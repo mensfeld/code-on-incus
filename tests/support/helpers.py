@@ -367,7 +367,7 @@ def press_enter(child, line_ending="\x0d"):
     child.send(line_ending)
 
 
-def send_prompt(child, prompt, delay=0.1):
+def send_prompt(child, prompt, delay=0.2):
     """
     Send a prompt to Claude Code with proper timing.
 
@@ -377,23 +377,31 @@ def send_prompt(child, prompt, delay=0.1):
     Args:
         child: pexpect.spawn object
         prompt: The prompt text to send
-        delay: Delay in seconds between text and Ctrl+M (default: 0.1)
+        delay: Delay in seconds between text and Ctrl+M (default: 0.2)
 
     Example:
         send_prompt(child, "What is 2+2?")
         # Equivalent to:
         # child.send("What is 2+2?")
-        # time.sleep(0.1)
+        # time.sleep(0.2)
         # child.send("\\x0d")
     """
     child.send(prompt)
     time.sleep(delay)
     child.send("\x0d")
+    time.sleep(delay)
 
 
 def exit_claude(child, timeout=60):
     """
     Exit Claude cleanly using /exit command.
+
+    Returns:
+        True if Claude exited cleanly, False if timeout/force kill occurred
+
+    Note:
+        After this function returns True, child.exitstatus will be set.
+        Call child.close() is done internally to wait for process termination.
     """
     # Check if we're in verbose mode
     verbose = getattr(child.logfile_read, "verbose", False)
@@ -406,6 +414,12 @@ def exit_claude(child, timeout=60):
 
     try:
         child.expect(EOF, timeout=timeout)
+
+        # Wait for process to fully exit and populate exitstatus
+        # This is required - expect(EOF) only means we got EOF from the process,
+        # but the process may not have fully terminated yet.
+        child.close(force=False)  # Wait for clean exit
+
         if verbose:
             print("\n--- END LIVE OUTPUT ---")
             print(f"{'=' * 60}\n")
@@ -416,6 +430,7 @@ def exit_claude(child, timeout=60):
             print(f"{'=' * 60}\n")
         # Force kill if graceful exit fails
         child.kill(9)
+        child.close(force=True)  # Force close after kill
         return False
 
 

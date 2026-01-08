@@ -35,8 +35,8 @@ def test_file_persists_after_container_exit(coi_binary, cleanup_containers, work
 
     with with_live_screen(child) as monitor:
         time.sleep(2)
-        send_prompt(child, 'Write the text "IM HERE" to a file named TEST.md')
-        wait_for_text_in_monitor(monitor, "TEST.md", timeout=30)
+        send_prompt(child, 'Write the text "IM HERE" to a file named TEST.md and print first 6 PI characters')
+        wait_for_text_in_monitor(monitor, "3.1415", timeout=30)
 
     clean_exit = exit_claude(child)
 
