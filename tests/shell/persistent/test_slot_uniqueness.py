@@ -126,20 +126,18 @@ def test_slot_assignments_are_reasonable():
             continue
 
         for node in ast.walk(tree):
-            if isinstance(node, ast.Call):
-                if (isinstance(node.func, ast.Name) and node.func.id == 'spawn_coi') or \
-                   (isinstance(node.func, ast.Attribute) and node.func.attr == 'spawn_coi'):
-                    for arg in node.args:
-                        if isinstance(arg, ast.List):
-                            for elt in arg.elts:
-                                if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
-                                    if '--slot=' in elt.value:
-                                        slot_str = elt.value.split('--slot=')[1]
-                                        try:
-                                            slot_num = int(slot_str)
-                                            all_slots.append((test_file.name, slot_num))
-                                        except ValueError:
-                                            pass
+            if isinstance(node, ast.Call) and ((isinstance(node.func, ast.Name) and node.func.id == 'spawn_coi') or \
+                   (isinstance(node.func, ast.Attribute) and node.func.attr == 'spawn_coi')):
+                for arg in node.args:
+                    if isinstance(arg, ast.List):
+                        for elt in arg.elts:
+                            if isinstance(elt, ast.Constant) and isinstance(elt.value, str) and '--slot=' in elt.value:
+                                slot_str = elt.value.split('--slot=')[1]
+                                try:
+                                    slot_num = int(slot_str)
+                                    all_slots.append((test_file.name, slot_num))
+                                except ValueError:
+                                    pass
 
     # Check each slot
     issues = []
