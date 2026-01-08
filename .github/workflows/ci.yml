@@ -72,8 +72,7 @@ jobs:
           name: incusbr0
           type: bridge
         storage_pools:
-        - config:
-            size: 30GiB
+        - config: {}
           description: ""
           name: default
           driver: dir
@@ -257,8 +256,7 @@ jobs:
           name: incusbr0
           type: bridge
         storage_pools:
-        - config:
-            size: 30GiB
+        - config: {}
           description: ""
           name: default
           driver: dir
