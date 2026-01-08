@@ -44,14 +44,20 @@ def test_all_persistent_tests_use_unique_slots():
         slots = []
         for node in ast.walk(tree):
             # Look for spawn_coi calls with --slot=N
-            if isinstance(node, ast.Call) and ((isinstance(node.func, ast.Name) and node.func.id == 'spawn_coi') or \
-                   (isinstance(node.func, ast.Attribute) and node.func.attr == 'spawn_coi')):
+            if isinstance(node, ast.Call) and (
+                (isinstance(node.func, ast.Name) and node.func.id == "spawn_coi")
+                or (isinstance(node.func, ast.Attribute) and node.func.attr == "spawn_coi")
+            ):
                 # Look through arguments for list containing slot specification
                 for arg in node.args:
                     if isinstance(arg, ast.List):
                         for elt in arg.elts:
-                            if isinstance(elt, ast.Constant) and isinstance(elt.value, str) and '--slot=' in elt.value:
-                                slot_str = elt.value.split('--slot=')[1]
+                            if (
+                                isinstance(elt, ast.Constant)
+                                and isinstance(elt.value, str)
+                                and "--slot=" in elt.value
+                            ):
+                                slot_str = elt.value.split("--slot=")[1]
                                 try:
                                     slot_num = int(slot_str)
                                     slots.append(slot_num)
@@ -62,13 +68,13 @@ def test_all_persistent_tests_use_unique_slots():
             slots_by_file[test_file.name] = sorted(set(slots))
 
     # Print slot assignments for documentation
-    print("\n" + "="*70)
+    print("\n" + "=" * 70)
     print("Slot assignments by test file:")
-    print("="*70)
+    print("=" * 70)
     for filename in sorted(slots_by_file.keys()):
         slots = slots_by_file[filename]
         print(f"  {filename:40s} -> slots {slots}")
-    print("="*70)
+    print("=" * 70)
 
     # Collect all slots
     all_slots = []
@@ -89,15 +95,16 @@ def test_all_persistent_tests_use_unique_slots():
         conflicts = []
         for dup_slot in duplicates:
             files_using_slot = [
-                filename for filename, slots in slots_by_file.items()
-                if dup_slot in slots
+                filename for filename, slots in slots_by_file.items() if dup_slot in slots
             ]
             conflicts.append(f"Slot {dup_slot} used in: {', '.join(files_using_slot)}")
 
         conflict_msg = "\n  ".join(conflicts)
         raise AssertionError(f"Duplicate slot assignments found:\n  {conflict_msg}")
 
-    print(f"\n✓ All {len(all_slots)} slot assignments are unique across {len(slots_by_file)} test files")
+    print(
+        f"\n✓ All {len(all_slots)} slot assignments are unique across {len(slots_by_file)} test files"
+    )
     print(f"  Slots used: {sorted(unique_slots)}")
 
 
@@ -126,13 +133,19 @@ def test_slot_assignments_are_reasonable():
             continue
 
         for node in ast.walk(tree):
-            if isinstance(node, ast.Call) and ((isinstance(node.func, ast.Name) and node.func.id == 'spawn_coi') or \
-                   (isinstance(node.func, ast.Attribute) and node.func.attr == 'spawn_coi')):
+            if isinstance(node, ast.Call) and (
+                (isinstance(node.func, ast.Name) and node.func.id == "spawn_coi")
+                or (isinstance(node.func, ast.Attribute) and node.func.attr == "spawn_coi")
+            ):
                 for arg in node.args:
                     if isinstance(arg, ast.List):
                         for elt in arg.elts:
-                            if isinstance(elt, ast.Constant) and isinstance(elt.value, str) and '--slot=' in elt.value:
-                                slot_str = elt.value.split('--slot=')[1]
+                            if (
+                                isinstance(elt, ast.Constant)
+                                and isinstance(elt.value, str)
+                                and "--slot=" in elt.value
+                            ):
+                                slot_str = elt.value.split("--slot=")[1]
                                 try:
                                     slot_num = int(slot_str)
                                     all_slots.append((test_file.name, slot_num))

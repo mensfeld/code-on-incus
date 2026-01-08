@@ -30,9 +30,7 @@ def test_no_mount_shows_initial_setup(coi_binary, cleanup_containers, workspace_
 
     # Start session with --mount-claude-config=false
     child = spawn_coi(
-        coi_binary,
-        ["shell", "--tmux=true", "--mount-claude-config=false"],
-        cwd=workspace_dir
+        coi_binary, ["shell", "--tmux=true", "--mount-claude-config=false"], cwd=workspace_dir
     )
 
     wait_for_container_ready(child)
@@ -44,9 +42,9 @@ def test_no_mount_shows_initial_setup(coi_binary, cleanup_containers, workspace_
         # Check for initial Claude setup prompts
         # These prompts should appear when Claude runs for the first time
         setup_found = (
-            wait_for_text_in_monitor(monitor, "Choose the text style", timeout=30) or
-            wait_for_text_in_monitor(monitor, "No, exit", timeout=5) or
-            wait_for_text_in_monitor(monitor, "Yes, I accept", timeout=5)
+            wait_for_text_in_monitor(monitor, "Choose the text style", timeout=30)
+            or wait_for_text_in_monitor(monitor, "No, exit", timeout=5)
+            or wait_for_text_in_monitor(monitor, "Yes, I accept", timeout=5)
         )
 
         assert setup_found, (

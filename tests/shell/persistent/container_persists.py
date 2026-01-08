@@ -31,7 +31,9 @@ def test_persistent_container_not_deleted(coi_binary, cleanup_containers, worksp
     """Test that persistent containers are stopped but not deleted."""
 
     # Start persistent session with specific slot
-    child = spawn_coi(coi_binary, ["shell", "--tmux=true", "--persistent", "--slot=10"], cwd=workspace_dir)
+    child = spawn_coi(
+        coi_binary, ["shell", "--tmux=true", "--persistent", "--slot=10"], cwd=workspace_dir
+    )
 
     wait_for_container_ready(child)
 
@@ -58,7 +60,9 @@ def test_persistent_container_not_deleted(coi_binary, cleanup_containers, worksp
         shell=False,
     )
 
-    assert container_name in result.stdout, f"Container {container_name} was deleted (persistent mode should keep it)"
+    assert container_name in result.stdout, (
+        f"Container {container_name} was deleted (persistent mode should keep it)"
+    )
     assert "STOPPED" in result.stdout or "Stopped" in result.stdout, "Container should be stopped"
 
     # Cleanup

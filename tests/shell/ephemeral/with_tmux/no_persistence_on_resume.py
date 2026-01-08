@@ -44,7 +44,10 @@ def test_ephemeral_no_persistence_on_resume(coi_binary, cleanup_containers, work
         time.sleep(2)
 
         # Create test file in home directory
-        send_prompt(child, "mkdir -p ~/ephemeral_test && echo 'should-not-persist' > ~/ephemeral_test/data.txt")
+        send_prompt(
+            child,
+            "mkdir -p ~/ephemeral_test && echo 'should-not-persist' > ~/ephemeral_test/data.txt",
+        )
         send_prompt(child, "Print ONLY result of sum of 3000 and 4000 and NOTHING ELSE")
         file_created = wait_for_text_in_monitor(monitor, "7000", timeout=30)
         assert file_created, "Failed to create test file in first session"
@@ -72,7 +75,10 @@ def test_ephemeral_no_persistence_on_resume(coi_binary, cleanup_containers, work
 
         # Try to check if file exists - it should NOT
         # We use a unique computation to verify Claude responds
-        send_prompt(child2, "CHECK IF ~/ephemeral_test/data.txt exists. If YES print ONLY 5555, if NO print ONLY 9999, NOTHING ELSE")
+        send_prompt(
+            child2,
+            "CHECK IF ~/ephemeral_test/data.txt exists. If YES print ONLY 5555, if NO print ONLY 9999, NOTHING ELSE",
+        )
 
         # Wait for response - should be 9999 (file does not exist)
         file_not_found = wait_for_text_in_monitor(monitor2, "9999", timeout=30)
@@ -87,5 +93,7 @@ def test_ephemeral_no_persistence_on_resume(coi_binary, cleanup_containers, work
 
     # Verify that file did NOT persist
     assert file_not_found, "File should NOT exist in resumed ephemeral session (new container)"
-    assert not file_found, "File from first ephemeral session incorrectly persisted to resumed session"
+    assert not file_found, (
+        "File from first ephemeral session incorrectly persisted to resumed session"
+    )
     assert_clean_exit(clean_exit2, child2)

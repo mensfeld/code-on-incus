@@ -419,9 +419,9 @@ def exit_claude(child, timeout=60, use_ctrl_c=False):
 
     if use_ctrl_c:
         # Send Ctrl+C twice to interrupt
-        child.sendcontrol('c')
+        child.sendcontrol("c")
         time.sleep(0.5)
-        child.sendcontrol('c')
+        child.sendcontrol("c")
         time.sleep(0.5)
     else:
         child.send("/exit")
@@ -500,14 +500,14 @@ def wait_for_container_deletion(prefix="coi-test-", timeout=30, poll_interval=0.
         elapsed = int(time.time() - start_time)
         status = f"""
 Container Cleanup Status
-{'=' * 40}
+{"=" * 40}
 
 ⏳ Waiting for container deletion...
 
 Containers remaining: {len(matching)}
 Elapsed time: {elapsed}s / {timeout}s
 
-{chr(10).join(f'  - {c}' for c in matching)}
+{chr(10).join(f"  - {c}" for c in matching)}
 """
 
         # Only update display if it changed (like monitor does)

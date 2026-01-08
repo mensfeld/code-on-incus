@@ -33,7 +33,9 @@ def test_persistent_container_reused_with_state(coi_binary, cleanup_containers, 
     """Test that persistent containers are reused and state persists."""
 
     # First session - create marker file
-    child1 = spawn_coi(coi_binary, ["shell", "--tmux=true", "--persistent", "--slot=11"], cwd=workspace_dir)
+    child1 = spawn_coi(
+        coi_binary, ["shell", "--tmux=true", "--persistent", "--slot=11"], cwd=workspace_dir
+    )
 
     wait_for_container_ready(child1)
 
@@ -46,7 +48,10 @@ def test_persistent_container_reused_with_state(coi_binary, cleanup_containers, 
         time.sleep(2)
         # Test home directory persistence - write specific content
         # Note: /tmp doesn't persist (tmpfs), use absolute path to ensure correct location
-        send_prompt(child1, "mkdir -p ~/persist_test && echo 'persistent-data-12345' > ~/persist_test/data.txt")
+        send_prompt(
+            child1,
+            "mkdir -p ~/persist_test && echo 'persistent-data-12345' > ~/persist_test/data.txt",
+        )
         send_prompt(child1, "Print ONLY result of sum of 10000 and 10000 and NOTHING ELSE")
         home_written = wait_for_text_in_monitor(monitor1, "20000", timeout=30)
         assert home_written, "Failed to write test file to /home/claude"
@@ -66,10 +71,14 @@ def test_persistent_container_reused_with_state(coi_binary, cleanup_containers, 
         text=True,
         shell=False,
     )
-    assert container_name in verify_result.stdout, f"Container {container_name} was deleted after first session!"
+    assert container_name in verify_result.stdout, (
+        f"Container {container_name} was deleted after first session!"
+    )
 
     # Second session - check if marker exists (same workspace, same slot)
-    child2 = spawn_coi(coi_binary, ["shell", "--tmux=true", "--persistent", "--slot=11"], cwd=workspace_dir)
+    child2 = spawn_coi(
+        coi_binary, ["shell", "--tmux=true", "--persistent", "--slot=11"], cwd=workspace_dir
+    )
 
     wait_for_container_ready(child2)
 
@@ -85,9 +94,14 @@ def test_persistent_container_reused_with_state(coi_binary, cleanup_containers, 
     with with_live_screen(child2) as monitor2:
         time.sleep(2)
         # Check if home directory file persisted with correct content
-        send_prompt(child2, "CHECK IF /home/claude/persist_test/data.txt exists and print ONLY result of 15000+15000 if YES AND NOTHING ELSE")
+        send_prompt(
+            child2,
+            "CHECK IF /home/claude/persist_test/data.txt exists and print ONLY result of 15000+15000 if YES AND NOTHING ELSE",
+        )
         home_persisted = wait_for_text_in_monitor(monitor2, "30000", timeout=30)
-        assert home_persisted, "Home directory file did not persist - container filesystem not preserved!"
+        assert home_persisted, (
+            "Home directory file did not persist - container filesystem not preserved!"
+        )
 
         time.sleep(2)
         exit_claude(child2, timeout=90, use_ctrl_c=True)

@@ -32,7 +32,9 @@ def test_persistent_to_persistent_reuses_container(coi_binary, cleanup_container
     """Test that persistent->persistent reuses the same container."""
 
     # First session with --persistent
-    child1 = spawn_coi(coi_binary, ["shell", "--tmux=true", "--persistent", "--slot=20"], cwd=workspace_dir)
+    child1 = spawn_coi(
+        coi_binary, ["shell", "--tmux=true", "--persistent", "--slot=20"], cwd=workspace_dir
+    )
     wait_for_container_ready(child1)
     container_name = calculate_container_name(workspace_dir, 20)
     wait_for_prompt(child1)
@@ -67,7 +69,9 @@ def test_persistent_to_persistent_reuses_container(coi_binary, cleanup_container
     )
 
     # Second session with --persistent (same workspace/slot)
-    child2 = spawn_coi(coi_binary, ["shell", "--tmux=true", "--persistent", "--slot=20"], cwd=workspace_dir)
+    child2 = spawn_coi(
+        coi_binary, ["shell", "--tmux=true", "--persistent", "--slot=20"], cwd=workspace_dir
+    )
     wait_for_container_ready(child2)
     wait_for_prompt(child2)
 
@@ -80,7 +84,9 @@ def test_persistent_to_persistent_reuses_container(coi_binary, cleanup_container
     )
 
     # UUIDs should match (same container reused)
-    assert uuid_before.stdout.strip() == uuid_after.stdout.strip(), "Container should be reused (UUID should match)"
+    assert uuid_before.stdout.strip() == uuid_after.stdout.strip(), (
+        "Container should be reused (UUID should match)"
+    )
 
     with with_live_screen(child2) as monitor2:
         time.sleep(2)

@@ -33,7 +33,9 @@ def test_filesystem_persistence_across_restarts(coi_binary, cleanup_containers, 
     """Test that filesystem changes persist across container restarts."""
 
     # First session with --persistent
-    child1 = spawn_coi(coi_binary, ["shell", "--tmux=true", "--persistent", "--slot=23"], cwd=workspace_dir)
+    child1 = spawn_coi(
+        coi_binary, ["shell", "--tmux=true", "--persistent", "--slot=23"], cwd=workspace_dir
+    )
     wait_for_container_ready(child1)
     container_name = calculate_container_name(workspace_dir, 23)
     wait_for_prompt(child1)
@@ -56,7 +58,9 @@ def test_filesystem_persistence_across_restarts(coi_binary, cleanup_containers, 
     time.sleep(2)
 
     # Second session with --persistent (restart container)
-    child2 = spawn_coi(coi_binary, ["shell", "--tmux=true", "--persistent", "--slot=23"], cwd=workspace_dir)
+    child2 = spawn_coi(
+        coi_binary, ["shell", "--tmux=true", "--persistent", "--slot=23"], cwd=workspace_dir
+    )
     wait_for_container_ready(child2)
     wait_for_prompt(child2)
 
@@ -64,7 +68,10 @@ def test_filesystem_persistence_across_restarts(coi_binary, cleanup_containers, 
         time.sleep(2)
 
         # Verify file exists via Claude
-        send_prompt(child2, "CHECK IF ~/test_fs/data.txt exists and print ONLY result of 16000+18000 if YES AND NOTHING ELSE")
+        send_prompt(
+            child2,
+            "CHECK IF ~/test_fs/data.txt exists and print ONLY result of 16000+18000 if YES AND NOTHING ELSE",
+        )
         file_persisted = wait_for_text_in_monitor(monitor2, "34000", timeout=30)
         assert file_persisted, "File should persist across container restarts"
 

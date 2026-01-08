@@ -32,7 +32,9 @@ def test_persistent_to_ephemeral_deletes_container(coi_binary, cleanup_container
     """Test that starting without --persistent after --persistent deletes container."""
 
     # First session with --persistent
-    child1 = spawn_coi(coi_binary, ["shell", "--tmux=true", "--persistent", "--slot=21"], cwd=workspace_dir)
+    child1 = spawn_coi(
+        coi_binary, ["shell", "--tmux=true", "--persistent", "--slot=21"], cwd=workspace_dir
+    )
     wait_for_container_ready(child1)
     container_name = calculate_container_name(workspace_dir, 21)
     wait_for_prompt(child1)
@@ -55,7 +57,9 @@ def test_persistent_to_ephemeral_deletes_container(coi_binary, cleanup_container
         text=True,
         shell=False,
     )
-    assert container_name in result.stdout, f"Container {container_name} should exist after persistent session"
+    assert container_name in result.stdout, (
+        f"Container {container_name} should exist after persistent session"
+    )
 
     # Second session WITHOUT --persistent (ephemeral mode)
     child2 = spawn_coi(coi_binary, ["shell", "--tmux=true", "--slot=21"], cwd=workspace_dir)
@@ -80,4 +84,6 @@ def test_persistent_to_ephemeral_deletes_container(coi_binary, cleanup_container
         text=True,
         shell=False,
     )
-    assert container_name not in result.stdout, f"Ephemeral container {container_name} should be deleted"
+    assert container_name not in result.stdout, (
+        f"Ephemeral container {container_name} should be deleted"
+    )
