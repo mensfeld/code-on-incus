@@ -12,7 +12,7 @@ Run Claude Code in isolated Incus containers with session persistence, workspace
 - ✅ **Interactive shell** - `coi shell` command with full resume support
 - ✅ **Image building** - Sandbox and privileged images with Docker + build tools
 - ✅ **Configuration system** - TOML-based config with profiles
-- ✅ **Management commands** - List, info, and clean commands
+- ✅ **Management commands** - List, info, attach, images, clean, and tmux commands
 
 ## Why Incus Over Docker?
 
@@ -132,9 +132,9 @@ ls -la file.txt
 # Build the binary
 make build
 
-# Build system images
-coi build sandbox
-coi build privileged
+# Build COI images
+coi build sandbox     # Standard sandbox image (coi-sandbox)
+coi build privileged  # Privileged image with Git/SSH (coi-privileged)
 
 # Run a command
 coi run "echo hello"
@@ -190,15 +190,35 @@ coi shell --persistent --privileged
 # Resume previous session
 coi shell --resume
 
+# Attach to existing session
+coi attach                    # List sessions or auto-attach if only one
+coi attach claude-abc123-1    # Attach to specific session
+
 # Build images
 coi build sandbox
 coi build privileged
 
+# List available images
+coi images                    # Show COI images
+coi images --all              # Show all local images
+
 # List active sessions
 coi list
 
+# Show session info
+coi info                      # Most recent session
+coi info <session-id>         # Specific session
+
+# Tmux integration
+coi tmux send <container> "command"   # Send command to tmux
+coi tmux capture <container>          # Capture tmux output
+coi tmux list <container>             # List tmux sessions
+
 # Cleanup
 coi clean
+
+# Version info
+coi version
 ```
 
 ### Global Flags
@@ -218,9 +238,10 @@ Config file: `~/.config/claude-on-incus/config.toml`
 
 ```toml
 [defaults]
-image = "claudeyard-sandbox"
+image = "coi-sandbox"
 privileged = false
 persistent = true  # Set to true to keep containers between sessions
+mount_claude_config = true
 
 [paths]
 sessions_dir = "~/.claude-on-incus/sessions"
@@ -232,7 +253,7 @@ group = "incus-admin"
 claude_uid = 1000
 
 [profiles.rust]
-image = "claudeyard-rust"
+image = "coi-rust"
 environment = { RUST_BACKTRACE = "1" }
 persistent = true  # Keep Rust tools installed
 ```
@@ -335,8 +356,11 @@ coi shell --persistent
 - ✅ `build` - Build sandbox and privileged Incus images
 - ✅ `list` - List active containers and saved sessions
 - ✅ `info` - Show detailed session information
+- ✅ `attach` - Attach to running Claude sessions
+- ✅ `images` - List available Incus images
 - ✅ `clean` - Clean up stopped containers and old sessions
 - ✅ `tmux` - Tmux integration for ClaudeYard
+- ✅ `version` - Show version information
 
 **Session Management:**
 - ✅ Multi-slot parallel sessions (run multiple Claude instances)
@@ -347,12 +371,13 @@ coi shell --persistent
 - ✅ Graceful Ctrl+C handling
 
 **Container & Workspace:**
-- ✅ Sandbox image (Ubuntu 22.04 + Docker + Node.js + Claude CLI)
-- ✅ Privileged image (+ GitHub CLI + SSH + Git config)
+- ✅ Sandbox image (`coi-sandbox`: Ubuntu 22.04 + Docker + Node.js + Claude CLI + tmux)
+- ✅ Privileged image (`coi-privileged`: + GitHub CLI + SSH + Git config)
 - ✅ Automatic UID mapping (correct file permissions)
 - ✅ Workspace isolation and mounting
 - ✅ Environment variable passing
 - ✅ Persistent storage mounting
+- ✅ Claude config mounting (automatic ~/.claude sync)
 
 **Configuration:**
 - ✅ TOML-based configuration system
