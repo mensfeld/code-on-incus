@@ -39,7 +39,7 @@ Initial release of claude-on-incus (coi) - Run Claude Code in isolated Incus con
 - [Feature] `list` command - List active containers and saved sessions
 - [Feature] `info` command - Show detailed session information
 - [Feature] `clean` command - Clean up stopped containers and old sessions
-- [Feature] `tmux` command - Tmux integration for background processes and ClaudeYard
+- [Feature] `tmux` command - Tmux integration for background processes
 
 ### Container Images
 

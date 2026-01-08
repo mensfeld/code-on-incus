@@ -11,7 +11,7 @@ This testing plan includes **215 comprehensive test cases** covering:
 ### Advanced Workflow Coverage
 - ✅ **Multi-Shell Workflows** (6 tests) - Running multiple shells for the same workspace with different slots
 - ✅ **Resume & Continue** (8 tests) - Session restoration with `--resume`, continuing previous work
-- ✅ **Tmux Integration** (8 tests) - Send commands, capture output, attach to sessions, ClaudeYard integration
+- ✅ **Tmux Integration** (8 tests) - Send commands, capture output, attach to sessions
 - ✅ **Storage & Mounting** (5 tests) - Persistent storage, Claude config mounting, SSH keys, git config
 - ✅ **Image Management** (5 tests) - Switching between sandbox/privileged, custom images, rebuilds
 - ✅ **Advanced Development** (7 tests) - Microservices, frontend+backend, CI/CD, databases, dotfiles
@@ -197,7 +197,7 @@ TC-BUILD-001: Build sandbox image
   AND no existing sandbox image
   WHEN ./coi build sandbox
   THEN exit code is 0
-  AND image "claudeyard-sandbox" exists in Incus
+  AND image "coi-sandbox" exists in Incus
   AND image contains Claude CLI
   AND image contains Docker
   AND image contains Node.js 20
@@ -207,7 +207,7 @@ TC-BUILD-002: Build privileged image
   AND sandbox image exists
   WHEN ./coi build privileged
   THEN exit code is 0
-  AND image "claudeyard-privileged" exists
+  AND image "coi-privileged" exists
   AND image contains GitHub CLI
   AND image contains SSH
 
@@ -849,7 +849,7 @@ TC-WORKFLOW-036: Tmux session persistence
   THEN tmux sessions still exist
   AND running processes preserved
 
-TC-WORKFLOW-037: ClaudeYard integration via tmux
+TC-WORKFLOW-037: Automated workflows via tmux
   GIVEN container with Claude running in tmux
   WHEN ./coi tmux send --container $NAME "/help"
   AND ./coi tmux capture --container $NAME
@@ -1278,7 +1278,7 @@ TC-CONFIG-001: Default config
   GIVEN no config file
   WHEN ./coi shell
   THEN uses built-in defaults
-  AND image = claudeyard-sandbox
+  AND image = coi-sandbox
   AND persistent = false
 
 TC-CONFIG-002: User config loading
@@ -2235,7 +2235,7 @@ Focus on these for immediate impact:
 2. Core command tests (Build, Run, Shell) - 25 tests
 3. Multi-shell workflows (6 tests) - Multiple sessions for same workspace
 4. Resume & continue workflows (8 tests) - Session restoration
-5. Tmux integration basics (4 tests) - ClaudeYard integration
+5. Tmux integration basics (4 tests) - Background process management
 6. Error handling basics (10 tests) - Better UX
 
 **Total Quick Wins**: 59 tests in 2 weeks

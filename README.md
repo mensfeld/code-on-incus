@@ -234,6 +234,143 @@ VERSION=v0.1.0 curl -fsSL https://raw.githubusercontent.com/mensfeld/claude-on-i
 curl -fsSL https://raw.githubusercontent.com/mensfeld/claude-on-incus/master/install.sh | bash -s -- --source
 ```
 
+### Verify Installation
+
+After installation, verify everything works:
+
+```bash
+# Check version
+coi version
+# Expected: claude-on-incus (coi) v0.1.0
+
+# Verify Incus access
+incus version
+# Should show version without errors
+
+# Check group membership
+groups | grep incus-admin
+# Should show: incus-admin
+
+# Test basic command
+coi --help
+# Should show help text
+```
+
+**If any command fails:**
+- Not in `incus-admin` group? → Log out and back in
+- `incus` not found? → Install Incus (see [Requirements](#requirements))
+- Permission errors? → Run `sudo usermod -aG incus-admin $USER`
+
+## What's Next?
+
+### Learn the Basics
+
+```bash
+# Start a session
+coi shell
+
+# List all sessions
+coi list
+
+# Resume a previous session
+coi shell --resume
+
+# Attach to running session
+coi attach
+```
+
+### Enable Persistent Mode
+
+```bash
+# Keep container between sessions
+coi shell --persistent
+
+# Install tools once, use forever
+> sudo apt install ripgrep fd-find bat
+> cargo install exa
+> # Exit and restart - tools still there!
+```
+
+### Work on Multiple Projects
+
+```bash
+# Each project gets its own container
+cd ~/project-a
+coi shell --slot 1 &
+
+cd ~/project-b
+coi shell --slot 2 &
+
+# Containers are isolated, files are separate
+```
+
+### Advanced Usage
+
+- 📚 Read the [full documentation](#usage)
+- 🔧 Configure [profiles](#configuration)
+- 🧪 See [integration tests](INTE.md) for workflow examples
+
+## Use Cases
+
+### 👨‍💻 Individual Developers
+
+**Problem:** Working on multiple projects with different tool versions
+
+**Solution:** Each project gets its own container with specific tools
+
+```bash
+# Project A needs Node 18
+cd ~/project-a
+coi shell --persistent
+> nvm install 18
+
+# Project B needs Node 20
+cd ~/project-b
+coi shell --persistent
+> nvm install 20
+
+# Tools stay isolated, no conflicts!
+```
+
+### 👥 Teams
+
+**Problem:** "Works on my machine" syndrome
+
+**Solution:** Share configuration files, everyone gets identical environment
+
+```bash
+# Commit .claude-on-incus.toml to your repo
+# Team members just:
+cd your-project
+coi shell
+
+# Everyone has the same environment!
+```
+
+### 🔬 AI/ML Development
+
+**Problem:** Need Docker inside container for model training
+
+**Solution:** Incus natively supports Docker-in-container
+
+```bash
+coi shell --privileged --persistent
+> docker run --gpus all nvidia/cuda:12.0-base
+> # Full Docker access, no DinD hacks!
+```
+
+### 🏢 Security-Conscious Environments
+
+**Problem:** Can't use Docker privileged mode
+
+**Solution:** Incus provides security without sacrificing functionality
+
+```bash
+# True isolation, no privileged mode needed
+coi shell --persistent
+> # Full system container, but isolated
+```
+
 ## Usage
 
 ### Basic Commands
@@ -427,7 +564,7 @@ coi shell --persistent
 - ✅ `attach` - Attach to running Claude sessions
 - ✅ `images` - List available Incus images
 - ✅ `clean` - Clean up stopped containers and old sessions
-- ✅ `tmux` - Tmux integration for ClaudeYard
+- ✅ `tmux` - Tmux integration for background processes
 - ✅ `version` - Show version information
 
 **Session Management:**
@@ -605,6 +742,6 @@ Maciej Mensfeld ([@mensfeld](https://github.com/mensfeld))
 
 - [CHANGELOG](CHANGELOG.md) - Version history and release notes
 - [Integration Tests](INTE.md) - Comprehensive E2E testing documentation (215 test cases)
-- [ClaudeYard](https://github.com/mensfeld/claude_yard) - Workflow automation using claude-on-incus
-- [claudebox](https://github.com/RchGrav/claudebox) - Docker-based alternative
+- [claudebox](https://github.com/RchGrav/claudebox) - Docker-based alternative (macOS/Windows)
+- [run-claude-docker](https://github.com/icanhasjonas/run-claude-docker) - Minimal Docker approach
 - [Incus](https://linuxcontainers.org/incus/) - Linux container manager

@@ -1,4 +1,4 @@
-.PHONY: build install clean test test-coverage test-coverage-integration test-coverage-scenarios test-coverage-all test-unit test-integration test-scenarios test-all test-smoke test-e2e test-pexpect test-pexpect-setup lint fmt tidy help
+.PHONY: build install clean test test-coverage test-unit test-python-setup test-python test-python-debug test-python-cli lint lint-python fmt tidy help
 
 # Binary name
 BINARY_NAME=coi
@@ -43,20 +43,10 @@ clean:
 	@rm -rf dist
 	@bash scripts/cleanup-pycache.sh
 
-# Run all tests
+# Run all tests (unit tests only)
 test:
-	@echo "Running tests..."
-	$(GOTEST) -v -race -timeout 5m ./...
-
-# Run smoke tests only (super fast, no Incus required)
-test-smoke:
-	@echo "Running smoke tests..."
-	@$(GOTEST) -v -timeout 30s ./tests/e2e/ -run TestSmoke
-
-# Run E2E tests (requires Incus)
-test-e2e:
-	@echo "Running E2E tests..."
-	@$(GOTEST) -v -tags=integration -timeout 10m ./tests/e2e/
+	@echo "Running unit tests..."
+	$(GOTEST) -v -race -short ./...
 
 # Setup Python test dependencies
 test-python-setup:
@@ -104,51 +94,10 @@ test-unit:
 test-coverage:
 	@mkdir -p $(COVERAGE_DIR)
 	@echo "Running unit tests with coverage..."
-	@$(GOTEST) -v -short -race -coverprofile=$(COVERAGE_DIR)/coverage-unit.out -covermode=atomic ./...
-	@$(GOCMD) tool cover -html=$(COVERAGE_DIR)/coverage-unit.out -o $(COVERAGE_DIR)/coverage-unit.html
-	@$(GOCMD) tool cover -func=$(COVERAGE_DIR)/coverage-unit.out | grep total | awk '{print "Unit Test Coverage: " $$3}'
-	@echo "Report: $(COVERAGE_DIR)/coverage-unit.html"
-
-# Run integration tests with coverage (requires Incus)
-test-coverage-integration:
-	@mkdir -p $(COVERAGE_DIR)
-	@echo "Running integration tests with coverage..."
-	@$(GOTEST) -v -tags=integration -coverprofile=$(COVERAGE_DIR)/coverage-integration.out -covermode=atomic ./...
-	@$(GOCMD) tool cover -html=$(COVERAGE_DIR)/coverage-integration.out -o $(COVERAGE_DIR)/coverage-integration.html
-	@$(GOCMD) tool cover -func=$(COVERAGE_DIR)/coverage-integration.out | grep total | awk '{print "Integration Test Coverage: " $$3}'
-	@echo "Report: $(COVERAGE_DIR)/coverage-integration.html"
-
-# Run scenario tests with coverage (requires Incus)
-test-coverage-scenarios:
-	@mkdir -p $(COVERAGE_DIR)
-	@echo "Running scenario tests with coverage..."
-	@$(GOTEST) -v -tags="integration,scenarios" -timeout 30m -coverprofile=$(COVERAGE_DIR)/coverage-scenarios.out -covermode=atomic ./integrations/...
-	@$(GOCMD) tool cover -html=$(COVERAGE_DIR)/coverage-scenarios.out -o $(COVERAGE_DIR)/coverage-scenarios.html
-	@$(GOCMD) tool cover -func=$(COVERAGE_DIR)/coverage-scenarios.out | grep total | awk '{print "Scenario Test Coverage: " $$3}'
-	@echo "Report: $(COVERAGE_DIR)/coverage-scenarios.html"
-
-# Run all tests with coverage (unit + integration + scenarios)
-test-coverage-all:
-	@mkdir -p $(COVERAGE_DIR)
-	@echo "Running all tests with coverage..."
-	@$(GOTEST) -v -tags="integration,scenarios" -timeout 30m -coverprofile=$(COVERAGE_DIR)/coverage-all.out -covermode=atomic ./...
-	@$(GOCMD) tool cover -html=$(COVERAGE_DIR)/coverage-all.out -o $(COVERAGE_DIR)/coverage-all.html
-	@$(GOCMD) tool cover -func=$(COVERAGE_DIR)/coverage-all.out | grep total | awk '{print "Total Coverage: " $$3}'
-	@echo "Report: $(COVERAGE_DIR)/coverage-all.html"
-
-# Run integration tests (requires Incus)
-test-integration:
-	@$(GOTEST) -v -tags=integration ./...
-
-# Run scenario tests (requires Incus, comprehensive)
-test-scenarios:
-	@echo "Running scenario tests..."
-	@$(GOTEST) -v -tags="integration,scenarios" -timeout 30m ./integrations/...
-
-# Run all tests (unit + integration + scenarios)
-test-all:
-	@echo "Running all tests..."
-	@$(GOTEST) -v -tags="integration,scenarios" -timeout 30m ./...
+	@$(GOTEST) -v -short -race -coverprofile=$(COVERAGE_DIR)/coverage.out -covermode=atomic ./...
+	@$(GOCMD) tool cover -html=$(COVERAGE_DIR)/coverage.out -o $(COVERAGE_DIR)/coverage.html
+	@$(GOCMD) tool cover -func=$(COVERAGE_DIR)/coverage.out | grep total | awk '{print "Test Coverage: " $$3}'
+	@echo "Report: $(COVERAGE_DIR)/coverage.html"
 
 # Tidy dependencies
 tidy:
@@ -200,37 +149,27 @@ help:
 	@echo "  clean         - Remove build artifacts"
 	@echo ""
 	@echo "Testing (Go):"
-	@echo "  test                      - Run all tests with race detector"
-	@echo "  test-smoke                - Run smoke tests only (<30s, no Incus)"
-	@echo "  test-unit                 - Run unit tests only (fast, no Incus)"
-	@echo "  test-e2e                  - Run E2E binary tests (requires Incus)"
-	@echo "  test-integration          - Run integration tests (requires Incus)"
-	@echo "  test-scenarios            - Run scenario tests (requires Incus, comprehensive)"
-	@echo "  test-all                  - Run all tests including scenarios"
+	@echo "  test          - Run Go unit tests (fast, no Incus)"
+	@echo "  test-unit     - Same as test"
+	@echo "  test-coverage - Unit tests with coverage report"
 	@echo ""
 	@echo "Testing (Python):"
-	@echo "  test-python-setup         - Install Python test dependencies"
-	@echo "  test-python               - Run Python integration tests (requires Incus)"
-	@echo "  test-python-debug         - Run Python tests with output (for debugging)"
-	@echo "  test-python-cli           - Run Python CLI tests only (no Incus required)"
-	@echo ""
-	@echo "Coverage:"
-	@echo "  test-coverage             - Unit tests with coverage report"
-	@echo "  test-coverage-integration - Integration tests with coverage (requires Incus)"
-	@echo "  test-coverage-scenarios   - Scenario tests with coverage (requires Incus)"
-	@echo "  test-coverage-all         - All tests with coverage (requires Incus)"
+	@echo "  test-python-setup - Install Python test dependencies"
+	@echo "  test-python       - Run Python integration tests (requires Incus)"
+	@echo "  test-python-debug - Run Python tests with output (for debugging)"
+	@echo "  test-python-cli   - Run Python CLI tests only (no Incus required)"
 	@echo ""
 	@echo "Code Quality:"
-	@echo "  fmt           - Format Go code"
-	@echo "  fmt-check     - Check Go code formatting"
-	@echo "  vet           - Run go vet"
-	@echo "  lint          - Run golangci-lint"
-	@echo "  lint-python   - Lint and format check Python tests"
-	@echo "  check         - Run all checks (fmt, vet, lint, test)"
+	@echo "  fmt         - Format Go code"
+	@echo "  fmt-check   - Check Go code formatting"
+	@echo "  vet         - Run go vet"
+	@echo "  lint        - Run golangci-lint"
+	@echo "  lint-python - Lint and format check Python tests"
+	@echo "  check       - Run all checks (fmt, vet, lint, test)"
 	@echo ""
 	@echo "Maintenance:"
-	@echo "  tidy          - Tidy dependencies"
-	@echo "  help          - Show this help"
+	@echo "  tidy        - Tidy dependencies"
+	@echo "  help        - Show this help"
 
 # Default target
 .DEFAULT_GOAL := build

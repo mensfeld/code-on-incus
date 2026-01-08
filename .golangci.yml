@@ -60,7 +60,7 @@ linters:
 linters-settings:
   errcheck:
     check-type-assertions: true
-    check-blank: true
+    check-blank: false  # Allow _ = for explicitly ignored errors in cleanup functions
 
   govet:
     check-shadowing: true
