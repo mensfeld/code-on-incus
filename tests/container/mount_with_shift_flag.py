@@ -52,10 +52,11 @@ def test_mount_with_shift_flag(coi_binary, cleanup_containers, workspace_dir):
         time.sleep(3)
 
         # === Phase 3: Mount with --shift ===
+        # Syntax: coi container mount <name> <device-name> <source> <path>
 
         mount_name = "shift-mount"
         result = subprocess.run(
-            [coi_binary, "container", "mount", container_name, tmpdir, "/mnt/shifted", mount_name, "--shift"],
+            [coi_binary, "container", "mount", container_name, mount_name, tmpdir, "/mnt/shifted", "--shift"],
             capture_output=True,
             text=True,
             timeout=60,
@@ -78,8 +79,9 @@ def test_mount_with_shift_flag(coi_binary, cleanup_containers, workspace_dir):
         assert result.returncode == 0, \
             f"Reading shifted mount file should succeed. stderr: {result.stderr}"
 
-        assert "shift-test-content" in result.stdout, \
-            f"Shifted mount file should contain expected content. Got:\n{result.stdout}"
+        combined_output = result.stdout + result.stderr
+        assert "shift-test-content" in combined_output, \
+            f"Shifted mount file should contain expected content. Got:\n{combined_output}"
 
         # Check ownership appears as valid user inside container
         result = subprocess.run(

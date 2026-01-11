@@ -26,9 +26,10 @@ def test_mount_nonexistent_container(coi_binary, cleanup_containers):
 
     with tempfile.TemporaryDirectory() as tmpdir:
         # === Phase 2: Try to mount into nonexistent container ===
+        # Syntax: coi container mount <name> <device-name> <source> <path>
 
         result = subprocess.run(
-            [coi_binary, "container", "mount", nonexistent_name, tmpdir, "/mnt/test", "test-mount"],
+            [coi_binary, "container", "mount", nonexistent_name, "test-mount", tmpdir, "/mnt/test"],
             capture_output=True,
             text=True,
             timeout=30,

@@ -52,10 +52,11 @@ def test_mount_basic(coi_binary, cleanup_containers, workspace_dir):
         time.sleep(3)
 
         # === Phase 3: Mount directory ===
+        # Syntax: coi container mount <name> <device-name> <source> <path>
 
         mount_name = "test-mount"
         result = subprocess.run(
-            [coi_binary, "container", "mount", container_name, tmpdir, "/mnt/test", mount_name],
+            [coi_binary, "container", "mount", container_name, mount_name, tmpdir, "/mnt/test"],
             capture_output=True,
             text=True,
             timeout=60,
@@ -78,8 +79,9 @@ def test_mount_basic(coi_binary, cleanup_containers, workspace_dir):
         assert result.returncode == 0, \
             f"Reading mounted file should succeed. stderr: {result.stderr}"
 
-        assert "mount-test-content-123" in result.stdout, \
-            f"Mounted file should contain expected content. Got:\n{result.stdout}"
+        combined_output = result.stdout + result.stderr
+        assert "mount-test-content-123" in combined_output, \
+            f"Mounted file should contain expected content. Got:\n{combined_output}"
 
         # === Phase 5: Cleanup ===
 
