@@ -83,7 +83,34 @@ func (m *Manager) MountDisk(name, source, path string, shift bool) error {
 	if shift {
 		args = append(args, "shift=true")
 	}
-	return IncusExec(args...)
+
+	// Debug: Print the mount command and source directory info
+	fmt.Fprintf(os.Stderr, "[DEBUG] MountDisk: incus %s\n", strings.Join(args, " "))
+	if info, err := os.Stat(source); err == nil {
+		fmt.Fprintf(os.Stderr, "[DEBUG] Source exists: %s (mode: %v, isDir: %v)\n", source, info.Mode(), info.IsDir())
+		// List contents if directory
+		if info.IsDir() {
+			if entries, err := os.ReadDir(source); err == nil {
+				fmt.Fprintf(os.Stderr, "[DEBUG] Source contents (%d items):\n", len(entries))
+				for _, entry := range entries {
+					fmt.Fprintf(os.Stderr, "[DEBUG]   - %s\n", entry.Name())
+				}
+			}
+		}
+	} else {
+		fmt.Fprintf(os.Stderr, "[DEBUG] Source does not exist or error: %v\n", err)
+	}
+
+	if err := IncusExec(args...); err != nil {
+		return err
+	}
+
+	// Debug: Verify device was added by checking device config
+	if output, err := IncusOutput("config", "device", "show", m.ContainerName); err == nil {
+		fmt.Fprintf(os.Stderr, "[DEBUG] Device config after adding %s:\n%s\n", name, output)
+	}
+
+	return nil
 }
 
 // Exec executes a command in the container (no output capture)

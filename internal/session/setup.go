@@ -165,6 +165,13 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 			return nil, fmt.Errorf("failed to mount workspace: %w", err)
 		}
 
+		// Debug: Verify mount worked by listing /workspace contents
+		if output, err := result.Manager.ExecCommand("ls -la /workspace/", container.ExecCommandOptions{Capture: true}); err == nil {
+			opts.Logger(fmt.Sprintf("[DEBUG] /workspace contents after mount:\n%s", output))
+		} else {
+			opts.Logger(fmt.Sprintf("[DEBUG] Failed to list /workspace: %v", err))
+		}
+
 		// 9. Mount storage if specified
 		if opts.StoragePath != "" {
 			if err := os.MkdirAll(opts.StoragePath, 0755); err != nil {
