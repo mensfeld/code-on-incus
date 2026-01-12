@@ -118,26 +118,27 @@ def test_uid_mapping_correct(coi_binary, cleanup_containers, workspace_dir):
             for item in os.listdir(workspace_dir):
                 item_path = os.path.join(workspace_dir, item)
                 stat_info = os.stat(item_path)
-                print(f"  {item} (uid={stat_info.st_uid}, gid={stat_info.st_gid}, mode={oct(stat_info.st_mode)})")
+                print(
+                    f"  {item} (uid={stat_info.st_uid}, gid={stat_info.st_gid}, mode={oct(stat_info.st_mode)})"
+                )
         except Exception as e:
             print(f"  Error listing: {e}")
         print(f"Current user: uid={current_uid}, gid={os.getgid()}")
         print("===")
 
-    assert os.path.exists(file_path), \
-        f"File {test_filename} should exist on host"
+    assert os.path.exists(file_path), f"File {test_filename} should exist on host"
 
     stat_info = os.stat(file_path)
     file_uid = stat_info.st_uid
     file_gid = stat_info.st_gid
 
     # File should be owned by current user, NOT by root (0) or high UIDs (1000000+)
-    assert file_uid == current_uid, \
+    assert file_uid == current_uid, (
         f"File UID should be {current_uid} (current user), got {file_uid}"
+    )
 
     # GID might vary, but should not be root or extremely high
-    assert file_gid < 1000000, \
-        f"File GID should not be a remapped high UID, got {file_gid}"
+    assert file_gid < 1000000, f"File GID should not be a remapped high UID, got {file_gid}"
 
     # Cleanup test file
     os.remove(file_path)

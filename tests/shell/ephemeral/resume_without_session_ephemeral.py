@@ -53,9 +53,9 @@ def test_resume_without_session(coi_binary, cleanup_containers, workspace_dir):
         time.sleep(1)
 
     # Get output for verification
-    if hasattr(child.logfile_read, 'get_raw_output'):
+    if hasattr(child.logfile_read, "get_raw_output"):
         output = child.logfile_read.get_raw_output()
-    elif hasattr(child.logfile_read, 'get_output'):
+    elif hasattr(child.logfile_read, "get_output"):
         output = child.logfile_read.get_output()
     else:
         output = ""
@@ -67,18 +67,21 @@ def test_resume_without_session(coi_binary, cleanup_containers, workspace_dir):
         child.close(force=True)
 
     # Should exit with non-zero status
-    assert child.exitstatus != 0, \
+    assert child.exitstatus != 0, (
         f"Expected non-zero exit code, got {child.exitstatus}. Output:\n{output}"
+    )
 
     # Error message should be helpful - coi exits early with workspace-specific error
     output_lower = output.lower()
 
-    assert "no previous session to resume" in output_lower or "no saved sessions" in output_lower, \
+    assert "no previous session to resume" in output_lower or "no saved sessions" in output_lower, (
         f"Error should mention 'no previous session to resume'. Got:\n{output}"
+    )
 
     # Verify no new containers were created
     containers_after = get_container_list()
     new_containers = set(containers_after) - set(containers_before)
 
-    assert len(new_containers) == 0, \
+    assert len(new_containers) == 0, (
         f"No containers should be created on resume error. New containers: {new_containers}"
+    )

@@ -37,16 +37,16 @@ def test_launch_ephemeral_flag(coi_binary, cleanup_containers, workspace_dir):
         timeout=120,
     )
 
-    assert result.returncode == 0, \
+    assert result.returncode == 0, (
         f"Ephemeral container launch should succeed. stderr: {result.stderr}"
+    )
 
     time.sleep(3)
 
     # === Phase 2: Verify container is running ===
 
     containers = get_container_list()
-    assert container_name in containers, \
-        f"Ephemeral container {container_name} should be running"
+    assert container_name in containers, f"Ephemeral container {container_name} should be running"
 
     # === Phase 3: Stop container ===
 
@@ -63,5 +63,6 @@ def test_launch_ephemeral_flag(coi_binary, cleanup_containers, workspace_dir):
     # === Phase 4: Verify container is deleted ===
 
     containers = get_container_list()
-    assert container_name not in containers, \
+    assert container_name not in containers, (
         f"Ephemeral container {container_name} should be auto-deleted after stop"
+    )

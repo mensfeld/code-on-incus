@@ -77,32 +77,36 @@ def test_info_output_fields(coi_binary, cleanup_containers, workspace_dir):
         timeout=30,
     )
 
-    assert result.returncode == 0, \
-        f"Info should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Info should succeed. stderr: {result.stderr}"
 
     output = result.stdout
 
     # === Phase 3: Verify expected fields ===
 
     # Session ID field
-    assert "Session ID:" in output or "session_id" in output.lower(), \
+    assert "Session ID:" in output or "session_id" in output.lower(), (
         f"Should show Session ID field. Got:\n{output}"
+    )
 
     # Container field
-    assert "Container:" in output or "container" in output.lower(), \
+    assert "Container:" in output or "container" in output.lower(), (
         f"Should show Container field. Got:\n{output}"
+    )
 
     # Session Path field
-    assert "Session Path:" in output or "path" in output.lower(), \
+    assert "Session Path:" in output or "path" in output.lower(), (
         f"Should show Session Path field. Got:\n{output}"
+    )
 
     # Resume command
-    assert "coi shell --resume" in output or "resume" in output.lower(), \
+    assert "coi shell --resume" in output or "resume" in output.lower(), (
         f"Should show resume command. Got:\n{output}"
+    )
 
     # Session Data status (Present or Missing)
-    assert "Session Data:" in output or "data" in output.lower(), \
+    assert "Session Data:" in output or "data" in output.lower(), (
         f"Should show Session Data status. Got:\n{output}"
+    )
 
     # === Phase 4: Cleanup ===
 

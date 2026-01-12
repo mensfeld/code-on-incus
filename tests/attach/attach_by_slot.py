@@ -51,8 +51,7 @@ def test_attach_by_slot(coi_binary, cleanup_containers, workspace_dir):
 
     # Verify container exists
     containers = get_container_list()
-    assert container_name in containers, \
-        f"Container {container_name} should exist"
+    assert container_name in containers, f"Container {container_name} should exist"
 
     # === Phase 2: Detach ===
 
@@ -78,8 +77,7 @@ def test_attach_by_slot(coi_binary, cleanup_containers, workspace_dir):
 
     # Verify container is still running
     containers = get_container_list()
-    assert container_name in containers, \
-        f"Container {container_name} should still be running"
+    assert container_name in containers, f"Container {container_name} should still be running"
 
     # === Phase 3: Test coi attach --slot=1 ===
 
@@ -93,12 +91,14 @@ def test_attach_by_slot(coi_binary, cleanup_containers, workspace_dir):
 
     # Check output mentions attaching with slot info
     combined_output = result.stdout + result.stderr
-    assert "Attaching to" in combined_output or "slot 1" in combined_output.lower(), \
+    assert "Attaching to" in combined_output or "slot 1" in combined_output.lower(), (
         f"Should show 'Attaching to' or 'slot 1'. Got:\n{combined_output}"
+    )
 
     # Should not show error
-    assert "not found" not in combined_output.lower(), \
+    assert "not found" not in combined_output.lower(), (
         f"Should not show 'not found'. Got:\n{combined_output}"
+    )
 
     # === Phase 4: Cleanup ===
 
@@ -110,5 +110,6 @@ def test_attach_by_slot(coi_binary, cleanup_containers, workspace_dir):
 
     time.sleep(1)
     containers = get_container_list()
-    assert container_name not in containers, \
+    assert container_name not in containers, (
         f"Container {container_name} should be deleted after cleanup"
+    )

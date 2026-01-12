@@ -37,15 +37,13 @@ def test_launch_duplicate_name(coi_binary, cleanup_containers, workspace_dir):
         timeout=120,
     )
 
-    assert result.returncode == 0, \
-        f"First container launch should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"First container launch should succeed. stderr: {result.stderr}"
 
     time.sleep(3)
 
     # Verify container exists
     containers = get_container_list()
-    assert container_name in containers, \
-        f"Container {container_name} should exist"
+    assert container_name in containers, f"Container {container_name} should exist"
 
     # === Phase 2: Try to launch duplicate ===
 
@@ -58,19 +56,17 @@ def test_launch_duplicate_name(coi_binary, cleanup_containers, workspace_dir):
 
     # === Phase 3: Verify failure ===
 
-    assert result.returncode != 0, \
-        "Launching container with duplicate name should fail"
+    assert result.returncode != 0, "Launching container with duplicate name should fail"
 
     combined_output = result.stdout + result.stderr
     has_error = (
-        "exist" in combined_output.lower() or
-        "already" in combined_output.lower() or
-        "duplicate" in combined_output.lower() or
-        "error" in combined_output.lower()
+        "exist" in combined_output.lower()
+        or "already" in combined_output.lower()
+        or "duplicate" in combined_output.lower()
+        or "error" in combined_output.lower()
     )
 
-    assert has_error, \
-        f"Should indicate duplicate/existing container. Got:\n{combined_output}"
+    assert has_error, f"Should indicate duplicate/existing container. Got:\n{combined_output}"
 
     # === Phase 4: Cleanup ===
 

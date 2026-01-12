@@ -25,16 +25,13 @@ def test_version_with_help_flag(coi_binary):
         timeout=10,
     )
 
-    assert result.returncode == 0, \
-        f"Version --help should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Version --help should succeed. stderr: {result.stderr}"
 
     output = result.stdout
 
     # Should show either help text or version info
     # Cobra typically shows help text for --help flag
-    assert len(output) > 0, \
-        "Should produce some output"
+    assert len(output) > 0, "Should produce some output"
 
     # Should mention version command
-    assert "version" in output.lower(), \
-        f"Output should mention version. Got:\n{output}"
+    assert "version" in output.lower(), f"Output should mention version. Got:\n{output}"

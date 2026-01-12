@@ -26,12 +26,12 @@ def test_attach_shows_sessions(coi_binary, cleanup_containers):
     )
 
     # Should succeed (exit 0) - shows list or usage
-    assert result.returncode == 0, \
-        f"coi attach should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"coi attach should succeed. stderr: {result.stderr}"
 
     # Should show session info (either active sessions or "no active" message)
     combined_output = result.stdout + result.stderr
-    assert "Active Claude sessions" in combined_output or \
-           "No active" in combined_output or \
-           "coi attach" in combined_output, \
-        f"Should show session info or usage hint. Got:\n{combined_output}"
+    assert (
+        "Active Claude sessions" in combined_output
+        or "No active" in combined_output
+        or "coi attach" in combined_output
+    ), f"Should show session info or usage hint. Got:\n{combined_output}"

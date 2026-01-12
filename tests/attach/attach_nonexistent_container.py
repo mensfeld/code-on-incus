@@ -27,9 +27,11 @@ def test_attach_nonexistent_container(coi_binary, cleanup_containers):
     )
 
     # Should fail
-    assert result.returncode != 0, \
+    assert result.returncode != 0, (
         f"coi attach should fail for nonexistent container. stdout: {result.stdout}"
+    )
 
     combined_output = (result.stdout + result.stderr).lower()
-    assert "not found" in combined_output or "not running" in combined_output, \
+    assert "not found" in combined_output or "not running" in combined_output, (
         f"Should show 'not found' or 'not running' error. Got:\nstdout: {result.stdout}\nstderr: {result.stderr}"
+    )

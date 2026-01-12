@@ -34,8 +34,7 @@ def test_pull_nonexistent_remote_file(coi_binary, cleanup_containers, workspace_
         text=True,
         timeout=120,
     )
-    assert result.returncode == 0, \
-        f"Container launch should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Container launch should succeed. stderr: {result.stderr}"
 
     time.sleep(3)
 
@@ -51,12 +50,14 @@ def test_pull_nonexistent_remote_file(coi_binary, cleanup_containers, workspace_
 
     # === Phase 3: Verify failure ===
 
-    assert result.returncode != 0, \
-        f"Pull of nonexistent file should fail. stdout: {result.stdout}"
+    assert result.returncode != 0, f"Pull of nonexistent file should fail. stdout: {result.stdout}"
 
     combined_output = (result.stdout + result.stderr).lower()
-    assert "failed" in combined_output or "not found" in combined_output or "no such file" in combined_output, \
-        f"Should show error message. Got:\n{result.stdout + result.stderr}"
+    assert (
+        "failed" in combined_output
+        or "not found" in combined_output
+        or "no such file" in combined_output
+    ), f"Should show error message. Got:\n{result.stdout + result.stderr}"
 
     # === Phase 4: Cleanup ===
 

@@ -30,5 +30,4 @@ def test_exists_coi_image(coi_binary, cleanup_containers):
 
     # === Phase 2: Verify success ===
 
-    assert result.returncode == 0, \
-        f"coi image should exist. stderr: {result.stderr}"
+    assert result.returncode == 0, f"coi image should exist. stderr: {result.stderr}"

@@ -28,9 +28,11 @@ def test_info_nonexistent_session(coi_binary, cleanup_containers):
 
     # === Phase 2: Verify failure ===
 
-    assert result.returncode != 0, \
+    assert result.returncode != 0, (
         f"Info for nonexistent session should fail. stdout: {result.stdout}"
+    )
 
     combined_output = (result.stdout + result.stderr).lower()
-    assert "not found" in combined_output or "no session" in combined_output, \
+    assert "not found" in combined_output or "no session" in combined_output, (
         f"Should show 'not found' error. Got:\n{result.stdout + result.stderr}"
+    )

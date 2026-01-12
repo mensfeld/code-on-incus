@@ -55,8 +55,7 @@ def test_attach_wrong_workspace_slot(coi_binary, cleanup_containers, workspace_d
 
     # Verify container exists
     containers = get_container_list()
-    assert container_name in containers, \
-        f"Container {container_name} should exist"
+    assert container_name in containers, f"Container {container_name} should exist"
 
     # === Phase 2: Detach ===
 
@@ -82,8 +81,7 @@ def test_attach_wrong_workspace_slot(coi_binary, cleanup_containers, workspace_d
 
     # Verify container is still running
     containers = get_container_list()
-    assert container_name in containers, \
-        f"Container {container_name} should still be running"
+    assert container_name in containers, f"Container {container_name} should still be running"
 
     # === Phase 3: Try to attach with wrong workspace ===
 
@@ -97,9 +95,9 @@ def test_attach_wrong_workspace_slot(coi_binary, cleanup_containers, workspace_d
     # Should fail - different workspace means different container name
     combined_output = result.stdout + result.stderr
     attach_failed = (
-        result.returncode != 0 or
-        "not found" in combined_output.lower() or
-        "not running" in combined_output.lower()
+        result.returncode != 0
+        or "not found" in combined_output.lower()
+        or "not running" in combined_output.lower()
     )
 
     # === Phase 4: Cleanup ===
@@ -112,9 +110,7 @@ def test_attach_wrong_workspace_slot(coi_binary, cleanup_containers, workspace_d
 
     time.sleep(1)
     containers = get_container_list()
-    assert container_name not in containers, \
-        f"Container {container_name} should be deleted"
+    assert container_name not in containers, f"Container {container_name} should be deleted"
 
     # Assert attach failed
-    assert attach_failed, \
-        f"Attach with wrong workspace should fail. Got:\n{combined_output}"
+    assert attach_failed, f"Attach with wrong workspace should fail. Got:\n{combined_output}"

@@ -79,24 +79,24 @@ def test_info_latest_session(coi_binary, cleanup_containers, workspace_dir):
     )
 
     # Should succeed (we just created a session)
-    assert result.returncode == 0, \
+    assert result.returncode == 0, (
         f"Info should succeed after creating session. stderr: {result.stderr}"
+    )
 
     # === Phase 3: Verify output ===
 
     output = result.stdout
 
-    assert "Session Information" in output or "Session ID" in output, \
+    assert "Session Information" in output or "Session ID" in output, (
         f"Should show session header. Got:\n{output}"
+    )
 
     # Should contain a UUID
-    uuid_pattern = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
-    assert uuid_pattern.search(output), \
-        f"Should contain a session UUID. Got:\n{output}"
+    uuid_pattern = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+    assert uuid_pattern.search(output), f"Should contain a session UUID. Got:\n{output}"
 
     # Should show resume command
-    assert "resume" in output.lower(), \
-        f"Should show resume command. Got:\n{output}"
+    assert "resume" in output.lower(), f"Should show resume command. Got:\n{output}"
 
     # === Phase 4: Cleanup ===
 

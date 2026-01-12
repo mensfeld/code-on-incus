@@ -27,20 +27,18 @@ def test_version_basic(coi_binary):
         timeout=10,
     )
 
-    assert result.returncode == 0, \
-        f"Version command should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Version command should succeed. stderr: {result.stderr}"
 
     output = result.stdout
 
     # Should contain version identifier
-    assert "claude-on-incus (coi) v" in output, \
-        f"Should contain version identifier. Got:\n{output}"
+    assert "claude-on-incus (coi) v" in output, f"Should contain version identifier. Got:\n{output}"
 
     # Should contain repository URL
-    assert "https://github.com/mensfeld/claude-on-incus" in output, \
+    assert "https://github.com/mensfeld/claude-on-incus" in output, (
         f"Should contain repository URL. Got:\n{output}"
+    )
 
     # Should be exactly 2 lines
-    lines = [line for line in output.strip().split('\n') if line]
-    assert len(lines) == 2, \
-        f"Should output exactly 2 lines. Got {len(lines)} lines:\n{output}"
+    lines = [line for line in output.strip().split("\n") if line]
+    assert len(lines) == 2, f"Should output exactly 2 lines. Got {len(lines)} lines:\n{output}"

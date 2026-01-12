@@ -29,9 +29,11 @@ def test_launch_nonexistent_image(coi_binary, cleanup_containers):
 
     # === Phase 2: Verify failure ===
 
-    assert result.returncode != 0, \
-        "Launch with nonexistent image should fail"
+    assert result.returncode != 0, "Launch with nonexistent image should fail"
 
     combined_output = result.stdout + result.stderr
-    assert "nonexistent" in combined_output.lower() or "not found" in combined_output.lower() or "error" in combined_output.lower(), \
-        f"Error should mention the image issue. Got:\n{combined_output}"
+    assert (
+        "nonexistent" in combined_output.lower()
+        or "not found" in combined_output.lower()
+        or "error" in combined_output.lower()
+    ), f"Error should mention the image issue. Got:\n{combined_output}"

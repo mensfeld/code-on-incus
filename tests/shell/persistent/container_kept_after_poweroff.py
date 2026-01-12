@@ -96,9 +96,9 @@ def test_persistent_container_kept_after_poweroff(coi_binary, cleanup_containers
         pass
 
     # Get output for verification
-    if hasattr(child.logfile_read, 'get_raw_output'):
+    if hasattr(child.logfile_read, "get_raw_output"):
         output = child.logfile_read.get_raw_output()
-    elif hasattr(child.logfile_read, 'get_output'):
+    elif hasattr(child.logfile_read, "get_output"):
         output = child.logfile_read.get_output()
     else:
         output = ""
@@ -112,16 +112,18 @@ def test_persistent_container_kept_after_poweroff(coi_binary, cleanup_containers
     time.sleep(3)
 
     # Verify session data was saved
-    assert "Saving session data" in output or "Session data saved" in output, \
+    assert "Saving session data" in output or "Session data saved" in output, (
         f"Should see session save message. Got:\n{output}"
+    )
 
     # In persistent mode, container should be KEPT (not deleted)
     # It may be stopped but should still exist
     # Note: Container might be listed even if stopped
 
     # Verify message indicates container was kept
-    assert "Container kept" in output or "persistent" in output.lower(), \
+    assert "Container kept" in output or "persistent" in output.lower(), (
         f"Should indicate container is kept in persistent mode. Got:\n{output}"
+    )
 
     # === Cleanup ===
     subprocess.run(
@@ -133,5 +135,6 @@ def test_persistent_container_kept_after_poweroff(coi_binary, cleanup_containers
     # Verify cleanup
     time.sleep(1)
     containers = get_container_list()
-    assert container_name not in containers, \
+    assert container_name not in containers, (
         f"Container {container_name} should be deleted after cleanup"
+    )

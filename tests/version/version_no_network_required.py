@@ -27,22 +27,22 @@ def test_version_no_network_required(coi_binary):
         timeout=10,
     )
 
-    assert result.returncode == 0, \
-        f"Version command should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Version command should succeed. stderr: {result.stderr}"
 
     output = result.stdout
 
     # Verify complete version output
-    assert "claude-on-incus (coi) v" in output, \
-        f"Should contain version string. Got:\n{output}"
+    assert "claude-on-incus (coi) v" in output, f"Should contain version string. Got:\n{output}"
 
-    assert "https://github.com/mensfeld/claude-on-incus" in output, \
+    assert "https://github.com/mensfeld/claude-on-incus" in output, (
         f"Should contain repository URL. Got:\n{output}"
+    )
 
     # Verify output is complete (2 non-empty lines)
-    lines = [line for line in output.strip().split('\n') if line]
-    assert len(lines) == 2, \
+    lines = [line for line in output.strip().split("\n") if line]
+    assert len(lines) == 2, (
         f"Should have complete output (2 lines). Got {len(lines)} lines:\n{output}"
+    )
 
     # Note: This test doesn't actually block network access, but verifies
     # that the version command produces complete output quickly (<10s timeout)

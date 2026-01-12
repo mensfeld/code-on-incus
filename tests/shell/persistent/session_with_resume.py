@@ -95,9 +95,9 @@ def test_persistent_session_with_resume(coi_binary, cleanup_containers, workspac
         pass
 
     # Get output
-    if hasattr(child.logfile_read, 'get_raw_output'):
+    if hasattr(child.logfile_read, "get_raw_output"):
         output1 = child.logfile_read.get_raw_output()
-    elif hasattr(child.logfile_read, 'get_output'):
+    elif hasattr(child.logfile_read, "get_output"):
         output1 = child.logfile_read.get_output()
     else:
         output1 = ""
@@ -111,8 +111,9 @@ def test_persistent_session_with_resume(coi_binary, cleanup_containers, workspac
     time.sleep(3)
 
     # Verify session was saved
-    assert "Session data saved" in output1 or "Saving session data" in output1, \
+    assert "Session data saved" in output1 or "Saving session data" in output1, (
         f"Session should be saved. Got:\n{output1}"
+    )
 
     # In persistent mode, container is kept - delete it for clean resume test
     subprocess.run(
@@ -142,9 +143,9 @@ def test_persistent_session_with_resume(coi_binary, cleanup_containers, workspac
         resumed = False
 
     # Get output for debugging
-    if hasattr(child2.logfile_read, 'get_raw_output'):
+    if hasattr(child2.logfile_read, "get_raw_output"):
         output2 = child2.logfile_read.get_raw_output()
-    elif hasattr(child2.logfile_read, 'get_display_stripped'):
+    elif hasattr(child2.logfile_read, "get_display_stripped"):
         output2 = child2.logfile_read.get_display_stripped()
     else:
         output2 = ""
@@ -183,8 +184,9 @@ def test_persistent_session_with_resume(coi_binary, cleanup_containers, workspac
     # Verify container is gone
     time.sleep(1)
     containers = get_container_list()
-    assert container_name2 not in containers, \
+    assert container_name2 not in containers, (
         f"Container {container_name2} should be deleted after cleanup"
+    )
 
     # Assert resume worked
     assert resumed, f"Should see 'Resuming session' in output. Got:\n{output2}"

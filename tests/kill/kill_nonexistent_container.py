@@ -31,12 +31,13 @@ def test_kill_nonexistent_container(coi_binary, cleanup_containers):
 
     if result.returncode != 0:
         # Expected - failed to kill
-        assert "failed" in combined_output.lower() or \
-               "warning" in combined_output.lower() or \
-               "error" in combined_output.lower(), \
-            f"Should show error message. Got:\n{combined_output}"
+        assert (
+            "failed" in combined_output.lower()
+            or "warning" in combined_output.lower()
+            or "error" in combined_output.lower()
+        ), f"Should show error message. Got:\n{combined_output}"
     else:
         # Also acceptable - showed warning but exited 0
-        assert "No containers were killed" in combined_output or \
-               "warning" in combined_output.lower(), \
-            f"Should indicate no containers killed. Got:\n{combined_output}"
+        assert (
+            "No containers were killed" in combined_output or "warning" in combined_output.lower()
+        ), f"Should indicate no containers killed. Got:\n{combined_output}"

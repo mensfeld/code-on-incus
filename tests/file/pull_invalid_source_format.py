@@ -31,9 +31,9 @@ def test_pull_invalid_source_format(coi_binary, cleanup_containers, workspace_di
 
     # === Phase 2: Verify failure with format error ===
 
-    assert result.returncode != 0, \
-        f"Pull with invalid format should fail. stdout: {result.stdout}"
+    assert result.returncode != 0, f"Pull with invalid format should fail. stdout: {result.stdout}"
 
     combined_output = (result.stdout + result.stderr).lower()
-    assert "container:path" in combined_output or "format" in combined_output, \
+    assert "container:path" in combined_output or "format" in combined_output, (
         f"Should mention correct format. Got:\n{result.stdout + result.stderr}"
+    )

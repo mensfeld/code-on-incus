@@ -34,8 +34,7 @@ def test_kill_idempotent(coi_binary, cleanup_containers, workspace_dir):
         text=True,
         timeout=120,
     )
-    assert result.returncode == 0, \
-        f"Container launch should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Container launch should succeed. stderr: {result.stderr}"
 
     time.sleep(3)
 
@@ -47,8 +46,7 @@ def test_kill_idempotent(coi_binary, cleanup_containers, workspace_dir):
         text=True,
         timeout=60,
     )
-    assert result.returncode == 0, \
-        f"First kill should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"First kill should succeed. stderr: {result.stderr}"
 
     # === Phase 3: Second kill (container no longer exists) ===
 
@@ -64,9 +62,10 @@ def test_kill_idempotent(coi_binary, cleanup_containers, workspace_dir):
 
     if result.returncode != 0:
         # Failed is acceptable for already-killed container
-        assert "failed" in combined_output.lower() or \
-               "warning" in combined_output.lower() or \
-               "not exist" in combined_output.lower() or \
-               "No containers" in combined_output, \
-            f"Should show appropriate message. Got:\n{combined_output}"
+        assert (
+            "failed" in combined_output.lower()
+            or "warning" in combined_output.lower()
+            or "not exist" in combined_output.lower()
+            or "No containers" in combined_output
+        ), f"Should show appropriate message. Got:\n{combined_output}"
     # Success with warning is also acceptable

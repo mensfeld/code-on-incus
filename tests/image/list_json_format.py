@@ -27,8 +27,9 @@ def test_list_json_format(coi_binary, cleanup_containers):
         timeout=30,
     )
 
-    assert result.returncode == 0, \
+    assert result.returncode == 0, (
         f"Image list with JSON format should succeed. stderr: {result.stderr}"
+    )
 
     # === Phase 2: Verify valid JSON ===
 
@@ -38,8 +39,9 @@ def test_list_json_format(coi_binary, cleanup_containers):
     try:
         parsed = json.loads(output)
         # Should be a list (possibly empty)
-        assert isinstance(parsed, list) or parsed is None, \
+        assert isinstance(parsed, list) or parsed is None, (
             f"JSON output should be a list or null. Got: {type(parsed)}"
+        )
     except json.JSONDecodeError as e:
         # Empty output is also acceptable for no matching images
         if output != "" and output != "null":

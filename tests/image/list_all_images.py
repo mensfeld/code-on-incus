@@ -26,13 +26,13 @@ def test_list_all_images(coi_binary, cleanup_containers):
         timeout=30,
     )
 
-    assert result.returncode == 0, \
-        f"Image list --all should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Image list --all should succeed. stderr: {result.stderr}"
 
     # === Phase 2: Verify output format ===
 
     combined_output = result.stdout + result.stderr
 
     # Should show All Local Images section
-    assert "All Local Images:" in combined_output or "ALIAS" in combined_output, \
+    assert "All Local Images:" in combined_output or "ALIAS" in combined_output, (
         f"Should show All Local Images section or header. Got:\n{combined_output}"
+    )

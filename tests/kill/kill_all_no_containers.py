@@ -27,13 +27,13 @@ def test_kill_all_no_containers(coi_binary, cleanup_containers):
     )
 
     # Should succeed (no error even with no containers)
-    assert result.returncode == 0, \
-        f"Kill --all should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Kill --all should succeed. stderr: {result.stderr}"
 
     combined_output = result.stdout + result.stderr
 
     # Either "no containers to kill" or actually killed some (from other tests)
-    assert "No containers to kill" in combined_output or \
-           "Killed" in combined_output or \
-           "container" in combined_output.lower(), \
-        f"Should show status message. Got:\n{combined_output}"
+    assert (
+        "No containers to kill" in combined_output
+        or "Killed" in combined_output
+        or "container" in combined_output.lower()
+    ), f"Should show status message. Got:\n{combined_output}"

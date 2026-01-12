@@ -36,8 +36,7 @@ def test_push_file_with_spaces(coi_binary, cleanup_containers, workspace_dir):
         text=True,
         timeout=120,
     )
-    assert result.returncode == 0, \
-        f"Container launch should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Container launch should succeed. stderr: {result.stderr}"
 
     time.sleep(3)
 
@@ -57,8 +56,7 @@ def test_push_file_with_spaces(coi_binary, cleanup_containers, workspace_dir):
         timeout=30,
     )
 
-    assert result.returncode == 0, \
-        f"File push should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"File push should succeed. stderr: {result.stderr}"
 
     # === Phase 4: Verify file exists in container ===
 
@@ -69,12 +67,10 @@ def test_push_file_with_spaces(coi_binary, cleanup_containers, workspace_dir):
         timeout=30,
     )
 
-    assert result.returncode == 0, \
-        f"File should exist in container. stderr: {result.stderr}"
+    assert result.returncode == 0, f"File should exist in container. stderr: {result.stderr}"
 
     combined_output = result.stdout + result.stderr
-    assert test_content in combined_output, \
-        f"File content should match. Got:\n{combined_output}"
+    assert test_content in combined_output, f"File content should match. Got:\n{combined_output}"
 
     # === Phase 5: Cleanup ===
 

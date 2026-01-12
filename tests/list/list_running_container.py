@@ -34,8 +34,7 @@ def test_list_running_container(coi_binary, cleanup_containers, workspace_dir):
         text=True,
         timeout=120,
     )
-    assert result.returncode == 0, \
-        f"Container launch should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Container launch should succeed. stderr: {result.stderr}"
 
     time.sleep(3)
 
@@ -47,27 +46,24 @@ def test_list_running_container(coi_binary, cleanup_containers, workspace_dir):
         text=True,
         timeout=30,
     )
-    assert result.returncode == 0, \
-        f"List should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"List should succeed. stderr: {result.stderr}"
 
     output = result.stdout
 
     # === Phase 3: Verify container appears ===
 
-    assert container_name in output, \
+    assert container_name in output, (
         f"Container {container_name} should appear in list. Got:\n{output}"
+    )
 
     # Should show Running status
-    assert "Running" in output, \
-        f"Should show Running status. Got:\n{output}"
+    assert "Running" in output, f"Should show Running status. Got:\n{output}"
 
     # Should show Status field
-    assert "Status:" in output, \
-        f"Should show Status field. Got:\n{output}"
+    assert "Status:" in output, f"Should show Status field. Got:\n{output}"
 
     # Should show Created field
-    assert "Created:" in output, \
-        f"Should show Created field. Got:\n{output}"
+    assert "Created:" in output, f"Should show Created field. Got:\n{output}"
 
     # === Phase 4: Cleanup ===
 

@@ -24,9 +24,9 @@ def test_cleanup_missing_keep_flag(coi_binary, cleanup_containers):
         timeout=30,
     )
 
-    assert result.returncode != 0, \
-        f"Missing --keep should fail. stdout: {result.stdout}"
+    assert result.returncode != 0, f"Missing --keep should fail. stdout: {result.stdout}"
 
     combined_output = (result.stdout + result.stderr).lower()
-    assert "keep" in combined_output or "required" in combined_output or "flag" in combined_output, \
-        f"Should indicate --keep is required. Got:\n{result.stdout + result.stderr}"
+    assert (
+        "keep" in combined_output or "required" in combined_output or "flag" in combined_output
+    ), f"Should indicate --keep is required. Got:\n{result.stdout + result.stderr}"

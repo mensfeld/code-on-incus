@@ -54,8 +54,7 @@ def test_list_persistent(coi_binary, cleanup_containers, workspace_dir):
 
     # Verify container exists
     containers = get_container_list()
-    assert container_name in containers, \
-        f"Container {container_name} should exist"
+    assert container_name in containers, f"Container {container_name} should exist"
 
     # Interact briefly with fake-claude to ensure session is established
     with with_live_screen(child) as monitor:
@@ -74,31 +73,32 @@ def test_list_persistent(coi_binary, cleanup_containers, workspace_dir):
         cwd=workspace_dir,
     )
 
-    assert list_result.returncode == 0, \
-        f"coi list should succeed. stderr: {list_result.stderr}"
+    assert list_result.returncode == 0, f"coi list should succeed. stderr: {list_result.stderr}"
 
     list_output = list_result.stdout
 
     # Container should be listed
-    assert container_name in list_output, \
+    assert container_name in list_output, (
         f"Container {container_name} should be in list output. Got:\n{list_output}"
+    )
 
     # Container SHOULD be marked as persistent
-    lines = list_output.split('\n')
+    lines = list_output.split("\n")
     container_line = None
     for line in lines:
         if container_name in line:
             container_line = line
             break
 
-    assert container_line is not None, \
-        f"Should find container {container_name} in output"
+    assert container_line is not None, f"Should find container {container_name} in output"
 
-    assert "(persistent)" in container_line, \
+    assert "(persistent)" in container_line, (
         f"Persistent container should be marked as (persistent). Line: {container_line}"
+    )
 
-    assert "(ephemeral)" not in container_line, \
+    assert "(ephemeral)" not in container_line, (
         f"Persistent container should NOT be marked as ephemeral. Line: {container_line}"
+    )
 
     # === Phase 3: Cleanup ===
 
@@ -133,5 +133,6 @@ def test_list_persistent(coi_binary, cleanup_containers, workspace_dir):
     # Verify container is gone
     time.sleep(1)
     containers = get_container_list()
-    assert container_name not in containers, \
+    assert container_name not in containers, (
         f"Container {container_name} should be deleted after cleanup"
+    )

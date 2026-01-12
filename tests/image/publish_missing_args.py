@@ -25,12 +25,12 @@ def test_publish_no_args(coi_binary, cleanup_containers):
         timeout=30,
     )
 
-    assert result.returncode != 0, \
-        f"Missing arguments should fail. stdout: {result.stdout}"
+    assert result.returncode != 0, f"Missing arguments should fail. stdout: {result.stdout}"
 
     combined_output = (result.stdout + result.stderr).lower()
-    assert "usage" in combined_output or "required" in combined_output or "argument" in combined_output, \
-        f"Should show usage error. Got:\n{result.stdout + result.stderr}"
+    assert (
+        "usage" in combined_output or "required" in combined_output or "argument" in combined_output
+    ), f"Should show usage error. Got:\n{result.stdout + result.stderr}"
 
 
 def test_publish_one_arg(coi_binary, cleanup_containers):
@@ -48,9 +48,9 @@ def test_publish_one_arg(coi_binary, cleanup_containers):
         timeout=30,
     )
 
-    assert result.returncode != 0, \
-        f"Missing alias argument should fail. stdout: {result.stdout}"
+    assert result.returncode != 0, f"Missing alias argument should fail. stdout: {result.stdout}"
 
     combined_output = (result.stdout + result.stderr).lower()
-    assert "usage" in combined_output or "required" in combined_output or "argument" in combined_output, \
-        f"Should show usage error. Got:\n{result.stdout + result.stderr}"
+    assert (
+        "usage" in combined_output or "required" in combined_output or "argument" in combined_output
+    ), f"Should show usage error. Got:\n{result.stdout + result.stderr}"

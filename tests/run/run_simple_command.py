@@ -26,10 +26,10 @@ def test_run_simple_command(coi_binary, cleanup_containers, workspace_dir):
         timeout=180,
     )
 
-    assert result.returncode == 0, \
-        f"Run should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Run should succeed. stderr: {result.stderr}"
 
     # Output should contain our text
     combined_output = result.stdout + result.stderr
-    assert "hello-test-xyz-123" in combined_output, \
+    assert "hello-test-xyz-123" in combined_output, (
         f"Output should contain echo text. Got:\n{combined_output}"
+    )

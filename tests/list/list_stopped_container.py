@@ -35,8 +35,7 @@ def test_list_stopped_container(coi_binary, cleanup_containers, workspace_dir):
         text=True,
         timeout=120,
     )
-    assert result.returncode == 0, \
-        f"Container launch should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Container launch should succeed. stderr: {result.stderr}"
 
     time.sleep(3)
 
@@ -48,8 +47,7 @@ def test_list_stopped_container(coi_binary, cleanup_containers, workspace_dir):
         text=True,
         timeout=60,
     )
-    assert result.returncode == 0, \
-        f"Container stop should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Container stop should succeed. stderr: {result.stderr}"
 
     time.sleep(2)
 
@@ -61,18 +59,17 @@ def test_list_stopped_container(coi_binary, cleanup_containers, workspace_dir):
         text=True,
         timeout=30,
     )
-    assert result.returncode == 0, \
-        f"List should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"List should succeed. stderr: {result.stderr}"
 
     output = result.stdout
 
     # === Phase 4: Verify container shows as stopped ===
 
-    assert container_name in output, \
+    assert container_name in output, (
         f"Container {container_name} should appear in list. Got:\n{output}"
+    )
 
-    assert "Stopped" in output, \
-        f"Should show Stopped status. Got:\n{output}"
+    assert "Stopped" in output, f"Should show Stopped status. Got:\n{output}"
 
     # === Phase 5: Cleanup ===
 

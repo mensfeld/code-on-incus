@@ -36,8 +36,7 @@ def test_push_directory_without_recursive(coi_binary, cleanup_containers, worksp
         text=True,
         timeout=120,
     )
-    assert result.returncode == 0, \
-        f"Container launch should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Container launch should succeed. stderr: {result.stderr}"
 
     time.sleep(3)
 
@@ -59,12 +58,12 @@ def test_push_directory_without_recursive(coi_binary, cleanup_containers, worksp
 
     # === Phase 4: Verify failure with helpful message ===
 
-    assert result.returncode != 0, \
-        f"Push directory without -r should fail. stdout: {result.stdout}"
+    assert result.returncode != 0, f"Push directory without -r should fail. stdout: {result.stdout}"
 
     combined_output = result.stdout + result.stderr
-    assert "-r" in combined_output or "recursive" in combined_output.lower(), \
+    assert "-r" in combined_output or "recursive" in combined_output.lower(), (
         f"Should mention -r flag. Got:\n{combined_output}"
+    )
 
     # === Phase 5: Cleanup ===
 

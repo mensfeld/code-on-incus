@@ -34,8 +34,7 @@ def test_kill_all_with_force(coi_binary, cleanup_containers, workspace_dir):
             text=True,
             timeout=120,
         )
-        assert result.returncode == 0, \
-            f"Container launch should succeed. stderr: {result.stderr}"
+        assert result.returncode == 0, f"Container launch should succeed. stderr: {result.stderr}"
 
     time.sleep(3)
 
@@ -47,13 +46,13 @@ def test_kill_all_with_force(coi_binary, cleanup_containers, workspace_dir):
         text=True,
         timeout=120,
     )
-    assert result.returncode == 0, \
-        f"Kill --all should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Kill --all should succeed. stderr: {result.stderr}"
 
     combined_output = result.stdout + result.stderr
     # Should show found containers and killed count
-    assert "Found" in combined_output or "container" in combined_output.lower(), \
+    assert "Found" in combined_output or "container" in combined_output.lower(), (
         f"Should show container info. Got:\n{combined_output}"
+    )
 
     # === Phase 3: Verify all deleted ===
 
@@ -64,5 +63,6 @@ def test_kill_all_with_force(coi_binary, cleanup_containers, workspace_dir):
             text=True,
             timeout=30,
         )
-        assert result.returncode != 0, \
+        assert result.returncode != 0, (
             f"Container {container_name} should not exist after kill --all"
+        )

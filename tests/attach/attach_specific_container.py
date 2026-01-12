@@ -50,8 +50,7 @@ def test_attach_specific_container(coi_binary, cleanup_containers, workspace_dir
 
     # Verify container exists
     containers = get_container_list()
-    assert container_name in containers, \
-        f"Container {container_name} should exist"
+    assert container_name in containers, f"Container {container_name} should exist"
 
     # === Phase 2: Detach ===
 
@@ -77,8 +76,7 @@ def test_attach_specific_container(coi_binary, cleanup_containers, workspace_dir
 
     # Verify container is still running
     containers = get_container_list()
-    assert container_name in containers, \
-        f"Container {container_name} should still be running"
+    assert container_name in containers, f"Container {container_name} should still be running"
 
     # === Phase 3: Test coi attach <container-name> ===
 
@@ -94,8 +92,9 @@ def test_attach_specific_container(coi_binary, cleanup_containers, workspace_dir
     # The attach should have worked (we may get various exit codes depending on timing)
     # Main thing is it didn't error about container not found
     combined_output = result.stdout + result.stderr
-    assert "not found" not in combined_output.lower(), \
+    assert "not found" not in combined_output.lower(), (
         f"Should not show 'not found'. Got:\n{combined_output}"
+    )
 
     # === Phase 4: Cleanup ===
 
@@ -107,5 +106,6 @@ def test_attach_specific_container(coi_binary, cleanup_containers, workspace_dir
 
     time.sleep(1)
     containers = get_container_list()
-    assert container_name not in containers, \
+    assert container_name not in containers, (
         f"Container {container_name} should be deleted after cleanup"
+    )

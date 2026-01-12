@@ -33,8 +33,7 @@ def test_list_shows_image(coi_binary, cleanup_containers, workspace_dir):
         text=True,
         timeout=120,
     )
-    assert result.returncode == 0, \
-        f"Container launch should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Container launch should succeed. stderr: {result.stderr}"
 
     time.sleep(3)
 
@@ -46,19 +45,16 @@ def test_list_shows_image(coi_binary, cleanup_containers, workspace_dir):
         text=True,
         timeout=30,
     )
-    assert result.returncode == 0, \
-        f"List should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"List should succeed. stderr: {result.stderr}"
 
     output = result.stdout
 
     # === Phase 3: Verify image info ===
 
-    assert container_name in output, \
-        f"Container should appear. Got:\n{output}"
+    assert container_name in output, f"Container should appear. Got:\n{output}"
 
     # Should show Image field (coi image has a description)
-    assert "Image:" in output, \
-        f"Should show Image field. Got:\n{output}"
+    assert "Image:" in output, f"Should show Image field. Got:\n{output}"
 
     # === Phase 4: Cleanup ===
 

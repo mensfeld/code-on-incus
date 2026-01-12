@@ -24,11 +24,11 @@ def test_kill_no_args(coi_binary, cleanup_containers):
         timeout=30,
     )
 
-    assert result.returncode != 0, \
-        f"Kill without args should fail. stdout: {result.stdout}"
+    assert result.returncode != 0, f"Kill without args should fail. stdout: {result.stdout}"
 
     combined_output = (result.stdout + result.stderr).lower()
-    assert "no container" in combined_output or \
-           "coi list" in combined_output or \
-           "usage" in combined_output, \
-        f"Should show helpful error. Got:\n{result.stdout + result.stderr}"
+    assert (
+        "no container" in combined_output
+        or "coi list" in combined_output
+        or "usage" in combined_output
+    ), f"Should show helpful error. Got:\n{result.stdout + result.stderr}"

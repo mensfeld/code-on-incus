@@ -28,16 +28,15 @@ def test_run_workspace_mounted(coi_binary, cleanup_containers, workspace_dir):
 
     # Run command to read the file
     result = subprocess.run(
-        [coi_binary, "run", "--workspace", workspace_dir,
-         "cat", "/workspace/mount-test.txt"],
+        [coi_binary, "run", "--workspace", workspace_dir, "cat", "/workspace/mount-test.txt"],
         capture_output=True,
         text=True,
         timeout=180,
     )
 
-    assert result.returncode == 0, \
-        f"Run should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Run should succeed. stderr: {result.stderr}"
 
     combined_output = result.stdout + result.stderr
-    assert test_content in combined_output, \
+    assert test_content in combined_output, (
         f"Output should contain file content. Got:\n{combined_output}"
+    )

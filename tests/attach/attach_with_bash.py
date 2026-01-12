@@ -52,8 +52,7 @@ def test_attach_with_bash(coi_binary, cleanup_containers, workspace_dir):
 
     # Verify container exists
     containers = get_container_list()
-    assert container_name in containers, \
-        f"Container {container_name} should exist"
+    assert container_name in containers, f"Container {container_name} should exist"
 
     # === Phase 2: Detach ===
 
@@ -79,8 +78,7 @@ def test_attach_with_bash(coi_binary, cleanup_containers, workspace_dir):
 
     # Verify container is still running
     containers = get_container_list()
-    assert container_name in containers, \
-        f"Container {container_name} should still be running"
+    assert container_name in containers, f"Container {container_name} should still be running"
 
     # === Phase 3: Test coi attach --bash ===
 
@@ -127,8 +125,9 @@ def test_attach_with_bash(coi_binary, cleanup_containers, workspace_dir):
 
     time.sleep(1)
     containers = get_container_list()
-    assert container_name not in containers, \
+    assert container_name not in containers, (
         f"Container {container_name} should be deleted after cleanup"
+    )
 
     # Assert bash worked
     assert in_bash, "Should be able to run commands in bash shell"

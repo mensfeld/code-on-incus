@@ -46,8 +46,7 @@ def test_mount_with_shift_flag(coi_binary, cleanup_containers, workspace_dir):
             timeout=120,
         )
 
-        assert result.returncode == 0, \
-            f"Container launch should succeed. stderr: {result.stderr}"
+        assert result.returncode == 0, f"Container launch should succeed. stderr: {result.stderr}"
 
         time.sleep(3)
 
@@ -56,43 +55,69 @@ def test_mount_with_shift_flag(coi_binary, cleanup_containers, workspace_dir):
 
         mount_name = "shift-mount"
         result = subprocess.run(
-            [coi_binary, "container", "mount", container_name, mount_name, tmpdir, "/mnt/shifted", "--shift"],
+            [
+                coi_binary,
+                "container",
+                "mount",
+                container_name,
+                mount_name,
+                tmpdir,
+                "/mnt/shifted",
+                "--shift",
+            ],
             capture_output=True,
             text=True,
             timeout=60,
         )
 
-        assert result.returncode == 0, \
-            f"Mount with --shift should succeed. stderr: {result.stderr}"
+        assert result.returncode == 0, f"Mount with --shift should succeed. stderr: {result.stderr}"
 
         time.sleep(2)
 
         # === Phase 4: Verify file accessible ===
 
         result = subprocess.run(
-            [coi_binary, "container", "exec", container_name, "--", "cat", "/mnt/shifted/shift-test.txt"],
+            [
+                coi_binary,
+                "container",
+                "exec",
+                container_name,
+                "--",
+                "cat",
+                "/mnt/shifted/shift-test.txt",
+            ],
             capture_output=True,
             text=True,
             timeout=30,
         )
 
-        assert result.returncode == 0, \
+        assert result.returncode == 0, (
             f"Reading shifted mount file should succeed. stderr: {result.stderr}"
+        )
 
         combined_output = result.stdout + result.stderr
-        assert "shift-test-content" in combined_output, \
+        assert "shift-test-content" in combined_output, (
             f"Shifted mount file should contain expected content. Got:\n{combined_output}"
+        )
 
         # Check ownership appears as valid user inside container
         result = subprocess.run(
-            [coi_binary, "container", "exec", container_name, "--", "ls", "-la", "/mnt/shifted/shift-test.txt"],
+            [
+                coi_binary,
+                "container",
+                "exec",
+                container_name,
+                "--",
+                "ls",
+                "-la",
+                "/mnt/shifted/shift-test.txt",
+            ],
             capture_output=True,
             text=True,
             timeout=30,
         )
 
-        assert result.returncode == 0, \
-            f"ls -la should succeed. stderr: {result.stderr}"
+        assert result.returncode == 0, f"ls -la should succeed. stderr: {result.stderr}"
 
         # === Phase 5: Cleanup ===
 

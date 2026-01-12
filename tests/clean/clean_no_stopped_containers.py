@@ -26,18 +26,18 @@ def test_clean_no_stopped_containers(coi_binary, cleanup_containers):
     )
 
     # Should succeed
-    assert result.returncode == 0, \
-        f"coi clean should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"coi clean should succeed. stderr: {result.stderr}"
 
     # Should indicate nothing to clean or complete successfully
     combined_output = result.stdout + result.stderr
     success_indicators = (
-        "no stopped" in combined_output.lower() or
-        "nothing to clean" in combined_output.lower() or
-        "cleaned" in combined_output.lower() or
-        "0 container" in combined_output.lower() or
-        result.returncode == 0  # Success with no output is also valid
+        "no stopped" in combined_output.lower()
+        or "nothing to clean" in combined_output.lower()
+        or "cleaned" in combined_output.lower()
+        or "0 container" in combined_output.lower()
+        or result.returncode == 0  # Success with no output is also valid
     )
 
-    assert success_indicators, \
+    assert success_indicators, (
         f"Should indicate nothing to clean or succeed. Got:\n{combined_output}"
+    )

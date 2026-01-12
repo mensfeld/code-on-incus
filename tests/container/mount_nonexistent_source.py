@@ -36,8 +36,7 @@ def test_mount_nonexistent_source(coi_binary, cleanup_containers, workspace_dir)
         timeout=120,
     )
 
-    assert result.returncode == 0, \
-        f"Container launch should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Container launch should succeed. stderr: {result.stderr}"
 
     time.sleep(3)
 
@@ -47,7 +46,15 @@ def test_mount_nonexistent_source(coi_binary, cleanup_containers, workspace_dir)
     nonexistent_source = "/nonexistent/path/12345"
     mount_name = "bad-mount"
     result = subprocess.run(
-        [coi_binary, "container", "mount", container_name, mount_name, nonexistent_source, "/mnt/test"],
+        [
+            coi_binary,
+            "container",
+            "mount",
+            container_name,
+            mount_name,
+            nonexistent_source,
+            "/mnt/test",
+        ],
         capture_output=True,
         text=True,
         timeout=60,
@@ -55,20 +62,18 @@ def test_mount_nonexistent_source(coi_binary, cleanup_containers, workspace_dir)
 
     # === Phase 3: Verify failure ===
 
-    assert result.returncode != 0, \
-        "Mounting nonexistent source should fail"
+    assert result.returncode != 0, "Mounting nonexistent source should fail"
 
     combined_output = result.stdout + result.stderr
     has_error = (
-        "not found" in combined_output.lower() or
-        "does not exist" in combined_output.lower() or
-        "no such" in combined_output.lower() or
-        "error" in combined_output.lower() or
-        "invalid" in combined_output.lower()
+        "not found" in combined_output.lower()
+        or "does not exist" in combined_output.lower()
+        or "no such" in combined_output.lower()
+        or "error" in combined_output.lower()
+        or "invalid" in combined_output.lower()
     )
 
-    assert has_error, \
-        f"Should indicate source not found. Got:\n{combined_output}"
+    assert has_error, f"Should indicate source not found. Got:\n{combined_output}"
 
     # === Phase 4: Cleanup ===
 

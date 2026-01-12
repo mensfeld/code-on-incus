@@ -30,20 +30,28 @@ def test_run_with_persistent(coi_binary, cleanup_containers, workspace_dir):
     # === Phase 1: First run with persistent ===
 
     result = subprocess.run(
-        [coi_binary, "run", "--workspace", workspace_dir,
-         "--persistent", "--slot", str(slot),
-         "echo", "first-run-persistent"],
+        [
+            coi_binary,
+            "run",
+            "--workspace",
+            workspace_dir,
+            "--persistent",
+            "--slot",
+            str(slot),
+            "echo",
+            "first-run-persistent",
+        ],
         capture_output=True,
         text=True,
         timeout=180,
     )
 
-    assert result.returncode == 0, \
-        f"First run should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"First run should succeed. stderr: {result.stderr}"
 
     combined_output = result.stdout + result.stderr
-    assert "first-run-persistent" in combined_output, \
+    assert "first-run-persistent" in combined_output, (
         f"Output should contain echo text. Got:\n{combined_output}"
+    )
 
     time.sleep(2)
 
@@ -56,30 +64,38 @@ def test_run_with_persistent(coi_binary, cleanup_containers, workspace_dir):
         timeout=30,
     )
 
-    assert result.returncode == 0, \
-        "Container should still exist after persistent run"
+    assert result.returncode == 0, "Container should still exist after persistent run"
 
     # === Phase 3: Second run reuses container ===
 
     result = subprocess.run(
-        [coi_binary, "run", "--workspace", workspace_dir,
-         "--persistent", "--slot", str(slot),
-         "echo", "second-run-reused"],
+        [
+            coi_binary,
+            "run",
+            "--workspace",
+            workspace_dir,
+            "--persistent",
+            "--slot",
+            str(slot),
+            "echo",
+            "second-run-reused",
+        ],
         capture_output=True,
         text=True,
         timeout=180,
     )
 
-    assert result.returncode == 0, \
-        f"Second run should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Second run should succeed. stderr: {result.stderr}"
 
     combined_output = result.stdout + result.stderr
-    assert "second-run-reused" in combined_output, \
+    assert "second-run-reused" in combined_output, (
         f"Output should contain echo text. Got:\n{combined_output}"
+    )
 
     # Should show "Restarting existing" message
-    assert "existing" in combined_output.lower() or "restart" in combined_output.lower(), \
+    assert "existing" in combined_output.lower() or "restart" in combined_output.lower(), (
         f"Should indicate container reuse. Got:\n{combined_output}"
+    )
 
     # === Phase 4: Cleanup ===
 

@@ -34,8 +34,7 @@ def test_running_active_container(coi_binary, cleanup_containers, workspace_dir)
         timeout=120,
     )
 
-    assert result.returncode == 0, \
-        f"Container launch should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Container launch should succeed. stderr: {result.stderr}"
 
     time.sleep(3)
 
@@ -48,8 +47,7 @@ def test_running_active_container(coi_binary, cleanup_containers, workspace_dir)
         timeout=30,
     )
 
-    assert result.returncode == 0, \
-        "Running should return 0 for active container"
+    assert result.returncode == 0, "Running should return 0 for active container"
 
     # === Phase 3: Cleanup ===
 

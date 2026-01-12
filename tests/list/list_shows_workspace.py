@@ -56,23 +56,21 @@ def test_list_shows_workspace(coi_binary, cleanup_containers, workspace_dir):
         text=True,
         timeout=30,
     )
-    assert result.returncode == 0, \
-        f"List should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"List should succeed. stderr: {result.stderr}"
 
     output = result.stdout
 
     # === Phase 3: Verify workspace appears ===
 
-    assert container_name in output, \
-        f"Container should appear. Got:\n{output}"
+    assert container_name in output, f"Container should appear. Got:\n{output}"
 
     # Should show Workspace field
-    assert "Workspace:" in output, \
-        f"Should show Workspace field. Got:\n{output}"
+    assert "Workspace:" in output, f"Should show Workspace field. Got:\n{output}"
 
     # Workspace should contain part of our workspace path
-    assert workspace_dir in output or "workspace" in output.lower(), \
+    assert workspace_dir in output or "workspace" in output.lower(), (
         f"Should show workspace path. Got:\n{output}"
+    )
 
     # === Phase 4: Cleanup ===
 

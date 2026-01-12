@@ -38,10 +38,11 @@ def test_info_no_sessions(coi_binary, cleanup_containers):
 
     if result.returncode != 0:
         # No sessions - expected when clean
-        assert "no session" in combined_output.lower() or \
-               "not found" in combined_output.lower(), \
+        assert "no session" in combined_output.lower() or "not found" in combined_output.lower(), (
             f"Should show 'no sessions' error. Got:\n{combined_output}"
+        )
     else:
         # Sessions exist from other tests - info should show session data
-        assert "Session" in combined_output or "session" in combined_output.lower(), \
+        assert "Session" in combined_output or "session" in combined_output.lower(), (
             f"Should show session info. Got:\n{combined_output}"
+        )

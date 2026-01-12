@@ -60,8 +60,9 @@ def test_persistent_multiple_slots_parallel(coi_binary, cleanup_containers, work
 
     # Verify slot 1 container exists
     containers = get_container_list()
-    assert container_name_1 in containers, \
+    assert container_name_1 in containers, (
         f"Container {container_name_1} should exist after starting slot 1"
+    )
 
     # Interact with fake-claude on slot 1
     with with_live_screen(child1) as monitor:
@@ -101,9 +102,9 @@ def test_persistent_multiple_slots_parallel(coi_binary, cleanup_containers, work
         pass
 
     # Get output for debugging
-    if hasattr(child1.logfile_read, 'get_raw_output'):
+    if hasattr(child1.logfile_read, "get_raw_output"):
         output1 = child1.logfile_read.get_raw_output()
-    elif hasattr(child1.logfile_read, 'get_output'):
+    elif hasattr(child1.logfile_read, "get_output"):
         output1 = child1.logfile_read.get_output()
     else:
         output1 = ""
@@ -116,8 +117,9 @@ def test_persistent_multiple_slots_parallel(coi_binary, cleanup_containers, work
     # Verify slot 1 container is still running
     time.sleep(5)
     containers = get_container_list()
-    assert container_name_1 in containers, \
+    assert container_name_1 in containers, (
         f"Container {container_name_1} should still be running after detach. Output:\n{output1}"
+    )
 
     # === Phase 3: Start persistent session on slot 2 ===
 
@@ -135,10 +137,12 @@ def test_persistent_multiple_slots_parallel(coi_binary, cleanup_containers, work
     # === Phase 4: Verify both containers are running ===
 
     containers = get_container_list()
-    assert container_name_1 in containers, \
+    assert container_name_1 in containers, (
         f"Container {container_name_1} (slot 1) should still be running"
-    assert container_name_2 in containers, \
+    )
+    assert container_name_2 in containers, (
         f"Container {container_name_2} (slot 2) should be running"
+    )
 
     # Interact with fake-claude on slot 2
     with with_live_screen(child2) as monitor:
@@ -174,9 +178,12 @@ def test_persistent_multiple_slots_parallel(coi_binary, cleanup_containers, work
         child2.send("\x0d")
         time.sleep(1)
         # Should NOT find slot1's file - expect "No such file" or our marker
-        isolated = wait_for_text_in_monitor(monitor, "FILE_NOT_FOUND", timeout=10) or \
-                   wait_for_text_in_monitor(monitor, "No such file", timeout=2)
-        assert isolated, "Slot 2 should NOT see slot 1's home directory files (isolation violation!)"
+        isolated = wait_for_text_in_monitor(
+            monitor, "FILE_NOT_FOUND", timeout=10
+        ) or wait_for_text_in_monitor(monitor, "No such file", timeout=2)
+        assert isolated, (
+            "Slot 2 should NOT see slot 1's home directory files (isolation violation!)"
+        )
 
     # Verify slot 2 does NOT contain slot 1's secret data
     with with_live_screen(child2) as monitor:
@@ -219,7 +226,9 @@ def test_persistent_multiple_slots_parallel(coi_binary, cleanup_containers, work
     # Verify both containers are gone
     time.sleep(1)
     containers = get_container_list()
-    assert container_name_1 not in containers, \
+    assert container_name_1 not in containers, (
         f"Container {container_name_1} should be deleted after cleanup"
-    assert container_name_2 not in containers, \
+    )
+    assert container_name_2 not in containers, (
         f"Container {container_name_2} should be deleted after cleanup"
+    )

@@ -37,8 +37,7 @@ def test_push_binary_file(coi_binary, cleanup_containers, workspace_dir):
         text=True,
         timeout=120,
     )
-    assert result.returncode == 0, \
-        f"Container launch should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Container launch should succeed. stderr: {result.stderr}"
 
     time.sleep(3)
 
@@ -62,8 +61,7 @@ def test_push_binary_file(coi_binary, cleanup_containers, workspace_dir):
         timeout=30,
     )
 
-    assert result.returncode == 0, \
-        f"File push should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"File push should succeed. stderr: {result.stderr}"
 
     # === Phase 4: Verify file content via md5sum ===
 
@@ -74,12 +72,12 @@ def test_push_binary_file(coi_binary, cleanup_containers, workspace_dir):
         timeout=30,
     )
 
-    assert result.returncode == 0, \
-        f"md5sum should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"md5sum should succeed. stderr: {result.stderr}"
 
     combined_output = result.stdout + result.stderr
-    assert local_md5 in combined_output, \
+    assert local_md5 in combined_output, (
         f"MD5 should match. Expected {local_md5}, got:\n{combined_output}"
+    )
 
     # === Phase 5: Cleanup ===
 

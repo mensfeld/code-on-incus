@@ -24,15 +24,22 @@ def test_run_cleanup_after(coi_binary, cleanup_containers, workspace_dir):
     slot = 7
 
     result = subprocess.run(
-        [coi_binary, "run", "--workspace", workspace_dir, "--slot", str(slot),
-         "echo", "cleanup-test"],
+        [
+            coi_binary,
+            "run",
+            "--workspace",
+            workspace_dir,
+            "--slot",
+            str(slot),
+            "echo",
+            "cleanup-test",
+        ],
         capture_output=True,
         text=True,
         timeout=180,
     )
 
-    assert result.returncode == 0, \
-        f"Run should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Run should succeed. stderr: {result.stderr}"
 
     # Wait a moment for cleanup
     time.sleep(2)
@@ -48,5 +55,6 @@ def test_run_cleanup_after(coi_binary, cleanup_containers, workspace_dir):
         timeout=30,
     )
 
-    assert result.returncode != 0, \
+    assert result.returncode != 0, (
         f"Container should be cleaned up after run. stdout: {result.stdout}"
+    )

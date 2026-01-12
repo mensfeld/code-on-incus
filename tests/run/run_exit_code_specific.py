@@ -24,5 +24,6 @@ def test_run_exit_code_specific(coi_binary, cleanup_containers, workspace_dir):
         timeout=180,
     )
 
-    assert result.returncode == 42, \
+    assert result.returncode == 42, (
         f"Should propagate exit code 42. Got: {result.returncode}. stderr: {result.stderr}"
+    )

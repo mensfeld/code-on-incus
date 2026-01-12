@@ -38,15 +38,13 @@ def test_clean_removes_stopped(coi_binary, cleanup_containers, workspace_dir):
         timeout=120,
     )
 
-    assert result.returncode == 0, \
-        f"Container launch should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Container launch should succeed. stderr: {result.stderr}"
 
     time.sleep(3)
 
     # Verify container is running
     containers = get_container_list()
-    assert container_name in containers, \
-        f"Container {container_name} should be running"
+    assert container_name in containers, f"Container {container_name} should be running"
 
     # === Phase 2: Stop container ===
 
@@ -57,8 +55,7 @@ def test_clean_removes_stopped(coi_binary, cleanup_containers, workspace_dir):
         timeout=60,
     )
 
-    assert result.returncode == 0, \
-        f"Container stop should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Container stop should succeed. stderr: {result.stderr}"
 
     time.sleep(2)
 
@@ -71,13 +68,13 @@ def test_clean_removes_stopped(coi_binary, cleanup_containers, workspace_dir):
         timeout=60,
     )
 
-    assert result.returncode == 0, \
-        f"coi clean should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"coi clean should succeed. stderr: {result.stderr}"
 
     time.sleep(2)
 
     # === Phase 4: Verify container is removed ===
 
     containers = get_container_list()
-    assert container_name not in containers, \
+    assert container_name not in containers, (
         f"Stopped container {container_name} should be removed by clean"
+    )

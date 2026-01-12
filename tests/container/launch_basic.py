@@ -35,16 +35,14 @@ def test_launch_basic(coi_binary, cleanup_containers, workspace_dir):
         timeout=120,
     )
 
-    assert result.returncode == 0, \
-        f"Container launch should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Container launch should succeed. stderr: {result.stderr}"
 
     time.sleep(3)
 
     # === Phase 2: Verify container is running ===
 
     containers = get_container_list()
-    assert container_name in containers, \
-        f"Container {container_name} should be in container list"
+    assert container_name in containers, f"Container {container_name} should be in container list"
 
     # Check container status
     result = subprocess.run(
@@ -54,8 +52,7 @@ def test_launch_basic(coi_binary, cleanup_containers, workspace_dir):
         timeout=30,
     )
 
-    assert result.returncode == 0, \
-        f"Container {container_name} should be running"
+    assert result.returncode == 0, f"Container {container_name} should be running"
 
     # === Phase 3: Cleanup ===
 

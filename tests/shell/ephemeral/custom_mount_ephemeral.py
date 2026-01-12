@@ -116,8 +116,9 @@ def test_custom_mount_ephemeral(coi_binary, cleanup_containers, workspace_dir, t
 
     time.sleep(1)
     containers = get_container_list()
-    assert container_name not in containers, \
+    assert container_name not in containers, (
         f"Container {container_name} should be deleted after cleanup"
+    )
 
     # Assert mount worked
     assert file_accessible, f"Mounted file should be accessible with content '{test_content}'"

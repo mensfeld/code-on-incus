@@ -24,5 +24,4 @@ def test_run_exit_code_success(coi_binary, cleanup_containers, workspace_dir):
         timeout=180,
     )
 
-    assert result.returncode == 0, \
-        f"'true' command should exit with 0. stderr: {result.stderr}"
+    assert result.returncode == 0, f"'true' command should exit with 0. stderr: {result.stderr}"

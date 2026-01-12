@@ -36,8 +36,7 @@ def test_push_directory_recursive(coi_binary, cleanup_containers, workspace_dir)
         text=True,
         timeout=120,
     )
-    assert result.returncode == 0, \
-        f"Container launch should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Container launch should succeed. stderr: {result.stderr}"
 
     time.sleep(3)
 
@@ -64,40 +63,56 @@ def test_push_directory_recursive(coi_binary, cleanup_containers, workspace_dir)
         timeout=60,
     )
 
-    assert result.returncode == 0, \
-        f"Directory push should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Directory push should succeed. stderr: {result.stderr}"
 
     combined_output = result.stdout + result.stderr
-    assert "Pushed directory" in combined_output, \
+    assert "Pushed directory" in combined_output, (
         f"Should show push confirmation. Got:\n{combined_output}"
+    )
 
     # === Phase 4: Verify files exist in container ===
 
     # Check first file
     result = subprocess.run(
-        [coi_binary, "container", "exec", container_name, "--", "cat", "/tmp/push-dir-test/file1.txt"],
+        [
+            coi_binary,
+            "container",
+            "exec",
+            container_name,
+            "--",
+            "cat",
+            "/tmp/push-dir-test/file1.txt",
+        ],
         capture_output=True,
         text=True,
         timeout=30,
     )
-    assert result.returncode == 0, \
-        f"file1.txt should exist. stderr: {result.stderr}"
+    assert result.returncode == 0, f"file1.txt should exist. stderr: {result.stderr}"
     combined_output = result.stdout + result.stderr
-    assert "content-file1-xyz" in combined_output, \
+    assert "content-file1-xyz" in combined_output, (
         f"file1.txt content should match. Got:\n{combined_output}"
+    )
 
     # Check nested file
     result = subprocess.run(
-        [coi_binary, "container", "exec", container_name, "--", "cat", "/tmp/push-dir-test/subdir/file2.txt"],
+        [
+            coi_binary,
+            "container",
+            "exec",
+            container_name,
+            "--",
+            "cat",
+            "/tmp/push-dir-test/subdir/file2.txt",
+        ],
         capture_output=True,
         text=True,
         timeout=30,
     )
-    assert result.returncode == 0, \
-        f"subdir/file2.txt should exist. stderr: {result.stderr}"
+    assert result.returncode == 0, f"subdir/file2.txt should exist. stderr: {result.stderr}"
     combined_output = result.stdout + result.stderr
-    assert "content-file2-abc" in combined_output, \
+    assert "content-file2-abc" in combined_output, (
         f"file2.txt content should match. Got:\n{combined_output}"
+    )
 
     # === Phase 5: Cleanup ===
 

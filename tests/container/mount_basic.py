@@ -46,8 +46,7 @@ def test_mount_basic(coi_binary, cleanup_containers, workspace_dir):
             timeout=120,
         )
 
-        assert result.returncode == 0, \
-            f"Container launch should succeed. stderr: {result.stderr}"
+        assert result.returncode == 0, f"Container launch should succeed. stderr: {result.stderr}"
 
         time.sleep(3)
 
@@ -62,26 +61,35 @@ def test_mount_basic(coi_binary, cleanup_containers, workspace_dir):
             timeout=60,
         )
 
-        assert result.returncode == 0, \
-            f"Mount should succeed. stderr: {result.stderr}"
+        assert result.returncode == 0, f"Mount should succeed. stderr: {result.stderr}"
 
         time.sleep(2)
 
         # === Phase 4: Verify file accessible ===
 
         result = subprocess.run(
-            [coi_binary, "container", "exec", container_name, "--", "cat", "/mnt/test/mount-test.txt"],
+            [
+                coi_binary,
+                "container",
+                "exec",
+                container_name,
+                "--",
+                "cat",
+                "/mnt/test/mount-test.txt",
+            ],
             capture_output=True,
             text=True,
             timeout=30,
         )
 
-        assert result.returncode == 0, \
+        assert result.returncode == 0, (
             f"Reading mounted file should succeed. stderr: {result.stderr}"
+        )
 
         combined_output = result.stdout + result.stderr
-        assert "mount-test-content-123" in combined_output, \
+        assert "mount-test-content-123" in combined_output, (
             f"Mounted file should contain expected content. Got:\n{combined_output}"
+        )
 
         # === Phase 5: Cleanup ===
 

@@ -108,7 +108,7 @@ def test_persistent_new_session_not_resumed(coi_binary, cleanup_containers, work
     wait_for_prompt(child2, timeout=90)
 
     # Get raw output to check if old session was restored
-    if hasattr(child2.logfile_read, 'get_raw_output'):
+    if hasattr(child2.logfile_read, "get_raw_output"):
         output = child2.logfile_read.get_raw_output()
     else:
         output = ""
@@ -150,9 +150,11 @@ def test_persistent_new_session_not_resumed(coi_binary, cleanup_containers, work
     # Verify container is gone
     time.sleep(1)
     containers = get_container_list()
-    assert container_name2 not in containers, \
+    assert container_name2 not in containers, (
         f"Container {container_name2} should be deleted after cleanup"
+    )
 
     # Assert the unique marker from first session is NOT present
-    assert not marker_found, \
+    assert not marker_found, (
         f"UNIQUE-MARKER-78923 should NOT appear without --resume flag. Output:\n{output}"
+    )

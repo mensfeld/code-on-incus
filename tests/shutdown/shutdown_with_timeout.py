@@ -32,8 +32,7 @@ def test_shutdown_with_timeout(coi_binary, cleanup_containers, workspace_dir):
         text=True,
         timeout=120,
     )
-    assert result.returncode == 0, \
-        f"Launch should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Launch should succeed. stderr: {result.stderr}"
 
     time.sleep(3)
 
@@ -45,12 +44,11 @@ def test_shutdown_with_timeout(coi_binary, cleanup_containers, workspace_dir):
         timeout=120,
     )
 
-    assert result.returncode == 0, \
-        f"Shutdown should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Shutdown should succeed. stderr: {result.stderr}"
 
     combined_output = result.stdout + result.stderr
     # Should show the timeout value (5s)
-    assert "5" in combined_output, \
-        f"Should show timeout value in output. Got:\n{combined_output}"
-    assert "shutdown" in combined_output.lower(), \
+    assert "5" in combined_output, f"Should show timeout value in output. Got:\n{combined_output}"
+    assert "shutdown" in combined_output.lower(), (
         f"Should show shutdown message. Got:\n{combined_output}"
+    )

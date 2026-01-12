@@ -26,16 +26,16 @@ def test_list_with_prefix(coi_binary, cleanup_containers):
         timeout=30,
     )
 
-    assert result.returncode == 0, \
-        f"Image list with prefix should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Image list with prefix should succeed. stderr: {result.stderr}"
 
     # === Phase 2: Verify output ===
 
     combined_output = result.stdout + result.stderr
 
     # Should either show images with prefix or "No images found"
-    assert "coi" in combined_output.lower() or "No images found" in combined_output, \
+    assert "coi" in combined_output.lower() or "No images found" in combined_output, (
         f"Should show filtered results or 'No images found'. Got:\n{combined_output}"
+    )
 
 
 def test_list_with_nonexistent_prefix(coi_binary, cleanup_containers):
@@ -55,11 +55,13 @@ def test_list_with_nonexistent_prefix(coi_binary, cleanup_containers):
         timeout=30,
     )
 
-    assert result.returncode == 0, \
+    assert result.returncode == 0, (
         f"Image list with nonexistent prefix should succeed. stderr: {result.stderr}"
+    )
 
     # === Phase 2: Verify no images found ===
 
     combined_output = result.stdout + result.stderr
-    assert "No images found" in combined_output or combined_output.strip() == "", \
+    assert "No images found" in combined_output or combined_output.strip() == "", (
         f"Should show 'No images found' or empty result. Got:\n{combined_output}"
+    )

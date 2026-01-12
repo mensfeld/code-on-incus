@@ -36,8 +36,7 @@ def test_exec_basic_command(coi_binary, cleanup_containers, workspace_dir):
         timeout=120,
     )
 
-    assert result.returncode == 0, \
-        f"Container launch should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Container launch should succeed. stderr: {result.stderr}"
 
     time.sleep(3)
 
@@ -50,14 +49,14 @@ def test_exec_basic_command(coi_binary, cleanup_containers, workspace_dir):
         timeout=30,
     )
 
-    assert result.returncode == 0, \
-        f"Exec should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Exec should succeed. stderr: {result.stderr}"
 
     # === Phase 3: Verify output ===
 
     combined_output = result.stdout + result.stderr
-    assert "hello-test-123" in combined_output, \
+    assert "hello-test-123" in combined_output, (
         f"Output should contain echo text. Got:\n{combined_output}"
+    )
 
     # === Phase 4: Cleanup ===
 

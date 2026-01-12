@@ -32,7 +32,9 @@ from support.helpers import (
 )
 
 
-def test_persistent_exit_bash_keeps_container_running(coi_binary, cleanup_containers, workspace_dir):
+def test_persistent_exit_bash_keeps_container_running(
+    coi_binary, cleanup_containers, workspace_dir
+):
     """
     Test that exiting bash (not poweroff) keeps persistent container running.
 
@@ -98,9 +100,9 @@ def test_persistent_exit_bash_keeps_container_running(coi_binary, cleanup_contai
         pass
 
     # Get output for verification
-    if hasattr(child.logfile_read, 'get_raw_output'):
+    if hasattr(child.logfile_read, "get_raw_output"):
         output1 = child.logfile_read.get_raw_output()
-    elif hasattr(child.logfile_read, 'get_output'):
+    elif hasattr(child.logfile_read, "get_output"):
         output1 = child.logfile_read.get_output()
     else:
         output1 = ""
@@ -114,13 +116,14 @@ def test_persistent_exit_bash_keeps_container_running(coi_binary, cleanup_contai
 
     time.sleep(2)
     containers = get_container_list()
-    assert container_name in containers, \
-        f"Container {container_name} should still be running after exit. " \
-        f"Output was:\n{output1}"
+    assert container_name in containers, (
+        f"Container {container_name} should still be running after exit. Output was:\n{output1}"
+    )
 
     # Verify output mentions container kept running
-    assert "Container kept running" in output1 or "coi attach" in output1.lower(), \
+    assert "Container kept running" in output1 or "coi attach" in output1.lower(), (
         f"Should mention container kept running. Got:\n{output1}"
+    )
 
     # === Phase 3: Attach with --bash ===
 
@@ -170,5 +173,6 @@ def test_persistent_exit_bash_keeps_container_running(coi_binary, cleanup_contai
     # Verify container is gone
     time.sleep(1)
     containers = get_container_list()
-    assert container_name not in containers, \
+    assert container_name not in containers, (
         f"Container {container_name} should be deleted after cleanup"
+    )

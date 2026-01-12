@@ -90,7 +90,7 @@ def test_workspace_files_persist_ephemeral(coi_binary, cleanup_containers, works
             ["incus", "config", "device", "list", container_name],
             capture_output=True,
             text=True,
-            timeout=5
+            timeout=5,
         )
         print(f"Container devices:\n{result.stdout}")
 
@@ -99,7 +99,7 @@ def test_workspace_files_persist_ephemeral(coi_binary, cleanup_containers, works
             ["incus", "config", "device", "show", container_name],
             capture_output=True,
             text=True,
-            timeout=5
+            timeout=5,
         )
         print(f"\nFull device config:\n{result2.stdout}")
 
@@ -108,7 +108,7 @@ def test_workspace_files_persist_ephemeral(coi_binary, cleanup_containers, works
             ["incus", "exec", container_name, "--", "ls", "-la", "/workspace/"],
             capture_output=True,
             text=True,
-            timeout=5
+            timeout=5,
         )
         print(f"\nFiles in container /workspace:\n{result3.stdout}")
 
@@ -138,7 +138,6 @@ def test_workspace_files_persist_ephemeral(coi_binary, cleanup_containers, works
     time.sleep(5)
 
     # Force filesystem sync (important in CI with btrfs)
-    import subprocess
     subprocess.run(["sync"], check=False)
 
     # Verify container is gone (ephemeral mode deletes on poweroff)
@@ -154,7 +153,6 @@ def test_workspace_files_persist_ephemeral(coi_binary, cleanup_containers, works
 
     # === Phase 4: Verify file persists on host ===
 
-    import os
     file_path = os.path.join(workspace_dir, test_filename)
 
     # Debug: List all files in workspace and check mount status
@@ -168,7 +166,9 @@ def test_workspace_files_persist_ephemeral(coi_binary, cleanup_containers, works
                 for item in items:
                     item_path = os.path.join(workspace_dir, item)
                     stat_info = os.stat(item_path)
-                    print(f"  {item} (uid={stat_info.st_uid}, gid={stat_info.st_gid}, mode={oct(stat_info.st_mode)})")
+                    print(
+                        f"  {item} (uid={stat_info.st_uid}, gid={stat_info.st_gid}, mode={oct(stat_info.st_mode)})"
+                    )
             else:
                 print("  (empty directory)")
         except Exception as e:
@@ -186,14 +186,14 @@ def test_workspace_files_persist_ephemeral(coi_binary, cleanup_containers, works
             print(f"Container config:\n{result.stdout}")
         print("===")
 
-    assert os.path.exists(file_path), \
+    assert os.path.exists(file_path), (
         f"File {test_filename} should persist on host after ephemeral container deletion"
+    )
 
     with open(file_path) as f:
         content = f.read().strip()
 
-    assert test_content in content, \
-        f"File content should be '{test_content}', got '{content}'"
+    assert test_content in content, f"File content should be '{test_content}', got '{content}'"
 
     # Cleanup test file
     os.remove(file_path)

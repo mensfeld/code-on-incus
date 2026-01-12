@@ -33,15 +33,20 @@ def test_push_nonexistent_file(coi_binary, cleanup_containers, workspace_dir):
         text=True,
         timeout=120,
     )
-    assert result.returncode == 0, \
-        f"Container launch should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Container launch should succeed. stderr: {result.stderr}"
 
     time.sleep(3)
 
     # === Phase 2: Try to push nonexistent file ===
 
     result = subprocess.run(
-        [coi_binary, "file", "push", "/nonexistent/path/file.txt", f"{container_name}:/tmp/test.txt"],
+        [
+            coi_binary,
+            "file",
+            "push",
+            "/nonexistent/path/file.txt",
+            f"{container_name}:/tmp/test.txt",
+        ],
         capture_output=True,
         text=True,
         timeout=30,
@@ -49,12 +54,14 @@ def test_push_nonexistent_file(coi_binary, cleanup_containers, workspace_dir):
 
     # === Phase 3: Verify failure ===
 
-    assert result.returncode != 0, \
-        f"Push of nonexistent file should fail. stdout: {result.stdout}"
+    assert result.returncode != 0, f"Push of nonexistent file should fail. stdout: {result.stdout}"
 
     combined_output = (result.stdout + result.stderr).lower()
-    assert "does not exist" in combined_output or "no such file" in combined_output or "not found" in combined_output, \
-        f"Should show 'does not exist' error. Got:\n{result.stdout + result.stderr}"
+    assert (
+        "does not exist" in combined_output
+        or "no such file" in combined_output
+        or "not found" in combined_output
+    ), f"Should show 'does not exist' error. Got:\n{result.stdout + result.stderr}"
 
     # === Phase 4: Cleanup ===
 

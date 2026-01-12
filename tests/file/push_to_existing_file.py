@@ -36,8 +36,7 @@ def test_push_to_existing_file(coi_binary, cleanup_containers, workspace_dir):
         text=True,
         timeout=120,
     )
-    assert result.returncode == 0, \
-        f"Container launch should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Container launch should succeed. stderr: {result.stderr}"
 
     time.sleep(3)
 
@@ -45,14 +44,21 @@ def test_push_to_existing_file(coi_binary, cleanup_containers, workspace_dir):
 
     old_content = "old-content-should-be-replaced"
     result = subprocess.run(
-        [coi_binary, "container", "exec", container_name, "--",
-         "sh", "-c", f"echo '{old_content}' > /tmp/overwrite-test.txt"],
+        [
+            coi_binary,
+            "container",
+            "exec",
+            container_name,
+            "--",
+            "sh",
+            "-c",
+            f"echo '{old_content}' > /tmp/overwrite-test.txt",
+        ],
         capture_output=True,
         text=True,
         timeout=30,
     )
-    assert result.returncode == 0, \
-        f"Initial file creation should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Initial file creation should succeed. stderr: {result.stderr}"
 
     # === Phase 3: Push new file to same location ===
 
@@ -68,8 +74,7 @@ def test_push_to_existing_file(coi_binary, cleanup_containers, workspace_dir):
         timeout=30,
     )
 
-    assert result.returncode == 0, \
-        f"File push should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"File push should succeed. stderr: {result.stderr}"
 
     # === Phase 4: Verify content was replaced ===
 
@@ -81,10 +86,12 @@ def test_push_to_existing_file(coi_binary, cleanup_containers, workspace_dir):
     )
 
     combined_output = result.stdout + result.stderr
-    assert new_content in combined_output, \
+    assert new_content in combined_output, (
         f"File should contain new content. Got:\n{combined_output}"
-    assert old_content not in combined_output, \
+    )
+    assert old_content not in combined_output, (
         f"Old content should be replaced. Got:\n{combined_output}"
+    )
 
     # === Phase 5: Cleanup ===
 

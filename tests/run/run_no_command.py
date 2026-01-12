@@ -24,9 +24,9 @@ def test_run_no_command(coi_binary, cleanup_containers):
         timeout=30,
     )
 
-    assert result.returncode != 0, \
-        f"Run without command should fail. stdout: {result.stdout}"
+    assert result.returncode != 0, f"Run without command should fail. stdout: {result.stdout}"
 
     combined_output = (result.stdout + result.stderr).lower()
-    assert "usage" in combined_output or "required" in combined_output or "argument" in combined_output, \
-        f"Should show usage error. Got:\n{result.stdout + result.stderr}"
+    assert (
+        "usage" in combined_output or "required" in combined_output or "argument" in combined_output
+    ), f"Should show usage error. Got:\n{result.stdout + result.stderr}"

@@ -24,9 +24,9 @@ def test_shutdown_no_args(coi_binary, cleanup_containers):
         timeout=30,
     )
 
-    assert result.returncode != 0, \
-        f"Shutdown without args should fail. stdout: {result.stdout}"
+    assert result.returncode != 0, f"Shutdown without args should fail. stdout: {result.stdout}"
 
     combined_output = (result.stdout + result.stderr).lower()
-    assert "no container" in combined_output or "provided" in combined_output, \
+    assert "no container" in combined_output or "provided" in combined_output, (
         f"Should show 'no container names provided' error. Got:\n{result.stdout + result.stderr}"
+    )

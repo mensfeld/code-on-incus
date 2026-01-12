@@ -32,8 +32,7 @@ def test_shutdown_specific_container(coi_binary, cleanup_containers, workspace_d
         text=True,
         timeout=120,
     )
-    assert result.returncode == 0, \
-        f"Launch should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Launch should succeed. stderr: {result.stderr}"
 
     time.sleep(3)
 
@@ -45,12 +44,12 @@ def test_shutdown_specific_container(coi_binary, cleanup_containers, workspace_d
         timeout=120,
     )
 
-    assert result.returncode == 0, \
-        f"Shutdown should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Shutdown should succeed. stderr: {result.stderr}"
 
     combined_output = result.stdout + result.stderr
-    assert "shutdown" in combined_output.lower(), \
+    assert "shutdown" in combined_output.lower(), (
         f"Should show shutdown message. Got:\n{combined_output}"
+    )
 
     # Verify container no longer exists
     time.sleep(2)
@@ -61,5 +60,4 @@ def test_shutdown_specific_container(coi_binary, cleanup_containers, workspace_d
         timeout=30,
     )
 
-    assert result.returncode != 0, \
-        "Container should not exist after shutdown"
+    assert result.returncode != 0, "Container should not exist after shutdown"

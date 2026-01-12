@@ -39,8 +39,7 @@ def test_stop_already_stopped(coi_binary, cleanup_containers, workspace_dir):
         timeout=120,
     )
 
-    assert result.returncode == 0, \
-        f"Container launch should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Container launch should succeed. stderr: {result.stderr}"
 
     time.sleep(3)
 
@@ -53,8 +52,7 @@ def test_stop_already_stopped(coi_binary, cleanup_containers, workspace_dir):
         timeout=60,
     )
 
-    assert result.returncode == 0, \
-        f"Container stop should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Container stop should succeed. stderr: {result.stderr}"
 
     time.sleep(2)
 
@@ -66,8 +64,7 @@ def test_stop_already_stopped(coi_binary, cleanup_containers, workspace_dir):
         timeout=30,
     )
 
-    assert result.returncode != 0, \
-        "Stopped container should not be running"
+    assert result.returncode != 0, "Stopped container should not be running"
 
     # === Phase 3: Try to stop again ===
 
@@ -81,8 +78,7 @@ def test_stop_already_stopped(coi_binary, cleanup_containers, workspace_dir):
     # Should either succeed (idempotent) or give informative message
     # Container should still exist (just stopped)
     containers = get_container_list()
-    assert container_name in containers, \
-        "Container should still exist after double stop"
+    assert container_name in containers, "Container should still exist after double stop"
 
     # === Phase 4: Cleanup ===
 

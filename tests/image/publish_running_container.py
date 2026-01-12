@@ -34,8 +34,7 @@ def test_publish_running_container(coi_binary, cleanup_containers, workspace_dir
         text=True,
         timeout=120,
     )
-    assert result.returncode == 0, \
-        f"Container launch should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Container launch should succeed. stderr: {result.stderr}"
 
     time.sleep(3)
 
@@ -61,10 +60,11 @@ def test_publish_running_container(coi_binary, cleanup_containers, workspace_dir
         )
     else:
         # If it failed, should show appropriate message
-        assert "running" in combined_output.lower() or \
-               "stop" in combined_output.lower() or \
-               "failed" in combined_output.lower(), \
-            f"Should indicate issue with running container. Got:\n{combined_output}"
+        assert (
+            "running" in combined_output.lower()
+            or "stop" in combined_output.lower()
+            or "failed" in combined_output.lower()
+        ), f"Should indicate issue with running container. Got:\n{combined_output}"
 
     # === Phase 3: Cleanup container ===
 

@@ -26,16 +26,16 @@ def test_images_alias(coi_binary, cleanup_containers):
         timeout=30,
     )
 
-    assert result.returncode == 0, \
-        f"coi images should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"coi images should succeed. stderr: {result.stderr}"
 
     # === Phase 2: Verify output format ===
 
     combined_output = result.stdout + result.stderr
 
     # Should show same content as image list
-    assert "COI Images:" in combined_output or "Available Images:" in combined_output, \
+    assert "COI Images:" in combined_output or "Available Images:" in combined_output, (
         f"Should show COI Images section. Got:\n{combined_output}"
+    )
 
 
 def test_images_all_flag(coi_binary, cleanup_containers):
@@ -55,13 +55,13 @@ def test_images_all_flag(coi_binary, cleanup_containers):
         timeout=30,
     )
 
-    assert result.returncode == 0, \
-        f"coi images --all should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"coi images --all should succeed. stderr: {result.stderr}"
 
     # === Phase 2: Verify output ===
 
     combined_output = result.stdout + result.stderr
 
     # Should show All Local Images section
-    assert "All Local Images:" in combined_output or "ALIAS" in combined_output, \
+    assert "All Local Images:" in combined_output or "ALIAS" in combined_output, (
         f"Should show All Local Images section. Got:\n{combined_output}"
+    )

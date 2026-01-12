@@ -33,8 +33,7 @@ def test_shutdown_verifies_deletion(coi_binary, cleanup_containers, workspace_di
         text=True,
         timeout=120,
     )
-    assert result.returncode == 0, \
-        f"Launch should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Launch should succeed. stderr: {result.stderr}"
 
     time.sleep(3)
 
@@ -45,8 +44,7 @@ def test_shutdown_verifies_deletion(coi_binary, cleanup_containers, workspace_di
         text=True,
         timeout=30,
     )
-    assert result.returncode == 0, \
-        "Container should exist before shutdown"
+    assert result.returncode == 0, "Container should exist before shutdown"
 
     # Shutdown the container
     result = subprocess.run(
@@ -56,8 +54,7 @@ def test_shutdown_verifies_deletion(coi_binary, cleanup_containers, workspace_di
         timeout=120,
     )
 
-    assert result.returncode == 0, \
-        f"Shutdown should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Shutdown should succeed. stderr: {result.stderr}"
 
     time.sleep(2)
 
@@ -68,8 +65,7 @@ def test_shutdown_verifies_deletion(coi_binary, cleanup_containers, workspace_di
         text=True,
         timeout=30,
     )
-    assert result.returncode != 0, \
-        "Container should not exist after shutdown"
+    assert result.returncode != 0, "Container should not exist after shutdown"
 
     # Also verify it doesn't appear in list
     result = subprocess.run(
@@ -78,5 +74,6 @@ def test_shutdown_verifies_deletion(coi_binary, cleanup_containers, workspace_di
         text=True,
         timeout=30,
     )
-    assert container_name not in result.stdout, \
+    assert container_name not in result.stdout, (
         f"Container should not appear in list. Got:\n{result.stdout}"
+    )

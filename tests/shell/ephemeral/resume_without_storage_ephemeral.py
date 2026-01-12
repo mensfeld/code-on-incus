@@ -148,9 +148,9 @@ def test_resume_does_not_persist_home_files(coi_binary, cleanup_containers, work
         file_gone = wait_for_text_in_monitor(monitor, "FILE_GONE_444", timeout=10)
 
     # Get output for debugging
-    if hasattr(child2.logfile_read, 'get_raw_output'):
+    if hasattr(child2.logfile_read, "get_raw_output"):
         output = child2.logfile_read.get_raw_output()
-    elif hasattr(child2.logfile_read, 'get_display_stripped'):
+    elif hasattr(child2.logfile_read, "get_display_stripped"):
         output = child2.logfile_read.get_display_stripped()
     else:
         output = ""
@@ -184,4 +184,6 @@ def test_resume_does_not_persist_home_files(coi_binary, cleanup_containers, work
             )
 
     # Assert file was NOT persisted
-    assert file_gone, f"~/test.txt should NOT exist after resume (only .claude is restored). Output:\n{output}"
+    assert file_gone, (
+        f"~/test.txt should NOT exist after resume (only .claude is restored). Output:\n{output}"
+    )

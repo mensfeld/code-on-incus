@@ -38,8 +38,7 @@ def test_start_stopped_container(coi_binary, cleanup_containers, workspace_dir):
         timeout=120,
     )
 
-    assert result.returncode == 0, \
-        f"Container launch should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Container launch should succeed. stderr: {result.stderr}"
 
     time.sleep(3)
 
@@ -52,8 +51,7 @@ def test_start_stopped_container(coi_binary, cleanup_containers, workspace_dir):
         timeout=60,
     )
 
-    assert result.returncode == 0, \
-        f"Container stop should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Container stop should succeed. stderr: {result.stderr}"
 
     time.sleep(2)
 
@@ -65,8 +63,7 @@ def test_start_stopped_container(coi_binary, cleanup_containers, workspace_dir):
         timeout=30,
     )
 
-    assert result.returncode != 0, \
-        "Stopped container should not be running"
+    assert result.returncode != 0, "Stopped container should not be running"
 
     # === Phase 3: Start container ===
 
@@ -77,8 +74,7 @@ def test_start_stopped_container(coi_binary, cleanup_containers, workspace_dir):
         timeout=60,
     )
 
-    assert result.returncode == 0, \
-        f"Container start should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Container start should succeed. stderr: {result.stderr}"
 
     time.sleep(3)
 
@@ -91,8 +87,7 @@ def test_start_stopped_container(coi_binary, cleanup_containers, workspace_dir):
         timeout=30,
     )
 
-    assert result.returncode == 0, \
-        "Started container should be running"
+    assert result.returncode == 0, "Started container should be running"
 
     # === Phase 5: Cleanup ===
 

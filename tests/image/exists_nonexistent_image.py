@@ -28,5 +28,4 @@ def test_exists_nonexistent_image(coi_binary, cleanup_containers):
 
     # === Phase 2: Verify failure ===
 
-    assert result.returncode != 0, \
-        f"Nonexistent image check should fail. stdout: {result.stdout}"
+    assert result.returncode != 0, f"Nonexistent image check should fail. stdout: {result.stdout}"

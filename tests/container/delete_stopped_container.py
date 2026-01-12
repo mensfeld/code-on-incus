@@ -38,8 +38,7 @@ def test_delete_stopped_container(coi_binary, cleanup_containers, workspace_dir)
         timeout=120,
     )
 
-    assert result.returncode == 0, \
-        f"Container launch should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Container launch should succeed. stderr: {result.stderr}"
 
     time.sleep(3)
 
@@ -52,15 +51,13 @@ def test_delete_stopped_container(coi_binary, cleanup_containers, workspace_dir)
         timeout=60,
     )
 
-    assert result.returncode == 0, \
-        f"Container stop should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Container stop should succeed. stderr: {result.stderr}"
 
     time.sleep(2)
 
     # Verify container still exists
     containers = get_container_list()
-    assert container_name in containers, \
-        "Stopped container should still exist"
+    assert container_name in containers, "Stopped container should still exist"
 
     # === Phase 3: Delete container ===
 
@@ -71,13 +68,11 @@ def test_delete_stopped_container(coi_binary, cleanup_containers, workspace_dir)
         timeout=60,
     )
 
-    assert result.returncode == 0, \
-        f"Container delete should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Container delete should succeed. stderr: {result.stderr}"
 
     time.sleep(2)
 
     # === Phase 4: Verify removed ===
 
     containers = get_container_list()
-    assert container_name not in containers, \
-        "Deleted container should not exist"
+    assert container_name not in containers, "Deleted container should not exist"

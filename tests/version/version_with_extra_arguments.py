@@ -35,11 +35,13 @@ def test_version_with_extra_arguments(coi_binary):
         timeout=10,
     )
 
-    assert result.returncode == 0, \
+    assert result.returncode == 0, (
         f"Version with extra args should succeed. stderr: {result.stderr}"
+    )
 
     # Extra arguments should be ignored (Cobra behavior)
-    assert result.stdout == baseline_result.stdout, \
-        f"Output should be identical with or without extra args.\n" \
-        f"Expected:\n{baseline_result.stdout}\n" \
+    assert result.stdout == baseline_result.stdout, (
+        f"Output should be identical with or without extra args.\n"
+        f"Expected:\n{baseline_result.stdout}\n"
         f"Got:\n{result.stdout}"
+    )

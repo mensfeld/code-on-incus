@@ -28,9 +28,11 @@ def test_publish_nonexistent_container(coi_binary, cleanup_containers):
 
     # === Phase 2: Verify failure ===
 
-    assert result.returncode != 0, \
+    assert result.returncode != 0, (
         f"Publishing nonexistent container should fail. stdout: {result.stdout}"
+    )
 
     combined_output = (result.stdout + result.stderr).lower()
-    assert "failed" in combined_output or "not found" in combined_output or "error" in combined_output, \
-        f"Should show error message. Got:\n{result.stdout + result.stderr}"
+    assert (
+        "failed" in combined_output or "not found" in combined_output or "error" in combined_output
+    ), f"Should show error message. Got:\n{result.stdout + result.stderr}"

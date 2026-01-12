@@ -24,15 +24,12 @@ def test_list_all_flag(coi_binary, cleanup_containers):
         timeout=30,
     )
 
-    assert result.returncode == 0, \
-        f"List --all should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"List --all should succeed. stderr: {result.stderr}"
 
     output = result.stdout
 
     # Should show Active Containers section
-    assert "Active Containers:" in output, \
-        f"Should show Active Containers section. Got:\n{output}"
+    assert "Active Containers:" in output, f"Should show Active Containers section. Got:\n{output}"
 
     # Should show Saved Sessions section
-    assert "Saved Sessions:" in output, \
-        f"Should show Saved Sessions section. Got:\n{output}"
+    assert "Saved Sessions:" in output, f"Should show Saved Sessions section. Got:\n{output}"

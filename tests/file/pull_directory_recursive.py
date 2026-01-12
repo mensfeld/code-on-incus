@@ -36,8 +36,7 @@ def test_pull_directory_recursive(coi_binary, cleanup_containers, workspace_dir)
         text=True,
         timeout=120,
     )
-    assert result.returncode == 0, \
-        f"Container launch should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Container launch should succeed. stderr: {result.stderr}"
 
     time.sleep(3)
 
@@ -57,8 +56,7 @@ def test_pull_directory_recursive(coi_binary, cleanup_containers, workspace_dir)
             text=True,
             timeout=30,
         )
-        assert result.returncode == 0, \
-            f"Command '{cmd}' should succeed. stderr: {result.stderr}"
+        assert result.returncode == 0, f"Command '{cmd}' should succeed. stderr: {result.stderr}"
 
     # === Phase 3: Pull directory with -r flag ===
 
@@ -70,32 +68,28 @@ def test_pull_directory_recursive(coi_binary, cleanup_containers, workspace_dir)
         timeout=60,
     )
 
-    assert result.returncode == 0, \
-        f"Directory pull should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Directory pull should succeed. stderr: {result.stderr}"
 
     combined_output = result.stdout + result.stderr
-    assert "Pulled directory" in combined_output, \
+    assert "Pulled directory" in combined_output, (
         f"Should show pull confirmation. Got:\n{combined_output}"
+    )
 
     # === Phase 4: Verify files exist locally ===
 
     # Check first file
     file1_path = os.path.join(local_dir, "file1.txt")
-    assert os.path.exists(file1_path), \
-        f"file1.txt should exist at {file1_path}"
+    assert os.path.exists(file1_path), f"file1.txt should exist at {file1_path}"
     with open(file1_path) as f:
         content = f.read()
-    assert "content-file1-pull" in content, \
-        f"file1.txt content should match. Got: {content}"
+    assert "content-file1-pull" in content, f"file1.txt content should match. Got: {content}"
 
     # Check nested file
     file2_path = os.path.join(local_dir, "subdir", "file2.txt")
-    assert os.path.exists(file2_path), \
-        f"subdir/file2.txt should exist at {file2_path}"
+    assert os.path.exists(file2_path), f"subdir/file2.txt should exist at {file2_path}"
     with open(file2_path) as f:
         content = f.read()
-    assert "content-file2-pull" in content, \
-        f"file2.txt content should match. Got: {content}"
+    assert "content-file2-pull" in content, f"file2.txt content should match. Got: {content}"
 
     # === Phase 5: Cleanup ===
 

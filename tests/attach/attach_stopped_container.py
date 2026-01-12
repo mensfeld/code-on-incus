@@ -39,15 +39,13 @@ def test_attach_stopped_container(coi_binary, cleanup_containers, workspace_dir)
         timeout=120,
     )
 
-    assert result.returncode == 0, \
-        f"Container launch should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Container launch should succeed. stderr: {result.stderr}"
 
     time.sleep(3)
 
     # Verify container is running
     containers = get_container_list()
-    assert container_name in containers, \
-        f"Container {container_name} should be running"
+    assert container_name in containers, f"Container {container_name} should be running"
 
     # === Phase 2: Stop container ===
 
@@ -58,8 +56,7 @@ def test_attach_stopped_container(coi_binary, cleanup_containers, workspace_dir)
         timeout=60,
     )
 
-    assert result.returncode == 0, \
-        f"Container stop should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Container stop should succeed. stderr: {result.stderr}"
 
     time.sleep(2)
 
@@ -77,10 +74,10 @@ def test_attach_stopped_container(coi_binary, cleanup_containers, workspace_dir)
 
     # Either returns error or container is not found in running list
     attach_failed = (
-        result.returncode != 0 or
-        "not found" in combined_output.lower() or
-        "not running" in combined_output.lower() or
-        "No active" in combined_output
+        result.returncode != 0
+        or "not found" in combined_output.lower()
+        or "not running" in combined_output.lower()
+        or "No active" in combined_output
     )
 
     # === Phase 4: Cleanup ===
@@ -93,9 +90,7 @@ def test_attach_stopped_container(coi_binary, cleanup_containers, workspace_dir)
 
     time.sleep(1)
     containers = get_container_list()
-    assert container_name not in containers, \
-        f"Container {container_name} should be deleted"
+    assert container_name not in containers, f"Container {container_name} should be deleted"
 
     # Assert attach failed appropriately
-    assert attach_failed, \
-        f"Attach to stopped container should fail. Got:\n{combined_output}"
+    assert attach_failed, f"Attach to stopped container should fail. Got:\n{combined_output}"

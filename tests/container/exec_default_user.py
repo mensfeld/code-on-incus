@@ -33,8 +33,7 @@ def test_code_user_exists(coi_binary, cleanup_containers, workspace_dir):
         text=True,
         timeout=120,
     )
-    assert result.returncode == 0, \
-        f"Container launch should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Container launch should succeed. stderr: {result.stderr}"
 
     time.sleep(3)
 
@@ -46,12 +45,12 @@ def test_code_user_exists(coi_binary, cleanup_containers, workspace_dir):
         text=True,
         timeout=30,
     )
-    assert result.returncode == 0, \
-        f"User 'code' should exist. stderr: {result.stderr}"
+    assert result.returncode == 0, f"User 'code' should exist. stderr: {result.stderr}"
 
     combined_output = result.stdout + result.stderr
-    assert "uid=1000" in combined_output, \
+    assert "uid=1000" in combined_output, (
         f"User 'code' should have UID 1000. Got: {combined_output}"
+    )
 
     # === Phase 3: Check home directory exists ===
 
@@ -61,8 +60,9 @@ def test_code_user_exists(coi_binary, cleanup_containers, workspace_dir):
         text=True,
         timeout=30,
     )
-    assert result.returncode == 0, \
+    assert result.returncode == 0, (
         f"Home directory /home/code should exist. stderr: {result.stderr}"
+    )
 
     # === Phase 4: Cleanup ===
 

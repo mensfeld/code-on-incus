@@ -37,15 +37,13 @@ def test_clean_keeps_running(coi_binary, cleanup_containers, workspace_dir):
         timeout=120,
     )
 
-    assert result.returncode == 0, \
-        f"Container launch should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Container launch should succeed. stderr: {result.stderr}"
 
     time.sleep(3)
 
     # Verify container is running
     containers = get_container_list()
-    assert container_name in containers, \
-        f"Container {container_name} should be running"
+    assert container_name in containers, f"Container {container_name} should be running"
 
     # === Phase 2: Clean (should NOT remove running container) ===
 
@@ -56,16 +54,16 @@ def test_clean_keeps_running(coi_binary, cleanup_containers, workspace_dir):
         timeout=60,
     )
 
-    assert result.returncode == 0, \
-        f"coi clean should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"coi clean should succeed. stderr: {result.stderr}"
 
     time.sleep(2)
 
     # === Phase 3: Verify container is STILL running ===
 
     containers = get_container_list()
-    assert container_name in containers, \
+    assert container_name in containers, (
         f"Running container {container_name} should NOT be removed by clean"
+    )
 
     # === Phase 4: Cleanup ===
 
@@ -77,5 +75,6 @@ def test_clean_keeps_running(coi_binary, cleanup_containers, workspace_dir):
 
     time.sleep(1)
     containers = get_container_list()
-    assert container_name not in containers, \
+    assert container_name not in containers, (
         f"Container {container_name} should be deleted after cleanup"
+    )

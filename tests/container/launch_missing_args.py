@@ -29,16 +29,14 @@ def test_launch_missing_args(coi_binary, cleanup_containers):
 
     # === Phase 2: Verify failure and usage shown ===
 
-    assert result.returncode != 0, \
-        "Launch without arguments should fail"
+    assert result.returncode != 0, "Launch without arguments should fail"
 
     combined_output = result.stdout + result.stderr
     has_usage = (
-        "usage" in combined_output.lower() or
-        "required" in combined_output.lower() or
-        "argument" in combined_output.lower() or
-        "image" in combined_output.lower()
+        "usage" in combined_output.lower()
+        or "required" in combined_output.lower()
+        or "argument" in combined_output.lower()
+        or "image" in combined_output.lower()
     )
 
-    assert has_usage, \
-        f"Should show usage or argument error. Got:\n{combined_output}"
+    assert has_usage, f"Should show usage or argument error. Got:\n{combined_output}"

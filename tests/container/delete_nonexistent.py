@@ -31,16 +31,14 @@ def test_delete_nonexistent(coi_binary, cleanup_containers):
 
     # === Phase 2: Verify failure ===
 
-    assert result.returncode != 0, \
-        "Deleting nonexistent container should fail"
+    assert result.returncode != 0, "Deleting nonexistent container should fail"
 
     combined_output = result.stdout + result.stderr
     has_error = (
-        "not found" in combined_output.lower() or
-        "does not exist" in combined_output.lower() or
-        "error" in combined_output.lower() or
-        nonexistent_name in combined_output
+        "not found" in combined_output.lower()
+        or "does not exist" in combined_output.lower()
+        or "error" in combined_output.lower()
+        or nonexistent_name in combined_output
     )
 
-    assert has_error, \
-        f"Should indicate container not found. Got:\n{combined_output}"
+    assert has_error, f"Should indicate container not found. Got:\n{combined_output}"

@@ -100,7 +100,7 @@ def test_new_session_not_resumed(coi_binary, cleanup_containers, workspace_dir):
     wait_for_prompt(child2, timeout=90)
 
     # Get raw output to check if old session was restored
-    if hasattr(child2.logfile_read, 'get_raw_output'):
+    if hasattr(child2.logfile_read, "get_raw_output"):
         output = child2.logfile_read.get_raw_output()
     else:
         output = ""
@@ -143,5 +143,6 @@ def test_new_session_not_resumed(coi_binary, cleanup_containers, workspace_dir):
             )
 
     # Assert the unique marker from first session is NOT present
-    assert not marker_found, \
+    assert not marker_found, (
         f"UNIQUE-MARKER-78923 should NOT appear without --resume flag. Output:\n{output}"
+    )

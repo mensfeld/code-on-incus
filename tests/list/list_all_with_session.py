@@ -77,29 +77,24 @@ def test_list_all_with_session(coi_binary, cleanup_containers, workspace_dir):
         text=True,
         timeout=30,
     )
-    assert result.returncode == 0, \
-        f"List --all should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"List --all should succeed. stderr: {result.stderr}"
 
     output = result.stdout
 
     # === Phase 3: Verify session details ===
 
     # Should show Saved Sessions section
-    assert "Saved Sessions:" in output, \
-        f"Should show Saved Sessions section. Got:\n{output}"
+    assert "Saved Sessions:" in output, f"Should show Saved Sessions section. Got:\n{output}"
 
     # Should show a UUID (session ID)
-    uuid_pattern = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
-    assert uuid_pattern.search(output), \
-        f"Should contain a session UUID. Got:\n{output}"
+    uuid_pattern = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+    assert uuid_pattern.search(output), f"Should contain a session UUID. Got:\n{output}"
 
     # Should show Saved timestamp
-    assert "Saved:" in output, \
-        f"Should show Saved field. Got:\n{output}"
+    assert "Saved:" in output, f"Should show Saved field. Got:\n{output}"
 
     # Should show Workspace
-    assert "Workspace:" in output, \
-        f"Should show Workspace field. Got:\n{output}"
+    assert "Workspace:" in output, f"Should show Workspace field. Got:\n{output}"
 
     # === Phase 4: Cleanup ===
 

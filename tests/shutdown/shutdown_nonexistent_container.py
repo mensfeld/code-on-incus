@@ -25,9 +25,11 @@ def test_shutdown_nonexistent_container(coi_binary, cleanup_containers):
     )
 
     # Should fail because container doesn't exist
-    assert result.returncode != 0, \
+    assert result.returncode != 0, (
         f"Shutdown of nonexistent container should fail. stdout: {result.stdout}"
+    )
 
     combined_output = (result.stdout + result.stderr).lower()
-    assert "failed" in combined_output or "warning" in combined_output or "not" in combined_output, \
-        f"Should show failure/warning message. Got:\n{result.stdout + result.stderr}"
+    assert (
+        "failed" in combined_output or "warning" in combined_output or "not" in combined_output
+    ), f"Should show failure/warning message. Got:\n{result.stdout + result.stderr}"

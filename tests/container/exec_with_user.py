@@ -37,8 +37,7 @@ def test_exec_with_user(coi_binary, cleanup_containers, workspace_dir):
         timeout=120,
     )
 
-    assert result.returncode == 0, \
-        f"Container launch should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Container launch should succeed. stderr: {result.stderr}"
 
     time.sleep(3)
 
@@ -51,12 +50,10 @@ def test_exec_with_user(coi_binary, cleanup_containers, workspace_dir):
         timeout=30,
     )
 
-    assert result.returncode == 0, \
-        f"Exec as root should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Exec as root should succeed. stderr: {result.stderr}"
 
     combined_output = result.stdout + result.stderr
-    assert "root" in combined_output.strip(), \
-        f"Should run as root. Got:\n{combined_output}"
+    assert "root" in combined_output.strip(), f"Should run as root. Got:\n{combined_output}"
 
     # === Phase 3: Execute as code (UID 1000) ===
 
@@ -68,12 +65,10 @@ def test_exec_with_user(coi_binary, cleanup_containers, workspace_dir):
     )
 
     # code user exists in coi image with UID 1000
-    assert result.returncode == 0, \
-        f"Exec as code should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Exec as code should succeed. stderr: {result.stderr}"
 
     combined_output = result.stdout + result.stderr
-    assert "code" in combined_output.strip(), \
-        f"Should run as code. Got:\n{combined_output}"
+    assert "code" in combined_output.strip(), f"Should run as code. Got:\n{combined_output}"
 
     # === Phase 4: Cleanup ===
 

@@ -36,9 +36,11 @@ def test_shutdown_all_no_containers(coi_binary, cleanup_containers):
     )
 
     # Should succeed (not an error, just nothing to do)
-    assert result.returncode == 0, \
+    assert result.returncode == 0, (
         f"Shutdown --all with no containers should succeed. stderr: {result.stderr}"
+    )
 
     combined_output = (result.stdout + result.stderr).lower()
-    assert "no containers" in combined_output, \
+    assert "no containers" in combined_output, (
         f"Should show 'No containers to shutdown'. Got:\n{result.stdout + result.stderr}"
+    )

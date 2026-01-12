@@ -25,14 +25,16 @@ def test_cleanup_no_matching_images(coi_binary, cleanup_containers):
     )
 
     # Should succeed even with no matching images
-    assert result.returncode == 0, \
+    assert result.returncode == 0, (
         f"Cleanup with no matching images should succeed. stderr: {result.stderr}"
+    )
 
     combined_output = result.stdout + result.stderr
 
     # Should show cleanup complete (with 0 deleted)
-    assert "Cleanup complete" in combined_output or \
-           "Deleted 0" in combined_output or \
-           "Kept 0" in combined_output or \
-           combined_output.strip() != "", \
-        f"Should show cleanup status. Got:\n{combined_output}"
+    assert (
+        "Cleanup complete" in combined_output
+        or "Deleted 0" in combined_output
+        or "Kept 0" in combined_output
+        or combined_output.strip() != ""
+    ), f"Should show cleanup status. Got:\n{combined_output}"

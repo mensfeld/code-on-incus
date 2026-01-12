@@ -27,15 +27,14 @@ def test_list_no_containers(coi_binary, cleanup_containers):
         timeout=30,
     )
 
-    assert result.returncode == 0, \
-        f"List should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"List should succeed. stderr: {result.stderr}"
 
     output = result.stdout
 
     # Should always show Active Containers header
-    assert "Active Containers:" in output, \
-        f"Should show Active Containers section. Got:\n{output}"
+    assert "Active Containers:" in output, f"Should show Active Containers section. Got:\n{output}"
 
     # Either shows "(none)" or actual containers - both valid
-    assert "(none)" in output or "coi-" in output or "Status:" in output, \
+    assert "(none)" in output or "coi-" in output or "Status:" in output, (
         f"Should show containers or (none). Got:\n{output}"
+    )

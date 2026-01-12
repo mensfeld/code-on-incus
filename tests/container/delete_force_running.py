@@ -36,8 +36,7 @@ def test_delete_force_running(coi_binary, cleanup_containers, workspace_dir):
         timeout=120,
     )
 
-    assert result.returncode == 0, \
-        f"Container launch should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Container launch should succeed. stderr: {result.stderr}"
 
     time.sleep(3)
 
@@ -49,8 +48,7 @@ def test_delete_force_running(coi_binary, cleanup_containers, workspace_dir):
         timeout=30,
     )
 
-    assert result.returncode == 0, \
-        "Container should be running"
+    assert result.returncode == 0, "Container should be running"
 
     # === Phase 2: Force delete ===
 
@@ -61,13 +59,11 @@ def test_delete_force_running(coi_binary, cleanup_containers, workspace_dir):
         timeout=60,
     )
 
-    assert result.returncode == 0, \
-        f"Force delete should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Force delete should succeed. stderr: {result.stderr}"
 
     time.sleep(2)
 
     # === Phase 3: Verify removed ===
 
     containers = get_container_list()
-    assert container_name not in containers, \
-        "Force deleted container should not exist"
+    assert container_name not in containers, "Force deleted container should not exist"

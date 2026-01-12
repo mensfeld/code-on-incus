@@ -833,9 +833,7 @@ def wait_for_any_text_on_screen(child, texts, timeout=30, poll_interval=0.1):
         TypeError: If logfile_read is not a TerminalEmulator
     """
     if not isinstance(child.logfile_read, TerminalEmulator):
-        raise TypeError(
-            "wait_for_any_text_on_screen requires TerminalEmulator."
-        )
+        raise TypeError("wait_for_any_text_on_screen requires TerminalEmulator.")
 
     start_time = time.time()
 

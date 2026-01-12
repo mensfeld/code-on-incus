@@ -34,8 +34,7 @@ def test_kill_stopped_container(coi_binary, cleanup_containers, workspace_dir):
         text=True,
         timeout=120,
     )
-    assert result.returncode == 0, \
-        f"Container launch should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Container launch should succeed. stderr: {result.stderr}"
 
     time.sleep(3)
 
@@ -47,8 +46,7 @@ def test_kill_stopped_container(coi_binary, cleanup_containers, workspace_dir):
         text=True,
         timeout=60,
     )
-    assert result.returncode == 0, \
-        f"Container stop should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Container stop should succeed. stderr: {result.stderr}"
 
     time.sleep(2)
 
@@ -60,12 +58,12 @@ def test_kill_stopped_container(coi_binary, cleanup_containers, workspace_dir):
         text=True,
         timeout=60,
     )
-    assert result.returncode == 0, \
-        f"Kill should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Kill should succeed. stderr: {result.stderr}"
 
     combined_output = result.stdout + result.stderr
-    assert "Killed" in combined_output or "killed" in combined_output.lower(), \
+    assert "Killed" in combined_output or "killed" in combined_output.lower(), (
         f"Should show killed confirmation. Got:\n{combined_output}"
+    )
 
     # === Phase 4: Verify deleted ===
 
@@ -75,5 +73,4 @@ def test_kill_stopped_container(coi_binary, cleanup_containers, workspace_dir):
         text=True,
         timeout=30,
     )
-    assert result.returncode != 0, \
-        f"Container should not exist after kill. stdout: {result.stdout}"
+    assert result.returncode != 0, f"Container should not exist after kill. stdout: {result.stdout}"

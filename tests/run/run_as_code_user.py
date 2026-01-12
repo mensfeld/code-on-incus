@@ -24,9 +24,7 @@ def test_run_as_code_user(coi_binary, cleanup_containers, workspace_dir):
         timeout=180,
     )
 
-    assert result.returncode == 0, \
-        f"Run should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Run should succeed. stderr: {result.stderr}"
 
     combined_output = result.stdout + result.stderr
-    assert "code" in combined_output, \
-        f"Should run as 'code' user. Got:\n{combined_output}"
+    assert "code" in combined_output, f"Should run as 'code' user. Got:\n{combined_output}"

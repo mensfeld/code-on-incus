@@ -38,15 +38,13 @@ def test_attach_no_tmux_suggests_bash(coi_binary, cleanup_containers, workspace_
         timeout=120,
     )
 
-    assert result.returncode == 0, \
-        f"Container launch should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Container launch should succeed. stderr: {result.stderr}"
 
     time.sleep(3)
 
     # Verify container is running
     containers = get_container_list()
-    assert container_name in containers, \
-        f"Container {container_name} should be running"
+    assert container_name in containers, f"Container {container_name} should be running"
 
     # === Phase 2: Try to attach (no tmux session exists) ===
 
@@ -59,8 +57,9 @@ def test_attach_no_tmux_suggests_bash(coi_binary, cleanup_containers, workspace_
 
     # Check output suggests using --bash
     combined_output = result.stdout + result.stderr
-    assert "--bash" in combined_output or "No tmux session" in combined_output, \
+    assert "--bash" in combined_output or "No tmux session" in combined_output, (
         f"Should suggest using --bash. Got:\n{combined_output}"
+    )
 
     # === Phase 3: Cleanup ===
 
@@ -72,5 +71,6 @@ def test_attach_no_tmux_suggests_bash(coi_binary, cleanup_containers, workspace_
 
     time.sleep(1)
     containers = get_container_list()
-    assert container_name not in containers, \
+    assert container_name not in containers, (
         f"Container {container_name} should be deleted after cleanup"
+    )

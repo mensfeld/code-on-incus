@@ -24,9 +24,11 @@ def test_cleanup_keep_zero_fails(coi_binary, cleanup_containers):
         timeout=30,
     )
 
-    assert result.returncode != 0, \
-        f"--keep 0 should fail. stdout: {result.stdout}"
+    assert result.returncode != 0, f"--keep 0 should fail. stdout: {result.stdout}"
 
     combined_output = result.stdout + result.stderr
-    assert "--keep" in combined_output or "> 0" in combined_output or "must be" in combined_output.lower(), \
-        f"Should indicate --keep must be > 0. Got:\n{combined_output}"
+    assert (
+        "--keep" in combined_output
+        or "> 0" in combined_output
+        or "must be" in combined_output.lower()
+    ), f"Should indicate --keep must be > 0. Got:\n{combined_output}"

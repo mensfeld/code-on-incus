@@ -81,8 +81,8 @@ def test_info_with_session(coi_binary, cleanup_containers, workspace_dir):
     )
 
     # Find session ID (UUID format)
-    uuid_pattern = re.compile(r'([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})')
-    lines = result.stdout.split('\n')
+    uuid_pattern = re.compile(r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})")
+    lines = result.stdout.split("\n")
     session_id = None
     in_sessions_section = False
 
@@ -111,8 +111,7 @@ def test_info_with_session(coi_binary, cleanup_containers, workspace_dir):
         if match:
             session_id = match.group(1)
 
-    assert session_id is not None, \
-        f"Should find a session ID. List output:\n{result.stdout}"
+    assert session_id is not None, f"Should find a session ID. List output:\n{result.stdout}"
 
     # === Phase 3: Run coi info with session ID ===
 
@@ -123,22 +122,20 @@ def test_info_with_session(coi_binary, cleanup_containers, workspace_dir):
         timeout=30,
     )
 
-    assert result.returncode == 0, \
-        f"Info should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Info should succeed. stderr: {result.stderr}"
 
     # === Phase 4: Verify output format ===
 
     output = result.stdout
 
-    assert "Session Information" in output or "Session ID" in output, \
+    assert "Session Information" in output or "Session ID" in output, (
         f"Should show session header. Got:\n{output}"
+    )
 
-    assert session_id in output, \
-        f"Should show the session ID. Got:\n{output}"
+    assert session_id in output, f"Should show the session ID. Got:\n{output}"
 
     # Should show resume command
-    assert "resume" in output.lower(), \
-        f"Should show resume command. Got:\n{output}"
+    assert "resume" in output.lower(), f"Should show resume command. Got:\n{output}"
 
     # === Phase 5: Cleanup ===
 

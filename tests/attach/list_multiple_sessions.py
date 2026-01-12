@@ -108,10 +108,8 @@ def test_attach_lists_multiple_sessions(coi_binary, cleanup_containers, workspac
 
     # Verify both containers are running
     containers = get_container_list()
-    assert container_name_1 in containers, \
-        f"Container {container_name_1} should be running"
-    assert container_name_2 in containers, \
-        f"Container {container_name_2} should be running"
+    assert container_name_1 in containers, f"Container {container_name_1} should be running"
+    assert container_name_2 in containers, f"Container {container_name_2} should be running"
 
     # === Phase 3: Test coi attach lists sessions ===
 
@@ -123,24 +121,21 @@ def test_attach_lists_multiple_sessions(coi_binary, cleanup_containers, workspac
     )
 
     # Should succeed and list sessions
-    assert result.returncode == 0, \
-        f"coi attach should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"coi attach should succeed. stderr: {result.stderr}"
 
     output = result.stdout
 
     # Should show list header
-    assert "Active Claude sessions" in output, \
+    assert "Active Claude sessions" in output, (
         f"Should show 'Active Claude sessions'. Got:\n{output}"
+    )
 
     # Should list both containers
-    assert container_name_1 in output, \
-        f"Should list {container_name_1}. Got:\n{output}"
-    assert container_name_2 in output, \
-        f"Should list {container_name_2}. Got:\n{output}"
+    assert container_name_1 in output, f"Should list {container_name_1}. Got:\n{output}"
+    assert container_name_2 in output, f"Should list {container_name_2}. Got:\n{output}"
 
     # Should show usage hint
-    assert "coi attach" in output, \
-        f"Should show usage hint. Got:\n{output}"
+    assert "coi attach" in output, f"Should show usage hint. Got:\n{output}"
 
     # === Phase 4: Cleanup ===
 
@@ -157,7 +152,5 @@ def test_attach_lists_multiple_sessions(coi_binary, cleanup_containers, workspac
 
     time.sleep(1)
     containers = get_container_list()
-    assert container_name_1 not in containers, \
-        f"Container {container_name_1} should be deleted"
-    assert container_name_2 not in containers, \
-        f"Container {container_name_2} should be deleted"
+    assert container_name_1 not in containers, f"Container {container_name_1} should be deleted"
+    assert container_name_2 not in containers, f"Container {container_name_2} should be deleted"

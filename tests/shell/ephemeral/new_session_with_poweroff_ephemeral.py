@@ -95,9 +95,9 @@ def test_ephemeral_session_with_shutdown(coi_binary, cleanup_containers, workspa
         pass
 
     # Get output for verification
-    if hasattr(child.logfile_read, 'get_raw_output'):
+    if hasattr(child.logfile_read, "get_raw_output"):
         output = child.logfile_read.get_raw_output()
-    elif hasattr(child.logfile_read, 'get_output'):
+    elif hasattr(child.logfile_read, "get_output"):
         output = child.logfile_read.get_output()
     else:
         output = ""
@@ -111,12 +111,15 @@ def test_ephemeral_session_with_shutdown(coi_binary, cleanup_containers, workspa
     container_deleted = wait_for_specific_container_deletion(container_name, timeout=30)
 
     # Step 6: Verify cleanup messages
-    assert "Saving session data" in output or "Session data saved" in output, \
+    assert "Saving session data" in output or "Session data saved" in output, (
         f"Should see session save message. Got:\n{output}"
+    )
 
-    assert "Container was stopped" in output or "removing" in output.lower(), \
+    assert "Container was stopped" in output or "removing" in output.lower(), (
         f"Should see container removal message. Got:\n{output}"
+    )
 
     # Step 7: Verify container was deleted
-    assert container_deleted, \
+    assert container_deleted, (
         f"Container {container_name} should be deleted after poweroff (waited 30s)"
+    )

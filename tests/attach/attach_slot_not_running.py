@@ -25,8 +25,10 @@ def test_attach_slot_not_running(coi_binary, cleanup_containers, workspace_dir):
     )
 
     # Should fail
-    assert result.returncode != 0, \
+    assert result.returncode != 0, (
         f"coi attach --slot should fail when no container running. stdout: {result.stdout}"
+    )
 
-    assert "not found" in result.stderr.lower() or "not running" in result.stderr.lower(), \
+    assert "not found" in result.stderr.lower() or "not running" in result.stderr.lower(), (
         f"Should show 'not found' or 'not running' error. Got:\n{result.stderr}"
+    )

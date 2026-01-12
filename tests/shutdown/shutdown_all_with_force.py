@@ -32,8 +32,7 @@ def test_shutdown_all_with_force(coi_binary, cleanup_containers, workspace_dir):
         text=True,
         timeout=120,
     )
-    assert result.returncode == 0, \
-        f"Launch container 1 should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Launch container 1 should succeed. stderr: {result.stderr}"
 
     # Launch second container
     result = subprocess.run(
@@ -42,8 +41,7 @@ def test_shutdown_all_with_force(coi_binary, cleanup_containers, workspace_dir):
         text=True,
         timeout=120,
     )
-    assert result.returncode == 0, \
-        f"Launch container 2 should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Launch container 2 should succeed. stderr: {result.stderr}"
 
     time.sleep(3)
 
@@ -55,12 +53,12 @@ def test_shutdown_all_with_force(coi_binary, cleanup_containers, workspace_dir):
         timeout=180,
     )
 
-    assert result.returncode == 0, \
-        f"Shutdown --all --force should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Shutdown --all --force should succeed. stderr: {result.stderr}"
 
     combined_output = result.stdout + result.stderr
-    assert "shutdown" in combined_output.lower(), \
+    assert "shutdown" in combined_output.lower(), (
         f"Should show shutdown message. Got:\n{combined_output}"
+    )
 
     # Verify containers no longer exist
     time.sleep(2)
@@ -71,8 +69,7 @@ def test_shutdown_all_with_force(coi_binary, cleanup_containers, workspace_dir):
         text=True,
         timeout=30,
     )
-    assert result.returncode != 0, \
-        "Container 1 should not exist after shutdown --all"
+    assert result.returncode != 0, "Container 1 should not exist after shutdown --all"
 
     result = subprocess.run(
         [coi_binary, "container", "exists", container2],
@@ -80,5 +77,4 @@ def test_shutdown_all_with_force(coi_binary, cleanup_containers, workspace_dir):
         text=True,
         timeout=30,
     )
-    assert result.returncode != 0, \
-        "Container 2 should not exist after shutdown --all"
+    assert result.returncode != 0, "Container 2 should not exist after shutdown --all"

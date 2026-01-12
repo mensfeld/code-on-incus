@@ -38,8 +38,7 @@ def test_pull_to_existing_file(coi_binary, cleanup_containers, workspace_dir):
         text=True,
         timeout=120,
     )
-    assert result.returncode == 0, \
-        f"Container launch should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Container launch should succeed. stderr: {result.stderr}"
 
     time.sleep(3)
 
@@ -47,14 +46,21 @@ def test_pull_to_existing_file(coi_binary, cleanup_containers, workspace_dir):
 
     new_content = "new-content-from-container-99999"
     result = subprocess.run(
-        [coi_binary, "container", "exec", container_name, "--",
-         "sh", "-c", f"echo '{new_content}' > /tmp/overwrite-test.txt"],
+        [
+            coi_binary,
+            "container",
+            "exec",
+            container_name,
+            "--",
+            "sh",
+            "-c",
+            f"echo '{new_content}' > /tmp/overwrite-test.txt",
+        ],
         capture_output=True,
         text=True,
         timeout=30,
     )
-    assert result.returncode == 0, \
-        f"File creation should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"File creation should succeed. stderr: {result.stderr}"
 
     # === Phase 3: Create existing local file ===
 
@@ -72,18 +78,15 @@ def test_pull_to_existing_file(coi_binary, cleanup_containers, workspace_dir):
         timeout=30,
     )
 
-    assert result.returncode == 0, \
-        f"File pull should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"File pull should succeed. stderr: {result.stderr}"
 
     # === Phase 5: Verify new content ===
 
     with open(local_file) as f:
         content = f.read()
 
-    assert new_content in content, \
-        f"File should contain new content. Got: {content}"
-    assert old_content not in content, \
-        f"Old content should be replaced. Got: {content}"
+    assert new_content in content, f"File should contain new content. Got: {content}"
+    assert old_content not in content, f"Old content should be replaced. Got: {content}"
 
     # === Phase 6: Cleanup ===
 

@@ -36,8 +36,7 @@ def test_start_already_running(coi_binary, cleanup_containers, workspace_dir):
         timeout=120,
     )
 
-    assert result.returncode == 0, \
-        f"Container launch should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Container launch should succeed. stderr: {result.stderr}"
 
     time.sleep(3)
 
@@ -49,8 +48,7 @@ def test_start_already_running(coi_binary, cleanup_containers, workspace_dir):
         timeout=30,
     )
 
-    assert result.returncode == 0, \
-        "Container should be running"
+    assert result.returncode == 0, "Container should be running"
 
     # === Phase 2: Try to start already running container ===
 
@@ -72,8 +70,7 @@ def test_start_already_running(coi_binary, cleanup_containers, workspace_dir):
         timeout=30,
     )
 
-    assert result.returncode == 0, \
-        "Container should still be running after start attempt"
+    assert result.returncode == 0, "Container should still be running after start attempt"
 
     # === Phase 3: Cleanup ===
 

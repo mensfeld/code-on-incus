@@ -24,15 +24,14 @@ def test_list_without_all_no_sessions(coi_binary, cleanup_containers):
         timeout=30,
     )
 
-    assert result.returncode == 0, \
-        f"List should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"List should succeed. stderr: {result.stderr}"
 
     output = result.stdout
 
     # Should show Active Containers section
-    assert "Active Containers:" in output, \
-        f"Should show Active Containers section. Got:\n{output}"
+    assert "Active Containers:" in output, f"Should show Active Containers section. Got:\n{output}"
 
     # Should NOT show Saved Sessions section (requires --all)
-    assert "Saved Sessions:" not in output, \
+    assert "Saved Sessions:" not in output, (
         f"Should NOT show Saved Sessions without --all. Got:\n{output}"
+    )

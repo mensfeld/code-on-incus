@@ -27,20 +27,18 @@ def test_version_format_validation(coi_binary):
         timeout=10,
     )
 
-    assert result.returncode == 0, \
-        f"Version command should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Version command should succeed. stderr: {result.stderr}"
 
-    lines = [line for line in result.stdout.strip().split('\n') if line]
+    lines = [line for line in result.stdout.strip().split("\n") if line]
 
-    assert len(lines) == 2, \
-        f"Should have exactly 2 lines. Got:\n{result.stdout}"
+    assert len(lines) == 2, f"Should have exactly 2 lines. Got:\n{result.stdout}"
 
     # Verify first line format: claude-on-incus (coi) vX.Y.Z
-    version_pattern = r'^claude-on-incus \(coi\) v\d+\.\d+\.\d+$'
-    assert re.match(version_pattern, lines[0]), \
+    version_pattern = r"^claude-on-incus \(coi\) v\d+\.\d+\.\d+$"
+    assert re.match(version_pattern, lines[0]), (
         f"First line should match pattern '{version_pattern}'. Got: {lines[0]}"
+    )
 
     # Verify second line is GitHub URL
-    url_pattern = r'^https://github\.com/[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+$'
-    assert re.match(url_pattern, lines[1]), \
-        f"Second line should be GitHub URL. Got: {lines[1]}"
+    url_pattern = r"^https://github\.com/[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+$"
+    assert re.match(url_pattern, lines[1]), f"Second line should be GitHub URL. Got: {lines[1]}"

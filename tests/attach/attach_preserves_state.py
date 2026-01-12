@@ -93,8 +93,7 @@ def test_attach_preserves_state(coi_binary, cleanup_containers, workspace_dir):
 
     # Verify container is still running
     containers = get_container_list()
-    assert container_name in containers, \
-        f"Container {container_name} should still be running"
+    assert container_name in containers, f"Container {container_name} should still be running"
 
     # === Phase 4: Attach with --bash and verify file ===
 
@@ -141,8 +140,9 @@ def test_attach_preserves_state(coi_binary, cleanup_containers, workspace_dir):
 
     time.sleep(1)
     containers = get_container_list()
-    assert container_name not in containers, \
+    assert container_name not in containers, (
         f"Container {container_name} should be deleted after cleanup"
+    )
 
     # Assert state was preserved
     assert file_exists, "File should still exist after detach/attach (state preserved)"

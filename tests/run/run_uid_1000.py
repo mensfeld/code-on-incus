@@ -24,9 +24,7 @@ def test_run_uid_1000(coi_binary, cleanup_containers, workspace_dir):
         timeout=180,
     )
 
-    assert result.returncode == 0, \
-        f"Run should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Run should succeed. stderr: {result.stderr}"
 
     combined_output = result.stdout + result.stderr
-    assert "1000" in combined_output, \
-        f"Should run with UID 1000. Got:\n{combined_output}"
+    assert "1000" in combined_output, f"Should run with UID 1000. Got:\n{combined_output}"

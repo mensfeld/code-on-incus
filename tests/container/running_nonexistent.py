@@ -30,5 +30,4 @@ def test_running_nonexistent(coi_binary, cleanup_containers):
 
     # === Phase 2: Verify returns false ===
 
-    assert result.returncode != 0, \
-        "Running should return non-zero for nonexistent container"
+    assert result.returncode != 0, "Running should return non-zero for nonexistent container"

@@ -28,9 +28,9 @@ def test_exists_missing_arg(coi_binary, cleanup_containers):
 
     # === Phase 2: Verify failure ===
 
-    assert result.returncode != 0, \
-        f"Missing argument should fail. stdout: {result.stdout}"
+    assert result.returncode != 0, f"Missing argument should fail. stdout: {result.stdout}"
 
     combined_output = (result.stdout + result.stderr).lower()
-    assert "usage" in combined_output or "required" in combined_output or "argument" in combined_output, \
-        f"Should show usage or argument error. Got:\n{result.stdout + result.stderr}"
+    assert (
+        "usage" in combined_output or "required" in combined_output or "argument" in combined_output
+    ), f"Should show usage or argument error. Got:\n{result.stdout + result.stderr}"

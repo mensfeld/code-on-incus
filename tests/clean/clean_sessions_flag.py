@@ -96,8 +96,7 @@ def test_clean_sessions_flag(coi_binary, cleanup_containers, workspace_dir):
         timeout=60,
     )
 
-    assert result.returncode == 0, \
-        f"coi clean --sessions should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"coi clean --sessions should succeed. stderr: {result.stderr}"
 
     time.sleep(2)
 
@@ -115,5 +114,4 @@ def test_clean_sessions_flag(coi_binary, cleanup_containers, workspace_dir):
 
     # Note: We can't strictly assert because other sessions might exist
     # Just verify the command ran successfully
-    assert result.returncode == 0, \
-        f"List after clean should succeed. Got:\n{output}"
+    assert result.returncode == 0, f"List after clean should succeed. Got:\n{output}"
