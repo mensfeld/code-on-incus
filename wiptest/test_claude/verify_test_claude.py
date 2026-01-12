@@ -1,9 +1,9 @@
 """
-Test that dummy works correctly with COI_USE_TEST_CLAUDE=1 env var.
+Test that dummy works correctly with COI_USE_DUMMY=1 env var.
 
 Verifies that:
 1. dummy is installed in the image
-2. COI_USE_TEST_CLAUDE=1 uses dummy instead of real claude
+2. COI_USE_DUMMY=1 uses dummy instead of real claude
 3. dummy responds correctly
 """
 
@@ -51,10 +51,10 @@ def test_test_claude_version(coi_binary, cleanup_containers, tmp_path):
 
 
 def test_env_var_uses_test_claude(coi_binary, cleanup_containers, tmp_path):
-    """Test that COI_USE_TEST_CLAUDE=1 actually uses dummy."""
+    """Test that COI_USE_DUMMY=1 actually uses dummy."""
 
     env = os.environ.copy()
-    env["COI_USE_TEST_CLAUDE"] = "1"
+    env["COI_USE_DUMMY"] = "1"
 
     # Start shell with dummy
     child = pexpect.spawn(
@@ -86,7 +86,7 @@ def test_env_var_uses_test_claude(coi_binary, cleanup_containers, tmp_path):
         child.sendline("exit")
         child.expect(pexpect.EOF, timeout=10)
 
-        print("✓ COI_USE_TEST_CLAUDE=1 works correctly!")
+        print("✓ COI_USE_DUMMY=1 works correctly!")
 
     finally:
         if child.isalive():

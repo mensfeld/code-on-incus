@@ -41,7 +41,7 @@ def test_resume_does_not_persist_home_files(coi_binary, cleanup_containers, work
     6. Verify ~/test.txt does NOT exist
     7. Cleanup
     """
-    env = {"COI_USE_TEST_CLAUDE": "1"}
+    env = {"COI_USE_DUMMY": "1"}
 
     # === Phase 1: Create file in container ===
 

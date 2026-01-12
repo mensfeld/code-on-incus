@@ -32,7 +32,7 @@ def test_auto_attach_single_session(coi_binary, cleanup_containers, workspace_di
     4. Verify it attaches and shows "Attaching to..."
     5. Cleanup
     """
-    env = {"COI_USE_TEST_CLAUDE": "1"}
+    env = {"COI_USE_DUMMY": "1"}
     container_name = calculate_container_name(workspace_dir, 1)
 
     # === Phase 1: Start persistent session ===

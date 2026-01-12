@@ -34,7 +34,7 @@ def test_attach_lists_multiple_sessions(coi_binary, cleanup_containers, workspac
     6. Verify it lists both sessions
     7. Cleanup
     """
-    env = {"COI_USE_TEST_CLAUDE": "1"}
+    env = {"COI_USE_DUMMY": "1"}
     container_name_1 = calculate_container_name(workspace_dir, 1)
     container_name_2 = calculate_container_name(workspace_dir, 2)
 

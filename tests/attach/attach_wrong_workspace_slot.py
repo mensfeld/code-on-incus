@@ -33,7 +33,7 @@ def test_attach_wrong_workspace_slot(coi_binary, cleanup_containers, workspace_d
     5. Verify it fails (different workspace = different container name)
     6. Cleanup
     """
-    env = {"COI_USE_TEST_CLAUDE": "1"}
+    env = {"COI_USE_DUMMY": "1"}
     container_name = calculate_container_name(workspace_dir, 1)
 
     # Create a different workspace

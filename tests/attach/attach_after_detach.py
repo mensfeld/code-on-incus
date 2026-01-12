@@ -37,7 +37,7 @@ def test_attach_after_detach(coi_binary, cleanup_containers, workspace_dir):
     5. Verify we're back in the same session
     6. Cleanup
     """
-    env = {"COI_USE_TEST_CLAUDE": "1"}
+    env = {"COI_USE_DUMMY": "1"}
     container_name = calculate_container_name(workspace_dir, 1)
 
     # === Phase 1: Start persistent session ===

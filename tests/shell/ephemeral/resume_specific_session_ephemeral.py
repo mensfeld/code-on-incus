@@ -41,7 +41,7 @@ def test_resume_specific_session(coi_binary, cleanup_containers, workspace_dir):
     5. Verify session 1 was resumed (not session 2)
     6. Cleanup
     """
-    env = {"COI_USE_TEST_CLAUDE": "1"}
+    env = {"COI_USE_DUMMY": "1"}
     container_name = calculate_container_name(workspace_dir, 1)
 
     # === Phase 1: Create first session ===

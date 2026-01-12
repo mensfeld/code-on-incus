@@ -32,7 +32,7 @@ def test_env_var_passing(coi_binary, cleanup_containers, workspace_dir):
     3. Echo $TEST_VAR and verify it's set
     4. Cleanup
     """
-    env = {"COI_USE_TEST_CLAUDE": "1"}
+    env = {"COI_USE_DUMMY": "1"}
     container_name = calculate_container_name(workspace_dir, 1)
 
     test_var_name = "COI_TEST_CUSTOM_VAR"

@@ -28,7 +28,7 @@ def test_persistent_resume_without_session(coi_binary, cleanup_containers, works
     3. Verify error message is helpful
     4. Verify no containers were created
     """
-    env = {"COI_USE_TEST_CLAUDE": "1"}
+    env = {"COI_USE_DUMMY": "1"}
 
     # Get container list before
     containers_before = get_container_list()

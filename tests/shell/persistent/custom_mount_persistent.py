@@ -39,7 +39,7 @@ def test_custom_mount_persistent(coi_binary, cleanup_containers, workspace_dir, 
     6. Verify new file appears on host
     7. Cleanup
     """
-    env = {"COI_USE_TEST_CLAUDE": "1"}
+    env = {"COI_USE_DUMMY": "1"}
 
     # === Phase 1: Create temp directory with test file ===
 

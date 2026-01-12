@@ -34,7 +34,7 @@ def test_docker_in_container(coi_binary, cleanup_containers, workspace_dir):
     4. Run 'docker ps' to verify Docker daemon is accessible
     5. Cleanup
     """
-    env = {"COI_USE_TEST_CLAUDE": "1"}
+    env = {"COI_USE_DUMMY": "1"}
     container_name = calculate_container_name(workspace_dir, 1)
 
     # === Phase 1: Start session ===

@@ -38,7 +38,7 @@ def test_new_session_not_resumed(coi_binary, cleanup_containers, workspace_dir):
     4. Verify fake-claude shows "Session:" (new session), not "Resuming session:"
     5. Cleanup
     """
-    env = {"COI_USE_TEST_CLAUDE": "1"}
+    env = {"COI_USE_DUMMY": "1"}
 
     # === Phase 1: Initial session ===
 

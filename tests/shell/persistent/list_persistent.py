@@ -35,7 +35,7 @@ def test_list_persistent(coi_binary, cleanup_containers, workspace_dir):
     3. Run coi list and verify container IS marked as (persistent)
     4. Cleanup
     """
-    env = {"COI_USE_TEST_CLAUDE": "1"}
+    env = {"COI_USE_DUMMY": "1"}
 
     # === Phase 1: Start persistent session ===
 

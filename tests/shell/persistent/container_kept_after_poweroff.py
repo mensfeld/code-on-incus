@@ -41,7 +41,7 @@ def test_persistent_container_kept_after_poweroff(coi_binary, cleanup_containers
     6. Verify container is KEPT (stopped but not deleted)
     7. Cleanup
     """
-    env = {"COI_USE_TEST_CLAUDE": "1"}
+    env = {"COI_USE_DUMMY": "1"}
 
     # Launch persistent container
     child = spawn_coi(

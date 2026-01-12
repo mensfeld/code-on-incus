@@ -46,7 +46,7 @@ def test_exit_bash_keeps_container_running(coi_binary, cleanup_containers, works
     7. Verify we can interact
     8. Kill container for cleanup
     """
-    env = {"COI_USE_TEST_CLAUDE": "1"}
+    env = {"COI_USE_DUMMY": "1"}
 
     # === Phase 1: Start session and exit normally ===
 

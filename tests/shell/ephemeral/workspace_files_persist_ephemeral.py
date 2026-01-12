@@ -35,7 +35,7 @@ def test_workspace_files_persist_ephemeral(coi_binary, cleanup_containers, works
     4. Exit (poweroff to trigger container deletion)
     5. Verify file exists on host filesystem
     """
-    env = {"COI_USE_TEST_CLAUDE": "1"}
+    env = {"COI_USE_DUMMY": "1"}
     container_name = calculate_container_name(workspace_dir, 1)
 
     # Define test file

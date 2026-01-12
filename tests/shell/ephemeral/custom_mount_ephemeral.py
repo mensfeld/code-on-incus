@@ -35,7 +35,7 @@ def test_custom_mount_ephemeral(coi_binary, cleanup_containers, workspace_dir, t
     4. Verify the test file exists in /workspace
     5. Cleanup
     """
-    env = {"COI_USE_TEST_CLAUDE": "1"}
+    env = {"COI_USE_DUMMY": "1"}
 
     # === Phase 1: Create temp directory with test file ===
 

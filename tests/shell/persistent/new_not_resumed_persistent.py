@@ -38,7 +38,7 @@ def test_persistent_new_session_not_resumed(coi_binary, cleanup_containers, work
     5. Verify fake-claude shows new session, not resuming
     6. Cleanup
     """
-    env = {"COI_USE_TEST_CLAUDE": "1"}
+    env = {"COI_USE_DUMMY": "1"}
 
     # === Phase 1: Initial persistent session ===
 

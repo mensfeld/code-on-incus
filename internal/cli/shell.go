@@ -282,11 +282,11 @@ func getEnvValue(key string) string {
 
 // runClaude executes the Claude CLI in the container interactively
 func runClaude(result *session.SetupResult, sessionID string, useResumeFlag, restoreOnly bool, sessionsDir, resumeID string) error {
-	// Determine which Claude binary to use (real or test)
+	// Determine which Claude binary to use (real or dummy)
 	claudeBinary := "claude"
-	if getEnvValue("COI_USE_TEST_CLAUDE") == "1" {
-		claudeBinary = "test-claude"
-		fmt.Fprintf(os.Stderr, "Using test-claude (fake Claude) for faster testing\n")
+	if getEnvValue("COI_USE_DUMMY") == "1" {
+		claudeBinary = "dummy"
+		fmt.Fprintf(os.Stderr, "Using dummy (test stub) for faster testing\n")
 	}
 
 	// Build command - either bash for debugging or Claude CLI
@@ -356,11 +356,11 @@ func runClaude(result *session.SetupResult, sessionID string, useResumeFlag, res
 func runClaudeInTmux(result *session.SetupResult, sessionID string, detached bool, useResumeFlag, restoreOnly bool, sessionsDir, resumeID string) error {
 	tmuxSessionName := fmt.Sprintf("coi-%s", result.ContainerName)
 
-	// Determine which Claude binary to use (real or test)
+	// Determine which Claude binary to use (real or dummy)
 	claudeBinary := "claude"
-	if getEnvValue("COI_USE_TEST_CLAUDE") == "1" {
-		claudeBinary = "test-claude"
-		fmt.Fprintf(os.Stderr, "Using test-claude (fake Claude) for faster testing\n")
+	if getEnvValue("COI_USE_DUMMY") == "1" {
+		claudeBinary = "dummy"
+		fmt.Fprintf(os.Stderr, "Using dummy (test stub) for faster testing\n")
 	}
 
 	// Build Claude command

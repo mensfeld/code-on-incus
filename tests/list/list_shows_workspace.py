@@ -30,7 +30,7 @@ def test_list_shows_workspace(coi_binary, cleanup_containers, workspace_dir):
     3. Verify Workspace field appears
     4. Cleanup
     """
-    env = {"COI_USE_TEST_CLAUDE": "1"}
+    env = {"COI_USE_DUMMY": "1"}
     container_name = calculate_container_name(workspace_dir, 1)
 
     # === Phase 1: Start shell session ===

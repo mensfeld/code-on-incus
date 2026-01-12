@@ -43,7 +43,7 @@ def test_persistent_session_with_resume(coi_binary, cleanup_containers, workspac
     6. Verify resume worked
     7. Cleanup
     """
-    env = {"COI_USE_TEST_CLAUDE": "1"}
+    env = {"COI_USE_DUMMY": "1"}
 
     # === Phase 1: Initial persistent session ===
 

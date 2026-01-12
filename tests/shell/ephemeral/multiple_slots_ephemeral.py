@@ -40,7 +40,7 @@ def test_multiple_slots_parallel(coi_binary, cleanup_containers, workspace_dir):
     6. Create marker file in slot 2, verify slot 1's file is NOT visible (isolation)
     7. Cleanup both containers
     """
-    env = {"COI_USE_TEST_CLAUDE": "1"}
+    env = {"COI_USE_DUMMY": "1"}
 
     container_name_1 = calculate_container_name(workspace_dir, 1)
     container_name_2 = calculate_container_name(workspace_dir, 2)

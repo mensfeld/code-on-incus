@@ -39,7 +39,7 @@ def test_ephemeral_session_with_shutdown(coi_binary, cleanup_containers, workspa
     5. Verify cleanup messages appear
     6. Verify container is deleted
     """
-    env = {"COI_USE_TEST_CLAUDE": "1"}
+    env = {"COI_USE_DUMMY": "1"}
 
     # Launch ephemeral container
     child = spawn_coi(
