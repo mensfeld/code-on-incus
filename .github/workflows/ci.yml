@@ -88,52 +88,109 @@ jobs:
       - name: Fix networking for Incus
         run: |
           echo "=== Diagnosing initial network state ==="
-          sudo iptables -L FORWARD -v -n
-          sudo iptables -t nat -L POSTROUTING -v -n
-          ip addr show incusbr0 || echo "incusbr0 not found yet"
-
+          echo "Default route:"
+          ip route | grep default
           echo ""
-          echo "=== Configuring iptables for Incus ==="
-          # Docker sets FORWARD policy to DROP which blocks Incus containers
-          sudo iptables -P FORWARD ACCEPT
-
-          # Allow forwarding for Incus bridge
-          sudo iptables -I FORWARD -i incusbr0 -j ACCEPT
-          sudo iptables -I FORWARD -o incusbr0 -j ACCEPT
-          sudo iptables -I FORWARD -m comment --comment "managed by lxd network incusbr0" -j ACCEPT
-
-          # Enable NAT for Incus bridge (critical for outbound connectivity)
-          # Get the actual bridge subnet from a running container's network
-          BRIDGE_IP=$(ip addr show incusbr0 | grep 'inet ' | awk '{print $2}' | cut -d/ -f1)
-          echo "Bridge IP: $BRIDGE_IP"
-
-          # Add NAT rules for common Incus subnets
-          sudo iptables -t nat -A POSTROUTING -s 10.0.0.0/8 -o $(ip route | grep default | awk '{print $5}') -j MASQUERADE
-          sudo iptables -t nat -A POSTROUTING -s 172.16.0.0/12 -o $(ip route | grep default | awk '{print $5}') -j MASQUERADE
-          sudo iptables -t nat -A POSTROUTING -s 192.168.0.0/16 -o $(ip route | grep default | awk '{print $5}') -j MASQUERADE
-
-          # Enable IP forwarding
-          echo 1 | sudo tee /proc/sys/net/ipv4/ip_forward
-          echo 1 | sudo tee /proc/sys/net/ipv6/conf/all/forwarding
-
-          echo ""
-          echo "=== Verifying iptables rules ==="
-          echo "FORWARD chain:"
+          echo "FORWARD policy and rules:"
           sudo iptables -L FORWARD -v -n | head -20
           echo ""
-          echo "NAT POSTROUTING chain:"
-          sudo iptables -t nat -L POSTROUTING -v -n | head -20
+          echo "NAT POSTROUTING rules:"
+          sudo iptables -t nat -L POSTROUTING -v -n
           echo ""
-          echo "IP forwarding enabled:"
+          echo "Incus bridge:"
+          ip addr show incusbr0 || echo "incusbr0 not found yet"
+          echo ""
+          echo "IP forwarding status:"
           cat /proc/sys/net/ipv4/ip_forward
 
           echo ""
-          echo "=== Testing network connectivity ==="
+          echo "=== Configuring iptables for Incus ==="
+
+          # Enable IP forwarding FIRST (kernel-level requirement)
+          echo 1 | sudo tee /proc/sys/net/ipv4/ip_forward
+          echo 1 | sudo tee /proc/sys/net/ipv6/conf/all/forwarding
+
+          # Get default interface for outbound traffic
+          DEFAULT_IFACE=$(ip route | grep default | awk '{print $5}' | head -1)
+          echo "Default interface: $DEFAULT_IFACE"
+
+          # Docker sets FORWARD policy to DROP - change to ACCEPT
+          sudo iptables -P FORWARD ACCEPT
+
+          # Allow forwarding for Incus bridge (insert at top of chain)
+          sudo iptables -I FORWARD 1 -i incusbr0 -j ACCEPT
+          sudo iptables -I FORWARD 1 -o incusbr0 -j ACCEPT
+
+          # Add NAT rules for Incus (prepend to ensure they're evaluated first)
+          # Don't flush - preserve Docker's rules
+          sudo iptables -t nat -I POSTROUTING 1 -s 10.0.0.0/8 ! -d 10.0.0.0/8 -o $DEFAULT_IFACE -j MASQUERADE
+          sudo iptables -t nat -I POSTROUTING 1 -s 172.16.0.0/12 ! -d 172.16.0.0/12 -o $DEFAULT_IFACE -j MASQUERADE
+          sudo iptables -t nat -I POSTROUTING 1 -s 192.168.0.0/16 ! -d 192.168.0.0/16 -o $DEFAULT_IFACE -j MASQUERADE
+
+          # Also add specific rule for the incus bridge subnet
+          BRIDGE_SUBNET=$(ip -4 addr show incusbr0 | grep -oP 'inet \K[\d.]+/\d+' || echo "")
+          if [ -n "$BRIDGE_SUBNET" ]; then
+            echo "Adding specific NAT rule for bridge subnet: $BRIDGE_SUBNET"
+            sudo iptables -t nat -I POSTROUTING 1 -s $BRIDGE_SUBNET -o $DEFAULT_IFACE -j MASQUERADE
+          fi
+
+          echo ""
+          echo "=== Verifying iptables rules ==="
+          echo "FORWARD chain (first 30 rules):"
+          sudo iptables -L FORWARD -v -n --line-numbers | head -35
+          echo ""
+          echo "NAT POSTROUTING chain (all rules):"
+          sudo iptables -t nat -L POSTROUTING -v -n --line-numbers
+          echo ""
+          echo "NAT PREROUTING chain:"
+          sudo iptables -t nat -L PREROUTING -v -n --line-numbers | head -10
+          echo ""
+          echo "IP forwarding enabled:"
+          cat /proc/sys/net/ipv4/ip_forward
+          echo ""
+          echo "Routing table:"
+          ip route show
+          echo ""
+          echo "All network interfaces:"
+          ip addr show
+
+          echo ""
+          echo "=== Testing HOST network connectivity first ==="
+          echo "Can host ping archive.ubuntu.com?"
+          ping -c 2 archive.ubuntu.com || echo "  ✗ Host cannot ping (might be ICMP blocked)"
+
+          echo ""
+          echo "Can host curl archive.ubuntu.com?"
+          if curl -s -I --max-time 5 http://archive.ubuntu.com/ | head -3; then
+            echo "  ✓ Host HTTP works"
+          else
+            echo "  ✗ Host HTTP failed - runner network issues"
+          fi
+
+          echo ""
+          echo "=== Checking for any DROP rules in iptables ==="
+          echo "FORWARD chain - looking for DROP:"
+          sudo iptables -L FORWARD -v -n | grep -i drop || echo "  No DROP rules in FORWARD"
+          echo ""
+          echo "INPUT chain - looking for DROP:"
+          sudo iptables -L INPUT -v -n | grep -i drop | head -10 || echo "  No DROP rules in INPUT"
+          echo ""
+          echo "OUTPUT chain - looking for DROP:"
+          sudo iptables -L OUTPUT -v -n | grep -i drop | head -10 || echo "  No DROP rules in OUTPUT"
+
+          echo ""
+          echo "=== Launching test container ==="
           incus launch images:alpine/edge network-test
 
           # Wait longer for network to initialize
           echo "Waiting for container network..."
           sleep 15
+
+          # Reset iptables counters to track new traffic
+          echo ""
+          echo "Resetting iptables counters..."
+          sudo iptables -Z
+          sudo iptables -t nat -Z
 
           # Check container has IP
           echo "Container IP addresses:"
@@ -147,16 +204,81 @@ jobs:
           echo "Container DNS config:"
           incus exec network-test -- cat /etc/resolv.conf || true
 
-          # Test connectivity
-          echo "Testing ping to archive.ubuntu.com:"
+          # Test connectivity with multiple methods
+          echo "Testing connectivity..."
+
+          echo "1. Can ping gateway?"
+          incus exec network-test -- ping -c 2 10.102.147.1 || echo "  ✗ Cannot ping gateway"
+
+          echo ""
+          echo "2. Can ping archive.ubuntu.com (ICMP)?"
           if incus exec network-test -- ping -c 3 -W 5 archive.ubuntu.com; then
-            echo "✓ Network test PASSED"
+            echo "  ✓ ICMP works"
           else
-            echo "✗ Network test FAILED - but continuing anyway"
-            echo "This may cause image build to timeout"
+            echo "  ✗ ICMP blocked (might be normal in CI)"
           fi
 
+          echo ""
+          echo "3. Installing curl for HTTP test..."
+          incus exec network-test -- apk add --no-cache curl 2>/dev/null || echo "  Could not install curl"
+
+          echo ""
+          echo "4. Can reach archive.ubuntu.com via HTTP?"
+          if incus exec network-test -- timeout 10 curl -s -I http://archive.ubuntu.com/ | head -3; then
+            echo "  ✓ HTTP connectivity works!"
+            NETWORK_OK=true
+          else
+            echo "  ✗ HTTP also failed"
+            NETWORK_OK=false
+          fi
+
+          echo ""
+          echo "5. Can reach google.com via HTTPS?"
+          if incus exec network-test -- timeout 10 curl -s -I https://google.com | head -3; then
+            echo "  ✓ HTTPS connectivity works!"
+            NETWORK_OK=true
+          else
+            echo "  ✗ HTTPS also failed"
+          fi
+
+          echo ""
+          echo "=== Debugging: Checking iptables packet counts after tests ==="
+          echo "FORWARD chain packet counts:"
+          sudo iptables -L FORWARD -v -n --line-numbers | head -15
+
+          echo ""
+          echo "NAT POSTROUTING packet counts:"
+          sudo iptables -t nat -L POSTROUTING -v -n --line-numbers | head -15
+
+          echo ""
+          echo "MASQUERADE rules hit counts:"
+          sudo iptables -t nat -L POSTROUTING -v -n | grep MASQUERADE
+
+          echo ""
+          echo "=== Checking connection tracking (conntrack) ==="
+          sudo conntrack -L 2>/dev/null | grep "10.102.147" | head -10 || echo "  No conntrack entries for container subnet"
+
+          echo ""
+          echo "=== Checking if bridge is forwarding ==="
+          cat /sys/class/net/incusbr0/bridge/stp_state 2>/dev/null || echo "  Cannot read bridge STP state"
+          brctl showstp incusbr0 2>/dev/null || echo "  brctl not available"
+
           incus delete -f network-test
+
+          if [ "$NETWORK_OK" = "true" ]; then
+            echo ""
+            echo "✓✓✓ Network test PASSED - HTTP/HTTPS works (ICMP may be blocked)"
+          else
+            echo ""
+            echo "✗✗✗ Network test FAILED - no external connectivity"
+            echo "Image build will likely timeout. Check iptables and routing above."
+            echo ""
+            echo "Common causes:"
+            echo "  1. GitHub Actions network security policy blocking nested containers"
+            echo "  2. Missing NAT/MASQUERADE rules (check packet counts above)"
+            echo "  3. IP forwarding disabled (check earlier in log)"
+            echo "  4. iptables DROP rules (check for DROP above)"
+          fi
 
       - name: Build COI binary
         run: |
