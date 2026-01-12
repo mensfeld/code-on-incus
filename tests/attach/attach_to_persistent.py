@@ -86,6 +86,17 @@ def test_attach_to_persistent(coi_binary, cleanup_containers, workspace_dir):
 
     # === Phase 3: Attach to persistent container ===
 
+    # DEBUG: Check if tmux session exists before attaching
+    list_sessions_result = subprocess.run(
+        ["incus", "exec", container_name, "--user", "1000", "--group", "1000", "--", "tmux", "list-sessions"],
+        capture_output=True,
+        text=True,
+        timeout=10
+    )
+    print(f"DEBUG: tmux list-sessions output: {list_sessions_result.stdout}", file=sys.stderr)
+    print(f"DEBUG: tmux list-sessions stderr: {list_sessions_result.stderr}", file=sys.stderr)
+    print(f"DEBUG: tmux list-sessions exit code: {list_sessions_result.returncode}", file=sys.stderr)
+
     child2 = spawn_coi(
         coi_binary,
         ["attach", container_name],
