@@ -82,10 +82,6 @@ jobs:
 
           # Initialize Incus with btrfs storage (faster than default dir storage)
           # Using preseed for explicit configuration
-          # Get current user's UID and GID for proper mapping
-          RUNNER_UID=$(id -u)
-          RUNNER_GID=$(id -g)
-
           cat <<EOF | sudo incus admin init --preseed
           config:
             images.compression_algorithm: none
@@ -101,10 +97,7 @@ jobs:
             name: default
             driver: btrfs
           profiles:
-          - config:
-              raw.idmap: |
-                uid ${RUNNER_UID} 0
-                gid ${RUNNER_GID} 0
+          - config: {}
             devices:
               eth0:
                 name: eth0
