@@ -7,7 +7,6 @@ Tests that:
 3. Verify the mounted directory and file are accessible inside container
 """
 
-import os
 import subprocess
 import time
 

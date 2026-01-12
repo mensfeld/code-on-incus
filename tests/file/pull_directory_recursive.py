@@ -83,7 +83,7 @@ def test_pull_directory_recursive(coi_binary, cleanup_containers, workspace_dir)
     file1_path = os.path.join(local_dir, "file1.txt")
     assert os.path.exists(file1_path), \
         f"file1.txt should exist at {file1_path}"
-    with open(file1_path, "r") as f:
+    with open(file1_path) as f:
         content = f.read()
     assert "content-file1-pull" in content, \
         f"file1.txt content should match. Got: {content}"
@@ -92,7 +92,7 @@ def test_pull_directory_recursive(coi_binary, cleanup_containers, workspace_dir)
     file2_path = os.path.join(local_dir, "subdir", "file2.txt")
     assert os.path.exists(file2_path), \
         f"subdir/file2.txt should exist at {file2_path}"
-    with open(file2_path, "r") as f:
+    with open(file2_path) as f:
         content = f.read()
     assert "content-file2-pull" in content, \
         f"file2.txt content should match. Got: {content}"

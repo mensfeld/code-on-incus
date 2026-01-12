@@ -61,4 +61,4 @@ def test_kill_with_force_flag(coi_binary, cleanup_containers, workspace_dir):
         timeout=30,
     )
     assert result.returncode != 0, \
-        f"Container should not exist after kill"
+        "Container should not exist after kill"

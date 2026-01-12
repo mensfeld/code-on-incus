@@ -9,8 +9,6 @@ Tests that:
 import os
 import subprocess
 
-from support.helpers import calculate_container_name
-
 
 def test_pull_invalid_source_format(coi_binary, cleanup_containers, workspace_dir):
     """

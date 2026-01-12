@@ -52,7 +52,7 @@ def test_delete_running_fails(coi_binary, cleanup_containers, workspace_dir):
     )
 
     assert result.returncode == 0, \
-        f"Container should be running"
+        "Container should be running"
 
     # === Phase 2: Try to delete without --force ===
 
@@ -72,7 +72,7 @@ def test_delete_running_fails(coi_binary, cleanup_containers, workspace_dir):
 
     containers = get_container_list()
     assert container_name in containers, \
-        f"Container should still exist after failed delete"
+        "Container should still exist after failed delete"
 
     # Still running
     result = subprocess.run(
@@ -83,7 +83,7 @@ def test_delete_running_fails(coi_binary, cleanup_containers, workspace_dir):
     )
 
     assert result.returncode == 0, \
-        f"Container should still be running after failed delete"
+        "Container should still be running after failed delete"
 
     # === Phase 5: Cleanup with --force ===
 

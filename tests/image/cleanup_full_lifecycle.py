@@ -55,7 +55,7 @@ def test_cleanup_keeps_recent_versions(coi_binary, cleanup_containers, workspace
     # === Phase 2: Create 3 versioned images ===
 
     created_images = []
-    for i in range(3):
+    for _i in range(3):
         # Create image with timestamp-like suffix (YYYYMMDD-HHMMSS format)
         timestamp = time.strftime("%Y%m%d-%H%M%S")
         image_name = f"{image_prefix}{timestamp}"

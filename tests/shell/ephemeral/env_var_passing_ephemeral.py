@@ -13,7 +13,6 @@ from pexpect import EOF, TIMEOUT
 
 from support.helpers import (
     calculate_container_name,
-    get_container_list,
     spawn_coi,
     wait_for_container_ready,
     wait_for_prompt,

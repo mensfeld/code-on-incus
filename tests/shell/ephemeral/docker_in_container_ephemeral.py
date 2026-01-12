@@ -14,7 +14,6 @@ from pexpect import EOF, TIMEOUT
 
 from support.helpers import (
     calculate_container_name,
-    get_container_list,
     spawn_coi,
     wait_for_container_ready,
     wait_for_prompt,
@@ -78,7 +77,7 @@ def test_docker_in_container(coi_binary, cleanup_containers, workspace_dir):
         docker_works = wait_for_text_in_monitor(monitor, "DOCKER_PS_OK", timeout=10)
         if not docker_works:
             # Check if it's a permission or daemon issue
-            docker_error = wait_for_text_in_monitor(monitor, "DOCKER_PS_FAILED", timeout=5)
+            wait_for_text_in_monitor(monitor, "DOCKER_PS_FAILED", timeout=5)
 
     # === Phase 4: Cleanup ===
 

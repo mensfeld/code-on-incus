@@ -110,7 +110,7 @@ def dummy_image(coi_binary):
     if not os.path.exists(script_path):
         pytest.skip(f"Dummy install script not found: {script_path}")
 
-    print(f"\nBuilding test image with dummy (one-time setup)...")
+    print("\nBuilding test image with dummy (one-time setup)...")
 
     result = subprocess.run(
         [coi_binary, "build", "custom", image_name,

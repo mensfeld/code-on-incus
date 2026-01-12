@@ -10,8 +10,6 @@ Tests that:
 import os
 import subprocess
 
-from support.helpers import calculate_container_name
-
 
 def test_push_invalid_destination_format(coi_binary, cleanup_containers, workspace_dir):
     """

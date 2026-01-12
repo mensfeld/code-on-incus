@@ -9,7 +9,6 @@ Tests that:
 5. Verify new file appears on host
 """
 
-import os
 import subprocess
 import time
 

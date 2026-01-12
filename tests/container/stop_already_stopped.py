@@ -82,7 +82,7 @@ def test_stop_already_stopped(coi_binary, cleanup_containers, workspace_dir):
     # Container should still exist (just stopped)
     containers = get_container_list()
     assert container_name in containers, \
-        f"Container should still exist after double stop"
+        "Container should still exist after double stop"
 
     # === Phase 4: Cleanup ===
 

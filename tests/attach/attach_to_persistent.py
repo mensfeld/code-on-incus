@@ -6,19 +6,11 @@ Tests that:
 2. Exit and verify container is kept
 3. Attach to it
 4. Verify attachment works
-
-NOTE: This test is skipped in CI due to GitHub Actions environment limitation.
-Root cause: When we detach from tmux (Ctrl+b d), the tmux server dies because
-the incus exec process exits. Even with setsid, nohup, or backgrounding, tmux's
-double-fork daemonization can't survive the strict process tree management in CI.
-This test passes locally where process management is less strict.
 """
 
-import os
 import subprocess
 import time
 
-import pytest
 from pexpect import EOF, TIMEOUT
 
 from support.helpers import (
@@ -33,10 +25,6 @@ from support.helpers import (
 )
 
 
-@pytest.mark.skipif(
-    os.environ.get("CI") == "true",
-    reason="Tmux server doesn't survive detach in GitHub Actions CI environment"
-)
 def test_attach_to_persistent(coi_binary, cleanup_containers, workspace_dir):
     """
     Test that coi attach works with persistent containers.
@@ -92,8 +80,9 @@ def test_attach_to_persistent(coi_binary, cleanup_containers, workspace_dir):
 
     # Verify container is STILL running (persistent mode)
     containers = get_container_list()
-    assert container_name in containers, \
+    assert container_name in containers, (
         f"Persistent container {container_name} should still be running after detach"
+    )
 
     # === Phase 3: Attach to persistent container ===
 
@@ -144,8 +133,9 @@ def test_attach_to_persistent(coi_binary, cleanup_containers, workspace_dir):
 
     time.sleep(1)
     containers = get_container_list()
-    assert container_name not in containers, \
+    assert container_name not in containers, (
         f"Container {container_name} should be deleted after cleanup"
+    )
 
     # Assert attachment worked
     assert responded, "Should be able to interact after attaching to persistent container"

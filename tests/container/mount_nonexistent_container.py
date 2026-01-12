@@ -6,7 +6,6 @@ Tests that:
 2. Verify command fails
 """
 
-import os
 import subprocess
 import tempfile
 

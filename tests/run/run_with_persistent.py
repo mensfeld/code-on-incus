@@ -57,7 +57,7 @@ def test_run_with_persistent(coi_binary, cleanup_containers, workspace_dir):
     )
 
     assert result.returncode == 0, \
-        f"Container should still exist after persistent run"
+        "Container should still exist after persistent run"
 
     # === Phase 3: Second run reuses container ===
 

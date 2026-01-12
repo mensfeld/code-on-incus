@@ -77,16 +77,14 @@ def test_workspace_files_persist_ephemeral(coi_binary, cleanup_containers, works
         assert file_created, "Should create file in /workspace"
 
     # === Phase 2.5: DEBUG - Check if file is visible on host while container is running ===
-    import os
     file_path_check = os.path.join(workspace_dir, test_filename)
     file_exists_on_host = os.path.exists(file_path_check)
-    print(f"\n=== DEBUG BEFORE SHUTDOWN ===")
+    print("\n=== DEBUG BEFORE SHUTDOWN ===")
     print(f"File created in container: {file_created}")
     print(f"File visible on host: {file_exists_on_host}")
     print(f"File path: {file_path_check}")
 
     # Check container's workspace mount using incus directly
-    import subprocess
     try:
         result = subprocess.run(
             ["incus", "config", "device", "list", container_name],
@@ -163,7 +161,7 @@ def test_workspace_files_persist_ephemeral(coi_binary, cleanup_containers, works
     if not os.path.exists(file_path):
         print(f"\n=== DEBUG: File not found at {file_path} ===")
         print(f"Workspace dir exists: {os.path.exists(workspace_dir)}")
-        print(f"Workspace dir contents:")
+        print("Workspace dir contents:")
         try:
             items = os.listdir(workspace_dir)
             if items:
@@ -172,13 +170,13 @@ def test_workspace_files_persist_ephemeral(coi_binary, cleanup_containers, works
                     stat_info = os.stat(item_path)
                     print(f"  {item} (uid={stat_info.st_uid}, gid={stat_info.st_gid}, mode={oct(stat_info.st_mode)})")
             else:
-                print(f"  (empty directory)")
+                print("  (empty directory)")
         except Exception as e:
             print(f"  Error listing: {e}")
         print(f"Current user: uid={os.getuid()}, gid={os.getgid()}")
 
         # Check if incus device was actually added
-        print(f"\nChecking container device mounts:")
+        print("\nChecking container device mounts:")
         result = subprocess.run(
             [coi_binary, "container", "show", container_name],
             capture_output=True,
@@ -190,10 +188,10 @@ def test_workspace_files_persist_ephemeral(coi_binary, cleanup_containers, works
 
     assert os.path.exists(file_path), \
         f"File {test_filename} should persist on host after ephemeral container deletion"
-    
-    with open(file_path, 'r') as f:
+
+    with open(file_path) as f:
         content = f.read().strip()
-    
+
     assert test_content in content, \
         f"File content should be '{test_content}', got '{content}'"
 

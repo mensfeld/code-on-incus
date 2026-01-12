@@ -74,7 +74,7 @@ def test_attach_stopped_container(coi_binary, cleanup_containers, workspace_dir)
 
     # Should fail
     combined_output = result.stdout + result.stderr
-    
+
     # Either returns error or container is not found in running list
     attach_failed = (
         result.returncode != 0 or

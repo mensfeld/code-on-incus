@@ -13,7 +13,6 @@ import time
 
 from support.helpers import (
     calculate_container_name,
-    get_container_list,
 )
 
 
@@ -93,7 +92,7 @@ def test_start_stopped_container(coi_binary, cleanup_containers, workspace_dir):
     )
 
     assert result.returncode == 0, \
-        f"Started container should be running"
+        "Started container should be running"
 
     # === Phase 5: Cleanup ===
 

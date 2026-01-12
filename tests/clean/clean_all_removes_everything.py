@@ -36,7 +36,7 @@ def test_clean_all_removes_everything(coi_binary, cleanup_containers, workspace_
     4. Verify both container and session are gone
     """
     env = {"COI_USE_DUMMY": "1"}
-    container_name_1 = calculate_container_name(workspace_dir, 1)
+    calculate_container_name(workspace_dir, 1)
     container_name_2 = calculate_container_name(workspace_dir, 2)
 
     # === Phase 1: Create a session ===
@@ -128,4 +128,4 @@ def test_clean_all_removes_everything(coi_binary, cleanup_containers, workspace_
 
     # Command should succeed
     assert result.returncode == 0, \
-        f"List after clean --all should succeed"
+        "List after clean --all should succeed"

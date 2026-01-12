@@ -43,7 +43,7 @@ def test_resume_without_session(coi_binary, cleanup_containers, workspace_dir):
     )
 
     # Use live screen to capture output
-    with with_live_screen(child) as monitor:
+    with with_live_screen(child):
         # Wait for process to exit (should be quick since it errors)
         try:
             child.expect(EOF, timeout=30)

@@ -12,7 +12,6 @@ import time
 
 from support.helpers import (
     calculate_container_name,
-    get_container_list,
 )
 
 
@@ -51,7 +50,7 @@ def test_start_already_running(coi_binary, cleanup_containers, workspace_dir):
     )
 
     assert result.returncode == 0, \
-        f"Container should be running"
+        "Container should be running"
 
     # === Phase 2: Try to start already running container ===
 
@@ -63,7 +62,7 @@ def test_start_already_running(coi_binary, cleanup_containers, workspace_dir):
     )
 
     # Should either succeed (idempotent) or give informative message
-    combined_output = result.stdout + result.stderr
+    result.stdout + result.stderr
 
     # Container should still be running
     result = subprocess.run(
@@ -74,7 +73,7 @@ def test_start_already_running(coi_binary, cleanup_containers, workspace_dir):
     )
 
     assert result.returncode == 0, \
-        f"Container should still be running after start attempt"
+        "Container should still be running after start attempt"
 
     # === Phase 3: Cleanup ===
 

@@ -32,6 +32,8 @@ Major internal refactoring to make coi CLI-agnostic (zero breaking changes). Ena
 - [Fix] Persistent container indicator in `coi list` - Shows "(persistent)" label correctly
 - [Fix] CI cache key updated to use `testdata/dummy/**` pattern
 - [Fix] Documentation inconsistencies between README and actual implementation
+- [Fix] **Tmux server persistence in CI** - Explicitly start tmux server before session operations; ensures sessions work in CI and new containers
+- [Fix] **Test isolation for parallel execution** - Fixed auto_attach_single_session test to use --slot flag, preventing conflicts when other sessions are running
 
 ### Enhancements
 - [Enhancement] Update image builder to use `dummy` instead of `test-claude`
@@ -43,9 +45,13 @@ Major internal refactoring to make coi CLI-agnostic (zero breaking changes). Ena
 - [Enhancement] Document `--storage` flag in README
 - [Enhancement] Add refactoring documentation (CLAUDE_REFERENCES_ANALYSIS.md, REFACTORING_SUMMARY.md, REFACTORING_PHASE2.md)
 - [Enhancement] Add "See Also" section in README with links to documentation
+- [Enhancement] **Tmux architecture** - Sessions created detached then attached separately; tmux server explicitly started before operations for reliability
+- [Enhancement] **Python linting with ruff** - Added ruff linter (Python equivalent of rubocop) to CI, auto-fixed 68 issues, formatted 166 test files for consistency
+- [Enhancement] **CI tests now run all attach tests** - Removed skipif decorators after fixing tmux persistence, all tests pass in CI
 
 ### Changes
 - [Change] Rename images from `claudeyard-*` to `coi-*` for consistency
+- [Change] **Session creation pattern** - Changed from `tmux new-session` (single command) to `tmux new-session -d` + `tmux attach` (two-step pattern) for better detach/reattach support
 
 ## 0.1.0 (2025-01-08)
 

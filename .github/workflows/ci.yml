@@ -64,6 +64,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r tests/support/requirements.txt
 
+      - name: Lint Python code with ruff
+        run: |
+          echo "Running ruff linter on Python test code..."
+          ruff check tests/
+          echo "Checking Python code formatting..."
+          ruff format --check tests/
+
       - name: Install Incus
         run: |
           # Add Zabbly repo for latest Incus

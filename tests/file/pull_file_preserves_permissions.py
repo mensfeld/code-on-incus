@@ -9,9 +9,9 @@ Tests that:
 """
 
 import os
+import stat
 import subprocess
 import time
-import stat
 
 from support.helpers import calculate_container_name
 
@@ -81,7 +81,7 @@ def test_pull_file_permissions(coi_binary, cleanup_containers, workspace_dir):
         f"File should be readable by owner. Mode: {oct(mode)}"
 
     # Should be able to read content
-    with open(local_file, "r") as f:
+    with open(local_file) as f:
         content = f.read()
 
     assert test_content in content, \

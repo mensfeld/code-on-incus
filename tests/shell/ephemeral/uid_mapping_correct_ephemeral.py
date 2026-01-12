@@ -15,7 +15,6 @@ from pexpect import EOF, TIMEOUT
 
 from support.helpers import (
     calculate_container_name,
-    get_container_list,
     spawn_coi,
     wait_for_container_ready,
     wait_for_prompt,
@@ -40,7 +39,7 @@ def test_uid_mapping_correct(coi_binary, cleanup_containers, workspace_dir):
 
     # Get current user's UID
     current_uid = os.getuid()
-    current_gid = os.getgid()
+    os.getgid()
 
     test_filename = "uid_test_file.txt"
     test_content = "UID_MAPPING_TEST_DATA"
@@ -114,7 +113,7 @@ def test_uid_mapping_correct(coi_binary, cleanup_containers, workspace_dir):
     # Debug: List all files in workspace
     if not os.path.exists(file_path):
         print(f"\n=== DEBUG: File not found at {file_path} ===")
-        print(f"Workspace dir contents:")
+        print("Workspace dir contents:")
         try:
             for item in os.listdir(workspace_dir):
                 item_path = os.path.join(workspace_dir, item)
@@ -135,7 +134,7 @@ def test_uid_mapping_correct(coi_binary, cleanup_containers, workspace_dir):
     # File should be owned by current user, NOT by root (0) or high UIDs (1000000+)
     assert file_uid == current_uid, \
         f"File UID should be {current_uid} (current user), got {file_uid}"
-    
+
     # GID might vary, but should not be root or extremely high
     assert file_gid < 1000000, \
         f"File GID should not be a remapped high UID, got {file_gid}"

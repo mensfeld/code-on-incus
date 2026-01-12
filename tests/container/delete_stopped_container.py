@@ -60,7 +60,7 @@ def test_delete_stopped_container(coi_binary, cleanup_containers, workspace_dir)
     # Verify container still exists
     containers = get_container_list()
     assert container_name in containers, \
-        f"Stopped container should still exist"
+        "Stopped container should still exist"
 
     # === Phase 3: Delete container ===
 
@@ -80,4 +80,4 @@ def test_delete_stopped_container(coi_binary, cleanup_containers, workspace_dir)
 
     containers = get_container_list()
     assert container_name not in containers, \
-        f"Deleted container should not exist"
+        "Deleted container should not exist"

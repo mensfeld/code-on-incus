@@ -7,7 +7,6 @@ Tests that:
 3. Verify output contains: Session ID, Container, Session Path, Resume command
 """
 
-import re
 import subprocess
 import time
 

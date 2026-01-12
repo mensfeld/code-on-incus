@@ -76,7 +76,7 @@ def test_pull_single_file(coi_binary, cleanup_containers, workspace_dir):
     assert os.path.exists(local_file), \
         f"Pulled file should exist at {local_file}"
 
-    with open(local_file, "r") as f:
+    with open(local_file) as f:
         content = f.read()
 
     assert test_content in content, \

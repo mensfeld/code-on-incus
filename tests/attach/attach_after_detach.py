@@ -6,20 +6,11 @@ Tests that:
 2. Detach using Ctrl+b d
 3. Run coi attach
 4. Verify we reconnect to the same tmux session
-
-NOTE: This test is skipped in CI due to GitHub Actions environment limitation.
-Root cause: When we detach from tmux (Ctrl+b d), the tmux server dies because
-the incus exec process exits. Even with setsid, nohup, or backgrounding, tmux's
-double-fork daemonization can't survive the strict process tree management in CI.
-This test passes locally where process management is less strict.
 """
 
-import os
 import subprocess
-import sys
 import time
 
-import pytest
 from pexpect import EOF, TIMEOUT
 
 from support.helpers import (
@@ -34,10 +25,6 @@ from support.helpers import (
 )
 
 
-@pytest.mark.skipif(
-    os.environ.get("CI") == "true",
-    reason="Tmux server doesn't survive detach in GitHub Actions CI environment"
-)
 def test_attach_after_detach(coi_binary, cleanup_containers, workspace_dir):
     """
     Test that coi attach reconnects after tmux detach.
@@ -94,8 +81,9 @@ def test_attach_after_detach(coi_binary, cleanup_containers, workspace_dir):
 
     # Verify container is still running
     containers = get_container_list()
-    assert container_name in containers, \
+    assert container_name in containers, (
         f"Container {container_name} should still be running after detach"
+    )
 
     # === Phase 3: Reattach ===
 
@@ -147,8 +135,9 @@ def test_attach_after_detach(coi_binary, cleanup_containers, workspace_dir):
 
     time.sleep(1)
     containers = get_container_list()
-    assert container_name not in containers, \
+    assert container_name not in containers, (
         f"Container {container_name} should be deleted after cleanup"
+    )
 
     # Assert reattach worked
     assert responded, "Should be able to interact with fake-claude after reattach"

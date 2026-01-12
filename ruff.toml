@@ -1,0 +1,54 @@
+# Ruff configuration for claude-on-incus Python tests
+# Similar to rubocop for Ruby - enforces code quality and style
+
+# Paths to lint
+extend-include = ["tests/**/*.py"]
+
+# Line length (adjust to match project preference)
+line-length = 100
+
+[lint]
+# Enable rule sets (similar to rubocop cops)
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort (import sorting)
+    "N",      # pep8-naming
+    "UP",     # pyupgrade (modern Python idioms)
+    "B",      # flake8-bugbear (common bugs)
+    "C4",     # flake8-comprehensions
+    "SIM",    # flake8-simplify
+    "PTH",    # flake8-use-pathlib
+    "RUF",    # ruff-specific rules
+]
+
+# Disable specific rules that are too strict or not applicable
+ignore = [
+    "E501",   # Line too long (handled by formatter)
+    "SIM105", # Use contextlib.suppress (try-except-pass is clearer in tests)
+    "SIM117", # Multiple with statements (sometimes clearer separate)
+    "PTH",    # Prefer pathlib (too pedantic for tests, os.path is fine)
+    "B904",   # raise-without-from inside except (not always needed in tests)
+]
+
+# Allow autofix for all enabled rules (like rubocop -a)
+fixable = ["ALL"]
+unfixable = []
+
+[lint.per-file-ignores]
+# Test files can have additional flexibility
+"tests/**/*.py" = [
+    "N802",   # Function name should be lowercase (test names often descriptive)
+    "N806",   # Variable should be lowercase (test fixtures)
+]
+
+[format]
+# Format configuration (like rubocop formatting)
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+
+[lint.isort]
+# Import sorting configuration
+known-first-party = ["support"]

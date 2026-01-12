@@ -8,10 +8,10 @@ Tests that:
 4. Verify file exists with correct content (md5sum)
 """
 
+import hashlib
 import os
 import subprocess
 import time
-import hashlib
 
 from support.helpers import calculate_container_name
 

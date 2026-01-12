@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/mensfeld/claude-on-incus/internal/container"
 	"github.com/mensfeld/claude-on-incus/internal/session"
@@ -425,6 +426,13 @@ func runCLIInTmux(result *session.SetupResult, sessionID string, detached bool, 
 		envExports += fmt.Sprintf("export %s=%q; ", k, v)
 	}
 
+	// Ensure tmux server is running first (critical for CI and new containers)
+	serverStartCmd := "tmux start-server 2>/dev/null || true"
+	result.Manager.ExecCommand(serverStartCmd, container.ExecCommandOptions{
+		Capture: true,
+		User:    userPtr,
+	})
+
 	// Check if tmux session already exists
 	checkSessionCmd := fmt.Sprintf("tmux has-session -t %s 2>/dev/null", tmuxSessionName)
 	_, err := result.Manager.ExecCommand(checkSessionCmd, container.ExecCommandOptions{
@@ -487,21 +495,61 @@ func runCLIInTmux(result *session.SetupResult, sessionID string, detached bool, 
 		fmt.Fprintf(os.Stderr, "Use 'coi tmux send %s \"<command>\"' to send commands\n", result.ContainerName)
 		return nil
 	} else {
-		// Interactive mode: create session and attach
+		// Interactive mode: create detached session, then attach
+		// This ensures tmux server owns the session, not the incus exec process
+		// When we detach, only the attach process exits, not the session
 		// trap : INT prevents bash from exiting on Ctrl+C, exec bash replaces (no nested shells)
-		createCmd := fmt.Sprintf(
-			"tmux new-session -s %s -c /workspace \"bash -c 'trap : INT; %s %s; exec bash'\"",
-			tmuxSessionName,
-			envExports,
-			cliCmd,
-		)
-		opts := container.ExecCommandOptions{
+
+		// Step 0: Ensure tmux server is running (required for all tmux operations)
+		// This is critical in CI and for newly started containers where tmux server
+		// might not be running yet. The command is idempotent - if server is already
+		// running, it does nothing. We redirect stderr and use || true to ignore errors.
+		serverStartCmd := "tmux start-server 2>/dev/null || true"
+		serverOpts := container.ExecCommandOptions{
+			User:    userPtr,
+			Capture: true,
+		}
+		result.Manager.ExecCommand(serverStartCmd, serverOpts)
+		// Don't check error - if it fails, subsequent tmux commands will fail with clearer errors
+
+		// Step 1: Check if session already exists
+		checkCmd := fmt.Sprintf("tmux has-session -t %s 2>/dev/null", tmuxSessionName)
+		checkOpts := container.ExecCommandOptions{
+			User:    userPtr,
+			Capture: true,
+		}
+		_, checkErr := result.Manager.ExecCommand(checkCmd, checkOpts)
+
+		// Step 2: Create detached session if it doesn't exist
+		if checkErr != nil {
+			createCmd := fmt.Sprintf(
+				"tmux new-session -d -s %s -c /workspace \"bash -c 'trap : INT; %s %s; exec bash'\"",
+				tmuxSessionName,
+				envExports,
+				cliCmd,
+			)
+			createOpts := container.ExecCommandOptions{
+				User:    userPtr,
+				Cwd:     "/workspace",
+				Capture: true,
+			}
+			if _, err := result.Manager.ExecCommand(createCmd, createOpts); err != nil {
+				return fmt.Errorf("failed to create tmux session: %w", err)
+			}
+
+			// Give tmux a moment to fully initialize the session
+			time.Sleep(500 * time.Millisecond)
+		}
+
+		// Step 3: Attach to the session
+		attachCmd := fmt.Sprintf("tmux attach -t %s", tmuxSessionName)
+		attachOpts := container.ExecCommandOptions{
 			User:        userPtr,
 			Cwd:         "/workspace",
 			Interactive: true,
 			Env:         containerEnv,
 		}
-		_, err := result.Manager.ExecCommand(createCmd, opts)
+		_, err := result.Manager.ExecCommand(attachCmd, attachOpts)
 		return err
 	}
 }

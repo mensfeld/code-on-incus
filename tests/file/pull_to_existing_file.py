@@ -77,7 +77,7 @@ def test_pull_to_existing_file(coi_binary, cleanup_containers, workspace_dir):
 
     # === Phase 5: Verify new content ===
 
-    with open(local_file, "r") as f:
+    with open(local_file) as f:
         content = f.read()
 
     assert new_content in content, \

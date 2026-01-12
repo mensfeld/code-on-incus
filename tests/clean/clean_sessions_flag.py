@@ -7,7 +7,6 @@ Tests that:
 3. Verify session data is removed
 """
 
-import os
 import subprocess
 import time
 
@@ -15,7 +14,6 @@ from pexpect import EOF, TIMEOUT
 
 from support.helpers import (
     calculate_container_name,
-    get_container_list,
     send_prompt,
     spawn_coi,
     wait_for_container_ready,
@@ -36,7 +34,7 @@ def test_clean_sessions_flag(coi_binary, cleanup_containers, workspace_dir):
     4. Verify session data is removed
     """
     env = {"COI_USE_DUMMY": "1"}
-    container_name = calculate_container_name(workspace_dir, 1)
+    calculate_container_name(workspace_dir, 1)
 
     # === Phase 1: Create a session ===
 
@@ -88,7 +86,6 @@ def test_clean_sessions_flag(coi_binary, cleanup_containers, workspace_dir):
     )
 
     # Should show saved sessions
-    has_sessions_before = "Saved Sessions" in result.stdout
 
     # === Phase 3: Clean sessions ===
 
@@ -115,11 +112,6 @@ def test_clean_sessions_flag(coi_binary, cleanup_containers, workspace_dir):
 
     # After cleaning, should show (none) for saved sessions or fewer sessions
     output = result.stdout
-    sessions_cleaned = (
-        "(none)" in output or
-        "Saved Sessions:\n---------------\n  (none)" in output or
-        "Saved Sessions" not in output
-    )
 
     # Note: We can't strictly assert because other sessions might exist
     # Just verify the command ran successfully

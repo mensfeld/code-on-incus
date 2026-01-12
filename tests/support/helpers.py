@@ -165,7 +165,7 @@ def spawn_coi(
         pexpect.spawn object
     """
     # Build command
-    cmd_args = [binary_path] + args
+    cmd_args = [binary_path, *args]
 
     # Merge environment
     env = os.environ.copy() if env is None else {**os.environ.copy(), **env}

@@ -22,7 +22,6 @@ from support.helpers import (
     wait_for_prompt,
     wait_for_specific_container_deletion,
     wait_for_text_in_monitor,
-    wait_for_text_on_screen,
     with_live_screen,
 )
 

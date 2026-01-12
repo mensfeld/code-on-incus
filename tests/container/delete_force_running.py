@@ -50,7 +50,7 @@ def test_delete_force_running(coi_binary, cleanup_containers, workspace_dir):
     )
 
     assert result.returncode == 0, \
-        f"Container should be running"
+        "Container should be running"
 
     # === Phase 2: Force delete ===
 
@@ -70,4 +70,4 @@ def test_delete_force_running(coi_binary, cleanup_containers, workspace_dir):
 
     containers = get_container_list()
     assert container_name not in containers, \
-        f"Force deleted container should not exist"
+        "Force deleted container should not exist"

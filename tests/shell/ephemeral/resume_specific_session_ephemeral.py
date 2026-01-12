@@ -10,7 +10,6 @@ Tests that:
 6. Verify correct session was resumed
 """
 
-import os
 import subprocess
 import time
 
@@ -18,7 +17,6 @@ from pexpect import EOF, TIMEOUT
 
 from support.helpers import (
     calculate_container_name,
-    get_container_list,
     send_prompt,
     spawn_coi,
     wait_for_container_ready,
