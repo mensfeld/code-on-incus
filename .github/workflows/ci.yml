@@ -85,6 +85,25 @@ jobs:
           # Allow access without re-login by changing socket permissions
           sudo chmod 666 /var/lib/incus/unix.socket
 
+      - name: Fix iptables for Incus networking
+        run: |
+          # Docker sets FORWARD policy to DROP which blocks Incus containers
+          # Allow forwarding for Incus bridge
+          sudo iptables -P FORWARD ACCEPT
+          sudo iptables -I FORWARD -i incusbr0 -j ACCEPT
+          sudo iptables -I FORWARD -o incusbr0 -j ACCEPT
+
+          # Verify the rules
+          echo "Current iptables FORWARD chain:"
+          sudo iptables -L FORWARD -v -n
+
+          # Test Incus network by launching a simple container
+          echo "Testing Incus network connectivity..."
+          incus launch images:alpine/edge network-test
+          sleep 10
+          incus exec network-test -- ping -c 3 archive.ubuntu.com || echo "Warning: Network test failed, but continuing..."
+          incus delete -f network-test
+
       - name: Build COI binary
         run: |
           go build -o coi ./cmd/coi

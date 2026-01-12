@@ -144,10 +144,37 @@ func (b *Builder) waitForNetwork() error {
 			Capture: true,
 		})
 		if err == nil {
+			b.opts.Logger(fmt.Sprintf("Network ready after %d seconds", i+1))
 			return nil
 		}
+
+		// Log progress every 30 seconds with diagnostic info
+		if i > 0 && i%30 == 0 {
+			b.opts.Logger(fmt.Sprintf("Still waiting for network... (%d/%d seconds)", i, maxAttempts))
+
+			// Get IP address info for debugging
+			ipOutput, _ := b.mgr.ExecCommand("ip addr show eth0 | grep inet || ip addr show", container.ExecCommandOptions{
+				Capture: true,
+			})
+			b.opts.Logger(fmt.Sprintf("Container IP info: %s", ipOutput))
+
+			// Check if DNS resolution works
+			dnsOutput, _ := b.mgr.ExecCommand("cat /etc/resolv.conf", container.ExecCommandOptions{
+				Capture: true,
+			})
+			b.opts.Logger(fmt.Sprintf("DNS config: %s", dnsOutput))
+		}
+
 		time.Sleep(1 * time.Second)
 	}
+
+	// Final diagnostic before failing
+	b.opts.Logger("Network timeout - gathering diagnostic info...")
+	ipOutput, _ := b.mgr.ExecCommand("ip addr show", container.ExecCommandOptions{Capture: true})
+	b.opts.Logger(fmt.Sprintf("Final IP addresses:\n%s", ipOutput))
+
+	routeOutput, _ := b.mgr.ExecCommand("ip route show", container.ExecCommandOptions{Capture: true})
+	b.opts.Logger(fmt.Sprintf("Final routes:\n%s", routeOutput))
 
 	return fmt.Errorf("network timeout after %d seconds", maxAttempts)
 }
