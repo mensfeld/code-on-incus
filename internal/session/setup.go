@@ -158,6 +158,13 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 		if err := result.Manager.Start(); err != nil {
 			return nil, fmt.Errorf("failed to start container: %w", err)
 		}
+
+		// Debug: verify mounts are actually active after start
+		if output, err := result.Manager.ExecCommand("mount | grep workspace", container.ExecCommandOptions{Capture: true}); err == nil {
+			opts.Logger(fmt.Sprintf("[DEBUG] Mount check: %s", output))
+		} else {
+			opts.Logger(fmt.Sprintf("[DEBUG] No workspace mount found! Error: %v", err))
+		}
 	}
 
 	// 6. Wait for ready
