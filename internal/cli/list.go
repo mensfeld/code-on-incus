@@ -43,6 +43,11 @@ func listCommand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
+	// Validate format value
+	if listFormat != "text" && listFormat != "json" {
+		return fmt.Errorf("invalid format '%s': must be 'text' or 'json'", listFormat)
+	}
+
 	// List active containers
 	containers, err := listActiveContainers()
 	if err != nil {
