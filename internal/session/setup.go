@@ -126,15 +126,40 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 		}
 	}
 
-	// 5. Launch container if needed
+	// 5. Create and configure container (but don't start yet if we need to add devices)
 	// Always launch as non-ephemeral so we can save session data even if container is stopped
 	// (e.g., via 'sudo shutdown 0' from within). Cleanup will delete if not --persistent.
 	if !skipLaunch {
-		opts.Logger(fmt.Sprintf("Launching container from %s...", image))
-		if err := result.Manager.Launch(image, false); err != nil {
-			return nil, fmt.Errorf("failed to launch container: %w", err)
+		opts.Logger(fmt.Sprintf("Creating container from %s...", image))
+		// Create container without starting it (init)
+		if err := container.IncusExec("init", image, opts.ContainerName); err != nil {
+			return nil, fmt.Errorf("failed to create container: %w", err)
+		}
+
+		// Add disk devices BEFORE starting container
+		opts.Logger(fmt.Sprintf("Adding workspace mount: %s", opts.WorkspacePath))
+		if err := result.Manager.MountDisk("workspace", opts.WorkspacePath, "/workspace", true); err != nil {
+			return nil, fmt.Errorf("failed to add workspace device: %w", err)
+		}
+
+		// Add storage device if specified
+		if opts.StoragePath != "" {
+			if err := os.MkdirAll(opts.StoragePath, 0755); err != nil {
+				return nil, fmt.Errorf("failed to create storage directory: %w", err)
+			}
+			opts.Logger(fmt.Sprintf("Adding storage mount: %s", opts.StoragePath))
+			if err := result.Manager.MountDisk("storage", opts.StoragePath, "/storage", true); err != nil {
+				return nil, fmt.Errorf("failed to add storage device: %w", err)
+			}
+		}
+
+		// Now start the container
+		opts.Logger("Starting container...")
+		if err := result.Manager.Start(); err != nil {
+			return nil, fmt.Errorf("failed to start container: %w", err)
 		}
 	}
+
 	// 6. Wait for ready
 	opts.Logger("Waiting for container to be ready...")
 	if err := waitForReady(result.Manager, 30, opts.Logger); err != nil {
@@ -158,24 +183,8 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 		}
 	}
 
-	// 8. Mount workspace and storage
-	if !skipLaunch {
-		opts.Logger(fmt.Sprintf("Mounting workspace: %s", opts.WorkspacePath))
-		if err := result.Manager.MountDisk("workspace", opts.WorkspacePath, "/workspace", true); err != nil {
-			return nil, fmt.Errorf("failed to mount workspace: %w", err)
-		}
-
-		// 9. Mount storage if specified
-		if opts.StoragePath != "" {
-			if err := os.MkdirAll(opts.StoragePath, 0755); err != nil {
-				return nil, fmt.Errorf("failed to create storage directory: %w", err)
-			}
-			opts.Logger(fmt.Sprintf("Mounting storage: %s", opts.StoragePath))
-			if err := result.Manager.MountDisk("storage", opts.StoragePath, "/storage", true); err != nil {
-				return nil, fmt.Errorf("failed to mount storage: %w", err)
-			}
-		}
-	} else {
+	// 8. Workspace and storage are already mounted (added before container start in step 5)
+	if skipLaunch {
 		opts.Logger("Reusing existing workspace and storage mounts")
 	}
 

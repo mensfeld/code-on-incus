@@ -249,7 +249,7 @@ jobs:
 
       - name: Run integration tests
         run: |
-          # Run only the failing tests to validate privileged container fix
+          # Run only the failing tests to validate fix
           python -m pytest \
             tests/shell/ephemeral/workspace_files_persist_ephemeral.py \
             tests/shell/ephemeral/uid_mapping_correct_ephemeral.py \
@@ -259,18 +259,6 @@ jobs:
             -v --tb=short
         env:
           COI_BINARY: ./coi
-
-      - name: Dump mount debug logs
-        if: always()
-        run: |
-          echo "=== Mount Debug Logs ==="
-          for log in /tmp/coi-mount-debug-*.log; do
-            if [ -f "$log" ]; then
-              echo "File: $log"
-              cat "$log"
-              echo "---"
-            fi
-          done
 
       - name: Cleanup
         if: always()

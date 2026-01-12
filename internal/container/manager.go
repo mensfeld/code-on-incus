@@ -84,41 +84,7 @@ func (m *Manager) MountDisk(name, source, path string, shift bool) error {
 		args = append(args, "shift=true")
 	}
 
-	// Debug: Log mount attempt to file for troubleshooting
-	debugFile := filepath.Join(os.TempDir(), fmt.Sprintf("coi-mount-debug-%s.log", m.ContainerName))
-	f, _ := os.OpenFile(debugFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if f != nil {
-		fmt.Fprintf(f, "\n=== MountDisk called ===\n")
-		fmt.Fprintf(f, "Command: incus %s\n", strings.Join(args, " "))
-		if info, err := os.Stat(source); err == nil {
-			fmt.Fprintf(f, "Source: %s (mode: %v, isDir: %v)\n", source, info.Mode(), info.IsDir())
-			if info.IsDir() {
-				if entries, err := os.ReadDir(source); err == nil {
-					fmt.Fprintf(f, "Source contents (%d items):\n", len(entries))
-					for _, entry := range entries {
-						fmt.Fprintf(f, "  - %s\n", entry.Name())
-					}
-				}
-			}
-		} else {
-			fmt.Fprintf(f, "Source error: %v\n", err)
-		}
-		f.Close()
-	}
-
-	if err := IncusExec(args...); err != nil {
-		return err
-	}
-
-	// Debug: Verify device was added
-	if f, _ := os.OpenFile(debugFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); f != nil {
-		if output, err := IncusOutput("config", "device", "show", m.ContainerName); err == nil {
-			fmt.Fprintf(f, "Device config after add:\n%s\n", output)
-		}
-		f.Close()
-	}
-
-	return nil
+	return IncusExec(args...)
 }
 
 // Exec executes a command in the container (no output capture)
