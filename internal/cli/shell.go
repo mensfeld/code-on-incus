@@ -488,9 +488,11 @@ func runCLIInTmux(result *session.SetupResult, sessionID string, detached bool, 
 		return nil
 	} else {
 		// Interactive mode: create session and attach
+		// Use setsid to detach tmux server from incus exec process tree
+		// This prevents the tmux server from being killed when incus exec exits
 		// trap : INT prevents bash from exiting on Ctrl+C, exec bash replaces (no nested shells)
 		createCmd := fmt.Sprintf(
-			"tmux new-session -s %s -c /workspace \"bash -c 'trap : INT; %s %s; exec bash'\"",
+			"setsid tmux new-session -s %s -c /workspace \"bash -c 'trap : INT; %s %s; exec bash'\"",
 			tmuxSessionName,
 			envExports,
 			cliCmd,
