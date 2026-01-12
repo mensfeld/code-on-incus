@@ -240,14 +240,14 @@ jobs:
           incus delete test-bind-mount-container --force
           rm -rf /tmp/test-bind-mount
 
-      - name: Cache COI image
+      - name: Restore COI image from cache
         id: cache-coi-image
-        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
+        uses: actions/cache/restore@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
         with:
           path: /tmp/coi-image.tar.gz
           key: ${{ runner.os }}-coi-image-${{ hashFiles('internal/image/**', 'testdata/dummy/**') }}
 
-      - name: Restore COI image from cache
+      - name: Import COI image from cache
         if: steps.cache-coi-image.outputs.cache-hit == 'true'
         run: |
           echo "Restoring COI image from cache..."
@@ -262,6 +262,13 @@ jobs:
           ./coi images
           # Export image for caching
           incus image export coi /tmp/coi-image
+
+      - name: Save COI image to cache
+        if: steps.cache-coi-image.outputs.cache-hit != 'true'
+        uses: actions/cache/save@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
+        with:
+          path: /tmp/coi-image.tar.gz
+          key: ${{ runner.os }}-coi-image-${{ hashFiles('internal/image/**', 'testdata/dummy/**') }}
 
       - name: Run integration tests
         run: |
