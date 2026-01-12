@@ -94,6 +94,25 @@ def test_workspace_files_persist_ephemeral(coi_binary, cleanup_containers, works
             timeout=5
         )
         print(f"Container devices:\n{result.stdout}")
+
+        # Get full device config for workspace
+        result2 = subprocess.run(
+            ["incus", "config", "device", "show", container_name],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        print(f"\nFull device config:\n{result2.stdout}")
+
+        # Check if files exist inside container
+        result3 = subprocess.run(
+            ["incus", "exec", container_name, "--", "ls", "-la", "/workspace/"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        print(f"\nFiles in container /workspace:\n{result3.stdout}")
+
         if result.stderr:
             print(f"Device list stderr: {result.stderr}")
     except Exception as e:
