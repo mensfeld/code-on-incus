@@ -172,8 +172,57 @@ build_from_source() {
     echo -e "${GREEN}✓ Built and installed${NC}"
 }
 
+# Set up ZFS storage (for instant container creation)
+setup_zfs_storage() {
+    echo ""
+    echo -e "${BLUE}→ Setting up fast storage (ZFS)...${NC}"
+
+    # Check if ZFS is already installed
+    if command -v zfs &> /dev/null; then
+        echo -e "${GREEN}✓ ZFS already installed${NC}"
+    else
+        echo -e "${BLUE}→ Installing ZFS...${NC}"
+        if sudo apt-get install -y zfsutils-linux 2>&1 | grep -q "E:"; then
+            echo -e "${YELLOW}⚠ ZFS installation failed (may not be available for your kernel)${NC}"
+            echo -e "${YELLOW}  Containers will use default storage (slower but functional)${NC}"
+            return 1
+        fi
+        echo -e "${GREEN}✓ ZFS installed${NC}"
+    fi
+
+    # Check if ZFS pool already exists
+    if incus storage list --format=csv 2>/dev/null | grep -q "^zfs-pool,"; then
+        echo -e "${GREEN}✓ ZFS storage pool already configured${NC}"
+        return 0
+    fi
+
+    # Create ZFS storage pool
+    echo -e "${BLUE}→ Creating ZFS storage pool (50GiB)...${NC}"
+    if sudo incus storage create zfs-pool zfs size=50GiB 2>&1; then
+        echo -e "${GREEN}✓ ZFS storage pool created${NC}"
+
+        # Configure default profile to use ZFS
+        echo -e "${BLUE}→ Configuring default profile to use ZFS...${NC}"
+        if incus profile device set default root pool=zfs-pool 2>&1; then
+            echo -e "${GREEN}✓ Default profile configured for ZFS${NC}"
+            echo -e "${GREEN}✓ Containers will now start instantly (~50ms vs 5-10s)${NC}"
+        else
+            echo -e "${YELLOW}⚠ Failed to configure default profile${NC}"
+            echo -e "${YELLOW}  You can manually configure it later with:${NC}"
+            echo -e "  ${BLUE}incus profile device set default root pool=zfs-pool${NC}"
+        fi
+    else
+        echo -e "${YELLOW}⚠ ZFS storage pool creation failed${NC}"
+        echo -e "${YELLOW}  Containers will use default storage (slower but functional)${NC}"
+        return 1
+    fi
+}
+
 # Post-install setup
 post_install() {
+    # Try to set up ZFS storage
+    setup_zfs_storage
+
     echo ""
     echo -e "${GREEN}✓ Installation complete!${NC}"
     echo ""
@@ -182,15 +231,10 @@ post_install() {
     echo "  1. Build the COI image:"
     echo "     ${BLUE}coi build${NC}"
     echo ""
-    echo "  2. (Optional) Set up ZFS for instant container creation:"
-    echo "     ${BLUE}sudo apt install zfsutils-linux${NC}"
-    echo "     ${BLUE}sudo incus storage create zfs-pool zfs size=50GiB${NC}"
-    echo "     ${BLUE}incus profile device set default root pool=zfs-pool${NC}"
-    echo ""
-    echo "  3. Start your first session:"
+    echo "  2. Start your first session:"
     echo "     ${BLUE}coi shell${NC}"
     echo ""
-    echo "  4. View available commands:"
+    echo "  3. View available commands:"
     echo "     ${BLUE}coi --help${NC}"
     echo ""
 
