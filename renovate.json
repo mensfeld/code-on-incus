@@ -1,0 +1,33 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "includePaths": [
+    "go.mod",
+    "go.sum",
+    "tests/support/requirements.txt",
+    ".github/workflows/**"
+  ],
+  "packageRules": [
+    {
+      "minimumReleaseAge": "7 days",
+      "matchDepNames": [
+        "/*/"
+      ]
+    },
+    {
+      "matchManagers": [
+        "github-actions"
+      ],
+      "pinDigests": true
+    },
+    {
+      "matchFileNames": [
+        "tests/support/requirements.txt"
+      ],
+      "groupName": "test dependencies",
+      "commitMessageTopic": "test dependencies"
+    }
+  ]
+}

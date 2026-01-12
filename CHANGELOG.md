@@ -1,20 +1,51 @@
 # CHANGELOG
 
-## 0.2.0 (Unreleased)
+## 0.2.0 (2025-01-12)
 
-- [Feature] Add one-shot installer script (`install.sh`) for easy installation
-- [Feature] Add `attach` command to attach to running Claude sessions
+Major internal refactoring to make coi CLI-agnostic (zero breaking changes). Enables future support for tools beyond Claude Code (e.g., Aider, Cursor). Includes bug fixes for persistent containers, slot allocation, and CI improvements.
+
+### Features
+- [Feature] Add `shutdown` command for graceful container shutdown (separate from `kill`)
+- [Feature] Add `attach` command to attach to running sessions
 - [Feature] Add `images` command to list available Incus images
 - [Feature] Add `version` command for displaying version information
 - [Feature] Add GitHub Actions workflow for automated releases with pre-built binaries
-- [Feature] Add automatic `~/.claude` config mounting (enabled by default via `mount_claude_config`)
+- [Feature] Add automatic `~/.claude` config mounting (enabled by default)
 - [Feature] Add CHANGELOG.md for version history tracking
-- [Change] Rename images from `claudeyard-*` to `coi-*` for consistency
-- [Enhancement] Improve README with complete command documentation (attach, images, version)
-- [Enhancement] Update configuration examples with `mount_claude_config` option
-- [Enhancement] Add "See Also" section in README with links to documentation
+- [Feature] Add one-shot installer script (`install.sh`)
+
+### Refactoring (Internal API - Non-Breaking)
+- [Refactor] Rename functions: `runClaude()` → `runCLI()`, `runClaudeInTmux()` → `runCLIInTmux()`, `GetClaudeSessionID()` → `GetCLISessionID()`, `setupClaudeConfig()` → `setupCLIConfig()`
+- [Refactor] Rename variables: `claudeBinary` → `cliBinary`, `claudeCmd` → `cliCmd`, `claudeDir` → `stateDir`, `claudePath` → `statePath`, `claudeJsonPath` → `stateConfigPath`
+- [Refactor] Rename struct fields: `ClaudeConfigPath` → `CLIConfigPath`
+- [Refactor] Rename test infrastructure: "fake-claude" → "dummy", `COI_USE_TEST_CLAUDE` → `COI_USE_DUMMY`
+- [Refactor] Update all internal documentation to use generic "CLI tool" terminology
+
+### Bug Fixes
+- [Fix] Persistent container filesystem persistence - Files now survive container stop/start
+- [Fix] Resume flag inheritance - `--resume` properly inherits persistent/privileged flags from session metadata
+- [Fix] Slot allocator race condition - Improved slot allocation logic to prevent conflicts
+- [Fix] Environment variable passing in `run` command - Variables now properly passed to containers
+- [Fix] Attach command container detection - Improved reliability of attach operations
+- [Fix] CI networking issues - Better timeout handling (180s) and diagnostics for slower environments
+- [Fix] Test suite stability - Various fixes to make tests more reliable and deterministic
+- [Fix] Persistent container indicator in `coi list` - Shows "(persistent)" label correctly
+- [Fix] CI cache key updated to use `testdata/dummy/**` pattern
 - [Fix] Documentation inconsistencies between README and actual implementation
-- [Fix] Missing command documentation in README
+
+### Enhancements
+- [Enhancement] Update image builder to use `dummy` instead of `test-claude`
+- [Enhancement] Improve CI networking with HTTP/HTTPS fallback tests
+- [Enhancement] Add backwards-compatible test fixtures (`fake_claude_path` → `dummy_path`)
+- [Enhancement] Update dummy script with generic terminology and documentation
+- [Enhancement] Improve README with complete command documentation (attach, images, version, shutdown)
+- [Enhancement] Update configuration examples with `mount_claude_config` option
+- [Enhancement] Document `--storage` flag in README
+- [Enhancement] Add refactoring documentation (CLAUDE_REFERENCES_ANALYSIS.md, REFACTORING_SUMMARY.md, REFACTORING_PHASE2.md)
+- [Enhancement] Add "See Also" section in README with links to documentation
+
+### Changes
+- [Change] Rename images from `claudeyard-*` to `coi-*` for consistency
 
 ## 0.1.0 (2025-01-08)
 

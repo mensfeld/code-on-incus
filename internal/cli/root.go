@@ -38,7 +38,7 @@ Examples:
   coi images                   # List available images
   coi list                     # List active sessions
 `,
-	Version: "0.1.0",
+	Version: "0.2.0",
 	// When called without subcommand, run shell command
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Execute shell command with the same args
@@ -110,7 +110,7 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version information",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("claude-on-incus (coi) v0.1.0")
+		fmt.Println("claude-on-incus (coi) v0.2.0")
 		fmt.Println("https://github.com/mensfeld/claude-on-incus")
 	},
 }

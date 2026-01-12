@@ -197,8 +197,8 @@ func listSavedSessions(sessionsDir string) ([]SessionInfo, error) {
 		sessionID := entry.Name()
 
 		// Check if it has a .claude directory
-		claudePath := filepath.Join(sessionsDir, sessionID, ".claude")
-		if info, err := os.Stat(claudePath); err != nil || !info.IsDir() {
+		statePath := filepath.Join(sessionsDir, sessionID, ".claude")
+		if info, err := os.Stat(statePath); err != nil || !info.IsDir() {
 			continue
 		}
 

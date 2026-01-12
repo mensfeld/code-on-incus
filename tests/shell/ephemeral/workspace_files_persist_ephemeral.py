@@ -91,8 +91,12 @@ def test_workspace_files_persist_ephemeral(coi_binary, cleanup_containers, works
     except Exception:
         child.close(force=True)
 
-    # Wait for cleanup
+    # Wait for cleanup and filesystem sync
     time.sleep(5)
+
+    # Force filesystem sync (important in CI with btrfs)
+    import subprocess
+    subprocess.run(["sync"], check=False)
 
     # Verify container is gone (ephemeral mode deletes on poweroff)
     containers = get_container_list()
@@ -110,18 +114,33 @@ def test_workspace_files_persist_ephemeral(coi_binary, cleanup_containers, works
     import os
     file_path = os.path.join(workspace_dir, test_filename)
 
-    # Debug: List all files in workspace
+    # Debug: List all files in workspace and check mount status
     if not os.path.exists(file_path):
         print(f"\n=== DEBUG: File not found at {file_path} ===")
+        print(f"Workspace dir exists: {os.path.exists(workspace_dir)}")
         print(f"Workspace dir contents:")
         try:
-            for item in os.listdir(workspace_dir):
-                item_path = os.path.join(workspace_dir, item)
-                stat_info = os.stat(item_path)
-                print(f"  {item} (uid={stat_info.st_uid}, gid={stat_info.st_gid}, mode={oct(stat_info.st_mode)})")
+            items = os.listdir(workspace_dir)
+            if items:
+                for item in items:
+                    item_path = os.path.join(workspace_dir, item)
+                    stat_info = os.stat(item_path)
+                    print(f"  {item} (uid={stat_info.st_uid}, gid={stat_info.st_gid}, mode={oct(stat_info.st_mode)})")
+            else:
+                print(f"  (empty directory)")
         except Exception as e:
             print(f"  Error listing: {e}")
         print(f"Current user: uid={os.getuid()}, gid={os.getgid()}")
+
+        # Check if incus device was actually added
+        print(f"\nChecking container device mounts:")
+        result = subprocess.run(
+            [coi_binary, "container", "show", container_name],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            print(f"Container config:\n{result.stdout}")
         print("===")
 
     assert os.path.exists(file_path), \

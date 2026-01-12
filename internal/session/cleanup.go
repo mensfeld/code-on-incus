@@ -104,7 +104,7 @@ func saveSessionData(mgr *container.Manager, sessionID string, persistent bool, 
 	// Since we currently only support coi images, always use /home/code
 	homeDir := "/home/" + container.CodeUser
 
-	claudeDir := filepath.Join(homeDir, ".claude")
+	stateDir := filepath.Join(homeDir, ".claude")
 
 	// Create local session directory
 	localSessionDir := filepath.Join(sessionsDir, sessionID)
@@ -126,7 +126,7 @@ func saveSessionData(mgr *container.Manager, sessionID string, persistent bool, 
 	// Pull .claude directory from container
 	// Note: incus file pull works on stopped containers, so we don't need to check if running
 	// If .claude doesn't exist, PullDirectory will fail and we handle it gracefully
-	if err := mgr.PullDirectory(claudeDir, localClaudeDir); err != nil {
+	if err := mgr.PullDirectory(stateDir, localClaudeDir); err != nil {
 		// Check if it's a "not found" error - this is expected if .claude doesn't exist
 		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "No such file") {
 			logger("No .claude directory found in container")
@@ -205,8 +205,8 @@ func SaveMetadataEarly(sessionsDir, sessionID, containerName, workspace string, 
 
 // SessionExists checks if a session with the given ID exists and is valid
 func SessionExists(sessionsDir, sessionID string) bool {
-	claudePath := filepath.Join(sessionsDir, sessionID, ".claude")
-	info, err := os.Stat(claudePath)
+	statePath := filepath.Join(sessionsDir, sessionID, ".claude")
+	info, err := os.Stat(statePath)
 	return err == nil && info.IsDir()
 }
 
@@ -224,8 +224,8 @@ func ListSavedSessions(sessionsDir string) ([]string, error) {
 	for _, entry := range entries {
 		if entry.IsDir() {
 			// Check if it contains a .claude directory
-			claudePath := filepath.Join(sessionsDir, entry.Name(), ".claude")
-			if info, err := os.Stat(claudePath); err == nil && info.IsDir() {
+			statePath := filepath.Join(sessionsDir, entry.Name(), ".claude")
+			if info, err := os.Stat(statePath); err == nil && info.IsDir() {
 				sessions = append(sessions, entry.Name())
 			}
 		}

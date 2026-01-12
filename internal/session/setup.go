@@ -251,8 +251,8 @@ func restoreSessionData(mgr *container.Manager, resumeID, homeDir, sessionsDir s
 
 	// Fix ownership if running as claude user
 	if homeDir != "/root" {
-		claudePath := destClaudePath
-		if err := mgr.Chown(claudePath, container.CodeUID, container.CodeUID); err != nil {
+		statePath := destClaudePath
+		if err := mgr.Chown(statePath, container.CodeUID, container.CodeUID); err != nil {
 			return fmt.Errorf("failed to set ownership: %w", err)
 		}
 	}
@@ -286,11 +286,11 @@ func injectCredentials(mgr *container.Manager, hostCLIConfigPath, homeDir string
 
 	// Also copy .claude.json (sibling to .claude directory) if it exists
 	// This file contains important config like theme, startup count, etc.
-	claudeJsonPath := filepath.Join(filepath.Dir(hostCLIConfigPath), ".claude.json")
-	if _, err := os.Stat(claudeJsonPath); err == nil {
+	stateConfigPath := filepath.Join(filepath.Dir(hostCLIConfigPath), ".claude.json")
+	if _, err := os.Stat(stateConfigPath); err == nil {
 		logger("Copying .claude.json for session resume...")
 		claudeJsonDest := filepath.Join(homeDir, ".claude.json")
-		if err := mgr.PushFile(claudeJsonPath, claudeJsonDest); err != nil {
+		if err := mgr.PushFile(stateConfigPath, claudeJsonDest); err != nil {
 			logger(fmt.Sprintf("Warning: Failed to copy .claude.json: %v", err))
 		} else {
 			// Inject sandbox settings into .claude.json
@@ -318,11 +318,11 @@ func injectCredentials(mgr *container.Manager, hostCLIConfigPath, homeDir string
 
 // setupCLIConfig copies .claude directory and injects sandbox settings
 func setupCLIConfig(mgr *container.Manager, hostCLIConfigPath, homeDir string, logger func(string)) error {
-	claudeDir := filepath.Join(homeDir, ".claude")
+	stateDir := filepath.Join(homeDir, ".claude")
 
 	// Create .claude directory in container
 	logger("Creating .claude directory in container...")
-	mkdirCmd := fmt.Sprintf("mkdir -p %s", claudeDir)
+	mkdirCmd := fmt.Sprintf("mkdir -p %s", stateDir)
 	if _, err := mgr.ExecCommand(mkdirCmd, container.ExecCommandOptions{Capture: true}); err != nil {
 		return fmt.Errorf("failed to create .claude directory: %w", err)
 	}
@@ -338,7 +338,7 @@ func setupCLIConfig(mgr *container.Manager, hostCLIConfigPath, homeDir string, l
 	for _, filename := range essentialFiles {
 		srcPath := filepath.Join(hostCLIConfigPath, filename)
 		if _, err := os.Stat(srcPath); err == nil {
-			destPath := filepath.Join(claudeDir, filename)
+			destPath := filepath.Join(stateDir, filename)
 			logger(fmt.Sprintf("  - Copying %s", filename))
 			if err := mgr.PushFile(srcPath, destPath); err != nil {
 				logger(fmt.Sprintf("  - Warning: Failed to copy %s: %v", filename, err))
@@ -349,7 +349,7 @@ func setupCLIConfig(mgr *container.Manager, hostCLIConfigPath, homeDir string, l
 	}
 
 	// Create or update settings.json with sandbox settings
-	settingsPath := filepath.Join(claudeDir, "settings.json")
+	settingsPath := filepath.Join(stateDir, "settings.json")
 	sandboxSettings := `{
   "includeCoAuthoredBy": false,
   "allowDangerouslySkipPermissions": true,
@@ -366,15 +366,15 @@ func setupCLIConfig(mgr *container.Manager, hostCLIConfigPath, homeDir string, l
 	logger("Claude config copied and sandbox settings injected in settings.json")
 
 	// Copy and modify .claude.json (sibling to .claude directory)
-	claudeJsonPath := filepath.Join(filepath.Dir(hostCLIConfigPath), ".claude.json")
-	logger(fmt.Sprintf("Checking for .claude.json at: %s", claudeJsonPath))
+	stateConfigPath := filepath.Join(filepath.Dir(hostCLIConfigPath), ".claude.json")
+	logger(fmt.Sprintf("Checking for .claude.json at: %s", stateConfigPath))
 
-	if info, err := os.Stat(claudeJsonPath); err == nil {
+	if info, err := os.Stat(stateConfigPath); err == nil {
 		logger(fmt.Sprintf("Found .claude.json (size: %d bytes), copying to container...", info.Size()))
 		claudeJsonDest := filepath.Join(homeDir, ".claude.json")
 
 		// Push the file to container
-		if err := mgr.PushFile(claudeJsonPath, claudeJsonDest); err != nil {
+		if err := mgr.PushFile(stateConfigPath, claudeJsonDest); err != nil {
 			return fmt.Errorf("failed to copy .claude.json: %w", err)
 		}
 		logger(fmt.Sprintf(".claude.json copied to %s", claudeJsonDest))
@@ -402,7 +402,7 @@ func setupCLIConfig(mgr *container.Manager, hostCLIConfigPath, homeDir string, l
 		// Fix ownership of entire .claude directory recursively
 		if homeDir != "/root" {
 			logger(fmt.Sprintf("Fixing ownership of entire .claude directory to %d:%d", container.CodeUID, container.CodeUID))
-			chownCmd := fmt.Sprintf("chown -R %d:%d %s", container.CodeUID, container.CodeUID, claudeDir)
+			chownCmd := fmt.Sprintf("chown -R %d:%d %s", container.CodeUID, container.CodeUID, stateDir)
 			if _, err := mgr.ExecCommand(chownCmd, container.ExecCommandOptions{Capture: true}); err != nil {
 				return fmt.Errorf("failed to set .claude directory ownership: %w", err)
 			}
@@ -410,7 +410,7 @@ func setupCLIConfig(mgr *container.Manager, hostCLIConfigPath, homeDir string, l
 
 		logger(".claude.json setup complete")
 	} else if os.IsNotExist(err) {
-		logger(fmt.Sprintf("Warning: .claude.json not found at %s, skipping", claudeJsonPath))
+		logger(fmt.Sprintf("Warning: .claude.json not found at %s, skipping", stateConfigPath))
 	} else {
 		return fmt.Errorf("failed to check .claude.json: %w", err)
 	}

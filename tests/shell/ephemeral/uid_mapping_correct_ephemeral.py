@@ -97,6 +97,9 @@ def test_uid_mapping_correct(coi_binary, cleanup_containers, workspace_dir):
 
     time.sleep(5)
 
+    # Force filesystem sync (important in CI with btrfs)
+    subprocess.run(["sync"], check=False)
+
     # Force cleanup
     subprocess.run(
         [coi_binary, "container", "delete", container_name, "--force"],

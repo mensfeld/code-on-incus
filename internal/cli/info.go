@@ -61,9 +61,9 @@ func infoCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// Check if .claude directory exists
-	claudePath := filepath.Join(sessionDir, ".claude")
+	statePath := filepath.Join(sessionDir, ".claude")
 	claudeExists := false
-	if info, err := os.Stat(claudePath); err == nil && info.IsDir() {
+	if info, err := os.Stat(statePath); err == nil && info.IsDir() {
 		claudeExists = true
 	}
 
@@ -89,7 +89,7 @@ func infoCommand(cmd *cobra.Command, args []string) error {
 
 	// Show directory size
 	if claudeExists {
-		size, err := getDirSize(claudePath)
+		size, err := getDirSize(statePath)
 		if err == nil {
 			fmt.Printf("Data Size:      %s\n", formatBytes(size))
 		}
