@@ -202,8 +202,8 @@ jobs:
             tests/shell/ephemeral/workspace_files_persist_ephemeral.py \
             tests/shell/ephemeral/uid_mapping_correct_ephemeral.py \
             tests/shell/persistent/custom_mount_persistent.py \
-            tests/shell/attach/attach_to_persistent.py \
-            tests/shell/attach/attach_after_detach.py \
+            tests/attach/attach_to_persistent.py \
+            tests/attach/attach_after_detach.py \
             -v --tb=short
         env:
           COI_BINARY: ./coi
