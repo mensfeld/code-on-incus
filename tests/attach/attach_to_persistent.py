@@ -9,6 +9,7 @@ Tests that:
 """
 
 import subprocess
+import sys
 import time
 
 from pexpect import EOF, TIMEOUT
@@ -93,14 +94,21 @@ def test_attach_to_persistent(coi_binary, cleanup_containers, workspace_dir):
         timeout=60,
     )
 
-    time.sleep(3)
+    # Give tmux more time to stabilize in CI (10 seconds total)
+    time.sleep(10)
 
     # We should reconnect to tmux session with claude still running
     # Try interacting with fake-claude again
     with with_live_screen(child2) as monitor:
-        time.sleep(2)
+        # Additional wait to ensure screen is ready
+        time.sleep(5)
+        print("DEBUG: About to send 'after attach' prompt", file=sys.stderr)
         send_prompt(child2, "after attach")
+        print("DEBUG: Sent prompt, waiting for response...", file=sys.stderr)
         responded = wait_for_text_in_monitor(monitor, "after attach-BACK", timeout=30)
+        print(f"DEBUG: Response received: {responded}", file=sys.stderr)
+        if not responded:
+            print(f"DEBUG: Monitor display:\n{monitor.last_display}", file=sys.stderr)
 
     # === Phase 4: Cleanup ===
 

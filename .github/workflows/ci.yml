@@ -300,15 +300,17 @@ jobs:
       - name: Run integration tests
         run: |
           # Run only the failing tests to validate fix
+          # Add -s to see print statements (disable output capture)
           python -m pytest \
             tests/shell/ephemeral/workspace_files_persist_ephemeral.py \
             tests/shell/ephemeral/uid_mapping_correct_ephemeral.py \
             tests/shell/persistent/custom_mount_persistent.py \
             tests/attach/attach_to_persistent.py \
             tests/attach/attach_after_detach.py \
-            -v --tb=short
+            -v -s --tb=short
         env:
           COI_BINARY: ./coi
+          PYTEST_DEBUG: 1
 
       - name: Cleanup
         if: always()
