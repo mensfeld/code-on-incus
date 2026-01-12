@@ -260,6 +260,18 @@ jobs:
         env:
           COI_BINARY: ./coi
 
+      - name: Dump mount debug logs
+        if: always()
+        run: |
+          echo "=== Mount Debug Logs ==="
+          for log in /tmp/coi-mount-debug-*.log; do
+            if [ -f "$log" ]; then
+              echo "File: $log"
+              cat "$log"
+              echo "---"
+            fi
+          done
+
       - name: Cleanup
         if: always()
         run: |
