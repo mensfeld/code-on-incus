@@ -132,7 +132,7 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 	if !skipLaunch {
 		opts.Logger(fmt.Sprintf("Creating container from %s...", image))
 		// Create container without starting it (init)
-		if err := container.IncusExec("init", image, opts.ContainerName); err != nil {
+		if err := container.IncusExec("init", image, result.ContainerName); err != nil {
 			return nil, fmt.Errorf("failed to create container: %w", err)
 		}
 
