@@ -7,6 +7,7 @@ concurrency:
 on:
   pull_request:
     branches: [master, main]
+  workflow_dispatch:
 
 permissions:
   contents: read
