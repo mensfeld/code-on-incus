@@ -85,23 +85,72 @@ jobs:
           # Allow access without re-login by changing socket permissions
           sudo chmod 666 /var/lib/incus/unix.socket
 
-      - name: Fix iptables for Incus networking
+      - name: Fix networking for Incus
         run: |
+          echo "=== Diagnosing initial network state ==="
+          sudo iptables -L FORWARD -v -n
+          sudo iptables -t nat -L POSTROUTING -v -n
+          ip addr show incusbr0 || echo "incusbr0 not found yet"
+
+          echo ""
+          echo "=== Configuring iptables for Incus ==="
           # Docker sets FORWARD policy to DROP which blocks Incus containers
-          # Allow forwarding for Incus bridge
           sudo iptables -P FORWARD ACCEPT
+
+          # Allow forwarding for Incus bridge
           sudo iptables -I FORWARD -i incusbr0 -j ACCEPT
           sudo iptables -I FORWARD -o incusbr0 -j ACCEPT
+          sudo iptables -I FORWARD -m comment --comment "managed by lxd network incusbr0" -j ACCEPT
 
-          # Verify the rules
-          echo "Current iptables FORWARD chain:"
-          sudo iptables -L FORWARD -v -n
+          # Enable NAT for Incus bridge (critical for outbound connectivity)
+          BRIDGE_SUBNET=$(incus network get incusbr0 ipv4.address || echo "10.0.100.1/24")
+          echo "Bridge subnet: $BRIDGE_SUBNET"
+          sudo iptables -t nat -A POSTROUTING -s $BRIDGE_SUBNET ! -d $BRIDGE_SUBNET -j MASQUERADE -m comment --comment "managed by lxd network incusbr0"
 
-          # Test Incus network by launching a simple container
-          echo "Testing Incus network connectivity..."
+          # Enable IP forwarding
+          echo 1 | sudo tee /proc/sys/net/ipv4/ip_forward
+          echo 1 | sudo tee /proc/sys/net/ipv6/conf/all/forwarding
+
+          echo ""
+          echo "=== Verifying iptables rules ==="
+          echo "FORWARD chain:"
+          sudo iptables -L FORWARD -v -n | head -20
+          echo ""
+          echo "NAT POSTROUTING chain:"
+          sudo iptables -t nat -L POSTROUTING -v -n | head -20
+          echo ""
+          echo "IP forwarding enabled:"
+          cat /proc/sys/net/ipv4/ip_forward
+
+          echo ""
+          echo "=== Testing network connectivity ==="
           incus launch images:alpine/edge network-test
-          sleep 10
-          incus exec network-test -- ping -c 3 archive.ubuntu.com || echo "Warning: Network test failed, but continuing..."
+
+          # Wait longer for network to initialize
+          echo "Waiting for container network..."
+          sleep 15
+
+          # Check container has IP
+          echo "Container IP addresses:"
+          incus exec network-test -- ip addr show eth0 || true
+
+          # Check container routing
+          echo "Container routes:"
+          incus exec network-test -- ip route show || true
+
+          # Check DNS
+          echo "Container DNS config:"
+          incus exec network-test -- cat /etc/resolv.conf || true
+
+          # Test connectivity
+          echo "Testing ping to archive.ubuntu.com:"
+          if incus exec network-test -- ping -c 3 -W 5 archive.ubuntu.com; then
+            echo "✓ Network test PASSED"
+          else
+            echo "✗ Network test FAILED - but continuing anyway"
+            echo "This may cause image build to timeout"
+          fi
+
           incus delete -f network-test
 
       - name: Build COI binary

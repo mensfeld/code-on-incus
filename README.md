@@ -33,7 +33,7 @@ Run Claude Code in isolated, production-grade Incus containers with zero permiss
 - **Credential protection** - No risk of SSH keys, `.env` files, or Git credentials being exposed to Claude
 
 **Developer Experience**
-- 15+ CLI commands - shell, run, build, list, info, attach, images, clean, kill, tmux, version, container, file, image
+- 15+ CLI commands - shell, run, build, list, info, attach, images, clean, kill, shutdown, tmux, version, container, file, image
 - Shell completions - Built-in bash/zsh/fish completions via `coi completion`
 - Smart configuration - TOML-based with profiles and hierarchy
 - Tmux integration - Background processes and session management
@@ -164,7 +164,16 @@ coi attach
 # List active containers and saved sessions
 coi list --all
 
-# Kill specific container
+# Gracefully shutdown specific container (60s timeout)
+coi shutdown coi-abc12345-1
+
+# Shutdown with custom timeout
+coi shutdown --timeout=30 coi-abc12345-1
+
+# Shutdown all containers
+coi shutdown --all
+
+# Force kill specific container (immediate)
 coi kill coi-abc12345-1
 
 # Kill all containers
@@ -185,6 +194,7 @@ coi clean
 --profile NAME         # Use named profile
 --image NAME           # Use custom image (default: coi)
 --env KEY=VALUE        # Set environment variables
+--storage PATH         # Mount persistent storage
 ```
 
 ### Container Management
@@ -452,7 +462,7 @@ sudo systemctl start incus
 **Production Ready** - All core features are fully implemented and tested.
 
 **Implemented Features:**
-- Core commands: shell, run, build, list, info, attach, images, clean, kill, tmux, version
+- Core commands: shell, run, build, list, info, attach, images, clean, kill, shutdown, tmux, version
 - Advanced operations: container (launch/start/stop/delete/exec/mount), file (push/pull), image (list/publish/delete/cleanup)
 - Multi-slot parallel sessions
 - Session resume with full conversation history and credentials restoration
@@ -508,10 +518,13 @@ From **inside** the container:
 - `sudo shutdown 0` → stops container, session is saved, then container is deleted (or kept if `--persistent`)
 
 From **outside** (host):
-- `coi shutdown <name>` → graceful stop with session save, then delete
+- `coi shutdown <name>` → graceful stop with session save, then delete (60s timeout by default)
 - `coi shutdown --timeout=30 <name>` → graceful stop with 30s timeout
+- `coi shutdown --all` → graceful stop all containers (with confirmation)
+- `coi shutdown --all --force` → graceful stop all without confirmation
 - `coi kill <name>` → force stop and delete immediately
-- `coi kill --all` → force stop and delete all containers
+- `coi kill --all` → force stop and delete all containers (with confirmation)
+- `coi kill --all --force` → force stop all without confirmation
 
 ### Example Workflows
 
