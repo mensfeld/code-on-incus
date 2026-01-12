@@ -130,6 +130,7 @@ Examples:
 			groupFlag, _ := cmd.Flags().GetInt("group")
 			envVars, _ := cmd.Flags().GetStringArray("env")
 			cwd, _ := cmd.Flags().GetString("cwd")
+			format, _ := cmd.Flags().GetString("format")
 
 			// Parse env vars
 			env := make(map[string]string)
@@ -155,6 +156,17 @@ Examples:
 
 			output, err := mgr.ExecCommand(command, opts)
 
+			// Handle raw format - output stdout and exit with proper code
+			if format == "raw" {
+				fmt.Print(output) // No newline, preserve exact output
+				if err != nil {
+					// Exit with code 1 on error
+					os.Exit(1)
+				}
+				return nil
+			}
+
+			// Handle JSON format (default)
 			result := map[string]interface{}{
 				"stdout":    output,
 				"stderr":    "",
@@ -301,6 +313,7 @@ func init() {
 	containerExecCmd.Flags().StringArray("env", []string{}, "Environment variable (KEY=VALUE)")
 	containerExecCmd.Flags().String("cwd", "/workspace", "Working directory")
 	containerExecCmd.Flags().Bool("capture", false, "Capture output as JSON")
+	containerExecCmd.Flags().String("format", "json", "Output format when using --capture: json or raw")
 
 	// Add flags to mount command
 	containerMountCmd.Flags().Bool("shift", true, "Enable UID/GID shifting")

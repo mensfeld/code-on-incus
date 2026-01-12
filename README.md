@@ -203,6 +203,10 @@ coi clean
 # List all containers and sessions
 coi list --all
 
+# Machine-readable JSON output (for programmatic use)
+coi list --format=json
+coi list --all --format=json
+
 # Output shows container mode:
 #   coi-abc12345-1 (ephemeral)   - will be deleted on exit
 #   coi-abc12345-2 (persistent)  - will be kept for reuse
@@ -243,7 +247,10 @@ coi container delete my-container --force
 # Execute commands in containers
 coi container exec my-container -- ls -la /workspace
 coi container exec my-container --user 1000 --env FOO=bar --cwd /workspace -- npm test
-coi container exec my-container --capture -- echo "hello"  # JSON output
+
+# Capture output in different formats
+coi container exec my-container --capture -- echo "hello"  # JSON output (default)
+coi container exec my-container --capture --format=raw -- pwd  # Raw stdout (for scripting)
 
 # Check container status
 coi container exists my-container
