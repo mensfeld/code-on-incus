@@ -68,14 +68,49 @@ create_code_user() {
     # Setup passwordless sudo for all commands
     echo "$CODE_USER ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/$CODE_USER"
 
-    # Also explicitly allow shutdown/poweroff/reboot with passwordless sudo
-    echo "$CODE_USER ALL=(ALL) NOPASSWD: /sbin/shutdown, /sbin/poweroff, /sbin/reboot" >> "/etc/sudoers.d/$CODE_USER"
-
     chown root:root "/etc/sudoers.d/$CODE_USER"
     chmod 440 "/etc/sudoers.d/$CODE_USER"
     usermod -aG sudo "$CODE_USER"
 
     log "User '$CODE_USER' created with passwordless sudo (uid: $CODE_UID)"
+}
+
+#######################################
+# Configure polkit rules for power management
+#######################################
+configure_polkit() {
+    log "Configuring polkit rules for power management..."
+
+    # Create polkit rules directory if it doesn't exist
+    mkdir -p /etc/polkit-1/rules.d
+
+    # Allow code user to shutdown/poweroff/reboot without authentication
+    cat > /etc/polkit-1/rules.d/50-coi-power.rules << 'EOF'
+/* Allow code user to manage system power without authentication */
+polkit.addRule(function(action, subject) {
+    if ((action.id == "org.freedesktop.login1.power-off" ||
+         action.id == "org.freedesktop.login1.power-off-multiple-sessions" ||
+         action.id == "org.freedesktop.login1.reboot" ||
+         action.id == "org.freedesktop.login1.reboot-multiple-sessions" ||
+         action.id == "org.freedesktop.login1.halt" ||
+         action.id == "org.freedesktop.login1.halt-multiple-sessions") &&
+        subject.user == "code") {
+        return polkit.Result.YES;
+    }
+});
+
+/* Allow code user to set wall message */
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.login1.set-wall-message" &&
+        subject.user == "code") {
+        return polkit.Result.YES;
+    }
+});
+EOF
+
+    chmod 644 /etc/polkit-1/rules.d/50-coi-power.rules
+
+    log "Polkit rules configured for power management"
 }
 
 #######################################
@@ -174,6 +209,7 @@ main() {
     install_base_dependencies
     install_nodejs
     create_code_user
+    configure_polkit
     install_claude_cli
     install_dummy
     install_docker

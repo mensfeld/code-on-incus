@@ -8,9 +8,13 @@ Add machine-readable output formats to enable programmatic integration with clau
 - [Feature] Add `--format=json` flag to `coi list` command for machine-readable output
 - [Feature] Add `--format=raw` flag to `coi container exec --capture` for raw stdout output (exit code via $?)
 
+### Bug Fixes
+- [Fix] Power management permissions - Add polkit rules to allow shutdown/poweroff/reboot without sudo (was only passwordless sudo)
+
 ### Enhancements
 - [Enhancement] Enable programmatic integration between coi and claude_yard projects
 - [Enhancement] Add 5 integration tests for new output formats (3 for list, 2 for exec)
+- [Enhancement] Add integration test for power management commands without sudo
 - [Enhancement] Update README with --format flag documentation and examples
 - [Enhancement] Normalize all "fake-claude" references to "dummy" throughout codebase (tests, docs, scripts)
 - [Enhancement] Remove FAQ.md - content no longer relevant after refactoring
