@@ -7,6 +7,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const (
+	// Version is the current version of coi
+	Version = "0.3.0"
+)
+
 var (
 	// Global flags
 	workspace       string
@@ -38,7 +43,7 @@ Examples:
   coi images                   # List available images
   coi list                     # List active sessions
 `,
-	Version: "0.2.0",
+	Version: Version,
 	// When called without subcommand, run shell command
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Execute shell command with the same args
@@ -110,7 +115,7 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version information",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("claude-on-incus (coi) v0.2.0")
+		fmt.Printf("claude-on-incus (coi) v%s\n", Version)
 		fmt.Println("https://github.com/mensfeld/claude-on-incus")
 	},
 }
