@@ -71,7 +71,7 @@ def test_persistent_multiple_slots_parallel(coi_binary, cleanup_containers, work
         responded = wait_for_text_in_monitor(monitor, "slot 1 message-BACK", timeout=30)
         assert responded, "Fake claude on slot 1 should respond"
 
-    # Exit claude to bash to create marker file
+    # Exit CLI to bash to create marker file
     child1.send("exit")
     time.sleep(0.3)
     child1.send("\x0d")
@@ -151,7 +151,7 @@ def test_persistent_multiple_slots_parallel(coi_binary, cleanup_containers, work
         responded = wait_for_text_in_monitor(monitor, "slot 2 message-BACK", timeout=30)
         assert responded, "Fake claude on slot 2 should respond"
 
-    # Exit claude to bash to test isolation
+    # Exit CLI to bash to test isolation
     child2.send("exit")
     time.sleep(0.3)
     child2.send("\x0d")

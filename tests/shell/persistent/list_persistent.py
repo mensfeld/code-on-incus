@@ -61,7 +61,7 @@ def test_list_persistent(coi_binary, cleanup_containers, workspace_dir):
         time.sleep(2)
         send_prompt(child, "test message")
         responded = wait_for_text_in_monitor(monitor, "test message-BACK", timeout=30)
-        assert responded, "Fake claude should respond"
+        assert responded, "Dummy CLI should respond"
 
     # === Phase 2: Run coi list and check output ===
 
@@ -102,7 +102,7 @@ def test_list_persistent(coi_binary, cleanup_containers, workspace_dir):
 
     # === Phase 3: Cleanup ===
 
-    # Exit claude
+    # Exit CLI
     child.send("exit")
     time.sleep(0.3)
     child.send("\x0d")

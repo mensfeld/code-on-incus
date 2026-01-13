@@ -65,9 +65,9 @@ def test_persistent_session_with_resume(coi_binary, cleanup_containers, workspac
         time.sleep(2)
         send_prompt(child, "remember this message")
         responded = wait_for_text_in_monitor(monitor, "remember this message-BACK", timeout=30)
-        assert responded, "Fake claude should respond"
+        assert responded, "Dummy CLI should respond"
 
-    # Exit claude to bash
+    # Exit CLI to bash
     child.send("exit")
     time.sleep(0.3)
     child.send("\x0d")

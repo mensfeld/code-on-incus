@@ -69,9 +69,9 @@ def test_persistent_resume_does_not_persist_home_files(
         time.sleep(2)
         send_prompt(child, "init session")
         responded = wait_for_text_in_monitor(monitor, "init session-BACK", timeout=30)
-        assert responded, "Fake claude should respond"
+        assert responded, "Dummy CLI should respond"
 
-    # Exit claude to bash
+    # Exit CLI to bash
     child.send("exit")
     time.sleep(0.3)
     child.send("\x0d")
@@ -142,7 +142,7 @@ def test_persistent_resume_does_not_persist_home_files(
         pass  # Continue anyway to check file
 
     time.sleep(2)
-    # Exit claude to bash
+    # Exit CLI to bash
     child2.send("exit")
     time.sleep(1)
     child2.send("\x0d")

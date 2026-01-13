@@ -33,7 +33,7 @@ def test_attach_to_persistent(coi_binary, cleanup_containers, workspace_dir):
     1. Start coi shell --persistent
     2. Detach with Ctrl+b d (claude keeps running)
     3. Attach to container
-    4. Verify we can still interact with claude
+    4. Verify we can still interact with CLI
     5. Cleanup
     """
     env = {"COI_USE_DUMMY": "1"}
@@ -57,7 +57,7 @@ def test_attach_to_persistent(coi_binary, cleanup_containers, workspace_dir):
         time.sleep(2)
         send_prompt(child, "persistent test")
         responded = wait_for_text_in_monitor(monitor, "persistent test-BACK", timeout=30)
-        assert responded, "Fake claude should respond"
+        assert responded, "Dummy CLI should respond"
 
     # === Phase 2: Detach with Ctrl+b d (container stays running) ===
 
@@ -105,7 +105,7 @@ def test_attach_to_persistent(coi_binary, cleanup_containers, workspace_dir):
 
     # === Phase 4: Cleanup ===
 
-    # Exit claude
+    # Exit CLI
     child2.send("exit")
     time.sleep(0.3)
     child2.send("\x0d")

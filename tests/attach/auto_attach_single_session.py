@@ -57,7 +57,7 @@ def test_auto_attach_single_session(coi_binary, cleanup_containers, workspace_di
 
     # === Phase 2: Detach (exit to bash, then exit bash) ===
 
-    # Exit claude to bash
+    # Exit CLI to bash
     child.send("exit")
     time.sleep(0.3)
     child.send("\x0d")

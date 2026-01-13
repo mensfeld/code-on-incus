@@ -124,16 +124,3 @@ def dummy_image(coi_binary):
 
     print(f"✓ Test image '{image_name}' built successfully")
     return image_name
-
-
-# Backwards compatibility aliases (deprecated)
-@pytest.fixture(scope="session")
-def fake_claude_path(dummy_path):
-    """Deprecated: Use dummy_path instead."""
-    return dummy_path
-
-
-@pytest.fixture(scope="session")
-def fake_claude_image(dummy_image):
-    """Deprecated: Use dummy_image instead."""
-    return dummy_image

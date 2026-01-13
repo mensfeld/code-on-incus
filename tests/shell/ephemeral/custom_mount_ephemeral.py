@@ -64,7 +64,7 @@ def test_custom_mount_ephemeral(coi_binary, cleanup_containers, workspace_dir, t
     wait_for_container_ready(child, timeout=60)
     wait_for_prompt(child, timeout=90)
 
-    # Exit claude to bash
+    # Exit CLI to bash
     child.send("exit")
     time.sleep(0.3)
     child.send("\x0d")

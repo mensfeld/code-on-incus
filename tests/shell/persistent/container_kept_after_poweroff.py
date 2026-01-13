@@ -62,9 +62,9 @@ def test_persistent_container_kept_after_poweroff(coi_binary, cleanup_containers
         time.sleep(2)
         send_prompt(child, "hello from test")
         responded = wait_for_text_in_monitor(monitor, "hello from test-BACK", timeout=30)
-        assert responded, "Fake claude should respond with echo"
+        assert responded, "Dummy CLI should respond with echo"
 
-    # Exit claude to get to bash shell
+    # Exit CLI to get to bash shell
     child.send("exit")
     time.sleep(0.3)
     child.send("\x0d")

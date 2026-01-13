@@ -60,7 +60,7 @@ def test_ephemeral_session_with_shutdown(coi_binary, cleanup_containers, workspa
         time.sleep(2)
         send_prompt(child, "hello from test")
         responded = wait_for_text_in_monitor(monitor, "hello from test-BACK", timeout=30)
-        assert responded, "Fake claude should respond with echo"
+        assert responded, "Dummy CLI should respond with echo"
 
     # Step 2: Exit claude to get to bash shell
     child.send("exit")

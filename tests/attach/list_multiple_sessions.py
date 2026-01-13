@@ -51,7 +51,7 @@ def test_attach_lists_multiple_sessions(coi_binary, cleanup_containers, workspac
     wait_for_container_ready(child1, timeout=60)
     wait_for_prompt(child1, timeout=90)
 
-    # Exit claude and bash to detach
+    # Exit CLI and bash to detach
     child1.send("exit")
     time.sleep(0.3)
     child1.send("\x0d")
@@ -85,7 +85,7 @@ def test_attach_lists_multiple_sessions(coi_binary, cleanup_containers, workspac
     wait_for_container_ready(child2, timeout=60)
     wait_for_prompt(child2, timeout=90)
 
-    # Exit claude and bash to detach
+    # Exit CLI and bash to detach
     child2.send("exit")
     time.sleep(0.3)
     child2.send("\x0d")

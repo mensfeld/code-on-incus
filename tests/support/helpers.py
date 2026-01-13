@@ -386,7 +386,7 @@ def send_prompt(child, prompt, delay=0.2):
 
 def exit_claude(child, timeout=60, use_ctrl_c=False):
     """
-    Exit Claude cleanly using /exit command or Ctrl+C.
+    Exit CLI cleanly using /exit command or Ctrl+C.
 
     Args:
         child: pexpect.spawn object
@@ -394,7 +394,7 @@ def exit_claude(child, timeout=60, use_ctrl_c=False):
         use_ctrl_c: Use Ctrl+C instead of /exit (useful for persistent containers)
 
     Returns:
-        True if Claude exited cleanly, False if timeout/force kill occurred
+        True if CLI exited cleanly, False if timeout/force kill occurred
 
     Note:
         After this function returns True, child.exitstatus will be set.

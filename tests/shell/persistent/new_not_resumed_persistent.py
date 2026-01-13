@@ -60,9 +60,9 @@ def test_persistent_new_session_not_resumed(coi_binary, cleanup_containers, work
         time.sleep(2)
         send_prompt(child, "UNIQUE-MARKER-78923")
         responded = wait_for_text_in_monitor(monitor, "UNIQUE-MARKER-78923-BACK", timeout=30)
-        assert responded, "Fake claude should respond"
+        assert responded, "Dummy CLI should respond"
 
-    # Exit claude to bash
+    # Exit CLI to bash
     child.send("exit")
     time.sleep(0.3)
     child.send("\x0d")

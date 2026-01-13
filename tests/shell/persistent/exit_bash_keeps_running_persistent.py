@@ -70,9 +70,9 @@ def test_persistent_exit_bash_keeps_container_running(
         time.sleep(2)
         send_prompt(child, "test message")
         responded = wait_for_text_in_monitor(monitor, "test message-BACK", timeout=30)
-        assert responded, "Fake claude should respond"
+        assert responded, "Dummy CLI should respond"
 
-    # Exit claude to bash
+    # Exit CLI to bash
     child.send("exit")
     time.sleep(0.3)
     child.send("\x0d")

@@ -58,7 +58,7 @@ def test_attach_after_detach(coi_binary, cleanup_containers, workspace_dir):
         time.sleep(2)
         send_prompt(child, "remember marker ABC123")
         responded = wait_for_text_in_monitor(monitor, "remember marker ABC123-BACK", timeout=30)
-        assert responded, "Fake claude should respond"
+        assert responded, "Dummy CLI should respond"
 
     # === Phase 2: Detach with Ctrl+b d ===
 
@@ -106,7 +106,7 @@ def test_attach_after_detach(coi_binary, cleanup_containers, workspace_dir):
 
     # === Phase 4: Cleanup ===
 
-    # Exit claude
+    # Exit CLI
     child2.send("exit")
     time.sleep(0.3)
     child2.send("\x0d")

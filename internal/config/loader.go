@@ -11,10 +11,10 @@ import (
 // Load loads configuration from all available sources
 // Hierarchy (lowest to highest precedence):
 // 1. Built-in defaults
-// 2. System config (/etc/claude-on-incus/config.toml)
-// 3. User config (~/.config/claude-on-incus/config.toml)
-// 4. Project config (./.claude-on-incus.toml)
-// 5. Environment variables (CLAUDE_ON_INCUS_*)
+// 2. System config (/etc/coi/config.toml)
+// 3. User config (~/.config/coi/config.toml)
+// 4. Project config (./.coi.toml)
+// 5. Environment variables (CLAUDE_ON_INCUS_* or COI_*)
 func Load() (*Config, error) {
 	// Start with defaults
 	cfg := GetDefaultConfig()
