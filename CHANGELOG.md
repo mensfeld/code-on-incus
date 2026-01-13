@@ -9,7 +9,7 @@ Add machine-readable output formats to enable programmatic integration with clau
 - [Feature] Add `--format=raw` flag to `coi container exec --capture` for raw stdout output (exit code via $?)
 
 ### Bug Fixes
-- [Fix] Power management permissions - Add polkit rules to allow shutdown/poweroff/reboot without sudo (was only passwordless sudo)
+- [Fix] Power management permissions - Add wrapper scripts for shutdown/poweroff/reboot commands to work without sudo prefix (uses passwordless sudo internally)
 
 ### Enhancements
 - [Enhancement] Enable programmatic integration between coi and claude_yard projects

@@ -30,7 +30,7 @@ install_base_dependencies() {
 
     DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
         curl wget git ca-certificates gnupg jq unzip sudo \
-        tmux policykit-1 \
+        tmux \
         build-essential libssl-dev libreadline-dev zlib1g-dev \
         libffi-dev libyaml-dev libgmp-dev \
         libsqlite3-dev libpq-dev libmysqlclient-dev \
@@ -76,41 +76,28 @@ create_code_user() {
 }
 
 #######################################
-# Configure polkit rules for power management
+# Configure power management wrappers
 #######################################
-configure_polkit() {
-    log "Configuring polkit rules for power management..."
+configure_power_wrappers() {
+    log "Configuring power management command wrappers..."
 
-    # Create polkit rules directory if it doesn't exist
-    mkdir -p /etc/polkit-1/rules.d
+    # Create wrapper scripts that use sudo automatically
+    # This allows users to type "poweroff" instead of "sudo poweroff"
+    # while working around the lack of login sessions in containers
 
-    # Allow code user to shutdown/poweroff/reboot without authentication
-    cat > /etc/polkit-1/rules.d/50-coi-power.rules << 'EOF'
-/* Allow code user to manage system power without authentication */
-polkit.addRule(function(action, subject) {
-    if ((action.id == "org.freedesktop.login1.power-off" ||
-         action.id == "org.freedesktop.login1.power-off-multiple-sessions" ||
-         action.id == "org.freedesktop.login1.reboot" ||
-         action.id == "org.freedesktop.login1.reboot-multiple-sessions" ||
-         action.id == "org.freedesktop.login1.halt" ||
-         action.id == "org.freedesktop.login1.halt-multiple-sessions") &&
-        subject.user == "code") {
-        return polkit.Result.YES;
-    }
-});
+    for cmd in shutdown poweroff reboot halt; do
+        cat > "/usr/local/bin/${cmd}" << 'WRAPPER_EOF'
+#!/bin/bash
+# Wrapper to run power management commands with sudo automatically
+# This works around the lack of login sessions in container environments
+exec sudo /usr/sbin/COMMAND_NAME "$@"
+WRAPPER_EOF
+        # Replace COMMAND_NAME with actual command
+        sed -i "s/COMMAND_NAME/${cmd}/" "/usr/local/bin/${cmd}"
+        chmod 755 "/usr/local/bin/${cmd}"
+    done
 
-/* Allow code user to set wall message */
-polkit.addRule(function(action, subject) {
-    if (action.id == "org.freedesktop.login1.set-wall-message" &&
-        subject.user == "code") {
-        return polkit.Result.YES;
-    }
-});
-EOF
-
-    chmod 644 /etc/polkit-1/rules.d/50-coi-power.rules
-
-    log "Polkit rules configured for power management"
+    log "Power management wrappers configured"
 }
 
 #######################################
@@ -209,7 +196,7 @@ main() {
     install_base_dependencies
     install_nodejs
     create_code_user
-    configure_polkit
+    configure_power_wrappers
     install_claude_cli
     install_dummy
     install_docker

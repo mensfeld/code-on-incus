@@ -4,7 +4,7 @@ Test for power management commands without sudo.
 Tests that:
 1. shutdown, poweroff, and reboot commands work without sudo prefix
 2. Commands don't fail with "Access denied" errors
-3. Polkit rules are properly configured
+3. Wrapper scripts are properly configured in /usr/local/bin
 """
 
 import subprocess
@@ -24,16 +24,17 @@ from support.helpers import (
 
 def test_power_management_no_sudo(coi_binary, cleanup_containers, workspace_dir, dummy_image):
     """
-    Test that shutdown/poweroff/reboot work without sudo.
+    Test that shutdown/poweroff/reboot work without sudo via wrapper scripts.
 
     Flow:
     1. Start ephemeral session with dummy CLI
     2. Exit CLI to bash
-    3. Test shutdown --help without sudo
-    4. Test poweroff --help without sudo
-    5. Test reboot --help without sudo
-    6. Verify no "Access denied" errors
-    7. Cleanup with poweroff (also tests no-sudo poweroff)
+    3. Verify wrapper scripts exist in /usr/local/bin
+    4. Test shutdown --help without sudo
+    5. Test poweroff --help without sudo
+    6. Test reboot --help without sudo
+    7. Verify no "Access denied" or "Permission denied" errors
+    8. Cleanup with poweroff (tests wrapper works for actual poweroff)
     """
     env = {"COI_USE_DUMMY": "1"}
     container_name = calculate_container_name(workspace_dir, 1)
@@ -57,7 +58,20 @@ def test_power_management_no_sudo(coi_binary, cleanup_containers, workspace_dir,
     child.send("\x0d")
     time.sleep(2)
 
-    # === Phase 2: Test shutdown --help without sudo ===
+    # === Phase 2: Verify wrapper scripts exist ===
+
+    with with_live_screen(child) as monitor:
+        time.sleep(1)
+        child.send(
+            "ls -la /usr/local/bin/shutdown /usr/local/bin/poweroff /usr/local/bin/reboot; echo WRAPPERS_CHECK_DONE"
+        )
+        time.sleep(0.3)
+        child.send("\x0d")
+        time.sleep(2)
+
+        wrappers_exist = wait_for_text_in_monitor(monitor, "WRAPPERS_CHECK_DONE", timeout=10)
+
+    # === Phase 3: Test shutdown --help without sudo ===
 
     with with_live_screen(child) as monitor:
         time.sleep(1)
@@ -68,8 +82,11 @@ def test_power_management_no_sudo(coi_binary, cleanup_containers, workspace_dir,
 
         shutdown_ok = wait_for_text_in_monitor(monitor, "SHUTDOWN_TEST_DONE", timeout=10)
         access_denied_shutdown = wait_for_text_in_monitor(monitor, "Access denied", timeout=1)
+        permission_denied_shutdown = wait_for_text_in_monitor(
+            monitor, "Permission denied", timeout=1
+        )
 
-    # === Phase 3: Test poweroff --help without sudo ===
+    # === Phase 4: Test poweroff --help without sudo ===
 
     with with_live_screen(child) as monitor:
         time.sleep(1)
@@ -80,8 +97,11 @@ def test_power_management_no_sudo(coi_binary, cleanup_containers, workspace_dir,
 
         poweroff_ok = wait_for_text_in_monitor(monitor, "POWEROFF_TEST_DONE", timeout=10)
         access_denied_poweroff = wait_for_text_in_monitor(monitor, "Access denied", timeout=1)
+        permission_denied_poweroff = wait_for_text_in_monitor(
+            monitor, "Permission denied", timeout=1
+        )
 
-    # === Phase 4: Test reboot --help without sudo ===
+    # === Phase 5: Test reboot --help without sudo ===
 
     with with_live_screen(child) as monitor:
         time.sleep(1)
@@ -92,8 +112,9 @@ def test_power_management_no_sudo(coi_binary, cleanup_containers, workspace_dir,
 
         reboot_ok = wait_for_text_in_monitor(monitor, "REBOOT_TEST_DONE", timeout=10)
         access_denied_reboot = wait_for_text_in_monitor(monitor, "Access denied", timeout=1)
+        permission_denied_reboot = wait_for_text_in_monitor(monitor, "Permission denied", timeout=1)
 
-    # === Phase 5: Test actual poweroff without sudo (cleanup) ===
+    # === Phase 6: Test actual poweroff without sudo (cleanup) ===
 
     # This also tests that poweroff works without sudo for real cleanup
     with with_live_screen(child) as monitor:
@@ -126,16 +147,26 @@ def test_power_management_no_sudo(coi_binary, cleanup_containers, workspace_dir,
         timeout=30,
     )
 
-    # Assert all commands worked without "Access denied" errors
+    # Assert wrapper scripts exist
+    assert wrappers_exist, "Wrapper scripts should exist in /usr/local/bin"
+
+    # Assert all commands worked without permission errors
     assert shutdown_ok, "shutdown --help should complete successfully"
     assert not access_denied_shutdown, "shutdown --help should not show 'Access denied' error"
+    assert not permission_denied_shutdown, (
+        "shutdown --help should not show 'Permission denied' error"
+    )
 
     assert poweroff_ok, "poweroff --help should complete successfully"
     assert not access_denied_poweroff, "poweroff --help should not show 'Access denied' error"
+    assert not permission_denied_poweroff, (
+        "poweroff --help should not show 'Permission denied' error"
+    )
 
     assert reboot_ok, "reboot --help should complete successfully"
     assert not access_denied_reboot, "reboot --help should not show 'Access denied' error"
+    assert not permission_denied_reboot, "reboot --help should not show 'Permission denied' error"
 
     assert not access_denied_actual_poweroff, (
-        "poweroff should work without sudo (no 'Access denied' error)"
+        "poweroff should work without sudo (no permission errors)"
     )
