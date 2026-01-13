@@ -427,11 +427,23 @@ func runCLIInTmux(result *session.SetupResult, sessionID string, detached bool, 
 	}
 
 	// Ensure tmux server is running first (critical for CI and new containers)
-	serverStartCmd := "tmux start-server 2>/dev/null || true"
-	result.Manager.ExecCommand(serverStartCmd, container.ExecCommandOptions{
+	// In constrained CI environments, wait for the server to be ready
+	serverStartCmd := "tmux start-server 2>/dev/null || true; sleep 0.1"
+	serverOpts := container.ExecCommandOptions{
 		Capture: true,
 		User:    userPtr,
-	})
+	}
+	result.Manager.ExecCommand(serverStartCmd, serverOpts)
+
+	// Poll to ensure server is ready (up to 2 seconds)
+	for i := 0; i < 20; i++ {
+		checkServerCmd := "tmux list-sessions 2>&1 | grep -v 'no server running' || true"
+		_, err := result.Manager.ExecCommand(checkServerCmd, serverOpts)
+		if err == nil {
+			break // Server is ready
+		}
+		result.Manager.ExecCommand("sleep 0.1", serverOpts)
+	}
 
 	// Check if tmux session already exists
 	checkSessionCmd := fmt.Sprintf("tmux has-session -t %s 2>/dev/null", tmuxSessionName)
@@ -504,13 +516,27 @@ func runCLIInTmux(result *session.SetupResult, sessionID string, detached bool, 
 		// This is critical in CI and for newly started containers where tmux server
 		// might not be running yet. The command is idempotent - if server is already
 		// running, it does nothing. We redirect stderr and use || true to ignore errors.
-		serverStartCmd := "tmux start-server 2>/dev/null || true"
+		//
+		// In constrained CI environments, we need to wait for the server to be ready.
+		// We start the server and then verify it's responsive by polling.
+		serverStartCmd := "tmux start-server 2>/dev/null || true; sleep 0.1"
 		serverOpts := container.ExecCommandOptions{
 			User:    userPtr,
 			Capture: true,
 		}
 		result.Manager.ExecCommand(serverStartCmd, serverOpts)
-		// Don't check error - if it fails, subsequent tmux commands will fail with clearer errors
+
+		// Poll to ensure server is ready (up to 2 seconds)
+		// This prevents race conditions in CI where the server takes time to initialize
+		for i := 0; i < 20; i++ {
+			checkServerCmd := "tmux list-sessions 2>&1 | grep -v 'no server running' || true"
+			_, err := result.Manager.ExecCommand(checkServerCmd, serverOpts)
+			if err == nil {
+				break // Server is ready (even if no sessions exist)
+			}
+			// Wait 100ms before next attempt
+			result.Manager.ExecCommand("sleep 0.1", serverOpts)
+		}
 
 		// Step 1: Check if session already exists
 		checkCmd := fmt.Sprintf("tmux has-session -t %s 2>/dev/null", tmuxSessionName)
