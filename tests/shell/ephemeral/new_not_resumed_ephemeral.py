@@ -2,7 +2,7 @@
 Test for coi shell - new session is NOT resumed without --resume flag.
 
 Verifies that:
-1. Start fake-claude, interact with it
+1. Start dummy, interact with it
 2. Poweroff container
 3. Start coi shell again WITHOUT --resume
 4. Verify it's a NEW session (not resuming the old one)
@@ -31,10 +31,10 @@ def test_new_session_not_resumed(coi_binary, cleanup_containers, workspace_dir):
     Test that without --resume, a new session is started.
 
     Flow:
-    1. Start coi shell, interact with fake-claude
+    1. Start coi shell, interact with dummy
     2. Poweroff container
     3. Start coi shell again (no --resume)
-    4. Verify fake-claude shows "Session:" (new session), not "Resuming session:"
+    4. Verify dummy shows "Session:" (new session), not "Resuming session:"
     5. Cleanup
     """
     env = {"COI_USE_DUMMY": "1"}
@@ -54,7 +54,7 @@ def test_new_session_not_resumed(coi_binary, cleanup_containers, workspace_dir):
 
     container_name = calculate_container_name(workspace_dir, 1)
 
-    # Interact with fake-claude - send a unique marker
+    # Interact with dummy - send a unique marker
     with with_live_screen(child) as monitor:
         time.sleep(2)
         send_prompt(child, "UNIQUE-MARKER-78923")

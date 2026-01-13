@@ -31,7 +31,7 @@ def test_attach_after_detach(coi_binary, cleanup_containers, workspace_dir):
 
     Flow:
     1. Start coi shell --persistent
-    2. Send a message to fake-claude
+    2. Send a message to dummy
     3. Detach with Ctrl+b d
     4. Run coi attach
     5. Verify we're back in the same session
@@ -53,7 +53,7 @@ def test_attach_after_detach(coi_binary, cleanup_containers, workspace_dir):
     wait_for_container_ready(child, timeout=60)
     wait_for_prompt(child, timeout=90)
 
-    # Interact with fake-claude
+    # Interact with dummy
     with with_live_screen(child) as monitor:
         time.sleep(2)
         send_prompt(child, "remember marker ABC123")
@@ -97,7 +97,7 @@ def test_attach_after_detach(coi_binary, cleanup_containers, workspace_dir):
 
     time.sleep(2)
 
-    # We should be back in the tmux session with fake-claude
+    # We should be back in the tmux session with dummy
     # The previous output should still be visible or we can interact again
     with with_live_screen(child2) as monitor:
         time.sleep(2)
@@ -140,4 +140,4 @@ def test_attach_after_detach(coi_binary, cleanup_containers, workspace_dir):
     )
 
     # Assert reattach worked
-    assert responded, "Should be able to interact with fake-claude after reattach"
+    assert responded, "Should be able to interact with dummy after reattach"

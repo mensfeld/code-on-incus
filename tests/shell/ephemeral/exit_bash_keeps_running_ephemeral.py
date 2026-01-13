@@ -2,7 +2,7 @@
 Test for coi shell - exit bash keeps container running.
 
 Tests the behavior:
-1. Start fake-claude in ephemeral mode
+1. Start dummy in ephemeral mode
 2. Exit claude to bash
 3. Exit bash (not poweroff)
 4. Verify container is still running
@@ -38,7 +38,7 @@ def test_exit_bash_keeps_container_running(coi_binary, cleanup_containers, works
 
     Flow:
     1. Start coi shell (ephemeral mode)
-    2. Interact with fake-claude
+    2. Interact with dummy
     3. Exit claude to get to bash
     4. Exit bash (should keep container running)
     5. Verify container is still running
@@ -63,7 +63,7 @@ def test_exit_bash_keeps_container_running(coi_binary, cleanup_containers, works
 
     container_name = calculate_container_name(workspace_dir, 1)
 
-    # Interact with fake-claude
+    # Interact with dummy
     with with_live_screen(child) as monitor:
         time.sleep(2)
         send_prompt(child, "test message")

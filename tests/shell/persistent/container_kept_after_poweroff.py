@@ -2,7 +2,7 @@
 Test for coi shell --persistent - container kept after poweroff.
 
 Tests that in persistent mode:
-1. Start fake-claude in persistent mode
+1. Start dummy in persistent mode
 2. Send a message and verify response
 3. Exit to bash shell
 4. Issue sudo poweroff
@@ -34,7 +34,7 @@ def test_persistent_container_kept_after_poweroff(coi_binary, cleanup_containers
 
     Flow:
     1. Start coi shell --persistent
-    2. Interact with fake-claude
+    2. Interact with dummy
     3. Exit claude to get to bash
     4. Run sudo poweroff to stop container
     5. Verify session data is saved
@@ -57,7 +57,7 @@ def test_persistent_container_kept_after_poweroff(coi_binary, cleanup_containers
 
     container_name = calculate_container_name(workspace_dir, 1)
 
-    # Interact with fake-claude
+    # Interact with dummy
     with with_live_screen(child) as monitor:
         time.sleep(2)
         send_prompt(child, "hello from test")

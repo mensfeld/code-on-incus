@@ -97,7 +97,7 @@ def test_attach_to_persistent(coi_binary, cleanup_containers, workspace_dir):
     time.sleep(2)
 
     # We should reconnect to tmux session with claude still running
-    # Try interacting with fake-claude again
+    # Try interacting with dummy again
     with with_live_screen(child2) as monitor:
         time.sleep(2)
         send_prompt(child2, "after attach")

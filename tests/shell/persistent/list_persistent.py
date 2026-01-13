@@ -2,7 +2,7 @@
 Test for coi list - persistent containers should show as persistent.
 
 Tests that:
-1. Start a persistent session with fake-claude
+1. Start a persistent session with dummy
 2. Run coi list
 3. Verify container IS marked as (persistent)
 4. Cleanup container
@@ -56,7 +56,7 @@ def test_list_persistent(coi_binary, cleanup_containers, workspace_dir):
     containers = get_container_list()
     assert container_name in containers, f"Container {container_name} should exist"
 
-    # Interact briefly with fake-claude to ensure session is established
+    # Interact briefly with dummy to ensure session is established
     with with_live_screen(child) as monitor:
         time.sleep(2)
         send_prompt(child, "test message")

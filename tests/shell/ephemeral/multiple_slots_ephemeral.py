@@ -34,7 +34,7 @@ def test_multiple_slots_parallel(coi_binary, cleanup_containers, workspace_dir):
 
     Flow:
     1. Start coi shell (slot 1 auto-allocated)
-    2. Interact with fake-claude, create marker file in ~/
+    2. Interact with dummy, create marker file in ~/
     3. Exit claude, exit bash (detach - container stays running)
     4. Start coi shell again (slot 2 auto-allocated)
     5. Verify both containers are running
@@ -70,7 +70,7 @@ def test_multiple_slots_parallel(coi_binary, cleanup_containers, workspace_dir):
         f"Container {container_name_1} should exist after starting slot 1"
     )
 
-    # Interact with fake-claude on slot 1
+    # Interact with dummy on slot 1
     with with_live_screen(child1) as monitor:
         time.sleep(2)
         send_prompt(child1, "slot 1 message")
@@ -150,7 +150,7 @@ def test_multiple_slots_parallel(coi_binary, cleanup_containers, workspace_dir):
         f"Container {container_name_2} (slot 2) should be running"
     )
 
-    # Interact with fake-claude on slot 2
+    # Interact with dummy on slot 2
     with with_live_screen(child2) as monitor:
         time.sleep(2)
         send_prompt(child2, "slot 2 message")

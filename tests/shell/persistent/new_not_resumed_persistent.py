@@ -2,7 +2,7 @@
 Test for coi shell --persistent - new session is NOT resumed without --resume flag.
 
 Verifies that:
-1. Start fake-claude in persistent mode, interact with it
+1. Start dummy in persistent mode, interact with it
 2. Poweroff container (container kept in persistent mode)
 3. Delete container for clean slate
 4. Start coi shell --persistent again WITHOUT --resume
@@ -31,11 +31,11 @@ def test_persistent_new_session_not_resumed(coi_binary, cleanup_containers, work
     Test that without --resume, a new persistent session is started.
 
     Flow:
-    1. Start coi shell --persistent, interact with fake-claude
+    1. Start coi shell --persistent, interact with dummy
     2. Poweroff container (kept in persistent mode)
     3. Delete container to ensure clean slate
     4. Start coi shell --persistent again (no --resume)
-    5. Verify fake-claude shows new session, not resuming
+    5. Verify dummy shows new session, not resuming
     6. Cleanup
     """
     env = {"COI_USE_DUMMY": "1"}
@@ -55,7 +55,7 @@ def test_persistent_new_session_not_resumed(coi_binary, cleanup_containers, work
 
     container_name = calculate_container_name(workspace_dir, 1)
 
-    # Interact with fake-claude - send a unique marker
+    # Interact with dummy - send a unique marker
     with with_live_screen(child) as monitor:
         time.sleep(2)
         send_prompt(child, "UNIQUE-MARKER-78923")

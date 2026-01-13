@@ -2,13 +2,13 @@
 Test for coi shell - ephemeral session with resume.
 
 Tests the resume lifecycle:
-1. Start fake-claude in ephemeral mode
+1. Start dummy in ephemeral mode
 2. Send a message and verify response
 3. Exit to bash shell
 4. Issue sudo poweroff
 5. Verify container is removed
 6. Run coi shell --resume
-7. Verify session was resumed (fake-claude shows "Resuming session")
+7. Verify session was resumed (dummy shows "Resuming session")
 8. Cleanup
 """
 
@@ -37,7 +37,7 @@ def test_ephemeral_session_with_resume(coi_binary, cleanup_containers, workspace
 
     Flow:
     1. Start coi shell (ephemeral mode)
-    2. Interact with fake-claude
+    2. Interact with dummy
     3. Exit claude to bash, then poweroff
     4. Verify container deleted
     5. Run coi shell --resume
@@ -61,7 +61,7 @@ def test_ephemeral_session_with_resume(coi_binary, cleanup_containers, workspace
 
     container_name = calculate_container_name(workspace_dir, 1)
 
-    # Interact with fake-claude
+    # Interact with dummy
     with with_live_screen(child) as monitor:
         time.sleep(2)
         send_prompt(child, "remember this message")
@@ -130,7 +130,7 @@ def test_ephemeral_session_with_resume(coi_binary, cleanup_containers, workspace
 
     wait_for_container_ready(child2, timeout=60)
 
-    # Wait for fake-claude to show resume message
+    # Wait for dummy to show resume message
     # Fake-claude prints "Resuming session: <session-id>" when resuming
     try:
         wait_for_text_on_screen(child2, "Resuming session", timeout=30)

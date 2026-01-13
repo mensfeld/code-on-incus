@@ -1,17 +1,17 @@
-# Testing Strategy: Real Claude vs Fake Claude
+# Testing Strategy: Real Claude vs Dummy CLI
 
 ## Overview
 
 The test suite uses a **hybrid approach** for optimal speed and reliability:
 
-- **Fake Claude** for most tests (10x+ faster, no license needed)
+- **Dummy CLI** for most tests (10x+ faster, no license needed)
 - **Real Claude** for smoke tests (verify actual integration)
 
 ---
 
 ## Test Classification
 
-### 🟢 Using Fake Claude (Fast Tests)
+### 🟢 Using Dummy CLI (Fast Tests)
 
 **Location:** `tests/shell/ephemeral/`
 
@@ -20,22 +20,22 @@ These tests run with the fake Claude CLI stub for maximum speed and reliability:
 ```
 tests/shell/ephemeral/
   ├── without_tmux/
-  │   ├── file_persistence.py          ✅ Fake Claude
-  │   ├── resume_basic.py               ✅ Fake Claude
-  │   └── start_stop_with_prompt.py     ✅ Fake Claude
+  │   ├── file_persistence.py          ✅ Dummy CLI
+  │   ├── resume_basic.py               ✅ Dummy CLI
+  │   └── start_stop_with_prompt.py     ✅ Dummy CLI
   └── with_tmux/
-      ├── file_persistence.py           ✅ Fake Claude
-      ├── no_mount_claude_config.py     ✅ Fake Claude
-      ├── no_persistence_on_resume.py   ✅ Fake Claude
-      ├── resume_basic.py               ✅ Fake Claude
-      └── start_stop_with_prompt.py     ✅ Fake Claude
+      ├── file_persistence.py           ✅ Dummy CLI
+      ├── no_mount_claude_config.py     ✅ Dummy CLI
+      ├── no_persistence_on_resume.py   ✅ Dummy CLI
+      ├── resume_basic.py               ✅ Dummy CLI
+      └── start_stop_with_prompt.py     ✅ Dummy CLI
 
-tests/shell/fake_claude/
-  ├── basic_startup.py                  ✅ Fake Claude (demo)
-  └── (performance test)                ✅ Fake Claude (demo)
+tests/shell/dummy/
+  ├── basic_startup.py                  ✅ Dummy CLI (demo)
+  └── (performance test)                ✅ Dummy CLI (demo)
 ```
 
-**Total: 10 tests using Fake Claude**
+**Total: 10 tests using Dummy CLI**
 
 **Benefits:**
 - ⚡ **5-8 seconds** per test (vs 25-35 seconds with real Claude)
@@ -88,7 +88,7 @@ Network required:   Yes ❌
 
 ### After (Hybrid Approach):
 ```
-Fake Claude tests:  10 tests × ~6 seconds  = ~1 minute
+Dummy CLI tests:  10 tests × ~6 seconds  = ~1 minute
 Real Claude tests:   8 tests × ~30 seconds = ~4 minutes
 Total time:         ~5 minutes
 
@@ -99,11 +99,11 @@ Network required:   Only for 8 tests ✅
 
 ---
 
-## How Fake Claude Works
+## How Dummy CLI Works
 
 ### The Stub:
 ```bash
-testdata/fake-claude/claude
+testdata/dummy/claude
 
 #!/bin/bash
 # Simulates Claude Code CLI behavior
@@ -116,16 +116,16 @@ testdata/fake-claude/claude
 
 ### Usage in Tests:
 ```python
-def test_something(coi_binary, fake_claude_path, workspace_dir):
+def test_something(coi_binary, dummy_path, workspace_dir):
     # Use fake Claude for faster testing (10x+ speedup)
     env = os.environ.copy()
-    env["PATH"] = f"{fake_claude_path}:{env.get('PATH', '')}"
+    env["PATH"] = f"{dummy_path}:{env.get('PATH', '')}"
 
     child = spawn_coi(
         coi_binary,
         ["shell", "--tmux=false"],
         cwd=workspace_dir,
-        env=env  # ← Fake Claude is now in PATH!
+        env=env  # ← Dummy CLI is now in PATH!
     )
 
     # Rest of test proceeds normally...
@@ -136,7 +136,7 @@ def test_something(coi_binary, fake_claude_path, workspace_dir):
 
 ## What Each Approach Tests
 
-### Fake Claude Tests (Container Orchestration)
+### Dummy CLI Tests (Container Orchestration)
 These tests focus on **coi's container management logic**:
 
 - ✅ Container launch/stop/cleanup
@@ -177,7 +177,7 @@ pytest tests/shell/
 
 ### Run only fast tests (fake Claude):
 ```bash
-pytest tests/shell/ephemeral/ tests/shell/fake_claude/
+pytest tests/shell/ephemeral/ tests/shell/dummy/
 # ~1 minute total ⚡
 ```
 
@@ -206,7 +206,7 @@ pytest tests/shell/persistent/container_persists.py -v
 ### Pull Request CI (Fast Feedback):
 ```yaml
 # Run fast tests only for quick feedback
-- pytest tests/shell/ephemeral/ tests/shell/fake_claude/
+- pytest tests/shell/ephemeral/ tests/shell/dummy/
 - pytest tests/container/ tests/file/ tests/image/ tests/build/
 # Total: ~2 minutes
 ```
@@ -234,22 +234,22 @@ pytest tests/shell/persistent/container_persists.py
 ## Adding New Tests
 
 ### Rule of Thumb:
-1. **Default to Fake Claude** for new tests
+1. **Default to Dummy CLI** for new tests
 2. **Use Real Claude only if** testing Claude-specific behavior
 3. **Add to `persistent/`** only for smoke tests
 
 ### Example - New Feature Test:
 
-#### ✅ Good (Use Fake Claude):
+#### ✅ Good (Use Dummy CLI):
 ```python
 # tests/shell/ephemeral/with_tmux/new_feature.py
 
-def test_new_container_feature(coi_binary, fake_claude_path, workspace_dir):
+def test_new_container_feature(coi_binary, dummy_path, workspace_dir):
     """Test new container orchestration feature."""
 
     # Use fake Claude - we're testing container logic, not Claude
     env = os.environ.copy()
-    env["PATH"] = f"{fake_claude_path}:{env.get('PATH', '')}"
+    env["PATH"] = f"{dummy_path}:{env.get('PATH', '')}"
 
     child = spawn_coi(coi_binary, ["shell"], cwd=workspace_dir, env=env)
     # Test the container feature...
@@ -271,13 +271,13 @@ def test_new_container_feature(coi_binary, workspace_dir):
 
 ## Maintenance
 
-### Updating Fake Claude:
+### Updating Dummy CLI:
 ```bash
 # Edit the stub to add new behavior
-vim testdata/fake-claude/claude
+vim testdata/dummy/claude
 
 # Test the changes
-pytest tests/shell/fake_claude/basic_startup.py -v
+pytest tests/shell/dummy/basic_startup.py -v
 ```
 
 ### Converting Existing Tests:
@@ -287,9 +287,9 @@ def test_something(coi_binary, workspace_dir):
     child = spawn_coi(coi_binary, ["shell"], cwd=workspace_dir)
 
 # After (fast):
-def test_something(coi_binary, fake_claude_path, workspace_dir):
+def test_something(coi_binary, dummy_path, workspace_dir):
     env = os.environ.copy()
-    env["PATH"] = f"{fake_claude_path}:{env.get('PATH', '')}"
+    env["PATH"] = f"{dummy_path}:{env.get('PATH', '')}"
     child = spawn_coi(coi_binary, ["shell"], cwd=workspace_dir, env=env)
 ```
 
@@ -298,7 +298,7 @@ def test_something(coi_binary, fake_claude_path, workspace_dir):
 ## Summary
 
 **Current Test Distribution:**
-- 🟢 Fake Claude: 10 tests (~60 seconds total)
+- 🟢 Dummy CLI: 10 tests (~60 seconds total)
 - 🔵 Real Claude: 8 tests (~240 seconds total)
 - 📊 Total improvement: **40% faster** than all-real-Claude approach
 

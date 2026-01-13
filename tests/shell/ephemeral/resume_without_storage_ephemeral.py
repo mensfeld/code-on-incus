@@ -2,7 +2,7 @@
 Test for coi shell - ephemeral resume does NOT persist home directory files.
 
 Verifies that:
-1. Start fake-claude, exit to bash
+1. Start dummy, exit to bash
 2. Create a file ~/test.txt in container
 3. Poweroff container
 4. Resume session
@@ -58,7 +58,7 @@ def test_resume_does_not_persist_home_files(coi_binary, cleanup_containers, work
 
     container_name = calculate_container_name(workspace_dir, 1)
 
-    # Quick interaction with fake-claude
+    # Quick interaction with dummy
     with with_live_screen(child) as monitor:
         time.sleep(2)
         send_prompt(child, "init session")

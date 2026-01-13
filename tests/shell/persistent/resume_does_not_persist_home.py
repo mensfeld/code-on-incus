@@ -2,7 +2,7 @@
 Test for coi shell --persistent - resume does NOT persist home directory files.
 
 Verifies that:
-1. Start fake-claude in persistent mode, exit to bash
+1. Start dummy in persistent mode, exit to bash
 2. Create a file ~/test.txt in container
 3. Poweroff container (kept in persistent mode)
 4. Delete container (to test pure resume behavior)
@@ -64,7 +64,7 @@ def test_persistent_resume_does_not_persist_home_files(
 
     container_name = calculate_container_name(workspace_dir, 1)
 
-    # Quick interaction with fake-claude
+    # Quick interaction with dummy
     with with_live_screen(child) as monitor:
         time.sleep(2)
         send_prompt(child, "init session")

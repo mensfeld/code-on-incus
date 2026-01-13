@@ -1,14 +1,14 @@
 #!/bin/bash
-# Install fake Claude into the container for testing
+# Install dummy CLI into the container for testing
 set -e
 
-echo "Installing fake Claude CLI for testing..."
+echo "Installing dummy CLI CLI for testing..."
 
-# Install fake Claude as /usr/local/bin/claude
-cp /workspace/testdata/fake-claude/claude /usr/local/bin/claude
+# Install dummy CLI as /usr/local/bin/claude
+cp /workspace/testdata/dummy/claude /usr/local/bin/claude
 chmod +x /usr/local/bin/claude
 
 # Verify it works
 /usr/local/bin/claude --version
 
-echo "✓ Fake Claude installed successfully"
+echo "✓ Dummy CLI installed successfully"

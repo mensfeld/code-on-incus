@@ -2,13 +2,13 @@
 Test for coi shell --persistent - session with resume.
 
 Tests the resume lifecycle in persistent mode:
-1. Start fake-claude in persistent mode
+1. Start dummy in persistent mode
 2. Send a message and verify response
 3. Exit to bash shell
 4. Issue sudo poweroff (container kept in persistent mode)
 5. Delete container to simulate fresh start
 6. Run coi shell --persistent --resume
-7. Verify session was resumed (fake-claude shows "Resuming session")
+7. Verify session was resumed (dummy shows "Resuming session")
 8. Cleanup
 """
 
@@ -36,7 +36,7 @@ def test_persistent_session_with_resume(coi_binary, cleanup_containers, workspac
 
     Flow:
     1. Start coi shell --persistent
-    2. Interact with fake-claude
+    2. Interact with dummy
     3. Exit claude to bash, then poweroff
     4. Delete container (for clean slate)
     5. Run coi shell --persistent --resume
@@ -60,7 +60,7 @@ def test_persistent_session_with_resume(coi_binary, cleanup_containers, workspac
 
     container_name = calculate_container_name(workspace_dir, 1)
 
-    # Interact with fake-claude
+    # Interact with dummy
     with with_live_screen(child) as monitor:
         time.sleep(2)
         send_prompt(child, "remember this message")
@@ -135,7 +135,7 @@ def test_persistent_session_with_resume(coi_binary, cleanup_containers, workspac
 
     wait_for_container_ready(child2, timeout=60)
 
-    # Wait for fake-claude to show resume message
+    # Wait for dummy to show resume message
     try:
         wait_for_text_on_screen(child2, "Resuming session", timeout=30)
         resumed = True

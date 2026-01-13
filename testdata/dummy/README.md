@@ -46,4 +46,4 @@ To add more realistic behavior:
 
 ## Future: Supporting Multiple CLI Tools
 
-This dummy is the first step toward making coi support different CLI tools beyond Claude Code. The generic naming (dummy instead of fake-claude) reflects this direction.
+This dummy is the first step toward making coi support different CLI tools beyond Claude Code. The generic naming (dummy instead of dummy) reflects this direction.

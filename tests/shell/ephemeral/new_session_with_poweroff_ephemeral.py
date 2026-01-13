@@ -2,7 +2,7 @@
 Test for coi shell - ephemeral session with shutdown.
 
 Tests the complete lifecycle:
-1. Start fake-claude in ephemeral mode
+1. Start dummy in ephemeral mode
 2. Send a message and verify response
 3. Exit to bash shell
 4. Issue sudo shutdown 0
@@ -33,7 +33,7 @@ def test_ephemeral_session_with_shutdown(coi_binary, cleanup_containers, workspa
 
     Flow:
     1. Start coi shell (ephemeral mode)
-    2. Interact with fake-claude
+    2. Interact with dummy
     3. Exit claude to get to bash
     4. Run sudo shutdown 0 to stop container
     5. Verify cleanup messages appear
@@ -55,7 +55,7 @@ def test_ephemeral_session_with_shutdown(coi_binary, cleanup_containers, workspa
 
     container_name = calculate_container_name(workspace_dir, 1)
 
-    # Step 1: Interact with fake-claude to verify it works
+    # Step 1: Interact with dummy to verify it works
     with with_live_screen(child) as monitor:
         time.sleep(2)
         send_prompt(child, "hello from test")
