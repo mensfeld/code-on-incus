@@ -46,7 +46,7 @@ func IncusExecQuiet(args ...string) error {
 	return cmd.Run()
 }
 
-// IncusOutput executes an Incus command and returns the output
+// IncusOutput executes an Incus command and returns the output (trimmed)
 func IncusOutput(args ...string) (string, error) {
 	cmdArgs := buildIncusCommand(args...)
 	cmd := exec.Command("sg", cmdArgs...)
@@ -57,6 +57,32 @@ func IncusOutput(args ...string) (string, error) {
 
 	err := cmd.Run()
 	output := strings.TrimSpace(stdout.String())
+
+	if err != nil {
+		// Extract exit code if available
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return output, &ExitError{
+				ExitCode: exitErr.ExitCode(),
+				Err:      err,
+			}
+		}
+		return output, err
+	}
+
+	return output, nil
+}
+
+// IncusOutputRaw executes an Incus command and returns the output (not trimmed)
+func IncusOutputRaw(args ...string) (string, error) {
+	cmdArgs := buildIncusCommand(args...)
+	cmd := exec.Command("sg", cmdArgs...)
+
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = nil
+
+	err := cmd.Run()
+	output := stdout.String()
 
 	if err != nil {
 		// Extract exit code if available

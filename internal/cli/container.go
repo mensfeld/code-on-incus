@@ -119,13 +119,22 @@ Examples:
 		}
 
 		capture, _ := cmd.Flags().GetBool("capture")
+		format, _ := cmd.Flags().GetString("format")
 		mgr := container.NewManager(containerName)
 
-		if capture {
-			// For capture mode, use ExecCommand with bash -c
-			command := strings.Join(commandArgs, " ")
+		// Validate that --format requires --capture
+		if cmd.Flags().Changed("format") && !capture {
+			return exitError(2, "--format flag requires --capture flag")
+		}
 
-			// Parse flags for ExecCommand
+		// Validate format value
+		if format != "json" && format != "raw" {
+			return exitError(2, fmt.Sprintf("invalid format '%s': must be 'json' or 'raw'", format))
+		}
+
+		if capture {
+			// For capture mode, use ExecArgsCapture (no bash -c wrapping, preserves whitespace)
+			// Parse flags
 			userFlag, _ := cmd.Flags().GetInt("user")
 			groupFlag, _ := cmd.Flags().GetInt("group")
 			envVars, _ := cmd.Flags().GetStringArray("env")
@@ -141,9 +150,8 @@ Examples:
 			}
 
 			opts := container.ExecCommandOptions{
-				Cwd:     cwd,
-				Env:     env,
-				Capture: true,
+				Cwd: cwd,
+				Env: env,
 			}
 
 			if cmd.Flags().Changed("user") {
@@ -153,16 +161,38 @@ Examples:
 				opts.Group = &groupFlag
 			}
 
-			output, err := mgr.ExecCommand(command, opts)
+			output, err := mgr.ExecArgsCapture(commandArgs, opts)
+
+			// Handle raw format - output stdout and exit with proper code
+			if format == "raw" {
+				fmt.Print(output) // No newline, preserve exact output
+				if err != nil {
+					// Extract actual exit code if available, otherwise use 1
+					exitCode := 1
+					if exitErr, ok := err.(*container.ExitError); ok {
+						exitCode = exitErr.ExitCode
+					}
+					os.Exit(exitCode)
+				}
+				return nil
+			}
+
+			// Handle JSON format (default)
+			exitCode := 0
+			stderr := ""
+			if err != nil {
+				// Extract actual exit code if available, otherwise use 1
+				exitCode = 1
+				if exitErr, ok := err.(*container.ExitError); ok {
+					exitCode = exitErr.ExitCode
+				}
+				stderr = err.Error()
+			}
 
 			result := map[string]interface{}{
 				"stdout":    output,
-				"stderr":    "",
-				"exit_code": 0,
-			}
-			if err != nil {
-				result["exit_code"] = 1
-				result["stderr"] = err.Error()
+				"stderr":    stderr,
+				"exit_code": exitCode,
 			}
 			jsonOutput, _ := json.MarshalIndent(result, "", "  ")
 			fmt.Println(string(jsonOutput))
@@ -301,6 +331,7 @@ func init() {
 	containerExecCmd.Flags().StringArray("env", []string{}, "Environment variable (KEY=VALUE)")
 	containerExecCmd.Flags().String("cwd", "/workspace", "Working directory")
 	containerExecCmd.Flags().Bool("capture", false, "Capture output as JSON")
+	containerExecCmd.Flags().String("format", "json", "Output format when using --capture: json or raw")
 
 	// Add flags to mount command
 	containerMountCmd.Flags().Bool("shift", true, "Enable UID/GID shifting")

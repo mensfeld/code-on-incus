@@ -65,8 +65,12 @@ create_code_user() {
     chmod 700 "/home/$CODE_USER/.ssh"
     chown -R "$CODE_USER:$CODE_USER" "/home/$CODE_USER"
 
-    # Setup passwordless sudo
+    # Setup passwordless sudo for all commands
     echo "$CODE_USER ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/$CODE_USER"
+
+    # Also explicitly allow shutdown/poweroff/reboot with passwordless sudo
+    echo "$CODE_USER ALL=(ALL) NOPASSWD: /sbin/shutdown, /sbin/poweroff, /sbin/reboot" >> "/etc/sudoers.d/$CODE_USER"
+
     chown root:root "/etc/sudoers.d/$CODE_USER"
     chmod 440 "/etc/sudoers.d/$CODE_USER"
     usermod -aG sudo "$CODE_USER"

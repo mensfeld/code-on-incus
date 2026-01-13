@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## 0.3.0 (TBD)
+
+Add machine-readable output formats to enable programmatic integration with claude_yard Ruby project.
+
+### Features
+- [Feature] Add `--format=json` flag to `coi list` command for machine-readable output
+- [Feature] Add `--format=raw` flag to `coi container exec --capture` for raw stdout output (exit code via $?)
+
+### Enhancements
+- [Enhancement] Enable programmatic integration between coi and claude_yard projects
+- [Enhancement] Add 5 integration tests for new output formats (3 for list, 2 for exec)
+- [Enhancement] Update README with --format flag documentation and examples
+
 ## 0.2.0 (2025-01-12)
 
 Major internal refactoring to make coi CLI-agnostic (zero breaking changes). Enables future support for tools beyond Claude Code (e.g., Aider, Cursor). Includes bug fixes for persistent containers, slot allocation, and CI improvements.

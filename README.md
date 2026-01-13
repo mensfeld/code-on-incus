@@ -4,22 +4,18 @@
 [![Go Version](https://img.shields.io/github/go-mod/go-version/mensfeld/claude-on-incus)](https://golang.org/)
 [![Latest Release](https://img.shields.io/github/v/release/mensfeld/claude-on-incus)](https://github.com/mensfeld/claude-on-incus/releases)
 
-**The Professional Claude Code Container Runtime for Linux**
+**Secure and Fast CLI Tool Container Runtime for Linux**
 
-Run Claude Code in isolated, production-grade Incus containers with zero permission headaches, perfect file ownership, and true multi-session support.
+Run Claude Code (and other AI coding tools soon) in isolated, production-grade Incus containers with zero permission headaches, perfect file ownership, and true multi-session support.
 
-**Security First:** Unlike Docker or bare-metal execution, your environment variables, SSH keys, and Git credentials are **never** exposed to Claude. Containers run in complete isolation with no access to your host credentials unless explicitly mounted.
+**Security First:** Unlike Docker or bare-metal execution, your environment variables, SSH keys, and Git credentials are **never** exposed to AI tools. Containers run in complete isolation with no access to your host credentials unless explicitly mounted.
 
-*Think Docker for Claude, but with system containers that actually work like real machines.*
-
-## Demo
-
-<!-- Placeholder for asciicast demo - to be added -->
+*Think Docker for AI coding tools, but with system containers that actually work like real machines.*
 
 ## Features
 
 **Core Capabilities**
-- Multi-slot support - Run parallel Claude sessions for the same workspace with full isolation
+- Multi-slot support - Run parallel AI coding sessions for the same workspace with full isolation
 - Session resume - Resume conversations with full history and credentials restored (workspace-scoped)
 - Persistent containers - Keep containers alive between sessions (installed tools preserved)
 - Workspace isolation - Each session mounts your project directory
@@ -30,19 +26,12 @@ Run Claude Code in isolated, production-grade Incus containers with zero permiss
 - Automatic UID mapping - No permission hell, files owned correctly
 - System containers - Full security isolation, better than Docker privileged mode
 - Project separation - Complete isolation between workspaces
-- **Credential protection** - No risk of SSH keys, `.env` files, or Git credentials being exposed to Claude
-
-**Developer Experience**
-- 15+ CLI commands - shell, run, build, list, info, attach, images, clean, kill, shutdown, tmux, version, container, file, image
-- Shell completions - Built-in bash/zsh/fish completions via `coi completion`
-- Smart configuration - TOML-based with profiles and hierarchy
-- Tmux integration - Background processes and session management
-- Claude config mounting - Automatic `~/.claude` and `.claude.json` sync (enabled by default)
+- **Credential protection** - No risk of SSH keys, `.env` files, or Git credentials being exposed to AI tools
 
 **Safe `--dangerous` Flags**
 - Claude Code CLI uses `--dangerously-disable-sandbox` and `--dangerously-allow-write-to-root` flags
 - **These are safe inside containers** because the "root" is the container root, not your host system
-- Containers are ephemeral or isolated - any changes are contained and don't affect your host
+- Containers are ephemeral - any changes are contained and don't affect your host
 - This gives Claude full capabilities while keeping your system protected
 
 ## Quick Start
@@ -130,14 +119,6 @@ coi build custom my-image --base coi --script setup.sh
 
 **Custom images:** Build your own specialized images using build scripts that run on top of the base `coi` image.
 
-### Verify Installation
-
-```bash
-coi version        # Check version
-incus version      # Verify Incus access
-groups | grep incus-admin  # Confirm group membership
-```
-
 ## Usage
 
 ### Basic Commands
@@ -203,6 +184,10 @@ coi clean
 # List all containers and sessions
 coi list --all
 
+# Machine-readable JSON output (for programmatic use)
+coi list --format=json
+coi list --all --format=json
+
 # Output shows container mode:
 #   coi-abc12345-1 (ephemeral)   - will be deleted on exit
 #   coi-abc12345-2 (persistent)  - will be kept for reuse
@@ -243,7 +228,10 @@ coi container delete my-container --force
 # Execute commands in containers
 coi container exec my-container -- ls -la /workspace
 coi container exec my-container --user 1000 --env FOO=bar --cwd /workspace -- npm test
-coi container exec my-container --capture -- echo "hello"  # JSON output
+
+# Capture output in different formats
+coi container exec my-container --capture -- echo "hello"  # JSON output (default)
+coi container exec my-container --capture --format=raw -- pwd  # Raw stdout (for scripting)
 
 # Check container status
 coi container exists my-container
@@ -389,89 +377,6 @@ persistent = true
 4. Project config (`./.coi.toml`)
 5. CLI flags
 
-## Use Cases
-
-| Use Case | Problem | Solution |
-|----------|---------|----------|
-| **Individual Developers** | Multiple projects with different tool versions | Each project gets isolated container with specific tools |
-| **Teams** | "Works on my machine" syndrome | Share `.coi.toml`, everyone gets identical environment |
-| **AI/ML Development** | Need Docker inside container | Incus natively supports Docker-in-container, no DinD hacks |
-| **Security-Conscious** | Can't use Docker privileged mode | True isolation without privileged mode |
-
-## Requirements
-
-- **Incus** - Linux container manager
-- **Go 1.21+** - For building from source
-- **incus-admin group** - User must be in group
-
-## Performance: Fast Storage
-
-By default, Incus uses directory-based storage which copies entire filesystems when creating containers. For **instant container creation**, use ZFS or Btrfs which support copy-on-write cloning.
-
-### Setting Up ZFS Storage (Recommended)
-
-```bash
-# Install ZFS
-sudo apt install zfsutils-linux
-
-# Create a ZFS storage pool (50GB loopback file)
-sudo incus storage create zfs-pool zfs size=50GiB
-
-# Or use a dedicated partition for best performance
-# sudo incus storage create zfs-pool zfs source=/dev/nvme0n1p4
-
-# Update the default profile to use ZFS
-incus profile device set default root pool=zfs-pool
-```
-
-### Performance Comparison
-
-| Storage Type | Container Creation | Copy Mechanism |
-|--------------|-------------------|----------------|
-| **dir** (default) | ~10-30 seconds | Full filesystem copy |
-| **zfs** | < 1 second | Copy-on-write clone |
-| **btrfs** | < 1 second | Copy-on-write clone |
-
-After switching to ZFS, new containers use instant snapshots. Existing containers remain on the old storage pool.
-
-## Troubleshooting
-
-### "incus is not available"
-```bash
-sudo apt update && sudo apt install -y incus
-sudo incus admin init --auto
-sudo usermod -aG incus-admin $USER
-# Log out and back in
-```
-
-### "permission denied" errors
-```bash
-groups | grep incus-admin  # Check membership
-sudo usermod -aG incus-admin $USER  # Add yourself
-# Log out and back in
-```
-
-### Container won't start
-```bash
-incus info  # Check daemon status
-sudo systemctl start incus
-```
-
-## Project Status
-
-**Production Ready** - All core features are fully implemented and tested.
-
-**Implemented Features:**
-- Core commands: shell, run, build, list, info, attach, images, clean, kill, shutdown, tmux, version
-- Advanced operations: container (launch/start/stop/delete/exec/mount), file (push/pull), image (list/publish/delete/cleanup)
-- Multi-slot parallel sessions
-- Session resume with full conversation history and credentials restoration
-- Persistent containers with state preservation
-- Custom image building from user scripts
-- Low-level container and file transfer operations
-- Automatic UID mapping
-- TOML-based configuration with profiles
-- Comprehensive integration test suite (54 tests passing)
 
 ## Container Lifecycle & Session Persistence
 
@@ -513,9 +418,9 @@ Understanding how containers and sessions work in `coi`:
 ### Stopping Containers
 
 From **inside** the container:
-- `exit` in bash → saves session, then deletes container (or keeps if `--persistent`)
-- `Ctrl+b d` → detaches, saves session, container stays running
-- `sudo shutdown 0` → stops container, session is saved, then container is deleted (or kept if `--persistent`)
+- `exit` in bash → exits bash but keeps container running (use for temporary shell exit)
+- `Ctrl+b d` → detaches from tmux, container stays running
+- `sudo shutdown 0` or `sudo poweroff` → stops container, session is saved, then container is deleted (or kept if `--persistent`)
 
 From **outside** (host):
 - `coi shutdown <name>` → graceful stop with session save, then delete (60s timeout by default)
@@ -532,9 +437,11 @@ From **outside** (host):
 ```bash
 coi shell                    # Start session
 # ... work with claude ...
-exit                         # Exit bash → session saved, container deleted
+sudo poweroff                # Shutdown container → session saved, container deleted
 coi shell --resume           # Continue conversation in fresh container
 ```
+
+**Note:** `exit` in bash keeps the container running - use `sudo poweroff` or `sudo shutdown 0` to properly end the session. Both require sudo but no password.
 
 **Long-running project (`--persistent`):**
 ```bash
@@ -542,7 +449,8 @@ coi shell --persistent       # Start persistent session
 # ... install tools, build things ...
 # Press Ctrl+b d to detach
 coi attach                   # Reconnect to same container with all tools
-coi shutdown --all           # When done, clean up
+sudo poweroff                # When done, shutdown and save
+coi shell --persistent --resume  # Resume with all installed tools intact
 ```
 
 **Parallel sessions (multi-slot):**
@@ -566,19 +474,7 @@ coi shell
 coi list
 #   coi-abc12345-1 (ephemeral)
 #   coi-abc12345-2 (ephemeral)
+
+# When done, shutdown all sessions
+coi shutdown --all
 ```
-
-## License
-
-MIT
-
-## Author
-
-Maciej Mensfeld ([@mensfeld](https://github.com/mensfeld))
-
-## See Also
-
-- [FAQ](FAQ.md) - Frequently asked questions
-- [CHANGELOG](CHANGELOG.md) - Version history and release notes
-- [Integration Tests](INTE.md) - Comprehensive E2E testing documentation
-- [Incus](https://linuxcontainers.org/incus/) - Linux container manager

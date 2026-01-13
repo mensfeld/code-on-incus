@@ -14,7 +14,8 @@ import (
 )
 
 var (
-	listAll bool
+	listAll    bool
+	listFormat string
 )
 
 var listCmd = &cobra.Command{
@@ -33,6 +34,7 @@ Examples:
 
 func init() {
 	listCmd.Flags().BoolVar(&listAll, "all", false, "Show saved sessions in addition to active containers")
+	listCmd.Flags().StringVar(&listFormat, "format", "text", "Output format: text or json")
 }
 
 func listCommand(cmd *cobra.Command, args []string) error {
@@ -41,10 +43,12 @@ func listCommand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	// List active containers
-	fmt.Println("Active Containers:")
-	fmt.Println("------------------")
+	// Validate format value
+	if listFormat != "text" && listFormat != "json" {
+		return fmt.Errorf("invalid format '%s': must be 'text' or 'json'", listFormat)
+	}
 
+	// List active containers
 	containers, err := listActiveContainers()
 	if err != nil {
 		return fmt.Errorf("failed to list containers: %w", err)
@@ -71,53 +75,21 @@ func listCommand(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	if len(containers) == 0 {
-		fmt.Println("  (none)")
-	} else {
-		for _, c := range containers {
-			// Show container name with mode indicator from session metadata
-			// (not from Incus state, since all containers are now created as persistent in Incus)
-			if persistent, ok := containerPersistent[c.Name]; ok && persistent {
-				fmt.Printf("  %s (persistent)\n", c.Name)
-			} else {
-				fmt.Printf("  %s (ephemeral)\n", c.Name)
-			}
-			fmt.Printf("    Status: %s\n", c.Status)
-			fmt.Printf("    Created: %s\n", c.CreatedAt)
-			if c.Image != "" {
-				fmt.Printf("    Image: %s\n", c.Image)
-			}
-			// Show workspace if we have it from session metadata
-			if workspace, ok := containerWorkspaces[c.Name]; ok && workspace != "" {
-				fmt.Printf("    Workspace: %s\n", workspace)
-			}
-		}
-	}
-
-	// List saved sessions if --all
+	// Get saved sessions if --all
+	var sessions []SessionInfo
 	if listAll {
-		fmt.Println("\nSaved Sessions:")
-		fmt.Println("---------------")
-
-		sessions, err := listSavedSessions(cfg.Paths.SessionsDir)
+		sessions, err = listSavedSessions(cfg.Paths.SessionsDir)
 		if err != nil {
 			return fmt.Errorf("failed to list sessions: %w", err)
 		}
-
-		if len(sessions) == 0 {
-			fmt.Println("  (none)")
-		} else {
-			for _, s := range sessions {
-				fmt.Printf("  %s\n", s.ID)
-				fmt.Printf("    Saved: %s\n", s.SavedAt)
-				if s.Workspace != "" {
-					fmt.Printf("    Workspace: %s\n", s.Workspace)
-				}
-			}
-		}
 	}
 
-	return nil
+	// Route to formatter
+	if listFormat == "json" {
+		return outputJSON(containers, sessions, containerWorkspaces, containerPersistent)
+	}
+
+	return outputText(containers, sessions, containerWorkspaces, containerPersistent)
 }
 
 // ContainerInfo holds information about a container
@@ -230,4 +202,91 @@ func listSavedSessions(sessionsDir string) ([]SessionInfo, error) {
 	}
 
 	return result, nil
+}
+
+// outputJSON formats container and session data as JSON
+func outputJSON(containers []ContainerInfo, sessions []SessionInfo,
+	workspaces map[string]string, persistent map[string]bool) error {
+
+	// Enrich container data
+	enrichedContainers := make([]map[string]interface{}, 0, len(containers))
+	for _, c := range containers {
+		item := map[string]interface{}{
+			"name":       c.Name,
+			"status":     c.Status,
+			"created_at": c.CreatedAt,
+			"image":      c.Image,
+			"persistent": persistent[c.Name],
+		}
+		if ws, ok := workspaces[c.Name]; ok {
+			item["workspace"] = ws
+		}
+		enrichedContainers = append(enrichedContainers, item)
+	}
+
+	// Build output structure
+	output := map[string]interface{}{
+		"active_containers": enrichedContainers,
+	}
+
+	if len(sessions) > 0 {
+		output["saved_sessions"] = sessions
+	}
+
+	// Marshal to JSON
+	jsonData, err := json.MarshalIndent(output, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal JSON: %w", err)
+	}
+
+	fmt.Println(string(jsonData))
+	return nil
+}
+
+// outputText formats container and session data as human-readable text
+func outputText(containers []ContainerInfo, sessions []SessionInfo,
+	workspaces map[string]string, persistent map[string]bool) error {
+
+	// Active Containers section
+	fmt.Println("Active Containers:")
+	fmt.Println("------------------")
+
+	if len(containers) == 0 {
+		fmt.Println("  (none)")
+	} else {
+		for _, c := range containers {
+			// Show container name with mode indicator from session metadata
+			// (not from Incus state, since all containers are now created as persistent in Incus)
+			if persistent[c.Name] {
+				fmt.Printf("  %s (persistent)\n", c.Name)
+			} else {
+				fmt.Printf("  %s (ephemeral)\n", c.Name)
+			}
+			fmt.Printf("    Status: %s\n", c.Status)
+			fmt.Printf("    Created: %s\n", c.CreatedAt)
+			if c.Image != "" {
+				fmt.Printf("    Image: %s\n", c.Image)
+			}
+			// Show workspace if we have it from session metadata
+			if workspace, ok := workspaces[c.Name]; ok && workspace != "" {
+				fmt.Printf("    Workspace: %s\n", workspace)
+			}
+		}
+	}
+
+	// Saved Sessions section (only with --all)
+	if len(sessions) > 0 {
+		fmt.Println("\nSaved Sessions:")
+		fmt.Println("---------------")
+
+		for _, s := range sessions {
+			fmt.Printf("  %s\n", s.ID)
+			fmt.Printf("    Saved: %s\n", s.SavedAt)
+			if s.Workspace != "" {
+				fmt.Printf("    Workspace: %s\n", s.Workspace)
+			}
+		}
+	}
+
+	return nil
 }
