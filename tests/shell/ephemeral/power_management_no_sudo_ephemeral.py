@@ -104,7 +104,9 @@ def test_power_management_no_sudo(coi_binary, cleanup_containers, workspace_dir,
         time.sleep(2)
 
         # Should not see "Access denied" error during poweroff
-        access_denied_actual_poweroff = wait_for_text_in_monitor(monitor, "Access denied", timeout=3)
+        access_denied_actual_poweroff = wait_for_text_in_monitor(
+            monitor, "Access denied", timeout=3
+        )
 
     try:
         child.expect(EOF, timeout=60)
@@ -134,4 +136,6 @@ def test_power_management_no_sudo(coi_binary, cleanup_containers, workspace_dir,
     assert reboot_ok, "reboot --help should complete successfully"
     assert not access_denied_reboot, "reboot --help should not show 'Access denied' error"
 
-    assert not access_denied_actual_poweroff, "poweroff should work without sudo (no 'Access denied' error)"
+    assert not access_denied_actual_poweroff, (
+        "poweroff should work without sudo (no 'Access denied' error)"
+    )
