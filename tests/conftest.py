@@ -63,6 +63,15 @@ def cleanup_containers(workspace_dir, coi_binary):
                 check=False,
             )
 
+    # Kill any orphaned tmux sessions to prevent test pollution
+    # This ensures clean state between tests, especially after tmux command tests
+    subprocess.run(
+        ["tmux", "kill-server"],
+        capture_output=True,
+        timeout=5,
+        check=False,
+    )
+
 
 @pytest.fixture(scope="session")
 def dummy_path():

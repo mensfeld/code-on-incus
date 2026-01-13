@@ -98,21 +98,28 @@ func killCommand(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Killing container %s...\n", name)
 		mgr := container.NewManager(name)
 
-		// Stop container
-		if err := mgr.Stop(true); err != nil {
-			fmt.Fprintf(os.Stderr, "  Warning: Failed to stop %s: %v\n", name, err)
+		// Check if container exists first
+		exists, err := mgr.Exists()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  Warning: Failed to check if %s exists: %v\n", name, err)
+			continue
+		}
+		if !exists {
+			fmt.Fprintf(os.Stderr, "  Warning: Container %s does not exist\n", name)
+			continue
+		}
+
+		// Stop container (only if running - skip if already stopped)
+		running, err := mgr.Running()
+		if err == nil && running {
+			if err := mgr.Stop(true); err != nil {
+				fmt.Fprintf(os.Stderr, "  Warning: Failed to stop %s: %v\n", name, err)
+			}
 		}
 
 		// Delete container
 		if err := mgr.Delete(true); err != nil {
-			// Check if container still exists - it might have been ephemeral and auto-deleted
-			exists, _ := mgr.Exists()
-			if !exists {
-				killed++
-				fmt.Printf("  ✓ Killed %s\n", name)
-			} else {
-				fmt.Fprintf(os.Stderr, "  Warning: Failed to delete %s: %v\n", name, err)
-			}
+			fmt.Fprintf(os.Stderr, "  Warning: Failed to delete %s: %v\n", name, err)
 		} else {
 			killed++
 			fmt.Printf("  ✓ Killed %s\n", name)
