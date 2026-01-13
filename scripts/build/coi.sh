@@ -30,7 +30,7 @@ install_base_dependencies() {
 
     DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
         curl wget git ca-certificates gnupg jq unzip sudo \
-        tmux \
+        tmux polkit \
         build-essential libssl-dev libreadline-dev zlib1g-dev \
         libffi-dev libyaml-dev libgmp-dev \
         libsqlite3-dev libpq-dev libmysqlclient-dev \
