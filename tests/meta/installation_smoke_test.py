@@ -134,7 +134,9 @@ def test_full_installation_process(meta_container, coi_binary):
             print(f"apt-get attempt {attempt + 1} failed, retrying...")
             time.sleep(10)  # Wait before retry
 
-    assert result.returncode == 0, f"Failed to install dependencies after {max_retries} attempts: {last_error}"
+    assert result.returncode == 0, (
+        f"Failed to install dependencies after {max_retries} attempts: {last_error}"
+    )
 
     # Phase 2: Install Go
     result = exec_in_container(
