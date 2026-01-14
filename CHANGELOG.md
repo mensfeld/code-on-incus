@@ -1,5 +1,56 @@
 # CHANGELOG
 
+## 0.3.3 (2026-01-14)
+
+Add domain allowlisting feature for network isolation, enabling high-security environments where containers can only communicate with approved domains.
+
+### Features
+- [Feature] Domain allowlisting mode - Restrict container network access to only approved domains
+- [Feature] DNS resolution with automatic IP refresh (every 30 minutes by default)
+- [Feature] IP caching for DNS failure resilience and container restarts
+- [Feature] Background goroutine for periodic IP refresh without container restart
+- [Feature] Per-profile domain allowlists for different security contexts
+
+### Enhancements
+- [Enhancement] New `allowlist` network mode alongside existing `restricted` and `open` modes
+- [Enhancement] Always block RFC1918 private networks in allowlist mode
+- [Enhancement] Persistent IP cache at `~/.coi/network-cache/<container>.json`
+- [Enhancement] Graceful DNS failure handling with last-known-good IPs
+- [Enhancement] Comprehensive logging for DNS resolution and IP refresh operations
+- [Enhancement] Dynamic ACL recreation for IP updates without container restart
+
+### Configuration
+- `network.mode = "allowlist"` - Enable domain allowlisting
+- `network.allowed_domains = ["github.com", "api.anthropic.com"]` - List of allowed domains
+- `network.refresh_interval_minutes = 30` - IP refresh interval (default: 30, 0 to disable)
+
+### Documentation
+- [Documentation] Updated NETWORK.md with comprehensive allowlist mode documentation
+- [Documentation] Updated README.md with profile configuration examples
+- [Documentation] Added DNS failure handling and IP refresh behavior explanations
+- [Documentation] Documented security limitations and best practices
+
+### Technical Details
+Allowlist implementation:
+- **DNS Resolution**: Resolves domains to IPv4 addresses on container start
+- **ACL Structure**: Default-deny with explicit allow rules for resolved IPs
+- **IP Refresh**: Background goroutine checks for IP changes every 30 minutes
+- **Cache Format**: JSON file with domain-to-IPs mapping and last update timestamp
+- **Graceful Degradation**: Uses cached IPs on DNS failures, only fails if no IPs ever resolved
+- **ACL Update**: Full ACL recreation (delete + create + reapply) for IP changes (~100ms network interruption)
+
+### New Files
+- `internal/network/cache.go` - IP cache persistence manager
+- `internal/network/resolver.go` - DNS resolver with caching and fallback
+- `tests/network/test_allowlist.py` - Integration test framework for allowlist mode
+
+### Modified Files
+- `internal/config/config.go` - Added `AllowedDomains`, `RefreshIntervalMinutes`, `NetworkModeAllowlist`
+- `internal/network/acl.go` - Added `CreateAllowlist()`, `buildAllowlistRules()`, `RecreateWithNewIPs()`
+- `internal/network/manager.go` - Added `setupAllowlist()`, `startRefresher()`, `stopRefresher()`, `refreshAllowedIPs()`
+- `NETWORK.md` - Added allowlist mode section with examples and limitations
+- `README.md` - Added profile-based network policy examples
+
 ## 0.3.2 (2026-01-14)
 
 Add network isolation to prevent containers from accessing local/internal networks while allowing full internet access for development workflows.

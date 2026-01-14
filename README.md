@@ -64,13 +64,16 @@ coi shell
 
 ## Network Isolation
 
-COI blocks container access to local/internal networks by default, preventing lateral movement while allowing full internet access for development workflows:
+COI provides three network isolation modes to balance security and development flexibility:
 
 ```bash
-# Default: Blocks local networks, allows internet (recommended)
+# Restricted mode (default): Blocks local networks, allows internet
 coi shell
 
-# Disable network isolation (for trusted projects)
+# Allowlist mode: Only allow specific domains (high security)
+coi shell --network=allowlist
+
+# Open mode: No restrictions (trusted projects only)
 coi shell --network=open
 ```
 
@@ -89,19 +92,48 @@ coi shell --network=open
 ```toml
 # ~/.config/coi/config.toml
 [network]
-mode = "restricted"  # restricted | open (default: restricted)
+mode = "restricted"  # restricted | open | allowlist (default: restricted)
 block_private_networks = true
 block_metadata_endpoint = true
+
+# Allowlist mode configuration
+allowed_domains = ["github.com", "api.anthropic.com"]
+refresh_interval_minutes = 30
 ```
 
-**Profile-based overrides:**
+**Profile-based network policies:**
 ```toml
 [profiles.secure]
-network.mode = "restricted"  # Explicit security stance
+# High-security: Only specific domains
+network.mode = "allowlist"
+network.allowed_domains = ["github.com", "api.anthropic.com"]
+network.refresh_interval_minutes = 15
+
+[profiles.development]
+# Moderate security: Common development domains
+network.mode = "allowlist"
+network.allowed_domains = [
+    "github.com",
+    "api.github.com",
+    "registry.npmjs.org",
+    "pypi.org",
+    "files.pythonhosted.org"
+]
+
+[profiles.restricted]
+# Default security: Block local networks only
+network.mode = "restricted"
 
 [profiles.trusted]
-network.mode = "open"  # For fully trusted projects
+# No security: For fully trusted projects
+network.mode = "open"
 ```
+
+**Allowlist mode features:**
+- DNS resolution to IPs with automatic refresh
+- IP caching for DNS failure resilience
+- Always blocks RFC1918 private networks
+- Requires explicit subdomain listing (e.g., both `github.com` and `api.github.com`)
 
 For technical details, see [NETWORK.md](NETWORK.md).
 

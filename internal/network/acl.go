@@ -100,6 +100,59 @@ func (m *ACLManager) Delete(name string) error {
 	return container.IncusExecQuiet("network", "acl", "delete", name)
 }
 
+// CreateAllowlist creates ACL for allowlist mode with resolved IPs
+func (m *ACLManager) CreateAllowlist(name string, cfg *config.NetworkConfig, domainIPs map[string][]string) error {
+	// First, delete existing ACL if present
+	_ = m.Delete(name)
+
+	// Create the ACL
+	if err := container.IncusExecQuiet("network", "acl", "create", name); err != nil {
+		return fmt.Errorf("failed to create ACL %s: %w", name, err)
+	}
+
+	// Build rules for allowlist mode
+	rules := buildAllowlistRules(cfg, domainIPs)
+
+	// Add rules
+	for _, rule := range rules {
+		parts := strings.Fields(rule)
+		if len(parts) < 2 {
+			_ = m.Delete(name)
+			return fmt.Errorf("invalid ACL rule format: %s", rule)
+		}
+
+		args := []string{"network", "acl", "rule", "add", name}
+		args = append(args, parts...)
+
+		if err := container.IncusExecQuiet(args...); err != nil {
+			_ = m.Delete(name)
+			return fmt.Errorf("failed to add ACL rule %s: %w", rule, err)
+		}
+	}
+
+	return nil
+}
+
+// RecreateWithNewIPs updates ACL with new IP list (full recreation)
+func (m *ACLManager) RecreateWithNewIPs(name string, cfg *config.NetworkConfig, domainIPs map[string][]string, containerName string) error {
+	// Delete existing ACL
+	if err := m.Delete(name); err != nil {
+		return fmt.Errorf("failed to delete old ACL: %w", err)
+	}
+
+	// Create new ACL with updated IPs
+	if err := m.CreateAllowlist(name, cfg, domainIPs); err != nil {
+		return fmt.Errorf("failed to create new ACL: %w", err)
+	}
+
+	// Reapply to container
+	if err := m.ApplyToContainer(containerName, name); err != nil {
+		return fmt.Errorf("failed to reapply ACL: %w", err)
+	}
+
+	return nil
+}
+
 // buildACLRules generates ACL rules based on network configuration
 func buildACLRules(cfg *config.NetworkConfig) []string {
 	rules := []string{}
@@ -121,6 +174,30 @@ func buildACLRules(cfg *config.NetworkConfig) []string {
 		// Block cloud metadata endpoints
 		if cfg.BlockMetadataEndpoint {
 			rules = append(rules, "egress action=reject destination=169.254.0.0/16")
+		}
+	}
+
+	return rules
+}
+
+// buildAllowlistRules generates allowlist ACL rules with default-deny
+func buildAllowlistRules(cfg *config.NetworkConfig, domainIPs map[string][]string) []string {
+	rules := []string{}
+
+	// Rule 1: Block all traffic by default (lowest priority)
+	rules = append(rules, "egress action=reject destination=0.0.0.0/0")
+
+	// Rules 2-5: Always block RFC1918 and metadata in allowlist mode (higher priority)
+	rules = append(rules, "egress action=reject destination=10.0.0.0/8")
+	rules = append(rules, "egress action=reject destination=172.16.0.0/12")
+	rules = append(rules, "egress action=reject destination=192.168.0.0/16")
+	rules = append(rules, "egress action=reject destination=169.254.0.0/16")
+
+	// Rules 6+: Allow specific IPs (highest priority, evaluated first)
+	for _, ips := range domainIPs {
+		for _, ip := range ips {
+			// Use /32 for single IP precision
+			rules = append(rules, fmt.Sprintf("egress action=allow destination=%s/32", ip))
 		}
 	}
 

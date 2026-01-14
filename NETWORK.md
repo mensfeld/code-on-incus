@@ -59,6 +59,115 @@ coi shell --network=restricted   # Explicit
 coi shell --network=open
 ```
 
+### Allowlist Mode
+
+**What it does:**
+- Allows ONLY specified domains (via DNS resolution to IPs)
+- Blocks ALL RFC1918 private networks (always enforced)
+- Blocks cloud metadata endpoints (always enforced)
+- Automatically refreshes domain IPs every 30 minutes (configurable)
+- Caches resolved IPs to survive DNS failures and container restarts
+
+**Use case**: High-security environments where you want to restrict network access to specific services only
+
+```bash
+coi shell --network=allowlist
+```
+
+**How it works:**
+1. Resolves allowed domains to IPv4 addresses using DNS
+2. Creates Incus ACL with default-deny policy + explicit allows for resolved IPs
+3. Applies ACL to container network interface
+4. Starts background refresher to update IPs every 30 minutes
+5. Persists IP cache to `~/.coi/network-cache/<container>.json`
+
+**Important limitations:**
+- **Subdomains NOT included**: `github.com` does NOT match `gist.github.com` - you must list each subdomain explicitly
+- **CDN complexity**: Domains behind CDNs (Cloudflare, Akamai) may have many IPs that change frequently
+- **IP changes**: Brief window between IP change and next refresh where old IPs may still work
+- **DNS tunneling**: Still possible via allowed domains (DNS is not filtered)
+
+**Configuration example:**
+```toml
+# ~/.config/coi/config.toml
+[network]
+mode = "allowlist"
+allowed_domains = ["github.com", "api.anthropic.com", "registry.npmjs.org"]
+refresh_interval_minutes = 30  # Default: 30, set to 0 to disable refresh
+
+[network.logging]
+enabled = true
+path = "~/.coi/logs/network.log"
+```
+
+**Profile example:**
+```toml
+# ~/.config/coi/config.toml
+
+[profiles.secure]
+network.mode = "allowlist"
+network.allowed_domains = ["github.com", "api.anthropic.com"]
+network.refresh_interval_minutes = 15  # More frequent updates for critical security
+
+[profiles.development]
+network.mode = "allowlist"
+network.allowed_domains = [
+    "github.com",
+    "api.github.com",
+    "registry.npmjs.org",
+    "pypi.org",
+    "files.pythonhosted.org"
+]
+network.refresh_interval_minutes = 30
+```
+
+**Testing allowlist mode:**
+```bash
+# Create config with allowlist
+cat > ~/.config/coi/config.toml <<EOF
+[network]
+mode = "allowlist"
+allowed_domains = ["example.com", "github.com"]
+EOF
+
+coi shell
+> curl example.com          # ✓ Should work (in allowlist)
+> curl github.com            # ✓ Should work (in allowlist)
+> curl google.com            # ✗ Should FAIL (not in allowlist)
+> curl 192.168.1.1          # ✗ Should FAIL (RFC1918 always blocked)
+> curl 169.254.169.254      # ✗ Should FAIL (metadata always blocked)
+```
+
+**DNS failure handling:**
+- Initial setup: If no domains resolve, container creation fails
+- Background refresh: If DNS fails, uses cached IPs from previous successful resolution
+- Container restart: Uses cached IPs from `~/.coi/network-cache/<container>.json`
+- Graceful degradation: Continues with last known good IPs
+
+**IP refresh behavior:**
+- Runs every `refresh_interval_minutes` (default: 30)
+- Resolves all domains again
+- Compares with cached IPs
+- If changed: Recreates ACL with new IPs (brief ~100ms network interruption)
+- If unchanged: No action taken
+- Logs all refresh attempts to network log
+
+**IP cache location:**
+```
+~/.coi/network-cache/<container-name>.json
+```
+
+**Cache format:**
+```json
+{
+  "domains": {
+    "github.com": ["140.82.113.4", "140.82.114.4"],
+    "api.anthropic.com": ["104.18.27.120"]
+  },
+  "last_update": "2026-01-14T12:00:00Z"
+}
+```
+
 ## Configuration
 
 ### Config File
@@ -67,9 +176,13 @@ coi shell --network=open
 # ~/.config/coi/config.toml
 
 [network]
-mode = "restricted"  # restricted | open (default: restricted)
+mode = "restricted"  # restricted | open | allowlist (default: restricted)
 block_private_networks = true
 block_metadata_endpoint = true
+
+# Allowlist mode configuration
+allowed_domains = []  # List of allowed domains (required for allowlist mode)
+refresh_interval_minutes = 30  # IP refresh interval (default: 30, 0 to disable)
 
 [network.logging]
 enabled = true
@@ -81,6 +194,7 @@ path = "~/.coi/logs/network.log"
 ```bash
 coi shell --network=restricted   # Use restricted mode
 coi shell --network=open         # Use open mode
+coi shell --network=allowlist    # Use allowlist mode (requires config with allowed_domains)
 ```
 
 CLI flags override config file settings.
@@ -277,7 +391,14 @@ pytest tests/ -v
 
 ## Future Enhancements
 
-### Planned Features (Out of Scope for v1)
+### Implemented Features
+
+1. ✅ **Domain Allowlisting** (v0.3.3)
+   - Restrict network access to specific domains only
+   - DNS resolution with IP caching and refresh
+   - Background IP updates every 30 minutes
+
+### Planned Features
 
 1. **Connection Logging**
    - Log all connection attempts with eBPF
@@ -286,7 +407,7 @@ pytest tests/ -v
 
 2. **DNS Filtering**
    - Use controlled DNS server to block tunneling
-   - Allowlist specific domains
+   - Additional DNS-level security
 
 3. **Egress Proxy**
    - Route all traffic through filtering proxy
@@ -298,8 +419,12 @@ pytest tests/ -v
 
 5. **Learning Mode**
    - Auto-discover domains during session
-   - Build per-project allowlists
+   - Build per-project allowlists automatically
    - Suggest restrictions based on observed behavior
+
+6. **Wildcard Domain Support**
+   - Support `*.github.com` syntax to match subdomains
+   - More flexible allowlist configuration
 
 ## Troubleshooting
 

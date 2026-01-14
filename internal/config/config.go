@@ -44,14 +44,18 @@ const (
 	NetworkModeRestricted NetworkMode = "restricted"
 	// NetworkModeOpen allows all network access (current behavior)
 	NetworkModeOpen NetworkMode = "open"
+	// NetworkModeAllowlist allows only specific domains (with RFC1918 always blocked)
+	NetworkModeAllowlist NetworkMode = "allowlist"
 )
 
 // NetworkConfig contains network isolation settings
 type NetworkConfig struct {
-	Mode                  NetworkMode              `toml:"mode"`
-	BlockPrivateNetworks  bool                     `toml:"block_private_networks"`
-	BlockMetadataEndpoint bool                     `toml:"block_metadata_endpoint"`
-	Logging               NetworkLoggingConfig     `toml:"logging"`
+	Mode                   NetworkMode              `toml:"mode"`
+	BlockPrivateNetworks   bool                     `toml:"block_private_networks"`
+	BlockMetadataEndpoint  bool                     `toml:"block_metadata_endpoint"`
+	AllowedDomains         []string                 `toml:"allowed_domains"`
+	RefreshIntervalMinutes int                      `toml:"refresh_interval_minutes"`
+	Logging                NetworkLoggingConfig     `toml:"logging"`
 }
 
 // NetworkLoggingConfig contains network logging settings
@@ -93,9 +97,11 @@ func GetDefaultConfig() *Config {
 			CodeUser: "code",
 		},
 		Network: NetworkConfig{
-			Mode:                  NetworkModeRestricted,
-			BlockPrivateNetworks:  true,
-			BlockMetadataEndpoint: true,
+			Mode:                   NetworkModeRestricted,
+			BlockPrivateNetworks:   true,
+			BlockMetadataEndpoint:  true,
+			AllowedDomains:         []string{},
+			RefreshIntervalMinutes: 30,
 			Logging: NetworkLoggingConfig{
 				Enabled: true,
 				Path:    filepath.Join(baseDir, "logs", "network.log"),
@@ -188,6 +194,16 @@ func (c *Config) Merge(other *Config) {
 	// This is imperfect in TOML but works for most cases
 	c.Network.BlockPrivateNetworks = other.Network.BlockPrivateNetworks
 	c.Network.BlockMetadataEndpoint = other.Network.BlockMetadataEndpoint
+
+	// Merge allowed domains (replace entirely if set)
+	if len(other.Network.AllowedDomains) > 0 {
+		c.Network.AllowedDomains = other.Network.AllowedDomains
+	}
+
+	// Merge refresh interval
+	if other.Network.RefreshIntervalMinutes != 0 {
+		c.Network.RefreshIntervalMinutes = other.Network.RefreshIntervalMinutes
+	}
 
 	if other.Network.Logging.Path != "" {
 		c.Network.Logging.Path = ExpandPath(other.Network.Logging.Path)
