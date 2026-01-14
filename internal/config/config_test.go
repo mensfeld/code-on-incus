@@ -193,3 +193,84 @@ func TestGetConfigPaths(t *testing.T) {
 		t.Errorf("User config path: expected %q, got %q", expectedUserPath, paths[1])
 	}
 }
+
+func TestToolConfigDefaults(t *testing.T) {
+	cfg := GetDefaultConfig()
+
+	if cfg.Tool.Name != "claude" {
+		t.Errorf("Expected default tool name 'claude', got '%s'", cfg.Tool.Name)
+	}
+
+	if cfg.Tool.Binary != "" {
+		t.Errorf("Expected default tool binary to be empty, got '%s'", cfg.Tool.Binary)
+	}
+}
+
+func TestToolConfigMerge(t *testing.T) {
+	base := GetDefaultConfig()
+	base.Tool.Name = "claude"
+	base.Tool.Binary = ""
+
+	tests := []struct {
+		name           string
+		otherName      string
+		otherBinary    string
+		expectedName   string
+		expectedBinary string
+	}{
+		{
+			name:           "merge tool name only",
+			otherName:      "aider",
+			otherBinary:    "",
+			expectedName:   "aider",
+			expectedBinary: "",
+		},
+		{
+			name:           "merge binary only",
+			otherName:      "",
+			otherBinary:    "custom-claude",
+			expectedName:   "claude",
+			expectedBinary: "custom-claude",
+		},
+		{
+			name:           "merge both",
+			otherName:      "aider",
+			otherBinary:    "custom-aider",
+			expectedName:   "aider",
+			expectedBinary: "custom-aider",
+		},
+		{
+			name:           "merge neither (empty stays)",
+			otherName:      "",
+			otherBinary:    "",
+			expectedName:   "claude",
+			expectedBinary: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Reset base for each test
+			testBase := GetDefaultConfig()
+			testBase.Tool.Name = "claude"
+			testBase.Tool.Binary = ""
+
+			other := &Config{
+				Tool: ToolConfig{
+					Name:   tt.otherName,
+					Binary: tt.otherBinary,
+				},
+			}
+
+			testBase.Merge(other)
+
+			if testBase.Tool.Name != tt.expectedName {
+				t.Errorf("Expected tool name '%s', got '%s'", tt.expectedName, testBase.Tool.Name)
+			}
+
+			if testBase.Tool.Binary != tt.expectedBinary {
+				t.Errorf("Expected tool binary '%s', got '%s'", tt.expectedBinary, testBase.Tool.Binary)
+			}
+		})
+	}
+}
