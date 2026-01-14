@@ -96,18 +96,45 @@ def test_full_installation_process(meta_container, coi_binary):
     container_name = meta_container
 
     # Phase 1: Install system dependencies
-    result = exec_in_container(
-        container_name,
-        """
-        set -e
-        apt-get update -qq
-        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-            curl wget git ca-certificates gnupg build-essential
-        echo "System dependencies installed"
-        """,
-        timeout=600,
-    )
-    assert result.returncode == 0, f"Failed to install dependencies: {result.stderr}"
+    # Retry apt-get operations to handle transient network issues in CI
+    max_retries = 3
+    last_error = None
+
+    for attempt in range(max_retries):
+        result = exec_in_container(
+            container_name,
+            """
+            set -e
+            # Wait for network and DNS to be ready
+            for i in {1..30}; do
+                if ping -c 1 archive.ubuntu.com >/dev/null 2>&1; then
+                    break
+                fi
+                sleep 1
+            done
+
+            # Update package lists with retry
+            apt-get update -qq || sleep 5 && apt-get update -qq
+
+            # Install packages
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+                curl wget git ca-certificates gnupg build-essential
+
+            echo "System dependencies installed"
+            """,
+            timeout=600,
+            check=False,
+        )
+
+        if result.returncode == 0:
+            break
+
+        last_error = result.stderr
+        if attempt < max_retries - 1:
+            print(f"apt-get attempt {attempt + 1} failed, retrying...")
+            time.sleep(10)  # Wait before retry
+
+    assert result.returncode == 0, f"Failed to install dependencies after {max_retries} attempts: {last_error}"
 
     # Phase 2: Install Go
     result = exec_in_container(
