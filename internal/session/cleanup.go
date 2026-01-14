@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,17 +9,19 @@ import (
 	"time"
 
 	"github.com/mensfeld/claude-on-incus/internal/container"
+	"github.com/mensfeld/claude-on-incus/internal/network"
 )
 
 // CleanupOptions contains options for cleaning up a session
 type CleanupOptions struct {
-	ContainerName string
-	SessionID     string // Claude session ID for saving .claude data
-	Persistent    bool   // If true, stop but don't delete container
-	SessionsDir   string // e.g., ~/.claude-on-incus/sessions
-	SaveSession   bool   // Whether to save .claude directory
-	Workspace     string // Workspace directory path
-	Logger        func(string)
+	ContainerName  string
+	SessionID      string // Claude session ID for saving .claude data
+	Persistent     bool   // If true, stop but don't delete container
+	SessionsDir    string // e.g., ~/.claude-on-incus/sessions
+	SaveSession    bool   // Whether to save .claude directory
+	Workspace      string // Workspace directory path
+	NetworkManager *network.Manager
+	Logger         func(string)
 }
 
 // Cleanup stops and deletes a container, optionally saving session data
@@ -82,6 +85,14 @@ func Cleanup(opts CleanupOptions) error {
 			} else {
 				// Container stopped (user did 'sudo shutdown 0') - delete it
 				opts.Logger("Container was stopped, removing...")
+
+				// Clean up network ACL before deleting container
+				if opts.NetworkManager != nil {
+					if err := opts.NetworkManager.Teardown(context.Background(), opts.ContainerName); err != nil {
+						opts.Logger(fmt.Sprintf("Warning: Failed to cleanup network ACL: %v", err))
+					}
+				}
+
 				if err := mgr.Delete(true); err != nil {
 					opts.Logger(fmt.Sprintf("Warning: Failed to delete container: %v", err))
 				} else {

@@ -272,6 +272,16 @@ func (b *Builder) buildCustom() error {
 		return fmt.Errorf("failed to read build script: %w", err)
 	}
 
+	// Push dummy to /tmp (required for test build scripts)
+	dummyPath := "testdata/dummy/dummy"
+	if _, err := os.Stat(dummyPath); err == nil {
+		// Only push if dummy exists (optional for custom builds)
+		b.opts.Logger("Pushing dummy to container...")
+		if err := b.mgr.PushFile(dummyPath, "/tmp/dummy"); err != nil {
+			return fmt.Errorf("failed to push dummy: %w", err)
+		}
+	}
+
 	// Push script to container
 	b.opts.Logger(fmt.Sprintf("Uploading build script from %s...", b.opts.BuildScript))
 	if err := b.mgr.PushFile(b.opts.BuildScript, "/tmp/build.sh"); err != nil {

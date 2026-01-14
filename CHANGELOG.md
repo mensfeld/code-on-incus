@@ -1,5 +1,32 @@
 # CHANGELOG
 
+## 0.3.2 (2026-01-14)
+
+Add network isolation to prevent containers from accessing local/internal networks while allowing full internet access for development workflows.
+
+### Features
+- [Feature] Network isolation - Block container access to private networks (RFC1918) and cloud metadata endpoints by default
+- [Feature] `--network` flag to control network mode: `restricted` (default) or `open`
+- [Feature] Dynamic gateway discovery in tests to work on any network configuration
+- [Feature] Comprehensive network isolation test suite (6 tests covering restricted/open modes)
+
+### Bug Fixes
+- [Fix] Dummy image build - Fix `buildCustom()` to push dummy file to container, enabling test image builds
+- [Fix] Incus ACL configuration - Add explicit `egress action=allow` rule to prevent default deny behavior
+
+### Enhancements
+- [Enhancement] Network documentation - Add comprehensive `NETWORK.md` with security model, configuration, and testing guide
+- [Enhancement] Two-step ACL application - Use `device override` followed by `device set` for proper ACL attachment
+- [Enhancement] Integration tests use backgrounded containers for consistency and reliability
+- [Enhancement] README updated with network isolation section and security information
+
+### Technical Details
+Network isolation implementation:
+- **Restricted mode (default)**: Blocks RFC1918 ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16) and cloud metadata (169.254.0.0/16), allows all public internet
+- **Open mode**: No restrictions (previous behavior)
+- **Implementation**: Incus network ACLs applied at container network interface level
+- **Tests**: 6 integration tests validate blocking private networks, metadata endpoints, and local gateway while allowing internet access
+
 ## 0.3.1 (2026-01-13)
 
 Re-release of 0.3.0 with proper GitHub release automation.

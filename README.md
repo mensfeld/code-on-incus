@@ -62,6 +62,49 @@ coi shell
 # - No access to your host SSH keys, env vars, or credentials
 ```
 
+## Network Isolation
+
+COI blocks container access to local/internal networks by default, preventing lateral movement while allowing full internet access for development workflows:
+
+```bash
+# Default: Blocks local networks, allows internet (recommended)
+coi shell
+
+# Disable network isolation (for trusted projects)
+coi shell --network=open
+```
+
+### What's Blocked by Default
+
+- **Private networks (RFC1918)**: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+- **Cloud metadata endpoints**: 169.254.0.0/16 (AWS, GCP, Azure credentials)
+
+### What's Allowed
+
+- **All public internet traffic**: npm, pypi, GitHub, APIs, etc.
+- **Ingress from host**: Access web servers running in containers
+
+### Configuration
+
+```toml
+# ~/.config/coi/config.toml
+[network]
+mode = "restricted"  # restricted | open (default: restricted)
+block_private_networks = true
+block_metadata_endpoint = true
+```
+
+**Profile-based overrides:**
+```toml
+[profiles.secure]
+network.mode = "restricted"  # Explicit security stance
+
+[profiles.trusted]
+network.mode = "open"  # For fully trusted projects
+```
+
+For technical details, see [NETWORK.md](NETWORK.md).
+
 ## Why Incus Over Docker?
 
 ### What is Incus?

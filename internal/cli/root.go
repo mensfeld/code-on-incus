@@ -9,7 +9,7 @@ import (
 
 const (
 	// Version is the current version of coi
-	Version = "0.3.1"
+	Version = "0.3.2"
 )
 
 var (
@@ -23,6 +23,7 @@ var (
 	profile         string
 	envVars         []string
 	storage         string
+	networkMode     string
 
 	// Loaded config
 	cfg *config.Config
@@ -94,6 +95,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&profile, "profile", "", "Use named profile")
 	rootCmd.PersistentFlags().StringSliceVarP(&envVars, "env", "e", []string{}, "Environment variables (KEY=VALUE)")
 	rootCmd.PersistentFlags().StringVar(&storage, "storage", "", "Mount persistent storage")
+	rootCmd.PersistentFlags().StringVar(&networkMode, "network", "", "Network mode: restricted (default), open")
 
 	// Add subcommands
 	rootCmd.AddCommand(runCmd)

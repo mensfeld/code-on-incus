@@ -1,12 +1,15 @@
 package session
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"time"
 
+	"github.com/mensfeld/claude-on-incus/internal/config"
 	"github.com/mensfeld/claude-on-incus/internal/container"
+	"github.com/mensfeld/claude-on-incus/internal/network"
 )
 
 const (
@@ -22,18 +25,20 @@ type SetupOptions struct {
 	ResumeFromID     string
 	Slot             int
 	StoragePath      string
-	SessionsDir   string // e.g., ~/.claude-on-incus/sessions
-	CLIConfigPath string // e.g., ~/.claude (host CLI config to copy credentials from)
-	Logger        func(string)
+	SessionsDir      string // e.g., ~/.claude-on-incus/sessions
+	CLIConfigPath    string // e.g., ~/.claude (host CLI config to copy credentials from)
+	NetworkConfig    *config.NetworkConfig
+	Logger           func(string)
 }
 
 // SetupResult contains the result of setup
 type SetupResult struct {
-	ContainerName string
-	Manager       *container.Manager
-	HomeDir       string
-	RunAsRoot     bool
-	Image         string
+	ContainerName  string
+	Manager        *container.Manager
+	NetworkManager *network.Manager
+	HomeDir        string
+	RunAsRoot      bool
+	Image          string
 }
 
 // Setup initializes a container for a Claude session
@@ -164,6 +169,14 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 			opts.Logger(fmt.Sprintf("Adding storage mount: %s", opts.StoragePath))
 			if err := result.Manager.MountDisk("storage", opts.StoragePath, "/storage", useShift); err != nil {
 				return nil, fmt.Errorf("failed to add storage device: %w", err)
+			}
+		}
+
+		// Setup network isolation (before starting container)
+		if opts.NetworkConfig != nil {
+			result.NetworkManager = network.NewManager(opts.NetworkConfig)
+			if err := result.NetworkManager.SetupForContainer(context.Background(), result.ContainerName); err != nil {
+				return nil, fmt.Errorf("failed to setup network isolation: %w", err)
 			}
 		}
 

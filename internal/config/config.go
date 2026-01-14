@@ -10,6 +10,7 @@ type Config struct {
 	Defaults DefaultsConfig           `toml:"defaults"`
 	Paths    PathsConfig              `toml:"paths"`
 	Incus    IncusConfig              `toml:"incus"`
+	Network  NetworkConfig            `toml:"network"`
 	Profiles map[string]ProfileConfig `toml:"profiles"`
 }
 
@@ -33,6 +34,30 @@ type IncusConfig struct {
 	Group    string `toml:"group"`
 	CodeUID  int    `toml:"code_uid"`
 	CodeUser string `toml:"code_user"`
+}
+
+// NetworkMode represents the network isolation mode
+type NetworkMode string
+
+const (
+	// NetworkModeRestricted blocks local/internal networks, allows internet
+	NetworkModeRestricted NetworkMode = "restricted"
+	// NetworkModeOpen allows all network access (current behavior)
+	NetworkModeOpen NetworkMode = "open"
+)
+
+// NetworkConfig contains network isolation settings
+type NetworkConfig struct {
+	Mode                  NetworkMode              `toml:"mode"`
+	BlockPrivateNetworks  bool                     `toml:"block_private_networks"`
+	BlockMetadataEndpoint bool                     `toml:"block_metadata_endpoint"`
+	Logging               NetworkLoggingConfig     `toml:"logging"`
+}
+
+// NetworkLoggingConfig contains network logging settings
+type NetworkLoggingConfig struct {
+	Enabled bool   `toml:"enabled"`
+	Path    string `toml:"path"`
 }
 
 // ProfileConfig represents a named profile
@@ -66,6 +91,15 @@ func GetDefaultConfig() *Config {
 			Group:    "incus-admin",
 			CodeUID:  1000,
 			CodeUser: "code",
+		},
+		Network: NetworkConfig{
+			Mode:                  NetworkModeRestricted,
+			BlockPrivateNetworks:  true,
+			BlockMetadataEndpoint: true,
+			Logging: NetworkLoggingConfig{
+				Enabled: true,
+				Path:    filepath.Join(baseDir, "logs", "network.log"),
+			},
 		},
 		Profiles: make(map[string]ProfileConfig),
 	}
@@ -145,6 +179,20 @@ func (c *Config) Merge(other *Config) {
 	if other.Incus.CodeUser != "" {
 		c.Incus.CodeUser = other.Incus.CodeUser
 	}
+
+	// Merge Network settings
+	if other.Network.Mode != "" {
+		c.Network.Mode = other.Network.Mode
+	}
+	// For booleans, we merge if they appear to be explicitly set
+	// This is imperfect in TOML but works for most cases
+	c.Network.BlockPrivateNetworks = other.Network.BlockPrivateNetworks
+	c.Network.BlockMetadataEndpoint = other.Network.BlockMetadataEndpoint
+
+	if other.Network.Logging.Path != "" {
+		c.Network.Logging.Path = ExpandPath(other.Network.Logging.Path)
+	}
+	c.Network.Logging.Enabled = other.Network.Logging.Enabled
 
 	// Merge profiles
 	for name, profile := range other.Profiles {

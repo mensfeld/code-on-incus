@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mensfeld/claude-on-incus/internal/config"
 	"github.com/mensfeld/claude-on-incus/internal/container"
 	"github.com/mensfeld/claude-on-incus/internal/session"
 	"github.com/spf13/cobra"
@@ -155,6 +156,13 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Prepare network configuration
+	networkConfig := cfg.Network // Copy from loaded config
+	// Override network mode from flag if specified
+	if networkMode != "" {
+		networkConfig.Mode = config.NetworkMode(networkMode)
+	}
+
 	// Setup session
 	setupOpts := session.SetupOptions{
 		WorkspacePath:    absWorkspace,
@@ -163,7 +171,8 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 		ResumeFromID:     resumeID,
 		Slot:             slotNum,
 		SessionsDir:      sessionsDir,
-		CLIConfigPath: filepath.Join(homeDir, ".claude"),
+		CLIConfigPath:    filepath.Join(homeDir, ".claude"),
+		NetworkConfig:    &networkConfig,
 	}
 
 	if storage != "" {
@@ -185,12 +194,13 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 	defer func() {
 		fmt.Fprintf(os.Stderr, "\nCleaning up session...\n")
 		cleanupOpts := session.CleanupOptions{
-			ContainerName: result.ContainerName,
-			SessionID:     sessionID,
-			Persistent:    persistent,
-			SessionsDir:   sessionsDir,
-			SaveSession:   true, // Always save session data
-			Workspace:     absWorkspace,
+			ContainerName:  result.ContainerName,
+			SessionID:      sessionID,
+			Persistent:     persistent,
+			SessionsDir:    sessionsDir,
+			SaveSession:    true, // Always save session data
+			Workspace:      absWorkspace,
+			NetworkManager: result.NetworkManager,
 		}
 		if err := session.Cleanup(cleanupOpts); err != nil {
 			fmt.Fprintf(os.Stderr, "Cleanup error: %v\n", err)
