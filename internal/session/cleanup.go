@@ -10,16 +10,18 @@ import (
 
 	"github.com/mensfeld/claude-on-incus/internal/container"
 	"github.com/mensfeld/claude-on-incus/internal/network"
+	"github.com/mensfeld/claude-on-incus/internal/tool"
 )
 
 // CleanupOptions contains options for cleaning up a session
 type CleanupOptions struct {
 	ContainerName  string
-	SessionID      string // Claude session ID for saving .claude data
-	Persistent     bool   // If true, stop but don't delete container
-	SessionsDir    string // e.g., ~/.claude-on-incus/sessions
-	SaveSession    bool   // Whether to save .claude directory
-	Workspace      string // Workspace directory path
+	SessionID      string            // COI session ID for saving tool config data
+	Persistent     bool              // If true, stop but don't delete container
+	SessionsDir    string            // e.g., ~/.coi/sessions-claude
+	SaveSession    bool              // Whether to save tool config directory
+	Workspace      string            // Workspace directory path
+	Tool           tool.Tool         // AI coding tool being used
 	NetworkManager *network.Manager
 	Logger         func(string)
 }
@@ -49,8 +51,9 @@ func Cleanup(opts CleanupOptions) error {
 
 	// Always save session data if container exists (works even from stopped containers)
 	// This ensures --resume works regardless of how the user exited (including sudo shutdown 0)
-	if opts.SaveSession && exists && opts.SessionID != "" && opts.SessionsDir != "" {
-		if err := saveSessionData(mgr, opts.SessionID, opts.Persistent, opts.Workspace, opts.SessionsDir, opts.Logger); err != nil {
+	// Skip if tool uses ENV-based auth (no config directory to save)
+	if opts.SaveSession && exists && opts.SessionID != "" && opts.SessionsDir != "" && opts.Tool != nil && opts.Tool.ConfigDirName() != "" {
+		if err := saveSessionData(mgr, opts.SessionID, opts.Persistent, opts.Workspace, opts.SessionsDir, opts.Tool, opts.Logger); err != nil {
 			opts.Logger(fmt.Sprintf("Warning: Failed to save session data: %v", err))
 		}
 	}
@@ -107,15 +110,16 @@ func Cleanup(opts CleanupOptions) error {
 	return nil
 }
 
-// saveSessionData saves the .claude directory from the container
-func saveSessionData(mgr *container.Manager, sessionID string, persistent bool, workspace string, sessionsDir string, logger func(string)) error {
+// saveSessionData saves the tool config directory from the container
+func saveSessionData(mgr *container.Manager, sessionID string, persistent bool, workspace string, sessionsDir string, t tool.Tool, logger func(string)) error {
 	// Determine home directory
 	// For coi images, we always use /home/code
 	// For other images, we use /root
 	// Since we currently only support coi images, always use /home/code
 	homeDir := "/home/" + container.CodeUser
 
-	stateDir := filepath.Join(homeDir, ".claude")
+	configDirName := t.ConfigDirName()
+	stateDir := filepath.Join(homeDir, configDirName)
 
 	// Create local session directory
 	localSessionDir := filepath.Join(sessionsDir, sessionID)
@@ -125,25 +129,25 @@ func saveSessionData(mgr *container.Manager, sessionID string, persistent bool, 
 
 	logger(fmt.Sprintf("Saving session data to %s", localSessionDir))
 
-	// Remove old .claude directory if it exists (when resuming)
-	localClaudeDir := filepath.Join(localSessionDir, ".claude")
-	if _, err := os.Stat(localClaudeDir); err == nil {
+	// Remove old config directory if it exists (when resuming)
+	localConfigDir := filepath.Join(localSessionDir, configDirName)
+	if _, err := os.Stat(localConfigDir); err == nil {
 		logger("Removing old session data before saving new state")
-		if err := os.RemoveAll(localClaudeDir); err != nil {
-			return fmt.Errorf("failed to remove old .claude directory: %w", err)
+		if err := os.RemoveAll(localConfigDir); err != nil {
+			return fmt.Errorf("failed to remove old %s directory: %w", configDirName, err)
 		}
 	}
 
-	// Pull .claude directory from container
+	// Pull config directory from container
 	// Note: incus file pull works on stopped containers, so we don't need to check if running
-	// If .claude doesn't exist, PullDirectory will fail and we handle it gracefully
-	if err := mgr.PullDirectory(stateDir, localClaudeDir); err != nil {
-		// Check if it's a "not found" error - this is expected if .claude doesn't exist
+	// If config dir doesn't exist, PullDirectory will fail and we handle it gracefully
+	if err := mgr.PullDirectory(stateDir, localConfigDir); err != nil {
+		// Check if it's a "not found" error - this is expected if config dir doesn't exist
 		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "No such file") {
-			logger("No .claude directory found in container")
+			logger(fmt.Sprintf("No %s directory found in container", configDirName))
 			return nil
 		}
-		return fmt.Errorf("failed to pull .claude directory: %w", err)
+		return fmt.Errorf("failed to pull %s directory: %w", configDirName, err)
 	}
 
 	// Save metadata
