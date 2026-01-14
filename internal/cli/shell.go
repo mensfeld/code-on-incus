@@ -334,10 +334,17 @@ func runCLI(result *session.SetupResult, sessionID string, useResumeFlag, restor
 		// Determine resume mode and CLI session ID
 		var cliSessionID string
 		if useResumeFlag || restoreOnly {
-			// Try to discover the tool's internal session ID
-			// For config-based tools, this looks in .claude/projects/-workspace/*.jsonl
-			// For ENV-based tools, this may return "" (start fresh)
-			cliSessionID = t.DiscoverSessionID(filepath.Join(sessionsDir, resumeID))
+			// Try to discover the tool's internal session ID from saved state
+			// The exact discovery mechanism is tool-specific (e.g. some tools read
+			// config files, others use environment variables) and may return ""
+			// if no previous session can be found (start fresh).
+			var sessionStatePath string
+			if configDir := t.ConfigDirName(); configDir != "" {
+				sessionStatePath = filepath.Join(sessionsDir, resumeID, configDir)
+			} else {
+				sessionStatePath = filepath.Join(sessionsDir, resumeID)
+			}
+			cliSessionID = t.DiscoverSessionID(sessionStatePath)
 		}
 
 		// Build command using tool abstraction
@@ -346,7 +353,9 @@ func runCLI(result *session.SetupResult, sessionID string, useResumeFlag, restor
 
 		// Handle dummy mode override (for testing)
 		if getEnvValue("COI_USE_DUMMY") == "1" {
-			cmd[0] = "dummy"
+			if len(cmd) > 0 {
+				cmd[0] = "dummy"
+			}
 			fmt.Fprintf(os.Stderr, "Using dummy (test stub) for faster testing\n")
 		}
 
@@ -400,10 +409,17 @@ func runCLIInTmux(result *session.SetupResult, sessionID string, detached bool, 
 		// Determine resume mode and CLI session ID
 		var cliSessionID string
 		if useResumeFlag || restoreOnly {
-			// Try to discover the tool's internal session ID
-			// For config-based tools, this looks in .claude/projects/-workspace/*.jsonl
-			// For ENV-based tools, this may return "" (start fresh)
-			cliSessionID = t.DiscoverSessionID(filepath.Join(sessionsDir, resumeID))
+			// Try to discover the tool's internal session ID from saved state
+			// The exact discovery mechanism is tool-specific (e.g. some tools read
+			// config files, others use environment variables) and may return ""
+			// if no previous session can be found (start fresh).
+			var sessionStatePath string
+			if configDir := t.ConfigDirName(); configDir != "" {
+				sessionStatePath = filepath.Join(sessionsDir, resumeID, configDir)
+			} else {
+				sessionStatePath = filepath.Join(sessionsDir, resumeID)
+			}
+			cliSessionID = t.DiscoverSessionID(sessionStatePath)
 		}
 
 		// Build command using tool abstraction
@@ -412,7 +428,9 @@ func runCLIInTmux(result *session.SetupResult, sessionID string, detached bool, 
 
 		// Handle dummy mode override (for testing)
 		if getEnvValue("COI_USE_DUMMY") == "1" {
-			cmd[0] = "dummy"
+			if len(cmd) > 0 {
+				cmd[0] = "dummy"
+			}
 			fmt.Fprintf(os.Stderr, "Using dummy (test stub) for faster testing\n")
 		}
 

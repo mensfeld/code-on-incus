@@ -2,9 +2,11 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/mensfeld/claude-on-incus/internal/config"
@@ -17,6 +19,16 @@ const (
 	DefaultImage = "images:ubuntu/22.04"
 	CoiImage     = "coi"
 )
+
+// buildJSONFromSettings converts a settings map to a properly escaped JSON string
+// Uses json.Marshal to ensure proper escaping and avoid command injection
+func buildJSONFromSettings(settings map[string]interface{}) (string, error) {
+	jsonBytes, err := json.Marshal(settings)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal settings: %w", err)
+	}
+	return string(jsonBytes), nil
+}
 
 // SetupOptions contains options for setting up a session
 type SetupOptions struct {
@@ -346,43 +358,20 @@ func injectCredentials(mgr *container.Manager, hostCLIConfigPath, homeDir string
 			} else {
 				// Inject sandbox settings using tool's GetSandboxSettings()
 				logger(fmt.Sprintf("Injecting sandbox settings into %s...", stateConfigFilename))
-				// Build JSON string from settings map
-				settingsJSON := "{"
-				first := true
-				for k, v := range sandboxSettings {
-					if !first {
-						settingsJSON += ","
+				settingsJSON, err := buildJSONFromSettings(sandboxSettings)
+				if err != nil {
+					logger(fmt.Sprintf("Warning: Failed to build JSON from settings: %v", err))
+				} else {
+					// Properly escape the JSON string for shell command
+					escapedJSON := strings.ReplaceAll(settingsJSON, "'", "'\"'\"'")
+					injectCmd := fmt.Sprintf(
+						`python3 -c 'import json; f=open("%s","r+"); d=json.load(f); updates=json.loads('"'"'%s'"'"'); d.update(updates); f.seek(0); json.dump(d,f,indent=2); f.truncate()'`,
+						stateJsonDest,
+						escapedJSON,
+					)
+					if _, err := mgr.ExecCommand(injectCmd, container.ExecCommandOptions{Capture: true}); err != nil {
+						logger(fmt.Sprintf("Warning: Failed to inject settings into %s: %v", stateConfigFilename, err))
 					}
-					// Handle different value types
-					switch val := v.(type) {
-					case string:
-						settingsJSON += fmt.Sprintf(`"%s":"%s"`, k, val)
-					case bool:
-						settingsJSON += fmt.Sprintf(`"%s":%t`, k, val)
-					case map[string]string:
-						// Nested map for permissions
-						settingsJSON += fmt.Sprintf(`"%s":{`, k)
-						firstInner := true
-						for ik, iv := range val {
-							if !firstInner {
-								settingsJSON += ","
-							}
-							settingsJSON += fmt.Sprintf(`"%s":"%s"`, ik, iv)
-							firstInner = false
-						}
-						settingsJSON += "}"
-					}
-					first = false
-				}
-				settingsJSON += "}"
-
-				injectCmd := fmt.Sprintf(
-					`python3 -c 'import json; f=open("%s","r+"); d=json.load(f); updates=%s; d.update(updates); f.seek(0); json.dump(d,f,indent=2); f.truncate()'`,
-					stateJsonDest,
-					settingsJSON,
-				)
-				if _, err := mgr.ExecCommand(injectCmd, container.ExecCommandOptions{Capture: true}); err != nil {
-					logger(fmt.Sprintf("Warning: Failed to inject settings into %s: %v", stateConfigFilename, err))
 				}
 
 				// Fix ownership if running as non-root user
@@ -436,37 +425,13 @@ func setupCLIConfig(mgr *container.Manager, hostCLIConfigPath, homeDir string, t
 	sandboxSettings := t.GetSandboxSettings()
 	if len(sandboxSettings) > 0 {
 		settingsPath := filepath.Join(stateDir, "settings.json")
-		// Build JSON from settings map
-		settingsJSON := "{\n"
-		first := true
-		for k, v := range sandboxSettings {
-			if !first {
-				settingsJSON += ",\n"
-			}
-			// Handle different value types
-			switch val := v.(type) {
-			case string:
-				settingsJSON += fmt.Sprintf(`  "%s": "%s"`, k, val)
-			case bool:
-				settingsJSON += fmt.Sprintf(`  "%s": %t`, k, val)
-			case map[string]string:
-				// Nested map for permissions
-				settingsJSON += fmt.Sprintf(`  "%s": {`, k)
-				firstInner := true
-				for ik, iv := range val {
-					if !firstInner {
-						settingsJSON += ", "
-					}
-					settingsJSON += fmt.Sprintf(`"%s": "%s"`, ik, iv)
-					firstInner = false
-				}
-				settingsJSON += "}"
-			}
-			first = false
+		// Build JSON from settings map using helper with pretty printing
+		settingsBytes, err := json.MarshalIndent(sandboxSettings, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to build JSON from sandbox settings: %w", err)
 		}
-		settingsJSON += "\n}\n"
 
-		if err := mgr.CreateFile(settingsPath, settingsJSON); err != nil {
+		if err := mgr.CreateFile(settingsPath, string(settingsBytes)+"\n"); err != nil {
 			return fmt.Errorf("failed to create settings.json: %w", err)
 		}
 		logger(fmt.Sprintf("%s config copied and sandbox settings injected in settings.json", t.Name()))
@@ -493,45 +458,22 @@ func setupCLIConfig(mgr *container.Manager, hostCLIConfigPath, homeDir string, t
 		// Inject sandbox settings if tool provides them
 		if len(sandboxSettings) > 0 {
 			logger(fmt.Sprintf("Injecting sandbox settings into %s...", stateConfigFilename))
-			// Build JSON string from settings map
-			settingsJSON := "{"
-			first := true
-			for k, v := range sandboxSettings {
-				if !first {
-					settingsJSON += ","
-				}
-				// Handle different value types
-				switch val := v.(type) {
-				case string:
-					settingsJSON += fmt.Sprintf(`"%s":"%s"`, k, val)
-				case bool:
-					settingsJSON += fmt.Sprintf(`"%s":%t`, k, val)
-				case map[string]string:
-					// Nested map for permissions
-					settingsJSON += fmt.Sprintf(`"%s":{`, k)
-					firstInner := true
-					for ik, iv := range val {
-						if !firstInner {
-							settingsJSON += ","
-						}
-						settingsJSON += fmt.Sprintf(`"%s":"%s"`, ik, iv)
-						firstInner = false
-					}
-					settingsJSON += "}"
-				}
-				first = false
-			}
-			settingsJSON += "}"
-
-			injectCmd := fmt.Sprintf(
-				`python3 -c 'import json; f=open("%s","r+"); d=json.load(f); updates=%s; d.update(updates); f.seek(0); json.dump(d,f,indent=2); f.truncate()'`,
-				stateJsonDest,
-				settingsJSON,
-			)
-			if _, err := mgr.ExecCommand(injectCmd, container.ExecCommandOptions{Capture: true}); err != nil {
-				logger(fmt.Sprintf("Warning: Failed to inject settings into %s: %v", stateConfigFilename, err))
+			settingsJSON, err := buildJSONFromSettings(sandboxSettings)
+			if err != nil {
+				logger(fmt.Sprintf("Warning: Failed to build JSON from settings: %v", err))
 			} else {
-				logger(fmt.Sprintf("Successfully injected sandbox settings into %s", stateConfigFilename))
+				// Properly escape the JSON string for shell command
+				escapedJSON := strings.ReplaceAll(settingsJSON, "'", "'\"'\"'")
+				injectCmd := fmt.Sprintf(
+					`python3 -c 'import json; f=open("%s","r+"); d=json.load(f); updates=json.loads('"'"'%s'"'"'); d.update(updates); f.seek(0); json.dump(d,f,indent=2); f.truncate()'`,
+					stateJsonDest,
+					escapedJSON,
+				)
+				if _, err := mgr.ExecCommand(injectCmd, container.ExecCommandOptions{Capture: true}); err != nil {
+					logger(fmt.Sprintf("Warning: Failed to inject settings into %s: %v", stateConfigFilename, err))
+				} else {
+					logger(fmt.Sprintf("Successfully injected sandbox settings into %s", stateConfigFilename))
+				}
 			}
 		}
 
