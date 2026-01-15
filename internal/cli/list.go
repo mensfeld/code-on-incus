@@ -48,6 +48,20 @@ func listCommand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid format '%s': must be 'text' or 'json'", listFormat)
 	}
 
+	// Get configured tool to determine tool-specific sessions directory
+	toolInstance, err := getConfiguredTool(cfg)
+	if err != nil {
+		return err
+	}
+
+	// Get tool-specific sessions directory
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get home directory: %w", err)
+	}
+	baseDir := filepath.Join(homeDir, ".coi")
+	sessionsDir := session.GetSessionsDir(baseDir, toolInstance)
+
 	// List active containers
 	containers, err := listActiveContainers()
 	if err != nil {
@@ -59,12 +73,12 @@ func listCommand(cmd *cobra.Command, args []string) error {
 	// because metadata is saved early at session start, before .claude directory exists
 	containerWorkspaces := make(map[string]string)
 	containerPersistent := make(map[string]bool)
-	if entries, err := os.ReadDir(cfg.Paths.SessionsDir); err == nil {
+	if entries, err := os.ReadDir(sessionsDir); err == nil {
 		for _, entry := range entries {
 			if !entry.IsDir() {
 				continue
 			}
-			metadataPath := filepath.Join(cfg.Paths.SessionsDir, entry.Name(), "metadata.json")
+			metadataPath := filepath.Join(sessionsDir, entry.Name(), "metadata.json")
 			if data, err := os.ReadFile(metadataPath); err == nil {
 				var metadata session.SessionMetadata
 				if err := json.Unmarshal(data, &metadata); err == nil && metadata.ContainerName != "" {
@@ -78,7 +92,7 @@ func listCommand(cmd *cobra.Command, args []string) error {
 	// Get saved sessions if --all
 	var sessions []SessionInfo
 	if listAll {
-		sessions, err = listSavedSessions(cfg.Paths.SessionsDir)
+		sessions, err = listSavedSessions(sessionsDir)
 		if err != nil {
 			return fmt.Errorf("failed to list sessions: %w", err)
 		}
@@ -294,3 +308,4 @@ func outputText(containers []ContainerInfo, sessions []SessionInfo,
 
 	return nil
 }
+

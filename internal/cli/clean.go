@@ -7,6 +7,7 @@ import (
 
 	"github.com/mensfeld/claude-on-incus/internal/config"
 	"github.com/mensfeld/claude-on-incus/internal/container"
+	"github.com/mensfeld/claude-on-incus/internal/session"
 	"github.com/spf13/cobra"
 )
 
@@ -43,6 +44,20 @@ func cleanCommand(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
+
+	// Get configured tool to determine tool-specific sessions directory
+	toolInstance, err := getConfiguredTool(cfg)
+	if err != nil {
+		return err
+	}
+
+	// Get tool-specific sessions directory
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get home directory: %w", err)
+	}
+	baseDir := filepath.Join(homeDir, ".coi")
+	sessionsDir := session.GetSessionsDir(baseDir, toolInstance)
 
 	cleaned := 0
 
@@ -96,7 +111,7 @@ func cleanCommand(cmd *cobra.Command, args []string) error {
 	if cleanAll || cleanSessions {
 		fmt.Println("\nChecking for saved session data...")
 
-		entries, err := os.ReadDir(cfg.Paths.SessionsDir)
+		entries, err := os.ReadDir(sessionsDir)
 		if err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("failed to read sessions directory: %w", err)
 		}
@@ -125,7 +140,7 @@ func cleanCommand(cmd *cobra.Command, args []string) error {
 			}
 
 			for _, name := range sessionDirs {
-				sessionPath := filepath.Join(cfg.Paths.SessionsDir, name)
+				sessionPath := filepath.Join(sessionsDir, name)
 				fmt.Printf("Deleting session %s...\n", name)
 				if err := os.RemoveAll(sessionPath); err != nil {
 					fmt.Fprintf(os.Stderr, "Warning: Failed to delete %s: %v\n", name, err)
@@ -146,3 +161,4 @@ func cleanCommand(cmd *cobra.Command, args []string) error {
 
 	return nil
 }
+

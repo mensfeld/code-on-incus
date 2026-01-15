@@ -68,12 +68,19 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("incus is not available - please install Incus and ensure you're in the incus-admin group")
 	}
 
-	// Get sessions directory
+	// Get configured tool (needed to determine tool-specific sessions directory)
+	toolInstance, err := getConfiguredTool(cfg)
+	if err != nil {
+		return err
+	}
+
+	// Get sessions directory (tool-specific: sessions-claude, sessions-aider, etc.)
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("failed to get home directory: %w", err)
 	}
-	sessionsDir := filepath.Join(homeDir, ".coi", "sessions")
+	baseDir := filepath.Join(homeDir, ".coi")
+	sessionsDir := session.GetSessionsDir(baseDir, toolInstance)
 	if err := os.MkdirAll(sessionsDir, 0755); err != nil {
 		return fmt.Errorf("failed to create sessions directory: %w", err)
 	}
@@ -162,12 +169,6 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 	// Override network mode from flag if specified
 	if networkMode != "" {
 		networkConfig.Mode = config.NetworkMode(networkMode)
-	}
-
-	// Get configured tool
-	toolInstance, err := getConfiguredTool(cfg)
-	if err != nil {
-		return err
 	}
 
 	// Determine CLI config path based on tool

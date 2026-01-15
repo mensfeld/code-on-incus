@@ -30,20 +30,34 @@ func infoCommand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
+	// Get configured tool to determine tool-specific sessions directory
+	toolInstance, err := getConfiguredTool(cfg)
+	if err != nil {
+		return err
+	}
+
+	// Get tool-specific sessions directory
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get home directory: %w", err)
+	}
+	baseDir := filepath.Join(homeDir, ".coi")
+	sessionsDir := session.GetSessionsDir(baseDir, toolInstance)
+
 	// Get session ID
 	var sessionID string
 	if len(args) > 0 {
 		sessionID = args[0]
 	} else {
 		// Get latest session
-		sessionID, err = session.GetLatestSession(cfg.Paths.SessionsDir)
+		sessionID, err = session.GetLatestSession(sessionsDir)
 		if err != nil {
 			return fmt.Errorf("no sessions found (specify session ID or use 'coi list --all')")
 		}
 	}
 
 	// Check if session exists
-	sessionDir := filepath.Join(cfg.Paths.SessionsDir, sessionID)
+	sessionDir := filepath.Join(sessionsDir, sessionID)
 	if _, err := os.Stat(sessionDir); os.IsNotExist(err) {
 		return fmt.Errorf("session not found: %s", sessionID)
 	}
@@ -131,3 +145,4 @@ func formatBytes(bytes int64) string {
 	}
 	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
+
