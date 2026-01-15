@@ -74,8 +74,7 @@ echo "Test build - no spurious errors"
             if "Error:" in line and "already stopped" in line.lower()
         ]
         assert len(error_lines) == 0, (
-            "Successful build should not contain error messages. Found:\n"
-            + "\n".join(error_lines)
+            "Successful build should not contain error messages. Found:\n" + "\n".join(error_lines)
         )
 
     # Cleanup
