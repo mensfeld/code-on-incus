@@ -31,7 +31,7 @@ def test_tmux_list_no_sessions(coi_binary, cleanup_containers):
     # Should succeed even with no sessions
     assert result.returncode == 0, f"Tmux list should succeed. stderr: {result.stderr}"
 
-    # Should show "No active Claude sessions"
-    assert "No active Claude sessions" in result.stdout, (
+    # Should show "No active sessions"
+    assert "No active sessions" in result.stdout, (
         f"Should show no sessions message. Got:\n{result.stdout}"
     )

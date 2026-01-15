@@ -126,8 +126,8 @@ def test_attach_lists_multiple_sessions(coi_binary, cleanup_containers, workspac
     output = result.stdout
 
     # Should show list header
-    assert "Active Claude sessions" in output, (
-        f"Should show 'Active Claude sessions'. Got:\n{output}"
+    assert "Active sessions" in output, (
+        f"Should show 'Active sessions'. Got:\n{output}"
     )
 
     # Should list both containers
