@@ -179,7 +179,7 @@ func init() {
 
 	// Add flags to cleanup command
 	imageCleanupCmd.Flags().Int("keep", 0, "Number of versions to keep (required)")
-	imageCleanupCmd.MarkFlagRequired("keep")
+	_ = imageCleanupCmd.MarkFlagRequired("keep") // Always succeeds for valid flag names.
 
 	// Add subcommands to image command
 	imageCmd.AddCommand(imageListCmd)

@@ -478,7 +478,7 @@ func runCLIInTmux(result *session.SetupResult, sessionID string, detached bool, 
 		Capture: true,
 		User:    userPtr,
 	}
-	result.Manager.ExecCommand(serverStartCmd, serverOpts)
+	_, _ = result.Manager.ExecCommand(serverStartCmd, serverOpts) // Best-effort server start.
 
 	// Poll to ensure server is ready (up to 2 seconds)
 	for i := 0; i < 20; i++ {
@@ -487,7 +487,7 @@ func runCLIInTmux(result *session.SetupResult, sessionID string, detached bool, 
 		if err == nil {
 			break // Server is ready
 		}
-		result.Manager.ExecCommand("sleep 0.1", serverOpts)
+		_, _ = result.Manager.ExecCommand("sleep 0.1", serverOpts) // Best-effort sleep.
 	}
 
 	// Check if tmux session already exists
@@ -569,7 +569,7 @@ func runCLIInTmux(result *session.SetupResult, sessionID string, detached bool, 
 			User:    userPtr,
 			Capture: true,
 		}
-		result.Manager.ExecCommand(serverStartCmd, serverOpts)
+		_, _ = result.Manager.ExecCommand(serverStartCmd, serverOpts) // Best-effort server start.
 
 		// Poll to ensure server is ready (up to 2 seconds)
 		// This prevents race conditions in CI where the server takes time to initialize

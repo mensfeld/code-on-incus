@@ -60,7 +60,7 @@ func init() {
 	buildCustomCmd.Flags().String("script", "", "Path to build script (required)")
 	buildCustomCmd.Flags().String("base", "", "Base image to build from (default: coi)")
 	buildCustomCmd.Flags().BoolVar(&buildForce, "force", false, "Force rebuild even if image exists")
-	buildCustomCmd.MarkFlagRequired("script")
+	_ = buildCustomCmd.MarkFlagRequired("script") // Always succeeds for valid flag names.
 
 	buildCmd.AddCommand(buildCustomCmd)
 }

@@ -87,7 +87,7 @@ linters-settings:
     under: 40  # Relaxed from 80 - test functions are naturally verbose
 
   dupl:
-    threshold: 100
+    threshold: 150  # Default threshold - allows some duplication in similar CLI commands.
 
   gocritic:
     enabled-tags:
