@@ -1,5 +1,114 @@
 # CHANGELOG
 
+## 0.5.0 (2026-01-15)
+
+**Major architectural refactoring to support multiple AI coding tools**
+
+This release introduces a comprehensive tool abstraction layer that allows code-on-incus to support multiple AI coding assistants beyond Claude Code. The refactoring was completed in three phases (Phase 1-3) with minimal user-facing changes.
+
+### Breaking Changes
+
+**Session Directory Structure:**
+- Old: `~/.coi/sessions/<session-id>/`
+- New: `~/.coi/sessions-claude/<session-id>/` (for Claude)
+      `~/.coi/sessions-aider/<session-id>/` (for Aider, future)
+      etc.
+
+**Migration:** Old sessions in `~/.coi/sessions/` will not be automatically migrated. You can manually move session directories if needed, or start fresh sessions.
+
+### Features
+
+**Phase 1: Tool Abstraction Layer (#18)**
+- [Feature] New `tool.Tool` interface for AI coding tool abstraction
+- [Feature] `ClaudeTool` implementation with session discovery and command building
+- [Feature] Tool registry system for registering and retrieving tools
+- [Feature] Config-based tool selection via `tool.name` configuration option
+
+**Phase 2: Runtime Integration (#19)**
+- [Feature] Tool abstraction wired throughout runtime (shell, setup, cleanup)
+- [Feature] Tool-specific configuration directory handling (e.g., `.claude`, `.aider`)
+- [Feature] Tool-specific sandbox settings injection
+- [Feature] Support for both config-based and ENV-based tool authentication
+
+**Phase 3: Tool-Specific Session Directories (#20)**
+- [Feature] Separate session directories per tool (`sessions-claude`, `sessions-aider`)
+- [Feature] Session isolation between different AI tools
+- [Feature] Extensible architecture for adding new tools without affecting existing sessions
+
+### Configuration
+
+New `tool` configuration section:
+```toml
+[tool]
+name = "claude"          # AI coding tool to use (currently supports: claude)
+# binary = "claude"      # Optional: override binary name
+```
+
+### Code Quality & Testing
+
+- [Enhancement] Added golangci-lint to CI with essential linters
+- [Enhancement] Added race detector to Go unit tests (`-race` flag)
+- [Enhancement] Added test coverage reporting (local, no third-party uploads)
+- [Enhancement] Auto-formatted entire codebase with gofmt/gofumpt
+- [Enhancement] Removed unused code and functions
+
+### Documentation
+
+- [Documentation] Updated README from "claude-on-incus" to "code-on-incus"
+- [Documentation] Rebranded to emphasize multi-tool support
+- [Documentation] Added "Supported AI Coding Tools" section
+- [Documentation] Updated all CLI help text to be tool-agnostic
+- [Documentation] Noted Claude Code as default tool with extensibility for others
+
+### Technical Details
+
+**Tool Interface:**
+```go
+type Tool interface {
+    Name() string                  // "claude", "aider", "cursor"
+    Binary() string                // binary name to execute
+    ConfigDirName() string         // config directory (e.g., ".claude")
+    SessionsDirName() string       // sessions directory name
+    BuildCommand(...) []string     // build CLI command
+    DiscoverSessionID(...) string  // find session ID from state
+    GetSandboxSettings() map[string]interface{}  // sandbox settings
+}
+```
+
+### New Files
+- `internal/tool/tool.go` - Tool abstraction interface and Claude implementation
+- `internal/tool/registry.go` - Tool registry for factory pattern
+- `internal/tool/tool_test.go` - Comprehensive tool abstraction tests
+- `internal/session/paths.go` - Tool-specific session directory helpers
+
+### Modified Files
+- `internal/cli/shell.go` - Tool-aware session management
+- `internal/cli/list.go` - Tool-specific session listing
+- `internal/cli/info.go` - Tool-specific session info
+- `internal/cli/clean.go` - Tool-specific session cleanup
+- `internal/cli/root.go` - Updated CLI descriptions to be tool-agnostic
+- `internal/cli/attach.go` - Generic "AI coding session" terminology
+- `internal/cli/build.go` - Multi-tool support noted
+- `internal/cli/tmux.go` - Generic session references
+- `internal/session/setup.go` - Tool-aware setup logic
+- `internal/session/cleanup.go` - Tool-aware cleanup logic
+- `internal/config/config.go` - Added ToolConfig section
+- `.golangci.yml` - Comprehensive linter configuration
+- `.github/workflows/ci.yml` - Added golangci-lint, race detector, coverage
+- `README.md` - Rebranded to emphasize multi-tool support
+
+### Future Tool Support
+
+The architecture now supports adding new AI coding tools with minimal changes:
+1. Implement the `Tool` interface
+2. Register in `tool/registry.go`
+3. Tool-specific sessions automatically isolated
+
+Example tools that can be added:
+- Aider - AI pair programming assistant
+- Cursor - AI-first code editor
+- Any CLI-based AI coding assistant
+
 ## 0.4.0 (2026-01-14)
 
 Add comprehensive network isolation with domain allowlisting and IP-based filtering, enabling high-security environments where containers can only communicate with approved domains.

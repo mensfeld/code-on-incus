@@ -116,7 +116,7 @@ def test_tmux_list_sessions(coi_binary, cleanup_containers, workspace_dir):
     )
 
     assert result.returncode == 0, f"Tmux list should succeed. stderr: {result.stderr}"
-    assert "Active Claude sessions:" in result.stdout, (
+    assert "Active sessions:" in result.stdout, (
         f"Should show sessions header. Got:\n{result.stdout}"
     )
 

@@ -32,12 +32,14 @@ var (
 // rootCmd represents the base command
 var rootCmd = &cobra.Command{
 	Use:   "coi",
-	Short: "Claude on Incus - Run Claude Code in isolated Incus containers",
-	Long: `claude-on-incus (coi) is a CLI tool for running Claude Code in Incus containers
+	Short: "Code on Incus - Run AI coding tools in isolated Incus containers",
+	Long: `code-on-incus (coi) is a CLI tool for running AI coding assistants in Incus containers
 with session persistence, workspace isolation, and multi-slot support.
 
+By default runs Claude Code. Other tools can be configured via the tool.name config option.
+
 Examples:
-  coi                          # Start interactive Claude session (same as 'coi shell')
+  coi                          # Start interactive AI coding session (same as 'coi shell')
   coi shell --slot 2           # Use specific slot
   coi run "npm test"           # Run command in container
   coi build                    # Build coi image

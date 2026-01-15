@@ -14,8 +14,8 @@ var buildForce bool
 
 var buildCmd = &cobra.Command{
 	Use:   "build",
-	Short: "Build Incus image for Claude sessions",
-	Long: `Build the coi Incus image for running Claude Code.
+	Short: "Build Incus image for AI coding sessions",
+	Long: `Build the coi Incus image for running AI coding tools (Claude Code, Aider, etc.).
 
 The coi image includes:
   - Base development tools

@@ -19,8 +19,8 @@ var (
 
 var attachCmd = &cobra.Command{
 	Use:   "attach [container-name]",
-	Short: "Attach to a running Claude session",
-	Long: `Attach to a running Claude session in a container.
+	Short: "Attach to a running AI coding session",
+	Long: `Attach to a running AI coding session in a container.
 
 If no container name is provided, lists all running sessions.
 If only one session is running, attaches to it automatically.
@@ -87,7 +87,7 @@ func attachCommand(cmd *cobra.Command, args []string) error {
 			}
 		} else if len(containers) == 0 {
 			// No container name provided and no sessions running
-			fmt.Println("No active Claude sessions")
+			fmt.Println("No active sessions")
 			return nil
 		} else if len(containers) == 1 {
 			// Auto-attach if only one session
@@ -95,7 +95,7 @@ func attachCommand(cmd *cobra.Command, args []string) error {
 			fmt.Printf("Attaching to %s...\n", targetContainer)
 		} else {
 			// Multiple sessions - show list
-			fmt.Println("Active Claude sessions:")
+			fmt.Println("Active sessions:")
 			for i, c := range containers {
 				mgr := container.NewManager(c)
 				running, err := mgr.Running()

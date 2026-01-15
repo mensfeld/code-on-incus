@@ -24,8 +24,10 @@ var (
 
 var shellCmd = &cobra.Command{
 	Use:   "shell",
-	Short: "Start an interactive Claude session",
-	Long: `Start an interactive Claude Code session in a container (always runs in tmux).
+	Short: "Start an interactive AI coding session",
+	Long: `Start an interactive AI coding session in a container (always runs in tmux).
+
+By default, runs Claude Code. Other tools can be configured via the tool.name config option.
 
 All sessions run in tmux for monitoring and detach/reattach support:
   - Interactive: Automatically attaches to tmux session
@@ -46,8 +48,8 @@ Examples:
 }
 
 func init() {
-	shellCmd.Flags().BoolVar(&debugShell, "debug", false, "Launch interactive bash instead of Claude (for debugging)")
-	shellCmd.Flags().BoolVar(&background, "background", false, "Run Claude in background tmux session (detached)")
+	shellCmd.Flags().BoolVar(&debugShell, "debug", false, "Launch interactive bash instead of AI tool (for debugging)")
+	shellCmd.Flags().BoolVar(&background, "background", false, "Run AI tool in background tmux session (detached)")
 	shellCmd.Flags().BoolVar(&useTmux, "tmux", true, "Use tmux for session management (default true)")
 }
 

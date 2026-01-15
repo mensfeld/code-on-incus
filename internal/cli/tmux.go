@@ -10,7 +10,7 @@ import (
 var tmuxCmd = &cobra.Command{
 	Use:   "tmux",
 	Short: "Interact with tmux sessions in containers",
-	Long: `Send commands to or capture output from Claude sessions running in tmux.
+	Long: `Send commands to or capture output from AI coding sessions running in tmux.
 This is primarily for automated workflows.`,
 }
 
@@ -118,11 +118,11 @@ func tmuxListCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(containers) == 0 {
-		fmt.Println("No active Claude sessions")
+		fmt.Println("No active sessions")
 		return nil
 	}
 
-	fmt.Println("Active Claude sessions:")
+	fmt.Println("Active sessions:")
 	for _, c := range containers {
 		mgr := container.NewManager(c)
 
