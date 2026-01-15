@@ -170,7 +170,7 @@ def test_full_installation_process(meta_container, coi_binary):
         timeout=300,
     )
     assert result.returncode == 0, f"Failed to build coi: {result.stderr}"
-    assert "claude-on-incus (coi) v" in result.stdout, "coi version check failed"
+    assert "code-on-incus (coi) v" in result.stdout, "coi version check failed"
 
     # Phase 4: Test coi --help
     result = exec_in_container(
@@ -182,7 +182,7 @@ def test_full_installation_process(meta_container, coi_binary):
         timeout=30,
     )
     assert result.returncode == 0, f"coi --help failed: {result.stderr}"
-    assert "claude-on-incus (coi) is a CLI tool" in result.stdout, (
+    assert "code-on-incus (coi) is a CLI tool" in result.stdout, (
         "coi help output missing expected text"
     )
     assert "Available Commands:" in result.stdout, "coi help missing commands section"
@@ -237,4 +237,4 @@ def test_installation_with_prebuilt_binary(meta_container, coi_binary):
         timeout=30,
     )
     assert result.returncode == 0, f"Pre-built binary test failed: {result.stderr}"
-    assert "claude-on-incus (coi)" in result.stdout, "coi binary not working correctly"
+    assert "code-on-incus (coi)" in result.stdout, "coi binary not working correctly"

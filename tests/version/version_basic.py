@@ -32,7 +32,7 @@ def test_version_basic(coi_binary):
     output = result.stdout
 
     # Should contain version identifier
-    assert "claude-on-incus (coi) v" in output, f"Should contain version identifier. Got:\n{output}"
+    assert "code-on-incus (coi) v" in output, f"Should contain version identifier. Got:\n{output}"
 
     # Should contain repository URL
     assert "https://github.com/mensfeld/claude-on-incus" in output, (
