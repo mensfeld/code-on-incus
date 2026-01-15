@@ -27,6 +27,12 @@ jobs:
           go-version: '1.21'
           cache: true
 
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@971e284b6050e8a5849b72094c50ab08da042db8 # v6.1.1
+        with:
+          version: latest
+          args: --timeout=5m
+
       - name: Build
         run: go build -v ./...
 
@@ -45,8 +51,15 @@ jobs:
           go-version: '1.21'
           cache: true
 
-      - name: Run unit tests
-        run: go test -v ./...
+      - name: Run unit tests with coverage and race detector
+        run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage.out
+          flags: unittests
+          fail_ci_if_error: false  # Don't fail CI if codecov upload fails
 
   # Integration tests run in parallel with unit tests (after build passes)
   integration:
@@ -287,14 +300,21 @@ jobs:
           path: /tmp/coi-image.tar.gz
           key: ${{ runner.os }}-coi-image-${{ hashFiles('internal/image/**', 'testdata/dummy/**', 'scripts/build/**') }}
 
-      - name: Run integration tests
+      - name: Run integration tests with coverage
         run: |
-          # Run all integration tests
+          # Run all integration tests with coverage reporting
           # Tests marked with @pytest.mark.skipif will be automatically skipped in CI
           # --durations=0 shows timing for all tests to help identify slow tests
-          python -m pytest tests/ -v --tb=short --durations=0
+          python -m pytest tests/ -v --tb=short --durations=0 --cov=tests --cov-report=xml --cov-report=term
         env:
           COI_BINARY: ./coi
+
+      - name: Upload Python coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage.xml
+          flags: integration
+          fail_ci_if_error: false  # Don't fail CI if codecov upload fails
 
       - name: Cleanup
         if: always()
