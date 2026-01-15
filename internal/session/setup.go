@@ -2,20 +2,33 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/mensfeld/claude-on-incus/internal/config"
 	"github.com/mensfeld/claude-on-incus/internal/container"
 	"github.com/mensfeld/claude-on-incus/internal/network"
+	"github.com/mensfeld/claude-on-incus/internal/tool"
 )
 
 const (
 	DefaultImage = "images:ubuntu/22.04"
 	CoiImage     = "coi"
 )
+
+// buildJSONFromSettings converts a settings map to a properly escaped JSON string
+// Uses json.Marshal to ensure proper escaping and avoid command injection
+func buildJSONFromSettings(settings map[string]interface{}) (string, error) {
+	jsonBytes, err := json.Marshal(settings)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal settings: %w", err)
+	}
+	return string(jsonBytes), nil
+}
 
 // SetupOptions contains options for setting up a session
 type SetupOptions struct {
@@ -25,8 +38,9 @@ type SetupOptions struct {
 	ResumeFromID     string
 	Slot             int
 	StoragePath      string
-	SessionsDir      string // e.g., ~/.claude-on-incus/sessions
-	CLIConfigPath    string // e.g., ~/.claude (host CLI config to copy credentials from)
+	SessionsDir      string             // e.g., ~/.coi/sessions-claude
+	CLIConfigPath    string             // e.g., ~/.claude (host CLI config to copy credentials from)
+	Tool             tool.Tool          // AI coding tool being used
 	NetworkConfig    *config.NetworkConfig
 	Logger           func(string)
 }
@@ -194,17 +208,18 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 	}
 
 	// 7. When resuming: restore session data if container was recreated, then inject credentials
-	if opts.ResumeFromID != "" {
-		// If we launched a new container (not reusing persistent one), restore .claude from saved session
+	// Skip if tool uses ENV-based auth (no config directory)
+	if opts.ResumeFromID != "" && opts.Tool != nil && opts.Tool.ConfigDirName() != "" {
+		// If we launched a new container (not reusing persistent one), restore config from saved session
 		if !skipLaunch && opts.SessionsDir != "" {
-			if err := restoreSessionData(result.Manager, opts.ResumeFromID, result.HomeDir, opts.SessionsDir, opts.Logger); err != nil {
+			if err := restoreSessionData(result.Manager, opts.ResumeFromID, result.HomeDir, opts.SessionsDir, opts.Tool, opts.Logger); err != nil {
 				opts.Logger(fmt.Sprintf("Warning: Could not restore session data: %v", err))
 			}
 		}
 
 		// Always inject fresh credentials when resuming (whether persistent container or restored session)
 		if opts.CLIConfigPath != "" {
-			if err := injectCredentials(result.Manager, opts.CLIConfigPath, result.HomeDir, opts.Logger); err != nil {
+			if err := injectCredentials(result.Manager, opts.CLIConfigPath, result.HomeDir, opts.Tool, opts.Logger); err != nil {
 				opts.Logger(fmt.Sprintf("Warning: Could not inject credentials: %v", err))
 			}
 		}
@@ -215,25 +230,30 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 		opts.Logger("Reusing existing workspace and storage mounts")
 	}
 
-	// 10. Setup Claude config (skip if resuming - .claude already restored)
-	if opts.CLIConfigPath != "" && opts.ResumeFromID == "" {
-		// Check if host .claude directory exists
-		if _, err := os.Stat(opts.CLIConfigPath); err == nil {
-			// Copy and inject settings (but only if NOT resuming)
-			// Only run on first launch, not when restarting persistent container
-			if !skipLaunch {
-				opts.Logger("Setting up Claude config...")
-				if err := setupCLIConfig(result.Manager, opts.CLIConfigPath, result.HomeDir, opts.Logger); err != nil {
-					opts.Logger(fmt.Sprintf("Warning: Failed to setup Claude config: %v", err))
+	// 10. Setup CLI tool config (skip if resuming - config already restored)
+	// Skip entirely if tool uses ENV-based auth (ConfigDirName returns "")
+	if opts.Tool != nil && opts.Tool.ConfigDirName() != "" {
+		if opts.CLIConfigPath != "" && opts.ResumeFromID == "" {
+			// Check if host config directory exists
+			if _, err := os.Stat(opts.CLIConfigPath); err == nil {
+				// Copy and inject settings (but only if NOT resuming)
+				// Only run on first launch, not when restarting persistent container
+				if !skipLaunch {
+					opts.Logger(fmt.Sprintf("Setting up %s config...", opts.Tool.Name()))
+					if err := setupCLIConfig(result.Manager, opts.CLIConfigPath, result.HomeDir, opts.Tool, opts.Logger); err != nil {
+						opts.Logger(fmt.Sprintf("Warning: Failed to setup %s config: %v", opts.Tool.Name(), err))
+					}
+				} else {
+					opts.Logger(fmt.Sprintf("Reusing existing %s config (persistent container)", opts.Tool.Name()))
 				}
-			} else {
-				opts.Logger("Reusing existing Claude config (persistent container)")
+			} else if !os.IsNotExist(err) {
+				return nil, fmt.Errorf("failed to check %s config directory: %w", opts.Tool.Name(), err)
 			}
-		} else if !os.IsNotExist(err) {
-			return nil, fmt.Errorf("failed to check Claude config directory: %w", err)
+		} else if opts.ResumeFromID != "" {
+			opts.Logger(fmt.Sprintf("Resuming session - using restored %s config", opts.Tool.Name()))
 		}
-	} else if opts.ResumeFromID != "" {
-		opts.Logger("Resuming session - using restored .claude config")
+	} else if opts.Tool != nil {
+		opts.Logger(fmt.Sprintf("Tool %s uses ENV-based auth, skipping config setup", opts.Tool.Name()))
 	}
 
 	opts.Logger("Container setup complete!")
@@ -265,29 +285,30 @@ func waitForReady(mgr *container.Manager, maxRetries int, logger func(string)) e
 	return fmt.Errorf("container failed to become ready after %d seconds", maxRetries)
 }
 
-// restoreSessionData restores .claude directory from a saved session
+// restoreSessionData restores tool config directory from a saved session
 // Used when resuming a non-persistent session (container was deleted and recreated)
-func restoreSessionData(mgr *container.Manager, resumeID, homeDir, sessionsDir string, logger func(string)) error {
-	sourceClaudeDir := filepath.Join(sessionsDir, resumeID, ".claude")
+func restoreSessionData(mgr *container.Manager, resumeID, homeDir, sessionsDir string, t tool.Tool, logger func(string)) error {
+	configDirName := t.ConfigDirName()
+	sourceConfigDir := filepath.Join(sessionsDir, resumeID, configDirName)
 
 	// Check if directory exists
-	if info, err := os.Stat(sourceClaudeDir); err != nil || !info.IsDir() {
+	if info, err := os.Stat(sourceConfigDir); err != nil || !info.IsDir() {
 		return fmt.Errorf("no saved session data found for %s", resumeID)
 	}
 
 	logger(fmt.Sprintf("Restoring session data from %s", resumeID))
 
-	// Push .claude directory to container
+	// Push config directory to container
 	// PushDirectory extracts the parent from the path and pushes to create the directory there
-	// So we pass the full destination path where .claude should end up
-	destClaudePath := filepath.Join(homeDir, ".claude")
-	if err := mgr.PushDirectory(sourceClaudeDir, destClaudePath); err != nil {
-		return fmt.Errorf("failed to push .claude directory: %w", err)
+	// So we pass the full destination path where the config dir should end up
+	destConfigPath := filepath.Join(homeDir, configDirName)
+	if err := mgr.PushDirectory(sourceConfigDir, destConfigPath); err != nil {
+		return fmt.Errorf("failed to push %s directory: %w", configDirName, err)
 	}
 
-	// Fix ownership if running as claude user
+	// Fix ownership if running as non-root user
 	if homeDir != "/root" {
-		statePath := destClaudePath
+		statePath := destConfigPath
 		if err := mgr.Chown(statePath, container.CodeUID, container.CodeUID); err != nil {
 			return fmt.Errorf("failed to set ownership: %w", err)
 		}
@@ -299,8 +320,10 @@ func restoreSessionData(mgr *container.Manager, resumeID, homeDir, sessionsDir s
 
 // injectCredentials copies credentials and essential config from host to container when resuming
 // This ensures fresh authentication while preserving the session conversation history
-func injectCredentials(mgr *container.Manager, hostCLIConfigPath, homeDir string, logger func(string)) error {
+func injectCredentials(mgr *container.Manager, hostCLIConfigPath, homeDir string, t tool.Tool, logger func(string)) error {
 	logger("Injecting fresh credentials and config for session resume...")
+
+	configDirName := t.ConfigDirName()
 
 	// Copy .credentials.json from host to container
 	credentialsPath := filepath.Join(hostCLIConfigPath, ".credentials.json")
@@ -308,41 +331,54 @@ func injectCredentials(mgr *container.Manager, hostCLIConfigPath, homeDir string
 		return fmt.Errorf("credentials file not found: %w", err)
 	}
 
-	destCredentials := filepath.Join(homeDir, ".claude", ".credentials.json")
+	destCredentials := filepath.Join(homeDir, configDirName, ".credentials.json")
 	if err := mgr.PushFile(credentialsPath, destCredentials); err != nil {
 		return fmt.Errorf("failed to push credentials: %w", err)
 	}
 
-	// Fix ownership if running as claude user
+	// Fix ownership if running as non-root user
 	if homeDir != "/root" {
 		if err := mgr.Chown(destCredentials, container.CodeUID, container.CodeUID); err != nil {
 			return fmt.Errorf("failed to set credentials ownership: %w", err)
 		}
 	}
 
-	// Also copy .claude.json (sibling to .claude directory) if it exists
-	// This file contains important config like theme, startup count, etc.
-	stateConfigPath := filepath.Join(filepath.Dir(hostCLIConfigPath), ".claude.json")
-	if _, err := os.Stat(stateConfigPath); err == nil {
-		logger("Copying .claude.json for session resume...")
-		claudeJsonDest := filepath.Join(homeDir, ".claude.json")
-		if err := mgr.PushFile(stateConfigPath, claudeJsonDest); err != nil {
-			logger(fmt.Sprintf("Warning: Failed to copy .claude.json: %v", err))
-		} else {
-			// Inject sandbox settings into .claude.json
-			logger("Injecting sandbox settings into .claude.json...")
-			injectCmd := fmt.Sprintf(
-				`python3 -c 'import json; f=open("%s","r+"); d=json.load(f); d["allowDangerouslySkipPermissions"]=True; d["bypassPermissionsModeAccepted"]=True; d["permissions"]={"defaultMode":"bypassPermissions"}; f.seek(0); json.dump(d,f,indent=2); f.truncate()'`,
-				claudeJsonDest,
-			)
-			if _, err := mgr.ExecCommand(injectCmd, container.ExecCommandOptions{Capture: true}); err != nil {
-				logger(fmt.Sprintf("Warning: Failed to inject settings into .claude.json: %v", err))
-			}
+	// Get sandbox settings from tool
+	sandboxSettings := t.GetSandboxSettings()
+	if len(sandboxSettings) > 0 {
+		// Get the state config filename (e.g., ".claude.json" or ".aider.json")
+		stateConfigFilename := fmt.Sprintf(".%s.json", t.Name())
+		stateConfigPath := filepath.Join(filepath.Dir(hostCLIConfigPath), stateConfigFilename)
 
-			// Fix ownership if running as claude user
-			if homeDir != "/root" {
-				if err := mgr.Chown(claudeJsonDest, container.CodeUID, container.CodeUID); err != nil {
-					logger(fmt.Sprintf("Warning: Failed to set .claude.json ownership: %v", err))
+		if _, err := os.Stat(stateConfigPath); err == nil {
+			logger(fmt.Sprintf("Copying %s for session resume...", stateConfigFilename))
+			stateJsonDest := filepath.Join(homeDir, stateConfigFilename)
+			if err := mgr.PushFile(stateConfigPath, stateJsonDest); err != nil {
+				logger(fmt.Sprintf("Warning: Failed to copy %s: %v", stateConfigFilename, err))
+			} else {
+				// Inject sandbox settings using tool's GetSandboxSettings()
+				logger(fmt.Sprintf("Injecting sandbox settings into %s...", stateConfigFilename))
+				settingsJSON, err := buildJSONFromSettings(sandboxSettings)
+				if err != nil {
+					logger(fmt.Sprintf("Warning: Failed to build JSON from settings: %v", err))
+				} else {
+					// Properly escape the JSON string for shell command
+					escapedJSON := strings.ReplaceAll(settingsJSON, "'", "'\"'\"'")
+					injectCmd := fmt.Sprintf(
+						`python3 -c 'import json; f=open("%s","r+"); d=json.load(f); updates=json.loads('"'"'%s'"'"'); d.update(updates); f.seek(0); json.dump(d,f,indent=2); f.truncate()'`,
+						stateJsonDest,
+						escapedJSON,
+					)
+					if _, err := mgr.ExecCommand(injectCmd, container.ExecCommandOptions{Capture: true}); err != nil {
+						logger(fmt.Sprintf("Warning: Failed to inject settings into %s: %v", stateConfigFilename, err))
+					}
+				}
+
+				// Fix ownership if running as non-root user
+				if homeDir != "/root" {
+					if err := mgr.Chown(stateJsonDest, container.CodeUID, container.CodeUID); err != nil {
+						logger(fmt.Sprintf("Warning: Failed to set %s ownership: %v", stateConfigFilename, err))
+					}
 				}
 			}
 		}
@@ -352,18 +388,19 @@ func injectCredentials(mgr *container.Manager, hostCLIConfigPath, homeDir string
 	return nil
 }
 
-// setupCLIConfig copies .claude directory and injects sandbox settings
-func setupCLIConfig(mgr *container.Manager, hostCLIConfigPath, homeDir string, logger func(string)) error {
-	stateDir := filepath.Join(homeDir, ".claude")
+// setupCLIConfig copies tool config directory and injects sandbox settings
+func setupCLIConfig(mgr *container.Manager, hostCLIConfigPath, homeDir string, t tool.Tool, logger func(string)) error {
+	configDirName := t.ConfigDirName()
+	stateDir := filepath.Join(homeDir, configDirName)
 
-	// Create .claude directory in container
-	logger("Creating .claude directory in container...")
+	// Create config directory in container
+	logger(fmt.Sprintf("Creating %s directory in container...", configDirName))
 	mkdirCmd := fmt.Sprintf("mkdir -p %s", stateDir)
 	if _, err := mgr.ExecCommand(mkdirCmd, container.ExecCommandOptions{Capture: true}); err != nil {
-		return fmt.Errorf("failed to create .claude directory: %w", err)
+		return fmt.Errorf("failed to create %s directory: %w", configDirName, err)
 	}
 
-	// Copy only essential files from .claude directory (skip debug logs with permission issues)
+	// Copy only essential files from config directory (skip debug logs with permission issues)
 	essentialFiles := []string{
 		".credentials.json",
 		"config.yml",
@@ -384,71 +421,84 @@ func setupCLIConfig(mgr *container.Manager, hostCLIConfigPath, homeDir string, l
 		}
 	}
 
-	// Create or update settings.json with sandbox settings
-	settingsPath := filepath.Join(stateDir, "settings.json")
-	sandboxSettings := `{
-  "includeCoAuthoredBy": false,
-  "allowDangerouslySkipPermissions": true,
-  "bypassPermissionsModeAccepted": true,
-  "permissions": {
-    "defaultMode": "bypassPermissions"
-  }
-}
-`
-	if err := mgr.CreateFile(settingsPath, sandboxSettings); err != nil {
-		return fmt.Errorf("failed to create settings.json: %w", err)
+	// Get sandbox settings from tool and create/update settings.json if needed
+	sandboxSettings := t.GetSandboxSettings()
+	if len(sandboxSettings) > 0 {
+		settingsPath := filepath.Join(stateDir, "settings.json")
+		// Build JSON from settings map using helper with pretty printing
+		settingsBytes, err := json.MarshalIndent(sandboxSettings, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to build JSON from sandbox settings: %w", err)
+		}
+
+		if err := mgr.CreateFile(settingsPath, string(settingsBytes)+"\n"); err != nil {
+			return fmt.Errorf("failed to create settings.json: %w", err)
+		}
+		logger(fmt.Sprintf("%s config copied and sandbox settings injected in settings.json", t.Name()))
+	} else {
+		logger(fmt.Sprintf("%s config copied (no sandbox settings needed)", t.Name()))
 	}
 
-	logger("Claude config copied and sandbox settings injected in settings.json")
-
-	// Copy and modify .claude.json (sibling to .claude directory)
-	stateConfigPath := filepath.Join(filepath.Dir(hostCLIConfigPath), ".claude.json")
-	logger(fmt.Sprintf("Checking for .claude.json at: %s", stateConfigPath))
+	// Copy and modify tool state config file (e.g., .claude.json, .aider.json)
+	// This is a sibling file to the config directory
+	stateConfigFilename := fmt.Sprintf(".%s.json", t.Name())
+	stateConfigPath := filepath.Join(filepath.Dir(hostCLIConfigPath), stateConfigFilename)
+	logger(fmt.Sprintf("Checking for %s at: %s", stateConfigFilename, stateConfigPath))
 
 	if info, err := os.Stat(stateConfigPath); err == nil {
-		logger(fmt.Sprintf("Found .claude.json (size: %d bytes), copying to container...", info.Size()))
-		claudeJsonDest := filepath.Join(homeDir, ".claude.json")
+		logger(fmt.Sprintf("Found %s (size: %d bytes), copying to container...", stateConfigFilename, info.Size()))
+		stateJsonDest := filepath.Join(homeDir, stateConfigFilename)
 
 		// Push the file to container
-		if err := mgr.PushFile(stateConfigPath, claudeJsonDest); err != nil {
-			return fmt.Errorf("failed to copy .claude.json: %w", err)
+		if err := mgr.PushFile(stateConfigPath, stateJsonDest); err != nil {
+			return fmt.Errorf("failed to copy %s: %w", stateConfigFilename, err)
 		}
-		logger(fmt.Sprintf(".claude.json copied to %s", claudeJsonDest))
+		logger(fmt.Sprintf("%s copied to %s", stateConfigFilename, stateJsonDest))
 
-		// Inject sandbox settings into .claude.json
-		logger("Injecting sandbox settings into .claude.json...")
-		injectCmd := fmt.Sprintf(
-			`python3 -c 'import json; f=open("%s","r+"); d=json.load(f); d["allowDangerouslySkipPermissions"]=True; d["bypassPermissionsModeAccepted"]=True; d["permissions"]={"defaultMode":"bypassPermissions"}; f.seek(0); json.dump(d,f,indent=2); f.truncate()'`,
-			claudeJsonDest,
-		)
-		if _, err := mgr.ExecCommand(injectCmd, container.ExecCommandOptions{Capture: true}); err != nil {
-			logger(fmt.Sprintf("Warning: Failed to inject settings into .claude.json: %v", err))
-		} else {
-			logger("Successfully injected sandbox settings into .claude.json")
-		}
-
-		// Fix ownership if running as claude user
-		if homeDir != "/root" {
-			logger(fmt.Sprintf("Fixing ownership of .claude.json to %d:%d", container.CodeUID, container.CodeUID))
-			if err := mgr.Chown(claudeJsonDest, container.CodeUID, container.CodeUID); err != nil {
-				return fmt.Errorf("failed to set .claude.json ownership: %w", err)
+		// Inject sandbox settings if tool provides them
+		if len(sandboxSettings) > 0 {
+			logger(fmt.Sprintf("Injecting sandbox settings into %s...", stateConfigFilename))
+			settingsJSON, err := buildJSONFromSettings(sandboxSettings)
+			if err != nil {
+				logger(fmt.Sprintf("Warning: Failed to build JSON from settings: %v", err))
+			} else {
+				// Properly escape the JSON string for shell command
+				escapedJSON := strings.ReplaceAll(settingsJSON, "'", "'\"'\"'")
+				injectCmd := fmt.Sprintf(
+					`python3 -c 'import json; f=open("%s","r+"); d=json.load(f); updates=json.loads('"'"'%s'"'"'); d.update(updates); f.seek(0); json.dump(d,f,indent=2); f.truncate()'`,
+					stateJsonDest,
+					escapedJSON,
+				)
+				if _, err := mgr.ExecCommand(injectCmd, container.ExecCommandOptions{Capture: true}); err != nil {
+					logger(fmt.Sprintf("Warning: Failed to inject settings into %s: %v", stateConfigFilename, err))
+				} else {
+					logger(fmt.Sprintf("Successfully injected sandbox settings into %s", stateConfigFilename))
+				}
 			}
 		}
 
-		// Fix ownership of entire .claude directory recursively
+		// Fix ownership if running as non-root user
 		if homeDir != "/root" {
-			logger(fmt.Sprintf("Fixing ownership of entire .claude directory to %d:%d", container.CodeUID, container.CodeUID))
+			logger(fmt.Sprintf("Fixing ownership of %s to %d:%d", stateConfigFilename, container.CodeUID, container.CodeUID))
+			if err := mgr.Chown(stateJsonDest, container.CodeUID, container.CodeUID); err != nil {
+				return fmt.Errorf("failed to set %s ownership: %w", stateConfigFilename, err)
+			}
+		}
+
+		// Fix ownership of entire config directory recursively
+		if homeDir != "/root" {
+			logger(fmt.Sprintf("Fixing ownership of entire %s directory to %d:%d", configDirName, container.CodeUID, container.CodeUID))
 			chownCmd := fmt.Sprintf("chown -R %d:%d %s", container.CodeUID, container.CodeUID, stateDir)
 			if _, err := mgr.ExecCommand(chownCmd, container.ExecCommandOptions{Capture: true}); err != nil {
-				return fmt.Errorf("failed to set .claude directory ownership: %w", err)
+				return fmt.Errorf("failed to set %s directory ownership: %w", configDirName, err)
 			}
 		}
 
-		logger(".claude.json setup complete")
+		logger(fmt.Sprintf("%s setup complete", stateConfigFilename))
 	} else if os.IsNotExist(err) {
-		logger(fmt.Sprintf("Warning: .claude.json not found at %s, skipping", stateConfigPath))
+		logger(fmt.Sprintf("Warning: %s not found at %s, skipping", stateConfigFilename, stateConfigPath))
 	} else {
-		return fmt.Errorf("failed to check .claude.json: %w", err)
+		return fmt.Errorf("failed to check %s: %w", stateConfigFilename, err)
 	}
 
 	return nil

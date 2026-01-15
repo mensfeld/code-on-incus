@@ -12,6 +12,7 @@ import (
 	"github.com/mensfeld/claude-on-incus/internal/config"
 	"github.com/mensfeld/claude-on-incus/internal/container"
 	"github.com/mensfeld/claude-on-incus/internal/session"
+	"github.com/mensfeld/claude-on-incus/internal/tool"
 	"github.com/spf13/cobra"
 )
 
@@ -163,6 +164,20 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 		networkConfig.Mode = config.NetworkMode(networkMode)
 	}
 
+	// Get configured tool
+	toolInstance, err := getConfiguredTool(cfg)
+	if err != nil {
+		return err
+	}
+
+	// Determine CLI config path based on tool
+	// For ENV-based tools (ConfigDirName returns ""), this will be empty
+	var cliConfigPath string
+	configDirName := toolInstance.ConfigDirName()
+	if configDirName != "" {
+		cliConfigPath = filepath.Join(homeDir, configDirName)
+	}
+
 	// Setup session
 	setupOpts := session.SetupOptions{
 		WorkspacePath:    absWorkspace,
@@ -171,7 +186,8 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 		ResumeFromID:     resumeID,
 		Slot:             slotNum,
 		SessionsDir:      sessionsDir,
-		CLIConfigPath:    filepath.Join(homeDir, ".claude"),
+		CLIConfigPath:    cliConfigPath,
+		Tool:             toolInstance,
 		NetworkConfig:    &networkConfig,
 	}
 
@@ -200,6 +216,7 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 			SessionsDir:    sessionsDir,
 			SaveSession:    true, // Always save session data
 			Workspace:      absWorkspace,
+			Tool:           toolInstance,
 			NetworkManager: result.NetworkManager,
 		}
 		if err := session.Cleanup(cleanupOpts); err != nil {
@@ -216,19 +233,19 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 		os.Exit(0) // Defer will run
 	}()
 
-	// Run Claude CLI
-	fmt.Fprintf(os.Stderr, "\nStarting Claude session...\n")
+	// Run CLI tool
+	fmt.Fprintf(os.Stderr, "\nStarting session...\n")
 	fmt.Fprintf(os.Stderr, "Session ID: %s\n", sessionID)
 	fmt.Fprintf(os.Stderr, "Container: %s\n", result.ContainerName)
 	fmt.Fprintf(os.Stderr, "Workspace: %s\n", absWorkspace)
 
 	// Determine resume mode
 	// The difference is:
-	// - Persistent: container is reused, .claude stays in container, pass --resume to Claude
-	// - Ephemeral: container is recreated, we restore .claude dir, let Claude auto-detect session
+	// - Persistent: container is reused, tool config stays in container, pass --resume flag
+	// - Ephemeral: container is recreated, we restore config dir, tool auto-detects session
 	//
-	// For persistent containers resuming: pass --resume flag with our session ID
-	// For ephemeral containers resuming: just restore .claude, Claude will auto-detect from restored data
+	// For persistent containers resuming: pass --resume flag with tool's session ID
+	// For ephemeral containers resuming: just restore config, tool will auto-detect from restored data
 	useResumeFlag := (resumeID != "") && persistent
 	restoreOnly := (resumeID != "") && !persistent
 
@@ -245,7 +262,7 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(os.Stderr, "Resume mode: Persistent session\n")
 		}
 		fmt.Fprintf(os.Stderr, "\n")
-		err = runCLIInTmux(result, sessionID, background, useResumeFlag, restoreOnly, sessionsDir, resumeID)
+		err = runCLIInTmux(result, sessionID, background, useResumeFlag, restoreOnly, sessionsDir, resumeID, toolInstance)
 	} else {
 		fmt.Fprintf(os.Stderr, "Mode: Direct (no tmux)\n")
 		if restoreOnly {
@@ -254,7 +271,7 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(os.Stderr, "Resume mode: Persistent session\n")
 		}
 		fmt.Fprintf(os.Stderr, "\n")
-		err = runCLI(result, sessionID, useResumeFlag, restoreOnly, sessionsDir, resumeID)
+		err = runCLI(result, sessionID, useResumeFlag, restoreOnly, sessionsDir, resumeID, toolInstance)
 	}
 
 	// Handle expected exit conditions gracefully
@@ -291,42 +308,58 @@ func getEnvValue(key string) string {
 	return os.Getenv(key)
 }
 
-// runCLI executes the CLI tool in the container interactively
-func runCLI(result *session.SetupResult, sessionID string, useResumeFlag, restoreOnly bool, sessionsDir, resumeID string) error {
-	// Determine which CLI binary to use (real or dummy)
-	cliBinary := "claude"
-	if getEnvValue("COI_USE_DUMMY") == "1" {
-		cliBinary = "dummy"
-		fmt.Fprintf(os.Stderr, "Using dummy (test stub) for faster testing\n")
+// getConfiguredTool returns the tool to use based on config
+func getConfiguredTool(cfg *config.Config) (tool.Tool, error) {
+	toolName := cfg.Tool.Name
+	if toolName == "" {
+		toolName = "claude" // Default to claude if not configured
 	}
 
+	t, err := tool.Get(toolName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get tool '%s': %w", toolName, err)
+	}
+
+	return t, nil
+}
+
+// runCLI executes the CLI tool in the container interactively
+func runCLI(result *session.SetupResult, sessionID string, useResumeFlag, restoreOnly bool, sessionsDir, resumeID string, t tool.Tool) error {
 	// Build command - either bash for debugging or CLI tool
 	var cmdToRun string
 	if debugShell {
 		// Debug mode: launch interactive bash
 		cmdToRun = "bash"
 	} else {
-		// Always use permission-mode bypassPermissions to skip all prompts
-		permissionFlags := "--permission-mode bypassPermissions "
-
-		// Build session flag:
-		// - useResumeFlag or restoreOnly: use --resume with CLI's session ID
-		// - neither: use --session-id for new sessions
-		var sessionArg string
+		// Determine resume mode and CLI session ID
+		var cliSessionID string
 		if useResumeFlag || restoreOnly {
-			// Resume mode: find CLI's session ID from saved data
-			cliSessionID := session.GetCLISessionID(sessionsDir, resumeID)
-			if cliSessionID != "" {
-				sessionArg = fmt.Sprintf(" --resume %s", cliSessionID)
+			// Try to discover the tool's internal session ID from saved state
+			// The exact discovery mechanism is tool-specific (e.g. some tools read
+			// config files, others use environment variables) and may return ""
+			// if no previous session can be found (start fresh).
+			var sessionStatePath string
+			if configDir := t.ConfigDirName(); configDir != "" {
+				sessionStatePath = filepath.Join(sessionsDir, resumeID, configDir)
 			} else {
-				// Fallback to auto-detect if we can't find the session ID
-				sessionArg = " --resume"
+				sessionStatePath = filepath.Join(sessionsDir, resumeID)
 			}
-		} else {
-			sessionArg = fmt.Sprintf(" --session-id %s", sessionID)
+			cliSessionID = t.DiscoverSessionID(sessionStatePath)
 		}
 
-		cmdToRun = fmt.Sprintf("%s --verbose %s%s", cliBinary, permissionFlags, sessionArg)
+		// Build command using tool abstraction
+		// This handles tool-specific flags (--verbose, --permission-mode, etc.)
+		cmd := t.BuildCommand(sessionID, useResumeFlag || restoreOnly, cliSessionID)
+
+		// Handle dummy mode override (for testing)
+		if getEnvValue("COI_USE_DUMMY") == "1" {
+			if len(cmd) > 0 {
+				cmd[0] = "dummy"
+			}
+			fmt.Fprintf(os.Stderr, "Using dummy (test stub) for faster testing\n")
+		}
+
+		cmdToRun = strings.Join(cmd, " ")
 	}
 
 	// Execute in container
@@ -364,15 +397,8 @@ func runCLI(result *session.SetupResult, sessionID string, useResumeFlag, restor
 }
 
 // runCLIInTmux executes CLI tool in a tmux session for background/monitoring support
-func runCLIInTmux(result *session.SetupResult, sessionID string, detached bool, useResumeFlag, restoreOnly bool, sessionsDir, resumeID string) error {
+func runCLIInTmux(result *session.SetupResult, sessionID string, detached bool, useResumeFlag, restoreOnly bool, sessionsDir, resumeID string, t tool.Tool) error {
 	tmuxSessionName := fmt.Sprintf("coi-%s", result.ContainerName)
-
-	// Determine which CLI binary to use (real or dummy)
-	cliBinary := "claude"
-	if getEnvValue("COI_USE_DUMMY") == "1" {
-		cliBinary = "dummy"
-		fmt.Fprintf(os.Stderr, "Using dummy (test stub) for faster testing\n")
-	}
 
 	// Build CLI command
 	var cliCmd string
@@ -380,27 +406,35 @@ func runCLIInTmux(result *session.SetupResult, sessionID string, detached bool, 
 		// Debug mode: launch interactive bash
 		cliCmd = "bash"
 	} else {
-		// Always use permission-mode bypassPermissions
-		permissionFlags := "--permission-mode bypassPermissions "
-
-		// Build session flag:
-		// - useResumeFlag or restoreOnly: use --resume with CLI's session ID
-		// - neither: use --session-id for new sessions
-		var sessionArg string
+		// Determine resume mode and CLI session ID
+		var cliSessionID string
 		if useResumeFlag || restoreOnly {
-			// Resume mode: find CLI's session ID from saved data
-			cliSessionID := session.GetCLISessionID(sessionsDir, resumeID)
-			if cliSessionID != "" {
-				sessionArg = fmt.Sprintf(" --resume %s", cliSessionID)
+			// Try to discover the tool's internal session ID from saved state
+			// The exact discovery mechanism is tool-specific (e.g. some tools read
+			// config files, others use environment variables) and may return ""
+			// if no previous session can be found (start fresh).
+			var sessionStatePath string
+			if configDir := t.ConfigDirName(); configDir != "" {
+				sessionStatePath = filepath.Join(sessionsDir, resumeID, configDir)
 			} else {
-				// Fallback to auto-detect if we can't find the session ID
-				sessionArg = " --resume"
+				sessionStatePath = filepath.Join(sessionsDir, resumeID)
 			}
-		} else {
-			sessionArg = fmt.Sprintf(" --session-id %s", sessionID)
+			cliSessionID = t.DiscoverSessionID(sessionStatePath)
 		}
 
-		cliCmd = fmt.Sprintf("%s --verbose %s%s", cliBinary, permissionFlags, sessionArg)
+		// Build command using tool abstraction
+		// This handles tool-specific flags (--verbose, --permission-mode, etc.)
+		cmd := t.BuildCommand(sessionID, useResumeFlag || restoreOnly, cliSessionID)
+
+		// Handle dummy mode override (for testing)
+		if getEnvValue("COI_USE_DUMMY") == "1" {
+			if len(cmd) > 0 {
+				cmd[0] = "dummy"
+			}
+			fmt.Fprintf(os.Stderr, "Using dummy (test stub) for faster testing\n")
+		}
+
+		cliCmd = strings.Join(cmd, " ")
 	}
 
 	// Build environment variables

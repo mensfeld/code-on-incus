@@ -275,15 +275,19 @@ func outputText(containers []ContainerInfo, sessions []SessionInfo,
 	}
 
 	// Saved Sessions section (only with --all)
-	if len(sessions) > 0 {
+	if sessions != nil {
 		fmt.Println("\nSaved Sessions:")
 		fmt.Println("---------------")
 
-		for _, s := range sessions {
-			fmt.Printf("  %s\n", s.ID)
-			fmt.Printf("    Saved: %s\n", s.SavedAt)
-			if s.Workspace != "" {
-				fmt.Printf("    Workspace: %s\n", s.Workspace)
+		if len(sessions) == 0 {
+			fmt.Println("  (none)")
+		} else {
+			for _, s := range sessions {
+				fmt.Printf("  %s\n", s.ID)
+				fmt.Printf("    Saved: %s\n", s.SavedAt)
+				if s.Workspace != "" {
+					fmt.Printf("    Workspace: %s\n", s.Workspace)
+				}
 			}
 		}
 	}

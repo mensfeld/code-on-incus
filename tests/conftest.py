@@ -124,3 +124,37 @@ def dummy_image(coi_binary):
 
     print(f"✓ Test image '{image_name}' built successfully")
     return image_name
+
+
+# Hook to show test duration inline with each test result
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """Add duration to test reports."""
+    outcome = yield
+    report = outcome.get_result()
+
+    # Add duration to the report for later display
+    if call.when == "call":
+        report.duration = call.duration
+
+
+def pytest_report_teststatus(report, config):
+    """Customize test status output to include duration inline."""
+    if report.when == "call" and hasattr(report, "duration"):
+        duration = report.duration
+        # Format duration nicely
+        duration_str = f"{duration:.2f}s" if duration < 1 else f"{duration:.1f}s"
+
+        # Append duration to the word (status)
+        if report.passed:
+            word = f"PASSED ({duration_str})"
+        elif report.failed:
+            word = f"FAILED ({duration_str})"
+        elif report.skipped:
+            word = f"SKIPPED ({duration_str})"
+        else:
+            word = f"{report.outcome.upper()} ({duration_str})"
+
+        return report.outcome, "", word
+
+    return None  # Use default formatting

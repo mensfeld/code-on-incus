@@ -278,13 +278,13 @@ def wait_for_prompt(child, timeout=90):
 def wait_for_container_ready(child, timeout=60):
     """
     Wait for container setup messages to complete.
-    Looks for "Starting Claude session..." message.
+    Looks for "Starting session..." message (tool-agnostic).
 
     Automatically uses terminal emulator if available, otherwise falls back to raw expect().
     """
     if isinstance(child.logfile_read, TerminalEmulator):
         try:
-            wait_for_text_on_screen(child, "Starting Claude session", timeout=timeout)
+            wait_for_text_on_screen(child, "Starting session", timeout=timeout)
             return True
         except TimeoutError:
             display = child.logfile_read.get_display_stripped()
@@ -292,7 +292,7 @@ def wait_for_container_ready(child, timeout=60):
     else:
         # Fallback to raw expect()
         try:
-            child.expect(r"Starting Claude session\.\.\.", timeout=timeout)
+            child.expect(r"Starting session\.\.\.", timeout=timeout)
             return True
         except TIMEOUT:
             output = (
