@@ -58,7 +58,7 @@ func (c *CacheManager) Load(containerName string) (*IPCache, error) {
 // Save writes the IP cache for a container
 func (c *CacheManager) Save(containerName string, cache *IPCache) error {
 	// Ensure cache directory exists
-	if err := os.MkdirAll(c.cacheDir, 0755); err != nil {
+	if err := os.MkdirAll(c.cacheDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create cache directory: %w", err)
 	}
 
@@ -69,7 +69,7 @@ func (c *CacheManager) Save(containerName string, cache *IPCache) error {
 		return fmt.Errorf("failed to marshal cache: %w", err)
 	}
 
-	if err := os.WriteFile(cachePath, data, 0644); err != nil {
+	if err := os.WriteFile(cachePath, data, 0o644); err != nil {
 		return fmt.Errorf("failed to write cache file: %w", err)
 	}
 

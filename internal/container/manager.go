@@ -256,7 +256,7 @@ func (m *Manager) PullDirectory(containerPath, localPath string) error {
 
 	// Move the pulled directory to the desired location
 	pulledDir := filepath.Join(tempDir, entries[0].Name())
-	if err := os.MkdirAll(filepath.Dir(localPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
 		return err
 	}
 
@@ -329,7 +329,7 @@ func ImageExistsGlobal(imageAlias string) (bool, error) {
 func (m *Manager) CreateFile(containerPath, content string) error {
 	// Create temp file locally
 	tmpFile := filepath.Join(os.TempDir(), fmt.Sprintf("coi-%s", filepath.Base(containerPath)))
-	if err := os.WriteFile(tmpFile, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(tmpFile, []byte(content), 0o644); err != nil {
 		return err
 	}
 	defer os.Remove(tmpFile)

@@ -17,13 +17,13 @@ const (
 
 // BuildOptions contains options for building an image
 type BuildOptions struct {
-	ImageType    string // "coi" or "custom"
-	AliasName    string
-	Description  string
-	BaseImage    string
-	Force        bool
-	BuildScript  string // For custom images
-	Logger       func(string)
+	ImageType   string // "coi" or "custom"
+	AliasName   string
+	Description string
+	BaseImage   string
+	Force       bool
+	BuildScript string // For custom images
+	Logger      func(string)
 }
 
 // BuildResult contains the result of an image build

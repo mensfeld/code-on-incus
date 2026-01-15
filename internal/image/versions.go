@@ -29,10 +29,10 @@ func ListVersions(prefix string) ([]ImageInfo, error) {
 	}
 
 	var rawImages []struct {
-		Fingerprint string    `json:"fingerprint"`
+		Fingerprint string                  `json:"fingerprint"`
 		Aliases     []struct{ Name string } `json:"aliases"`
-		Size        int64     `json:"size"`
-		CreatedAt   time.Time `json:"created_at"`
+		Size        int64                   `json:"size"`
+		CreatedAt   time.Time               `json:"created_at"`
 	}
 
 	if err := json.Unmarshal([]byte(output), &rawImages); err != nil {

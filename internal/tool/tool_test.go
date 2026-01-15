@@ -102,14 +102,14 @@ func TestClaudeDiscoverSessionID_ValidSession(t *testing.T) {
 	// Create temporary directory structure
 	tmpDir := t.TempDir()
 	projectsDir := filepath.Join(tmpDir, "projects", "-workspace")
-	if err := os.MkdirAll(projectsDir, 0755); err != nil {
+	if err := os.MkdirAll(projectsDir, 0o755); err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 
 	// Create a .jsonl file (Claude session file)
 	sessionID := "test-session-abc123"
 	sessionFile := filepath.Join(projectsDir, sessionID+".jsonl")
-	if err := os.WriteFile(sessionFile, []byte("{}"), 0644); err != nil {
+	if err := os.WriteFile(sessionFile, []byte("{}"), 0o644); err != nil {
 		t.Fatalf("Failed to create session file: %v", err)
 	}
 
@@ -126,7 +126,7 @@ func TestClaudeDiscoverSessionID_NoSession(t *testing.T) {
 	// Create empty directory structure
 	tmpDir := t.TempDir()
 	projectsDir := filepath.Join(tmpDir, "projects", "-workspace")
-	if err := os.MkdirAll(projectsDir, 0755); err != nil {
+	if err := os.MkdirAll(projectsDir, 0o755); err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
 

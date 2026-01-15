@@ -16,12 +16,12 @@ import (
 // CleanupOptions contains options for cleaning up a session
 type CleanupOptions struct {
 	ContainerName  string
-	SessionID      string            // COI session ID for saving tool config data
-	Persistent     bool              // If true, stop but don't delete container
-	SessionsDir    string            // e.g., ~/.coi/sessions-claude
-	SaveSession    bool              // Whether to save tool config directory
-	Workspace      string            // Workspace directory path
-	Tool           tool.Tool         // AI coding tool being used
+	SessionID      string    // COI session ID for saving tool config data
+	Persistent     bool      // If true, stop but don't delete container
+	SessionsDir    string    // e.g., ~/.coi/sessions-claude
+	SaveSession    bool      // Whether to save tool config directory
+	Workspace      string    // Workspace directory path
+	Tool           tool.Tool // AI coding tool being used
 	NetworkManager *network.Manager
 	Logger         func(string)
 }
@@ -123,7 +123,7 @@ func saveSessionData(mgr *container.Manager, sessionID string, persistent bool, 
 
 	// Create local session directory
 	localSessionDir := filepath.Join(sessionsDir, sessionID)
-	if err := os.MkdirAll(localSessionDir, 0755); err != nil {
+	if err := os.MkdirAll(localSessionDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create session directory: %w", err)
 	}
 
@@ -190,7 +190,7 @@ func saveMetadata(path string, metadata SessionMetadata) error {
 }
 `, metadata.SessionID, metadata.ContainerName, metadata.Persistent, metadata.Workspace, metadata.SavedAt)
 
-	return os.WriteFile(path, []byte(content), 0644)
+	return os.WriteFile(path, []byte(content), 0o644)
 }
 
 // getCurrentTime returns current time in RFC3339 format
@@ -202,7 +202,7 @@ func getCurrentTime() string {
 func SaveMetadataEarly(sessionsDir, sessionID, containerName, workspace string, persistent bool) error {
 	// Create session directory if it doesn't exist
 	sessionDir := filepath.Join(sessionsDir, sessionID)
-	if err := os.MkdirAll(sessionDir, 0755); err != nil {
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create session directory: %w", err)
 	}
 

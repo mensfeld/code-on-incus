@@ -81,7 +81,7 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 	}
 	baseDir := filepath.Join(homeDir, ".coi")
 	sessionsDir := session.GetSessionsDir(baseDir, toolInstance)
-	if err := os.MkdirAll(sessionsDir, 0755); err != nil {
+	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create sessions directory: %w", err)
 	}
 
@@ -181,15 +181,15 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 
 	// Setup session
 	setupOpts := session.SetupOptions{
-		WorkspacePath:    absWorkspace,
-		Image:            imageName,
-		Persistent:       persistent,
-		ResumeFromID:     resumeID,
-		Slot:             slotNum,
-		SessionsDir:      sessionsDir,
-		CLIConfigPath:    cliConfigPath,
-		Tool:             toolInstance,
-		NetworkConfig:    &networkConfig,
+		WorkspacePath: absWorkspace,
+		Image:         imageName,
+		Persistent:    persistent,
+		ResumeFromID:  resumeID,
+		Slot:          slotNum,
+		SessionsDir:   sessionsDir,
+		CLIConfigPath: cliConfigPath,
+		Tool:          toolInstance,
+		NetworkConfig: &networkConfig,
 	}
 
 	if storage != "" {

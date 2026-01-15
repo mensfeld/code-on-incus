@@ -12,8 +12,8 @@ import (
 )
 
 var (
-	attachWithBash bool
-	attachSlot     int
+	attachWithBash  bool
+	attachSlot      int
 	attachWorkspace string
 )
 

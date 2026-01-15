@@ -11,9 +11,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	showAll bool
-)
+var showAll bool
 
 // imageCmd is the parent command for all image operations
 var imageCmd = &cobra.Command{

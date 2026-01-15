@@ -93,7 +93,7 @@ func ensureDirectories(cfg *Config) error {
 	}
 
 	for _, dir := range dirs {
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("failed to create directory %s: %w", dir, err)
 		}
 	}
@@ -138,10 +138,10 @@ code_user = "code"
 
 	// Create directory if it doesn't exist
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
 
 	// Write file
-	return os.WriteFile(path, []byte(example), 0644)
+	return os.WriteFile(path, []byte(example), 0o644)
 }

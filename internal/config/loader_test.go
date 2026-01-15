@@ -64,7 +64,7 @@ model = "test-model"
 code_uid = 2000
 `
 
-	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+	if err := os.WriteFile(configPath, []byte(configContent), 0o644); err != nil {
 		t.Fatalf("Failed to create test config: %v", err)
 	}
 
@@ -111,7 +111,7 @@ func TestLoadConfigFileInvalid(t *testing.T) {
 image = "broken
 `
 
-	if err := os.WriteFile(configPath, []byte(invalidContent), 0644); err != nil {
+	if err := os.WriteFile(configPath, []byte(invalidContent), 0o644); err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
 	}
 

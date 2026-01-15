@@ -51,12 +51,12 @@ const (
 
 // NetworkConfig contains network isolation settings
 type NetworkConfig struct {
-	Mode                   NetworkMode              `toml:"mode"`
-	BlockPrivateNetworks   bool                     `toml:"block_private_networks"`
-	BlockMetadataEndpoint  bool                     `toml:"block_metadata_endpoint"`
-	AllowedDomains         []string                 `toml:"allowed_domains"`
-	RefreshIntervalMinutes int                      `toml:"refresh_interval_minutes"`
-	Logging                NetworkLoggingConfig     `toml:"logging"`
+	Mode                   NetworkMode          `toml:"mode"`
+	BlockPrivateNetworks   bool                 `toml:"block_private_networks"`
+	BlockMetadataEndpoint  bool                 `toml:"block_metadata_endpoint"`
+	AllowedDomains         []string             `toml:"allowed_domains"`
+	RefreshIntervalMinutes int                  `toml:"refresh_interval_minutes"`
+	Logging                NetworkLoggingConfig `toml:"logging"`
 }
 
 // NetworkLoggingConfig contains network logging settings

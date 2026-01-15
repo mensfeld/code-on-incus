@@ -10,9 +10,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	buildForce bool
-)
+var buildForce bool
 
 var buildCmd = &cobra.Command{
 	Use:   "build",

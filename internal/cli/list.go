@@ -220,8 +220,8 @@ func listSavedSessions(sessionsDir string) ([]SessionInfo, error) {
 
 // outputJSON formats container and session data as JSON
 func outputJSON(containers []ContainerInfo, sessions []SessionInfo,
-	workspaces map[string]string, persistent map[string]bool) error {
-
+	workspaces map[string]string, persistent map[string]bool,
+) error {
 	// Enrich container data
 	enrichedContainers := make([]map[string]interface{}, 0, len(containers))
 	for _, c := range containers {
@@ -259,8 +259,8 @@ func outputJSON(containers []ContainerInfo, sessions []SessionInfo,
 
 // outputText formats container and session data as human-readable text
 func outputText(containers []ContainerInfo, sessions []SessionInfo,
-	workspaces map[string]string, persistent map[string]bool) error {
-
+	workspaces map[string]string, persistent map[string]bool,
+) error {
 	// Active Containers section
 	fmt.Println("Active Containers:")
 	fmt.Println("------------------")
@@ -308,4 +308,3 @@ func outputText(containers []ContainerInfo, sessions []SessionInfo,
 
 	return nil
 }
-

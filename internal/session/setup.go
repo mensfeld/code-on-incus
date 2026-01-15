@@ -32,17 +32,17 @@ func buildJSONFromSettings(settings map[string]interface{}) (string, error) {
 
 // SetupOptions contains options for setting up a session
 type SetupOptions struct {
-	WorkspacePath    string
-	Image            string
-	Persistent       bool   // Keep container between sessions (don't delete on cleanup)
-	ResumeFromID     string
-	Slot             int
-	StoragePath      string
-	SessionsDir      string             // e.g., ~/.coi/sessions-claude
-	CLIConfigPath    string             // e.g., ~/.claude (host CLI config to copy credentials from)
-	Tool             tool.Tool          // AI coding tool being used
-	NetworkConfig    *config.NetworkConfig
-	Logger           func(string)
+	WorkspacePath string
+	Image         string
+	Persistent    bool // Keep container between sessions (don't delete on cleanup)
+	ResumeFromID  string
+	Slot          int
+	StoragePath   string
+	SessionsDir   string    // e.g., ~/.coi/sessions-claude
+	CLIConfigPath string    // e.g., ~/.claude (host CLI config to copy credentials from)
+	Tool          tool.Tool // AI coding tool being used
+	NetworkConfig *config.NetworkConfig
+	Logger        func(string)
 }
 
 // SetupResult contains the result of setup
@@ -177,7 +177,7 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 
 		// Add storage device if specified
 		if opts.StoragePath != "" {
-			if err := os.MkdirAll(opts.StoragePath, 0755); err != nil {
+			if err := os.MkdirAll(opts.StoragePath, 0o755); err != nil {
 				return nil, fmt.Errorf("failed to create storage directory: %w", err)
 			}
 			opts.Logger(fmt.Sprintf("Adding storage mount: %s", opts.StoragePath))
