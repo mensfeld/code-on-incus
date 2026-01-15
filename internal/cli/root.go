@@ -9,7 +9,7 @@ import (
 
 const (
 	// Version is the current version of coi
-	Version = "0.4.0"
+	Version = "0.5.0"
 )
 
 var (
@@ -119,7 +119,7 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version information",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Printf("claude-on-incus (coi) v%s\n", Version)
+		fmt.Printf("code-on-incus (coi) v%s\n", Version)
 		fmt.Println("https://github.com/mensfeld/claude-on-incus")
 	},
 }
