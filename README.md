@@ -1,22 +1,34 @@
 <p align="center">
-  <img src="misc/logo.png" alt="Claude on Incus Logo" width="350">
+  <img src="misc/logo.png" alt="Code on Incus Logo" width="350">
 </p>
 
-# claude-on-incus (`coi`)
+# code-on-incus (`coi`)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/mensfeld/claude-on-incus)](https://golang.org/)
 [![Latest Release](https://img.shields.io/github/v/release/mensfeld/claude-on-incus)](https://github.com/mensfeld/claude-on-incus/releases)
 
-**Secure and Fast CLI Tool Container Runtime for Linux**
+**Secure and Fast Container Runtime for AI Coding Tools on Linux**
 
-Run Claude Code (and other AI coding tools soon) in isolated, production-grade Incus containers with zero permission headaches, perfect file ownership, and true multi-session support.
+Run AI coding assistants (Claude Code, Aider, and more) in isolated, production-grade Incus containers with zero permission headaches, perfect file ownership, and true multi-session support.
 
 **Security First:** Unlike Docker or bare-metal execution, your environment variables, SSH keys, and Git credentials are **never** exposed to AI tools. Containers run in complete isolation with no access to your host credentials unless explicitly mounted.
 
 *Think Docker for AI coding tools, but with system containers that actually work like real machines.*
 
 ![Demo](misc/demo.gif)
+
+## Supported AI Coding Tools
+
+Currently supported:
+- **Claude Code** (default) - Anthropic's official CLI tool
+
+Coming soon:
+- Aider - AI pair programming in your terminal
+- Cursor - AI-first code editor
+- And more...
+
+The tool abstraction layer makes it easy to add support for new AI coding assistants.
 
 ## Features
 
@@ -34,11 +46,11 @@ Run Claude Code (and other AI coding tools soon) in isolated, production-grade I
 - Project separation - Complete isolation between workspaces
 - **Credential protection** - No risk of SSH keys, `.env` files, or Git credentials being exposed to AI tools
 
-**Safe `--dangerous` Flags**
-- Claude Code CLI uses `--dangerously-disable-sandbox` and `--dangerously-allow-write-to-root` flags
-- **These are safe inside containers** because the "root" is the container root, not your host system
+**Safe Dangerous Operations**
+- AI coding tools often need broad filesystem access or bypass permission checks
+- **These operations are safe inside containers** because the "root" is the container root, not your host system
 - Containers are ephemeral - any changes are contained and don't affect your host
-- This gives Claude full capabilities while keeping your system protected
+- This gives AI tools full capabilities while keeping your system protected
 
 ## Quick Start
 
@@ -49,11 +61,11 @@ curl -fsSL https://raw.githubusercontent.com/mensfeld/claude-on-incus/master/ins
 # Build image (first time only, ~5-10 minutes)
 coi build
 
-# Start coding
+# Start coding with your preferred AI tool (defaults to Claude Code)
 cd your-project
 coi shell
 
-# That's it! Claude is now running in an isolated container with:
+# That's it! Your AI coding assistant is now running in an isolated container with:
 # - Your project mounted at /workspace
 # - Correct file permissions (no more chown!)
 # - Full Docker access inside the container
@@ -71,7 +83,7 @@ Incus is a modern Linux container and virtual machine manager, forked from LXD. 
 
 ### Key Differences
 
-| Feature | **claude-on-incus (Incus)** | Docker |
+| Feature | **code-on-incus (Incus)** | Docker |
 |---------|---------------------------|--------|
 | **Container Type** | System containers (full OS) | Application containers |
 | **Init System** | Full systemd/init | No init (single process) |
@@ -83,11 +95,11 @@ Incus is a modern Linux container and virtual machine manager, forked from LXD. 
 
 ### Benefits
 
-**No Permission Hell** - Incus automatically maps container UIDs to host UIDs. Files created by Claude in-container have correct ownership on host. No `chown` needed.
+**No Permission Hell** - Incus automatically maps container UIDs to host UIDs. Files created by AI tools in-container have correct ownership on host. No `chown` needed.
 
-**True Isolation** - Full system container means Claude can run Docker, systemd services, etc. Safer than Docker's privileged mode.
+**True Isolation** - Full system container means AI tools can run Docker, systemd services, etc. Safer than Docker's privileged mode.
 
-**Persistent State** - System containers can be stopped/started without data loss. Ideal for long-running Claude sessions.
+**Persistent State** - System containers can be stopped/started without data loss. Ideal for long-running AI coding sessions.
 
 **Resource Efficiency** - Share kernel like Docker, lower overhead than VMs, better density for parallel sessions.
 
@@ -119,10 +131,10 @@ coi build custom my-image --base coi --script setup.sh
 - Ubuntu 22.04 base
 - Docker (full Docker-in-container support)
 - Node.js 20 + npm
-- Claude CLI
+- Claude Code CLI (default AI tool)
 - GitHub CLI (`gh`)
 - tmux for session management
-- Common build tools
+- Common build tools (git, curl, build-essential, etc.)
 
 **Custom images:** Build your own specialized images using build scripts that run on top of the base `coi` image.
 
@@ -131,7 +143,7 @@ coi build custom my-image --base coi --script setup.sh
 ### Basic Commands
 
 ```bash
-# Interactive Claude session
+# Interactive session (defaults to Claude Code)
 coi shell
 
 # Persistent mode - keep container between sessions
@@ -264,13 +276,13 @@ coi file pull -r my-container:/root/.claude ./saved-sessions/session-123/
 
 ### Tmux Automation
 
-Interact with running Claude sessions for automation workflows:
+Interact with running AI coding sessions for automation workflows:
 
 ```bash
 # List all active tmux sessions
 coi tmux list
 
-# Send commands to a running session
+# Send commands/prompts to a running session
 coi tmux send coi-abc12345-1 "write a hello world script"
 coi tmux send coi-abc12345-1 "/exit"
 
@@ -306,7 +318,7 @@ coi image cleanup claudeyard-node-42- --keep 3
 
 ## Session Resume
 
-Session resume allows you to continue a previous Claude conversation with full history and credentials restored.
+Session resume allows you to continue a previous AI coding session with full history and credentials restored.
 
 **Usage:**
 ```bash
@@ -325,15 +337,15 @@ coi list --all
 
 **What's Restored:**
 - Full conversation history from previous session
-- Claude credentials (no re-authentication needed)
+- Tool credentials and authentication (no re-authentication needed)
 - User settings and preferences
 - Project context and conversation state
 
 **How It Works:**
-- After each session, `.claude` directory is automatically saved to `~/.coi/sessions/`
-- On resume, session data is restored to the container before Claude starts
-- Fresh credentials are injected from your host `~/.claude` directory
-- Claude automatically continues from where you left off
+- After each session, tool state directory (e.g., `.claude`) is automatically saved to `~/.coi/sessions-<tool>/`
+- On resume, session data is restored to the container before the tool starts
+- Fresh credentials are injected from your host config directory
+- The AI tool automatically continues from where you left off
 
 **Workspace-Scoped Sessions:**
 - `--resume` only looks for sessions from the **current workspace directory**
@@ -380,8 +392,12 @@ image = "coi"
 persistent = true
 mount_claude_config = true
 
+[tool]
+name = "claude"  # AI coding tool to use (currently supports: claude)
+# binary = "claude"  # Optional: override binary name
+
 [paths]
-sessions_dir = "~/.coi/sessions"
+sessions_dir = "~/.coi/sessions"  # Base directory for tool-specific sessions
 storage_dir = "~/.coi/storage"
 
 [incus]
@@ -413,27 +429,27 @@ Understanding how containers and sessions work in `coi`:
    - This allows saving session data even if the container is stopped from within (e.g., `sudo shutdown 0`)
    - Session data can be pulled from stopped containers, but not from deleted ones
 
-2. **Inside the container**: `tmux` → `bash` → `claude`
-   - When claude exits, you're dropped to bash
+2. **Inside the container**: `tmux` → `bash` → `<ai-tool>`
+   - When the AI tool exits, you're dropped to bash
    - From bash you can: type `exit`, press `Ctrl+b d` to detach, or run `sudo shutdown 0`
 
 3. **On cleanup** (when you exit/detach):
-   - Session data (`.claude` directory) is **always** saved to `~/.coi/sessions/`
+   - Session data (tool config directory) is **always** saved to `~/.coi/sessions-<tool>/`
    - If `--persistent` was NOT set: container is deleted after saving
    - If `--persistent` was set: container is kept for reuse
 
 ### What Gets Preserved
 
-| Mode | Workspace Files | Claude Session | Container State |
-|------|----------------|----------------|-----------------|
+| Mode | Workspace Files | AI Tool Session | Container State |
+|------|----------------|-----------------|-----------------|
 | **Default (ephemeral)** | Always saved | Always saved | Deleted |
 | **`--persistent`** | Always saved | Always saved | Kept |
 
 ### Session vs Container Persistence
 
-- **`--resume`**: Restores the **Claude conversation** in a fresh container
+- **`--resume`**: Restores the **AI tool conversation** in a fresh container
   - Use when you want to continue a conversation but don't need installed packages
-  - Container is recreated, only `.claude` session data is restored
+  - Container is recreated, only tool session data is restored
   - **Workspace-scoped**: Only finds sessions from the current workspace directory (security feature)
 
 - **`--persistent`**: Keeps the **entire container** with all modifications
@@ -460,8 +476,8 @@ From **outside** (host):
 
 **Quick task (default mode):**
 ```bash
-coi shell                    # Start session
-# ... work with claude ...
+coi shell                    # Start session with default AI tool
+# ... work with AI assistant ...
 sudo poweroff                # Shutdown container → session saved, container deleted
 coi shell --resume           # Continue conversation in fresh container
 ```
@@ -493,7 +509,7 @@ coi shell
 # - Home directories (~/slot1_file won't appear in slot 2)
 # - Installed packages
 # - Running processes
-# - Claude conversation history
+# - AI tool conversation history
 
 # List both running sessions
 coi list
