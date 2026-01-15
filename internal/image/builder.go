@@ -334,7 +334,10 @@ func (b *Builder) createImage(versionAlias string) (string, error) {
 // cleanup removes the build container
 func (b *Builder) cleanup() {
 	b.opts.Logger("Cleaning up build container...")
-	_ = b.mgr.Stop(true)   // Best effort cleanup
+	// Only stop if container is running (avoids spurious error messages)
+	if running, _ := b.mgr.Running(); running {
+		_ = b.mgr.Stop(true) // Best effort cleanup
+	}
 	_ = b.mgr.Delete(true) // Best effort cleanup
 }
 
