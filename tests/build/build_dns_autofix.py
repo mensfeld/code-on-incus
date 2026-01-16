@@ -11,6 +11,7 @@ the DNS misconfiguration that occurs on Ubuntu systems with systemd-resolved.
 """
 
 import subprocess
+
 import pytest
 
 
