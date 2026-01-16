@@ -596,3 +596,15 @@ incus network set incusbr0 raw.dnsmasq "dhcp-option=6,8.8.8.8,8.8.4.4"
 After applying either fix, future containers will have working DNS automatically.
 
 **Note:** The automatic fix only affects the built image. Other Incus containers on your system may still experience DNS issues until you apply the permanent fix.
+
+**Why doesn't COI automatically run `incus network set` for me?**
+
+COI deliberately uses an in-container fix rather than modifying your Incus network configuration:
+
+1. **System-level impact** - Changing Incus network settings affects all containers on that bridge, not just COI containers
+2. **Network name varies** - The bridge might not be named `incusbr0` on all systems
+3. **Permissions** - Users running `coi build` might not have permission to modify Incus network settings
+4. **Intentional configurations** - Some users have custom DNS configurations for their other containers
+5. **Principle of least surprise** - Modifying system-level Incus config without explicit consent could break other setups
+
+The in-container approach is self-contained and only affects COI images, leaving your Incus configuration untouched.
