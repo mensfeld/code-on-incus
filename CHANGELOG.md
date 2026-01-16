@@ -24,6 +24,7 @@
 - [Testing] Added integration test `tests/run/run_persistent_no_spurious_errors.py` to verify no spurious errors during persistent run cleanup
 - [Testing] Added integration test `tests/shutdown/shutdown_no_spurious_errors.py` to verify no spurious errors during shutdown with timeout
 - [Testing] Added integration test `tests/build/build_dns_autofix.py` to verify DNS auto-fix works during builds with misconfigured DNS
+- [Testing] Added unit test `internal/network/resolver_test.go` for raw IPv4 address support in allowlist mode
 
 ## 0.5.0 (2026-01-15)
 

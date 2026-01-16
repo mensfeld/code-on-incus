@@ -558,14 +558,17 @@ coi shell --network=open
 mode = "restricted"  # restricted | open | allowlist
 
 # Allowlist mode configuration
-allowed_domains = ["github.com", "api.anthropic.com", "registry.npmjs.org"]
+# Supports both domain names and raw IPv4 addresses
+allowed_domains = ["github.com", "api.anthropic.com", "8.8.8.8"]
 refresh_interval_minutes = 30  # IP refresh interval (0 to disable)
 ```
 
 **Important for allowlist mode:**
+- Supports both domain names (`github.com`) and raw IPv4 addresses (`8.8.8.8`)
 - Subdomains must be listed explicitly (`github.com` ≠ `api.github.com`)
 - Domains behind CDNs may have many IPs that change frequently
 - DNS failures use cached IPs from previous successful resolution
+- To allow DNS resolution inside the container, add DNS server IPs (e.g., `8.8.8.8`)
 
 ## Troubleshooting
 
