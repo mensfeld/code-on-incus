@@ -21,6 +21,46 @@ log() {
 }
 
 #######################################
+# Configure DNS if misconfigured
+# Only applies fix if DNS resolution fails
+#######################################
+configure_dns_if_needed() {
+    log "Checking DNS configuration..."
+
+    # Test if DNS resolution works
+    if getent hosts archive.ubuntu.com > /dev/null 2>&1; then
+        log "DNS resolution works, keeping default configuration."
+        return 0
+    fi
+
+    log "DNS resolution failed, configuring static DNS..."
+
+    # Disable systemd-resolved (not needed in containers)
+    systemctl disable systemd-resolved 2>/dev/null || true
+    systemctl stop systemd-resolved 2>/dev/null || true
+    systemctl mask systemd-resolved 2>/dev/null || true
+
+    # Remove symlink and create static resolv.conf
+    rm -f /etc/resolv.conf
+    cat > /etc/resolv.conf << 'EOF'
+# Static DNS configuration (auto-configured due to DNS misconfiguration)
+# See: https://github.com/mensfeld/claude-on-incus#troubleshooting
+nameserver 8.8.8.8
+nameserver 8.8.4.4
+nameserver 1.1.1.1
+EOF
+
+    log "Static DNS configured (8.8.8.8, 8.8.4.4, 1.1.1.1)."
+
+    # Verify it works now
+    if getent hosts archive.ubuntu.com > /dev/null 2>&1; then
+        log "DNS resolution now working."
+    else
+        log "WARNING: DNS still not working after fix. Build may fail."
+    fi
+}
+
+#######################################
 # Install base dependencies
 #######################################
 install_base_dependencies() {
@@ -193,6 +233,7 @@ cleanup() {
 main() {
     log "Starting coi image build..."
 
+    configure_dns_if_needed
     install_base_dependencies
     install_nodejs
     create_code_user

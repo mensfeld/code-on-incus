@@ -566,3 +566,30 @@ refresh_interval_minutes = 30  # IP refresh interval (0 to disable)
 - Subdomains must be listed explicitly (`github.com` ≠ `api.github.com`)
 - Domains behind CDNs may have many IPs that change frequently
 - DNS failures use cached IPs from previous successful resolution
+
+## Troubleshooting
+
+### DNS Issues During Build
+
+**Symptom:** `coi build` hangs at "Still waiting for network..." even though the container has an IP address.
+
+**Cause:** On Ubuntu systems with systemd-resolved, containers may receive `127.0.0.53` as their DNS server via DHCP. This is the host's stub resolver which only works on the host, not inside containers.
+
+**Automatic Fix:** COI automatically detects and fixes this issue during build by:
+1. Detecting if DNS resolution fails but IP connectivity works
+2. Injecting public DNS servers (8.8.8.8, 8.8.4.4, 1.1.1.1) into the container
+3. The resulting image uses static DNS configuration
+
+**Permanent Fix:** Configure your Incus network to provide proper DNS to containers:
+
+```bash
+# Option 1: Enable managed DNS (recommended)
+incus network set incusbr0 dns.mode managed
+
+# Option 2: Use public DNS servers
+incus network set incusbr0 raw.dnsmasq "dhcp-option=6,8.8.8.8,8.8.4.4"
+```
+
+After applying either fix, future containers will have working DNS automatically.
+
+**Note:** The automatic fix only affects the built image. Other Incus containers on your system may still experience DNS issues until you apply the permanent fix.
