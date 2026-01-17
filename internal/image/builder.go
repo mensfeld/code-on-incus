@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/mensfeld/claude-on-incus/internal/container"
@@ -137,6 +138,7 @@ func (b *Builder) launchBuildContainer() error {
 func (b *Builder) waitForNetwork() error {
 	b.opts.Logger("Waiting for network...")
 
+	dnsFixed := false
 	maxAttempts := 180 // 3 minutes - increased for slower CI environments
 	for i := 0; i < maxAttempts; i++ {
 		// Try TCP connection (works even when ICMP/ping is blocked in CI)
@@ -146,6 +148,9 @@ func (b *Builder) waitForNetwork() error {
 		})
 		if err == nil {
 			b.opts.Logger(fmt.Sprintf("Network ready (HTTP) after %d seconds", i+1))
+			if dnsFixed {
+				b.logDNSFixWarning()
+			}
 			return nil
 		}
 
@@ -155,7 +160,20 @@ func (b *Builder) waitForNetwork() error {
 		})
 		if pingErr == nil {
 			b.opts.Logger(fmt.Sprintf("Network ready (ICMP) after %d seconds", i+1))
+			if dnsFixed {
+				b.logDNSFixWarning()
+			}
 			return nil
+		}
+
+		// After 10 seconds, check if this is a DNS issue and auto-fix
+		if i == 10 && !dnsFixed {
+			if b.tryFixDNS() {
+				dnsFixed = true
+				// Give the new DNS config a moment to take effect
+				time.Sleep(2 * time.Second)
+				continue
+			}
 		}
 
 		// Log progress every 30 seconds with diagnostic info
@@ -187,6 +205,62 @@ func (b *Builder) waitForNetwork() error {
 	b.opts.Logger(fmt.Sprintf("Final routes:\n%s", routeOutput))
 
 	return fmt.Errorf("network timeout after %d seconds", maxAttempts)
+}
+
+// tryFixDNS attempts to automatically fix DNS misconfiguration
+// Returns true if a fix was applied
+func (b *Builder) tryFixDNS() bool {
+	// Test if we can reach an IP directly (Google DNS on port 53)
+	_, ipErr := b.mgr.ExecCommand("timeout 3 bash -c 'exec 3<>/dev/tcp/8.8.8.8/53' 2>/dev/null", container.ExecCommandOptions{
+		Capture: true,
+	})
+
+	if ipErr != nil {
+		// Can't reach external IPs - this is a general network issue, not DNS-specific
+		return false
+	}
+
+	// We can reach IPs but not hostnames - this is a DNS issue
+	// Check for the common systemd-resolved stub resolver issue (127.0.0.53)
+	resolvConf, _ := b.mgr.ExecCommand("cat /etc/resolv.conf 2>/dev/null", container.ExecCommandOptions{Capture: true})
+
+	hasStubResolver := strings.Contains(resolvConf, "127.0.0.53")
+	hasEmptyDNS := strings.TrimSpace(resolvConf) == "" || !strings.Contains(resolvConf, "nameserver")
+
+	if hasStubResolver || hasEmptyDNS {
+		b.opts.Logger("Detected DNS misconfiguration, applying automatic fix...")
+
+		// Inject working DNS servers
+		// First, remove resolv.conf if it's a symlink (common with systemd-resolved)
+		_, _ = b.mgr.ExecCommand("rm -f /etc/resolv.conf 2>/dev/null", container.ExecCommandOptions{Capture: true})
+
+		// Write a working resolv.conf with public DNS servers
+		_, err := b.mgr.ExecCommand(`cat > /etc/resolv.conf << 'EOF'
+# Auto-configured by coi build due to DNS misconfiguration
+nameserver 8.8.8.8
+nameserver 8.8.4.4
+nameserver 1.1.1.1
+EOF`, container.ExecCommandOptions{Capture: true})
+		if err != nil {
+			b.opts.Logger(fmt.Sprintf("Failed to fix DNS: %v", err))
+			return false
+		}
+
+		b.opts.Logger("DNS configuration fixed (using 8.8.8.8, 8.8.4.4, 1.1.1.1)")
+		return true
+	}
+
+	return false
+}
+
+// logDNSFixWarning logs a warning about the DNS misconfiguration and how to permanently fix it
+func (b *Builder) logDNSFixWarning() {
+	b.opts.Logger("")
+	b.opts.Logger("WARNING: DNS misconfiguration detected (systemd-resolved stub at 127.0.0.53).")
+	b.opts.Logger("Auto-fixed for this build. The resulting image uses static DNS (8.8.8.8, 8.8.4.4, 1.1.1.1).")
+	b.opts.Logger("To fix your Incus network for other containers, run:")
+	b.opts.Logger("  incus network set incusbr0 dns.mode managed")
+	b.opts.Logger("")
 }
 
 // runBuildSteps executes the build steps based on image type

@@ -193,7 +193,9 @@ func buildAllowlistRules(cfg *config.NetworkConfig, domainIPs map[string][]strin
 	rules = append(rules, "egress action=reject destination=192.168.0.0/16")
 	rules = append(rules, "egress action=reject destination=169.254.0.0/16")
 
-	// Rules 6+: Allow specific IPs (highest priority, evaluated first)
+	// Allow specific IPs from resolved domains (highest priority, evaluated first)
+	// DNS resolution happens on the host, so containers don't need DNS server access
+	// Users can explicitly add DNS server IPs to allowed_domains if needed
 	for _, ips := range domainIPs {
 		for _, ip := range ips {
 			// Use /32 for single IP precision

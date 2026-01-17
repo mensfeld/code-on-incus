@@ -558,11 +558,53 @@ coi shell --network=open
 mode = "restricted"  # restricted | open | allowlist
 
 # Allowlist mode configuration
-allowed_domains = ["github.com", "api.anthropic.com", "registry.npmjs.org"]
+# Supports both domain names and raw IPv4 addresses
+allowed_domains = ["github.com", "api.anthropic.com", "8.8.8.8"]
 refresh_interval_minutes = 30  # IP refresh interval (0 to disable)
 ```
 
 **Important for allowlist mode:**
+- Supports both domain names (`github.com`) and raw IPv4 addresses (`8.8.8.8`)
 - Subdomains must be listed explicitly (`github.com` ≠ `api.github.com`)
 - Domains behind CDNs may have many IPs that change frequently
 - DNS failures use cached IPs from previous successful resolution
+- To allow DNS resolution inside the container, add DNS server IPs (e.g., `8.8.8.8`)
+
+## Troubleshooting
+
+### DNS Issues During Build
+
+**Symptom:** `coi build` hangs at "Still waiting for network..." even though the container has an IP address.
+
+**Cause:** On Ubuntu systems with systemd-resolved, containers may receive `127.0.0.53` as their DNS server via DHCP. This is the host's stub resolver which only works on the host, not inside containers.
+
+**Automatic Fix:** COI automatically detects and fixes this issue during build by:
+1. Detecting if DNS resolution fails but IP connectivity works
+2. Injecting public DNS servers (8.8.8.8, 8.8.4.4, 1.1.1.1) into the container
+3. The resulting image uses static DNS configuration
+
+**Permanent Fix:** Configure your Incus network to provide proper DNS to containers:
+
+```bash
+# Option 1: Enable managed DNS (recommended)
+incus network set incusbr0 dns.mode managed
+
+# Option 2: Use public DNS servers
+incus network set incusbr0 raw.dnsmasq "dhcp-option=6,8.8.8.8,8.8.4.4"
+```
+
+After applying either fix, future containers will have working DNS automatically.
+
+**Note:** The automatic fix only affects the built image. Other Incus containers on your system may still experience DNS issues until you apply the permanent fix.
+
+**Why doesn't COI automatically run `incus network set` for me?**
+
+COI deliberately uses an in-container fix rather than modifying your Incus network configuration:
+
+1. **System-level impact** - Changing Incus network settings affects all containers on that bridge, not just COI containers
+2. **Network name varies** - The bridge might not be named `incusbr0` on all systems
+3. **Permissions** - Users running `coi build` might not have permission to modify Incus network settings
+4. **Intentional configurations** - Some users have custom DNS configurations for their other containers
+5. **Principle of least surprise** - Modifying system-level Incus config without explicit consent could break other setups
+
+The in-container approach is self-contained and only affects COI images, leaving your Incus configuration untouched.

@@ -21,7 +21,17 @@ func NewResolver(cache *IPCache) *Resolver {
 }
 
 // ResolveDomain resolves a single domain to IPv4 addresses
+// If the input is already an IPv4 address, it returns it directly
 func (r *Resolver) ResolveDomain(domain string) ([]string, error) {
+	// Check if input is already an IP address
+	if ip := net.ParseIP(domain); ip != nil {
+		if ipv4 := ip.To4(); ipv4 != nil {
+			return []string{ipv4.String()}, nil
+		}
+		return nil, fmt.Errorf("%s is not a valid IPv4 address", domain)
+	}
+
+	// Resolve domain name to IPs
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
