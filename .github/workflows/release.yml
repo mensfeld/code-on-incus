@@ -53,6 +53,8 @@ jobs:
           mv coi coi-${{ matrix.os }}-${{ matrix.arch }}
 
       - name: Verify version
+        # Only verify amd64 builds since ARM64 cannot run on amd64 runners
+        if: matrix.arch == 'amd64'
         run: |
           chmod +x coi-${{ matrix.os }}-${{ matrix.arch }}
           BUILT_VERSION=$(./coi-${{ matrix.os }}-${{ matrix.arch }} version | grep -oP 'v\K[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
