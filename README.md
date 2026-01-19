@@ -105,8 +105,10 @@ Incus is a modern Linux container and virtual machine manager, forked from LXD. 
 
 ## Installation
 
+### Automated Installation (Recommended)
+
 ```bash
-# One-shot install (recommended)
+# One-shot install
 curl -fsSL https://raw.githubusercontent.com/mensfeld/claude-on-incus/master/install.sh | bash
 
 # This will:
@@ -115,6 +117,99 @@ curl -fsSL https://raw.githubusercontent.com/mensfeld/claude-on-incus/master/ins
 # - Verify you're in incus-admin group
 # - Show next steps
 ```
+
+### Manual Installation
+
+For users who prefer to verify each step or cannot use the automated installer:
+
+**Prerequisites:**
+
+1. **Linux OS** - Only Linux is supported (Incus is Linux-only)
+   - Supported architectures: x86_64/amd64, aarch64/arm64
+
+2. **Incus installed and initialized**
+   ```bash
+   # Ubuntu/Debian
+   sudo apt update
+   sudo apt install -y incus
+   sudo incus admin init --auto
+   ```
+   See [Incus installation guide](https://linuxcontainers.org/incus/docs/main/installing/) for other distributions.
+
+3. **User in incus-admin group**
+   ```bash
+   sudo usermod -aG incus-admin $USER
+   # Log out and back in for group changes to take effect
+   ```
+
+**Installation Steps:**
+
+1. **Download the binary** for your platform:
+   ```bash
+   # For x86_64/amd64
+   curl -fsSL -o coi https://github.com/mensfeld/claude-on-incus/releases/latest/download/coi-linux-amd64
+
+   # For aarch64/arm64
+   curl -fsSL -o coi https://github.com/mensfeld/claude-on-incus/releases/latest/download/coi-linux-arm64
+   ```
+
+2. **Verify the download** (optional but recommended):
+   ```bash
+   # Check file size and type
+   ls -lh coi
+   file coi
+   ```
+
+3. **Install the binary**:
+   ```bash
+   chmod +x coi
+   sudo mv coi /usr/local/bin/
+   sudo ln -s /usr/local/bin/coi /usr/local/bin/claude-on-incus
+   ```
+
+4. **Verify installation**:
+   ```bash
+   coi --version
+   ```
+
+**Alternative: Build from Source**
+
+If you prefer to build from source or need a specific version:
+
+```bash
+# Prerequisites: Go 1.22 or later
+git clone https://github.com/mensfeld/claude-on-incus.git
+cd claude-on-incus
+make build
+sudo make install
+```
+
+**Post-Install Setup:**
+
+1. **Optional: Set up ZFS for instant container creation**
+   ```bash
+   # Install ZFS (may not be available for all kernels)
+   sudo apt-get install -y zfsutils-linux
+
+   # Create ZFS storage pool (50GiB)
+   sudo incus storage create zfs-pool zfs size=50GiB
+
+   # Configure default profile to use ZFS
+   incus profile device set default root pool=zfs-pool
+   ```
+
+   This reduces container startup time from 5-10s to ~50ms. If ZFS is not available, containers will use default storage (slower but fully functional).
+
+2. **Verify group membership** (must be done in a new shell/login):
+   ```bash
+   groups | grep incus-admin
+   ```
+
+**Troubleshooting:**
+
+- **"Permission denied" errors**: Ensure you're in the `incus-admin` group and have logged out/in
+- **"incus: command not found"**: Install Incus following the [official guide](https://linuxcontainers.org/incus/docs/main/installing/)
+- **Cannot download binary**: Check your internet connection and GitHub access, or build from source
 
 ### Build Images
 
