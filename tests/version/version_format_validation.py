@@ -34,7 +34,12 @@ def test_version_format_validation(coi_binary):
     assert len(lines) == 2, f"Should have exactly 2 lines. Got:\n{result.stdout}"
 
     # Verify first line format: code-on-incus (coi) vX.Y.Z
-    version_pattern = r"^code-on-incus \(coi\) v\d+\.\d+\.\d+$"
+    # Allow various version formats:
+    # - vX.Y.Z (tagged release)
+    # - vX.Y.Z-N-gHASH (commits after tag)
+    # - vX.Y.Z-dirty (uncommitted changes)
+    # - vdev (development build without tags)
+    version_pattern = r"^code-on-incus \(coi\) v(\d+\.\d+\.\d+(-\d+-g[0-9a-f]+)?(-dirty)?|dev)$"
     assert re.match(version_pattern, lines[0]), (
         f"First line should match pattern '{version_pattern}'. Got: {lines[0]}"
     )
