@@ -47,9 +47,25 @@ jobs:
         env:
           GOOS: ${{ matrix.os }}
           GOARCH: ${{ matrix.arch }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           make build
           mv coi coi-${{ matrix.os }}-${{ matrix.arch }}
+
+      - name: Verify version
+        run: |
+          chmod +x coi-${{ matrix.os }}-${{ matrix.arch }}
+          BUILT_VERSION=$(./coi-${{ matrix.os }}-${{ matrix.arch }} version | grep -oP 'v\K[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
+          EXPECTED_VERSION=${{ steps.version.outputs.version }}
+          # Strip leading 'v' from expected version if present
+          EXPECTED_VERSION=${EXPECTED_VERSION#v}
+          echo "Built version: $BUILT_VERSION"
+          echo "Expected version: $EXPECTED_VERSION"
+          if [ "$BUILT_VERSION" != "$EXPECTED_VERSION" ]; then
+            echo "ERROR: Version mismatch! Built: $BUILT_VERSION, Expected: $EXPECTED_VERSION"
+            exit 1
+          fi
+          echo "Version verification passed!"
 
       - name: Upload artifact
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6

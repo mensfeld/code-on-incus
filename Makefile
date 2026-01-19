@@ -23,10 +23,14 @@ GOMOD=$(GOCMD) mod
 GOFMT=$(GOCMD) fmt
 GOVET=$(GOCMD) vet
 
+# Version injection
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+LDFLAGS=-ldflags "-X github.com/mensfeld/claude-on-incus/internal/cli.Version=$(VERSION)"
+
 # Build the project
 build:
-	@echo "Building $(BINARY_NAME)..."
-	@$(GOBUILD) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/coi
+	@echo "Building $(BINARY_NAME) version $(VERSION)..."
+	@$(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/coi
 	@ln -sf $(BINARY_NAME) $(BUILD_DIR)/$(BINARY_FULL)
 
 # Install to system
@@ -134,11 +138,12 @@ check-all: check doc-coverage
 
 # Build for multiple platforms
 build-all:
+	@echo "Building $(BINARY_NAME) version $(VERSION) for all platforms..."
 	@mkdir -p dist
-	@GOOS=linux GOARCH=amd64 $(GOBUILD) -o dist/$(BINARY_NAME)-linux-amd64 ./cmd/coi
-	@GOOS=linux GOARCH=arm64 $(GOBUILD) -o dist/$(BINARY_NAME)-linux-arm64 ./cmd/coi
-	@GOOS=darwin GOARCH=amd64 $(GOBUILD) -o dist/$(BINARY_NAME)-darwin-amd64 ./cmd/coi
-	@GOOS=darwin GOARCH=arm64 $(GOBUILD) -o dist/$(BINARY_NAME)-darwin-arm64 ./cmd/coi
+	@GOOS=linux GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o dist/$(BINARY_NAME)-linux-amd64 ./cmd/coi
+	@GOOS=linux GOARCH=arm64 $(GOBUILD) $(LDFLAGS) -o dist/$(BINARY_NAME)-linux-arm64 ./cmd/coi
+	@GOOS=darwin GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o dist/$(BINARY_NAME)-darwin-amd64 ./cmd/coi
+	@GOOS=darwin GOARCH=arm64 $(GOBUILD) $(LDFLAGS) -o dist/$(BINARY_NAME)-darwin-arm64 ./cmd/coi
 
 # Help
 help:

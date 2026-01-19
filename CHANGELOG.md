@@ -1,5 +1,25 @@
 # CHANGELOG
 
+## 0.5.2 (2026-01-19)
+
+### Bug Fixes
+
+- [Bug Fix] Fix version mismatch in released binaries - Version 0.5.1 was incorrectly showing as 0.5.0 due to hardcoded version string in source code.
+
+### Enhancements
+
+- [Enhancement] Implement dynamic version injection via ldflags during build - Version is now automatically set from git tags at build time instead of being hardcoded in source code.
+- [Enhancement] Add version verification step in GitHub Actions release workflow - Build process now validates that the binary version matches the git tag before creating releases, preventing future version mismatches.
+- [Enhancement] Update Makefile to inject version from git tags using `git describe --tags --always --dirty`, with fallback to "dev" for local builds without tags.
+
+### Technical Details
+
+Version injection implementation:
+- **Source code**: Changed `Version` from `const` to `var` with default value "dev" in `internal/cli/root.go`
+- **Build system**: Added `VERSION` variable and `LDFLAGS` to Makefile for dynamic version injection
+- **Release workflow**: Pass `VERSION` environment variable to build step and verify binary version matches expected tag
+- **Verification**: Release workflow now extracts version from built binary and compares against git tag, failing build on mismatch
+
 ## 0.5.1 (2026-01-17)
 
 ### Features
