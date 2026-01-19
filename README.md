@@ -164,7 +164,7 @@ For users who prefer to verify each step or cannot use the automated installer:
    ```bash
    chmod +x coi
    sudo mv coi /usr/local/bin/
-   sudo ln -s /usr/local/bin/coi /usr/local/bin/claude-on-incus
+   sudo ln -sf /usr/local/bin/coi /usr/local/bin/claude-on-incus
    ```
 
 4. **Verify installation**:
