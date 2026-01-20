@@ -189,6 +189,10 @@ jobs:
           echo "Simulating Quick Start user journey"
           echo "====================================="
 
+          # Clean up the existing image to force a real build
+          echo "Cleaning up existing image to test fresh build..."
+          incus image delete coi || true
+
           # This simulates what a user following the Quick Start would do:
           # 1. Install binary (already done)
           # 2. Try to run coi build (this is where issue #50 happens)
@@ -200,10 +204,13 @@ jobs:
 
           # This SHOULD fail if scripts are not embedded/fetched
           # If it fails, it proves we have issue #50
-          if coi build 2>&1 | grep -q "build script not found"; then
+          if coi build 2>&1 | tee /tmp/build-output.log | grep -q "build script not found"; then
             echo "❌ ISSUE #50 DETECTED: coi build fails outside repository"
             echo "This is expected in current implementation"
             echo "Scripts are not embedded in binary or fetched at runtime"
+            echo ""
+            echo "Build output:"
+            cat /tmp/build-output.log
             exit 1
           else
             echo "✅ coi build works from outside repository"
