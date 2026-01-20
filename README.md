@@ -128,13 +128,32 @@ For users who prefer to verify each step or cannot use the automated installer:
    - Supported architectures: x86_64/amd64, aarch64/arm64
 
 2. **Incus installed and initialized**
+
+   **Ubuntu/Debian:**
    ```bash
-   # Ubuntu/Debian
    sudo apt update
    sudo apt install -y incus
+   ```
+
+   **Arch/Manjaro:**
+   ```bash
+   sudo pacman -S incus
+
+   # Enable and start the service (not auto-started on Arch)
+   sudo systemctl enable --now incus.socket
+
+   # Configure idmap for unprivileged containers
+   echo "root:1000000:1000000000" | sudo tee -a /etc/subuid
+   echo "root:1000000:1000000000" | sudo tee -a /etc/subgid
+   sudo systemctl restart incus.service
+   ```
+
+   See [Incus installation guide](https://linuxcontainers.org/incus/docs/main/installing/) for other distributions.
+
+   **Initialize Incus (all distros):**
+   ```bash
    sudo incus admin init --auto
    ```
-   See [Incus installation guide](https://linuxcontainers.org/incus/docs/main/installing/) for other distributions.
 
 3. **User in incus-admin group**
    ```bash
@@ -188,8 +207,12 @@ sudo make install
 
 1. **Optional: Set up ZFS for instant container creation**
    ```bash
-   # Install ZFS (may not be available for all kernels)
+   # Install ZFS
+   # Ubuntu/Debian (may not be available for all kernels):
    sudo apt-get install -y zfsutils-linux
+
+   # Arch/Manjaro (replace 617 with your kernel version from uname -r):
+   # sudo pacman -S linux617-zfs zfs-utils
 
    # Create ZFS storage pool (50GiB)
    sudo incus storage create zfs-pool zfs size=50GiB
