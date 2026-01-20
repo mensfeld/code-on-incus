@@ -235,6 +235,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
 
+      - name: Configure git for container
+        run: |
+          # Fix git ownership issues in container
+          git config --global --add safe.directory '*'
+
       - name: Install Incus (Arch)
         run: |
           echo "Installing Incus on Arch Linux..."
