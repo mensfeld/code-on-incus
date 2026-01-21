@@ -238,7 +238,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     container:
-      image: archlinux:latest
+      image: archlinux:latest@sha256:f5add4183c5f05abf3b65489447aee6d5714db735cd639d4000505a59838e1c1
       options: --privileged
 
     steps:
