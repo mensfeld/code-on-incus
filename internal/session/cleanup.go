@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mensfeld/claude-on-incus/internal/container"
-	"github.com/mensfeld/claude-on-incus/internal/network"
-	"github.com/mensfeld/claude-on-incus/internal/tool"
+	"github.com/mensfeld/code-on-incus/internal/container"
+	"github.com/mensfeld/code-on-incus/internal/network"
+	"github.com/mensfeld/code-on-incus/internal/tool"
 )
 
 // CleanupOptions contains options for cleaning up a session

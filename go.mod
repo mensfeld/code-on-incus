@@ -1,4 +1,4 @@
-module github.com/mensfeld/claude-on-incus
+module github.com/mensfeld/code-on-incus
 
 go 1.24.4
 

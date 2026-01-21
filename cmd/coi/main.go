@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/mensfeld/claude-on-incus/internal/cli"
+	"github.com/mensfeld/code-on-incus/internal/cli"
 )
 
 func main() {

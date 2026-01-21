@@ -5,8 +5,8 @@
 # code-on-incus (`coi`)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Go Version](https://img.shields.io/github/go-mod/go-version/mensfeld/claude-on-incus)](https://golang.org/)
-[![Latest Release](https://img.shields.io/github/v/release/mensfeld/claude-on-incus)](https://github.com/mensfeld/claude-on-incus/releases)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/mensfeld/code-on-incus)](https://golang.org/)
+[![Latest Release](https://img.shields.io/github/v/release/mensfeld/code-on-incus)](https://github.com/mensfeld/code-on-incus/releases)
 
 **Secure and Fast Container Runtime for AI Coding Tools on Linux**
 
@@ -56,7 +56,7 @@ The tool abstraction layer makes it easy to add support for new AI coding assist
 
 ```bash
 # Install
-curl -fsSL https://raw.githubusercontent.com/mensfeld/claude-on-incus/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/mensfeld/code-on-incus/master/install.sh | bash
 
 # Build image (first time only, ~5-10 minutes)
 coi build
@@ -109,7 +109,7 @@ Incus is a modern Linux container and virtual machine manager, forked from LXD. 
 
 ```bash
 # One-shot install
-curl -fsSL https://raw.githubusercontent.com/mensfeld/claude-on-incus/master/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/mensfeld/code-on-incus/master/install.sh | bash
 
 # This will:
 # - Download and install coi to /usr/local/bin
@@ -166,10 +166,10 @@ For users who prefer to verify each step or cannot use the automated installer:
 1. **Download the binary** for your platform:
    ```bash
    # For x86_64/amd64
-   curl -fsSL -o coi https://github.com/mensfeld/claude-on-incus/releases/latest/download/coi-linux-amd64
+   curl -fsSL -o coi https://github.com/mensfeld/code-on-incus/releases/latest/download/coi-linux-amd64
 
    # For aarch64/arm64
-   curl -fsSL -o coi https://github.com/mensfeld/claude-on-incus/releases/latest/download/coi-linux-arm64
+   curl -fsSL -o coi https://github.com/mensfeld/code-on-incus/releases/latest/download/coi-linux-arm64
    ```
 
 2. **Verify the download** (optional but recommended):
@@ -197,7 +197,7 @@ If you prefer to build from source or need a specific version:
 
 ```bash
 # Prerequisites: Go 1.24.4 or later
-git clone https://github.com/mensfeld/claude-on-incus.git
+git clone https://github.com/mensfeld/code-on-incus.git
 cd claude-on-incus
 make build
 sudo make install

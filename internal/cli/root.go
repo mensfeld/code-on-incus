@@ -3,7 +3,7 @@ package cli
 import (
 	"fmt"
 
-	"github.com/mensfeld/claude-on-incus/internal/config"
+	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/spf13/cobra"
 )
 
@@ -118,6 +118,6 @@ var versionCmd = &cobra.Command{
 	Short: "Print version information",
 	Run: func(cmd *cobra.Command, args []string) {
 		fmt.Printf("code-on-incus (coi) v%s\n", Version)
-		fmt.Println("https://github.com/mensfeld/claude-on-incus")
+		fmt.Println("https://github.com/mensfeld/code-on-incus")
 	},
 }

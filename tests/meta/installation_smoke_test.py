@@ -161,9 +161,9 @@ def test_full_installation_process(meta_container, coi_binary):
     # In CI (pull requests), use the PR branch instead of master
     github_branch = os.environ.get("GITHUB_HEAD_REF", "")
     if github_branch:
-        clone_cmd = f"git clone -b {github_branch} https://github.com/mensfeld/claude-on-incus.git"
+        clone_cmd = f"git clone -b {github_branch} https://github.com/mensfeld/code-on-incus.git"
     else:
-        clone_cmd = "git clone https://github.com/mensfeld/claude-on-incus.git"
+        clone_cmd = "git clone https://github.com/mensfeld/code-on-incus.git"
 
     result = exec_in_container(
         container_name,

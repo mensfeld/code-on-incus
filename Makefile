@@ -25,7 +25,7 @@ GOVET=$(GOCMD) vet
 
 # Version injection
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
-LDFLAGS=-ldflags "-X github.com/mensfeld/claude-on-incus/internal/cli.Version=$(VERSION)"
+LDFLAGS=-ldflags "-X github.com/mensfeld/code-on-incus/internal/cli.Version=$(VERSION)"
 
 # Build the project
 build:

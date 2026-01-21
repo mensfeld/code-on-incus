@@ -104,7 +104,7 @@ func ensureDirectories(cfg *Config) error {
 // WriteExample writes an example config file to the specified path
 func WriteExample(path string) error {
 	example := `# Claude on Incus Configuration
-# See: https://github.com/mensfeld/claude-on-incus
+# See: https://github.com/mensfeld/code-on-incus
 
 [defaults]
 image = "coi"

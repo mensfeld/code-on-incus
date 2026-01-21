@@ -119,7 +119,7 @@ jobs:
           ### Quick Install (Linux)
           ```bash
           # Install latest version
-          curl -fsSL https://raw.githubusercontent.com/mensfeld/claude-on-incus/master/install.sh | bash
+          curl -fsSL https://raw.githubusercontent.com/mensfeld/code-on-incus/master/install.sh | bash
           ```
 
           ### Manual Installation
@@ -128,14 +128,14 @@ jobs:
 
           #### Linux AMD64 (x86_64)
           ```bash
-          wget https://github.com/mensfeld/claude-on-incus/releases/download/${{ steps.version.outputs.version }}/coi-linux-amd64
+          wget https://github.com/mensfeld/code-on-incus/releases/download/${{ steps.version.outputs.version }}/coi-linux-amd64
           chmod +x coi-linux-amd64
           sudo mv coi-linux-amd64 /usr/local/bin/coi
           ```
 
           #### Linux ARM64 (aarch64)
           ```bash
-          wget https://github.com/mensfeld/claude-on-incus/releases/download/${{ steps.version.outputs.version }}/coi-linux-arm64
+          wget https://github.com/mensfeld/code-on-incus/releases/download/${{ steps.version.outputs.version }}/coi-linux-arm64
           chmod +x coi-linux-arm64
           sudo mv coi-linux-arm64 /usr/local/bin/coi
           ```
@@ -149,7 +149,7 @@ jobs:
 
           ## What's Changed
 
-          See [CHANGELOG.md](https://github.com/mensfeld/claude-on-incus/blob/master/CHANGELOG.md) for full changes.
+          See [CHANGELOG.md](https://github.com/mensfeld/code-on-incus/blob/master/CHANGELOG.md) for full changes.
 
           ## Requirements
 
@@ -159,9 +159,9 @@ jobs:
 
           ## Documentation
 
-          - [README](https://github.com/mensfeld/claude-on-incus/blob/master/README.md)
-          - [PERSISTENT_MODE.md](https://github.com/mensfeld/claude-on-incus/blob/master/PERSISTENT_MODE.md)
-          - [Integration Tests](https://github.com/mensfeld/claude-on-incus/blob/master/INTE.md)
+          - [README](https://github.com/mensfeld/code-on-incus/blob/master/README.md)
+          - [PERSISTENT_MODE.md](https://github.com/mensfeld/code-on-incus/blob/master/PERSISTENT_MODE.md)
+          - [Integration Tests](https://github.com/mensfeld/code-on-incus/blob/master/INTE.md)
           EOF
 
       - name: Create GitHub Release

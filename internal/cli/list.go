@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/mensfeld/claude-on-incus/internal/config"
-	"github.com/mensfeld/claude-on-incus/internal/container"
-	"github.com/mensfeld/claude-on-incus/internal/session"
+	"github.com/mensfeld/code-on-incus/internal/config"
+	"github.com/mensfeld/code-on-incus/internal/container"
+	"github.com/mensfeld/code-on-incus/internal/session"
 	"github.com/spf13/cobra"
 )
 

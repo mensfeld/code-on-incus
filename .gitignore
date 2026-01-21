@@ -50,3 +50,7 @@ test-config.toml
 
 # Session data (for local testing)
 .claude-on-incus/
+
+# Backup files
+*.bck.yml
+*.backup
