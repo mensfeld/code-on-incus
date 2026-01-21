@@ -171,7 +171,7 @@ def test_full_installation_process(meta_container, coi_binary):
         set -e
         cd /root
         {clone_cmd}
-        cd claude-on-incus
+        cd code-on-incus
         /usr/local/go/bin/go build -o coi ./cmd/coi
         ./coi version
         """,

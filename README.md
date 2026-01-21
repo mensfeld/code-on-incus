@@ -198,7 +198,7 @@ If you prefer to build from source or need a specific version:
 ```bash
 # Prerequisites: Go 1.24.4 or later
 git clone https://github.com/mensfeld/code-on-incus.git
-cd claude-on-incus
+cd code-on-incus
 make build
 sudo make install
 ```
