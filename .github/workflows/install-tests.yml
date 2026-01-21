@@ -229,21 +229,20 @@ jobs:
           coi kill --all --force || true
           coi clean --force || true
 
-  # Test installation on Arch Linux
-  arch-install:
-    name: Arch Linux Installation Test
+  # Test building COI on Arch Linux (no Incus - just build validation)
+  arch-build:
+    name: Arch Linux Build Test
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 15
     container:
       image: archlinux:latest
-      options: --privileged
 
     steps:
       - name: Initialize Arch Linux
         run: |
           # Update system and install base packages
           pacman -Syu --noconfirm
-          pacman -S --noconfirm base-devel git go wget curl sudo
+          pacman -S --noconfirm base-devel git go wget curl
 
       - name: Checkout repository
         uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8 # v6.0.1
@@ -253,65 +252,23 @@ jobs:
           # Fix git ownership issues in container
           git config --global --add safe.directory '*'
 
-      - name: Install Incus (Arch)
-        run: |
-          echo "Installing Incus on Arch Linux..."
-
-          # Incus requires iptables-nft which conflicts with iptables
-          # Use --ask=4 to auto-remove conflicting packages
-          echo "y" | pacman -S --noconfirm incus || \
-          pacman -S --noconfirm --overwrite '*' incus || \
-          echo "Incus installation failed (expected in container - package conflicts)"
-
-          # Verify incus command exists
-          if command -v incus &> /dev/null; then
-            echo "✓ Incus installed successfully"
-          else
-            echo "⚠ Incus not installed, skipping Incus-specific tests"
-          fi
-
-          # Note: Full Incus initialization may not work in Docker container
-          # due to kernel/cgroup limitations, but we can test basic functionality
-
-      - name: Verify Incus installation
-        continue-on-error: true
-        run: |
-          echo "Verifying Incus installation..."
-
-          # Check if Incus command exists and can show version
-          if command -v incus &> /dev/null; then
-            echo "✓ Incus command available"
-            incus version || echo "⚠ Incus not fully functional (expected in container)"
-          else
-            echo "⚠ Incus not available (package conflicts in container)"
-            echo "This is acceptable - we're primarily testing COI build on Arch"
-          fi
-
       - name: Build and install COI
         run: |
-          echo "Building COI from source..."
+          echo "Testing that COI builds and installs on Arch Linux..."
 
           make build
           make install
 
-          # Verify installation
+          # Verify binary works
           coi version
-
-      - name: Test COI commands (basic validation)
-        run: |
-          echo "Testing basic COI commands on Arch Linux..."
-
-          # Test commands that don't require full Incus functionality
           coi --help
-          coi version
-
-          # These commands should work even without Incus fully functional
-          coi list || echo "⚠ coi list requires Incus (expected failure in container)"
 
           echo ""
-          echo "✓ COI builds and installs successfully on Arch Linux"
-          echo "Note: Full integration tests (coi build, coi shell) require Incus"
-          echo "      which may not work fully in container environment"
+          echo "✅ COI successfully builds and installs on Arch Linux"
+          echo ""
+          echo "Note: This test validates that the COI binary can be built"
+          echo "      and installed on Arch. Full Incus integration testing"
+          echo "      is covered by the Ubuntu tests."
 
   install-test-success:
     name: Installation Tests Success
@@ -320,7 +277,7 @@ jobs:
     if: always()
     needs:
       - ubuntu-install
-      - arch-install
+      - arch-build
     steps:
       - name: Check all jobs passed
         if: |
