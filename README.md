@@ -256,6 +256,39 @@ coi build custom my-image --base coi --script setup.sh
 
 **Custom images:** Build your own specialized images using build scripts that run on top of the base `coi` image.
 
+## Running on macOS (Colima/Lima)
+
+COI can run on macOS by using Incus inside a [Colima](https://github.com/abiosoft/colima) or [Lima](https://github.com/lima-vm/lima) VM. These tools provide Linux VMs on macOS that can run Incus.
+
+**Automatic Environment Detection**: COI automatically detects when running inside a Colima or Lima VM and adjusts its configuration accordingly. No manual configuration needed!
+
+### How It Works
+
+1. **Colima/Lima handle UID mapping** - These VMs mount macOS directories using virtiofs and map UIDs at the VM level
+2. **COI detects the environment** - Checks for virtiofs mounts in `/proc/mounts` and the `lima` user
+3. **UID shifting is auto-disabled** - COI automatically disables Incus's `shift=true` option to avoid conflicts with VM-level mapping
+
+### Setup
+
+```bash
+# Install Colima (example)
+brew install colima
+
+# Start Colima VM
+colima start
+
+# Inside the VM, install Incus and COI following normal Linux instructions
+# COI will automatically detect it's running in Colima/Lima
+```
+
+**Manual Override**: In rare cases where auto-detection doesn't work, you can manually configure:
+
+```toml
+# ~/.config/coi/config.toml
+[incus]
+disable_shift = true
+```
+
 ## Usage
 
 ### Basic Commands

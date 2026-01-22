@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## Unreleased
+
+### Features
+
+- [Feature] **Automatic Colima/Lima environment detection** - COI now automatically detects when running inside a Colima or Lima VM and disables UID shifting. These VMs already handle UID mapping at the VM level via virtiofs, making Incus's `shift=true` unnecessary and problematic. Detection checks for virtiofs mounts in `/proc/mounts` and the `lima` user. Users no longer need to manually configure `disable_shift` option.
+- [Feature] **Manual UID shift override** - Added `disable_shift` config option for manual control in edge cases: `[incus]` `disable_shift = true` in `~/.config/coi/config.toml`. The auto-detection works in most cases, but this option allows manual override if needed.
+
+### Technical Details
+
+Colima/Lima detection:
+- **Auto-detection**: Checks `/proc/mounts` for virtiofs filesystem (characteristic of Lima VMs)
+- **Fallback check**: Verifies if running as `lima` user (Lima VM default user)
+- **Logging**: Clearly indicates when auto-detection activates vs manual configuration
+- **Override**: Manual `disable_shift = true` config takes precedence over auto-detection
+
+This prevents the error: `Error: Failed to start device "workspace": Required idmapping abilities not available` when running COI inside Colima/Lima VMs on macOS.
+
 ## 0.5.2 (2026-01-19)
 
 ### Bug Fixes

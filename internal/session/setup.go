@@ -20,6 +20,31 @@ const (
 	CoiImage     = "coi"
 )
 
+// isColimaOrLimaEnvironment detects if we're running inside a Colima or Lima VM
+// These VMs use virtiofs for mounting host directories and already handle UID mapping
+// at the VM level, making Incus's shift=true unnecessary and problematic
+func isColimaOrLimaEnvironment() bool {
+	// Check for virtiofs mounts which are characteristic of Lima/Colima
+	data, err := os.ReadFile("/proc/mounts")
+	if err != nil {
+		return false
+	}
+
+	// Lima mounts host directories via virtiofs (e.g., "mount0 on /Users/... type virtiofs")
+	// Colima uses Lima under the hood, so same detection applies
+	mounts := string(data)
+	if strings.Contains(mounts, "virtiofs") {
+		return true
+	}
+
+	// Additional check: Lima typically runs as the "lima" user
+	if user := os.Getenv("USER"); user == "lima" {
+		return true
+	}
+
+	return false
+}
+
 // buildJSONFromSettings converts a settings map to a properly escaped JSON string
 // Uses json.Marshal to ensure proper escaping and avoid command injection
 func buildJSONFromSettings(settings map[string]interface{}) (string, error) {
@@ -160,7 +185,15 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 		// Local: Use shift=true (kernel idmap support)
 		// CI: Use raw.idmap (kernel lacks idmap support, runner UID 1001 → container UID 1000)
 		// Colima/Lima: Disable shift (VM already handles UID mapping via virtiofs)
-		useShift := !opts.DisableShift // Config can disable shift for Colima/Lima environments
+
+		// Auto-detect Colima/Lima environment if not explicitly configured
+		disableShift := opts.DisableShift
+		if !disableShift && isColimaOrLimaEnvironment() {
+			disableShift = true
+			opts.Logger("Auto-detected Colima/Lima environment - disabling UID shifting")
+		}
+
+		useShift := !disableShift
 		isCI := os.Getenv("CI") == "true" || os.Getenv("GITHUB_ACTIONS") == "true"
 
 		if isCI {
@@ -169,8 +202,13 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 				opts.Logger(fmt.Sprintf("Warning: Failed to set raw.idmap: %v", err))
 			}
 			useShift = false // Don't use shift=true with raw.idmap
-		} else if opts.DisableShift {
-			opts.Logger("UID shifting disabled (Colima/Lima environment)")
+		} else if disableShift {
+			if !opts.DisableShift {
+				// Was auto-detected, not explicitly configured
+				opts.Logger("UID shifting disabled (auto-detected Colima/Lima environment)")
+			} else {
+				opts.Logger("UID shifting disabled (configured via disable_shift option)")
+			}
 		}
 
 		// Add disk devices BEFORE starting container
