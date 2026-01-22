@@ -42,7 +42,7 @@ type SetupOptions struct {
 	CLIConfigPath string    // e.g., ~/.claude (host CLI config to copy credentials from)
 	Tool          tool.Tool // AI coding tool being used
 	NetworkConfig *config.NetworkConfig
-	DisableShift  bool      // Disable UID shifting (for Colima/Lima environments)
+	DisableShift  bool // Disable UID shifting (for Colima/Lima environments)
 	Logger        func(string)
 }
 
