@@ -41,12 +41,8 @@ def test_persist_help(coi_binary):
     assert "--force" in output, f"Should document --force flag. Got:\n{output}"
 
     # Should describe what it does
-    assert (
-        "persistent" in output.lower()
-    ), f"Should mention persistent mode. Got:\n{output}"
-    assert (
-        "ephemeral" in output.lower()
-    ), f"Should mention ephemeral mode. Got:\n{output}"
+    assert "persistent" in output.lower(), f"Should mention persistent mode. Got:\n{output}"
+    assert "ephemeral" in output.lower(), f"Should mention ephemeral mode. Got:\n{output}"
 
     # Should have examples
     assert "Examples:" in output, f"Should contain examples section. Got:\n{output}"
