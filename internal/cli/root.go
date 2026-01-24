@@ -109,6 +109,7 @@ func init() {
 	rootCmd.AddCommand(fileCmd)      // New: coi file <subcommand>
 	rootCmd.AddCommand(cleanCmd)
 	rootCmd.AddCommand(killCmd)
+	rootCmd.AddCommand(persistCmd)
 	rootCmd.AddCommand(tmuxCmd)
 	rootCmd.AddCommand(versionCmd)
 }
