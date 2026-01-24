@@ -314,9 +314,11 @@ jobs:
           echo "Note: Full Incus integration is tested on Ubuntu in CI."
 
   # End-to-end installation test on macOS with Colima
+  # NOTE: Using macos-13 (Intel) because ARM runners (macos-14+) don't support
+  # nested virtualization required for Colima/Lima VMs
   macos-install:
     name: macOS Installation Test (Colima)
-    runs-on: macos-14
+    runs-on: macos-13
     timeout-minutes: 45
     strategy:
       matrix:
@@ -340,9 +342,7 @@ jobs:
       - name: Start Colima with Incus runtime
         run: |
           echo "Starting Colima with Incus backend..."
-          # Use QEMU driver for better CI compatibility
-          # VZ driver has issues in GitHub Actions environment
-          colima start --runtime incus --cpu 2 --memory 4 --vm-type qemu
+          colima start --runtime incus --cpu 2 --memory 4
 
           # Wait for Colima to be ready
           sleep 20
