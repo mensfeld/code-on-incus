@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -18,10 +19,25 @@ const (
 	IncusProject = "default"
 )
 
-// IncusExec executes an Incus command via sg wrapper for group permissions
+// execIncusCommand creates an exec.Cmd for running incus commands.
+// On Linux, it wraps the command with sg for group permissions.
+// On macOS, it runs incus directly (no incus-admin group).
+func execIncusCommand(cmdArgs []string) *exec.Cmd {
+	if runtime.GOOS == "darwin" {
+		// macOS: run incus directly without sg wrapper
+		// cmdArgs is in format: [IncusGroup, "-c", "incus --project ... command"]
+		// Extract the actual incus command from the third element
+		incusCmd := cmdArgs[2] // "incus --project ... command"
+		return exec.Command("sh", "-c", incusCmd)
+	}
+	// Linux: use sg for group permissions
+	return exec.Command("sg", cmdArgs...)
+}
+
+// IncusExec executes an Incus command via sg wrapper for group permissions (Linux) or directly (macOS)
 func IncusExec(args ...string) error {
 	cmdArgs := buildIncusCommand(args...)
-	cmd := exec.Command("sg", cmdArgs...)
+	cmd := execIncusCommand(cmdArgs)
 	cmd.Stdout = os.Stderr // Send stdout to stderr so it's visible
 	cmd.Stderr = os.Stderr // Show errors instead of silencing them
 	return cmd.Run()
@@ -30,7 +46,7 @@ func IncusExec(args ...string) error {
 // IncusExecInteractive executes an Incus command with stdin/stdout/stderr attached
 func IncusExecInteractive(args ...string) error {
 	cmdArgs := buildIncusCommand(args...)
-	cmd := exec.Command("sg", cmdArgs...)
+	cmd := execIncusCommand(cmdArgs)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -40,7 +56,7 @@ func IncusExecInteractive(args ...string) error {
 // IncusExecQuiet executes an Incus command silently (suppress stdout/stderr)
 func IncusExecQuiet(args ...string) error {
 	cmdArgs := buildIncusCommand(args...)
-	cmd := exec.Command("sg", cmdArgs...)
+	cmd := execIncusCommand(cmdArgs)
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	return cmd.Run()
@@ -49,7 +65,7 @@ func IncusExecQuiet(args ...string) error {
 // IncusOutput executes an Incus command and returns the output (trimmed)
 func IncusOutput(args ...string) (string, error) {
 	cmdArgs := buildIncusCommand(args...)
-	cmd := exec.Command("sg", cmdArgs...)
+	cmd := execIncusCommand(cmdArgs)
 
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
@@ -75,7 +91,7 @@ func IncusOutput(args ...string) (string, error) {
 // IncusOutputRaw executes an Incus command and returns the output (not trimmed)
 func IncusOutputRaw(args ...string) (string, error) {
 	cmdArgs := buildIncusCommand(args...)
-	cmd := exec.Command("sg", cmdArgs...)
+	cmd := execIncusCommand(cmdArgs)
 
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
@@ -112,7 +128,7 @@ func IncusOutputWithArgs(args ...string) (string, error) {
 	incusCmd := "incus " + strings.Join(quotedArgs, " ")
 	sgArgs := []string{IncusGroup, "-c", incusCmd}
 
-	cmd := exec.Command("sg", sgArgs...)
+	cmd := execIncusCommand(sgArgs)
 
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
@@ -138,7 +154,7 @@ func IncusOutputWithArgs(args ...string) (string, error) {
 // IncusFilePush pushes a file into a container
 func IncusFilePush(source, destination string) error {
 	cmdArgs := buildIncusCommand("file", "push", source, destination)
-	cmd := exec.Command("sg", cmdArgs...)
+	cmd := execIncusCommand(cmdArgs)
 	return cmd.Run()
 }
 
@@ -194,9 +210,10 @@ func ContainerExec(containerName, command string, opts ContainerExecOptions) (st
 	var cmd *exec.Cmd
 	if opts.Timeout != nil {
 		timeoutCmd := fmt.Sprintf("timeout %d %s", int(opts.Timeout.Seconds()), incusCmd)
-		cmd = exec.Command("sg", IncusGroup, "-c", timeoutCmd)
+		timeoutSgArgs := []string{IncusGroup, "-c", timeoutCmd}
+		cmd = execIncusCommand(timeoutSgArgs)
 	} else {
-		cmd = exec.Command("sg", sgArgs...)
+		cmd = execIncusCommand(sgArgs)
 	}
 
 	if opts.CaptureOutput {
