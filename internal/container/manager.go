@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -313,8 +314,16 @@ func Available() bool {
 		return false
 	}
 
-	// Try to run incus info
-	cmd := exec.Command("sg", IncusGroup, "-c", fmt.Sprintf("incus --project %s info", IncusProject))
+	// On macOS, run incus directly without sg group switching
+	// macOS doesn't have the incus-admin group like Linux
+	var cmd *exec.Cmd
+	if runtime.GOOS == "darwin" {
+		cmd = exec.Command("incus", "--project", IncusProject, "info")
+	} else {
+		// Linux - use sg to run with group permissions
+		cmd = exec.Command("sg", IncusGroup, "-c", fmt.Sprintf("incus --project %s info", IncusProject))
+	}
+
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	return cmd.Run() == nil
