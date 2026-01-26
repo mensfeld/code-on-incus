@@ -55,25 +55,49 @@ def test_docker_flags_enabled(coi_binary, cleanup_containers, workspace_dir):
 
     # Check security.syscalls.intercept.mknod
     result = subprocess.run(
-        ["incus", "--project", "default", "config", "get", container_name, "security.syscalls.intercept.mknod"],
+        [
+            "incus",
+            "--project",
+            "default",
+            "config",
+            "get",
+            container_name,
+            "security.syscalls.intercept.mknod",
+        ],
         capture_output=True,
         text=True,
         timeout=30,
     )
 
-    assert result.returncode == 0, f"Failed to get security.syscalls.intercept.mknod config. stderr: {result.stderr}"
-    assert result.stdout.strip() == "true", "security.syscalls.intercept.mknod should be enabled for Docker support"
+    assert result.returncode == 0, (
+        f"Failed to get security.syscalls.intercept.mknod config. stderr: {result.stderr}"
+    )
+    assert result.stdout.strip() == "true", (
+        "security.syscalls.intercept.mknod should be enabled for Docker support"
+    )
 
     # Check security.syscalls.intercept.setxattr
     result = subprocess.run(
-        ["incus", "--project", "default", "config", "get", container_name, "security.syscalls.intercept.setxattr"],
+        [
+            "incus",
+            "--project",
+            "default",
+            "config",
+            "get",
+            container_name,
+            "security.syscalls.intercept.setxattr",
+        ],
         capture_output=True,
         text=True,
         timeout=30,
     )
 
-    assert result.returncode == 0, f"Failed to get security.syscalls.intercept.setxattr config. stderr: {result.stderr}"
-    assert result.stdout.strip() == "true", "security.syscalls.intercept.setxattr should be enabled for Docker support"
+    assert result.returncode == 0, (
+        f"Failed to get security.syscalls.intercept.setxattr config. stderr: {result.stderr}"
+    )
+    assert result.stdout.strip() == "true", (
+        "security.syscalls.intercept.setxattr should be enabled for Docker support"
+    )
 
     # === Phase 3: Cleanup ===
 

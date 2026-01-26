@@ -73,7 +73,9 @@ def test_docker_works_in_container(coi_binary, cleanup_containers, workspace_dir
             timeout=300,
         )
 
-        assert result.returncode == 0, f"Docker installation should succeed. stderr: {result.stderr}"
+        assert result.returncode == 0, (
+            f"Docker installation should succeed. stderr: {result.stderr}"
+        )
 
     # === Phase 3: Start Docker daemon ===
 
@@ -95,41 +97,80 @@ def test_docker_works_in_container(coi_binary, cleanup_containers, workspace_dir
         timeout=30,
     )
 
-    assert result.returncode == 0, f"Docker daemon should be active. Output: {result.stdout}, stderr: {result.stderr}"
+    assert result.returncode == 0, (
+        f"Docker daemon should be active. Output: {result.stdout}, stderr: {result.stderr}"
+    )
 
     # === Phase 4: Run a simple Docker container ===
 
     # Pull alpine image and run a simple command
     result = subprocess.run(
-        [coi_binary, "container", "exec", container_name, "--", "docker", "run", "--rm", "alpine:latest", "echo", "Docker works!"],
+        [
+            coi_binary,
+            "container",
+            "exec",
+            container_name,
+            "--",
+            "docker",
+            "run",
+            "--rm",
+            "alpine:latest",
+            "echo",
+            "Docker works!",
+        ],
         capture_output=True,
         text=True,
         timeout=120,
     )
 
-    assert result.returncode == 0, f"Docker container should run successfully. stderr: {result.stderr}"
+    assert result.returncode == 0, (
+        f"Docker container should run successfully. stderr: {result.stderr}"
+    )
     # Docker output goes to stderr when pulling images, check both stdout and stderr
     output = result.stdout + result.stderr
-    assert "Docker works!" in output, f"Docker container should produce expected output. output: {output}"
+    assert "Docker works!" in output, (
+        f"Docker container should produce expected output. output: {output}"
+    )
 
     # Verify no network namespace errors
-    assert "network namespace" not in result.stderr.lower(), f"Should not have network namespace errors. stderr: {result.stderr}"
-    assert "ip_unprivileged_port_start" not in result.stderr.lower(), f"Should not have sysctl errors. stderr: {result.stderr}"
+    assert "network namespace" not in result.stderr.lower(), (
+        f"Should not have network namespace errors. stderr: {result.stderr}"
+    )
+    assert "ip_unprivileged_port_start" not in result.stderr.lower(), (
+        f"Should not have sysctl errors. stderr: {result.stderr}"
+    )
 
     # === Phase 5: Test Docker with network isolation (default behavior) ===
 
     # Run another container to verify network namespaces work properly
     result = subprocess.run(
-        [coi_binary, "container", "exec", container_name, "--", "docker", "run", "--rm", "alpine:latest", "sh", "-c", "ip addr show"],
+        [
+            coi_binary,
+            "container",
+            "exec",
+            container_name,
+            "--",
+            "docker",
+            "run",
+            "--rm",
+            "alpine:latest",
+            "sh",
+            "-c",
+            "ip addr show",
+        ],
         capture_output=True,
         text=True,
         timeout=60,
     )
 
-    assert result.returncode == 0, f"Docker container with network should work. stderr: {result.stderr}"
+    assert result.returncode == 0, (
+        f"Docker container with network should work. stderr: {result.stderr}"
+    )
     # Docker output may go to stderr, check both
     output = result.stdout + result.stderr
-    assert "eth0" in output or "lo" in output, f"Docker container should have network interfaces. output: {output}"
+    assert "eth0" in output or "lo" in output, (
+        f"Docker container should have network interfaces. output: {output}"
+    )
 
     # === Phase 6: Cleanup ===
 
