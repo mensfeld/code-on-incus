@@ -8,6 +8,7 @@
 
 ### Features
 
+- [Feature] **Automatic Docker/nested container support** - COI now automatically enables Docker and container nesting support on all containers by setting `security.nesting=true`, `security.syscalls.intercept.mknod=true`, and `security.syscalls.intercept.setxattr=true`. This eliminates the "unable to start container process: error during container init: open sysctl net.ipv4.ip_unprivileged_port_start file: reopen fd 8: permission denied" error when running Docker inside Incus containers. No configuration required - Docker just works out of the box.
 - [Feature] **Automatic Colima/Lima environment detection** - COI now automatically detects when running inside a Colima or Lima VM and disables UID shifting. These VMs already handle UID mapping at the VM level via virtiofs, making Incus's `shift=true` unnecessary and problematic. Detection checks for virtiofs mounts in `/proc/mounts` and the `lima` user. Users no longer need to manually configure `disable_shift` option.
 - [Feature] **Manual UID shift override** - Added `disable_shift` config option for manual control in edge cases: `[incus]` `disable_shift = true` in `~/.config/coi/config.toml`. The auto-detection works in most cases, but this option allows manual override if needed.
 - [Feature] Add `coi persist` command to convert ephemeral sessions to persistent - Allows converting running ephemeral containers to persistent mode, preventing automatic deletion when stopped. Supports `--all` flag to persist all containers and `--force` to skip confirmations. Use `coi list` to verify persistence mode.
@@ -19,6 +20,13 @@
 
 ### Technical Details
 
+Docker/nested container support:
+- **Automatic Configuration**: All containers automatically receive Docker support flags on launch
+- **Security Flags**: Three flags are set: `security.nesting=true` (enables nested containerization), `security.syscalls.intercept.mknod=true` (safe device node creation), `security.syscalls.intercept.setxattr=true` (safe filesystem attribute handling)
+- **Security Model**: Incus's syscall interception provides defense-in-depth - even if a process escapes a Docker container, it remains within the isolated Incus container
+- **Use Case**: Safe for development/testing environments (COI's primary use case) where you control the workloads running inside containers
+- **Technical Root Cause**: Docker (runc) needs to access and reopen file descriptors for network-related sysctls when creating network namespaces. Without nesting flags, runc cannot perform these operations, resulting in "permission denied" errors when accessing `net.ipv4.ip_unprivileged_port_start`
+
 Colima/Lima detection:
 - **Auto-detection**: Checks `/proc/mounts` for virtiofs filesystem (characteristic of Lima VMs)
 - **Fallback check**: Verifies if running as `lima` user (Lima VM default user)
@@ -29,6 +37,7 @@ This prevents the error: `Error: Failed to start device "workspace": Required id
 
 ### Testing
 
+- [Testing] Added Docker integration tests - Two test scenarios: (1) verify Docker nesting flags are automatically enabled on container launch, (2) verify Docker actually works inside containers without network namespace errors (tests/docker/ directory).
 - [Testing] Added integration tests for `coi persist` command - Five test scenarios covering basic operation, bulk operations, state verification, and error handling (tests/persist/ directory).
 - [Testing] Added comprehensive terminal sanitization tests - Unit tests, integration tests with real tmux sessions, and CI end-to-end tests that verify exotic terminal types work correctly in containers.
 - [Testing] Added integration tests for IPv4 display in `coi list` - Three test scenarios covering running containers showing IPv4, stopped containers not showing IPv4, and JSON format including the ipv4 field (tests/list/ directory).
