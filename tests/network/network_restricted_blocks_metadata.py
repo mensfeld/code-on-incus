@@ -4,10 +4,21 @@ Test for network isolation - restricted mode blocks cloud metadata endpoint.
 Tests that:
 1. Container cannot reach cloud metadata service at 169.254.169.254
 2. Prevents cloud credential exfiltration
+
+Note: This test requires OVN networking which is not available in CI.
 """
 
+import os
 import subprocess
 import time
+
+import pytest
+
+# Skip in CI - restricted mode requires OVN networking
+pytestmark = pytest.mark.skipif(
+    os.environ.get("CI") == "true" or os.environ.get("GITHUB_ACTIONS") == "true",
+    reason="Restricted network mode requires OVN networking (not available in CI)",
+)
 
 
 def test_restricted_blocks_metadata_endpoint(coi_binary, workspace_dir, cleanup_containers):

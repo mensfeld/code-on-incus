@@ -6,10 +6,21 @@ Tests that:
 2. Blocks 10.0.0.0/8
 3. Blocks 172.16.0.0/12
 4. Blocks 192.168.0.0/16
+
+Note: This test requires OVN networking which is not available in CI.
 """
 
+import os
 import subprocess
 import time
+
+import pytest
+
+# Skip in CI - restricted mode requires OVN networking
+pytestmark = pytest.mark.skipif(
+    os.environ.get("CI") == "true" or os.environ.get("GITHUB_ACTIONS") == "true",
+    reason="Restricted network mode requires OVN networking (not available in CI)",
+)
 
 
 def test_restricted_blocks_private_networks(coi_binary, workspace_dir, cleanup_containers):

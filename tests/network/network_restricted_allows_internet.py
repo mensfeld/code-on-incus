@@ -5,10 +5,21 @@ Tests that:
 1. Container can reach public internet
 2. Development workflows (npm, pypi, GitHub) work normally
 3. Only local/internal networks are blocked
+
+Note: This test requires OVN networking which is not available in CI.
 """
 
+import os
 import subprocess
 import time
+
+import pytest
+
+# Skip in CI - restricted mode requires OVN networking
+pytestmark = pytest.mark.skipif(
+    os.environ.get("CI") == "true" or os.environ.get("GITHUB_ACTIONS") == "true",
+    reason="Restricted network mode requires OVN networking (not available in CI)",
+)
 
 
 def test_restricted_allows_internet(coi_binary, workspace_dir, cleanup_containers):

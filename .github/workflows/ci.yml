@@ -226,6 +226,17 @@ jobs:
           go build -o coi ./cmd/coi
           ./coi version
 
+      - name: Configure COI for CI (use open network mode)
+        run: |
+          # CI doesn't have OVN, so use open network mode by default
+          # This allows all tests except network-specific restricted mode tests to run
+          mkdir -p ~/.config/coi
+          cat > ~/.config/coi/config.toml << 'EOF'
+          [network]
+          mode = "open"
+          EOF
+          echo "Created COI config with network.mode = open"
+
       - name: Test bind mount functionality
         run: |
           echo "Testing if bind mounts work with shift=true..."
