@@ -10,7 +10,7 @@ import (
 )
 
 // ParseMountConfig creates MountConfig from config file and CLI flags
-func ParseMountConfig(cfg *config.Config, mountPairs []string, storagePath string) (*session.MountConfig, error) {
+func ParseMountConfig(cfg *config.Config, mountPairs []string) (*session.MountConfig, error) {
 	mountConfig := &session.MountConfig{
 		Mounts: []session.MountEntry{},
 	}
@@ -39,35 +39,7 @@ func ParseMountConfig(cfg *config.Config, mountPairs []string, storagePath strin
 		deviceNameCounter++
 	}
 
-	// Step 2: Add backward-compatible --storage flag
-	if storagePath != "" {
-		absPath, err := filepath.Abs(storagePath)
-		if err != nil {
-			return nil, fmt.Errorf("invalid storage path: %w", err)
-		}
-
-		// Check if /storage is already mounted from config
-		storageExists := false
-		for i, m := range mountConfig.Mounts {
-			if m.ContainerPath == "/storage" {
-				// Override config mount with CLI storage
-				mountConfig.Mounts[i].HostPath = absPath
-				mountConfig.Mounts[i].DeviceName = "storage"
-				storageExists = true
-				break
-			}
-		}
-
-		if !storageExists {
-			mountConfig.Mounts = append(mountConfig.Mounts, session.MountEntry{
-				HostPath:      absPath,
-				ContainerPath: "/storage",
-				DeviceName:    "storage",
-			})
-		}
-	}
-
-	// Step 3: Add --mount flags (can override config mounts)
+	// Step 2: Add --mount flags (can override config mounts)
 	for _, pair := range mountPairs {
 		parts := strings.Split(pair, ":")
 		if len(parts) != 2 {

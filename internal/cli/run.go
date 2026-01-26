@@ -146,7 +146,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		}
 
 		// Parse and validate mount configuration
-		mountConfig, err := ParseMountConfig(cfg, mountPairs, storage)
+		mountConfig, err := ParseMountConfig(cfg, mountPairs)
 		if err != nil {
 			return fmt.Errorf("invalid mount configuration: %w", err)
 		}

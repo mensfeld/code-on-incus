@@ -85,8 +85,7 @@ type SetupOptions struct {
 	Persistent    bool // Keep container between sessions (don't delete on cleanup)
 	ResumeFromID  string
 	Slot          int
-	StoragePath   string       // DEPRECATED - kept for backward compat
-	MountConfig   *MountConfig // NEW - multi-mount support
+	MountConfig   *MountConfig // Multi-mount support
 	SessionsDir   string       // e.g., ~/.coi/sessions-claude
 	CLIConfigPath string       // e.g., ~/.claude (host CLI config to copy credentials from)
 	Tool          tool.Tool    // AI coding tool being used
