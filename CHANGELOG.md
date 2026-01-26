@@ -2,6 +2,10 @@
 
 ## 0.6.0 (Unreleased)
 
+### Bug Fixes
+
+- [Bug Fix] **Network ACL support detection** - Fixed `coi shell` failing with "Invalid device option 'security.acls'" error on standard Incus bridge networks. The tool now detects whether the network supports ACLs (requires OVN) and provides a clear error message with remediation steps instead of a cryptic failure. Users on standard bridge networks are guided to either use `--network=open` or configure OVN networking. (#63)
+
 ### Features
 
 - [Feature] **Automatic Colima/Lima environment detection** - COI now automatically detects when running inside a Colima or Lima VM and disables UID shifting. These VMs already handle UID mapping at the VM level via virtiofs, making Incus's `shift=true` unnecessary and problematic. Detection checks for virtiofs mounts in `/proc/mounts` and the `lima` user. Users no longer need to manually configure `disable_shift` option.

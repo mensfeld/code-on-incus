@@ -677,6 +677,8 @@ coi shutdown --all
 
 COI provides network isolation to protect your host and private networks from container access.
 
+**Important:** Network isolation (restricted/allowlist modes) requires an **OVN network** in Incus. Standard bridge networks (like the default `incusbr0`) do not support the `security.acls` feature needed for egress filtering. If OVN is not configured, you'll need to use `--network=open` or set up OVN networking. See [OVN Network Setup](#ovn-network-setup) below for instructions.
+
 ### Network Modes
 
 **Restricted mode (default)** - Blocks local networks, allows internet:
@@ -720,6 +722,35 @@ refresh_interval_minutes = 30  # IP refresh interval (0 to disable)
 - Domains behind CDNs may have many IPs that change frequently
 - DNS failures use cached IPs from previous successful resolution
 - To allow DNS resolution inside the container, add DNS server IPs (e.g., `8.8.8.8`)
+
+### OVN Network Setup
+
+Network isolation (restricted/allowlist modes) requires OVN (Open Virtual Network). If you see the error "network ACLs not supported", you have two options:
+
+**Option 1: Use open network mode (quick fix)**
+```bash
+coi shell --network=open
+```
+This disables egress filtering but allows you to work immediately.
+
+**Option 2: Set up OVN networking (recommended for production)**
+
+OVN provides proper network ACL support for egress filtering:
+
+```bash
+# Install OVN packages (Ubuntu/Debian)
+sudo apt install ovn-host ovn-central
+
+# Create an OVN network
+incus network create ovn-net --type=ovn
+
+# Update the default profile to use the OVN network
+incus profile device set default eth0 network=ovn-net
+```
+
+For more details, see the [Incus OVN documentation](https://linuxcontainers.org/incus/docs/main/howto/network_ovn/).
+
+**Note:** After switching to OVN, existing containers will need to be recreated to use the new network
 
 ## Security Best Practices
 

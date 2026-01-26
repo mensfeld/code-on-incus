@@ -8,6 +8,10 @@ import (
 	"github.com/mensfeld/code-on-incus/internal/container"
 )
 
+// ErrACLNotSupported is returned when the network doesn't support ACLs
+// This typically happens with standard bridge networks (non-OVN)
+var ErrACLNotSupported = fmt.Errorf("network ACLs not supported")
+
 // ACLManager manages Incus network ACLs for container isolation
 type ACLManager struct{}
 
@@ -77,6 +81,14 @@ func (m *ACLManager) ApplyToContainer(containerName, aclName string) error {
 		return fmt.Errorf("could not determine network name from default profile")
 	}
 
+	// Check if the network supports ACLs before attempting to apply
+	// ACLs require OVN networks; standard bridge networks don't support security.acls
+	if supported, err := m.networkSupportsACLs(networkName); err != nil {
+		return fmt.Errorf("failed to check ACL support: %w", err)
+	} else if !supported {
+		return ErrACLNotSupported
+	}
+
 	// Step 1: Override the eth0 device from profile to container level
 	// This copies all properties from the profile's eth0 device
 	err = container.IncusExec("config", "device", "override", containerName, "eth0")
@@ -88,10 +100,40 @@ func (m *ACLManager) ApplyToContainer(containerName, aclName string) error {
 	err = container.IncusExec("config", "device", "set", containerName, "eth0",
 		"security.acls", aclName)
 	if err != nil {
+		// Check if this is an ACL not supported error
+		if strings.Contains(err.Error(), "Invalid device option") ||
+			strings.Contains(err.Error(), "security.acls") {
+			return ErrACLNotSupported
+		}
 		return fmt.Errorf("failed to set ACL property: %w", err)
 	}
 
 	return nil
+}
+
+// networkSupportsACLs checks if the given network supports ACLs
+// ACLs are only supported on OVN networks, not standard bridge networks
+func (m *ACLManager) networkSupportsACLs(networkName string) (bool, error) {
+	// Get network configuration to check its type
+	output, err := container.IncusOutput("network", "show", networkName)
+	if err != nil {
+		return false, fmt.Errorf("failed to get network info: %w", err)
+	}
+
+	// Parse the output to find the network type
+	// Looking for "type: ovn" or "type: bridge"
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "type:") {
+			networkType := strings.TrimSpace(strings.TrimPrefix(line, "type:"))
+			// Only OVN networks support security.acls on NIC devices
+			return networkType == "ovn", nil
+		}
+	}
+
+	// If we can't determine the type, assume ACLs are not supported
+	return false, nil
 }
 
 // Delete removes a network ACL

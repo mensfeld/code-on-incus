@@ -2,6 +2,7 @@ package network
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -73,8 +74,29 @@ func (m *Manager) setupRestricted(ctx context.Context, containerName string) err
 
 	// 2. Apply ACL to container
 	if err := m.acl.ApplyToContainer(containerName, m.aclName); err != nil {
-		// If applying fails, clean up the ACL
+		// Clean up the ACL
 		_ = m.acl.Delete(m.aclName)
+
+		// Check if ACLs are not supported (non-OVN network)
+		if errors.Is(err, ErrACLNotSupported) {
+			return fmt.Errorf(`network ACLs not supported: your Incus network does not support security.acls
+
+This feature requires an OVN (Open Virtual Network) network. Your current network
+uses a standard bridge which doesn't support egress filtering via ACLs.
+
+To fix this, choose one of these options:
+
+  1. Run with unrestricted network access:
+     coi shell --network=open
+
+  2. Set up an OVN network in Incus (recommended for production):
+     - Install OVN: sudo apt install ovn-host ovn-central
+     - Create OVN network: incus network create ovn-net --type=ovn
+     - Update default profile to use the OVN network
+
+For more information, see: https://linuxcontainers.org/incus/docs/main/howto/network_ovn/`)
+		}
+
 		return fmt.Errorf("failed to apply network ACL: %w", err)
 	}
 
@@ -82,10 +104,10 @@ func (m *Manager) setupRestricted(ctx context.Context, containerName string) err
 
 	// Log what is blocked
 	if m.config.BlockPrivateNetworks {
-		log.Println("  ✓ Blocking private networks (RFC1918)")
+		log.Println("  Blocking private networks (RFC1918)")
 	}
 	if m.config.BlockMetadataEndpoint {
-		log.Println("  ✓ Blocking cloud metadata endpoints")
+		log.Println("  Blocking cloud metadata endpoints")
 	}
 
 	return nil
@@ -143,6 +165,27 @@ func (m *Manager) setupAllowlist(ctx context.Context, containerName string) erro
 	// 6. Apply to container
 	if err := m.acl.ApplyToContainer(containerName, m.aclName); err != nil {
 		_ = m.acl.Delete(m.aclName)
+
+		// Check if ACLs are not supported (non-OVN network)
+		if errors.Is(err, ErrACLNotSupported) {
+			return fmt.Errorf(`network ACLs not supported: your Incus network does not support security.acls
+
+This feature requires an OVN (Open Virtual Network) network. Your current network
+uses a standard bridge which doesn't support egress filtering via ACLs.
+
+To fix this, choose one of these options:
+
+  1. Run with unrestricted network access:
+     coi shell --network=open
+
+  2. Set up an OVN network in Incus (recommended for production):
+     - Install OVN: sudo apt install ovn-host ovn-central
+     - Create OVN network: incus network create ovn-net --type=ovn
+     - Update default profile to use the OVN network
+
+For more information, see: https://linuxcontainers.org/incus/docs/main/howto/network_ovn/`)
+		}
+
 		return fmt.Errorf("failed to apply allowlist ACL: %w", err)
 	}
 
