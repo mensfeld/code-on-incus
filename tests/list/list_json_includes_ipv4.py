@@ -51,7 +51,9 @@ def test_list_json_includes_ipv4(coi_binary, cleanup_containers, workspace_dir):
     assert container["ipv4"] != "", "Running container should have an IPv4 address"
 
     # Verify it looks like an IP address (basic check)
-    assert "." in container["ipv4"], f"IPv4 should look like an IP address, got: {container['ipv4']}"
+    assert "." in container["ipv4"], (
+        f"IPv4 should look like an IP address, got: {container['ipv4']}"
+    )
 
     # Phase 4: Stop container and verify IPv4 becomes empty
     result = subprocess.run(
@@ -86,7 +88,9 @@ def test_list_json_includes_ipv4(coi_binary, cleanup_containers, workspace_dir):
 
     # Verify ipv4 field exists but is empty for stopped container
     assert "ipv4" in container, "Missing ipv4 field for stopped container"
-    assert container["ipv4"] == "", f"Stopped container should have empty IPv4, got: {container['ipv4']}"
+    assert container["ipv4"] == "", (
+        f"Stopped container should have empty IPv4, got: {container['ipv4']}"
+    )
 
     # Phase 6: Cleanup
     subprocess.run(
