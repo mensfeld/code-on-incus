@@ -55,11 +55,13 @@ container = "/app/subdir"
     config_file = Path(workspace_dir) / ".coi.toml"
     config_file.write_text(config_content)
 
+    # Run from workspace directory so config is loaded
     result = subprocess.run(
-        [coi_binary, "run", "--workspace", workspace_dir, "--", "echo", "test"],
+        [coi_binary, "run", "--", "echo", "test"],
         capture_output=True,
         text=True,
         timeout=120,
+        cwd=workspace_dir,  # Run from workspace directory to load .coi.toml
     )
 
     assert result.returncode != 0

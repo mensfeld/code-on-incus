@@ -14,7 +14,8 @@ def test_config_default_mounts(coi_binary, cleanup_containers, workspace_dir, tm
     (mount1 / "file1.txt").write_text("content1")
     (mount2 / "file2.txt").write_text("content2")
 
-    # Create config file in workspace directory (.coi.toml)
+    # Create config file in current working directory (.coi.toml)
+    # Config is loaded from cwd, not from workspace directory
     config_content = f"""
 [mounts]
 [[mounts.default]]
@@ -29,21 +30,13 @@ container = "/mnt/data2"
     config_file = Path(workspace_dir) / ".coi.toml"
     config_file.write_text(config_content)
 
-    # Run - config file will be loaded automatically
+    # Run from workspace directory so config is loaded
     result = subprocess.run(
-        [
-            coi_binary,
-            "run",
-            "--workspace",
-            workspace_dir,
-            "--",
-            "sh",
-            "-c",
-            "cat /mnt/data1/file1.txt && cat /mnt/data2/file2.txt",
-        ],
+        [coi_binary, "run", "--", "sh", "-c", "cat /mnt/data1/file1.txt && cat /mnt/data2/file2.txt"],
         capture_output=True,
         text=True,
         timeout=120,
+        cwd=workspace_dir,  # Run from workspace directory to load .coi.toml
     )
 
     assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
@@ -71,20 +64,11 @@ container = "/data"
 
     # CLI also mounts to /data (should override)
     result = subprocess.run(
-        [
-            coi_binary,
-            "run",
-            "--workspace",
-            workspace_dir,
-            "--mount",
-            f"{cli_mount}:/data",
-            "--",
-            "cat",
-            "/data/file.txt",
-        ],
+        [coi_binary, "run", "--mount", f"{cli_mount}:/data", "--", "cat", "/data/file.txt"],
         capture_output=True,
         text=True,
         timeout=120,
+        cwd=workspace_dir,  # Run from workspace directory to load .coi.toml
     )
 
     assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
