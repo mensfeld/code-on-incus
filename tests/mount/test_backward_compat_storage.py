@@ -28,4 +28,3 @@ def test_storage_flag_still_works(coi_binary, cleanup_containers, workspace_dir,
 
     assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
     assert "storage-content" in result.stdout
-

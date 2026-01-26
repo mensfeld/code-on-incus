@@ -65,4 +65,3 @@ container = "/app/subdir"
     assert result.returncode != 0
     combined = result.stdout + result.stderr
     assert "nested" in combined.lower() or "conflict" in combined.lower()
-

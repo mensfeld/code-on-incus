@@ -42,4 +42,3 @@ def test_multiple_cli_mounts(coi_binary, cleanup_containers, workspace_dir, tmp_
     assert "content1" in result.stdout
     assert "content2" in result.stdout
     assert "content3" in result.stdout
-

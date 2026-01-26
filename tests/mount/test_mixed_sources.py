@@ -50,4 +50,3 @@ container = "/config-data"
     assert "from-config" in result.stdout
     assert "from-storage" in result.stdout
     assert "from-cli" in result.stdout
-

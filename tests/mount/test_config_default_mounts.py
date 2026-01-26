@@ -90,4 +90,3 @@ container = "/data"
     assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
     assert "from-cli" in result.stdout
     assert "from-config" not in result.stdout
-
