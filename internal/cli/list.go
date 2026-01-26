@@ -112,6 +112,7 @@ type ContainerInfo struct {
 	Status    string
 	CreatedAt string
 	Image     string
+	IPv4      string
 }
 
 // SessionInfo holds information about a saved session
@@ -153,11 +154,15 @@ func listActiveContainers() ([]ContainerInfo, error) {
 			createdTime = t.Format("2006-01-02 15:04:05")
 		}
 
+		// Extract IPv4 address from eth0 interface
+		ipv4 := extractEth0IPv4(c)
+
 		result = append(result, ContainerInfo{
 			Name:      name,
 			Status:    status,
 			CreatedAt: createdTime,
 			Image:     image,
+			IPv4:      ipv4,
 		})
 	}
 
@@ -218,6 +223,49 @@ func listSavedSessions(sessionsDir string) ([]SessionInfo, error) {
 	return result, nil
 }
 
+// extractEth0IPv4 extracts the IPv4 address from the eth0 interface
+func extractEth0IPv4(container map[string]interface{}) string {
+	// Get state object
+	state, ok := container["state"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+
+	// Get network object - it's null for stopped containers
+	network, ok := state["network"].(map[string]interface{})
+	if !ok || network == nil {
+		return ""
+	}
+
+	// Get eth0 interface
+	eth0, ok := network["eth0"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+
+	// Get addresses array
+	addresses, ok := eth0["addresses"].([]interface{})
+	if !ok {
+		return ""
+	}
+
+	// Find the first inet (IPv4) address
+	for _, addr := range addresses {
+		addrMap, ok := addr.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		family, _ := addrMap["family"].(string)
+		if family == "inet" {
+			ip, _ := addrMap["address"].(string)
+			return ip
+		}
+	}
+
+	return ""
+}
+
 // outputJSON formats container and session data as JSON
 func outputJSON(containers []ContainerInfo, sessions []SessionInfo,
 	workspaces map[string]string, persistent map[string]bool,
@@ -231,6 +279,7 @@ func outputJSON(containers []ContainerInfo, sessions []SessionInfo,
 			"created_at": c.CreatedAt,
 			"image":      c.Image,
 			"persistent": persistent[c.Name],
+			"ipv4":       c.IPv4,
 		}
 		if ws, ok := workspaces[c.Name]; ok {
 			item["workspace"] = ws
@@ -277,6 +326,9 @@ func outputText(containers []ContainerInfo, sessions []SessionInfo,
 				fmt.Printf("  %s (ephemeral)\n", c.Name)
 			}
 			fmt.Printf("    Status: %s\n", c.Status)
+			if c.IPv4 != "" {
+				fmt.Printf("    IPv4: %s\n", c.IPv4)
+			}
 			fmt.Printf("    Created: %s\n", c.CreatedAt)
 			if c.Image != "" {
 				fmt.Printf("    Image: %s\n", c.Image)
