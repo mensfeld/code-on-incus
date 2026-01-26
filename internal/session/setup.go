@@ -62,10 +62,11 @@ type SetupOptions struct {
 	Persistent    bool // Keep container between sessions (don't delete on cleanup)
 	ResumeFromID  string
 	Slot          int
-	StoragePath   string
-	SessionsDir   string    // e.g., ~/.coi/sessions-claude
-	CLIConfigPath string    // e.g., ~/.claude (host CLI config to copy credentials from)
-	Tool          tool.Tool // AI coding tool being used
+	StoragePath   string       // DEPRECATED - kept for backward compat
+	MountConfig   *MountConfig // NEW - multi-mount support
+	SessionsDir   string       // e.g., ~/.coi/sessions-claude
+	CLIConfigPath string       // e.g., ~/.claude (host CLI config to copy credentials from)
+	Tool          tool.Tool    // AI coding tool being used
 	NetworkConfig *config.NetworkConfig
 	DisableShift  bool // Disable UID shifting (for Colima/Lima environments)
 	Logger        func(string)
@@ -217,14 +218,20 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 			return nil, fmt.Errorf("failed to add workspace device: %w", err)
 		}
 
-		// Add storage device if specified
-		if opts.StoragePath != "" {
-			if err := os.MkdirAll(opts.StoragePath, 0o755); err != nil {
-				return nil, fmt.Errorf("failed to create storage directory: %w", err)
-			}
-			opts.Logger(fmt.Sprintf("Adding storage mount: %s", opts.StoragePath))
-			if err := result.Manager.MountDisk("storage", opts.StoragePath, "/storage", useShift); err != nil {
-				return nil, fmt.Errorf("failed to add storage device: %w", err)
+		// Mount all configured directories
+		if opts.MountConfig != nil && len(opts.MountConfig.Mounts) > 0 {
+			for _, mount := range opts.MountConfig.Mounts {
+				// Create host directory if it doesn't exist
+				if err := os.MkdirAll(mount.HostPath, 0o755); err != nil {
+					return nil, fmt.Errorf("failed to create mount directory '%s': %w", mount.HostPath, err)
+				}
+
+				opts.Logger(fmt.Sprintf("Adding mount: %s -> %s", mount.HostPath, mount.ContainerPath))
+
+				// Apply shift setting (all mounts use same shift for now)
+				if err := result.Manager.MountDisk(mount.DeviceName, mount.HostPath, mount.ContainerPath, useShift); err != nil {
+					return nil, fmt.Errorf("failed to add mount '%s': %w", mount.DeviceName, err)
+				}
 			}
 		}
 
@@ -267,9 +274,9 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 		}
 	}
 
-	// 8. Workspace and storage are already mounted (added before container start in step 5)
+	// 8. Workspace and configured mounts are already mounted (added before container start in step 5)
 	if skipLaunch {
-		opts.Logger("Reusing existing workspace and storage mounts")
+		opts.Logger("Reusing existing workspace and mount configurations")
 	}
 
 	// 10. Setup CLI tool config (skip if resuming - config already restored)

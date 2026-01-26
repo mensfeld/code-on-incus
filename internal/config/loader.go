@@ -123,6 +123,25 @@ group = "incus-admin"
 code_uid = 1000
 code_user = "code"
 
+[mounts]
+# Default mounts applied to all sessions
+# These can be overridden by CLI flags
+
+# Example: Mount AWS credentials (read-only recommended)
+# [[mounts.default]]
+# host = "~/.aws"
+# container = "/home/user/.aws"
+
+# Example: Mount shared data directory
+# [[mounts.default]]
+# host = "~/shared-data"
+# container = "/data"
+
+# Example: Mount Docker socket (advanced users)
+# [[mounts.default]]
+# host = "/var/run/docker.sock"
+# container = "/var/run/docker.sock"
+
 # Example profile for Rust development with persistent container
 # [profiles.rust]
 # image = "coi-rust"

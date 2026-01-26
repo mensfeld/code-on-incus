@@ -12,6 +12,7 @@ type Config struct {
 	Incus    IncusConfig              `toml:"incus"`
 	Network  NetworkConfig            `toml:"network"`
 	Tool     ToolConfig               `toml:"tool"`
+	Mounts   MountsConfig             `toml:"mounts"`
 	Profiles map[string]ProfileConfig `toml:"profiles"`
 }
 
@@ -79,6 +80,17 @@ type ToolConfig struct {
 	Binary string `toml:"binary"` // Binary name to execute (if empty, uses tool name)
 }
 
+// MountEntry represents a single directory mount configuration
+type MountEntry struct {
+	Host      string `toml:"host"`      // Host path (supports ~ expansion)
+	Container string `toml:"container"` // Container path (must be absolute)
+}
+
+// MountsConfig contains mount-related configuration
+type MountsConfig struct {
+	Default []MountEntry `toml:"default"` // Default mounts for all sessions
+}
+
 // GetDefaultConfig returns the default configuration
 func GetDefaultConfig() *Config {
 	homeDir, err := os.UserHomeDir()
@@ -118,6 +130,9 @@ func GetDefaultConfig() *Config {
 		Tool: ToolConfig{
 			Name:   "claude",
 			Binary: "", // Empty means use tool's default binary name
+		},
+		Mounts: MountsConfig{
+			Default: []MountEntry{},
 		},
 		Profiles: make(map[string]ProfileConfig),
 	}
@@ -232,6 +247,11 @@ func (c *Config) Merge(other *Config) {
 	// For DisableShift, if the other config sets it to true, use it
 	if other.Incus.DisableShift {
 		c.Incus.DisableShift = true
+	}
+
+	// Merge mounts - append from other config
+	if len(other.Mounts.Default) > 0 {
+		c.Mounts.Default = append(c.Mounts.Default, other.Mounts.Default...)
 	}
 
 	// Merge profiles

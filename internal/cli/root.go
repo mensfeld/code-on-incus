@@ -20,7 +20,8 @@ var (
 	continueSession string // Alias for resume
 	profile         string
 	envVars         []string
-	storage         string
+	storage         string   // KEPT for backward compatibility
+	mountPairs      []string // NEW: --mount flag
 	networkMode     string
 
 	// Loaded config
@@ -94,7 +95,8 @@ func init() {
 	rootCmd.PersistentFlags().Lookup("continue").NoOptDefVal = "auto"
 	rootCmd.PersistentFlags().StringVar(&profile, "profile", "", "Use named profile")
 	rootCmd.PersistentFlags().StringSliceVarP(&envVars, "env", "e", []string{}, "Environment variables (KEY=VALUE)")
-	rootCmd.PersistentFlags().StringVar(&storage, "storage", "", "Mount persistent storage")
+	rootCmd.PersistentFlags().StringVar(&storage, "storage", "", "Mount persistent storage at /storage (backward compat, prefer --mount)")
+	rootCmd.PersistentFlags().StringArrayVar(&mountPairs, "mount", []string{}, "Mount directory (HOST:CONTAINER, repeatable)")
 	rootCmd.PersistentFlags().StringVar(&networkMode, "network", "", "Network mode: restricted (default), open")
 
 	// Add subcommands

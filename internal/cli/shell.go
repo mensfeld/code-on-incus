@@ -196,9 +196,18 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 		DisableShift:  cfg.Incus.DisableShift,
 	}
 
-	if storage != "" {
-		setupOpts.StoragePath = storage
+	// Parse and validate mount configuration
+	mountConfig, err := ParseMountConfig(cfg, mountPairs, storage)
+	if err != nil {
+		return fmt.Errorf("invalid mount configuration: %w", err)
 	}
+
+	// Validate no nested mounts
+	if err := session.ValidateMounts(mountConfig); err != nil {
+		return fmt.Errorf("mount validation failed: %w", err)
+	}
+
+	setupOpts.MountConfig = mountConfig
 
 	fmt.Fprintf(os.Stderr, "Setting up session %s...\n", sessionID)
 	result, err := session.Setup(setupOpts)

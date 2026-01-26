@@ -144,6 +144,33 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		if err := mgr.MountDisk("workspace", absWorkspace, "/workspace", useShift); err != nil {
 			return fmt.Errorf("failed to mount workspace: %w", err)
 		}
+
+		// Parse and validate mount configuration
+		mountConfig, err := ParseMountConfig(cfg, mountPairs, storage)
+		if err != nil {
+			return fmt.Errorf("invalid mount configuration: %w", err)
+		}
+
+		// Validate no nested mounts
+		if err := session.ValidateMounts(mountConfig); err != nil {
+			return fmt.Errorf("mount validation failed: %w", err)
+		}
+
+		// Mount all configured directories
+		if mountConfig != nil && len(mountConfig.Mounts) > 0 {
+			for _, mount := range mountConfig.Mounts {
+				// Create host directory if it doesn't exist
+				if err := os.MkdirAll(mount.HostPath, 0o755); err != nil {
+					return fmt.Errorf("failed to create mount directory '%s': %w", mount.HostPath, err)
+				}
+
+				fmt.Fprintf(os.Stderr, "Adding mount: %s -> %s\n", mount.HostPath, mount.ContainerPath)
+
+				if err := mgr.MountDisk(mount.DeviceName, mount.HostPath, mount.ContainerPath, useShift); err != nil {
+					return fmt.Errorf("failed to add mount '%s': %w", mount.DeviceName, err)
+				}
+			}
+		}
 	} else {
 		fmt.Fprintf(os.Stderr, "Reusing existing workspace mount...\n")
 	}
