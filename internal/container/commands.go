@@ -244,7 +244,16 @@ func LaunchContainerPersistent(imageAlias, containerName string) error {
 	return enableDockerSupport(containerName)
 }
 
-// enableDockerSupport configures the container to support Docker/nested containers
+// enableDockerSupport configures the container to support Docker/nested containers.
+//
+// This function sets three security flags required for Docker to work properly:
+// - security.nesting=true: Enables nested containerization
+// - security.syscalls.intercept.mknod=true: Safe device node creation
+// - security.syscalls.intercept.setxattr=true: Safe filesystem attribute handling
+//
+// Note: If an error occurs during configuration, the container may be left in a
+// partially configured state with some but not all flags set. Future troubleshooting
+// should verify all three flags are properly configured if Docker isn't working.
 func enableDockerSupport(containerName string) error {
 	// Enable container nesting for Docker support
 	if err := IncusExec("config", "set", containerName, "security.nesting=true"); err != nil {

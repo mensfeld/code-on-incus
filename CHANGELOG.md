@@ -37,7 +37,7 @@ This prevents the error: `Error: Failed to start device "workspace": Required id
 
 ### Testing
 
-- [Testing] Added Docker integration tests - Two test scenarios: (1) verify Docker nesting flags are automatically enabled on container launch, (2) verify Docker actually works inside containers without network namespace errors (tests/docker/ directory).
+- [Testing] Added Docker integration tests - Three test scenarios: (1) verify Docker nesting flags are automatically enabled on container launch, (2) verify Docker actually works inside containers without network namespace errors, (3) verify Docker fails with a clear error when required nesting flags are not enabled (regression test) (tests/docker/ directory).
 - [Testing] Added integration tests for `coi persist` command - Five test scenarios covering basic operation, bulk operations, state verification, and error handling (tests/persist/ directory).
 - [Testing] Added comprehensive terminal sanitization tests - Unit tests, integration tests with real tmux sessions, and CI end-to-end tests that verify exotic terminal types work correctly in containers.
 - [Testing] Added integration tests for IPv4 display in `coi list` - Three test scenarios covering running containers showing IPv4, stopped containers not showing IPv4, and JSON format including the ipv4 field (tests/list/ directory).

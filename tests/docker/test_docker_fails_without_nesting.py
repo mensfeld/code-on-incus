@@ -177,7 +177,29 @@ def test_docker_fails_without_nesting(coi_binary, cleanup_containers, workspace_
         timeout=30,
     )
 
+    # Wait for Docker daemon to be ready
     time.sleep(5)
+
+    # Verify Docker daemon is running
+    result = subprocess.run(
+        [
+            coi_binary,
+            "container",
+            "exec",
+            container_name,
+            "--",
+            "systemctl",
+            "is-active",
+            "docker",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, (
+        f"Docker daemon should be active. Output: {result.stdout}, stderr: {result.stderr}"
+    )
 
     # === Phase 5: Try to run Docker container (should FAIL) ===
 
