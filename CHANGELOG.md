@@ -8,6 +8,10 @@
 - [Feature] **Manual UID shift override** - Added `disable_shift` config option for manual control in edge cases: `[incus]` `disable_shift = true` in `~/.config/coi/config.toml`. The auto-detection works in most cases, but this option allows manual override if needed.
 - [Feature] Add `coi persist` command to convert ephemeral sessions to persistent - Allows converting running ephemeral containers to persistent mode, preventing automatic deletion when stopped. Supports `--all` flag to persist all containers and `--force` to skip confirmations. Use `coi list` to verify persistence mode.
 
+### Bug Fixes
+
+- [Bug Fix] **Exotic terminal type support** - Fixed tmux failing with "missing or unsuitable terminal" error when using modern terminals like Ghostty, WezTerm, Alacritty, or Kitty. These terminals set TERM to values (e.g., `xterm-ghostty`) that don't exist in container terminfo databases. Added automatic mapping to `xterm-256color` while preserving standard terminal types unchanged. Applies to both environment TERM and `-e TERM=...` flag. (#53)
+
 ### Technical Details
 
 Colima/Lima detection:
@@ -21,6 +25,7 @@ This prevents the error: `Error: Failed to start device "workspace": Required id
 ### Testing
 
 - [Testing] Added integration tests for `coi persist` command - Five test scenarios covering basic operation, bulk operations, state verification, and error handling (tests/persist/ directory).
+- [Testing] Added comprehensive terminal sanitization tests - Unit tests, integration tests with real tmux sessions, and CI end-to-end tests that verify exotic terminal types work correctly in containers.
 
 
 ## 0.5.2 (2026-01-19)
