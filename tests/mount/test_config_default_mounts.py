@@ -1,7 +1,8 @@
 """Test default mounts from config file."""
+
 import subprocess
 from pathlib import Path
-import tempfile
+
 
 def test_config_default_mounts(coi_binary, cleanup_containers, workspace_dir, tmp_path):
     """Test that config file default mounts are applied."""
@@ -30,14 +31,25 @@ container = "/mnt/data2"
 
     # Run - config file will be loaded automatically
     result = subprocess.run(
-        [coi_binary, "run", "--workspace", workspace_dir,
-         "--", "sh", "-c", "cat /mnt/data1/file1.txt && cat /mnt/data2/file2.txt"],
-        capture_output=True, text=True, timeout=120
+        [
+            coi_binary,
+            "run",
+            "--workspace",
+            workspace_dir,
+            "--",
+            "sh",
+            "-c",
+            "cat /mnt/data1/file1.txt && cat /mnt/data2/file2.txt",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
     )
 
     assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
     assert "content1" in result.stdout
     assert "content2" in result.stdout
+
 
 def test_cli_overrides_config_mount(coi_binary, cleanup_containers, workspace_dir, tmp_path):
     """Test that CLI --mount overrides config mount for same container path."""
@@ -59,12 +71,23 @@ container = "/data"
 
     # CLI also mounts to /data (should override)
     result = subprocess.run(
-        [coi_binary, "run", "--workspace", workspace_dir,
-         "--mount", f"{cli_mount}:/data",
-         "--", "cat", "/data/file.txt"],
-        capture_output=True, text=True, timeout=120
+        [
+            coi_binary,
+            "run",
+            "--workspace",
+            workspace_dir,
+            "--mount",
+            f"{cli_mount}:/data",
+            "--",
+            "cat",
+            "/data/file.txt",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
     )
 
     assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
     assert "from-cli" in result.stdout
     assert "from-config" not in result.stdout
+

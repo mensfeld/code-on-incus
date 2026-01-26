@@ -1,6 +1,8 @@
 """Test nested mount path detection."""
+
 import subprocess
 from pathlib import Path
+
 
 def test_nested_mounts_rejected(coi_binary, workspace_dir, tmp_path):
     """Test that nested paths fail validation."""
@@ -10,16 +12,28 @@ def test_nested_mounts_rejected(coi_binary, workspace_dir, tmp_path):
     dir2.mkdir()
 
     result = subprocess.run(
-        [coi_binary, "run", "--workspace", workspace_dir,
-         "--mount", f"{dir1}:/data",
-         "--mount", f"{dir2}:/data/nested",  # Nested!
-         "--", "echo", "test"],
-        capture_output=True, text=True, timeout=120
+        [
+            coi_binary,
+            "run",
+            "--workspace",
+            workspace_dir,
+            "--mount",
+            f"{dir1}:/data",
+            "--mount",
+            f"{dir2}:/data/nested",  # Nested!
+            "--",
+            "echo",
+            "test",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
     )
 
     assert result.returncode != 0
     combined = result.stdout + result.stderr
     assert "nested" in combined.lower() or "conflict" in combined.lower()
+
 
 def test_config_nested_mounts_rejected(coi_binary, workspace_dir, tmp_path):
     """Test nested paths in config file are rejected."""
@@ -42,11 +56,13 @@ container = "/app/subdir"
     config_file.write_text(config_content)
 
     result = subprocess.run(
-        [coi_binary, "run", "--workspace", workspace_dir,
-         "--", "echo", "test"],
-        capture_output=True, text=True, timeout=120
+        [coi_binary, "run", "--workspace", workspace_dir, "--", "echo", "test"],
+        capture_output=True,
+        text=True,
+        timeout=120,
     )
 
     assert result.returncode != 0
     combined = result.stdout + result.stderr
     assert "nested" in combined.lower() or "conflict" in combined.lower()
+

@@ -1,6 +1,8 @@
 """Test mixing config mounts, --storage, and --mount."""
+
 import subprocess
 from pathlib import Path
+
 
 def test_config_storage_and_mount(coi_binary, cleanup_containers, workspace_dir, tmp_path):
     """Test combining all three mount sources."""
@@ -25,14 +27,27 @@ container = "/config-data"
     config_file.write_text(config_content)
 
     result = subprocess.run(
-        [coi_binary, "run", "--workspace", workspace_dir,
-         "--storage", str(storage_dir),
-         "--mount", f"{cli_dir}:/cli-data",
-         "--", "sh", "-c", "cat /config-data/fc.txt && cat /storage/fs.txt && cat /cli-data/fm.txt"],
-        capture_output=True, text=True, timeout=120
+        [
+            coi_binary,
+            "run",
+            "--workspace",
+            workspace_dir,
+            "--storage",
+            str(storage_dir),
+            "--mount",
+            f"{cli_dir}:/cli-data",
+            "--",
+            "sh",
+            "-c",
+            "cat /config-data/fc.txt && cat /storage/fs.txt && cat /cli-data/fm.txt",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
     )
 
     assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
     assert "from-config" in result.stdout
     assert "from-storage" in result.stdout
     assert "from-cli" in result.stdout
+
