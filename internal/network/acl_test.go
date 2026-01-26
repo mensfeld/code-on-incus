@@ -9,17 +9,17 @@ import (
 
 func TestBuildACLRules_Restricted(t *testing.T) {
 	tests := []struct {
-		name                 string
-		blockPrivateNetworks bool
+		name                  string
+		blockPrivateNetworks  bool
 		blockMetadataEndpoint bool
-		wantRuleCount        int
-		wantContains         []string
+		wantRuleCount         int
+		wantContains          []string
 	}{
 		{
-			name:                 "block both private networks and metadata",
-			blockPrivateNetworks: true,
+			name:                  "block both private networks and metadata",
+			blockPrivateNetworks:  true,
 			blockMetadataEndpoint: true,
-			wantRuleCount:        5, // 1 allow + 3 RFC1918 + 1 metadata
+			wantRuleCount:         5, // 1 allow + 3 RFC1918 + 1 metadata
 			wantContains: []string{
 				"egress action=allow",
 				"egress action=reject destination=10.0.0.0/8",
@@ -29,30 +29,30 @@ func TestBuildACLRules_Restricted(t *testing.T) {
 			},
 		},
 		{
-			name:                 "block only private networks",
-			blockPrivateNetworks: true,
+			name:                  "block only private networks",
+			blockPrivateNetworks:  true,
 			blockMetadataEndpoint: false,
-			wantRuleCount:        4, // 1 allow + 3 RFC1918
+			wantRuleCount:         4, // 1 allow + 3 RFC1918
 			wantContains: []string{
 				"egress action=allow",
 				"egress action=reject destination=10.0.0.0/8",
 			},
 		},
 		{
-			name:                 "block only metadata",
-			blockPrivateNetworks: false,
+			name:                  "block only metadata",
+			blockPrivateNetworks:  false,
 			blockMetadataEndpoint: true,
-			wantRuleCount:        2, // 1 allow + 1 metadata
+			wantRuleCount:         2, // 1 allow + 1 metadata
 			wantContains: []string{
 				"egress action=allow",
 				"egress action=reject destination=169.254.0.0/16",
 			},
 		},
 		{
-			name:                 "block nothing",
-			blockPrivateNetworks: false,
+			name:                  "block nothing",
+			blockPrivateNetworks:  false,
 			blockMetadataEndpoint: false,
-			wantRuleCount:        1, // just allow
+			wantRuleCount:         1, // just allow
 			wantContains: []string{
 				"egress action=allow",
 			},
