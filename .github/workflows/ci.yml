@@ -279,13 +279,32 @@ jobs:
           echo "Checking if AppArmor is blocking bind mounts:"
           sudo dmesg | grep -i "apparmor.*denied" | tail -20 || echo "No recent AppArmor denials"
 
-      - name: Configure networking for Incus with OVN
-        if: matrix.network_type == 'ovn'
+      - name: Configure basic networking for Incus
         run: |
-          # Enable IP forwarding (required for container networking)
+          # Enable IP forwarding (required for ALL container networking)
           echo 1 | sudo tee /proc/sys/net/ipv4/ip_forward > /dev/null
           echo 1 | sudo tee /proc/sys/net/ipv6/conf/all/forwarding > /dev/null
 
+          # Get default interface for outbound traffic
+          DEFAULT_IFACE=$(ip route | grep default | awk '{print $5}' | head -1)
+
+          # Allow container traffic through firewall
+          if sudo iptables -nL DOCKER-USER 2>/dev/null; then
+            # Use DOCKER-USER chain if it exists
+            sudo iptables -I DOCKER-USER -i incusbr0 -j ACCEPT
+            sudo iptables -I DOCKER-USER -o incusbr0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+          else
+            # Fallback to FORWARD chain
+            sudo iptables -P FORWARD ACCEPT
+            sudo iptables -I FORWARD 1 -i incusbr0 -j ACCEPT
+            sudo iptables -I FORWARD 1 -o incusbr0 -j ACCEPT
+          fi
+
+          echo "Basic network configuration complete"
+
+      - name: Configure OVN-specific networking
+        if: matrix.network_type == 'ovn'
+        run: |
           # Get default interface for outbound traffic
           DEFAULT_IFACE=$(ip route | grep default | awk '{print $5}' | head -1)
 
@@ -296,7 +315,6 @@ jobs:
             sudo iptables -I DOCKER-USER -o genev_sys_6081 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
           else
             # Fallback to FORWARD chain if DOCKER-USER doesn't exist
-            sudo iptables -P FORWARD ACCEPT
             sudo iptables -I FORWARD 1 -i genev_sys_6081 -j ACCEPT
             sudo iptables -I FORWARD 1 -o genev_sys_6081 -j ACCEPT
           fi
@@ -304,7 +322,7 @@ jobs:
           # Add NAT/MASQUERADE rules for OVN subnet (10.215.220.0/24)
           sudo iptables -t nat -I POSTROUTING 1 -s 10.215.220.0/24 -o $DEFAULT_IFACE -j MASQUERADE
 
-          echo "Network configuration for OVN complete"
+          echo "OVN network configuration complete"
           sudo iptables -L -n -v | head -20
 
       - name: Pre-cache base Ubuntu image
