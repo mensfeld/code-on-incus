@@ -19,9 +19,9 @@ func TestBuildACLRules_Restricted(t *testing.T) {
 			name:                  "block both private networks and metadata",
 			blockPrivateNetworks:  true,
 			blockMetadataEndpoint: true,
-			wantRuleCount:         6, // 1 established + 3 RFC1918 + 1 metadata + 1 allow
+			wantRuleCount:         6, // 1 gateway allow + 3 RFC1918 + 1 metadata + 1 general allow
 			wantContains: []string{
-				"egress action=allow connection-state=established,related destination=10.128.178.1/32",
+				"egress action=allow destination=10.128.178.1/32",
 				"egress action=reject destination=10.0.0.0/8",
 				"egress action=reject destination=172.16.0.0/12",
 				"egress action=reject destination=192.168.0.0/16",
@@ -33,9 +33,9 @@ func TestBuildACLRules_Restricted(t *testing.T) {
 			name:                  "block only private networks",
 			blockPrivateNetworks:  true,
 			blockMetadataEndpoint: false,
-			wantRuleCount:         5, // 1 established + 3 RFC1918 + 1 allow
+			wantRuleCount:         5, // 1 gateway allow + 3 RFC1918 + 1 general allow
 			wantContains: []string{
-				"egress action=allow connection-state=established,related destination=10.128.178.1/32",
+				"egress action=allow destination=10.128.178.1/32",
 				"egress action=reject destination=10.0.0.0/8",
 				"egress action=allow",
 			},
@@ -44,9 +44,9 @@ func TestBuildACLRules_Restricted(t *testing.T) {
 			name:                  "block only metadata",
 			blockPrivateNetworks:  false,
 			blockMetadataEndpoint: true,
-			wantRuleCount:         3, // 1 established + 1 metadata + 1 allow
+			wantRuleCount:         3, // 1 gateway allow + 1 metadata + 1 general allow
 			wantContains: []string{
-				"egress action=allow connection-state=established,related destination=10.128.178.1/32",
+				"egress action=allow destination=10.128.178.1/32",
 				"egress action=reject destination=169.254.0.0/16",
 				"egress action=allow",
 			},
@@ -55,9 +55,9 @@ func TestBuildACLRules_Restricted(t *testing.T) {
 			name:                  "block nothing",
 			blockPrivateNetworks:  false,
 			blockMetadataEndpoint: false,
-			wantRuleCount:         2, // 1 established + 1 allow
+			wantRuleCount:         2, // 1 gateway allow + 1 general allow
 			wantContains: []string{
-				"egress action=allow connection-state=established,related destination=10.128.178.1/32",
+				"egress action=allow destination=10.128.178.1/32",
 				"egress action=allow",
 			},
 		},
@@ -121,7 +121,7 @@ func TestBuildAllowlistRules(t *testing.T) {
 
 	rules := buildAllowlistRules(cfg, domainIPs)
 
-	// Should have: 1 established + 3 allowed IPs (gateway excluded from regular allows) + 4 RFC1918/metadata blocks = 8 rules (no catch-all)
+	// Should have: 1 gateway allow + 3 allowed IPs (gateway excluded from regular allows) + 4 RFC1918/metadata blocks = 8 rules (no catch-all)
 	expectedRules := 8
 	if len(rules) != expectedRules {
 		t.Errorf("buildAllowlistRules() returned %d rules, want %d", len(rules), expectedRules)
@@ -196,7 +196,7 @@ func TestBuildAllowlistRules_EmptyDomains(t *testing.T) {
 	rules := buildAllowlistRules(cfg, domainIPs)
 
 	// Should still have the blocking rules even with no allowed domains
-	// 1 established + 4 RFC1918/metadata blocks (no catch-all)
+	// 1 gateway allow + 4 RFC1918/metadata blocks (no catch-all)
 	expectedRules := 5
 	if len(rules) != expectedRules {
 		t.Errorf("buildAllowlistRules() with empty domains returned %d rules, want %d", len(rules), expectedRules)
@@ -215,22 +215,24 @@ func TestBuildACLRules_LocalNetworkAccess(t *testing.T) {
 			name:                    "allow_local_network_access disabled (default)",
 			allowLocalNetworkAccess: false,
 			wantContains: []string{
-				"egress action=allow connection-state=established,related destination=10.128.178.1/32",
+				"egress action=allow destination=10.128.178.1/32",
+				"egress action=reject destination=10.0.0.0/8",
 			},
 			wantNotContains: []string{
-				"egress action=allow connection-state=established,related destination=10.0.0.0/8",
+				"egress action=allow destination=10.0.0.0/8",
 			},
 		},
 		{
 			name:                    "allow_local_network_access enabled",
 			allowLocalNetworkAccess: true,
 			wantContains: []string{
-				"egress action=allow connection-state=established,related destination=10.0.0.0/8",
-				"egress action=allow connection-state=established,related destination=172.16.0.0/12",
-				"egress action=allow connection-state=established,related destination=192.168.0.0/16",
+				"egress action=allow destination=10.0.0.0/8",
+				"egress action=allow destination=172.16.0.0/12",
+				"egress action=allow destination=192.168.0.0/16",
 			},
 			wantNotContains: []string{
-				"egress action=allow connection-state=established,related destination=10.128.178.1/32",
+				"egress action=reject destination=10.0.0.0/8",
+				"egress action=allow destination=10.128.178.1/32",
 			},
 		},
 	}

@@ -224,23 +224,27 @@ func buildACLRules(cfg *config.NetworkConfig, gatewayIP string) []string {
 		// IMPORTANT: OVN evaluates rules in order they're added
 		// We must add ALLOW rules for established connections FIRST, then REJECT, then general ALLOW
 
-		// Allow established/related connections (FIRST - highest priority)
+		// Allow traffic to host/local network (FIRST - highest priority)
 		// This allows response traffic from container back to host/local network
+		// Note: Incus OVN ACLs don't support connection tracking, so we allow all traffic to these destinations
 		if cfg.AllowLocalNetworkAccess {
-			// Allow from entire local network (useful for tmux across machines)
-			rules = append(rules, "egress action=allow connection-state=established,related destination=10.0.0.0/8")
-			rules = append(rules, "egress action=allow connection-state=established,related destination=172.16.0.0/12")
-			rules = append(rules, "egress action=allow connection-state=established,related destination=192.168.0.0/16")
-		} else if gatewayIP != "" {
+			// Allow to entire local network (useful for tmux across machines)
+			// When enabled, RFC1918 blocking is disabled to allow full local network access
+			rules = append(rules, "egress action=allow destination=10.0.0.0/8")
+			rules = append(rules, "egress action=allow destination=172.16.0.0/12")
+			rules = append(rules, "egress action=allow destination=192.168.0.0/16")
+		} else {
 			// Default: only allow to gateway IP (host only)
-			rules = append(rules, fmt.Sprintf("egress action=allow connection-state=established,related destination=%s/32", gatewayIP))
-		}
+			if gatewayIP != "" {
+				rules = append(rules, fmt.Sprintf("egress action=allow destination=%s/32", gatewayIP))
+			}
 
-		// Block private ranges (RFC1918)
-		if cfg.BlockPrivateNetworks {
-			rules = append(rules, "egress action=reject destination=10.0.0.0/8")
-			rules = append(rules, "egress action=reject destination=172.16.0.0/12")
-			rules = append(rules, "egress action=reject destination=192.168.0.0/16")
+			// Block rest of private ranges (RFC1918) if configured
+			if cfg.BlockPrivateNetworks {
+				rules = append(rules, "egress action=reject destination=10.0.0.0/8")
+				rules = append(rules, "egress action=reject destination=172.16.0.0/12")
+				rules = append(rules, "egress action=reject destination=192.168.0.0/16")
+			}
 		}
 
 		// Block cloud metadata endpoints
@@ -280,16 +284,18 @@ func buildAllowlistRules(cfg *config.NetworkConfig, domainIPs map[string][]strin
 	// IMPORTANT: Rules are evaluated in order they're added in OVN
 	// We must add ALLOW rules BEFORE REJECT rules
 
-	// Step 0: Allow established/related connections (FIRST - highest priority)
+	// Step 0: Allow traffic to host/local network (FIRST - highest priority)
 	// This allows response traffic from container back to host/local network
+	// Note: Incus OVN ACLs don't support connection tracking, so we allow all traffic to these destinations
 	if cfg.AllowLocalNetworkAccess {
-		// Allow from entire local network (useful for tmux across machines)
-		rules = append(rules, "egress action=allow connection-state=established,related destination=10.0.0.0/8")
-		rules = append(rules, "egress action=allow connection-state=established,related destination=172.16.0.0/12")
-		rules = append(rules, "egress action=allow connection-state=established,related destination=192.168.0.0/16")
+		// Allow to entire local network (useful for tmux across machines)
+		// When enabled, RFC1918 blocking is disabled to allow full local network access
+		rules = append(rules, "egress action=allow destination=10.0.0.0/8")
+		rules = append(rules, "egress action=allow destination=172.16.0.0/12")
+		rules = append(rules, "egress action=allow destination=192.168.0.0/16")
 	} else if gatewayIP != "" {
 		// Default: only allow to gateway IP (host only)
-		rules = append(rules, fmt.Sprintf("egress action=allow connection-state=established,related destination=%s/32", gatewayIP))
+		rules = append(rules, fmt.Sprintf("egress action=allow destination=%s/32", gatewayIP))
 	}
 
 	// Step 1: Allow specific IPs from resolved domains (added first, highest priority)
@@ -305,11 +311,14 @@ func buildAllowlistRules(cfg *config.NetworkConfig, domainIPs map[string][]strin
 		rules = append(rules, fmt.Sprintf("egress action=allow destination=%s/32", ip))
 	}
 
-	// Step 2: Block RFC1918 and metadata (but specific IPs were already allowed above)
-	rules = append(rules, "egress action=reject destination=10.0.0.0/8")
-	rules = append(rules, "egress action=reject destination=172.16.0.0/12")
-	rules = append(rules, "egress action=reject destination=192.168.0.0/16")
-	rules = append(rules, "egress action=reject destination=169.254.0.0/16")
+	// Step 2: Block RFC1918 and metadata (but specific IPs/ranges were already allowed above)
+	// Skip if allow_local_network_access is enabled (already allowed all local networks)
+	if !cfg.AllowLocalNetworkAccess {
+		rules = append(rules, "egress action=reject destination=10.0.0.0/8")
+		rules = append(rules, "egress action=reject destination=172.16.0.0/12")
+		rules = append(rules, "egress action=reject destination=192.168.0.0/16")
+		rules = append(rules, "egress action=reject destination=169.254.0.0/16")
+	}
 
 	// Note: We don't add a catch-all reject (0.0.0.0/0) because OVN's ACL system
 	// applies implicit default-deny when ACLs are attached to a NIC. Adding an
