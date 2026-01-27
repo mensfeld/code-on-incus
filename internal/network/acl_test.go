@@ -116,8 +116,8 @@ func TestBuildAllowlistRules(t *testing.T) {
 
 	rules := buildAllowlistRules(cfg, domainIPs)
 
-	// Should have: 3 allowed IPs + 4 RFC1918/metadata blocks + 1 catch-all = 8 rules
-	expectedRules := 8
+	// Should have: 3 allowed IPs + 4 RFC1918/metadata blocks = 7 rules (no catch-all)
+	expectedRules := 7
 	if len(rules) != expectedRules {
 		t.Errorf("buildAllowlistRules() returned %d rules, want %d", len(rules), expectedRules)
 	}
@@ -189,8 +189,8 @@ func TestBuildAllowlistRules_EmptyDomains(t *testing.T) {
 	rules := buildAllowlistRules(cfg, domainIPs)
 
 	// Should still have the blocking rules even with no allowed domains
-	// 4 RFC1918/metadata blocks + 1 catch-all = 5 rules
-	expectedRules := 5
+	// 4 RFC1918/metadata blocks (no catch-all)
+	expectedRules := 4
 	if len(rules) != expectedRules {
 		t.Errorf("buildAllowlistRules() with empty domains returned %d rules, want %d", len(rules), expectedRules)
 	}
@@ -328,10 +328,10 @@ func TestBuildAllowlistRules_IPDeduplication(t *testing.T) {
 	}
 }
 
-// TestBuildAllowlistRules_HasCatchAllReject verifies that allowlist mode blocks all non-allowed traffic
-// The catch-all reject is required for security (only allowed IPs should be reachable)
-// It's safe because the gateway IP is explicitly allowed before this rule
-func TestBuildAllowlistRules_HasCatchAllReject(t *testing.T) {
+// TestBuildAllowlistRules_NoCatchAllReject verifies we don't have an explicit catch-all reject
+// OVN applies implicit default-deny when ACLs are attached to a NIC, so we don't need
+// an explicit 0.0.0.0/0 reject rule (which would interfere with OVN routing)
+func TestBuildAllowlistRules_NoCatchAllReject(t *testing.T) {
 	cfg := &config.NetworkConfig{
 		Mode: config.NetworkModeAllowlist,
 	}
@@ -342,24 +342,11 @@ func TestBuildAllowlistRules_HasCatchAllReject(t *testing.T) {
 
 	rules := buildAllowlistRules(cfg, domainIPs)
 
-	// Should have a catch-all reject rule as the last rule
-	hasCatchAll := false
+	// Should NOT have a catch-all reject rule
 	for _, rule := range rules {
 		if rule == "egress action=reject destination=0.0.0.0/0" {
-			hasCatchAll = true
-			break
+			t.Error("Found catch-all reject rule which interferes with OVN routing")
+			t.Logf("Rules: %v", rules)
 		}
-	}
-
-	if !hasCatchAll {
-		t.Error("Missing catch-all reject rule - allowlist mode must block all non-allowed traffic")
-		t.Logf("Rules: %v", rules)
-	}
-
-	// Verify it's the last rule (after all allows and RFC1918 blocks)
-	lastRule := rules[len(rules)-1]
-	if lastRule != "egress action=reject destination=0.0.0.0/0" {
-		t.Errorf("Catch-all reject should be the last rule, got: %s", lastRule)
-		t.Logf("Rules: %v", rules)
 	}
 }

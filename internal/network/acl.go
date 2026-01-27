@@ -270,9 +270,9 @@ func buildAllowlistRules(cfg *config.NetworkConfig, domainIPs map[string][]strin
 	rules = append(rules, "egress action=reject destination=192.168.0.0/16")
 	rules = append(rules, "egress action=reject destination=169.254.0.0/16")
 
-	// Step 3: Catch-all reject for anything not explicitly allowed
-	// This is safe because the gateway IP is explicitly allowed in Step 1
-	rules = append(rules, "egress action=reject destination=0.0.0.0/0")
+	// Note: We don't add a catch-all reject (0.0.0.0/0) because OVN's ACL system
+	// applies implicit default-deny when ACLs are attached to a NIC. Adding an
+	// explicit 0.0.0.0/0 reject interferes with OVN's internal routing.
 
 	return rules
 }
