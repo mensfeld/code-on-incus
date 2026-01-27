@@ -429,13 +429,10 @@ jobs:
       - name: Run integration tests with coverage
         run: |
           # Run all integration tests with coverage reporting
-          # Matrix runs tests in both OVN and bridge environments:
-          # - OVN: Runs all tests including network isolation (restricted/allowlist modes)
-          # - Bridge: Runs tests that work without OVN + error handling tests
-          # Tests use CI_NETWORK_TYPE env var to skip incompatible tests
-          # --durations=0 shows timing for all tests to help identify slow tests
-          # --cov-report=term-missing shows which lines aren't covered
-          python -m pytest tests/ -v --tb=short --durations=0 --cov=tests --cov-report=term-missing
+          # TEMPORARY: Only run failing tests for fast iteration
+          # Full test suite: tests/
+          # Failing tests only for debugging:
+          python -m pytest tests/network/test_allowlist.py::test_restricted_allows_host_to_access_container_services tests/network/test_allowlist.py::test_allowlist_allows_host_to_access_container_services -v --tb=short --durations=0 --cov=tests --cov-report=term-missing
         env:
           COI_BINARY: ./coi
           CI_NETWORK_TYPE: ${{ matrix.network_type }}
