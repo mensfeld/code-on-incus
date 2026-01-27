@@ -309,26 +309,6 @@ jobs:
           DEFAULT_IFACE=$(ip route | grep default | awk '{print $5}' | head -1)
 
           # Allow traffic to/from OVN subnet through firewall
-          # Note: OVN's geneve interface doesn't exist until containers start,
-          # so we use subnet-based rules in the FORWARD chain
-
-          # Configure OVN to allow host traffic
-          # OVN networks are isolated L3 networks. We need to configure them to allow
-          # traffic from the bridge network (where the CI host resides).
-
-          echo "Configuring OVN to allow traffic from bridge network..."
-
-          # Option 1: Try adding a default ALLOW rule to the OVN network
-          # This allows all ingress traffic to the OVN network
-          incus network acl create ovn-allow-all 2>/dev/null || true
-          incus network acl rule add ovn-allow-all ingress action=allow 2>/dev/null || true
-          incus network acl rule add ovn-allow-all egress action=allow 2>/dev/null || true
-          incus network set ovn-net security.acls=ovn-allow-all 2>/dev/null || true
-
-          echo "Temporarily setting FORWARD policy to ACCEPT for debugging..."
-          sudo iptables -P FORWARD ACCEPT
-
-          echo "Adding OVN subnet rules to FORWARD chain..."
           # Allow traffic destined for OVN subnet (host-to-container)
           sudo iptables -I FORWARD 1 -d 10.215.220.0/24 -j ACCEPT
           # Allow return traffic from OVN subnet (container-to-host responses)
@@ -343,12 +323,6 @@ jobs:
           sudo ip route add 10.215.220.0/24 via 10.47.62.100 dev incusbr0 || true
 
           echo "OVN network configuration complete"
-          echo "OVN ACLs:"
-          incus network acl show ovn-allow-all 2>/dev/null || echo "No ACL configured"
-          echo "OVN network config:"
-          incus network show ovn-net
-          echo "Routing table:"
-          sudo ip route show
 
       - name: Pre-cache base Ubuntu image
         run: |
@@ -372,49 +346,6 @@ jobs:
           mode = "open"
           EOF
           echo "Created COI config with network.mode = open (tests can override for isolation testing)"
-
-      - name: Debug OVN connectivity (OVN only)
-        if: matrix.network_type == 'ovn'
-        run: |
-          echo "=== Testing OVN host-to-container connectivity ==="
-
-          # Create a simple test container
-          echo "Creating test container..."
-          incus launch images:ubuntu/22.04 ovn-test -n ovn-net
-          sleep 5
-
-          # Get container IP
-          CONTAINER_IP=$(incus list ovn-test --format json | jq -r '.[0].state.network.eth0.addresses[0].address')
-          echo "Container IP: $CONTAINER_IP"
-
-          # Test ping from host to container
-          echo "Testing ping from host to container..."
-          ping -c 3 $CONTAINER_IP || echo "PING FAILED"
-
-          # Start HTTP server in container
-          echo "Starting HTTP server in container..."
-          incus exec ovn-test -- bash -c "nohup python3 -m http.server 8000 > /tmp/http.log 2>&1 &"
-          sleep 2
-
-          # Check if server is running
-          echo "Checking if HTTP server is running in container..."
-          incus exec ovn-test -- netstat -tlnp | grep 8000 || echo "NO SERVER LISTENING"
-
-          # Try to access from host
-          echo "Testing HTTP access from host..."
-          curl -v -m 5 http://$CONTAINER_IP:8000/ || echo "CURL FAILED"
-
-          # Check routing
-          echo "Host routing table:"
-          ip route show
-
-          # Check if we can reach the gateway
-          echo "Testing ping to OVN gateway (10.47.62.100)..."
-          ping -c 3 10.47.62.100 || echo "GATEWAY PING FAILED"
-
-          # Cleanup
-          incus delete -f ovn-test
-          echo "=== End OVN connectivity test ==="
 
       - name: Test bind mount functionality
         run: |
@@ -488,10 +419,7 @@ jobs:
       - name: Run integration tests with coverage
         run: |
           # Run all integration tests with coverage reporting
-          # TEMPORARY: Only run failing tests for fast iteration
-          # Full test suite: tests/
-          # Failing tests only for debugging:
-          python -m pytest tests/network/test_allowlist.py::test_restricted_allows_host_to_access_container_services tests/network/test_allowlist.py::test_allowlist_allows_host_to_access_container_services -v --tb=short --durations=0 --cov=tests --cov-report=term-missing
+          python -m pytest tests/ -v --tb=short --durations=0 --cov=tests --cov-report=term-missing
         env:
           COI_BINARY: ./coi
           CI_NETWORK_TYPE: ${{ matrix.network_type }}
