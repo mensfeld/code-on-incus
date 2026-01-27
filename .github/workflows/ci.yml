@@ -312,6 +312,19 @@ jobs:
           # Note: OVN's geneve interface doesn't exist until containers start,
           # so we use subnet-based rules in the FORWARD chain
 
+          # Configure OVN to allow host traffic
+          # OVN networks are isolated L3 networks. We need to configure them to allow
+          # traffic from the bridge network (where the CI host resides).
+
+          echo "Configuring OVN to allow traffic from bridge network..."
+
+          # Option 1: Try adding a default ALLOW rule to the OVN network
+          # This allows all ingress traffic to the OVN network
+          incus network acl create ovn-allow-all 2>/dev/null || true
+          incus network acl rule add ovn-allow-all ingress action=allow 2>/dev/null || true
+          incus network acl rule add ovn-allow-all egress action=allow 2>/dev/null || true
+          incus network set ovn-net security.acls=ovn-allow-all 2>/dev/null || true
+
           echo "Temporarily setting FORWARD policy to ACCEPT for debugging..."
           sudo iptables -P FORWARD ACCEPT
 
@@ -329,10 +342,10 @@ jobs:
           sudo ip route add 10.215.220.0/24 via 10.47.62.1 dev incusbr0 || true
 
           echo "OVN network configuration complete"
-          echo "FORWARD chain rules:"
-          sudo iptables -L FORWARD -n -v | head -15
-          echo "NAT POSTROUTING rules:"
-          sudo iptables -t nat -L POSTROUTING -n -v | head -10
+          echo "OVN ACLs:"
+          incus network acl show ovn-allow-all 2>/dev/null || echo "No ACL configured"
+          echo "OVN network config:"
+          incus network show ovn-net
           echo "Routing table:"
           sudo ip route show
 
