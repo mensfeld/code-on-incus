@@ -312,6 +312,9 @@ jobs:
           # Note: OVN's geneve interface doesn't exist until containers start,
           # so we use subnet-based rules in the FORWARD chain
 
+          echo "Temporarily setting FORWARD policy to ACCEPT for debugging..."
+          sudo iptables -P FORWARD ACCEPT
+
           echo "Adding OVN subnet rules to FORWARD chain..."
           # Allow traffic destined for OVN subnet (host-to-container)
           sudo iptables -I FORWARD 1 -d 10.215.220.0/24 -j ACCEPT
