@@ -154,6 +154,7 @@ jobs:
           - config:
               ipv4.address: 10.47.62.1/24
               ipv4.nat: "true"
+              ipv4.ovn.ranges: 10.47.62.100-10.47.62.200
               ipv6.address: none
             name: incusbr0
             type: bridge
