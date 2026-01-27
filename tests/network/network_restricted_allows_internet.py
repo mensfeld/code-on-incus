@@ -9,11 +9,8 @@ Tests that:
 Note: This test requires OVN networking (now configured in CI).
 """
 
-import os
 import subprocess
 import time
-
-
 
 
 def test_restricted_allows_internet(coi_binary, workspace_dir, cleanup_containers):
