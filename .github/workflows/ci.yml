@@ -322,8 +322,13 @@ jobs:
           # Add NAT/MASQUERADE rules for OVN subnet (10.215.220.0/24)
           sudo iptables -t nat -I POSTROUTING 1 -s 10.215.220.0/24 -o $DEFAULT_IFACE -j MASQUERADE
 
+          # Add route so host can reach OVN network (10.215.220.0/24) via incusbr0 gateway
+          # This allows tests to curl container services from the host
+          sudo ip route add 10.215.220.0/24 via 10.47.62.1 dev incusbr0 || true
+
           echo "OVN network configuration complete"
           sudo iptables -L -n -v | head -20
+          sudo ip route show
 
       - name: Pre-cache base Ubuntu image
         run: |
