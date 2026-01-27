@@ -725,11 +725,39 @@ refresh_interval_minutes = 30  # IP refresh interval (0 to disable)
 **Important for allowlist mode:**
 - **Gateway IP is auto-detected** - COI automatically detects and allows your OVN network gateway IP (e.g., `10.128.178.1`). You don't need to add it manually. Containers must reach their gateway to route traffic.
 - **Public DNS servers required** - `8.8.8.8` and `1.1.1.1` must be in the allowlist for DNS resolution to work. The OVN network is configured to use these public DNS servers directly.
-- **ACL rule ordering** - OVN network ACLs are evaluated in the order they're added. COI adds ALLOW rules first (for gateway, allowed domains/IPs), then REJECT rules (for RFC1918 ranges), and finally a catch-all REJECT (for everything else). This ensures proper filtering.
+- **ACL rule ordering** - OVN network ACLs are evaluated in the order they're added. COI adds ALLOW rules first (for gateway, allowed domains/IPs), then REJECT rules (for RFC1918 ranges). OVN applies implicit default-deny for any traffic not explicitly allowed.
 - Supports both domain names (`github.com`) and raw IPv4 addresses (`8.8.8.8`)
 - Subdomains must be listed explicitly (`github.com` ≠ `api.github.com`)
 - Domains behind CDNs may have many IPs that change frequently
 - DNS failures use cached IPs from previous successful resolution
+
+### Host Access to Container Services
+
+**Accessing services from the host** (e.g., Puma web server, HTTP servers):
+
+By default, COI allows the **host machine** to access services running in containers. This works by adding an allow rule for the gateway IP (which represents the host) **before** the RFC1918 block rules. Since OVN evaluates rules in order, the gateway IP is allowed while other private IPs are still blocked.
+
+For example, if a web server runs on port 3000 in the container:
+```bash
+# Inside container: Puma/Rails server listening on 0.0.0.0:3000
+# From host: Access via container IP
+curl http://<container-ip>:3000
+```
+
+**Allowing access from entire local network:**
+
+For development environments where you want machines on your local network to access container services (e.g., accessing containers via tmux from multiple machines), add this to your config:
+
+```toml
+[network]
+allow_local_network_access = true  # Allow all RFC1918, not just gateway
+```
+
+**⚠️ Security Note:** When `allow_local_network_access = true`, ALL RFC1918 private network traffic is allowed (no RFC1918 blocking). Use this only in trusted development environments where you need cross-machine access.
+
+**Default behavior:** Only the host (gateway IP) can access container services. Other machines on your local network cannot, even if they're on the same subnet.
+
+**Connection tracking limitation:** Incus OVN ACLs don't support stateful connection tracking (like iptables `state ESTABLISHED,RELATED`). To allow host access, all traffic to the gateway IP is permitted, not just established connections. This is an acceptable trade-off since the gateway represents the host and you want to allow host access anyway.
 
 ### OVN Network Setup
 
