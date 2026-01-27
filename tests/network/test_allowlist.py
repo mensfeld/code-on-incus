@@ -438,3 +438,208 @@ refresh_interval_minutes = 30
 
     finally:
         os.unlink(config_file)
+
+
+def test_allowlist_allows_host_to_access_container_services(
+    coi_binary, workspace_dir, cleanup_containers
+):
+    """
+    Test that host can access services running in container (established connections).
+
+    When a service like Puma or HTTP server runs in the container, the host should
+    be able to access it because established/related connections back to the host
+    are allowed via connection tracking.
+    """
+    # Create temporary config with allowlist
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as f:
+        f.write(
+            """
+[network]
+mode = "allowlist"
+allowed_domains = [
+    "8.8.8.8",
+    "1.1.1.1",
+]
+refresh_interval_minutes = 30
+"""
+        )
+        config_file = f.name
+
+    try:
+        # Start container in background
+        env = os.environ.copy()
+        env["COI_CONFIG"] = config_file
+
+        result = subprocess.run(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                workspace_dir,
+                "--network=allowlist",
+                "--background",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=90,
+            env=env,
+        )
+
+        assert result.returncode == 0, f"Failed to start container: {result.stderr}"
+
+        # Extract container name (check both stdout and stderr)
+        container_name = None
+        output = result.stdout + result.stderr
+        for line in output.split("\n"):
+            if "Container: " in line:
+                container_name = line.split("Container: ")[1].strip()
+                break
+
+        assert container_name, "Could not find container name"
+
+        # Start a simple HTTP server in the container on port 8000
+        subprocess.run(
+            [
+                coi_binary,
+                "container",
+                "exec",
+                container_name,
+                "--",
+                "bash",
+                "-c",
+                "nohup python3 -m http.server 8000 > /tmp/http-server.log 2>&1 &",
+            ],
+            capture_output=True,
+            timeout=10,
+        )
+
+        # Give server time to start
+        import time
+
+        time.sleep(2)
+
+        # Get container's IP address
+        result = subprocess.run(
+            [
+                coi_binary,
+                "container",
+                "exec",
+                container_name,
+                "--",
+                "hostname",
+                "-I",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+
+        assert result.returncode == 0, f"Failed to get container IP: {result.stderr}"
+        container_ip = result.stdout.strip().split()[0]  # First IP
+
+        # Test: Host should be able to access the HTTP server
+        # This verifies established connection tracking works
+        result = subprocess.run(
+            ["curl", "-I", "-m", "5", f"http://{container_ip}:8000"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+
+        assert result.returncode == 0, (
+            f"Host should be able to access container service: {result.stderr}"
+        )
+        assert "HTTP" in result.stdout, f"Expected HTTP response from container: {result.stdout}"
+
+    finally:
+        os.unlink(config_file)
+
+
+def test_restricted_allows_host_to_access_container_services(
+    coi_binary, workspace_dir, cleanup_containers
+):
+    """
+    Test that host can access services in restricted mode too.
+
+    Verifies that the established connection rule works in both allowlist
+    and restricted network modes.
+    """
+    # Start container in background with restricted mode
+    result = subprocess.run(
+        [
+            coi_binary,
+            "shell",
+            "--workspace",
+            workspace_dir,
+            "--network=restricted",
+            "--background",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=90,
+    )
+
+    assert result.returncode == 0, f"Failed to start container: {result.stderr}"
+
+    # Extract container name (check both stdout and stderr)
+    container_name = None
+    output = result.stdout + result.stderr
+    for line in output.split("\n"):
+        if "Container: " in line:
+            container_name = line.split("Container: ")[1].strip()
+            break
+
+    assert container_name, "Could not find container name"
+
+    # Start a simple HTTP server in the container on port 8000
+    subprocess.run(
+        [
+            coi_binary,
+            "container",
+            "exec",
+            container_name,
+            "--",
+            "bash",
+            "-c",
+            "nohup python3 -m http.server 8000 > /tmp/http-server.log 2>&1 &",
+        ],
+        capture_output=True,
+        timeout=10,
+    )
+
+    # Give server time to start
+    import time
+
+    time.sleep(2)
+
+    # Get container's IP address
+    result = subprocess.run(
+        [
+            coi_binary,
+            "container",
+            "exec",
+            container_name,
+            "--",
+            "hostname",
+            "-I",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+    assert result.returncode == 0, f"Failed to get container IP: {result.stderr}"
+    container_ip = result.stdout.strip().split()[0]  # First IP
+
+    # Test: Host should be able to access the HTTP server
+    result = subprocess.run(
+        ["curl", "-I", "-m", "5", f"http://{container_ip}:8000"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+    assert result.returncode == 0, (
+        f"Host should be able to access container service: {result.stderr}"
+    )
+    assert "HTTP" in result.stdout, f"Expected HTTP response from container: {result.stdout}"
