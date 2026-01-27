@@ -19,8 +19,9 @@ func TestBuildACLRules_Restricted(t *testing.T) {
 			name:                  "block both private networks and metadata",
 			blockPrivateNetworks:  true,
 			blockMetadataEndpoint: true,
-			wantRuleCount:         5, // 3 RFC1918 + 1 metadata + 1 allow
+			wantRuleCount:         6, // 1 established + 3 RFC1918 + 1 metadata + 1 allow
 			wantContains: []string{
+				"egress action=allow connection-state=established,related destination=10.128.178.1/32",
 				"egress action=reject destination=10.0.0.0/8",
 				"egress action=reject destination=172.16.0.0/12",
 				"egress action=reject destination=192.168.0.0/16",
@@ -32,8 +33,9 @@ func TestBuildACLRules_Restricted(t *testing.T) {
 			name:                  "block only private networks",
 			blockPrivateNetworks:  true,
 			blockMetadataEndpoint: false,
-			wantRuleCount:         4, // 3 RFC1918 + 1 allow
+			wantRuleCount:         5, // 1 established + 3 RFC1918 + 1 allow
 			wantContains: []string{
+				"egress action=allow connection-state=established,related destination=10.128.178.1/32",
 				"egress action=reject destination=10.0.0.0/8",
 				"egress action=allow",
 			},
@@ -42,8 +44,9 @@ func TestBuildACLRules_Restricted(t *testing.T) {
 			name:                  "block only metadata",
 			blockPrivateNetworks:  false,
 			blockMetadataEndpoint: true,
-			wantRuleCount:         2, // 1 metadata + 1 allow
+			wantRuleCount:         3, // 1 established + 1 metadata + 1 allow
 			wantContains: []string{
+				"egress action=allow connection-state=established,related destination=10.128.178.1/32",
 				"egress action=reject destination=169.254.0.0/16",
 				"egress action=allow",
 			},
@@ -52,8 +55,9 @@ func TestBuildACLRules_Restricted(t *testing.T) {
 			name:                  "block nothing",
 			blockPrivateNetworks:  false,
 			blockMetadataEndpoint: false,
-			wantRuleCount:         1, // just allow
+			wantRuleCount:         2, // 1 established + 1 allow
 			wantContains: []string{
+				"egress action=allow connection-state=established,related destination=10.128.178.1/32",
 				"egress action=allow",
 			},
 		},
@@ -67,7 +71,7 @@ func TestBuildACLRules_Restricted(t *testing.T) {
 				BlockMetadataEndpoint: tt.blockMetadataEndpoint,
 			}
 
-			rules := buildACLRules(cfg)
+			rules := buildACLRules(cfg, "10.128.178.1") // Test gateway IP
 
 			if len(rules) != tt.wantRuleCount {
 				t.Errorf("buildACLRules() returned %d rules, want %d", len(rules), tt.wantRuleCount)
@@ -96,7 +100,7 @@ func TestBuildACLRules_OpenMode(t *testing.T) {
 		BlockMetadataEndpoint: true,
 	}
 
-	rules := buildACLRules(cfg)
+	rules := buildACLRules(cfg, "10.128.178.1") // Test gateway IP
 
 	// Open mode should return no rules regardless of block settings
 	if len(rules) != 0 {
@@ -110,14 +114,15 @@ func TestBuildAllowlistRules(t *testing.T) {
 	}
 
 	domainIPs := map[string][]string{
-		"api.example.com": {"1.2.3.4", "5.6.7.8"},
-		"cdn.example.com": {"10.20.30.40"},
+		"api.example.com":       {"1.2.3.4", "5.6.7.8"},
+		"cdn.example.com":       {"10.20.30.40"},
+		"__internal_gateway__": {"10.128.178.1"}, // Add gateway for established connection rule
 	}
 
 	rules := buildAllowlistRules(cfg, domainIPs)
 
-	// Should have: 3 allowed IPs + 4 RFC1918/metadata blocks = 7 rules (no catch-all)
-	expectedRules := 7
+	// Should have: 1 established + 3 allowed IPs (gateway excluded from regular allows) + 4 RFC1918/metadata blocks = 8 rules (no catch-all)
+	expectedRules := 8
 	if len(rules) != expectedRules {
 		t.Errorf("buildAllowlistRules() returned %d rules, want %d", len(rules), expectedRules)
 	}
@@ -184,13 +189,15 @@ func TestBuildAllowlistRules_EmptyDomains(t *testing.T) {
 		Mode: config.NetworkModeAllowlist,
 	}
 
-	domainIPs := map[string][]string{}
+	domainIPs := map[string][]string{
+		"__internal_gateway__": {"10.128.178.1"}, // Gateway for established connection rule
+	}
 
 	rules := buildAllowlistRules(cfg, domainIPs)
 
 	// Should still have the blocking rules even with no allowed domains
-	// 4 RFC1918/metadata blocks (no catch-all)
-	expectedRules := 4
+	// 1 established + 4 RFC1918/metadata blocks (no catch-all)
+	expectedRules := 5
 	if len(rules) != expectedRules {
 		t.Errorf("buildAllowlistRules() with empty domains returned %d rules, want %d", len(rules), expectedRules)
 	}
@@ -205,7 +212,7 @@ func TestBuildACLRules_RuleOrdering(t *testing.T) {
 		BlockMetadataEndpoint: true,
 	}
 
-	rules := buildACLRules(cfg)
+	rules := buildACLRules(cfg, "10.128.178.1") // Test gateway IP
 
 	// Find indices of first reject and first allow
 	firstRejectIdx := -1

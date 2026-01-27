@@ -2,6 +2,7 @@ package network
 
 import (
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 
@@ -17,7 +18,7 @@ var ErrACLNotSupported = fmt.Errorf("network ACLs not supported")
 type ACLManager struct{}
 
 // Create creates a new network ACL with the specified rules
-func (m *ACLManager) Create(name string, cfg *config.NetworkConfig) error {
+func (m *ACLManager) Create(name string, cfg *config.NetworkConfig, containerName string) error {
 	// First, check if ACL already exists and delete it
 	// This handles cases where ACL wasn't cleaned up properly
 	_ = m.Delete(name) // Ignore error if ACL doesn't exist
@@ -27,8 +28,14 @@ func (m *ACLManager) Create(name string, cfg *config.NetworkConfig) error {
 		return fmt.Errorf("failed to create ACL %s: %w", name, err)
 	}
 
+	// Auto-detect gateway IP for established connection rules
+	gatewayIP, err := getContainerGatewayIP(containerName)
+	if err != nil {
+		log.Printf("Warning: Could not auto-detect gateway IP for ACL: %v", err)
+	}
+
 	// Build and add egress rules
-	rules := buildACLRules(cfg)
+	rules := buildACLRules(cfg, gatewayIP)
 	for _, rule := range rules {
 		// Parse rule into parts for the incus command
 		// Rule format: "egress reject destination=10.0.0.0/8"
@@ -209,13 +216,20 @@ func (m *ACLManager) RecreateWithNewIPs(name string, cfg *config.NetworkConfig, 
 }
 
 // buildACLRules generates ACL rules based on network configuration
-func buildACLRules(cfg *config.NetworkConfig) []string {
+func buildACLRules(cfg *config.NetworkConfig, gatewayIP string) []string {
 	rules := []string{}
 
 	// In restricted mode, block local networks
 	if cfg.Mode == config.NetworkModeRestricted {
 		// IMPORTANT: OVN evaluates rules in order they're added
-		// We must add REJECT rules FIRST, then ALLOW rules
+		// We must add ALLOW rules for established connections FIRST, then REJECT, then general ALLOW
+
+		// Allow established/related connections to gateway (FIRST - highest priority)
+		// This allows response traffic from container back to host even if host IP is RFC1918
+		// Scoped to gateway IP only (not entire private network)
+		if gatewayIP != "" {
+			rules = append(rules, fmt.Sprintf("egress action=allow connection-state=established,related destination=%s/32", gatewayIP))
+		}
 
 		// Block private ranges (RFC1918)
 		if cfg.BlockPrivateNetworks {
@@ -240,9 +254,19 @@ func buildACLRules(cfg *config.NetworkConfig) []string {
 func buildAllowlistRules(cfg *config.NetworkConfig, domainIPs map[string][]string) []string {
 	rules := []string{}
 
+	// Extract gateway IP for established connection rule
+	var gatewayIP string
+	if ips, ok := domainIPs["__internal_gateway__"]; ok && len(ips) > 0 {
+		gatewayIP = ips[0]
+	}
+
 	// Deduplicate IPs across all domains (multiple domains can resolve to same IP)
+	// Exclude __internal_gateway__ from regular allow rules (it's only for established connections)
 	uniqueIPs := make(map[string]bool)
-	for _, ips := range domainIPs {
+	for domain, ips := range domainIPs {
+		if domain == "__internal_gateway__" {
+			continue // Skip gateway IP - it's only used for established connection rule
+		}
 		for _, ip := range ips {
 			uniqueIPs[ip] = true
 		}
@@ -250,6 +274,13 @@ func buildAllowlistRules(cfg *config.NetworkConfig, domainIPs map[string][]strin
 
 	// IMPORTANT: Rules are evaluated in order they're added in OVN
 	// We must add ALLOW rules BEFORE REJECT rules
+
+	// Step 0: Allow established/related connections to gateway (FIRST - highest priority)
+	// This allows response traffic from container back to host even if host IP is RFC1918
+	// Scoped to gateway IP only (not entire private network)
+	if gatewayIP != "" {
+		rules = append(rules, fmt.Sprintf("egress action=allow connection-state=established,related destination=%s/32", gatewayIP))
+	}
 
 	// Step 1: Allow specific IPs from resolved domains (added first, highest priority)
 	// Sort IPs for deterministic ordering (makes debugging and testing easier)

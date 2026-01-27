@@ -90,7 +90,7 @@ func (m *Manager) setupRestricted(ctx context.Context, containerName string) err
 	m.aclName = fmt.Sprintf("coi-%s-restricted", containerName)
 
 	// 1. Create ACL with block rules
-	if err := m.acl.Create(m.aclName, m.config); err != nil {
+	if err := m.acl.Create(m.aclName, m.config, containerName); err != nil {
 		return fmt.Errorf("failed to create network ACL: %w", err)
 	}
 
