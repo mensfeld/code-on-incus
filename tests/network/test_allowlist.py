@@ -127,8 +127,7 @@ refresh_interval_minutes = 30
                 container_name = line.split('Container: ')[1].strip()
                 break
 
-        assert container_name, f"Could not find container name in output"
-        cleanup_containers.append(container_name)
+        assert container_name, "Could not find container name in output"
 
         # Fix DNS
         subprocess.run(
@@ -209,7 +208,7 @@ refresh_interval_minutes = 30
                 container_name = line.split('Container: ')[1].strip()
                 break
 
-        assert container_name, f"Could not find container name"
+        assert container_name, "Could not find container name"
 
         # Test: RFC1918 10.0.0.0/8 (should be blocked)
         result = subprocess.run(
@@ -290,7 +289,7 @@ refresh_interval_minutes = 30
                 container_name = line.split('Container: ')[1].strip()
                 break
 
-        assert container_name, f"Could not find container name"
+        assert container_name, "Could not find container name"
 
         # Test: Random public IP not in allowlist (should be blocked by implicit default-deny)
         result = subprocess.run(
