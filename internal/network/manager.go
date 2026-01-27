@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"strings"
 	"time"
@@ -156,9 +157,14 @@ func (m *Manager) setupAllowlist(ctx context.Context, containerName string) erro
 		log.Printf("Warning: Could not auto-detect gateway IP: %v", err)
 		log.Println("You may need to manually add the gateway IP to allowed_domains")
 	} else {
-		// Add gateway IP to domainIPs map
-		domainIPs["<gateway>"] = []string{gatewayIP}
-		log.Printf("Auto-detected gateway IP: %s", gatewayIP)
+		// Validate gateway IP before adding
+		if net.ParseIP(gatewayIP) == nil {
+			log.Printf("Warning: Invalid gateway IP detected: %s", gatewayIP)
+		} else {
+			// Add gateway IP to domainIPs map with internal key
+			domainIPs["__internal_gateway__"] = []string{gatewayIP}
+			log.Printf("Auto-detected gateway IP: %s", gatewayIP)
+		}
 	}
 
 	// Log resolution results
@@ -249,6 +255,20 @@ func (m *Manager) refreshAllowedIPs() error {
 	newIPs, err := m.resolver.ResolveAll(m.config.AllowedDomains)
 	if err != nil && len(newIPs) == 0 {
 		return fmt.Errorf("failed to resolve any domains")
+	}
+
+	// Re-add gateway IP (required for routing, must persist across refreshes)
+	gatewayIP, err := getContainerGatewayIP(m.containerName)
+	if err != nil {
+		log.Printf("Warning: Could not re-detect gateway IP during refresh: %v", err)
+	} else {
+		// Validate gateway IP before adding
+		if net.ParseIP(gatewayIP) == nil {
+			log.Printf("Warning: Invalid gateway IP detected during refresh: %s", gatewayIP)
+		} else {
+			newIPs["__internal_gateway__"] = []string{gatewayIP}
+			log.Printf("Re-added gateway IP during refresh: %s", gatewayIP)
+		}
 	}
 
 	// Check if anything changed
@@ -364,10 +384,17 @@ func getContainerGatewayIP(containerName string) (string, error) {
 		if strings.HasPrefix(line, "ipv4.address:") {
 			addressWithMask := strings.TrimSpace(strings.TrimPrefix(line, "ipv4.address:"))
 			// Remove CIDR suffix (e.g., "10.128.178.1/24" -> "10.128.178.1")
+			gatewayIP := addressWithMask
 			if idx := strings.Index(addressWithMask, "/"); idx != -1 {
-				return addressWithMask[:idx], nil
+				gatewayIP = addressWithMask[:idx]
 			}
-			return addressWithMask, nil
+
+			// Validate that we extracted a valid IPv4 address
+			if net.ParseIP(gatewayIP) == nil {
+				return "", fmt.Errorf("invalid IPv4 address extracted: %s", gatewayIP)
+			}
+
+			return gatewayIP, nil
 		}
 	}
 

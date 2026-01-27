@@ -2,6 +2,7 @@ package network
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/mensfeld/code-on-incus/internal/config"
@@ -251,7 +252,14 @@ func buildAllowlistRules(cfg *config.NetworkConfig, domainIPs map[string][]strin
 	// We must add ALLOW rules BEFORE REJECT rules
 
 	// Step 1: Allow specific IPs from resolved domains (added first, highest priority)
+	// Sort IPs for deterministic ordering (makes debugging and testing easier)
+	sortedIPs := make([]string, 0, len(uniqueIPs))
 	for ip := range uniqueIPs {
+		sortedIPs = append(sortedIPs, ip)
+	}
+	sort.Strings(sortedIPs)
+
+	for _, ip := range sortedIPs {
 		// Use /32 for single IP precision
 		rules = append(rules, fmt.Sprintf("egress action=allow destination=%s/32", ip))
 	}
@@ -262,10 +270,9 @@ func buildAllowlistRules(cfg *config.NetworkConfig, domainIPs map[string][]strin
 	rules = append(rules, "egress action=reject destination=192.168.0.0/16")
 	rules = append(rules, "egress action=reject destination=169.254.0.0/16")
 
-	// Note: We don't add a catch-all reject rule because it interferes with OVN's
-	// internal routing. Instead, we rely on explicitly allowed IPs + RFC1918 blocks.
-	// This means non-RFC1918 IPs not in the allowlist will use OVN's default behavior.
-	// TODO: Investigate if we can make this more restrictive without breaking routing.
+	// Step 3: Catch-all reject for anything not explicitly allowed
+	// This is safe because the gateway IP is explicitly allowed in Step 1
+	rules = append(rules, "egress action=reject destination=0.0.0.0/0")
 
 	return rules
 }

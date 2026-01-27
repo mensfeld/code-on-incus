@@ -116,8 +116,8 @@ func TestBuildAllowlistRules(t *testing.T) {
 
 	rules := buildAllowlistRules(cfg, domainIPs)
 
-	// Should have: 3 allowed IPs + 4 RFC1918/metadata blocks = 7 rules (no catch-all)
-	expectedRules := 7
+	// Should have: 3 allowed IPs + 4 RFC1918/metadata blocks + 1 catch-all = 8 rules
+	expectedRules := 8
 	if len(rules) != expectedRules {
 		t.Errorf("buildAllowlistRules() returned %d rules, want %d", len(rules), expectedRules)
 	}
@@ -189,8 +189,8 @@ func TestBuildAllowlistRules_EmptyDomains(t *testing.T) {
 	rules := buildAllowlistRules(cfg, domainIPs)
 
 	// Should still have the blocking rules even with no allowed domains
-	// 4 RFC1918/metadata blocks (no catch-all)
-	expectedRules := 4
+	// 4 RFC1918/metadata blocks + 1 catch-all = 5 rules
+	expectedRules := 5
 	if len(rules) != expectedRules {
 		t.Errorf("buildAllowlistRules() with empty domains returned %d rules, want %d", len(rules), expectedRules)
 	}
@@ -303,10 +303,15 @@ func TestBuildAllowlistRules_IPDeduplication(t *testing.T) {
 	// Count how many times the duplicate IP appears in rules
 	duplicateIPCount := 0
 	targetRule := "egress action=allow destination=160.79.104.10/32"
+	uniqueIPCount := 0
+	uniqueRule := "egress action=allow destination=1.2.3.4/32"
 
 	for _, rule := range rules {
 		if rule == targetRule {
 			duplicateIPCount++
+		}
+		if rule == uniqueRule {
+			uniqueIPCount++
 		}
 	}
 
@@ -315,11 +320,18 @@ func TestBuildAllowlistRules_IPDeduplication(t *testing.T) {
 		t.Errorf("IP deduplication failed: found %d rules for 160.79.104.10, want 1", duplicateIPCount)
 		t.Logf("Rules: %v", rules)
 	}
+
+	// Unique IP should also be present
+	if uniqueIPCount != 1 {
+		t.Errorf("Unique IP missing: found %d rules for 1.2.3.4, want 1", uniqueIPCount)
+		t.Logf("Rules: %v", rules)
+	}
 }
 
-// TestBuildAllowlistRules_NoCatchAllReject verifies we don't block all traffic
-// The catch-all reject rule (0.0.0.0/0) was interfering with OVN routing
-func TestBuildAllowlistRules_NoCatchAllReject(t *testing.T) {
+// TestBuildAllowlistRules_HasCatchAllReject verifies that allowlist mode blocks all non-allowed traffic
+// The catch-all reject is required for security (only allowed IPs should be reachable)
+// It's safe because the gateway IP is explicitly allowed before this rule
+func TestBuildAllowlistRules_HasCatchAllReject(t *testing.T) {
 	cfg := &config.NetworkConfig{
 		Mode: config.NetworkModeAllowlist,
 	}
@@ -330,11 +342,24 @@ func TestBuildAllowlistRules_NoCatchAllReject(t *testing.T) {
 
 	rules := buildAllowlistRules(cfg, domainIPs)
 
-	// Should NOT have a catch-all reject rule
+	// Should have a catch-all reject rule as the last rule
+	hasCatchAll := false
 	for _, rule := range rules {
 		if rule == "egress action=reject destination=0.0.0.0/0" {
-			t.Error("Found catch-all reject rule 0.0.0.0/0 which breaks OVN routing. " +
-				"This rule should not exist - OVN applies implicit default-deny when ACLs are present.")
+			hasCatchAll = true
+			break
 		}
+	}
+
+	if !hasCatchAll {
+		t.Error("Missing catch-all reject rule - allowlist mode must block all non-allowed traffic")
+		t.Logf("Rules: %v", rules)
+	}
+
+	// Verify it's the last rule (after all allows and RFC1918 blocks)
+	lastRule := rules[len(rules)-1]
+	if lastRule != "egress action=reject destination=0.0.0.0/0" {
+		t.Errorf("Catch-all reject should be the last rule, got: %s", lastRule)
+		t.Logf("Rules: %v", rules)
 	}
 }
