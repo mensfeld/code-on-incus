@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -574,15 +575,17 @@ func getOVNUplinkIP(networkName string) (string, error) {
 	return "", fmt.Errorf("could not find volatile.network.ipv4.address in OVN config")
 }
 
-// routeExists checks if a route already exists
+// routeExists checks if a route already exists on the host
 func routeExists(subnet, gateway string) bool {
-	output, err := container.IncusOutput("ip", "route", "show")
+	// Run 'ip route show' on the host (not inside container)
+	cmd := exec.Command("ip", "route", "show")
+	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return false
 	}
 
 	// Look for a line like: "10.215.220.0/24 via 10.47.62.100 dev incusbr0"
-	lines := strings.Split(output, "\n")
+	lines := strings.Split(string(output), "\n")
 	for _, line := range lines {
 		if strings.Contains(line, subnet) && strings.Contains(line, gateway) {
 			return true
@@ -592,24 +595,26 @@ func routeExists(subnet, gateway string) bool {
 	return false
 }
 
-// addRoute adds a route to the routing table
+// addRoute adds a route to the routing table on the host
 func addRoute(subnet, gateway, bridge string) error {
-	// Try to add route using ip command
+	// Try to add route using ip command on the host (not inside container)
 	// This requires either:
 	// 1. Running as root/sudo
 	// 2. Having CAP_NET_ADMIN capability
 	// 3. User having permissions via sudo NOPASSWD for ip command
-	cmd := fmt.Sprintf("ip route add %s via %s dev %s", subnet, gateway, bridge)
+	cmdStr := fmt.Sprintf("ip route add %s via %s dev %s", subnet, gateway, bridge)
 
-	// Try with sudo first
-	if err := container.IncusExec("sudo", "-n", "ip", "route", "add", subnet, "via", gateway, "dev", bridge); err == nil {
+	// Try with sudo first (non-interactive: -n)
+	cmd := exec.Command("sudo", "-n", "ip", "route", "add", subnet, "via", gateway, "dev", bridge)
+	if err := cmd.Run(); err == nil {
 		return nil
 	}
 
 	// Try without sudo (if running as root or with capabilities)
-	if err := container.IncusExec("ip", "route", "add", subnet, "via", gateway, "dev", bridge); err == nil {
+	cmd = exec.Command("ip", "route", "add", subnet, "via", gateway, "dev", bridge)
+	if err := cmd.Run(); err == nil {
 		return nil
 	}
 
-	return fmt.Errorf("failed to add route (need sudo): %s", cmd)
+	return fmt.Errorf("failed to add route (need sudo): %s", cmdStr)
 }
