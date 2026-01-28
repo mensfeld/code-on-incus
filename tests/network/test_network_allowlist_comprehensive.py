@@ -384,7 +384,7 @@ refresh_interval_minutes = 30
 
         assert container_name, f"Could not find container name in output: {output}"
 
-        # Test: dig query to Google DNS (allowed)
+        # Test: nslookup query to Google DNS (allowed)
         result = subprocess.run(
             [
                 coi_binary,
@@ -392,10 +392,9 @@ refresh_interval_minutes = 30
                 "exec",
                 container_name,
                 "--",
-                "dig",
-                "+short",
+                "nslookup",
                 "example.com",
-                "@8.8.8.8",
+                "8.8.8.8",
             ],
             capture_output=True,
             text=True,
@@ -403,9 +402,9 @@ refresh_interval_minutes = 30
         )
 
         assert result.returncode == 0, f"DNS query to allowed server failed: {result.stderr}"
-        # Should return an IP address
-        output_lines = result.stderr.strip().split("\n")
-        assert any(line.strip() for line in output_lines), (
+        # Should return an IP address in the output
+        output_text = result.stderr
+        assert "Address" in output_text or "address" in output_text.lower(), (
             f"No DNS response received: {result.stderr}"
         )
 
@@ -463,7 +462,7 @@ refresh_interval_minutes = 30
 
         assert container_name, f"Could not find container name in output: {output}"
 
-        # Test: dig query to Quad9 DNS 9.9.9.9 (NOT in allowlist, should fail)
+        # Test: nslookup query to Quad9 DNS 9.9.9.9 (NOT in allowlist, should fail)
         result = subprocess.run(
             [
                 coi_binary,
@@ -471,11 +470,11 @@ refresh_interval_minutes = 30
                 "exec",
                 container_name,
                 "--",
-                "dig",
-                "+short",
-                "+time=5",
+                "timeout",
+                "5",
+                "nslookup",
                 "example.com",
-                "@9.9.9.9",
+                "9.9.9.9",
             ],
             capture_output=True,
             text=True,
