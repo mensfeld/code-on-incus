@@ -46,15 +46,6 @@ def test_ovn_route_added_automatically(coi_binary, workspace_dir, cleanup_contai
     assert subnet, "Could not find ipv4.address in network config"
     assert uplink_ip, "Could not find volatile.network.ipv4.address in network config"
 
-    # Check that route doesn't exist initially (cleanup from previous tests)
-    result = subprocess.run(
-        ["ip", "route", "show"],
-        capture_output=True,
-        text=True,
-        timeout=5,
-    )
-    initial_routes = result.stdout
-
     # Start a container (route should be added automatically)
     result = subprocess.run(
         [coi_binary, "shell", "--workspace", workspace_dir, "--background"],
