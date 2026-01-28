@@ -5,6 +5,10 @@
 ### Bug Fixes
 
 - [Bug Fix] **Network ACL support detection** - Fixed `coi shell` failing with "Invalid device option 'security.acls'" error on standard Incus bridge networks. The tool now detects whether the network supports ACLs (requires OVN) and provides a clear error message with remediation steps instead of a cryptic failure. Users on standard bridge networks are guided to either use `--network=open` or configure OVN networking. (#63)
+- [Bug Fix] **`coi list --all` always shows Saved Sessions section** - Fixed bug where "Saved Sessions:" section would not appear when using `--all` flag if no sessions with saved state existed. The function `listSavedSessions()` was returning `nil` instead of an empty slice, causing the section to be skipped entirely. Now properly initializes as empty slice so the section always appears with `--all`, showing "(none)" when empty. This makes the output predictable and consistent. (#81)
+- [Bug Fix] **Tool-agnostic session listing** - Fixed `coi list --all` hardcoding `.claude` directory check, which broke support for other AI coding tools (Aider, Cursor, etc.). Now uses `tool.ConfigDirName()` to dynamically check for the configured tool's config directory (e.g., `.aider/`, `.cursor/`). Also handles ENV-based tools (no config directory) by only checking for `metadata.json`. This ensures saved sessions are properly detected regardless of which AI tool is configured. (#81)
+- [Bug Fix] **Test isolation improvements** - Fixed `test_list_format_json_empty` and `test_attach_shows_sessions` failing intermittently due to containers left by previous tests in random test order. Added `cleanup_containers` fixture and explicit `kill --all --force` before test execution to ensure clean state. This prevents test interference from pytest-randomly's randomized execution order. (#81)
+- [Bug Fix] **macOS Colima build timeout handling** - Fixed macOS Colima installation tests hanging for 45 minutes when `coi build` gets stuck during containerd/Docker setup. Added 15-minute timeout per build attempt with automatic retry on timeout (exit code 124) in addition to existing network failure retry logic. Prevents CI jobs from hanging until job timeout - now retries after 15 minutes for transient Colima VM issues. (#81)
 
 ### Features
 
@@ -54,6 +58,12 @@ This prevents the error: `Error: Failed to start device "workspace": Required id
 - [Testing] Added integration tests for `coi persist` command - Five test scenarios covering basic operation, bulk operations, state verification, and error handling (tests/persist/ directory).
 - [Testing] Added comprehensive terminal sanitization tests - Unit tests, integration tests with real tmux sessions, and CI end-to-end tests that verify exotic terminal types work correctly in containers.
 - [Testing] Added integration tests for IPv4 display in `coi list` - Three test scenarios covering running containers showing IPv4, stopped containers not showing IPv4, and JSON format including the ipv4 field (tests/list/ directory).
+- [Testing] Added comprehensive OVN routing integration tests - Tests validate automatic host route configuration, route persistence across container restarts, and proper cleanup on container deletion. Tests run in actual OVN network environment in CI to verify end-to-end functionality (tests/network/test_ovn_routing.py). (#81)
+
+### CI/CD Improvements
+
+- [CI/CD] **Parallel test execution for 2.6x faster CI** - Split integration test suite into 6 parallel test groups that run across 11 jobs (6 groups × 2 network types - 1 for network/bridge skip). Test groups: shell-ephemeral (15 tests), shell-persistent (9 tests), network (10 tests, OVN only), container-file (54 tests), core commands (83 tests), and misc commands (70 tests). **CI time reduced from 37 minutes to ~13 minutes**, providing 2.6x faster feedback loop for developers. All test groups run on both OVN and bridge networks to maintain full test coverage across both network types. (#81)
+- [CI/CD] **Improved macOS Colima test reliability** - Added comprehensive retry logic for macOS Colima installation tests to handle two types of failures: (1) network failures during package downloads ("connection timed out"), and (2) build hangs during containerd/Docker setup. Implements 15-minute timeout per attempt with automatic retry on both timeout and network failures (up to 3 attempts). Prevents 45-minute CI hangs while maintaining resilience for transient Colima VM issues. (#81)
 
 
 ## 0.5.2 (2026-01-19)
