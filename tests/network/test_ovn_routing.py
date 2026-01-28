@@ -130,10 +130,7 @@ def test_bridge_network_no_route_added(coi_binary, workspace_dir, cleanup_contai
 
     # Filter out any routes that are just the bridge network itself
     # (these may appear dynamically when container starts)
-    significant_new_routes = [
-        r for r in new_routes
-        if r and not r.startswith("10.47.62.0/24")
-    ]
+    significant_new_routes = [r for r in new_routes if r and not r.startswith("10.47.62.0/24")]
 
     assert len(significant_new_routes) == 0, (
         f"Expected no new routes for bridge network, but found: {significant_new_routes}"
