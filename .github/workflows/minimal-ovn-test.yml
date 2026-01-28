@@ -1,7 +1,7 @@
-name: Minimal OVN Test (Fixed Tests Only)
+name: Minimal OVN Test (3 Fixed Tests)
 
-# Temporary workflow to verify the 3 fixed tests work in OVN environment
-# Once green, we can re-enable full CI
+# EXACT copy of integration test job from ci.yml, only changes final pytest command
+# Verifies the 3 fixed tests work properly in OVN CI environment
 
 on:
   workflow_dispatch:
@@ -12,10 +12,10 @@ permissions:
   contents: read
 
 jobs:
-  minimal-ovn-test:
-    name: Test Fixed OVN Tests Only
+  test-fixed-ovn-tests:
+    name: Test 3 Fixed OVN Tests
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 60
 
     env:
       GOTOOLCHAIN: local
@@ -96,16 +96,12 @@ jobs:
           sleep 5
 
           # Configure subuid/subgid for UID mapping (needed for raw.idmap)
-          # Map runner UID 1001 to be available for container remapping
           echo "root:1001:1" | sudo tee -a /etc/subuid
           echo "root:1001:1" | sudo tee -a /etc/subgid
 
           # Restart Incus to pick up subuid/subgid changes
           sudo systemctl restart incus || true
           sleep 5
-
-          # Configure OVN integration BEFORE initializing Incus
-          sudo incus config set network.ovn.northbound_connection=tcp:127.0.0.1:6641
 
           # Initialize Incus with btrfs storage and OVN networking
           cat <<EOF | sudo incus admin init --preseed
@@ -125,10 +121,9 @@ jobs:
               ipv4.address: 10.215.220.1/24
               ipv4.nat: "true"
               ipv6.address: none
-            description: OVN logical network
+              network: incusbr0
             name: ovn-net
             type: ovn
-            project: default
           storage_pools:
           - config:
               size: 15GiB
@@ -157,47 +152,139 @@ jobs:
           echo "OVN network configured successfully"
           incus network list
 
-      - name: Configure host routing for OVN
+      - name: Check kernel idmap support
         run: |
-          # Get OVN uplink IP and configure host route
-          OVN_UPLINK_IP=$(incus network get ovn-net volatile.network.ipv4.address)
-          echo "OVN uplink IP: $OVN_UPLINK_IP"
-          sudo ip route add 10.215.220.0/24 via $OVN_UPLINK_IP dev incusbr0 || true
+          echo "Kernel version:"
+          uname -r
+          echo "Checking for idmapped mount support:"
+          grep -i idmap /proc/filesystems || echo "No idmap in /proc/filesystems"
+          echo "Checking btrfs features:"
+          sudo btrfs filesystem df /var/lib/incus/storage-pools/default || true
+          echo "AppArmor status:"
+          sudo aa-status | grep incus || echo "No incus AppArmor profiles"
 
-          echo "Routing table:"
-          ip route show
+      - name: Configure basic networking for Incus
+        run: |
+          # Enable IP forwarding (required for ALL container networking)
+          echo 1 | sudo tee /proc/sys/net/ipv4/ip_forward > /dev/null
+          echo 1 | sudo tee /proc/sys/net/ipv6/conf/all/forwarding > /dev/null
 
-      - name: Configure COI for OVN
+          # Get default interface for outbound traffic
+          DEFAULT_IFACE=$(ip route | grep default | awk '{print $5}' | head -1)
+
+          # Allow container traffic through firewall
+          if sudo iptables -nL DOCKER-USER 2>/dev/null; then
+            sudo iptables -I DOCKER-USER -i incusbr0 -j ACCEPT
+            sudo iptables -I DOCKER-USER -o incusbr0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+          else
+            sudo iptables -P FORWARD ACCEPT
+            sudo iptables -I FORWARD 1 -i incusbr0 -j ACCEPT
+            sudo iptables -I FORWARD 1 -o incusbr0 -j ACCEPT
+          fi
+
+          echo "Basic network configuration complete"
+
+      - name: Configure OVN-specific networking
+        run: |
+          # Get default interface for outbound traffic
+          DEFAULT_IFACE=$(ip route | grep default | awk '{print $5}' | head -1)
+
+          # Allow traffic to/from OVN subnet through firewall
+          sudo iptables -I FORWARD 1 -d 10.215.220.0/24 -j ACCEPT
+          sudo iptables -I FORWARD 1 -s 10.215.220.0/24 -j ACCEPT
+
+          # Add NAT/MASQUERADE rules for OVN subnet
+          sudo iptables -t nat -I POSTROUTING 1 -s 10.215.220.0/24 -o $DEFAULT_IFACE -j MASQUERADE
+
+          # Add route so host can reach OVN network via OVN uplink IP
+          sudo ip route add 10.215.220.0/24 via 10.47.62.100 dev incusbr0 || true
+
+          echo "OVN network configuration complete"
+
+      - name: Pre-cache base Ubuntu image
+        run: |
+          echo "Pre-caching Ubuntu 22.04 base image..."
+          incus image copy images:ubuntu/22.04 local: --alias ubuntu-22.04 --auto-update=false || true
+          incus image list
+
+      - name: Build COI binary
+        run: |
+          go build -o coi ./cmd/coi
+          ./coi version
+
+      - name: Configure COI for CI
         run: |
           mkdir -p ~/.config/coi
           cat > ~/.config/coi/config.toml << 'EOF'
           [network]
           mode = "open"
           EOF
+          echo "Created COI config with network.mode = open"
 
-          echo "COI config:"
-          cat ~/.config/coi/config.toml
-
-      - name: Build COI
+      - name: Test bind mount functionality
         run: |
-          echo "Building COI binary..."
-          go build -v -o ./coi ./cmd/coi
+          echo "Testing if bind mounts work with shift=true..."
+          mkdir -p /tmp/test-bind-mount
+          echo "test-content" > /tmp/test-bind-mount/test-file.txt
 
-          echo "COI version:"
-          ./coi version
+          incus launch images:ubuntu/22.04 test-bind-mount-container
+          sleep 5
 
-      - name: Run only the 2 fixed tests (skip routing test to avoid image build)
+          incus config device add test-bind-mount-container testmount disk source=/tmp/test-bind-mount path=/mnt/test shift=true
+
+          incus exec test-bind-mount-container -- cat /mnt/test/test-file.txt || echo "FAILED: Cannot read file in container"
+          incus exec test-bind-mount-container -- sh -c 'echo "created-from-container" > /mnt/test/created.txt'
+
+          if [ -f /tmp/test-bind-mount/created.txt ]; then
+            echo "SUCCESS: File created in container is visible on host"
+          else
+            echo "FAILED: File created in container NOT visible on host"
+          fi
+
+          incus delete test-bind-mount-container --force
+          rm -rf /tmp/test-bind-mount
+
+      - name: Restore COI image from cache
+        id: cache-coi-image
+        uses: actions/cache/restore@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v5.0.2
+        with:
+          path: /tmp/coi-image.tar.gz
+          key: ${{ runner.os }}-coi-image-${{ hashFiles('internal/image/**', 'testdata/dummy/**', 'scripts/build/**') }}
+
+      - name: Import COI image from cache
+        if: steps.cache-coi-image.outputs.cache-hit == 'true'
         run: |
-          echo "===== RUNNING ONLY 2 FIXED TESTS (no image build) ====="
-          echo "1. test_list_format_json_empty"
-          echo "2. test_attach_shows_sessions"
-          echo ""
-          echo "NOTE: Skipping test_ovn_route_added_automatically to avoid 10+ min image build"
-          echo "      That test was verified locally and works correctly."
+          echo "Restoring COI image from cache..."
+          incus image import /tmp/coi-image.tar.gz --alias coi
+          ./coi images
+
+      - name: Build COI image
+        if: steps.cache-coi-image.outputs.cache-hit != 'true'
+        run: |
+          echo "Building COI image (not cached)..."
+          ./coi build
+          ./coi images
+          incus image export coi /tmp/coi-image
+
+      - name: Save COI image to cache
+        if: steps.cache-coi-image.outputs.cache-hit != 'true'
+        uses: actions/cache/save@8b402f58fbc84540c8b491a91e594a4576fec3d7 # v5.0.2
+        with:
+          path: /tmp/coi-image.tar.gz
+          key: ${{ runner.os }}-coi-image-${{ hashFiles('internal/image/**', 'testdata/dummy/**', 'scripts/build/**') }}
+
+      - name: Run ONLY the 3 fixed tests
+        run: |
+          echo "============================================"
+          echo "RUNNING ONLY THE 3 FIXED TESTS:"
+          echo "  1. test_ovn_route_added_automatically"
+          echo "  2. test_list_format_json_empty"
+          echo "  3. test_attach_shows_sessions"
+          echo "============================================"
           echo ""
 
           python -m pytest tests/ -v --tb=short --durations=0 \
-            -k "test_list_format_json_empty or test_attach_shows_sessions"
+            -k "test_ovn_route_added_automatically or test_list_format_json_empty or test_attach_shows_sessions"
 
       - name: Cleanup
         if: always()
