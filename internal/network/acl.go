@@ -150,9 +150,23 @@ func (m *ACLManager) networkSupportsACLs(networkName string) (bool, error) {
 	return false, nil
 }
 
+// Exists checks if a network ACL exists
+func (m *ACLManager) Exists(name string) bool {
+	// Use 'incus network acl show <name>' to check existence
+	// Returns exit code 1 with "Network ACL not found" if doesn't exist
+	err := container.IncusExecQuiet("network", "acl", "show", name)
+	return err == nil
+}
+
 // Delete removes a network ACL
 func (m *ACLManager) Delete(name string) error {
-	// Delete ACL (use quiet to suppress error if doesn't exist)
+	// Check if ACL exists before trying to delete
+	if !m.Exists(name) {
+		// ACL doesn't exist, nothing to do
+		return nil
+	}
+
+	// Delete ACL
 	return container.IncusExecQuiet("network", "acl", "delete", name)
 }
 
