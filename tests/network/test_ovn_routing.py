@@ -5,6 +5,7 @@ These tests verify that COI automatically configures host routes to OVN networks
 allowing the host to access services running in containers.
 """
 
+import ipaddress
 import os
 import subprocess
 
@@ -39,7 +40,10 @@ def test_ovn_route_added_automatically(coi_binary, workspace_dir, cleanup_contai
     for line in result.stdout.split("\n"):
         line = line.strip()
         if line.startswith("ipv4.address:"):
-            subnet = line.split(":", 1)[1].strip()
+            # Parse CIDR to get network address (e.g., "10.215.220.1/24" -> "10.215.220.0/24")
+            gateway_cidr = line.split(":", 1)[1].strip()
+            network = ipaddress.ip_network(gateway_cidr, strict=False)
+            subnet = str(network)
         elif line.startswith("volatile.network.ipv4.address:"):
             uplink_ip = line.split(":", 1)[1].strip()
 
