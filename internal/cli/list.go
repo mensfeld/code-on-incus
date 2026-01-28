@@ -10,6 +10,7 @@ import (
 	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/session"
+	"github.com/mensfeld/code-on-incus/internal/tool"
 	"github.com/spf13/cobra"
 )
 
@@ -92,7 +93,7 @@ func listCommand(cmd *cobra.Command, args []string) error {
 	// Get saved sessions if --all
 	var sessions []SessionInfo
 	if listAll {
-		sessions, err = listSavedSessions(sessionsDir)
+		sessions, err = listSavedSessions(sessionsDir, toolInstance)
 		if err != nil {
 			return fmt.Errorf("failed to list sessions: %w", err)
 		}
@@ -170,7 +171,7 @@ func listActiveContainers() ([]ContainerInfo, error) {
 }
 
 // listSavedSessions lists all saved sessions
-func listSavedSessions(sessionsDir string) ([]SessionInfo, error) {
+func listSavedSessions(sessionsDir string, toolInstance tool.Tool) ([]SessionInfo, error) {
 	entries, err := os.ReadDir(sessionsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -188,10 +189,21 @@ func listSavedSessions(sessionsDir string) ([]SessionInfo, error) {
 
 		sessionID := entry.Name()
 
-		// Check if it has a .claude directory
-		statePath := filepath.Join(sessionsDir, sessionID, ".claude")
-		if info, err := os.Stat(statePath); err != nil || !info.IsDir() {
-			continue
+		// Check if it has the tool's config directory (e.g., .claude, .aider, .cursor)
+		// Skip if tool uses ENV-based auth (ConfigDirName returns "")
+		configDirName := toolInstance.ConfigDirName()
+		if configDirName == "" {
+			// For ENV-based tools, only check if metadata.json exists
+			metadataPath := filepath.Join(sessionsDir, sessionID, "metadata.json")
+			if _, err := os.Stat(metadataPath); err != nil {
+				continue
+			}
+		} else {
+			// For config-based tools, check if config directory exists
+			statePath := filepath.Join(sessionsDir, sessionID, configDirName)
+			if info, err := os.Stat(statePath); err != nil || !info.IsDir() {
+				continue
+			}
 		}
 
 		// Try to read metadata
