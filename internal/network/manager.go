@@ -510,6 +510,7 @@ func isOVNNetwork(networkName string) (bool, error) {
 }
 
 // getNetworkSubnet gets the IPv4 subnet of a network (e.g., "10.215.220.0/24")
+// It parses the ipv4.address (which is gateway IP + CIDR) and converts to network subnet
 func getNetworkSubnet(networkName string) (string, error) {
 	output, err := container.IncusOutput("network", "show", networkName)
 	if err != nil {
@@ -520,7 +521,16 @@ func getNetworkSubnet(networkName string) (string, error) {
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "ipv4.address:") {
-			return strings.TrimSpace(strings.TrimPrefix(line, "ipv4.address:")), nil
+			addressWithCIDR := strings.TrimSpace(strings.TrimPrefix(line, "ipv4.address:"))
+
+			// Parse the CIDR notation (e.g., "10.128.178.1/24")
+			_, ipnet, err := net.ParseCIDR(addressWithCIDR)
+			if err != nil {
+				return "", fmt.Errorf("failed to parse CIDR %s: %w", addressWithCIDR, err)
+			}
+
+			// Return the network address (e.g., "10.128.178.0/24")
+			return ipnet.String(), nil
 		}
 	}
 
