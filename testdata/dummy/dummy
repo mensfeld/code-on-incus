@@ -218,9 +218,16 @@ while true; do
     # Save user message to session
     echo "{\"type\":\"user\",\"content\":\"$input\",\"msgNum\":$MSG_NUM,\"timestamp\":\"$(date -Iseconds)\"}" >> "$SESSION_FILE"
 
-    # Echo back input with -BACK suffix for easy test matching
-    RESPONSE="${input}-BACK"
-    echo "$RESPONSE"
+    # Check if input is a network command and execute it
+    if [[ "$input" =~ ^(curl|dig|nslookup|ping|wget|nc|host)([[:space:]]|$) ]]; then
+        # Execute actual command and capture output
+        eval "$input" 2>&1 || true
+        RESPONSE="$input [executed]"
+    else
+        # Echo back input with -BACK suffix for easy test matching
+        RESPONSE="${input}-BACK"
+        echo "$RESPONSE"
+    fi
 
     # Save assistant response to session
     echo "{\"type\":\"assistant\",\"content\":\"$RESPONSE\",\"msgNum\":$MSG_NUM,\"timestamp\":\"$(date -Iseconds)\"}" >> "$SESSION_FILE"
