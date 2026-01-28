@@ -20,6 +20,9 @@
 - [Feature] Add `coi persist` command to convert ephemeral sessions to persistent - Allows converting running ephemeral containers to persistent mode, preventing automatic deletion when stopped. Supports `--all` flag to persist all containers and `--force` to skip confirmations. Use `coi list` to verify persistence mode.
 - [Feature] **Display IPv4 addresses in `coi list`** - The `coi list` command now shows the IPv4 address (eth0) for running containers, making it easy to access exposed web servers and services. The IPv4 field appears in both text and JSON output formats. Stopped containers do not display an IP address since they have no network connectivity. (#66)
 
+### Enhancements
+
+- [Enhancement] **Update Claude CLI installation to native method** - Replaced deprecated npm installation (`npm install -g @anthropic-ai/claude-code`) with the official native installer (`curl -fsSL https://claude.ai/install.sh | bash`). Anthropic moved away from npm releases as of 2025, making the native installation method the recommended approach. The installer runs as the `code` user and installs to `~/.local/bin/claude` with a global symlink at `/usr/local/bin/claude`. Added verification to ensure the binary exists before creating symlink, preventing broken installations. Users must rebuild the base image with `coi build --force` to get the updated installation method. (#82)
 ### Technical Details
 
 OVN host routing:
