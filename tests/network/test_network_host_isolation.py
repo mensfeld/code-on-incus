@@ -7,6 +7,7 @@ but that host can access container services (response traffic allowed).
 Note: These tests require OVN networking (now configured in CI).
 """
 
+import json
 import os
 import subprocess
 import tempfile
@@ -224,24 +225,25 @@ mode = "restricted"
 
         assert container_name, f"Could not find container name in output: {output}"
 
-        # Get container IP address
+        # Wait for container to be fully ready
+        time.sleep(2)
+
+        # Get container's IP address using incus list (more reliable than hostname -I)
         result = subprocess.run(
-            [
-                coi_binary,
-                "container",
-                "exec",
-                container_name,
-                "--",
-                "hostname",
-                "-I",
-            ],
+            ["incus", "list", container_name, "--format=json"],
             capture_output=True,
             text=True,
             timeout=10,
         )
 
-        assert result.returncode == 0, f"Failed to get container IP: {result.stderr}"
-        container_ip = result.stderr.strip().split()[0]
+        assert result.returncode == 0, f"Failed to get container info: {result.stderr}"
+
+        container_info = json.loads(result.stdout)[0]
+        # Get eth0 IP address (OVN network IP, not Docker bridge IP)
+        eth0_addresses = container_info["state"]["network"]["eth0"]["addresses"]
+        ipv4_addresses = [addr["address"] for addr in eth0_addresses if addr["family"] == "inet"]
+        assert ipv4_addresses, f"No IPv4 address found for container {container_name}"
+        container_ip = ipv4_addresses[0]
 
         # Start HTTP server in container
         server_proc = subprocess.Popen(
