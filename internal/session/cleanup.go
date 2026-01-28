@@ -94,13 +94,13 @@ func Cleanup(opts CleanupOptions) error {
 					opts.Logger(fmt.Sprintf("Warning: Failed to delete container: %v", err))
 				} else {
 					opts.Logger("Container removed (session data saved for --resume)")
-				}
 
-				// Clean up network ACL after deleting container
-				// The ACL is now detached and can be safely deleted
-				if opts.NetworkManager != nil {
-					// Ignore errors - ACL might already be removed or not exist for this network mode
-					_ = opts.NetworkManager.Teardown(context.Background(), opts.ContainerName)
+					// Clean up network ACL after successfully deleting container
+					// The ACL is now detached and can be safely deleted
+					if opts.NetworkManager != nil {
+						// Ignore errors - ACL might already be removed or not exist for this network mode
+						_ = opts.NetworkManager.Teardown(context.Background(), opts.ContainerName)
+					}
 				}
 			}
 		} else {

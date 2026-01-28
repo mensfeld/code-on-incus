@@ -335,8 +335,9 @@ func (m *Manager) Teardown(ctx context.Context, containerName string) error {
 
 	if err := m.acl.Delete(aclName); err != nil {
 		// Don't fail teardown if ACL deletion fails
-		// This only happens if the ACL exists but deletion failed for another reason
-		// (ACLs that don't exist are handled gracefully by the Delete method)
+		// With the existence check in Delete(), this only happens if the ACL exists but
+		// deletion failed due to unexpected errors (e.g., permissions, network issues).
+		// The normal "ACL still attached" case is prevented by deleting the container first.
 		log.Printf("Warning: failed to delete network ACL '%s': %v", aclName, err)
 		return nil
 	}
