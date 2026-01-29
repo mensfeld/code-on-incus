@@ -358,9 +358,11 @@ jobs:
 
           # Initialize Incus with btrfs storage and OVN networking
           # Using preseed for explicit configuration
+          # IMPORTANT: network.ovn.northbound_connection tells Incus where to find OVN
           cat <<EOF | sudo incus admin init --preseed
           config:
             images.compression_algorithm: none
+            network.ovn.northbound_connection: tcp:127.0.0.1:6641
           networks:
           - config:
               ipv4.address: 10.47.62.1/24
