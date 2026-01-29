@@ -245,6 +245,23 @@ jobs:
           echo "=== Incus logs ==="
           sudo journalctl -u incus --no-pager -n 30 | grep -i "ovs\|ovn\|network\|error" || echo "No relevant logs"
 
+          # Debug: Check what Incus sees when connecting to OVS
+          echo "=== Debug: Testing Incus OVS connectivity ==="
+          # Install strace for debugging
+          sudo apt-get install -y strace 2>/dev/null || true
+
+          # Try a simple incus command and trace its OVS connection
+          echo "Running incus info with strace on OVS socket..."
+          sudo timeout 10 strace -f -e connect,read,write -s 1000 incus info 2>&1 | grep -i "openvswitch\|db.sock" | head -20 || echo "Strace completed"
+
+          # Check if there's a different OVS socket Incus is expecting
+          echo "=== All potential OVS sockets ==="
+          sudo find / -name "*.sock" 2>/dev/null | grep -i ovs | head -10 || true
+
+          # Check Incus environment
+          echo "=== Incus daemon environment ==="
+          sudo cat /proc/$(pgrep -f incusd | head -1)/environ 2>/dev/null | tr '\0' '\n' | grep -i ovs || echo "No OVS env vars"
+
           # Set OVN northbound connection via TCP
           echo "=== Setting OVN connection ==="
           sudo incus config set network.ovn.northbound_connection tcp:127.0.0.1:6641
