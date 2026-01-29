@@ -236,19 +236,37 @@ jobs:
           echo "root:1001:1" | sudo tee -a /etc/subgid
 
           # Restart Incus to pick up subuid/subgid changes
-          sudo systemctl restart incus || true
-          sleep 5
+          echo "Restarting Incus service..."
+          sudo systemctl restart incus
 
-          # Wait for Incus to be fully ready after restart
-          echo "Waiting for Incus daemon to be ready..."
+          # Wait for systemd service to be fully active
+          echo "Waiting for Incus systemd service..."
           for i in {1..30}; do
-            if incus info >/dev/null 2>&1; then
-              echo "✓ Incus daemon is ready"
+            if sudo systemctl is-active --quiet incus; then
+              echo "✓ Incus systemd service is active"
               break
             fi
-            echo "Waiting for Incus... ($i/30)"
+            echo "Waiting for systemd service... ($i/30)"
             sleep 1
           done
+
+          # Additional wait for socket to be ready
+          sleep 3
+
+          # Wait for Incus API to be responsive
+          echo "Waiting for Incus API to be ready..."
+          for i in {1..30}; do
+            if sudo incus info >/dev/null 2>&1; then
+              echo "✓ Incus API is ready"
+              break
+            fi
+            echo "Waiting for Incus API... ($i/30)"
+            sleep 1
+          done
+
+          # Show status for debugging
+          sudo systemctl status incus --no-pager || true
+          sudo journalctl -u incus -n 20 --no-pager || true
 
           # Verify OVN is still available after Incus restart
           echo "Verifying OVN availability after Incus restart..."
