@@ -224,6 +224,22 @@ jobs:
           # Step 7: Configure project to allow bridge as OVN uplink
           incus project set default restricted.networks.uplinks=incusbr0
 
+          # Fix OVS socket permissions and ensure it's responsive
+          sudo chmod 666 /run/openvswitch/db.sock
+          sleep 2
+
+          # Verify OVS is still responding after network operations
+          echo "Verifying OVS connectivity..."
+          for i in {1..10}; do
+            if sudo ovs-vsctl show >/dev/null 2>&1; then
+              echo "✓ OVS is responding"
+              break
+            fi
+            echo "Waiting for OVS... ($i/10)"
+            sudo systemctl restart ovsdb-server || true
+            sleep 2
+          done
+
           # Tell Incus where to find OVN northbound database
           incus config set network.ovn.northbound_connection tcp:127.0.0.1:6641
 
