@@ -160,19 +160,28 @@ jobs:
       - name: Configure OVN
         if: matrix.network_type == 'ovn'
         run: |
-          # Start OVN services (required before Incus can use OVN)
-          echo "Starting OVN services..."
-          sudo systemctl enable --now ovs-vswitchd
-          sudo systemctl enable --now ovsdb-server
-          sudo systemctl enable --now ovn-northd
-          sudo systemctl enable --now ovn-controller
+          # Start OVN services using Ubuntu's meta-services
+          echo "Starting OVN and OVS services..."
 
-          # Wait for OVN services to be ready
-          sleep 5
+          # Start base OVS services first
+          sudo systemctl enable --now openvswitch-switch
+          sleep 2
 
-          # Verify services are running
-          sudo systemctl status ovs-vswitchd --no-pager || true
-          sudo systemctl status ovn-northd --no-pager || true
+          # Start OVN central components (northbound/southbound databases)
+          sudo systemctl enable --now ovn-central
+          sleep 2
+
+          # Start OVN host components (controller)
+          sudo systemctl enable --now ovn-host
+          sleep 2
+
+          # Verify critical services are running
+          echo "Checking service status..."
+          sudo systemctl is-active openvswitch-switch || (echo "ERROR: openvswitch-switch not running" && exit 1)
+          sudo systemctl is-active ovn-northd || (echo "ERROR: ovn-northd not running" && exit 1)
+          sudo systemctl is-active ovn-controller || (echo "ERROR: ovn-controller not running" && exit 1)
+
+          echo "All OVN services are running ✓"
 
           # Configure OVN to listen on TCP (required for Incus integration)
           sudo ovn-nbctl set-connection ptcp:6641:127.0.0.1
@@ -185,10 +194,10 @@ jobs:
             external_ids:ovn-encap-ip=127.0.0.1
 
           # Verify OVS configuration
-          echo "OVN configuration:"
+          echo "OVS external IDs:"
           sudo ovs-vsctl get open_vswitch . external_ids
 
-          echo "✓ OVN services started and configured"
+          echo "✓ OVN fully configured and ready for Incus"
 
       - name: Initialize Incus (OVN)
         if: matrix.network_type == 'ovn'
