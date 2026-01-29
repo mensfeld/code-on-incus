@@ -10,7 +10,6 @@ Tests the complete lifecycle:
 6. Verify container is removed
 """
 
-import os
 import time
 
 from pexpect import EOF, TIMEOUT
@@ -108,12 +107,8 @@ def test_ephemeral_session_with_shutdown(coi_binary, cleanup_containers, workspa
     except Exception:
         child.close(force=True)
 
-    # Step 5: Wait for container to be deleted
-    # OVN networks may take longer for cleanup due to additional network teardown
-    deletion_timeout = 60 if os.getenv("CI_NETWORK_TYPE") == "ovn" else 30
-    container_deleted = wait_for_specific_container_deletion(
-        container_name, timeout=deletion_timeout
-    )
+    # Step 5: Wait for container to be deleted (60s to account for OVN network teardown)
+    container_deleted = wait_for_specific_container_deletion(container_name, timeout=60)
 
     # Step 6: Verify cleanup messages
     assert "Saving session data" in output or "Session data saved" in output, (
@@ -125,6 +120,4 @@ def test_ephemeral_session_with_shutdown(coi_binary, cleanup_containers, workspa
     )
 
     # Step 7: Verify container was deleted
-    assert container_deleted, (
-        f"Container {container_name} should be deleted after poweroff (waited {deletion_timeout}s)"
-    )
+    assert container_deleted, f"Container {container_name} should be deleted after poweroff (waited 60s)"

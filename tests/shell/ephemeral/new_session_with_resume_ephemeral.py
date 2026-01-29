@@ -12,7 +12,6 @@ Tests the resume lifecycle:
 8. Cleanup
 """
 
-import os
 import subprocess
 import time
 
@@ -115,15 +114,9 @@ def test_ephemeral_session_with_resume(coi_binary, cleanup_containers, workspace
     # data, then starts container deletion
     time.sleep(5)
 
-    # Wait for container deletion
-    # OVN networks may take longer for cleanup due to additional network teardown
-    deletion_timeout = 60 if os.getenv("CI_NETWORK_TYPE") == "ovn" else 30
-    container_deleted = wait_for_specific_container_deletion(
-        container_name, timeout=deletion_timeout
-    )
-    assert container_deleted, (
-        f"Container {container_name} should be deleted after poweroff (waited {deletion_timeout}s)"
-    )
+    # Wait for container deletion (60s to account for OVN network teardown)
+    container_deleted = wait_for_specific_container_deletion(container_name, timeout=60)
+    assert container_deleted, f"Container {container_name} should be deleted after poweroff (waited 60s)"
 
     # Verify session was saved
     assert "Session data saved" in output1 or "Saving session data" in output1, (
@@ -182,11 +175,9 @@ def test_ephemeral_session_with_resume(coi_binary, cleanup_containers, workspace
     # Give cleanup process time to detect stopped container and initiate deletion
     time.sleep(5)
 
-    # Wait for second container to be deleted
-    # OVN networks may take longer for cleanup due to additional network teardown
+    # Wait for second container to be deleted (60s to account for OVN network teardown)
     container_name2 = calculate_container_name(workspace_dir, 1)
-    deletion_timeout2 = 60 if os.getenv("CI_NETWORK_TYPE") == "ovn" else 30
-    deleted = wait_for_specific_container_deletion(container_name2, timeout=deletion_timeout2)
+    deleted = wait_for_specific_container_deletion(container_name2, timeout=60)
 
     # Force cleanup if container still exists
     if not deleted:

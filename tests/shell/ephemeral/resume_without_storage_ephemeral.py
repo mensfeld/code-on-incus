@@ -9,7 +9,6 @@ Verifies that:
 5. The file ~/test.txt should NOT exist (only .claude is restored, not home dir)
 """
 
-import os
 import subprocess
 import time
 
@@ -114,15 +113,9 @@ def test_resume_does_not_persist_home_files(coi_binary, cleanup_containers, work
     # data, then starts container deletion
     time.sleep(5)
 
-    # Wait for container deletion
-    # OVN networks may take longer for cleanup due to additional network teardown
-    deletion_timeout = 60 if os.getenv("CI_NETWORK_TYPE") == "ovn" else 30
-    container_deleted = wait_for_specific_container_deletion(
-        container_name, timeout=deletion_timeout
-    )
-    assert container_deleted, (
-        f"Container {container_name} should be deleted (waited {deletion_timeout}s)"
-    )
+    # Wait for container deletion (60s to account for OVN network teardown)
+    container_deleted = wait_for_specific_container_deletion(container_name, timeout=60)
+    assert container_deleted, f"Container {container_name} should be deleted (waited 60s)"
 
     # === Phase 2: Resume and verify file is gone ===
 
@@ -185,11 +178,9 @@ def test_resume_does_not_persist_home_files(coi_binary, cleanup_containers, work
     # Give cleanup process time to detect stopped container and initiate deletion
     time.sleep(5)
 
-    # Wait for cleanup
-    # OVN networks may take longer for cleanup due to additional network teardown
+    # Wait for cleanup (60s to account for OVN network teardown)
     container_name2 = calculate_container_name(workspace_dir, 1)
-    deletion_timeout2 = 60 if os.getenv("CI_NETWORK_TYPE") == "ovn" else 30
-    wait_for_specific_container_deletion(container_name2, timeout=deletion_timeout2)
+    wait_for_specific_container_deletion(container_name2, timeout=60)
 
     # Force cleanup any remaining
     containers = get_container_list()
