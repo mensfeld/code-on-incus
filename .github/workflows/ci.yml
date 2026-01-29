@@ -268,11 +268,11 @@ jobs:
           sudo systemctl status incus --no-pager || true
           sudo journalctl -u incus -n 20 --no-pager || true
 
-          # Verify and restore OVN services after Incus restart
-          echo "=== Verifying OVN services after Incus restart ==="
+          # Verify and restore OVS/OVN services after Incus restart
+          echo "=== Verifying OVS/OVN services after Incus restart ==="
 
-          # Check and restart OVN services if needed
-          ovn_services=(
+          # Check and restart OVS/OVN services if needed (order matters!)
+          ovs_ovn_services=(
             "ovsdb-server"
             "ovs-vswitchd"
             "ovn-ovsdb-server-nb"
@@ -281,13 +281,40 @@ jobs:
             "ovn-controller"
           )
 
-          for service in "${ovn_services[@]}"; do
+          for service in "${ovs_ovn_services[@]}"; do
             if ! sudo systemctl is-active --quiet "$service"; then
               echo "Restarting $service..."
               sudo systemctl restart "$service"
               sleep 2
+            else
+              echo "✓ $service is active"
             fi
           done
+
+          # Wait for OVS socket to be ready (critical for Incus)
+          echo "Waiting for OVS socket..."
+          for i in {1..30}; do
+            if [ -S /run/openvswitch/db.sock ]; then
+              # Socket exists, test if it's responding
+              if sudo ovs-vsctl show >/dev/null 2>&1; then
+                echo "✓ OVS socket is ready and responding"
+                break
+              fi
+            fi
+            echo "Waiting for OVS socket... ($i/30)"
+            sleep 1
+          done
+
+          # Verify OVS is fully operational
+          echo "Testing OVS connectivity..."
+          if ! sudo ovs-vsctl show >/dev/null 2>&1; then
+            echo "ERROR: OVS not responding, restarting ovsdb-server..."
+            sudo systemctl restart ovsdb-server
+            sleep 3
+            sudo systemctl restart ovs-vswitchd
+            sleep 2
+          fi
+          sudo ovs-vsctl show
 
           # Wait for OVN sockets to exist
           echo "Waiting for OVN sockets..."
@@ -351,10 +378,12 @@ jobs:
             done
           fi
 
-          # Show OVN status for debugging
-          echo "=== OVN Status ==="
+          # Show status for debugging
+          echo "=== OVS/OVN Status ==="
+          sudo ovs-vsctl show || echo "WARNING: Cannot show OVS"
           sudo ovn-nbctl show || echo "WARNING: Cannot show OVN NB"
           ss -tlnp | grep -E "6641|6642" || echo "WARNING: TCP listeners not visible"
+          ls -la /run/openvswitch/ || echo "WARNING: OVS socket dir not accessible"
 
           # Initialize Incus with btrfs storage and OVN networking
           # Using preseed for explicit configuration
