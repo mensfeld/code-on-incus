@@ -145,32 +145,25 @@ jobs:
           # Install from Ubuntu's official repositories (reliable, stable)
           echo "Installing Incus from Ubuntu 24.04 repositories..."
           sudo apt-get update
-
-          # Install OVN packages only for OVN matrix
-          if [ "${{ matrix.network_type }}" = "ovn" ]; then
-            sudo apt-get install -y incus ovn-host ovn-central
-          else
-            sudo apt-get install -y incus
-          fi
+          sudo apt-get install -y incus
 
           # Verify installation
           incus version
           echo "✓ Using Incus from Ubuntu official repos (stable, reliable)"
 
-      - name: Configure OVN
+      - name: Install and configure MicroOVN
         if: matrix.network_type == 'ovn'
         run: |
-          # Configure OVN BEFORE Incus init (like master branch)
-          sudo ovn-nbctl set-connection ptcp:6641:127.0.0.1
-          sudo ovn-sbctl set-connection ptcp:6642:127.0.0.1
+          # Use MicroOVN snap (recommended by Canonical for CI)
+          # See: https://github.com/canonical/lxd-ci
+          echo "Installing MicroOVN snap..."
+          sudo snap install microovn --channel=latest/edge
 
-          sudo ovs-vsctl set open_vswitch . \
-            external_ids:ovn-remote=unix:/var/run/ovn/ovnsb_db.sock \
-            external_ids:ovn-encap-type=geneve \
-            external_ids:ovn-encap-ip=127.0.0.1
+          echo "Bootstrapping MicroOVN cluster..."
+          sudo microovn cluster bootstrap
 
-          echo "OVN configured:"
-          sudo ovs-vsctl get open_vswitch . external_ids
+          echo "MicroOVN status:"
+          sudo microovn status
 
       - name: Initialize Incus (OVN)
         if: matrix.network_type == 'ovn'
@@ -220,9 +213,9 @@ jobs:
       - name: Add OVN network
         if: matrix.network_type == 'ovn'
         run: |
-          # Now set OVN connection and create OVN network
+          # Set OVN connection for MicroOVN (uses SSL)
           echo "Setting OVN northbound connection..."
-          incus config set network.ovn.northbound_connection tcp:127.0.0.1:6641
+          incus config set network.ovn.northbound_connection ssl:127.0.0.1:6641
 
           echo "Creating OVN network..."
           incus network create ovn-net --type=ovn \
