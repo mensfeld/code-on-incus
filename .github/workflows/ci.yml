@@ -223,42 +223,56 @@ jobs:
         run: |
           echo "=== Checking OVS/OVN status ==="
           sudo ovs-vsctl show
-          sudo ovn-nbctl show || true
-          ls -la /run/openvswitch/ || true
-          ls -la /run/ovn/ || true
+          sudo ovn-nbctl show || echo "OVN NB show empty/failed"
+          ls -la /run/openvswitch/
+          ls -la /run/ovn/
 
-          # Set OVN northbound connection for Incus
+          # Test OVS connectivity first
+          echo "=== Testing OVS connectivity ==="
+          sudo ovs-vsctl list-br
+          echo "OVS databases:"
+          sudo ovsdb-client list-dbs unix:/run/openvswitch/db.sock || echo "OVS list-dbs failed"
+
+          # Test OVN connectivity
+          echo "=== Testing OVN connectivity ==="
+          sudo ovsdb-client list-dbs unix:/run/ovn/ovnnb_db.sock || echo "OVN NB list-dbs failed"
+          sudo ovn-nbctl --db=unix:/run/ovn/ovnnb_db.sock show || echo "OVN NB show failed"
+
+          # Restart Incus FIRST so it detects OVS
+          echo "=== Restarting Incus to detect OVS ==="
+          sudo systemctl restart incus
+          sleep 5
+          sudo chmod 666 /var/lib/incus/unix.socket
+
+          # Configure OVS integration bridge for OVN
+          echo "=== Configuring OVS integration bridge ==="
+          # Check if br-int exists (created by ovn-controller)
+          sudo ovs-vsctl br-exists br-int && echo "br-int exists" || echo "br-int missing"
+
+          # Now try to set OVN config
           echo "=== Configuring Incus OVN connection ==="
-          # Use unix socket path that OVN is listening on
           OVN_SOCK="/run/ovn/ovnnb_db.sock"
-          if [ -S "$OVN_SOCK" ]; then
-            echo "Found OVN socket: $OVN_SOCK"
-            sudo incus config set network.ovn.northbound_connection "unix:$OVN_SOCK"
-          else
-            echo "OVN socket not found at $OVN_SOCK, checking alternatives..."
-            ls -la /var/run/ovn/ 2>/dev/null || true
-            # Try /var/run/ovn path
-            if [ -S "/var/run/ovn/ovnnb_db.sock" ]; then
-              sudo incus config set network.ovn.northbound_connection "unix:/var/run/ovn/ovnnb_db.sock"
-            fi
-          fi
+          echo "Setting northbound_connection to unix:$OVN_SOCK"
+
+          # Set integration bridge first
+          sudo incus config set network.ovn.integration_bridge br-int || echo "integration_bridge set failed"
+
+          # Set OVN northbound connection
+          sudo incus config set network.ovn.northbound_connection "unix:$OVN_SOCK" || {
+            echo "Failed to set OVN config. Checking Incus OVS detection..."
+            sudo journalctl -u incus --no-pager -n 30 | grep -i "ovs\|ovn" || true
+            # Try alternative - see if Incus auto-detected OVN
+            echo "Trying to create OVN network directly..."
+          }
 
           # Verify settings
           echo "=== Verifying OVN config ==="
           sudo incus config get network.ovn.northbound_connection || echo "northbound_connection not set"
           sudo incus config show
 
-          # Restart Incus to apply OVN config
-          echo "Restarting Incus..."
-          sudo systemctl restart incus
-          sleep 5
-
-          # Verify socket permissions
-          sudo chmod 666 /var/lib/incus/unix.socket
-
           # Check Incus logs for OVN
           echo "=== Incus logs ==="
-          sudo journalctl -u incus --no-pager -n 20 | grep -i "ovn\|ovs" || echo "No OVN entries in logs"
+          sudo journalctl -u incus --no-pager -n 30 | grep -i "ovn\|ovs" || echo "No OVN entries in logs"
 
           # Test OVN directly
           echo "=== Testing OVN connection ==="
