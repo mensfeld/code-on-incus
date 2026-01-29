@@ -9,6 +9,7 @@ Verifies that:
 5. The file ~/test.txt should NOT exist (only .claude is restored, not home dir)
 """
 
+import os
 import subprocess
 import time
 
