@@ -116,41 +116,51 @@ jobs:
           echo "Checking Python code formatting..."
           ruff format --check tests/
 
-      - name: Install Incus and MicroOVN (snaps)
-        if: matrix.network_type == 'ovn'
-        run: |
-          echo "=== Installing Incus snap ==="
-          sudo snap install incus --channel=6.0/stable
-          sudo snap start incus
-
-          echo "=== Installing MicroOVN ==="
-          sudo snap install microovn --channel=latest/stable
-          sudo microovn cluster bootstrap
-          sleep 5
-
-          echo "=== MicroOVN status ==="
-          sudo microovn status
-
-          echo "=== MicroOVN OVS ==="
-          sudo microovn.ovs-vsctl show
-
-          # Create symlinks from MicroOVN to standard paths for Incus snap
-          echo "=== Setting up MicroOVN for Incus ==="
-
-          # Add incus group to allow socket access
-          sudo usermod -aG incus-admin $USER
-
-          incus version
-          echo "✓ Incus and MicroOVN installed"
-
-      - name: Install Incus (apt)
-        if: matrix.network_type != 'ovn'
+      - name: Install Incus
         run: |
           echo "Installing Incus from Ubuntu 24.04 repositories..."
           sudo apt-get update
           sudo apt-get install -y incus
           incus version
           echo "✓ Incus installed"
+
+      - name: Install OVS and OVN
+        if: matrix.network_type == 'ovn'
+        run: |
+          echo "=== Installing OVS and OVN from apt ==="
+          sudo apt-get install -y openvswitch-switch openvswitch-common \
+            ovn-central ovn-host ovn-common
+
+          echo "=== Starting OVS ==="
+          sudo systemctl enable --now openvswitch-switch
+          sleep 3
+
+          echo "=== Configuring OVN to listen on TCP ==="
+          # Start OVN central (northbound + southbound databases)
+          sudo systemctl enable --now ovn-central
+          sleep 3
+
+          # Configure OVN to listen on TCP (without SSL for simplicity)
+          sudo ovn-nbctl set-connection ptcp:6641:127.0.0.1
+          sudo ovn-sbctl set-connection ptcp:6642:127.0.0.1
+          sleep 2
+
+          # Start OVN host (controller)
+          sudo systemctl enable --now ovn-host
+          sleep 3
+
+          echo "=== OVS status ==="
+          sudo ovs-vsctl show
+
+          echo "=== OVN NB status ==="
+          sudo ovn-nbctl --db=tcp:127.0.0.1:6641 show || echo "OVN NB not ready"
+
+          echo "=== OVN NB connection ==="
+          sudo ovn-nbctl get-connection
+
+          # Verify TCP is listening
+          echo "=== Checking TCP listeners ==="
+          ss -tlnp | grep -E "6641|6642" || echo "TCP ports not listening"
 
       - name: Initialize Incus (OVN)
         if: matrix.network_type == 'ovn'
@@ -159,11 +169,7 @@ jobs:
           echo "root:1001:1" | sudo tee -a /etc/subuid
           echo "root:1001:1" | sudo tee -a /etc/subgid
 
-          # Get the MicroOVN NB socket path
-          NB_SOCK=$(sudo find /var/snap/microovn -name "ovnnb_db.sock" -type s 2>/dev/null | head -1)
-          echo "Found OVN NB socket: $NB_SOCK"
-
-          # Initialize Incus with OVN config (snap version integrates with MicroOVN)
+          # Initialize Incus with basic config (no OVN config in preseed)
           cat <<EOF | sudo incus admin init --preseed
           config:
             images.compression_algorithm: none
@@ -195,9 +201,7 @@ jobs:
             name: default
           EOF
 
-          sudo chmod 666 /var/lib/incus/unix.socket || true
-          # Snap uses different socket path
-          sudo chmod 666 /var/snap/incus/common/incus/unix.socket || true
+          sudo chmod 666 /var/lib/incus/unix.socket
 
           echo "✓ Incus initialized with bridge"
           incus network list
@@ -205,17 +209,26 @@ jobs:
       - name: Add OVN network
         if: matrix.network_type == 'ovn'
         run: |
-          echo "=== Checking MicroOVN status ==="
-          sudo microovn status
-          sudo microovn.ovs-vsctl show
-          sudo microovn.ovn-nbctl show || echo "OVN NB empty"
+          echo "=== Checking OVS/OVN status ==="
+          sudo ovs-vsctl show
+          sudo ovn-nbctl --db=tcp:127.0.0.1:6641 show || echo "OVN NB show failed"
 
-          # Check Incus config
-          echo "=== Incus config ==="
+          # Restart Incus after OVS/OVN are running
+          echo "=== Restarting Incus ==="
+          sudo systemctl restart incus
+          sleep 5
+          sudo chmod 666 /var/lib/incus/unix.socket
+
+          # Set OVN northbound connection via TCP
+          echo "=== Setting OVN connection ==="
+          sudo incus config set network.ovn.northbound_connection tcp:127.0.0.1:6641
+
+          # Verify
+          echo "=== Verifying OVN config ==="
           incus config show
 
-          # The Incus snap should auto-detect MicroOVN
-          echo "=== Testing OVN network creation ==="
+          # Create OVN network
+          echo "=== Creating OVN network ==="
           incus network create ovn-net --type=ovn \
             network=incusbr0 \
             bridge.mtu=1442 \
