@@ -239,6 +239,23 @@ jobs:
           sudo systemctl restart incus || true
           sleep 5
 
+          # Wait for Incus to be fully ready after restart
+          echo "Waiting for Incus daemon to be ready..."
+          for i in {1..30}; do
+            if incus info >/dev/null 2>&1; then
+              echo "✓ Incus daemon is ready"
+              break
+            fi
+            echo "Waiting for Incus... ($i/30)"
+            sleep 1
+          done
+
+          # Verify OVN is still available after Incus restart
+          echo "Verifying OVN availability after Incus restart..."
+          sudo systemctl is-active ovn-northd || (echo "ERROR: OVN northd stopped" && sudo systemctl restart ovn-northd && sleep 3)
+          sudo systemctl is-active ovn-controller || (echo "ERROR: OVN controller stopped" && sudo systemctl restart ovn-controller && sleep 3)
+          sudo ovn-nbctl show || echo "WARNING: OVN database not responsive"
+
           # Initialize Incus with btrfs storage and OVN networking
           # Using preseed for explicit configuration
           cat <<EOF | sudo incus admin init --preseed
