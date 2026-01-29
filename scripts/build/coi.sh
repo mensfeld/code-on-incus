@@ -98,9 +98,19 @@ install_nodejs() {
 create_code_user() {
     log "Creating code user..."
 
-    # Rename ubuntu user to code
-    usermod -l "$CODE_USER" -d "/home/$CODE_USER" -m ubuntu
-    groupmod -n "$CODE_USER" ubuntu
+    # Check if ubuntu user exists (Ubuntu 22.04 and earlier)
+    # If so, rename it to code. Otherwise, create code user from scratch.
+    if id ubuntu >/dev/null 2>&1; then
+        log "Found ubuntu user, renaming to $CODE_USER..."
+        usermod -l "$CODE_USER" -d "/home/$CODE_USER" -m ubuntu
+        groupmod -n "$CODE_USER" ubuntu
+    else
+        log "No ubuntu user found (Ubuntu 24.04+), creating $CODE_USER from scratch..."
+        # Create code user with specific UID
+        useradd -m -u "$CODE_UID" -s /bin/bash "$CODE_USER"
+    fi
+
+    # Create necessary directories
     mkdir -p "/home/$CODE_USER/.claude"
     mkdir -p "/home/$CODE_USER/.ssh"
     chmod 700 "/home/$CODE_USER/.ssh"
