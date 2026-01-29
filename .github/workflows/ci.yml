@@ -116,7 +116,8 @@ jobs:
           echo "Checking Python code formatting..."
           ruff format --check tests/
 
-      - name: Install Incus
+      - name: Install Incus (apt - for bridge mode)
+        if: matrix.network_type != 'ovn'
         run: |
           echo "Installing Incus from Ubuntu 24.04 repositories..."
           sudo apt-get update
@@ -124,52 +125,127 @@ jobs:
           incus version
           echo "✓ Incus installed"
 
+      - name: Build Incus from source (for OVN)
+        if: matrix.network_type == 'ovn'
+        run: |
+          echo "=== Installing build dependencies ==="
+          sudo apt-get update
+          sudo apt-get install -y \
+            acl attr autoconf automake dnsmasq-base git libacl1-dev \
+            libcap-dev liblxc1 liblxc-dev libsqlite3-dev libtool \
+            libudev-dev libuv1-dev make pkg-config rsync squashfs-tools \
+            tar tcl xz-utils ebtables libapparmor-dev libseccomp-dev \
+            libcap2-bin dnsmasq-base liblz4-dev libdbus-1-dev
+
+          # Install OVS/OVN packages
+          sudo apt-get install -y \
+            openvswitch-switch openvswitch-common \
+            ovn-central ovn-host ovn-common
+
+          echo "=== Cloning Incus source ==="
+          git clone --depth 1 --branch v6.21.0 https://github.com/lxc/incus.git /tmp/incus-src
+          cd /tmp/incus-src
+
+          echo "=== Building Incus ==="
+          make deps
+
+          # Set environment for building with custom cowsql/raft
+          export CGO_CFLAGS="-I$(go env GOPATH)/deps/raft/include/ -I$(go env GOPATH)/deps/cowsql/include/"
+          export CGO_LDFLAGS="-L$(go env GOPATH)/deps/raft/.libs -L$(go env GOPATH)/deps/cowsql/.libs/"
+          export LD_LIBRARY_PATH="$(go env GOPATH)/deps/raft/.libs/:$(go env GOPATH)/deps/cowsql/.libs/"
+          export CGO_LDFLAGS_ALLOW="(-Wl,-wrap,pthread_create)|(-Wl,-z,now)"
+
+          make
+
+          echo "=== Installing Incus ==="
+          # Copy binaries
+          sudo cp /tmp/incus-src/bin/* /usr/local/bin/
+
+          # Copy libraries
+          sudo cp $(go env GOPATH)/deps/raft/.libs/libraft.so* /usr/local/lib/
+          sudo cp $(go env GOPATH)/deps/cowsql/.libs/libcowsql.so* /usr/local/lib/
+          sudo ldconfig
+          sudo mkdir -p /var/lib/incus /var/log/incus
+
+          # Create incus user and group
+          sudo groupadd -f incus-admin
+          sudo usermod -aG incus-admin $USER
+
+          # Create systemd service
+          sudo tee /etc/systemd/system/incus.service > /dev/null << 'EOFSERVICE'
+          [Unit]
+          Description=Incus - Container and VM manager
+          After=network-online.target openvswitch-switch.service
+          Wants=network-online.target
+          Documentation=https://linuxcontainers.org/incus/docs/main/
+
+          [Service]
+          ExecStart=/usr/local/bin/incusd --group incus-admin
+          ExecStop=/usr/local/bin/incus admin shutdown
+          Type=simple
+          Restart=on-failure
+          LimitNOFILE=infinity
+          LimitNPROC=infinity
+          TasksMax=infinity
+
+          [Install]
+          WantedBy=multi-user.target
+          EOFSERVICE
+
+          sudo systemctl daemon-reload
+          sudo systemctl enable --now incus
+          sleep 5
+
+          sudo chmod 666 /var/lib/incus/unix.socket || true
+          incus version
+          echo "✓ Incus built from source"
+
       - name: Install OVS and OVN
         if: matrix.network_type == 'ovn'
         run: |
-          echo "=== Installing OVS and OVN from apt ==="
-          sudo apt-get install -y openvswitch-switch openvswitch-common \
-            ovn-central ovn-host ovn-common
-
           echo "=== Starting OVS ==="
           sudo systemctl enable --now openvswitch-switch
           sleep 3
 
-          echo "=== Configuring OVN to listen on TCP ==="
-          # Start OVN central (northbound + southbound databases)
+          echo "=== Configuring OVN ==="
           sudo systemctl enable --now ovn-central
           sleep 3
 
-          # Configure OVN to listen on TCP (without SSL for simplicity)
-          sudo ovn-nbctl set-connection ptcp:6641:127.0.0.1
-          sudo ovn-sbctl set-connection ptcp:6642:127.0.0.1
+          # Configure OVN to listen on unix socket
+          sudo ovn-nbctl set-connection punix:/run/ovn/ovnnb_db.sock
+          sudo ovn-sbctl set-connection punix:/run/ovn/ovnsb_db.sock
           sleep 2
 
-          # Start OVN host (controller)
           sudo systemctl enable --now ovn-host
           sleep 3
+
+          # Make sockets accessible
+          sudo chmod 666 /run/ovn/*.sock 2>/dev/null || true
+          sudo chmod 666 /run/openvswitch/*.sock 2>/dev/null || true
 
           echo "=== OVS status ==="
           sudo ovs-vsctl show
 
           echo "=== OVN NB status ==="
-          sudo ovn-nbctl --db=tcp:127.0.0.1:6641 show || echo "OVN NB not ready"
+          sudo ovn-nbctl show || echo "OVN NB not ready"
 
-          echo "=== OVN NB connection ==="
-          sudo ovn-nbctl get-connection
-
-          # Verify TCP is listening
-          echo "=== Checking TCP listeners ==="
-          ss -tlnp | grep -E "6641|6642" || echo "TCP ports not listening"
+          echo "=== Socket check ==="
+          ls -la /run/openvswitch/
+          ls -la /run/ovn/
 
       - name: Initialize Incus (OVN)
         if: matrix.network_type == 'ovn'
         run: |
-          # Configure subuid/subgid BEFORE first Incus start
+          # Configure subuid/subgid
           echo "root:1001:1" | sudo tee -a /etc/subuid
           echo "root:1001:1" | sudo tee -a /etc/subgid
 
-          # Initialize Incus with basic config (no OVN config in preseed)
+          # Restart Incus to pick up subuid/subgid
+          sudo systemctl restart incus
+          sleep 5
+          sudo chmod 666 /var/lib/incus/unix.socket
+
+          # Initialize Incus with preseed
           cat <<EOF | sudo incus admin init --preseed
           config:
             images.compression_algorithm: none
@@ -211,64 +287,30 @@ jobs:
         run: |
           echo "=== Checking OVS/OVN status ==="
           sudo ovs-vsctl show
-          sudo ovn-nbctl --db=tcp:127.0.0.1:6641 show || echo "OVN NB show failed"
-
-          # Check socket permissions and fix them
-          echo "=== Fixing OVS socket permissions ==="
-          sudo chmod 777 /run/openvswitch/
-          sudo chmod 666 /run/openvswitch/db.sock
+          sudo ovn-nbctl show || echo "OVN NB show failed"
           ls -la /run/openvswitch/
+          ls -la /run/ovn/
 
-          # Restart Incus to detect OVS
-          echo "=== Restarting Incus ==="
-          sudo systemctl restart incus
-          sleep 5
-          sudo chmod 666 /var/lib/incus/unix.socket
+          # Test OVS connectivity
+          echo "=== Testing OVS connectivity ==="
+          sudo ovsdb-client list-dbs unix:/run/openvswitch/db.sock
 
-          # Check Incus info for OVN support
-          echo "=== Incus info ==="
-          incus info | head -30
+          # Set OVN northbound connection
+          echo "=== Configuring Incus OVN connection ==="
+          sudo incus config set network.ovn.northbound_connection unix:/run/ovn/ovnnb_db.sock
 
-          # Try creating OVN network directly WITHOUT setting config first
-          # Maybe Incus will auto-detect OVN from the running services
-          echo "=== Attempting to create OVN network directly ==="
+          # Verify config
+          echo "=== Incus config ==="
+          incus config show
+
+          # Create OVN network
+          echo "=== Creating OVN network ==="
           incus network create ovn-net --type=ovn \
             network=incusbr0 \
             bridge.mtu=1442 \
             ipv4.address=10.215.220.1/24 \
             ipv4.nat=true \
-            ipv6.address=none || {
-            echo "Direct creation failed. Checking if OVN is detected..."
-
-            # Check what Incus thinks about OVN
-            incus info | grep -i ovn || echo "No OVN info in incus info"
-
-            # Check if maybe we need different OVS external-ids config
-            echo "=== Setting OVS external-ids for OVN ==="
-            sudo ovs-vsctl set open_vswitch . \
-              external-ids:ovn-encap-type=geneve \
-              external-ids:ovn-encap-ip=127.0.0.1 \
-              external-ids:ovn-remote=tcp:127.0.0.1:6642 \
-              external-ids:system-id=$(hostname)
-
-            # Restart OVN controller to pick up changes
-            sudo systemctl restart ovn-host || true
-            sleep 3
-
-            # Restart Incus again
-            sudo systemctl restart incus
-            sleep 5
-            sudo chmod 666 /var/lib/incus/unix.socket
-
-            # Try again
-            echo "=== Retrying OVN network creation ==="
-            incus network create ovn-net --type=ovn \
-              network=incusbr0 \
-              bridge.mtu=1442 \
-              ipv4.address=10.215.220.1/24 \
-              ipv4.nat=true \
-              ipv6.address=none
-          }
+            ipv6.address=none
 
           # Update default profile to use OVN network
           incus profile device remove default eth0
