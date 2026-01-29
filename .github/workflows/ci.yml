@@ -157,57 +157,49 @@ jobs:
           incus version
           echo "✓ Using Incus from Ubuntu official repos (stable, reliable)"
 
-      - name: Start and configure OVN
+      - name: Initialize Incus (OVN)
         if: matrix.network_type == 'ovn'
         run: |
-          echo "=== Starting OVN and OVS services ==="
+          # Configure subuid/subgid BEFORE starting Incus (no restart needed)
+          echo "root:1001:1" | sudo tee -a /etc/subuid
+          echo "root:1001:1" | sudo tee -a /etc/subgid
 
-          # Start base OVS services (database and switch daemon)
-          sudo systemctl start ovsdb-server
-          sudo systemctl start ovs-vswitchd
+          # Initialize Incus with basic setup (like users do)
+          sudo incus admin init --auto --storage-backend=btrfs --storage-create-loop=15
+
+          # Allow access without re-login
+          sudo chmod 666 /var/lib/incus/unix.socket
+          sudo usermod -aG incus-admin $USER
+
+          # Configure Incus settings
+          incus config set images.compression_algorithm none
+
+          echo "✓ Incus initialized"
+          incus network list
+          incus storage list
+
+      - name: Configure OVN networking
+        if: matrix.network_type == 'ovn'
+        run: |
+          # Follow README OVN setup steps exactly
+          echo "=== Configuring OVN (following README steps) ==="
+
+          # Ensure OVN services are running (may be auto-started on install)
+          sudo systemctl start ovsdb-server ovs-vswitchd || true
+          sudo systemctl start ovn-ovsdb-server-nb ovn-ovsdb-server-sb || true
+          sudo systemctl start ovn-northd ovn-controller || true
           sleep 3
 
-          # Start OVN database servers
-          sudo systemctl start ovn-ovsdb-server-nb
-          sudo systemctl start ovn-ovsdb-server-sb
-          sleep 3
-
-          # Start OVN northd (central control daemon)
-          sudo systemctl start ovn-northd
-          sleep 2
-
-          # Start OVN controller (local host daemon)
-          sudo systemctl start ovn-controller
-          sleep 2
-
-          echo "=== Verifying all services are active ==="
-          services=(
-            "ovsdb-server"
-            "ovs-vswitchd"
-            "ovn-ovsdb-server-nb"
-            "ovn-ovsdb-server-sb"
-            "ovn-northd"
-            "ovn-controller"
-          )
-
-          for service in "${services[@]}"; do
-            if sudo systemctl is-active --quiet "$service"; then
-              echo "✓ $service is active"
-            else
-              echo "✗ ERROR: $service is NOT active"
-              sudo systemctl status "$service" --no-pager || true
-              exit 1
-            fi
+          # Verify services
+          for svc in ovsdb-server ovs-vswitchd ovn-northd ovn-controller; do
+            sudo systemctl is-active --quiet $svc && echo "✓ $svc running" || echo "✗ $svc not running"
           done
 
-          echo "=== Verifying OVN sockets exist ==="
-          ls -la /var/run/ovn/*.sock || (echo "ERROR: OVN sockets not found" && exit 1)
+          # Step 2: Configure OVN to listen on TCP (required for Incus integration)
+          sudo ovn-nbctl set-connection ptcp:6641:127.0.0.1
+          sudo ovn-sbctl set-connection ptcp:6642:127.0.0.1
 
-          echo "=== Testing OVN database connectivity ==="
-          sudo ovn-nbctl show || (echo "ERROR: Cannot connect to OVN northbound database" && exit 1)
-
-          echo "=== Configuring OVN ==="
-          # Configure Open vSwitch to connect to OVN via unix socket
+          # Step 3: Configure Open vSwitch to connect to OVN (CRITICAL STEP)
           sudo ovs-vsctl set open_vswitch . \
             external_ids:ovn-remote=unix:/var/run/ovn/ovnsb_db.sock \
             external_ids:ovn-encap-type=geneve \
@@ -217,163 +209,10 @@ jobs:
           echo "OVS external IDs:"
           sudo ovs-vsctl get open_vswitch . external_ids
 
-          # Make OVN sockets accessible
-          sudo chmod 666 /var/run/ovn/ovnnb_db.sock
-          sudo chmod 666 /var/run/ovn/ovnsb_db.sock
-
-          echo "✓ OVN fully configured and ready for Incus"
-
-      - name: Initialize Incus (OVN)
-        if: matrix.network_type == 'ovn'
-        run: |
-          # Wait for Incus service to be ready
-          sudo systemctl start incus.socket || true
-          sleep 5
-
-          # Configure subuid/subgid for UID mapping (needed for raw.idmap)
-          # Map runner UID 1001 to be available for container remapping
-          echo "root:1001:1" | sudo tee -a /etc/subuid
-          echo "root:1001:1" | sudo tee -a /etc/subgid
-
-          # Restart Incus to pick up subuid/subgid changes
-          echo "Restarting Incus service..."
-          sudo systemctl restart incus
-
-          # Wait for systemd service to be fully active
-          echo "Waiting for Incus systemd service..."
-          for i in {1..30}; do
-            if sudo systemctl is-active --quiet incus; then
-              echo "✓ Incus systemd service is active"
-              break
-            fi
-            echo "Waiting for systemd service... ($i/30)"
-            sleep 1
-          done
-
-          # Additional wait for socket to be ready
-          sleep 3
-
-          # Wait for Incus API to be responsive
-          echo "Waiting for Incus API to be ready..."
-          for i in {1..30}; do
-            if sudo incus info >/dev/null 2>&1; then
-              echo "✓ Incus API is ready"
-              break
-            fi
-            echo "Waiting for Incus API... ($i/30)"
-            sleep 1
-          done
-
-          # Show status for debugging
-          sudo systemctl status incus --no-pager || true
-          sudo journalctl -u incus -n 20 --no-pager || true
-
-          # Verify and restore OVS/OVN services after Incus restart
-          echo "=== Verifying OVS/OVN services after Incus restart ==="
-
-          # Check and restart OVS/OVN services if needed (order matters!)
-          ovs_ovn_services=(
-            "ovsdb-server"
-            "ovs-vswitchd"
-            "ovn-ovsdb-server-nb"
-            "ovn-ovsdb-server-sb"
-            "ovn-northd"
-            "ovn-controller"
-          )
-
-          for service in "${ovs_ovn_services[@]}"; do
-            if ! sudo systemctl is-active --quiet "$service"; then
-              echo "Restarting $service..."
-              sudo systemctl restart "$service"
-              sleep 2
-            else
-              echo "✓ $service is active"
-            fi
-          done
-
-          # Wait for OVS socket to be ready (critical for Incus)
-          echo "Waiting for OVS socket..."
-          for i in {1..30}; do
-            if [ -S /run/openvswitch/db.sock ]; then
-              # Socket exists, test if it's responding
-              if sudo ovs-vsctl show >/dev/null 2>&1; then
-                echo "✓ OVS socket is ready and responding"
-                break
-              fi
-            fi
-            echo "Waiting for OVS socket... ($i/30)"
-            sleep 1
-          done
-
-          # Verify OVS is fully operational
-          echo "Testing OVS connectivity..."
-          if ! sudo ovs-vsctl show >/dev/null 2>&1; then
-            echo "ERROR: OVS not responding, restarting ovsdb-server..."
-            sudo systemctl restart ovsdb-server
-            sleep 3
-            sudo systemctl restart ovs-vswitchd
-            sleep 2
-          fi
-          sudo ovs-vsctl show
-
-          # Wait for OVN sockets to exist
-          echo "Waiting for OVN sockets..."
-          for i in {1..30}; do
-            if ls /var/run/ovn/*.sock >/dev/null 2>&1; then
-              echo "✓ OVN sockets are ready"
-              break
-            fi
-            echo "Waiting for OVN sockets... ($i/30)"
-            sleep 1
-          done
-
-          # Wait for OVN northbound database to be responsive
-          echo "Waiting for OVN northbound database..."
-          for i in {1..30}; do
-            if sudo ovn-nbctl --timeout=3 show >/dev/null 2>&1; then
-              echo "✓ OVN northbound database is ready"
-              break
-            fi
-            echo "Waiting for OVN NB database... ($i/30)"
-            sleep 1
-          done
-
-          # Show status for debugging
-          echo "=== OVS/OVN Status ==="
-          sudo ovs-vsctl show || echo "WARNING: Cannot show OVS"
-          sudo ovn-nbctl show || echo "WARNING: Cannot show OVN NB"
-          ls -la /var/run/ovn/*.sock || echo "WARNING: OVN sockets not accessible"
-          ls -la /run/openvswitch/ || echo "WARNING: OVS socket dir not accessible"
-
-          # Initialize Incus step-by-step (more reliable than preseed)
-          echo "=== Initializing Incus ==="
-
-          # Fix OVS socket permissions so Incus can connect
-          sudo chmod 666 /run/openvswitch/db.sock
-
-          # Minimal init (less auto-detection than --auto)
-          sudo incus admin init --minimal
-
-          # Create storage pool manually
-          echo "Creating storage pool..."
-          sudo incus storage create default btrfs size=15GiB
-
-          # Allow access without re-login
-          sudo chmod 666 /var/lib/incus/unix.socket
-          sudo usermod -aG incus-admin $USER
-
-          # Configure Incus settings
-          echo "Configuring Incus..."
-          incus config set images.compression_algorithm none
-
-          # Tell Incus where to find OVN via unix socket (same as local setup)
-          echo "Configuring OVN connection..."
-          incus config set network.ovn.northbound_connection unix:/var/run/ovn/ovnnb_db.sock
-
-          # Configure the default bridge for OVN uplink
-          echo "Configuring bridge network for OVN uplink..."
-          # Delete auto-created network and recreate with OVN uplink settings
+          # Step 5: Delete existing default bridge
           incus network delete incusbr0 || true
+
+          # Step 6: Create bridge with OVN ranges (using incusbr0 name for consistency)
           incus network create incusbr0 \
             ipv4.address=10.47.62.1/24 \
             ipv4.nat=true \
@@ -381,8 +220,10 @@ jobs:
             ipv4.ovn.ranges=10.47.62.100-10.47.62.200 \
             ipv6.address=none
 
-          # Create OVN network
-          echo "Creating OVN network..."
+          # Step 7: Configure project to allow bridge as OVN uplink
+          incus project set default restricted.networks.uplinks=incusbr0
+
+          # Step 8: Create OVN network
           incus network create ovn-net --type=ovn \
             network=incusbr0 \
             bridge.mtu=1442 \
@@ -390,8 +231,7 @@ jobs:
             ipv4.nat=true \
             ipv6.address=none
 
-          # Update default profile to use OVN network
-          echo "Updating default profile..."
+          # Step 9: Update default profile to use OVN network
           incus profile device remove default eth0 || true
           incus profile device add default eth0 nic network=ovn-net
 
