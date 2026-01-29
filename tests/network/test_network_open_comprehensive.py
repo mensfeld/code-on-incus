@@ -267,17 +267,18 @@ mode = "open"
 
         output_text = result.stderr.lower()
 
-        # Check if we're in a cloud environment with real metadata service
-        if result.returncode == 0 and result.stderr.strip():
-            # Real metadata service exists (cloud environment)
-            # Skip test since we can't distinguish between ACL allowing and cloud service existing
-            pytest.skip("Cloud metadata service exists in CI environment")
-
-        # Connection will fail (timeout), but NOT due to ACL rejection
-        # Should NOT see immediate rejection (which would indicate ACL blocking)
-        assert "connection refused" not in output_text or "timed out" in output_text, (
-            f"Metadata endpoint appears to be blocked by ACL in OPEN mode: {result.stderr}"
-        )
+        # In OPEN mode, either outcome is acceptable:
+        # - Success (returncode == 0): Cloud environment with real metadata service
+        # - Timeout/failure: Local environment with no metadata service
+        # Both are valid - we just verify it's not being blocked by ACL with immediate rejection
+        if result.returncode == 0:
+            # Metadata service exists and is reachable (cloud environment) - this is OK in OPEN mode
+            pass
+        else:
+            # Connection failed (local environment) - should be timeout, not ACL rejection
+            assert "connection refused" not in output_text or "timed out" in output_text, (
+                f"Metadata endpoint appears to be blocked by ACL in OPEN mode: {result.stderr}"
+            )
 
     finally:
         os.unlink(config_file)
