@@ -140,48 +140,33 @@ jobs:
           echo "Checking Python code formatting..."
           ruff format --check tests/
 
-      - name: Install Incus
+      - name: Install Incus and OVN
         run: |
-          # Install from Ubuntu's official repositories (reliable, stable)
+          # Install from Ubuntu's official repositories
           echo "Installing Incus from Ubuntu 24.04 repositories..."
           sudo apt-get update
-          sudo apt-get install -y incus
 
-          # Verify installation
+          if [ "${{ matrix.network_type }}" = "ovn" ]; then
+            sudo apt-get install -y incus ovn-host ovn-central
+          else
+            sudo apt-get install -y incus
+          fi
+
           incus version
-          echo "✓ Using Incus from Ubuntu official repos (stable, reliable)"
+          echo "✓ Incus installed"
 
-      - name: Install and configure MicroOVN
+      - name: Configure OVN (deb packages)
         if: matrix.network_type == 'ovn'
         run: |
-          # Use MicroOVN snap (recommended by Canonical for CI)
-          # See: https://github.com/canonical/lxd-ci
-          echo "Installing MicroOVN snap..."
-          sudo snap install microovn --channel=latest/edge
+          # Configure OVS to connect to OVN (like Canonical lxd-ci does)
+          # Do NOT set network.ovn.northbound_connection - let Incus auto-detect
+          sudo ovs-vsctl set open_vswitch . \
+            external_ids:ovn-remote=unix:/var/run/ovn/ovnsb_db.sock \
+            external_ids:ovn-encap-type=geneve \
+            external_ids:ovn-encap-ip=127.0.0.1
 
-          echo "Bootstrapping MicroOVN cluster..."
-          sudo microovn cluster bootstrap
-
-          echo "MicroOVN status:"
-          sudo microovn status
-
-          # Find where MicroOVN puts OVS socket
-          echo "Looking for OVS sockets..."
-          sudo find /var/snap/microovn -name "*.sock" 2>/dev/null || true
-          sudo find /run -name "db.sock" 2>/dev/null || true
-          sudo find /var/run -name "db.sock" 2>/dev/null || true
-
-          # Create symlink so apt-installed Incus can find OVS socket
-          sudo mkdir -p /run/openvswitch
-          if [ -S /var/snap/microovn/common/run/openvswitch/db.sock ]; then
-            sudo ln -sf /var/snap/microovn/common/run/openvswitch/db.sock /run/openvswitch/db.sock
-          elif [ -S /var/snap/microovn/common/data/run/openvswitch/db.sock ]; then
-            sudo ln -sf /var/snap/microovn/common/data/run/openvswitch/db.sock /run/openvswitch/db.sock
-          else
-            echo "ERROR: Could not find MicroOVN OVS socket"
-            sudo find /var/snap/microovn -type s 2>/dev/null || true
-          fi
-          ls -la /run/openvswitch/ || true
+          echo "OVS configured:"
+          sudo ovs-vsctl get open_vswitch . external_ids
 
       - name: Initialize Incus (OVN)
         if: matrix.network_type == 'ovn'
@@ -231,11 +216,9 @@ jobs:
       - name: Add OVN network
         if: matrix.network_type == 'ovn'
         run: |
-          # Set OVN connection for MicroOVN (uses SSL)
-          echo "Setting OVN northbound connection..."
-          incus config set network.ovn.northbound_connection ssl:127.0.0.1:6641
-
-          echo "Creating OVN network..."
+          # Do NOT set network.ovn.northbound_connection - let Incus auto-detect via unix socket
+          # This is how Canonical's lxd-ci does it for deb packages
+          echo "Creating OVN network (auto-detect OVN connection)..."
           incus network create ovn-net --type=ovn \
             network=incusbr0 \
             bridge.mtu=1442 \
