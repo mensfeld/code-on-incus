@@ -480,20 +480,47 @@ func setupCLIConfig(mgr *container.Manager, hostCLIConfigPath, homeDir string, t
 		}
 	}
 
-	// Get sandbox settings from tool and create/update settings.json if needed
+	// Get sandbox settings from tool and merge into settings.json if needed
 	sandboxSettings := t.GetSandboxSettings()
 	if len(sandboxSettings) > 0 {
 		settingsPath := filepath.Join(stateDir, "settings.json")
-		// Build JSON from settings map using helper with pretty printing
-		settingsBytes, err := json.MarshalIndent(sandboxSettings, "", "  ")
+		logger("Merging sandbox settings into settings.json...")
+		settingsJSON, err := buildJSONFromSettings(sandboxSettings)
 		if err != nil {
-			return fmt.Errorf("failed to build JSON from sandbox settings: %w", err)
-		}
+			logger(fmt.Sprintf("Warning: Failed to build JSON from settings: %v", err))
+		} else {
+			// Check if settings.json exists in container
+			checkCmd := fmt.Sprintf("test -f %s && echo exists || echo missing", settingsPath)
+			checkResult, err := mgr.ExecCommand(checkCmd, container.ExecCommandOptions{Capture: true})
 
-		if err := mgr.CreateFile(settingsPath, string(settingsBytes)+"\n"); err != nil {
-			return fmt.Errorf("failed to create settings.json: %w", err)
+			if err != nil || strings.TrimSpace(checkResult) == "missing" {
+				// File doesn't exist, create it with sandbox settings
+				logger("settings.json not found in container, creating with sandbox settings")
+				settingsBytes, err := json.MarshalIndent(sandboxSettings, "", "  ")
+				if err != nil {
+					return fmt.Errorf("failed to marshal sandbox settings: %w", err)
+				}
+				if err := mgr.CreateFile(settingsPath, string(settingsBytes)+"\n"); err != nil {
+					return fmt.Errorf("failed to create settings.json: %w", err)
+				}
+			} else {
+				// File exists, merge sandbox settings into it
+				logger("Merging sandbox settings into existing settings.json")
+				// Properly escape the JSON string for shell command
+				escapedJSON := strings.ReplaceAll(settingsJSON, "'", "'\"'\"'")
+				injectCmd := fmt.Sprintf(
+					`python3 -c 'import json; f=open("%s","r+"); d=json.load(f); updates=json.loads('"'"'%s'"'"'); d.update(updates); f.seek(0); json.dump(d,f,indent=2); f.truncate()'`,
+					settingsPath,
+					escapedJSON,
+				)
+				if _, err := mgr.ExecCommand(injectCmd, container.ExecCommandOptions{Capture: true}); err != nil {
+					logger(fmt.Sprintf("Warning: Failed to inject settings into settings.json: %v", err))
+				} else {
+					logger("Successfully merged sandbox settings into settings.json")
+				}
+			}
 		}
-		logger(fmt.Sprintf("%s config copied and sandbox settings injected in settings.json", t.Name()))
+		logger(fmt.Sprintf("%s config copied and sandbox settings merged into settings.json", t.Name()))
 	} else {
 		logger(fmt.Sprintf("%s config copied (no sandbox settings needed)", t.Name()))
 	}
