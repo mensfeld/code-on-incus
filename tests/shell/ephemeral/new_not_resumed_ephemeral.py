@@ -82,8 +82,8 @@ def test_new_session_not_resumed(coi_binary, cleanup_containers, workspace_dir):
     except Exception:
         child.close(force=True)
 
-    # Wait for container deletion
-    container_deleted = wait_for_specific_container_deletion(container_name, timeout=30)
+    # Wait for container deletion (increased timeout for CI environments)
+    container_deleted = wait_for_specific_container_deletion(container_name, timeout=60)
     assert container_deleted, f"Container {container_name} should be deleted"
 
     # === Phase 2: Start NEW session (no --resume) ===

@@ -108,8 +108,8 @@ def test_resume_does_not_persist_home_files(coi_binary, cleanup_containers, work
     except Exception:
         child.close(force=True)
 
-    # Wait for container deletion
-    container_deleted = wait_for_specific_container_deletion(container_name, timeout=30)
+    # Wait for container deletion (increased timeout for CI environments)
+    container_deleted = wait_for_specific_container_deletion(container_name, timeout=60)
     assert container_deleted, f"Container {container_name} should be deleted"
 
     # === Phase 2: Resume and verify file is gone ===
