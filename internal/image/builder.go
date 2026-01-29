@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -11,7 +12,7 @@ import (
 )
 
 const (
-	BaseImage      = "images:ubuntu/24.04"
+	BaseImage      = "ubuntu-24.04" // Local alias (auto-downloaded from Ubuntu CDN if not present)
 	CoiAlias       = "coi"
 	BuildContainer = "coi-build"
 )
@@ -78,6 +79,12 @@ func (b *Builder) Build() *BuildResult {
 	result.VersionAlias = fmt.Sprintf("%s-%s", b.opts.AliasName, time.Now().Format("20060102-150405"))
 	b.opts.Logger(fmt.Sprintf("Building Incus image '%s'...", result.VersionAlias))
 
+	// Ensure base image is available
+	if err := b.ensureBaseImage(); err != nil {
+		result.Error = err
+		return result
+	}
+
 	// Execute build steps
 	if err := b.launchBuildContainer(); err != nil {
 		result.Error = err
@@ -119,6 +126,81 @@ func (b *Builder) Build() *BuildResult {
 	b.opts.Logger(fmt.Sprintf("Image '%s' built successfully! (version: %s)", b.opts.AliasName, result.VersionAlias))
 	result.Success = true
 	return result
+}
+
+// ensureBaseImage ensures the base Ubuntu image is available locally,
+// downloading it from Ubuntu's official CDN if necessary.
+func (b *Builder) ensureBaseImage() error {
+	// Check if base image already exists locally
+	exists, err := container.ImageExists(b.opts.BaseImage)
+	if err != nil {
+		return fmt.Errorf("failed to check base image: %w", err)
+	}
+
+	if exists {
+		b.opts.Logger(fmt.Sprintf("Using existing base image: %s", b.opts.BaseImage))
+		return nil
+	}
+
+	// Image doesn't exist - download from Ubuntu's CDN
+	b.opts.Logger("Base Ubuntu image not found locally, downloading from Ubuntu's official CDN...")
+	b.opts.Logger("(This may take a few moments on first run)")
+
+	// Download Ubuntu 24.04 cloud image directly from Ubuntu
+	version := "24.04"
+	codename := "noble"
+	baseURL := fmt.Sprintf("https://cloud-images.ubuntu.com/releases/%s/release", version)
+	rootfsFile := fmt.Sprintf("ubuntu-%s-server-cloudimg-amd64-root.tar.xz", version)
+
+	// Create temporary directory for download
+	tmpDir := "/tmp/coi-ubuntu-download"
+	os.RemoveAll(tmpDir) // Clean up any previous failed attempts
+	if err := os.MkdirAll(tmpDir, 0755); err != nil {
+		return fmt.Errorf("failed to create temp directory: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Download rootfs using system curl
+	b.opts.Logger(fmt.Sprintf("Downloading Ubuntu %s rootfs from Ubuntu's CDN...", version))
+	rootfsPath := fmt.Sprintf("%s/rootfs.tar.xz", tmpDir)
+	downloadURL := fmt.Sprintf("%s/%s", baseURL, rootfsFile)
+
+	// Use exec.Command to run curl on the host
+	cmd := exec.Command("curl", "-L", "-f", "-o", rootfsPath, downloadURL)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to download Ubuntu image from %s: %w\nOutput: %s", downloadURL, err, string(output))
+	}
+
+	// Create metadata
+	b.opts.Logger("Creating image metadata...")
+	metadata := fmt.Sprintf(`architecture: x86_64
+creation_date: %d
+properties:
+  description: Ubuntu %s (%s)
+  os: Ubuntu
+  release: %s
+`, time.Now().Unix(), version, codename, codename)
+
+	metadataPath := fmt.Sprintf("%s/metadata.yaml", tmpDir)
+	if err := os.WriteFile(metadataPath, []byte(metadata), 0644); err != nil {
+		return fmt.Errorf("failed to create metadata: %w", err)
+	}
+
+	// Create metadata tarball
+	metadataTarPath := fmt.Sprintf("%s/metadata.tar.gz", tmpDir)
+	cmd = exec.Command("tar", "-czf", metadataTarPath, "-C", tmpDir, "metadata.yaml")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to create metadata tarball: %w", err)
+	}
+
+	// Import image into Incus
+	b.opts.Logger("Importing image into Incus...")
+	if err := container.IncusExec("image", "import", metadataTarPath, rootfsPath, "--alias", b.opts.BaseImage); err != nil {
+		return fmt.Errorf("failed to import Ubuntu image: %w", err)
+	}
+
+	b.opts.Logger(fmt.Sprintf("✓ Successfully downloaded and imported Ubuntu %s", version))
+	return nil
 }
 
 // launchBuildContainer launches the build container from base image

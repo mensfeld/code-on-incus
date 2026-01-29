@@ -450,7 +450,10 @@ jobs:
           echo "Importing image into Incus..."
           incus image import metadata.tar.gz ubuntu-rootfs.tar.xz --alias ubuntu-24.04
 
-          echo "✓ Successfully imported Ubuntu 22.04 image"
+          echo "Removing images: remote to prevent fallback to images.linuxcontainers.org..."
+          incus remote remove images || true
+
+          echo "✓ Successfully imported Ubuntu 24.04 image"
           incus image list
 
           # Export image for caching

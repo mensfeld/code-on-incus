@@ -16,7 +16,7 @@ import (
 )
 
 const (
-	DefaultImage = "images:ubuntu/24.04"
+	DefaultImage = "ubuntu-24.04" // Local alias (auto-downloaded from Ubuntu CDN if not present)
 	CoiImage     = "coi"
 )
 
