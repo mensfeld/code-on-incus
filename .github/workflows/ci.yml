@@ -120,6 +120,11 @@ jobs:
 
           # Configure firewalld to allow forwarding (masquerade enables NAT)
           sudo firewall-cmd --permanent --add-masquerade
+
+          # Add incusbr0 to the trusted zone so container DHCP/DNS works
+          # This must be done BEFORE Incus creates the bridge
+          sudo firewall-cmd --permanent --zone=trusted --add-interface=incusbr0
+
           sudo firewall-cmd --reload
 
           # Verify firewalld is running
