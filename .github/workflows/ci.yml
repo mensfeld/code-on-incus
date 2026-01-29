@@ -57,27 +57,15 @@ jobs:
           go tool cover -func=coverage.out | tail -1  # Show total coverage
 
   # Integration tests run in parallel with unit tests (after build passes)
-  # Matrix runs tests in both OVN and bridge-only environments
-  # Split into 6 test groups for parallel execution:
-  #   - shell-ephemeral (15 tests) × 2 network types = 2 jobs
-  #   - shell-persistent (9 tests) × 2 network types = 2 jobs
-  #   - network (10 tests) × OVN only = 1 job
-  #   - container-file (54 tests) × 2 network types = 2 jobs
-  #   - core (83 tests) × 2 network types = 2 jobs
-  #   - misc (70 tests) × 2 network types = 2 jobs
-  # Total: 11 parallel jobs instead of 2 sequential
-  # Result: ~15-20min total (down from 37min), 2x faster CI feedback
+  # Uses bridge networking with firewalld for network isolation
   integration:
-    name: Integration Tests (${{ matrix.test_group.name }}, ${{ matrix.network_type }})
+    name: Integration Tests (${{ matrix.test_group.name }})
     runs-on: ubuntu-24.04
     needs: build
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        # TEMP: Only test OVN setup - will restore full matrix later
-        network_type:
-          - ovn
         test_group:
           - name: core
             path: tests/list tests/attach tests/tmux tests/kill tests/run tests/persist tests/build
@@ -116,212 +104,29 @@ jobs:
           echo "Checking Python code formatting..."
           ruff format --check tests/
 
-      - name: Install Incus (apt - for bridge mode)
-        if: matrix.network_type != 'ovn'
+      - name: Install Incus
         run: |
           echo "Installing Incus from Ubuntu 24.04 repositories..."
           sudo apt-get update
           sudo apt-get install -y incus
           incus version
-          echo "✓ Incus installed"
+          echo "Incus installed"
 
-      - name: Build Incus from source (for OVN)
-        if: matrix.network_type == 'ovn'
+      - name: Setup Firewalld
         run: |
-          echo "=== Installing build dependencies ==="
-          sudo apt-get update
-          sudo apt-get install -y \
-            acl attr autoconf automake dnsmasq-base git libacl1-dev \
-            libcap-dev liblxc1 liblxc-dev libsqlite3-dev libtool \
-            libudev-dev libuv1-dev make pkg-config rsync squashfs-tools \
-            tar tcl xz-utils ebtables libapparmor-dev libseccomp-dev \
-            libcap2-bin dnsmasq-base liblz4-dev libdbus-1-dev
+          echo "Installing and configuring firewalld..."
+          sudo apt-get install -y firewalld
+          sudo systemctl enable --now firewalld
 
-          # Install OVS/OVN packages
-          sudo apt-get install -y \
-            openvswitch-switch openvswitch-common \
-            ovn-central ovn-host ovn-common
+          # Configure firewalld to allow forwarding (masquerade enables NAT)
+          sudo firewall-cmd --permanent --add-masquerade
+          sudo firewall-cmd --reload
 
-          echo "=== Cloning Incus source ==="
-          git clone --depth 1 --branch v6.21.0 https://github.com/lxc/incus.git /tmp/incus-src
-          cd /tmp/incus-src
+          # Verify firewalld is running
+          sudo firewall-cmd --state
+          echo "Firewalld configured"
 
-          echo "=== Building Incus ==="
-          make deps
-
-          # Set environment for building with custom cowsql/raft
-          export CGO_CFLAGS="-I$(go env GOPATH)/deps/raft/include/ -I$(go env GOPATH)/deps/cowsql/include/"
-          export CGO_LDFLAGS="-L$(go env GOPATH)/deps/raft/.libs -L$(go env GOPATH)/deps/cowsql/.libs/"
-          export LD_LIBRARY_PATH="$(go env GOPATH)/deps/raft/.libs/:$(go env GOPATH)/deps/cowsql/.libs/"
-          export CGO_LDFLAGS_ALLOW="(-Wl,-wrap,pthread_create)|(-Wl,-z,now)"
-
-          make
-
-          echo "=== Installing Incus ==="
-          # Copy binaries
-          sudo cp /tmp/incus-src/bin/* /usr/local/bin/
-
-          # Copy libraries
-          sudo cp $(go env GOPATH)/deps/raft/.libs/libraft.so* /usr/local/lib/
-          sudo cp $(go env GOPATH)/deps/cowsql/.libs/libcowsql.so* /usr/local/lib/
-          sudo ldconfig
-          sudo mkdir -p /var/lib/incus /var/log/incus
-
-          # Create incus user and group
-          sudo groupadd -f incus-admin
-          sudo usermod -aG incus-admin $USER
-
-          # Create systemd service
-          sudo tee /etc/systemd/system/incus.service > /dev/null << 'EOFSERVICE'
-          [Unit]
-          Description=Incus - Container and VM manager
-          After=network-online.target openvswitch-switch.service
-          Wants=network-online.target
-          Documentation=https://linuxcontainers.org/incus/docs/main/
-
-          [Service]
-          ExecStart=/usr/local/bin/incusd --group incus-admin
-          ExecStop=/usr/local/bin/incus admin shutdown
-          Type=simple
-          Restart=on-failure
-          LimitNOFILE=infinity
-          LimitNPROC=infinity
-          TasksMax=infinity
-
-          [Install]
-          WantedBy=multi-user.target
-          EOFSERVICE
-
-          sudo systemctl daemon-reload
-          sudo systemctl enable --now incus
-          sleep 5
-
-          sudo chmod 666 /var/lib/incus/unix.socket || true
-          incus version
-          echo "✓ Incus built from source"
-
-      - name: Install OVS and OVN
-        if: matrix.network_type == 'ovn'
-        run: |
-          echo "=== Starting OVS ==="
-          sudo systemctl enable --now openvswitch-switch
-          sleep 3
-
-          echo "=== Configuring OVN ==="
-          sudo systemctl enable --now ovn-central
-          sleep 3
-
-          # Configure OVN to listen on unix socket
-          sudo ovn-nbctl set-connection punix:/run/ovn/ovnnb_db.sock
-          sudo ovn-sbctl set-connection punix:/run/ovn/ovnsb_db.sock
-          sleep 2
-
-          sudo systemctl enable --now ovn-host
-          sleep 3
-
-          # Make sockets accessible
-          sudo chmod 666 /run/ovn/*.sock 2>/dev/null || true
-          sudo chmod 666 /run/openvswitch/*.sock 2>/dev/null || true
-
-          echo "=== OVS status ==="
-          sudo ovs-vsctl show
-
-          echo "=== OVN NB status ==="
-          sudo ovn-nbctl show || echo "OVN NB not ready"
-
-          echo "=== Socket check ==="
-          ls -la /run/openvswitch/
-          ls -la /run/ovn/
-
-      - name: Initialize Incus (OVN)
-        if: matrix.network_type == 'ovn'
-        run: |
-          # Configure subuid/subgid
-          echo "root:1001:1" | sudo tee -a /etc/subuid
-          echo "root:1001:1" | sudo tee -a /etc/subgid
-
-          # Restart Incus to pick up subuid/subgid
-          sudo systemctl restart incus
-          sleep 5
-          sudo chmod 666 /var/lib/incus/unix.socket
-
-          # Initialize Incus with preseed
-          cat <<EOF | sudo incus admin init --preseed
-          config:
-            images.compression_algorithm: none
-          networks:
-          - config:
-              ipv4.address: 10.47.62.1/24
-              ipv4.nat: "true"
-              ipv4.dhcp.ranges: 10.47.62.2-10.47.62.99
-              ipv4.ovn.ranges: 10.47.62.100-10.47.62.200
-              ipv6.address: none
-            name: incusbr0
-            type: bridge
-          storage_pools:
-          - config:
-              size: 15GiB
-            name: default
-            driver: btrfs
-          profiles:
-          - config: {}
-            devices:
-              eth0:
-                name: eth0
-                network: incusbr0
-                type: nic
-              root:
-                path: /
-                pool: default
-                type: disk
-            name: default
-          EOF
-
-          sudo chmod 666 /var/lib/incus/unix.socket
-
-          echo "✓ Incus initialized with bridge"
-          incus network list
-
-      - name: Add OVN network
-        if: matrix.network_type == 'ovn'
-        run: |
-          echo "=== Checking OVS/OVN status ==="
-          sudo ovs-vsctl show
-          sudo ovn-nbctl show || echo "OVN NB show failed"
-          ls -la /run/openvswitch/
-          ls -la /run/ovn/
-
-          # Test OVS connectivity
-          echo "=== Testing OVS connectivity ==="
-          sudo ovsdb-client list-dbs unix:/run/openvswitch/db.sock
-
-          # Set OVN northbound connection
-          echo "=== Configuring Incus OVN connection ==="
-          sudo incus config set network.ovn.northbound_connection unix:/run/ovn/ovnnb_db.sock
-
-          # Verify config
-          echo "=== Incus config ==="
-          incus config show
-
-          # Create OVN network
-          echo "=== Creating OVN network ==="
-          incus network create ovn-net --type=ovn \
-            network=incusbr0 \
-            bridge.mtu=1442 \
-            ipv4.address=10.215.220.1/24 \
-            ipv4.nat=true \
-            ipv6.address=none
-
-          # Update default profile to use OVN network
-          incus profile device remove default eth0
-          incus profile device add default eth0 nic network=ovn-net
-
-          echo "✓ OVN network configured"
-          incus network list
-          incus profile show default
-
-      - name: Initialize Incus (Bridge)
-        if: matrix.network_type == 'bridge'
+      - name: Initialize Incus
         run: |
           # Wait for Incus service to be ready
           sudo systemctl start incus.socket || true
@@ -337,7 +142,6 @@ jobs:
           sleep 5
 
           # Initialize Incus with btrfs storage and standard bridge networking
-          # NO OVN - this tests error handling for non-OVN networks
           cat <<EOF | sudo incus admin init --preseed
           config:
             images.compression_algorithm: none
@@ -373,7 +177,7 @@ jobs:
           # Add current user to incus-admin group
           sudo usermod -aG incus-admin $USER
 
-          echo "Bridge network configured successfully"
+          echo "Incus initialized with bridge network"
           incus network list
 
       - name: Check kernel idmap support
@@ -411,28 +215,6 @@ jobs:
           fi
 
           echo "Basic network configuration complete"
-
-      - name: Configure OVN-specific networking
-        if: matrix.network_type == 'ovn'
-        run: |
-          # Get default interface for outbound traffic
-          DEFAULT_IFACE=$(ip route | grep default | awk '{print $5}' | head -1)
-
-          # Allow traffic to/from OVN subnet through firewall
-          # Allow traffic destined for OVN subnet (host-to-container)
-          sudo iptables -I FORWARD 1 -d 10.215.220.0/24 -j ACCEPT
-          # Allow return traffic from OVN subnet (container-to-host responses)
-          sudo iptables -I FORWARD 1 -s 10.215.220.0/24 -j ACCEPT
-
-          # Add NAT/MASQUERADE rules for OVN subnet (10.215.220.0/24)
-          sudo iptables -t nat -I POSTROUTING 1 -s 10.215.220.0/24 -o $DEFAULT_IFACE -j MASQUERADE
-
-          # Add route so host can reach OVN network (10.215.220.0/24) via OVN uplink IP
-          # The OVN network uses 10.47.62.100 as its uplink IP on the bridge
-          # This allows tests to curl container services from the host
-          sudo ip route add 10.215.220.0/24 via 10.47.62.100 dev incusbr0 || true
-
-          echo "OVN network configuration complete"
 
       - name: Cache Ubuntu base image
         id: cache-ubuntu-image
@@ -484,7 +266,7 @@ jobs:
           echo "Removing images: remote to prevent fallback to images.linuxcontainers.org..."
           incus remote remove images || true
 
-          echo "✓ Successfully imported Ubuntu 24.04 image"
+          echo "Successfully imported Ubuntu 24.04 image"
           incus image list
 
           # Export image for caching
@@ -528,7 +310,7 @@ jobs:
           incus launch ubuntu-24.04 test-bind-mount-container
           sleep 5
 
-          # Configure UID mapping for CI environment (runner UID 1001 → container UID 0)
+          # Configure UID mapping for CI environment (runner UID 1001 -> container UID 0)
           # This is what COI does internally in CI environments
           incus config set test-bind-mount-container raw.idmap "both 1001 0"
 
@@ -597,7 +379,6 @@ jobs:
         run: |
           echo "============================================"
           echo "Running: ${{ matrix.test_group.description }}"
-          echo "Network: ${{ matrix.network_type }}"
           echo "Path: ${{ matrix.test_group.path }}"
           echo "============================================"
 
@@ -605,7 +386,6 @@ jobs:
           python -m pytest ${{ matrix.test_group.path }} -v --tb=short --durations=0 --cov=tests --cov-report=term-missing
         env:
           COI_BINARY: ./coi
-          CI_NETWORK_TYPE: ${{ matrix.network_type }}
           GITHUB_REPOSITORY_URL: ${{ github.event.pull_request.head.repo.clone_url || format('https://github.com/{0}.git', github.repository) }}
 
       - name: Cleanup
