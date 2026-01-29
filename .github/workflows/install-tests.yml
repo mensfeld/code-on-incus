@@ -37,42 +37,14 @@ jobs:
 
       - name: Install Incus (Ubuntu)
         run: |
-          # Try Zabbly first (newer version with better features), fallback to Ubuntu repos
-          echo "Attempting to install Incus from Zabbly repository..."
-
-          # Try adding Zabbly repo with timeout
-          if timeout 30 bash -c '
-            sudo mkdir -p /etc/apt/keyrings/ &&
-            sudo curl -fsSL https://pkgs.zabbly.com/key.asc -o /etc/apt/keyrings/zabbly.asc &&
-            sudo sh -c "cat <<SOURCES > /etc/apt/sources.list.d/zabbly-incus-stable.sources
-          Enabled: yes
-          Types: deb
-          URIs: https://pkgs.zabbly.com/incus/stable
-          Suites: \$(. /etc/os-release && echo \${VERSION_CODENAME})
-          Components: main
-          Architectures: \$(dpkg --print-architecture)
-          Signed-By: /etc/apt/keyrings/zabbly.asc
-          SOURCES"
-          '; then
-            echo "✓ Zabbly repository configured successfully"
-            ZABBLY_AVAILABLE=true
-          else
-            echo "⚠ Zabbly repository unavailable (timeout/connection refused)"
-            echo "→ Falling back to Ubuntu default repositories (Incus 6.0.0)"
-            ZABBLY_AVAILABLE=false
-          fi
-
+          # Install from Ubuntu's official repositories (reliable, stable)
+          echo "Installing Incus from Ubuntu 24.04 repositories..."
           sudo apt-get update
           sudo apt-get install -y incus
 
-          # Verify installation and show version
+          # Verify installation
           incus version
-
-          if [ "$ZABBLY_AVAILABLE" = "true" ]; then
-            echo "✓ Using Incus from Zabbly (latest version)"
-          else
-            echo "✓ Using Incus from Ubuntu repos (v6.0.0 - stable)"
-          fi
+          echo "✓ Using Incus from Ubuntu official repos (stable, reliable)"
 
       - name: Initialize Incus
         run: |
