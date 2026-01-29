@@ -216,14 +216,20 @@ jobs:
       - name: Add OVN network
         if: matrix.network_type == 'ovn'
         run: |
+          # Fix socket permissions so Incus can access them
+          echo "=== Fixing socket permissions ==="
+          sudo chmod 666 /run/openvswitch/db.sock
+          sudo chmod 666 /var/run/ovn/ovnnb_db.sock
+          sudo chmod 666 /var/run/ovn/ovnsb_db.sock
+
           # Debug: Check OVS and OVN sockets
           echo "=== Checking sockets ==="
-          ls -la /run/openvswitch/ || echo "No /run/openvswitch"
-          ls -la /var/run/ovn/ || echo "No /var/run/ovn"
+          ls -la /run/openvswitch/
+          ls -la /var/run/ovn/
           sudo ovs-vsctl show
-          sudo ovn-nbctl show || echo "ovn-nbctl show failed"
+          sudo ovn-nbctl show
 
-          # Restart Incus so it picks up OVS that was configured after initial start
+          # Restart Incus so it picks up OVS/OVN
           echo "Restarting Incus to detect OVS/OVN..."
           sudo systemctl restart incus
           sleep 5
@@ -231,6 +237,10 @@ jobs:
           # Set OVN connection explicitly via unix socket
           echo "Setting OVN northbound connection..."
           incus config set network.ovn.northbound_connection unix:/var/run/ovn/ovnnb_db.sock
+
+          # Verify the setting was applied
+          echo "Verifying OVN connection setting..."
+          incus config get network.ovn.northbound_connection
 
           echo "Creating OVN network..."
           incus network create ovn-net --type=ovn \
