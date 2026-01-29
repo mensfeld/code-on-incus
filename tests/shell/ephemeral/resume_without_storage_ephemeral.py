@@ -108,6 +108,11 @@ def test_resume_does_not_persist_home_files(coi_binary, cleanup_containers, work
     except Exception:
         child.close(force=True)
 
+    # Give cleanup process time to detect stopped container and initiate deletion
+    # The cleanup loop checks if container is stopped (up to 5s), then saves session
+    # data, then starts container deletion
+    time.sleep(5)
+
     # Wait for container deletion
     # OVN networks may take longer for cleanup due to additional network teardown
     deletion_timeout = 60 if os.getenv("CI_NETWORK_TYPE") == "ovn" else 30
@@ -175,6 +180,9 @@ def test_resume_does_not_persist_home_files(coi_binary, cleanup_containers, work
         child2.close(force=False)
     except Exception:
         child2.close(force=True)
+
+    # Give cleanup process time to detect stopped container and initiate deletion
+    time.sleep(5)
 
     # Wait for cleanup
     # OVN networks may take longer for cleanup due to additional network teardown
