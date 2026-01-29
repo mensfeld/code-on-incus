@@ -216,9 +216,23 @@ jobs:
       - name: Add OVN network
         if: matrix.network_type == 'ovn'
         run: |
-          # Do NOT set network.ovn.northbound_connection - let Incus auto-detect via unix socket
-          # This is how Canonical's lxd-ci does it for deb packages
-          echo "Creating OVN network (auto-detect OVN connection)..."
+          # Debug: Check OVS and OVN sockets
+          echo "=== Checking sockets ==="
+          ls -la /run/openvswitch/ || echo "No /run/openvswitch"
+          ls -la /var/run/ovn/ || echo "No /var/run/ovn"
+          sudo ovs-vsctl show
+          sudo ovn-nbctl show || echo "ovn-nbctl show failed"
+
+          # Restart Incus so it picks up OVS that was configured after initial start
+          echo "Restarting Incus to detect OVS/OVN..."
+          sudo systemctl restart incus
+          sleep 5
+
+          # Set OVN connection explicitly via unix socket
+          echo "Setting OVN northbound connection..."
+          incus config set network.ovn.northbound_connection unix:/var/run/ovn/ovnnb_db.sock
+
+          echo "Creating OVN network..."
           incus network create ovn-net --type=ovn \
             network=incusbr0 \
             bridge.mtu=1442 \
