@@ -68,25 +68,24 @@ jobs:
       fail-fast: false
       matrix:
         test_group:
-          # Temporarily disabled for faster iteration on network tests
-          # - name: shell-ephemeral
-          #   path: tests/shell/ephemeral
-          #   description: "Ephemeral shell session tests (15 tests)"
-          # - name: shell-persistent
-          #   path: tests/shell/persistent
-          #   description: "Persistent shell session tests (9 tests)"
+          - name: shell-ephemeral
+            path: tests/shell/ephemeral
+            description: "Ephemeral shell session tests (15 tests)"
+          - name: shell-persistent
+            path: tests/shell/persistent
+            description: "Persistent shell session tests (9 tests)"
           - name: network
             path: tests/network
             description: "Network isolation tests (10 tests)"
-          # - name: container-file
-          #   path: tests/container tests/file
-          #   description: "Container and file operations (54 tests)"
-          # - name: core
-          #   path: tests/list tests/attach tests/tmux tests/kill tests/run tests/persist tests/build
-          #   description: "Core commands: list/attach/tmux/kill/run/persist/build (83 tests)"
-          # - name: misc
-          #   path: tests/clean tests/completion tests/docker tests/errors tests/help tests/image tests/info tests/mount tests/shutdown tests/version tests/meta tests/main_help_flag.py tests/main_help_shorthand.py
-          #   description: "Misc commands: clean/completion/docker/errors/help/image/info/mount/shutdown/version/meta/main help (70 tests)"
+          - name: container-file
+            path: tests/container tests/file
+            description: "Container and file operations (54 tests)"
+          - name: core
+            path: tests/list tests/attach tests/tmux tests/kill tests/run tests/persist tests/build
+            description: "Core commands: list/attach/tmux/kill/run/persist/build (83 tests)"
+          - name: misc
+            path: tests/clean tests/completion tests/docker tests/errors tests/help tests/image tests/info tests/mount tests/shutdown tests/version tests/meta tests/main_help_flag.py tests/main_help_shorthand.py
+            description: "Misc commands: clean/completion/docker/errors/help/image/info/mount/shutdown/version/meta/main help (70 tests)"
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
