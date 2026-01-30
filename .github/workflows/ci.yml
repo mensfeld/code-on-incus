@@ -229,24 +229,11 @@ jobs:
           echo 1 | sudo tee /proc/sys/net/ipv4/ip_forward > /dev/null
           echo 1 | sudo tee /proc/sys/net/ipv6/conf/all/forwarding > /dev/null
 
-          # Set FORWARD policy to DROP - this forces all traffic through explicit rules
-          # Critical for network isolation tests to work (REJECT rules must be hit)
-          sudo iptables -P FORWARD DROP
-
-          # Add fallback ACCEPT at priority 100 for general Incus traffic
-          # COI's rules at priority 0-99 will override for isolated containers
-          # This allows: image builds, non-isolated containers, etc.
-          sudo firewall-cmd --direct --add-rule ipv4 filter FORWARD 100 -i incusbr0 -j ACCEPT
-          sudo firewall-cmd --direct --add-rule ipv4 filter FORWARD 100 -o incusbr0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
-
-          # Also add to DOCKER-USER if it exists (for Docker compatibility)
-          if sudo iptables -nL DOCKER-USER 2>/dev/null; then
-            sudo iptables -I DOCKER-USER -o incusbr0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
-          fi
+          # FORWARD policy stays ACCEPT (firewalld default with public zone)
+          # Our REJECT rules are explicit and will fire regardless of default policy
+          # This allows builds and non-isolated containers to work
 
           echo "Network configuration complete"
-          echo "FORWARD chain:"
-          sudo iptables -L FORWARD -n --line-numbers | head -20
 
       - name: Pre-cache base Ubuntu image
         run: |
