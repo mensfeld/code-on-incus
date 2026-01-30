@@ -191,11 +191,17 @@ func (m *Manager) setupAllowlist(ctx context.Context, containerName string) erro
 
 // waitForContainerIP waits for the container to get an IP address
 func (m *Manager) waitForContainerIP(ctx context.Context, containerName string) (string, error) {
-	// Try up to 30 times with 1 second delay (30 seconds total)
-	for i := 0; i < 30; i++ {
+	// Try up to 60 times with 1 second delay (60 seconds total)
+	// CI environments with parallel tests may have slower DHCP
+	maxAttempts := 60
+	for i := 0; i < maxAttempts; i++ {
 		ip, err := GetContainerIP(containerName)
 		if err == nil && ip != "" {
 			return ip, nil
+		}
+
+		if i > 0 && i%10 == 0 {
+			log.Printf("Still waiting for container IP... (%d/%d seconds)", i, maxAttempts)
 		}
 
 		select {
