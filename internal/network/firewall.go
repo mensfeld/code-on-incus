@@ -79,19 +79,12 @@ func (f *FirewallManager) ApplyRestricted(cfg *config.NetworkConfig) error {
 
 // ApplyAllowlist applies allowlist mode rules (allow specific IPs, block all else)
 func (f *FirewallManager) ApplyAllowlist(cfg *config.NetworkConfig, allowedIPs []string) error {
-	// Priority 0: Allow gateway (for host communication and DNS)
+	// Priority 0: Allow gateway (for host communication and DNS via dnsmasq)
+	// DNS works through the bridge's dnsmasq - no public DNS servers allowed
+	// to prevent DNS exfiltration attacks
 	if f.gatewayIP != "" {
 		if err := f.addRule(0, f.containerIP, f.gatewayIP+"/32", "ACCEPT"); err != nil {
 			return fmt.Errorf("failed to add gateway allow rule: %w", err)
-		}
-	}
-
-	// Priority 0: Always allow common public DNS servers
-	// This ensures DNS resolution works even in strict allowlist mode
-	dnsServers := []string{"8.8.8.8", "8.8.4.4", "1.1.1.1", "1.0.0.1"}
-	for _, dns := range dnsServers {
-		if err := f.addRule(0, f.containerIP, dns+"/32", "ACCEPT"); err != nil {
-			return fmt.Errorf("failed to add DNS allow rule for %s: %w", dns, err)
 		}
 	}
 
