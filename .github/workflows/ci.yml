@@ -144,17 +144,18 @@ jobs:
           # Start firewalld for network isolation tests
           sudo systemctl enable --now firewalld
 
-          # Use public zone (not trusted - trusted accepts all traffic bypassing our rules)
-          sudo firewall-cmd --set-default-zone=public
+          # Use trusted zone - it allows all traffic by default, which is what we need
+          # Our direct rules explicitly REJECT what we want blocked
+          sudo firewall-cmd --set-default-zone=trusted
 
           # Enable masquerading for container NAT
-          sudo firewall-cmd --zone=public --add-masquerade
+          sudo firewall-cmd --zone=trusted --add-masquerade
 
           # Verify firewalld is running
           sudo firewall-cmd --state
           sudo firewall-cmd --get-default-zone
 
-          echo "Firewalld configured with public zone"
+          echo "Firewalld configured with trusted zone"
 
       - name: Initialize Incus
         run: |
