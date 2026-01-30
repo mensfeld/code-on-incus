@@ -182,6 +182,7 @@ jobs:
               ipv4.address: 10.47.62.1/24
               ipv4.nat: "true"
               ipv6.address: none
+              dns.nameservers: 8.8.8.8,1.1.1.1
             name: incusbr0
             type: bridge
           storage_pools:
