@@ -139,6 +139,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	// Mount workspace (skip if restarting existing persistent container)
 	wasRestarted := containerExists && persistent
 	useShift := !cfg.Incus.DisableShift
+
 	if !wasRestarted {
 		fmt.Fprintf(os.Stderr, "Mounting workspace %s...\n", absWorkspace)
 		if err := mgr.MountDisk("workspace", absWorkspace, "/workspace", useShift); err != nil {

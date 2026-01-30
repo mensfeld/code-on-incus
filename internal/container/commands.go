@@ -227,21 +227,33 @@ func ContainerExec(containerName, command string, opts ContainerExecOptions) (st
 }
 
 // LaunchContainer launches an ephemeral container
+// Uses init + configure + start to ensure security flags are applied before first start
 func LaunchContainer(imageAlias, containerName string) error {
-	args := []string{"launch", imageAlias, containerName, "--ephemeral"}
-	if err := IncusExec(args...); err != nil {
+	// Create container without starting (init with ephemeral flag)
+	if err := IncusExec("init", imageAlias, containerName, "--ephemeral"); err != nil {
 		return err
 	}
-	return EnableDockerSupport(containerName)
+	// Configure security flags before starting
+	if err := EnableDockerSupport(containerName); err != nil {
+		return err
+	}
+	// Now start the container
+	return IncusExec("start", containerName)
 }
 
 // LaunchContainerPersistent launches a non-ephemeral container
+// Uses init + configure + start to ensure security flags are applied before first start
 func LaunchContainerPersistent(imageAlias, containerName string) error {
-	args := []string{"launch", imageAlias, containerName}
-	if err := IncusExec(args...); err != nil {
+	// Create container without starting
+	if err := IncusExec("init", imageAlias, containerName); err != nil {
 		return err
 	}
-	return EnableDockerSupport(containerName)
+	// Configure security flags before starting
+	if err := EnableDockerSupport(containerName); err != nil {
+		return err
+	}
+	// Now start the container
+	return IncusExec("start", containerName)
 }
 
 // EnableDockerSupport configures the container to support Docker/nested containers.
