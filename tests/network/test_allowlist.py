@@ -10,6 +10,7 @@ import json
 import os
 import subprocess
 import tempfile
+import time
 
 
 def test_allowlist_mode_allows_specified_domains(coi_binary, workspace_dir, cleanup_containers):
@@ -173,6 +174,9 @@ refresh_interval_minutes = 30
             capture_output=True,
             timeout=10,
         )
+
+        # Wait for firewall rules to be fully applied (CI timing issue)
+        time.sleep(2)
 
         # Test: curl blocked domain (should fail)
         result = subprocess.run(
