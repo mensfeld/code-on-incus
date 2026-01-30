@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
@@ -214,7 +215,31 @@ func (f *FirewallManager) removeRule(rule string) error {
 }
 
 // GetContainerIP retrieves the IPv4 address of a container from Incus
+// It retries for up to 30 seconds waiting for DHCP to assign an IP
 func GetContainerIP(containerName string) (string, error) {
+	const maxRetries = 30
+	const retryDelay = time.Second
+
+	var lastErr error
+
+	for i := 0; i < maxRetries; i++ {
+		ip, err := getContainerIPOnce(containerName)
+		if err == nil {
+			return ip, nil
+		}
+		lastErr = err
+
+		// Wait before retrying
+		if i < maxRetries-1 {
+			time.Sleep(retryDelay)
+		}
+	}
+
+	return "", fmt.Errorf("timeout waiting for container IP after %d seconds: %w", maxRetries, lastErr)
+}
+
+// getContainerIPOnce attempts to get the container IP once without retrying
+func getContainerIPOnce(containerName string) (string, error) {
 	output, err := container.IncusOutput("list", containerName, "--format=json")
 	if err != nil {
 		return "", fmt.Errorf("failed to get container info: %w", err)
