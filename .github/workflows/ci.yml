@@ -232,15 +232,15 @@ jobs:
           DEFAULT_IFACE=$(ip route | grep default | awk '{print $5}' | head -1)
 
           # Allow container traffic through firewall
+          # These rules are needed even with firewalld because our direct rules
+          # only handle outbound filtering - return traffic needs explicit allow
+          sudo iptables -I FORWARD 1 -o incusbr0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+          sudo iptables -I FORWARD 2 -i incusbr0 -j ACCEPT
+
+          # Also add to DOCKER-USER if it exists (for Docker compatibility)
           if sudo iptables -nL DOCKER-USER 2>/dev/null; then
-            # Use DOCKER-USER chain if it exists
             sudo iptables -I DOCKER-USER -i incusbr0 -j ACCEPT
             sudo iptables -I DOCKER-USER -o incusbr0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
-          else
-            # Fallback to FORWARD chain
-            sudo iptables -P FORWARD ACCEPT
-            sudo iptables -I FORWARD 1 -i incusbr0 -j ACCEPT
-            sudo iptables -I FORWARD 1 -o incusbr0 -j ACCEPT
           fi
 
           echo "Network configuration complete"
