@@ -195,6 +195,28 @@ func EnsureBaseRules() error {
 	return nil
 }
 
+// EnsureOpenModeRules adds rules to allow all traffic for a container in open mode
+// This is needed because FORWARD chain policy may be DROP
+func EnsureOpenModeRules(containerIP string) error {
+	// Ensure base conntrack rule exists
+	if err := EnsureBaseRules(); err != nil {
+		log.Printf("Warning: failed to ensure base rules: %v", err)
+	}
+
+	// Add ACCEPT rule for all traffic from this container
+	cmd := exec.Command("sudo", "-n", "firewall-cmd", "--direct", "--add-rule",
+		"ipv4", "filter", "FORWARD", "0",
+		"-s", containerIP, "-j", "ACCEPT")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		if !strings.Contains(string(output), "ALREADY_ENABLED") {
+			return fmt.Errorf("failed to add open mode rule: %s: %w", strings.TrimSpace(string(output)), err)
+		}
+	}
+
+	return nil
+}
+
 // addRule adds a firewall direct rule using firewall-cmd
 func (f *FirewallManager) addRule(priority int, source, destination, action string) error {
 	// firewall-cmd --direct --add-rule ipv4 filter FORWARD <priority> -s <src> -d <dst> -j <action>

@@ -61,6 +61,17 @@ func (m *Manager) SetupForContainer(ctx context.Context, containerName string) e
 	switch m.config.Mode {
 	case config.NetworkModeOpen:
 		log.Println("Network mode: open (no restrictions)")
+		// Still need to add ACCEPT rules if firewall FORWARD policy is DROP
+		if FirewallAvailable() {
+			containerIP, err := GetContainerIP(containerName)
+			if err != nil {
+				log.Printf("Warning: could not get container IP for open mode rules: %v", err)
+				return nil
+			}
+			if err := EnsureOpenModeRules(containerIP); err != nil {
+				log.Printf("Warning: could not add open mode rules: %v", err)
+			}
+		}
 		return nil
 
 	case config.NetworkModeRestricted:
