@@ -229,13 +229,13 @@ jobs:
           echo 1 | sudo tee /proc/sys/net/ipv4/ip_forward > /dev/null
           echo 1 | sudo tee /proc/sys/net/ipv6/conf/all/forwarding > /dev/null
 
-          # Ensure FORWARD chain allows container traffic
-          # Trusted zone should do this, but be explicit for reliability
-          sudo iptables -I FORWARD -i incusbr0 -j ACCEPT
-          sudo iptables -I FORWARD -o incusbr0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+          # NOTE: We do NOT add explicit iptables ACCEPT rules here.
+          # Firewalld's trusted zone handles allowing traffic, and
+          # COI's firewall rules need to be able to REJECT traffic for
+          # network isolation tests (restricted/allowlist modes).
 
           # Ensure NAT/masquerade is working for container internet access
-          # Get the default outbound interface
+          # This is needed in addition to firewalld's masquerade for reliability
           DEFAULT_IFACE=$(ip route | grep default | awk '{print $5}' | head -1)
           sudo iptables -t nat -A POSTROUTING -s 10.47.62.0/24 -o $DEFAULT_IFACE -j MASQUERADE
 
