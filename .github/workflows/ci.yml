@@ -165,14 +165,19 @@ jobs:
           sudo systemctl stop incus.socket incus || true
 
           # Configure subuid/subgid for UID mapping BEFORE Incus starts
-          # This is needed for raw.idmap to work properly
-          # root:1000:2 allows mapping UIDs 1000 and 1001
-          echo "root:1000:2" | sudo tee -a /etc/subuid
-          echo "root:1000:2" | sudo tee -a /etc/subgid
+          # Replace the default config with sensible ranges
+          # The default root:1000000:1000000000 range causes issues
 
-          # Also add a broader range for unprivileged containers
-          echo "root:100000:65536" | sudo tee -a /etc/subuid
-          echo "root:100000:65536" | sudo tee -a /etc/subgid
+          # Create clean subuid/subgid files with only needed entries
+          sudo tee /etc/subuid > /dev/null << 'EOF'
+          root:100000:65536
+          root:1000:2
+          EOF
+
+          sudo tee /etc/subgid > /dev/null << 'EOF'
+          root:100000:65536
+          root:1000:2
+          EOF
 
           # Verify subuid/subgid configuration
           echo "subuid configuration:"
@@ -350,26 +355,17 @@ jobs:
           mkdir -p /tmp/test-bind-mount
           echo "test-content" > /tmp/test-bind-mount/test-file.txt
 
-          # First just init (create) the container without starting
+          # Create test container
           echo "Creating container..."
           incus init ubuntu-24.04 test-bind-mount-container
 
-          # Show container config
+          # Show container config (verify idmap)
           echo "Container config:"
           incus config show test-bind-mount-container
 
-          # Try to start with debug output
+          # Start the container
           echo "Starting container..."
-          if ! incus start test-bind-mount-container 2>&1; then
-            echo "Container failed to start. Checking logs..."
-            # Check incusd logs
-            sudo journalctl -u incus --no-pager -n 50 || true
-            # Check dmesg for kernel errors
-            sudo dmesg | tail -30 || true
-            # Check AppArmor
-            sudo aa-status || true
-            exit 1
-          fi
+          incus start test-bind-mount-container
           sleep 5
 
           # Configure UID mapping for CI environment (runner UID 1001 -> container UID 1000)
