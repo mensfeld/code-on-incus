@@ -245,14 +245,6 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 			return nil, err
 		}
 
-		// Setup network isolation (before starting container)
-		if opts.NetworkConfig != nil {
-			result.NetworkManager = network.NewManager(opts.NetworkConfig)
-			if err := result.NetworkManager.SetupForContainer(context.Background(), result.ContainerName); err != nil {
-				return nil, fmt.Errorf("failed to setup network isolation: %w", err)
-			}
-		}
-
 		// Now start the container
 		opts.Logger("Starting container...")
 		if err := result.Manager.Start(); err != nil {
@@ -266,7 +258,15 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 		return nil, err
 	}
 
-	// 7. When resuming: restore session data if container was recreated, then inject credentials
+	// 7. Setup network isolation (after container is running and has IP)
+	if opts.NetworkConfig != nil {
+		result.NetworkManager = network.NewManager(opts.NetworkConfig)
+		if err := result.NetworkManager.SetupForContainer(context.Background(), result.ContainerName); err != nil {
+			return nil, fmt.Errorf("failed to setup network isolation: %w", err)
+		}
+	}
+
+	// 8. When resuming: restore session data if container was recreated, then inject credentials
 	// Skip if tool uses ENV-based auth (no config directory)
 	if opts.ResumeFromID != "" && opts.Tool != nil && opts.Tool.ConfigDirName() != "" {
 		// If we launched a new container (not reusing persistent one), restore config from saved session
@@ -284,7 +284,7 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 		}
 	}
 
-	// 8. Workspace and configured mounts are already mounted (added before container start in step 5)
+	// 9. Workspace and configured mounts are already mounted (added before container start in step 5)
 	if skipLaunch {
 		opts.Logger("Reusing existing workspace and mount configurations")
 	}
