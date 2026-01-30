@@ -118,11 +118,71 @@ jobs:
 
       - name: Install Incus
         run: |
-          echo "Installing Incus from Ubuntu 24.04 repositories..."
-          sudo apt-get update
-          sudo apt-get install -y incus
+          echo "Installing Incus from GitHub releases (newer than Ubuntu repos)..."
+          INCUS_VERSION="6.10"  # LTS version with good stability
+
+          # Download and extract Incus
+          curl -fsSL "https://github.com/lxc/incus/releases/download/v${INCUS_VERSION}/incus-${INCUS_VERSION}-linux-amd64.tar.xz" -o incus.tar.xz
+          sudo mkdir -p /opt/incus
+          sudo tar -xJf incus.tar.xz -C /opt/incus --strip-components=1
+          rm incus.tar.xz
+
+          # Install binaries to system paths
+          sudo cp /opt/incus/bin/* /usr/bin/
+          sudo cp /opt/incus/sbin/* /usr/sbin/ 2>/dev/null || true
+
+          # Create incus group and add runner user
+          sudo groupadd -f incus-admin
+          sudo usermod -aG incus-admin $USER
+
+          # Create necessary directories
+          sudo mkdir -p /var/lib/incus
+          sudo mkdir -p /var/log/incus
+
+          # Create systemd service files
+          sudo tee /etc/systemd/system/incus.socket > /dev/null <<'SOCKET'
+          [Unit]
+          Description=Incus - Container and VM manager (Unix socket)
+
+          [Socket]
+          ListenStream=/var/lib/incus/unix.socket
+          SocketMode=0660
+          SocketGroup=incus-admin
+
+          [Install]
+          WantedBy=sockets.target
+          SOCKET
+
+          sudo tee /etc/systemd/system/incus.service > /dev/null <<'SERVICE'
+          [Unit]
+          Description=Incus - Container and VM manager
+          After=network-online.target
+          Wants=network-online.target
+          Requires=incus.socket
+          Documentation=https://linuxcontainers.org/incus/docs/main/
+
+          [Service]
+          ExecStart=/usr/sbin/incusd --group incus-admin
+          Type=simple
+          Restart=on-failure
+          TimeoutStartSec=600
+          TimeoutStopSec=40
+          KillMode=process
+
+          [Install]
+          WantedBy=multi-user.target
+          SERVICE
+
+          # Enable and start services
+          sudo systemctl daemon-reload
+          sudo systemctl enable incus.socket
+          sudo systemctl start incus.socket
+          sudo systemctl start incus.service
+
+          # Wait for Incus to be ready
+          sleep 3
           incus version
-          echo "Incus installed"
+          echo "Incus ${INCUS_VERSION} installed from GitHub releases"
 
       - name: Setup Firewalld
         run: |
