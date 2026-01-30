@@ -176,19 +176,19 @@ func (f *FirewallManager) RemoveRules() error {
 	return nil
 }
 
-// EnsureBaseRules adds the base iptables rules needed for container networking
+// EnsureBaseRules adds the base rules needed for container networking
 // These rules allow return traffic and must be in place before container-specific rules
 func EnsureBaseRules() error {
-	// Add conntrack rule for return traffic (must be at top of FORWARD chain)
-	// Using iptables directly since firewalld direct rules don't support conntrack well
-	cmd := exec.Command("sudo", "-n", "iptables", "-C", "FORWARD",
+	// Add conntrack rule for return traffic via firewalld direct rules
+	// Priority -1 ensures this runs before all other rules (including our container rules at 0+)
+	cmd := exec.Command("sudo", "-n", "firewall-cmd", "--direct", "--add-rule",
+		"ipv4", "filter", "FORWARD", "-1",
 		"-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT")
-	if err := cmd.Run(); err != nil {
-		// Rule doesn't exist, add it
-		cmd = exec.Command("sudo", "-n", "iptables", "-I", "FORWARD", "1",
-			"-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT")
-		if output, err := cmd.CombinedOutput(); err != nil {
-			log.Printf("Warning: failed to add conntrack rule: %s", strings.TrimSpace(string(output)))
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// Rule might already exist, that's OK
+		if !strings.Contains(string(output), "ALREADY_ENABLED") {
+			log.Printf("Warning: failed to add conntrack rule via firewalld: %s", strings.TrimSpace(string(output)))
 		}
 	}
 
