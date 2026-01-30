@@ -67,22 +67,10 @@ jobs:
       fail-fast: false
       matrix:
         test_group:
-          # TEMP: Only run failing tests for faster iteration
-          # - name: core
-          #   path: tests/list tests/attach tests/tmux tests/kill tests/run tests/persist tests/build
-          #   description: "Core commands"
-          # - name: container
-          #   path: tests/container tests/shell tests/shutdown tests/clean
-          #   description: "Container lifecycle"
-          - name: files
-            path: tests/file tests/mount tests/docker
-            description: "File and mount operations"
-          # - name: utilities
-          #   path: tests/image tests/info tests/version tests/help tests/meta tests/completion tests/errors tests/config
-          #   description: "Utility commands"
-          # - name: network
-          #   path: tests/network
-          #   description: "Network isolation tests"
+          # TEMP: Only run the 4 specific failing tests for faster iteration
+          - name: failing-only
+            path: tests/docker/test_docker_works_in_container.py tests/mount/test_multiple_mounts.py tests/mount/test_config_default_mounts.py
+            description: "Only failing tests"
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
