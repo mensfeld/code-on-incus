@@ -4,7 +4,7 @@ Integration tests for network host isolation.
 Tests that containers cannot access host services in RESTRICTED and ALLOWLIST modes,
 but that host can access container services (response traffic allowed).
 
-Note: These tests require OVN networking (now configured in CI).
+Note: These tests require firewalld for network isolation.
 """
 
 import json
@@ -15,10 +15,22 @@ import time
 
 import pytest
 
-# Skip all tests in this module when running on bridge network (no OVN/ACL support)
+
+def firewalld_available():
+    """Check if firewalld is running."""
+    result = subprocess.run(
+        ["firewall-cmd", "--state"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    return result.returncode == 0 and "running" in result.stdout
+
+
+# Skip all tests in this module when firewalld is not available
 pytestmark = pytest.mark.skipif(
-    os.getenv("CI_NETWORK_TYPE") == "bridge",
-    reason="Network mode tests require OVN networking (ACL support)",
+    not firewalld_available(),
+    reason="Network isolation tests require firewalld",
 )
 
 

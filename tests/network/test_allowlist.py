@@ -3,7 +3,7 @@ Integration tests for network allowlist mode.
 
 Tests the domain allowlisting feature with DNS resolution and IP-based filtering.
 
-Note: These tests require OVN networking (now configured in CI).
+Note: These tests require firewalld for network isolation.
 """
 
 import json
@@ -13,10 +13,22 @@ import tempfile
 
 import pytest
 
-# Skip all tests in this module when running on bridge network (no OVN/ACL support)
+
+def firewalld_available():
+    """Check if firewalld is running."""
+    result = subprocess.run(
+        ["firewall-cmd", "--state"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    return result.returncode == 0 and "running" in result.stdout
+
+
+# Skip all tests in this module when firewalld is not available
 pytestmark = pytest.mark.skipif(
-    os.getenv("CI_NETWORK_TYPE") == "bridge",
-    reason="Allowlist mode requires OVN networking (ACL support)",
+    not firewalld_available(),
+    reason="Allowlist mode requires firewalld",
 )
 
 
