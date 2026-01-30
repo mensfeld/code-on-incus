@@ -213,9 +213,9 @@ jobs:
             type: bridge
           storage_pools:
           - config:
-              size: 15GiB
+              source: /var/lib/incus/storage-pools/default
             name: default
-            driver: btrfs
+            driver: dir
           profiles:
           - config:
               security.nesting: "true"
