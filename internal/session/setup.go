@@ -245,18 +245,18 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 			return nil, err
 		}
 
-		// Setup network isolation (before starting container)
+		// Now start the container
+		opts.Logger("Starting container...")
+		if err := result.Manager.Start(); err != nil {
+			return nil, fmt.Errorf("failed to start container: %w", err)
+		}
+
+		// Setup network isolation (after container starts, so it has an IP)
 		if opts.NetworkConfig != nil {
 			result.NetworkManager = network.NewManager(opts.NetworkConfig)
 			if err := result.NetworkManager.SetupForContainer(context.Background(), result.ContainerName); err != nil {
 				return nil, fmt.Errorf("failed to setup network isolation: %w", err)
 			}
-		}
-
-		// Now start the container
-		opts.Logger("Starting container...")
-		if err := result.Manager.Start(); err != nil {
-			return nil, fmt.Errorf("failed to start container: %w", err)
 		}
 	}
 
