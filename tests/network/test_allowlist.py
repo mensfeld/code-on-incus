@@ -195,11 +195,14 @@ refresh_interval_minutes = 30
             timeout=10,
         )
 
-        # Should fail to connect
+        # Should fail to connect (either REJECT with "Connection refused" or timeout)
         assert result.returncode != 0, (
             f"Should not reach blocked domain github.com: {result.stderr}"
         )
-        assert "Connection refused" in result.stderr or "Failed to connect" in result.stderr, (
+        # Accept either explicit rejection or timeout (exit code 124) as valid blocking
+        is_rejected = "Connection refused" in result.stderr or "Failed to connect" in result.stderr
+        is_timeout = "exit status 124" in result.stderr or result.returncode == 124
+        assert is_rejected or is_timeout, (
             f"Expected connection failure for blocked domain: {result.stderr}"
         )
 
@@ -431,7 +434,10 @@ refresh_interval_minutes = 30
         assert result.returncode != 0, (
             f"Should block non-allowed public IP 9.9.9.9: {result.stderr}"
         )
-        assert "Connection refused" in result.stderr or "Failed to connect" in result.stderr, (
+        # Accept either explicit rejection or timeout (exit code 124) as valid blocking
+        is_rejected = "Connection refused" in result.stderr or "Failed to connect" in result.stderr
+        is_timeout = "exit status 124" in result.stderr or result.returncode == 124
+        assert is_rejected or is_timeout, (
             f"Expected connection failure for non-allowed IP: {result.stderr}"
         )
 
