@@ -91,6 +91,38 @@ check_group() {
     fi
 }
 
+# Check firewalld for network isolation
+check_firewalld() {
+    echo -e "${BLUE}→ Checking firewalld (for network isolation)...${NC}"
+
+    if command -v firewall-cmd &> /dev/null; then
+        if sudo firewall-cmd --state &> /dev/null 2>&1; then
+            echo -e "${GREEN}✓ Firewalld is installed and running${NC}"
+        else
+            echo -e "${YELLOW}⚠ Firewalld is installed but not running${NC}"
+            echo ""
+            echo "  Network isolation (restricted/allowlist modes) requires firewalld."
+            echo "  Start it with: sudo systemctl enable --now firewalld"
+            echo ""
+        fi
+    else
+        echo -e "${YELLOW}⚠ Firewalld not found${NC}"
+        echo ""
+        echo "  Network isolation (restricted/allowlist modes) requires firewalld."
+        echo "  Without it, you can still use --network=open mode."
+        echo ""
+        echo "  To install firewalld (Ubuntu/Debian):"
+        echo "    sudo apt install firewalld"
+        echo "    sudo systemctl enable --now firewalld"
+        echo "    sudo firewall-cmd --permanent --add-masquerade"
+        echo "    sudo firewall-cmd --reload"
+        echo ""
+        echo "  For passwordless firewall management:"
+        echo "    echo \"\$USER ALL=(ALL) NOPASSWD: /usr/bin/firewall-cmd\" | sudo tee /etc/sudoers.d/coi-firewalld"
+        echo ""
+    fi
+}
+
 # Download binary from GitHub releases
 download_binary() {
     local download_url
@@ -247,6 +279,13 @@ post_install() {
         echo ""
     fi
 
+    if ! command -v firewall-cmd &> /dev/null; then
+        echo -e "${YELLOW}⚠ For network isolation (restricted/allowlist modes), install firewalld:${NC}"
+        echo "   ${BLUE}sudo apt install firewalld && sudo systemctl enable --now firewalld${NC}"
+        echo "   See README for full setup instructions."
+        echo ""
+    fi
+
     echo "Documentation: https://github.com/${REPO}"
     echo ""
 }
@@ -262,6 +301,7 @@ main() {
     detect_platform
     check_incus
     check_group
+    check_firewalld
 
     echo ""
     echo "Installation method:"
