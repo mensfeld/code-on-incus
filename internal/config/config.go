@@ -149,6 +149,7 @@ func GetDefaultConfig() *Config {
 }
 
 // GetConfigPaths returns the list of config file paths to check (in order)
+// If COI_CONFIG environment variable is set, it is added as highest priority
 func GetConfigPaths() []string {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -159,11 +160,18 @@ func GetConfigPaths() []string {
 		workDir = "."
 	}
 
-	return []string{
+	paths := []string{
 		"/etc/coi/config.toml",                            // System config
 		filepath.Join(homeDir, ".config/coi/config.toml"), // User config
 		filepath.Join(workDir, ".coi.toml"),               // Project config
 	}
+
+	// COI_CONFIG environment variable has highest priority
+	if envConfig := os.Getenv("COI_CONFIG"); envConfig != "" {
+		paths = append(paths, envConfig)
+	}
+
+	return paths
 }
 
 // ExpandPath expands ~ in paths to home directory
