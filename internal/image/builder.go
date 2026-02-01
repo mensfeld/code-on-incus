@@ -183,8 +183,9 @@ func (b *Builder) waitForNetwork() error {
 			return nil
 		}
 
-		// After 10 seconds, check if this is a DNS issue and auto-fix
-		if i == 10 && !dnsFixed {
+		// After 5 seconds, check if this is a DNS issue and auto-fix
+		// We check early to avoid unnecessary waiting when DNS is clearly broken
+		if i == 5 && !dnsFixed {
 			if b.tryFixDNS() {
 				dnsFixed = true
 				// Give the new DNS config a moment to take effect
@@ -238,14 +239,29 @@ func (b *Builder) tryFixDNS() bool {
 	}
 
 	// We can reach IPs but not hostnames - this is a DNS issue
-	// Check for the common systemd-resolved stub resolver issue (127.0.0.53)
+	// Check for common DNS misconfigurations:
+	// - 127.0.0.53: systemd-resolved stub resolver (doesn't work in container)
+	// - 127.0.0.1: localhost DNS (doesn't work in container)
+	// - 127.0.x.x: any localhost address (doesn't work in container)
+	// - Empty or missing nameserver entries
 	resolvConf, _ := b.mgr.ExecCommand("cat /etc/resolv.conf 2>/dev/null", container.ExecCommandOptions{Capture: true})
 
 	hasStubResolver := strings.Contains(resolvConf, "127.0.0.53")
+	hasLocalhostDNS := strings.Contains(resolvConf, "nameserver 127.0.0.1") ||
+		strings.Contains(resolvConf, "nameserver 127.0.1.") ||
+		strings.Contains(resolvConf, "nameserver 127.1.")
 	hasEmptyDNS := strings.TrimSpace(resolvConf) == "" || !strings.Contains(resolvConf, "nameserver")
 
-	if hasStubResolver || hasEmptyDNS {
-		b.opts.Logger("Detected DNS misconfiguration, applying automatic fix...")
+	if hasStubResolver || hasLocalhostDNS || hasEmptyDNS {
+		reason := "unknown"
+		if hasStubResolver {
+			reason = "systemd-resolved stub at 127.0.0.53"
+		} else if hasLocalhostDNS {
+			reason = "localhost DNS (127.0.0.x) - unreachable from container"
+		} else if hasEmptyDNS {
+			reason = "no nameserver configured"
+		}
+		b.opts.Logger(fmt.Sprintf("Detected DNS misconfiguration (%s), applying automatic fix...", reason))
 
 		// Inject working DNS servers
 		// First, remove resolv.conf if it's a symlink (common with systemd-resolved)
@@ -273,7 +289,7 @@ EOF`, container.ExecCommandOptions{Capture: true})
 // logDNSFixWarning logs a warning about the DNS misconfiguration and how to permanently fix it
 func (b *Builder) logDNSFixWarning() {
 	b.opts.Logger("")
-	b.opts.Logger("WARNING: DNS misconfiguration detected (systemd-resolved stub at 127.0.0.53).")
+	b.opts.Logger("WARNING: DNS misconfiguration detected (localhost DNS or systemd-resolved stub).")
 	b.opts.Logger("Auto-fixed for this build. The resulting image uses static DNS (8.8.8.8, 8.8.4.4, 1.1.1.1).")
 	b.opts.Logger("To fix your Incus network for other containers, run:")
 	b.opts.Logger("  incus network set incusbr0 dns.mode managed")

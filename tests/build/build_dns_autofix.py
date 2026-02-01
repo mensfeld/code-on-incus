@@ -3,11 +3,14 @@ Test for coi build - DNS auto-fix functionality.
 
 Tests that:
 1. When DNS is misconfigured (127.0.0.53 stub resolver), build auto-detects and fixes it
-2. Build completes successfully with auto-fix
-3. Warning message is displayed about the DNS misconfiguration
+2. When DNS points to localhost (127.0.0.1), build auto-detects and fixes it
+3. Build completes successfully with auto-fix
+4. Warning message is displayed about the DNS misconfiguration
 
 This test temporarily modifies the Incus network configuration to simulate
-the DNS misconfiguration that occurs on Ubuntu systems with systemd-resolved.
+DNS misconfigurations that occur on various systems:
+- Ubuntu with systemd-resolved (127.0.0.53)
+- Systems with localhost DNS (127.0.0.1)
 """
 
 import subprocess
@@ -37,10 +40,15 @@ def get_incus_network():
     return None
 
 
-def break_dns_config(network_name):
-    """Configure Incus network to push broken DNS (127.0.0.53) to containers."""
+def break_dns_config(network_name, dns_server="127.0.0.53"):
+    """Configure Incus network to push broken DNS to containers.
+
+    Args:
+        network_name: Name of the Incus network to configure
+        dns_server: DNS server IP to push (default: 127.0.0.53 for systemd-resolved stub)
+    """
     result = subprocess.run(
-        ["incus", "network", "set", network_name, "raw.dnsmasq", "dhcp-option=6,127.0.0.53"],
+        ["incus", "network", "set", network_name, "raw.dnsmasq", f"dhcp-option=6,{dns_server}"],
         capture_output=True,
         text=True,
         timeout=30,
@@ -391,6 +399,114 @@ echo "Build with working DNS"
         )
 
     finally:
+        # Cleanup test image
+        subprocess.run(
+            [coi_binary, "image", "delete", image_name],
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+
+
+def test_build_dns_autofix_localhost(coi_binary, tmp_path):
+    """
+    Test that build auto-fixes DNS when pointing to localhost (127.0.0.1).
+
+    This tests the case where DNS is configured to use 127.0.0.1 (common on
+    some systems), which doesn't work inside containers because the container
+    can't reach the host's loopback address.
+
+    Flow:
+    1. Get Incus network name
+    2. Break DNS configuration (set 127.0.0.1)
+    3. Clean up any existing build container
+    4. Run coi build custom with --base images:ubuntu/22.04
+    5. Verify build succeeds
+    6. Verify DNS auto-fix messages mention localhost DNS
+    7. Restore DNS configuration
+    """
+    # Get network name
+    network_name = get_incus_network()
+    if not network_name:
+        pytest.skip("Could not determine Incus network name")
+
+    image_name = "coi-test-dns-localhost"
+
+    # Create minimal build script that verifies DNS works
+    build_script = tmp_path / "build.sh"
+    build_script.write_text(
+        """#!/bin/bash
+set -e
+echo "Testing DNS resolution after localhost DNS fix..."
+# This should work after auto-fix
+if getent hosts archive.ubuntu.com > /dev/null 2>&1; then
+    echo "DNS resolution works!"
+else
+    echo "DNS resolution failed!"
+    exit 1
+fi
+"""
+    )
+
+    try:
+        # Break DNS configuration with 127.0.0.1 (localhost)
+        if not break_dns_config(network_name, "127.0.0.1"):
+            pytest.skip("Could not modify Incus network configuration (permission denied?)")
+
+        # Clean up any existing build container
+        subprocess.run(
+            ["incus", "delete", "--force", "coi-build"],
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+
+        # Build custom image from fresh Ubuntu base (not coi) to trigger DNS fix
+        result = subprocess.run(
+            [
+                coi_binary,
+                "build",
+                "custom",
+                image_name,
+                "--base",
+                "images:ubuntu/22.04",
+                "--script",
+                str(build_script),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=600,  # Longer timeout for DNS fix + build
+        )
+
+        combined_output = result.stdout + result.stderr
+
+        # Build should succeed despite broken DNS
+        assert result.returncode == 0, (
+            f"Build should succeed with DNS auto-fix for localhost DNS. "
+            f"Exit code: {result.returncode}\n"
+            f"Output:\n{combined_output}"
+        )
+
+        # Verify DNS auto-fix was applied and mentions localhost
+        assert (
+            "Detected DNS misconfiguration" in combined_output
+            or "DNS configuration fixed" in combined_output
+        ), f"Build should show DNS auto-fix message. Output:\n{combined_output}"
+
+        # Verify the specific localhost DNS detection message
+        assert "localhost" in combined_output.lower() or "127.0.0" in combined_output, (
+            f"Build should mention localhost DNS issue. Output:\n{combined_output}"
+        )
+
+        # Verify the build script's DNS check passed
+        assert "DNS resolution works!" in combined_output, (
+            f"DNS should work after auto-fix. Output:\n{combined_output}"
+        )
+
+    finally:
+        # Always restore DNS configuration
+        restore_dns_config(network_name)
+
         # Cleanup test image
         subprocess.run(
             [coi_binary, "image", "delete", image_name],
