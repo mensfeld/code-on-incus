@@ -6,8 +6,10 @@ Tests that:
 2. Restore with --force skips confirmation
 3. Restore nonexistent snapshot fails
 4. Successful restore message
+5. Restore recovers deleted files
 """
 
+import json
 import subprocess
 import time
 
@@ -226,6 +228,144 @@ def test_snapshot_restore_nonexistent_container(coi_binary):
     )
     assert result.returncode != 0, "Should fail for nonexistent container"
     assert "not found" in result.stderr, "Should mention container not found"
+
+
+def test_snapshot_restore_recovers_deleted_file(coi_binary, cleanup_containers, workspace_dir):
+    """
+    Test that restoring snapshot recovers files that were deleted after snapshot.
+
+    Flow:
+    1. Launch a container
+    2. Create a test file
+    3. Create a snapshot (file included in snapshot)
+    4. Delete the test file
+    5. Stop container
+    6. Restore from snapshot
+    7. Start container
+    8. Verify file is restored
+    9. Cleanup
+    """
+    container_name = calculate_container_name(workspace_dir, 1)
+    snapshot_name = "recover-test"
+    test_file = "/root/test-file.txt"
+    test_content = "This file was created before snapshot"
+
+    # === Phase 1: Launch container ===
+    result = subprocess.run(
+        [coi_binary, "container", "launch", "coi", container_name],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, f"Container launch should succeed. stderr: {result.stderr}"
+    time.sleep(3)
+
+    # === Phase 2: Create test file BEFORE snapshot ===
+    result = subprocess.run(
+        [
+            coi_binary,
+            "container",
+            "exec",
+            container_name,
+            "--",
+            "bash",
+            "-c",
+            f"echo '{test_content}' > {test_file}",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, f"Creating file should succeed. stderr: {result.stderr}"
+
+    # Verify file exists and has correct content
+    result = subprocess.run(
+        [coi_binary, "container", "exec", container_name, "--capture", "--", "cat", test_file],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, "File should exist before snapshot"
+    # Parse JSON output from --capture
+    output = json.loads(result.stdout)
+    assert output["exit_code"] == 0, "Command should succeed"
+    assert test_content in output["stdout"], "File should have correct content"
+
+    # === Phase 3: Create snapshot (with file) ===
+    result = subprocess.run(
+        [coi_binary, "snapshot", "create", snapshot_name, "-c", container_name],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, f"Snapshot create should succeed. stderr: {result.stderr}"
+
+    # === Phase 4: Delete the test file ===
+    result = subprocess.run(
+        [coi_binary, "container", "exec", container_name, "--", "rm", test_file],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, f"Deleting file should succeed. stderr: {result.stderr}"
+
+    # Verify file is gone
+    result = subprocess.run(
+        [coi_binary, "container", "exec", container_name, "--", "ls", test_file],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode != 0, "File should be deleted before restore"
+
+    # === Phase 5: Stop container ===
+    result = subprocess.run(
+        [coi_binary, "container", "stop", container_name],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, f"Container stop should succeed. stderr: {result.stderr}"
+
+    # === Phase 6: Restore from snapshot ===
+    result = subprocess.run(
+        [coi_binary, "snapshot", "restore", snapshot_name, "-c", container_name, "-f"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, f"Restore should succeed. stderr: {result.stderr}"
+    assert "Restored container" in result.stderr, "Should confirm restore"
+
+    # === Phase 7: Start container ===
+    result = subprocess.run(
+        [coi_binary, "container", "start", container_name],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, f"Container start should succeed. stderr: {result.stderr}"
+    time.sleep(3)
+
+    # === Phase 8: Verify file is restored with original content ===
+    result = subprocess.run(
+        [coi_binary, "container", "exec", container_name, "--capture", "--", "cat", test_file],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, "File should be restored after snapshot restore"
+    # Parse JSON output
+    output = json.loads(result.stdout)
+    assert output["exit_code"] == 0, "Command should succeed"
+    assert test_content in output["stdout"], "File should have original content after restore"
+
+    # === Cleanup ===
+    subprocess.run(
+        [coi_binary, "container", "delete", container_name, "--force"],
+        capture_output=True,
+        timeout=30,
+    )
 
 
 def test_snapshot_restore_missing_name(coi_binary, cleanup_containers, workspace_dir):
