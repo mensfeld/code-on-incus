@@ -253,7 +253,9 @@ def test_snapshot_restore_missing_name(coi_binary, cleanup_containers, workspace
     )
     assert result.returncode != 0, "Restore should fail without snapshot name"
     # Cobra should show usage error
-    assert "accepts 1 arg" in result.stderr or "required" in result.stderr.lower(), "Should indicate argument required"
+    assert "accepts 1 arg" in result.stderr or "required" in result.stderr.lower(), (
+        "Should indicate argument required"
+    )
 
     # === Cleanup ===
     subprocess.run(

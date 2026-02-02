@@ -97,7 +97,9 @@ def test_snapshot_create_explicit_name(coi_binary, cleanup_containers, workspace
         timeout=60,
     )
     assert result.returncode == 0, f"Snapshot create should succeed. stderr: {result.stderr}"
-    assert f"Created snapshot '{snapshot_name}'" in result.stderr, "Should confirm snapshot creation with name"
+    assert f"Created snapshot '{snapshot_name}'" in result.stderr, (
+        "Should confirm snapshot creation with name"
+    )
 
     # === Phase 3: Verify snapshot exists ===
     result = subprocess.run(

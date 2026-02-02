@@ -48,8 +48,12 @@ def test_snapshot_auto_resolve_single_container(coi_binary, cleanup_containers, 
         timeout=60,
         cwd=workspace_dir,
     )
-    assert result.returncode == 0, f"Snapshot create should auto-resolve container. stderr: {result.stderr}"
-    assert f"Created snapshot '{snapshot_name}'" in result.stderr, "Should confirm snapshot creation"
+    assert result.returncode == 0, (
+        f"Snapshot create should auto-resolve container. stderr: {result.stderr}"
+    )
+    assert f"Created snapshot '{snapshot_name}'" in result.stderr, (
+        "Should confirm snapshot creation"
+    )
 
     # === Phase 3: Verify snapshot exists for correct container ===
     result = subprocess.run(
@@ -113,7 +117,9 @@ def test_snapshot_multiple_containers_requires_flag(coi_binary, cleanup_containe
             text=True,
             timeout=120,
         )
-        assert result.returncode == 0, f"Container {container} launch should succeed. stderr: {result.stderr}"
+        assert result.returncode == 0, (
+            f"Container {container} launch should succeed. stderr: {result.stderr}"
+        )
         time.sleep(3)
 
     # === Phase 2: Try to create snapshot without --container ===
@@ -125,9 +131,9 @@ def test_snapshot_multiple_containers_requires_flag(coi_binary, cleanup_containe
         cwd=workspace_dir,
     )
     assert result.returncode != 0, "Should fail when multiple containers exist"
-    assert (
-        "multiple" in result.stderr.lower() or "use --container" in result.stderr.lower()
-    ), "Should mention multiple containers and suggest --container flag"
+    assert "multiple" in result.stderr.lower() or "use --container" in result.stderr.lower(), (
+        "Should mention multiple containers and suggest --container flag"
+    )
 
     # === Phase 3: Create snapshot with explicit --container ===
     result = subprocess.run(
@@ -137,7 +143,9 @@ def test_snapshot_multiple_containers_requires_flag(coi_binary, cleanup_containe
         timeout=60,
         cwd=workspace_dir,
     )
-    assert result.returncode == 0, f"Snapshot should succeed with explicit container. stderr: {result.stderr}"
+    assert result.returncode == 0, (
+        f"Snapshot should succeed with explicit container. stderr: {result.stderr}"
+    )
 
     # Verify snapshot was created for correct container
     result = subprocess.run(
@@ -251,7 +259,9 @@ def test_snapshot_env_var_container(coi_binary, cleanup_containers, workspace_di
         timeout=60,
         env=env,
     )
-    assert result.returncode == 0, f"Snapshot create should use COI_CONTAINER env var. stderr: {result.stderr}"
+    assert result.returncode == 0, (
+        f"Snapshot create should use COI_CONTAINER env var. stderr: {result.stderr}"
+    )
 
     # === Phase 3: Verify snapshot exists ===
     result = subprocess.run(
@@ -294,7 +304,9 @@ def test_snapshot_container_flag_overrides_env(coi_binary, cleanup_containers, w
             text=True,
             timeout=120,
         )
-        assert result.returncode == 0, f"Container {container} launch should succeed. stderr: {result.stderr}"
+        assert result.returncode == 0, (
+            f"Container {container} launch should succeed. stderr: {result.stderr}"
+        )
         time.sleep(3)
 
     # === Phase 2: Create snapshot with flag overriding env ===
@@ -302,7 +314,14 @@ def test_snapshot_container_flag_overrides_env(coi_binary, cleanup_containers, w
     env["COI_CONTAINER"] = container1  # Env points to container1
 
     result = subprocess.run(
-        [coi_binary, "snapshot", "create", snapshot_name, "-c", container2],  # Flag points to container2
+        [
+            coi_binary,
+            "snapshot",
+            "create",
+            snapshot_name,
+            "-c",
+            container2,
+        ],  # Flag points to container2
         capture_output=True,
         text=True,
         timeout=60,
@@ -325,7 +344,9 @@ def test_snapshot_container_flag_overrides_env(coi_binary, cleanup_containers, w
         text=True,
         timeout=30,
     )
-    assert snapshot_name not in result.stdout, "Snapshot should not exist for container from env var"
+    assert snapshot_name not in result.stdout, (
+        "Snapshot should not exist for container from env var"
+    )
 
     # === Cleanup ===
     for container in [container1, container2]:

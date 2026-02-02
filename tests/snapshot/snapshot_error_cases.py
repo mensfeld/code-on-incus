@@ -67,7 +67,9 @@ def test_snapshot_restore_requires_name(coi_binary):
         timeout=10,
     )
     assert result.returncode != 0, "Restore without name should fail"
-    assert "accepts 1 arg" in result.stderr or "required" in result.stderr.lower(), "Should indicate argument required"
+    assert "accepts 1 arg" in result.stderr or "required" in result.stderr.lower(), (
+        "Should indicate argument required"
+    )
 
 
 def test_snapshot_info_requires_name(coi_binary):
@@ -81,7 +83,9 @@ def test_snapshot_info_requires_name(coi_binary):
         timeout=10,
     )
     assert result.returncode != 0, "Info without name should fail"
-    assert "accepts 1 arg" in result.stderr or "required" in result.stderr.lower(), "Should indicate argument required"
+    assert "accepts 1 arg" in result.stderr or "required" in result.stderr.lower(), (
+        "Should indicate argument required"
+    )
 
 
 def test_snapshot_delete_requires_name_or_all(coi_binary):
@@ -205,4 +209,6 @@ def test_snapshot_help_flag_all_subcommands(coi_binary):
             )
             assert result.returncode == 0, f"Help should work for {subcmd} with {help_flag}"
             assert "Usage:" in result.stdout, f"Help output should show usage for {subcmd}"
-            assert "Flags:" in result.stdout or "flags" in result.stdout.lower(), f"Help should show flags for {subcmd}"
+            assert "Flags:" in result.stdout or "flags" in result.stdout.lower(), (
+                f"Help should show flags for {subcmd}"
+            )

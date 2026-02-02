@@ -58,7 +58,9 @@ def test_snapshot_list_text_format(coi_binary, cleanup_containers, workspace_dir
     assert result.returncode == 0, f"Snapshot list should succeed. stderr: {result.stderr}"
 
     # Verify text format output
-    assert f"Snapshots for {container_name}:" in result.stdout, "Should show container name in header"
+    assert f"Snapshots for {container_name}:" in result.stdout, (
+        "Should show container name in header"
+    )
     assert "NAME" in result.stdout, "Should have NAME column header"
     assert "CREATED" in result.stdout, "Should have CREATED column header"
     assert "STATEFUL" in result.stdout, "Should have STATEFUL column header"
@@ -208,7 +210,9 @@ def test_snapshot_list_empty_json(coi_binary, cleanup_containers, workspace_dir)
     # Parse and verify JSON
     data = json.loads(result.stdout)
     assert data["container"] == container_name, "Container name should match"
-    assert data["snapshots"] == [] or data["snapshots"] is None or len(data["snapshots"]) == 0, "Snapshots should be empty"
+    assert data["snapshots"] == [] or data["snapshots"] is None or len(data["snapshots"]) == 0, (
+        "Snapshots should be empty"
+    )
 
     # === Cleanup ===
     subprocess.run(

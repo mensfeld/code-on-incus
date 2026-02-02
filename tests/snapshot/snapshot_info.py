@@ -213,7 +213,16 @@ def test_snapshot_info_invalid_format(coi_binary, cleanup_containers, workspace_
 
     # === Phase 3: Try invalid format ===
     result = subprocess.run(
-        [coi_binary, "snapshot", "info", snapshot_name, "-c", container_name, "--format", "invalid"],
+        [
+            coi_binary,
+            "snapshot",
+            "info",
+            snapshot_name,
+            "-c",
+            container_name,
+            "--format",
+            "invalid",
+        ],
         capture_output=True,
         text=True,
         timeout=30,
@@ -253,7 +262,9 @@ def test_snapshot_info_missing_name(coi_binary, cleanup_containers, workspace_di
         timeout=30,
     )
     assert result.returncode != 0, "Info should fail without snapshot name"
-    assert "accepts 1 arg" in result.stderr or "required" in result.stderr.lower(), "Should indicate argument required"
+    assert "accepts 1 arg" in result.stderr or "required" in result.stderr.lower(), (
+        "Should indicate argument required"
+    )
 
     # === Cleanup ===
     subprocess.run(

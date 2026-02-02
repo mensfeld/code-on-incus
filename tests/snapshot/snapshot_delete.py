@@ -75,7 +75,9 @@ def test_snapshot_delete_single(coi_binary, cleanup_containers, workspace_dir):
     )
     assert result.returncode == 0, f"Snapshot list should succeed. stderr: {result.stderr}"
     assert snapshot_name not in result.stdout, "Snapshot should be deleted"
-    assert "(none)" in result.stdout or "Total: 0 snapshots" in result.stdout, "Should show empty list"
+    assert "(none)" in result.stdout or "Total: 0 snapshots" in result.stdout, (
+        "Should show empty list"
+    )
 
     # === Cleanup ===
     subprocess.run(
@@ -147,7 +149,9 @@ def test_snapshot_delete_all_with_force(coi_binary, cleanup_containers, workspac
         timeout=30,
     )
     assert result.returncode == 0, f"Snapshot list should succeed. stderr: {result.stderr}"
-    assert "(none)" in result.stdout or "Total: 0 snapshots" in result.stdout, "Should show empty list"
+    assert "(none)" in result.stdout or "Total: 0 snapshots" in result.stdout, (
+        "Should show empty list"
+    )
 
     # === Cleanup ===
     subprocess.run(
@@ -186,7 +190,9 @@ def test_snapshot_delete_all_empty(coi_binary, cleanup_containers, workspace_dir
         text=True,
         timeout=60,
     )
-    assert result.returncode == 0, f"Delete all should succeed even with no snapshots. stderr: {result.stderr}"
+    assert result.returncode == 0, (
+        f"Delete all should succeed even with no snapshots. stderr: {result.stderr}"
+    )
     assert "No snapshots to delete" in result.stderr, "Should indicate no snapshots"
 
     # === Cleanup ===
@@ -275,7 +281,9 @@ def test_snapshot_delete_missing_name_without_all(coi_binary, cleanup_containers
         timeout=30,
     )
     assert result.returncode != 0, "Delete should fail without snapshot name or --all"
-    assert "snapshot name required" in result.stderr or "--all" in result.stderr, "Should indicate name or --all required"
+    assert "snapshot name required" in result.stderr or "--all" in result.stderr, (
+        "Should indicate name or --all required"
+    )
 
     # === Cleanup ===
     subprocess.run(
