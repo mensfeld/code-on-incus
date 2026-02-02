@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mensfeld/code-on-incus/internal/bedrock"
 	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/limits"
@@ -127,6 +128,45 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 	result.ContainerName = containerName
 	result.Manager = container.NewManager(containerName)
 	opts.Logger(fmt.Sprintf("Container name: %s", containerName))
+
+	// 1.5 Validate Bedrock setup if running in Colima/Lima
+	if isColimaOrLimaEnvironment() && opts.CLIConfigPath != "" {
+		settingsPath := filepath.Join(opts.CLIConfigPath, "settings.json")
+		isConfigured, err := bedrock.IsBedrockConfigured(settingsPath)
+		if err != nil {
+			opts.Logger(fmt.Sprintf("Warning: Failed to check Bedrock configuration: %v", err))
+		} else if isConfigured {
+			opts.Logger("Detected AWS Bedrock configuration, validating setup...")
+
+			// Validate Bedrock setup
+			validationResult := bedrock.ValidateColimaBedrockSetup()
+
+			// Check if .aws is mounted
+			if opts.MountConfig != nil {
+				var mountPaths []string
+				for _, mount := range opts.MountConfig.Mounts {
+					mountPaths = append(mountPaths, mount.HostPath)
+				}
+				if mountIssue := bedrock.CheckMountConfiguration(mountPaths); mountIssue != nil {
+					validationResult.Issues = append(validationResult.Issues, *mountIssue)
+				}
+			}
+
+			// If there are errors, fail with helpful message
+			if validationResult.HasErrors() {
+				return nil, fmt.Errorf("%s", validationResult.FormatError())
+			}
+
+			// Log warnings but continue
+			if len(validationResult.Issues) > 0 {
+				for _, issue := range validationResult.Issues {
+					if issue.Severity == "warning" {
+						opts.Logger(fmt.Sprintf("⚠️  %s", issue.Message))
+					}
+				}
+			}
+		}
+	}
 
 	// 2. Determine image
 	image := opts.Image

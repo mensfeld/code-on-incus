@@ -286,6 +286,81 @@ Or set it as default in your config:
 mode = "open"
 ```
 
+### AWS Bedrock on macOS/Colima
+
+If you're using Claude via AWS Bedrock, COI will automatically validate your setup when running in Colima/Lima and prevent startup with helpful error messages if anything is misconfigured.
+
+#### Common Issues and Fixes
+
+**Issue 1: Dual .aws Directory Locations**
+
+Colima creates two `.aws` locations that can get out of sync:
+- `/home/lima/.aws/` - Lima's VM home (where `~` expands inside Colima)
+- `/Users/<yourname>/.aws/` - macOS home (mounted via virtiofs)
+
+**Solution:** Pick one location and be consistent:
+1. **Recommended:** Use macOS path `/Users/<yourname>/.aws/`
+2. Run `aws sso login` on your Mac (not inside Colima)
+3. Ensure it's mounted to containers (see below)
+
+**Issue 2: Restrictive Permissions on SSO Cache**
+
+AWS SSO creates cache files with permissions `-rw-------` (600), which become unreadable inside containers.
+
+**Solution:** After running `aws sso login`, fix permissions:
+```bash
+chmod 644 ~/.aws/sso/cache/*.json
+```
+
+**Issue 3: .aws Not Mounted**
+
+The container needs access to your AWS credentials.
+
+**Solution:** Add to your config:
+```toml
+# ~/.config/coi/config.toml
+[[mounts.default]]
+host = "~/.aws"
+container = "/home/code/.aws"
+```
+
+#### Complete Bedrock Setup Example
+
+1. Configure Bedrock in `~/.claude/settings.json`:
+```json
+{
+  "anthropic": {
+    "apiProvider": "bedrock",
+    "bedrock": {
+      "region": "us-west-2",
+      "profile": "default"
+    }
+  }
+}
+```
+
+2. Set up AWS SSO (on macOS, not in Colima):
+```bash
+aws configure sso
+aws sso login
+chmod 644 ~/.aws/sso/cache/*.json
+```
+
+3. Configure mount in `~/.config/coi/config.toml`:
+```toml
+[[mounts.default]]
+host = "/Users/<yourname>/.aws"
+container = "/home/code/.aws"
+```
+
+4. Launch COI:
+```bash
+colima ssh
+coi shell --network=open
+```
+
+COI will validate your setup and provide clear error messages if anything is missing or misconfigured.
+
 ### Setup
 
 ```bash
