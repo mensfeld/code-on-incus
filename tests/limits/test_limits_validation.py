@@ -8,7 +8,6 @@ Tests that:
 """
 
 import subprocess
-from pathlib import Path
 
 
 def test_valid_cpu_count_formats(coi_binary, workspace_dir, cleanup_containers):

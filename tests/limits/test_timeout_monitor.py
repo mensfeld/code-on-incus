@@ -144,8 +144,6 @@ echo "Done"
 
 def test_normal_exit_before_timeout(coi_binary, workspace_dir, cleanup_containers):
     """Test that normal exit before timeout works correctly."""
-    container_name = f"coi-{Path(workspace_dir).name}-1"
-
     # Run a quick command with a long timeout
     start_time = time.time()
     result = subprocess.run(
@@ -175,8 +173,6 @@ def test_normal_exit_before_timeout(coi_binary, workspace_dir, cleanup_container
 
 def test_timeout_applied_in_shell_mode(coi_binary, workspace_dir, cleanup_containers):
     """Test that timeout works in shell mode (not just run mode)."""
-    container_name = f"coi-{Path(workspace_dir).name}-1"
-
     # Create config with timeout
     project_config = Path(workspace_dir) / ".coi.toml"
     config_content = """
