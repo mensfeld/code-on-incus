@@ -39,6 +39,7 @@ The tool abstraction layer makes it easy to add support for new AI coding assist
 - Workspace isolation - Each session mounts your project directory
 - **Slot isolation** - Each parallel slot has its own home directory (files don't leak between slots)
 - **Workspace files persist even in ephemeral mode** - Only the container is deleted, your work is always saved
+- **Container snapshots** - Create checkpoints, rollback changes, and branch experiments with full state preservation
 
 **Security & Isolation**
 - Automatic UID mapping - No permission hell, files owned correctly
@@ -496,6 +497,50 @@ coi image exists coi
 # Clean up old image versions
 coi image cleanup claudeyard-node-42- --keep 3
 ```
+
+### Snapshot Management
+
+Create container snapshots for checkpointing, rollback, and branching workflows:
+
+```bash
+# Create snapshots
+coi snapshot create                     # Auto-named snapshot (snap-YYYYMMDD-HHMMSS)
+coi snapshot create checkpoint-1        # Named snapshot
+coi snapshot create --stateful live     # Include process memory state
+coi snapshot create -c coi-abc-1 backup # Specific container
+
+# List snapshots
+coi snapshot list                       # Current workspace container
+coi snapshot list -c coi-abc-1          # Specific container
+coi snapshot list --all                 # All COI containers
+coi snapshot list --format json         # JSON output
+
+# Restore from snapshot (requires stopped container)
+coi snapshot restore checkpoint-1       # Restore with confirmation
+coi snapshot restore checkpoint-1 -f    # Skip confirmation
+coi snapshot restore checkpoint-1 --stateful  # Restore with process state
+
+# Delete snapshots
+coi snapshot delete checkpoint-1        # Delete specific snapshot
+coi snapshot delete --all               # Delete all (with confirmation)
+coi snapshot delete --all -f            # Delete all without confirmation
+
+# Show snapshot details
+coi snapshot info checkpoint-1          # Text output
+coi snapshot info checkpoint-1 --format json  # JSON output
+```
+
+**Container Resolution:**
+- Uses `--container` flag if provided
+- Falls back to `COI_CONTAINER` environment variable
+- Auto-resolves from current workspace if exactly one container exists
+- Error if multiple containers found (use `--container` to specify)
+
+**Safety Features:**
+- Restore requires container to be stopped (`coi container stop <name>`)
+- Destructive operations require confirmation (skip with `--force`)
+- Snapshots capture complete container state including session data
+- Stateful snapshots include process memory for live state preservation
 
 ## Session Resume
 
