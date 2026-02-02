@@ -113,6 +113,7 @@ func init() {
 	rootCmd.AddCommand(tmuxCmd)
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(healthCmd)
+	rootCmd.AddCommand(snapshotCmd)
 }
 
 var versionCmd = &cobra.Command{

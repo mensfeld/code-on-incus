@@ -1,12 +1,14 @@
 package container
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 // Manager provides a clean interface for Incus container operations
@@ -358,4 +360,107 @@ func (m *Manager) ExecHostCommand(command string, capture bool) (string, error) 
 	}
 
 	return "", cmd.Run()
+}
+
+// SnapshotInfo holds information about a container snapshot
+type SnapshotInfo struct {
+	Name        string     `json:"name"`
+	CreatedAt   time.Time  `json:"created_at"`
+	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+	Stateful    bool       `json:"stateful"`
+	Description string     `json:"description,omitempty"`
+}
+
+// CreateSnapshot creates a snapshot of the container
+func (m *Manager) CreateSnapshot(name string, stateful bool) error {
+	return SnapshotCreate(m.ContainerName, name, stateful)
+}
+
+// ListSnapshots lists all snapshots for the container
+func (m *Manager) ListSnapshots() ([]SnapshotInfo, error) {
+	output, err := SnapshotList(m.ContainerName)
+	if err != nil {
+		return nil, err
+	}
+
+	// Parse JSON output from incus snapshot list
+	var rawSnapshots []struct {
+		Name      string `json:"name"`
+		CreatedAt string `json:"created_at"`
+		ExpiresAt string `json:"expires_at"`
+		Stateful  bool   `json:"stateful"`
+	}
+
+	if err := json.Unmarshal([]byte(output), &rawSnapshots); err != nil {
+		return nil, fmt.Errorf("failed to parse snapshot list: %w", err)
+	}
+
+	// Convert to SnapshotInfo
+	snapshots := make([]SnapshotInfo, 0, len(rawSnapshots))
+	for _, raw := range rawSnapshots {
+		info := SnapshotInfo{
+			Name:     raw.Name,
+			Stateful: raw.Stateful,
+		}
+
+		// Parse created_at
+		if raw.CreatedAt != "" {
+			if t, err := time.Parse(time.RFC3339, raw.CreatedAt); err == nil {
+				info.CreatedAt = t
+			}
+		}
+
+		// Parse expires_at if present
+		if raw.ExpiresAt != "" && raw.ExpiresAt != "0001-01-01T00:00:00Z" {
+			if t, err := time.Parse(time.RFC3339, raw.ExpiresAt); err == nil {
+				info.ExpiresAt = &t
+			}
+		}
+
+		snapshots = append(snapshots, info)
+	}
+
+	return snapshots, nil
+}
+
+// RestoreSnapshot restores the container from a snapshot
+func (m *Manager) RestoreSnapshot(name string, stateful bool) error {
+	return SnapshotRestore(m.ContainerName, name, stateful)
+}
+
+// DeleteSnapshot deletes a snapshot from the container
+func (m *Manager) DeleteSnapshot(name string) error {
+	return SnapshotDelete(m.ContainerName, name)
+}
+
+// SnapshotExists checks if a snapshot exists for the container
+func (m *Manager) SnapshotExists(name string) (bool, error) {
+	snapshots, err := m.ListSnapshots()
+	if err != nil {
+		return false, err
+	}
+
+	for _, s := range snapshots {
+		if s.Name == name {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+// GetSnapshotInfo retrieves detailed information about a specific snapshot
+func (m *Manager) GetSnapshotInfo(name string) (*SnapshotInfo, error) {
+	snapshots, err := m.ListSnapshots()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, s := range snapshots {
+		if s.Name == name {
+			return &s, nil
+		}
+	}
+
+	return nil, fmt.Errorf("snapshot '%s' not found for container '%s'", name, m.ContainerName)
 }

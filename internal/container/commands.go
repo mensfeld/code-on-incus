@@ -465,3 +465,31 @@ func shellQuote(s string) string {
 	escaped := strings.ReplaceAll(s, "'", "'\"'\"'")
 	return "'" + escaped + "'"
 }
+
+// SnapshotCreate creates a snapshot of a container
+func SnapshotCreate(containerName, snapshotName string, stateful bool) error {
+	args := []string{"snapshot", "create", containerName, snapshotName}
+	if stateful {
+		args = append(args, "--stateful")
+	}
+	return IncusExec(args...)
+}
+
+// SnapshotList lists snapshots for a container in JSON format
+func SnapshotList(containerName string) (string, error) {
+	return IncusOutput("snapshot", "list", containerName, "--format=json")
+}
+
+// SnapshotRestore restores a container from a snapshot
+func SnapshotRestore(containerName, snapshotName string, stateful bool) error {
+	args := []string{"snapshot", "restore", containerName, snapshotName}
+	if stateful {
+		args = append(args, "--stateful")
+	}
+	return IncusExec(args...)
+}
+
+// SnapshotDelete deletes a snapshot from a container
+func SnapshotDelete(containerName, snapshotName string) error {
+	return IncusExec("snapshot", "delete", containerName, snapshotName)
+}
