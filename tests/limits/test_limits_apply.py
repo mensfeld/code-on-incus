@@ -149,7 +149,7 @@ def test_memory_swap_applied(coi_binary, workspace_dir, cleanup_containers):
     )
 
     assert result.returncode == 0, "Should be able to read container config"
-    assert "limits.memory.swap: \"false\"" in result.stdout, (
+    assert 'limits.memory.swap: "false"' in result.stdout, (
         f"Memory swap should be disabled. Config: {result.stdout}"
     )
 

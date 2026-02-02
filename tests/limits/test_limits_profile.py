@@ -70,7 +70,9 @@ max_processes = 50
     assert 'limits.cpu: "2"' in config_output, "Profile CPU count should be applied"
     assert "limits.cpu.allowance: 50%" in config_output, "Profile CPU allowance should be applied"
     assert "limits.memory: 2GiB" in config_output, "Profile memory limit should be applied"
-    assert "limits.memory.enforce: hard" in config_output, "Profile memory enforce should be applied"
+    assert "limits.memory.enforce: hard" in config_output, (
+        "Profile memory enforce should be applied"
+    )
     assert "limits.read: 10MiB/s" in config_output, "Profile disk read limit should be applied"
     assert 'limits.processes: "50"' in config_output, "Profile process limit should be applied"
 
@@ -217,9 +219,9 @@ count = "2"
     config_output = result.stdout
     assert 'limits.cpu: "2"' in config_output, "CPU limit should be set from profile"
     # Memory should not be set (or be empty)
-    assert (
-        "limits.memory:" not in config_output or 'limits.memory: ""' in config_output
-    ), "Memory limit should not be set (profile didn't specify it)"
+    assert "limits.memory:" not in config_output or 'limits.memory: ""' in config_output, (
+        "Memory limit should not be set (profile didn't specify it)"
+    )
 
 
 def test_profile_limits_with_global_config(coi_binary, workspace_dir, cleanup_containers):
@@ -278,9 +280,7 @@ count = "1"
     )
 
     config_output = result.stdout
-    assert 'limits.cpu: "1"' in config_output, (
-        "Profile should override CPU (should be 1, not 4)"
-    )
+    assert 'limits.cpu: "1"' in config_output, "Profile should override CPU (should be 1, not 4)"
     assert "limits.memory: 8GiB" in config_output, (
         "Global memory should apply (profile didn't override)"
     )

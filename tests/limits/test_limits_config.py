@@ -66,9 +66,9 @@ max_processes = 100
         )
 
         config_output = result.stdout
-        assert "limits.cpu: \"2\"" in config_output, "CPU limit should be applied"
+        assert 'limits.cpu: "2"' in config_output, "CPU limit should be applied"
         assert "limits.memory: 1GiB" in config_output, "Memory limit should be applied"
-        assert "limits.processes: \"100\"" in config_output, "Process limit should be applied"
+        assert 'limits.processes: "100"' in config_output, "Process limit should be applied"
 
     finally:
         # Restore original config
@@ -122,7 +122,7 @@ limit = "512MiB"
     )
 
     config_output = result.stdout
-    assert "limits.cpu: \"1\"" in config_output, "Profile CPU limit should override global"
+    assert 'limits.cpu: "1"' in config_output, "Profile CPU limit should override global"
     assert "limits.memory: 512MiB" in config_output, "Profile memory limit should override global"
 
 
@@ -153,7 +153,7 @@ def test_environment_variables_work(coi_binary, workspace_dir, cleanup_container
     )
 
     config_output = result.stdout
-    assert "limits.cpu: \"2\"" in config_output, "CPU limit from env should be applied"
+    assert 'limits.cpu: "2"' in config_output, "CPU limit from env should be applied"
     assert "limits.memory: 2GiB" in config_output, "Memory limit from env should be applied"
 
 
@@ -183,5 +183,6 @@ def test_empty_limits_means_unlimited(coi_binary, workspace_dir, cleanup_contain
     # Should not have custom CPU/memory limits (only Docker security flags)
     # We're checking that we didn't explicitly set limits
     # Note: security.nesting and other Docker flags are OK, we're just checking resource limits
-    assert 'limits.cpu: "' not in config_output or "limits.cpu: \"\"" in config_output, \
+    assert 'limits.cpu: "' not in config_output or 'limits.cpu: ""' in config_output, (
         "No CPU limit should be set"
+    )
