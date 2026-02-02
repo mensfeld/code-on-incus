@@ -6,7 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
+	"github.com/mensfeld/code-on-incus/internal/limits"
 	"github.com/mensfeld/code-on-incus/internal/session"
 	"github.com/spf13/cobra"
 )
@@ -130,6 +132,41 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
+	// Apply resource limits (only for new containers, not restarted persistent ones)
+	wasRestarted := containerExists && persistent
+	if !wasRestarted {
+		limitsConfig := mergeLimitsConfig(cmd)
+		if limitsConfig != nil && hasAnyLimits(limitsConfig) {
+			fmt.Fprintf(os.Stderr, "Applying resource limits...\n")
+			applyOpts := limits.ApplyOptions{
+				ContainerName: containerName,
+				CPU: limits.CPULimits{
+					Count:     limitsConfig.CPU.Count,
+					Allowance: limitsConfig.CPU.Allowance,
+					Priority:  limitsConfig.CPU.Priority,
+				},
+				Memory: limits.MemoryLimits{
+					Limit:   limitsConfig.Memory.Limit,
+					Enforce: limitsConfig.Memory.Enforce,
+					Swap:    limitsConfig.Memory.Swap,
+				},
+				Disk: limits.DiskLimits{
+					Read:     limitsConfig.Disk.Read,
+					Write:    limitsConfig.Disk.Write,
+					Max:      limitsConfig.Disk.Max,
+					Priority: limitsConfig.Disk.Priority,
+				},
+				Runtime: limits.RuntimeLimits{
+					MaxProcesses: limitsConfig.Runtime.MaxProcesses,
+				},
+				Project: cfg.Incus.Project,
+			}
+			if err := limits.ApplyResourceLimits(applyOpts); err != nil {
+				return fmt.Errorf("failed to apply resource limits: %w", err)
+			}
+		}
+	}
+
 	// Wait for container to be ready
 	fmt.Fprintf(os.Stderr, "Waiting for container to be ready...\n")
 	if err := waitForContainer(mgr, 30); err != nil {
@@ -137,7 +174,6 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// Mount workspace (skip if restarting existing persistent container)
-	wasRestarted := containerExists && persistent
 	useShift := !cfg.Incus.DisableShift
 	if !wasRestarted {
 		fmt.Fprintf(os.Stderr, "Mounting workspace %s...\n", absWorkspace)
@@ -235,4 +271,24 @@ func waitForContainer(mgr *container.Manager, maxRetries int) error {
 		}
 	}
 	return fmt.Errorf("container failed to become ready")
+}
+
+// hasAnyLimits checks if any limits are configured (used in run.go)
+func hasAnyLimits(cfg *config.LimitsConfig) bool {
+	if cfg == nil {
+		return false
+	}
+
+	// Check if any limit is set (non-empty strings or non-zero integers)
+	return cfg.CPU.Count != "" ||
+		cfg.CPU.Allowance != "" ||
+		cfg.CPU.Priority != 0 ||
+		cfg.Memory.Limit != "" ||
+		cfg.Memory.Enforce != "" ||
+		cfg.Memory.Swap != "" ||
+		cfg.Disk.Read != "" ||
+		cfg.Disk.Write != "" ||
+		cfg.Disk.Max != "" ||
+		cfg.Disk.Priority != 0 ||
+		cfg.Runtime.MaxProcesses != 0
 }

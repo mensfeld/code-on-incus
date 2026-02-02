@@ -182,6 +182,9 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 		cliConfigPath = filepath.Join(homeDir, configDirName)
 	}
 
+	// Merge limits configuration from config file and CLI flags
+	limitsConfig := mergeLimitsConfig(cmd)
+
 	// Setup session
 	setupOpts := session.SetupOptions{
 		WorkspacePath: absWorkspace,
@@ -194,6 +197,8 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 		Tool:          toolInstance,
 		NetworkConfig: &networkConfig,
 		DisableShift:  cfg.Incus.DisableShift,
+		LimitsConfig:  limitsConfig,
+		IncusProject:  cfg.Incus.Project,
 	}
 
 	// Parse and validate mount configuration
@@ -223,6 +228,12 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 	// Setup cleanup on exit
 	defer func() {
 		fmt.Fprintf(os.Stderr, "\nCleaning up session...\n")
+
+		// Stop timeout monitor if it was started
+		if result.TimeoutMonitor != nil {
+			result.TimeoutMonitor.Stop()
+		}
+
 		cleanupOpts := session.CleanupOptions{
 			ContainerName:  result.ContainerName,
 			SessionID:      sessionID,

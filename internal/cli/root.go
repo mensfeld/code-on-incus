@@ -23,6 +23,20 @@ var (
 	mountPairs      []string // --mount flag for custom mounts
 	networkMode     string
 
+	// Limit flags
+	limitCPU           string
+	limitCPUAllowance  string
+	limitCPUPriority   int
+	limitMemory        string
+	limitMemorySwap    string
+	limitMemoryEnforce string
+	limitDiskRead      string
+	limitDiskWrite     string
+	limitDiskMax       string
+	limitDiskPriority  int
+	limitProcesses     int
+	limitDuration      string
+
 	// Loaded config
 	cfg *config.Config
 )
@@ -97,6 +111,20 @@ func init() {
 	rootCmd.PersistentFlags().StringArrayVar(&mountPairs, "mount", []string{}, "Mount directory (HOST:CONTAINER, repeatable)")
 	rootCmd.PersistentFlags().StringVar(&networkMode, "network", "", "Network mode: restricted (default), open")
 
+	// Resource limit flags
+	rootCmd.PersistentFlags().StringVar(&limitCPU, "limit-cpu", "", "CPU count limit (e.g., '2', '0-3', '0,1,3')")
+	rootCmd.PersistentFlags().StringVar(&limitCPUAllowance, "limit-cpu-allowance", "", "CPU allowance (e.g., '50%', '25ms/100ms')")
+	rootCmd.PersistentFlags().IntVar(&limitCPUPriority, "limit-cpu-priority", 0, "CPU priority (0-10)")
+	rootCmd.PersistentFlags().StringVar(&limitMemory, "limit-memory", "", "Memory limit (e.g., '2GiB', '512MiB', '50%')")
+	rootCmd.PersistentFlags().StringVar(&limitMemorySwap, "limit-memory-swap", "", "Memory swap (true, false, or size)")
+	rootCmd.PersistentFlags().StringVar(&limitMemoryEnforce, "limit-memory-enforce", "", "Memory enforce mode (hard or soft)")
+	rootCmd.PersistentFlags().StringVar(&limitDiskRead, "limit-disk-read", "", "Disk read rate (e.g., '10MiB/s', '1000iops')")
+	rootCmd.PersistentFlags().StringVar(&limitDiskWrite, "limit-disk-write", "", "Disk write rate (e.g., '5MiB/s', '1000iops')")
+	rootCmd.PersistentFlags().StringVar(&limitDiskMax, "limit-disk-max", "", "Combined disk I/O limit")
+	rootCmd.PersistentFlags().IntVar(&limitDiskPriority, "limit-disk-priority", 0, "Disk priority (0-10)")
+	rootCmd.PersistentFlags().IntVar(&limitProcesses, "limit-processes", 0, "Max processes (0 = unlimited)")
+	rootCmd.PersistentFlags().StringVar(&limitDuration, "limit-duration", "", "Max runtime (e.g., '2h', '30m', '1h30m')")
+
 	// Add subcommands
 	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(shellCmd)
@@ -123,4 +151,55 @@ var versionCmd = &cobra.Command{
 		fmt.Printf("code-on-incus (coi) v%s\n", Version)
 		fmt.Println("https://github.com/mensfeld/code-on-incus")
 	},
+}
+
+// mergeLimitsConfig merges limits from config and CLI flags
+// CLI flags take precedence over config file
+func mergeLimitsConfig(cmd *cobra.Command) *config.LimitsConfig {
+	limits := &config.LimitsConfig{
+		CPU:     cfg.Limits.CPU,
+		Memory:  cfg.Limits.Memory,
+		Disk:    cfg.Limits.Disk,
+		Runtime: cfg.Limits.Runtime,
+	}
+
+	// Apply CLI flag overrides (only if flag was explicitly set)
+	if cmd.Flags().Changed("limit-cpu") {
+		limits.CPU.Count = limitCPU
+	}
+	if cmd.Flags().Changed("limit-cpu-allowance") {
+		limits.CPU.Allowance = limitCPUAllowance
+	}
+	if cmd.Flags().Changed("limit-cpu-priority") {
+		limits.CPU.Priority = limitCPUPriority
+	}
+	if cmd.Flags().Changed("limit-memory") {
+		limits.Memory.Limit = limitMemory
+	}
+	if cmd.Flags().Changed("limit-memory-swap") {
+		limits.Memory.Swap = limitMemorySwap
+	}
+	if cmd.Flags().Changed("limit-memory-enforce") {
+		limits.Memory.Enforce = limitMemoryEnforce
+	}
+	if cmd.Flags().Changed("limit-disk-read") {
+		limits.Disk.Read = limitDiskRead
+	}
+	if cmd.Flags().Changed("limit-disk-write") {
+		limits.Disk.Write = limitDiskWrite
+	}
+	if cmd.Flags().Changed("limit-disk-max") {
+		limits.Disk.Max = limitDiskMax
+	}
+	if cmd.Flags().Changed("limit-disk-priority") {
+		limits.Disk.Priority = limitDiskPriority
+	}
+	if cmd.Flags().Changed("limit-processes") {
+		limits.Runtime.MaxProcesses = limitProcesses
+	}
+	if cmd.Flags().Changed("limit-duration") {
+		limits.Runtime.MaxDuration = limitDuration
+	}
+
+	return limits
 }

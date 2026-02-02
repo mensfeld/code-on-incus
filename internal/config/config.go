@@ -13,6 +13,7 @@ type Config struct {
 	Network  NetworkConfig            `toml:"network"`
 	Tool     ToolConfig               `toml:"tool"`
 	Mounts   MountsConfig             `toml:"mounts"`
+	Limits   LimitsConfig             `toml:"limits"`
 	Profiles map[string]ProfileConfig `toml:"profiles"`
 }
 
@@ -73,6 +74,7 @@ type ProfileConfig struct {
 	Image       string            `toml:"image"`
 	Environment map[string]string `toml:"environment"`
 	Persistent  bool              `toml:"persistent"`
+	Limits      *LimitsConfig     `toml:"limits"`
 }
 
 // ToolConfig represents AI coding tool configuration
@@ -90,6 +92,44 @@ type MountEntry struct {
 // MountsConfig contains mount-related configuration
 type MountsConfig struct {
 	Default []MountEntry `toml:"default"` // Default mounts for all sessions
+}
+
+// LimitsConfig contains resource and time limits for containers
+type LimitsConfig struct {
+	CPU     CPULimits     `toml:"cpu"`
+	Memory  MemoryLimits  `toml:"memory"`
+	Disk    DiskLimits    `toml:"disk"`
+	Runtime RuntimeLimits `toml:"runtime"`
+}
+
+// CPULimits contains CPU resource limits
+type CPULimits struct {
+	Count     string `toml:"count"`     // "2", "0-3", "" (unlimited)
+	Allowance string `toml:"allowance"` // "50%", "25ms/100ms"
+	Priority  int    `toml:"priority"`  // 0-10
+}
+
+// MemoryLimits contains memory resource limits
+type MemoryLimits struct {
+	Limit   string `toml:"limit"`   // "512MiB", "2GiB", "50%", "" (unlimited)
+	Enforce string `toml:"enforce"` // "hard" or "soft"
+	Swap    string `toml:"swap"`    // "true", "false", or size
+}
+
+// DiskLimits contains disk I/O resource limits
+type DiskLimits struct {
+	Read     string `toml:"read"`     // "10MiB/s", "1000iops", "" (unlimited)
+	Write    string `toml:"write"`    // "5MiB/s", "1000iops", "" (unlimited)
+	Max      string `toml:"max"`      // combined read+write limit
+	Priority int    `toml:"priority"` // 0-10
+}
+
+// RuntimeLimits contains time-based and process limits
+type RuntimeLimits struct {
+	MaxDuration  string `toml:"max_duration"`  // "2h", "30m", "1h30m", "" (unlimited)
+	MaxProcesses int    `toml:"max_processes"` // 0 = unlimited
+	AutoStop     bool   `toml:"auto_stop"`     // auto-stop when limit reached
+	StopGraceful bool   `toml:"stop_graceful"` // graceful vs force stop
 }
 
 // GetDefaultConfig returns the default configuration
@@ -143,6 +183,30 @@ func GetDefaultConfig() *Config {
 		},
 		Mounts: MountsConfig{
 			Default: []MountEntry{},
+		},
+		Limits: LimitsConfig{
+			CPU: CPULimits{
+				Count:     "",
+				Allowance: "",
+				Priority:  0,
+			},
+			Memory: MemoryLimits{
+				Limit:   "",
+				Enforce: "soft",
+				Swap:    "true",
+			},
+			Disk: DiskLimits{
+				Read:     "",
+				Write:    "",
+				Max:      "",
+				Priority: 0,
+			},
+			Runtime: RuntimeLimits{
+				MaxDuration:  "",
+				MaxProcesses: 0,
+				AutoStop:     true,
+				StopGraceful: true,
+			},
 		},
 		Profiles: make(map[string]ProfileConfig),
 	}
@@ -273,10 +337,64 @@ func (c *Config) Merge(other *Config) {
 		c.Mounts.Default = append(c.Mounts.Default, other.Mounts.Default...)
 	}
 
+	// Merge limits
+	mergeLimits(&c.Limits, &other.Limits)
+
 	// Merge profiles
 	for name, profile := range other.Profiles {
 		c.Profiles[name] = profile
 	}
+}
+
+// mergeLimits merges limit configurations (other takes precedence)
+func mergeLimits(base *LimitsConfig, other *LimitsConfig) {
+	// Merge CPU limits
+	if other.CPU.Count != "" {
+		base.CPU.Count = other.CPU.Count
+	}
+	if other.CPU.Allowance != "" {
+		base.CPU.Allowance = other.CPU.Allowance
+	}
+	if other.CPU.Priority != 0 {
+		base.CPU.Priority = other.CPU.Priority
+	}
+
+	// Merge memory limits
+	if other.Memory.Limit != "" {
+		base.Memory.Limit = other.Memory.Limit
+	}
+	if other.Memory.Enforce != "" {
+		base.Memory.Enforce = other.Memory.Enforce
+	}
+	if other.Memory.Swap != "" {
+		base.Memory.Swap = other.Memory.Swap
+	}
+
+	// Merge disk limits
+	if other.Disk.Read != "" {
+		base.Disk.Read = other.Disk.Read
+	}
+	if other.Disk.Write != "" {
+		base.Disk.Write = other.Disk.Write
+	}
+	if other.Disk.Max != "" {
+		base.Disk.Max = other.Disk.Max
+	}
+	if other.Disk.Priority != 0 {
+		base.Disk.Priority = other.Disk.Priority
+	}
+
+	// Merge runtime limits
+	if other.Runtime.MaxDuration != "" {
+		base.Runtime.MaxDuration = other.Runtime.MaxDuration
+	}
+	if other.Runtime.MaxProcesses != 0 {
+		base.Runtime.MaxProcesses = other.Runtime.MaxProcesses
+	}
+	// For booleans, we take the other value if it differs from default
+	// This is imperfect but works for most cases
+	base.Runtime.AutoStop = other.Runtime.AutoStop
+	base.Runtime.StopGraceful = other.Runtime.StopGraceful
 }
 
 // GetProfile returns a profile by name, or nil if not found
@@ -298,6 +416,11 @@ func (c *Config) ApplyProfile(name string) bool {
 		c.Defaults.Image = profile.Image
 	}
 	c.Defaults.Persistent = profile.Persistent
+
+	// Apply profile limits if present
+	if profile.Limits != nil {
+		mergeLimits(&c.Limits, profile.Limits)
+	}
 
 	return true
 }

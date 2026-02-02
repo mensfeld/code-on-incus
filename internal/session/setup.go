@@ -11,6 +11,7 @@ import (
 
 	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
+	"github.com/mensfeld/code-on-incus/internal/limits"
 	"github.com/mensfeld/code-on-incus/internal/network"
 	"github.com/mensfeld/code-on-incus/internal/tool"
 )
@@ -90,7 +91,9 @@ type SetupOptions struct {
 	CLIConfigPath string       // e.g., ~/.claude (host CLI config to copy credentials from)
 	Tool          tool.Tool    // AI coding tool being used
 	NetworkConfig *config.NetworkConfig
-	DisableShift  bool // Disable UID shifting (for Colima/Lima environments)
+	DisableShift  bool              // Disable UID shifting (for Colima/Lima environments)
+	LimitsConfig  *config.LimitsConfig // Resource and time limits
+	IncusProject  string              // Incus project name
 	Logger        func(string)
 }
 
@@ -99,6 +102,7 @@ type SetupResult struct {
 	ContainerName  string
 	Manager        *container.Manager
 	NetworkManager *network.Manager
+	TimeoutMonitor *limits.TimeoutMonitor
 	HomeDir        string
 	RunAsRoot      bool
 	Image          string
@@ -245,6 +249,37 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 			return nil, err
 		}
 
+		// Apply resource limits before starting (if configured)
+		if opts.LimitsConfig != nil && hasLimits(opts.LimitsConfig) {
+			opts.Logger("Applying resource limits...")
+			applyOpts := limits.ApplyOptions{
+				ContainerName: result.ContainerName,
+				CPU: limits.CPULimits{
+					Count:     opts.LimitsConfig.CPU.Count,
+					Allowance: opts.LimitsConfig.CPU.Allowance,
+					Priority:  opts.LimitsConfig.CPU.Priority,
+				},
+				Memory: limits.MemoryLimits{
+					Limit:   opts.LimitsConfig.Memory.Limit,
+					Enforce: opts.LimitsConfig.Memory.Enforce,
+					Swap:    opts.LimitsConfig.Memory.Swap,
+				},
+				Disk: limits.DiskLimits{
+					Read:     opts.LimitsConfig.Disk.Read,
+					Write:    opts.LimitsConfig.Disk.Write,
+					Max:      opts.LimitsConfig.Disk.Max,
+					Priority: opts.LimitsConfig.Disk.Priority,
+				},
+				Runtime: limits.RuntimeLimits{
+					MaxProcesses: opts.LimitsConfig.Runtime.MaxProcesses,
+				},
+				Project: opts.IncusProject,
+			}
+			if err := limits.ApplyResourceLimits(applyOpts); err != nil {
+				return nil, fmt.Errorf("failed to apply resource limits: %w", err)
+			}
+		}
+
 		// Now start the container
 		opts.Logger("Starting container...")
 		if err := result.Manager.Start(); err != nil {
@@ -258,7 +293,26 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 		return nil, err
 	}
 
-	// 7. Setup network isolation (after container is running and has IP)
+	// 7. Start timeout monitor if max_duration is configured
+	if opts.LimitsConfig != nil && opts.LimitsConfig.Runtime.MaxDuration != "" {
+		duration, err := limits.ParseDuration(opts.LimitsConfig.Runtime.MaxDuration)
+		if err != nil {
+			return nil, fmt.Errorf("invalid max_duration: %w", err)
+		}
+		if duration > 0 {
+			result.TimeoutMonitor = limits.NewTimeoutMonitor(
+				result.ContainerName,
+				duration,
+				opts.LimitsConfig.Runtime.AutoStop,
+				opts.LimitsConfig.Runtime.StopGraceful,
+				opts.IncusProject,
+				opts.Logger,
+			)
+			result.TimeoutMonitor.Start()
+		}
+	}
+
+	// 8. Setup network isolation (after container is running and has IP)
 	if opts.NetworkConfig != nil {
 		result.NetworkManager = network.NewManager(opts.NetworkConfig)
 		if err := result.NetworkManager.SetupForContainer(context.Background(), result.ContainerName); err != nil {
@@ -266,7 +320,7 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 		}
 	}
 
-	// 8. When resuming: restore session data if container was recreated, then inject credentials
+	// 9. When resuming: restore session data if container was recreated, then inject credentials
 	// Skip if tool uses ENV-based auth (no config directory)
 	if opts.ResumeFromID != "" && opts.Tool != nil && opts.Tool.ConfigDirName() != "" {
 		// If we launched a new container (not reusing persistent one), restore config from saved session
@@ -284,12 +338,12 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 		}
 	}
 
-	// 9. Workspace and configured mounts are already mounted (added before container start in step 5)
+	// 10. Workspace and configured mounts are already mounted (added before container start in step 5)
 	if skipLaunch {
 		opts.Logger("Reusing existing workspace and mount configurations")
 	}
 
-	// 10. Setup CLI tool config (skip if resuming - config already restored)
+	// 11. Setup CLI tool config (skip if resuming - config already restored)
 	// Skip entirely if tool uses ENV-based auth (ConfigDirName returns "")
 	if opts.Tool != nil && opts.Tool.ConfigDirName() != "" {
 		if opts.CLIConfigPath != "" && opts.ResumeFromID == "" {
@@ -588,4 +642,24 @@ func setupCLIConfig(mgr *container.Manager, hostCLIConfigPath, homeDir string, t
 	}
 
 	return nil
+}
+
+// hasLimits checks if any limits are configured
+func hasLimits(cfg *config.LimitsConfig) bool {
+	if cfg == nil {
+		return false
+	}
+
+	// Check if any limit is set (non-empty strings or non-zero integers)
+	return cfg.CPU.Count != "" ||
+		cfg.CPU.Allowance != "" ||
+		cfg.CPU.Priority != 0 ||
+		cfg.Memory.Limit != "" ||
+		cfg.Memory.Enforce != "" ||
+		cfg.Memory.Swap != "" ||
+		cfg.Disk.Read != "" ||
+		cfg.Disk.Write != "" ||
+		cfg.Disk.Max != "" ||
+		cfg.Disk.Priority != 0 ||
+		cfg.Runtime.MaxProcesses != 0
 }

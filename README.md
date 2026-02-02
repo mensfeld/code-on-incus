@@ -647,6 +647,144 @@ persistent = true
 5. CLI flags
 
 
+## Resource and Time Limits
+
+Control container resource consumption and runtime with configurable limits. All limits can be set via config file or CLI flags.
+
+### Configuration
+
+Add to your `~/.config/coi/config.toml`:
+
+```toml
+[limits.cpu]
+count = "2"              # CPU cores: "2", "0-3", "0,1,3" or "" (unlimited)
+allowance = "50%"        # CPU time: "50%", "25ms/100ms" or "" (unlimited)
+priority = 0             # CPU priority: 0-10 (higher = more priority)
+
+[limits.memory]
+limit = "2GiB"           # Memory: "512MiB", "2GiB", "50%" or "" (unlimited)
+enforce = "soft"         # Enforcement: "hard" or "soft"
+swap = "true"            # Swap: "true", "false", or size like "1GiB"
+
+[limits.disk]
+read = "10MiB/s"         # Read rate: "10MiB/s", "1000iops" or "" (unlimited)
+write = "5MiB/s"         # Write rate: "5MiB/s", "1000iops" or "" (unlimited)
+max = ""                 # Combined I/O limit (overrides read/write)
+priority = 0             # Disk priority: 0-10
+
+[limits.runtime]
+max_duration = "2h"      # Max runtime: "2h", "30m", "1h30m" or "" (unlimited)
+max_processes = 0        # Max processes: 100 or 0 (unlimited)
+auto_stop = true         # Auto-stop when max_duration reached
+stop_graceful = true     # Graceful (true) vs force (false) stop
+```
+
+### CLI Flags
+
+Override config file settings with flags:
+
+```bash
+# CPU limits
+coi shell --limit-cpu="2" --limit-cpu-allowance="50%"
+
+# Memory limits
+coi shell --limit-memory="2GiB" --limit-memory-swap="1GiB"
+
+# Disk limits
+coi shell --limit-disk-read="10MiB/s" --limit-disk-write="5MiB/s"
+
+# Runtime limits
+coi shell --limit-duration="2h" --limit-processes=100
+
+# Combine multiple limits
+coi shell \
+  --limit-cpu="2" \
+  --limit-memory="2GiB" \
+  --limit-duration="1h"
+```
+
+### Profile-Specific Limits
+
+Define limits per profile:
+
+```toml
+[profiles.limited]
+image = "coi"
+persistent = false
+
+[profiles.limited.limits.cpu]
+count = "2"
+allowance = "50%"
+
+[profiles.limited.limits.memory]
+limit = "2GiB"
+
+[profiles.limited.limits.runtime]
+max_duration = "2h"
+auto_stop = true
+```
+
+Use with: `coi shell --profile limited`
+
+### Time Limits and Auto-Stop
+
+When `max_duration` is set and `auto_stop = true`:
+- Container automatically stops after the specified duration
+- Graceful stop preserves session data
+- Force stop (`stop_graceful = false`) terminates immediately
+- Useful for preventing runaway sessions or managing costs
+
+Example:
+```bash
+# Auto-stop after 2 hours
+coi shell --limit-duration="2h"
+
+# The container will gracefully stop after 2 hours, saving session data
+```
+
+### Precedence
+
+Limits are applied with this precedence (highest to lowest):
+1. CLI flags (e.g., `--limit-cpu="2"`)
+2. Profile limits (if `--profile` specified)
+3. Config `[limits]` section
+4. Unlimited (Incus defaults)
+
+### Examples
+
+**Limit resources for expensive operations:**
+```bash
+coi shell \
+  --limit-cpu="4" \
+  --limit-memory="4GiB" \
+  --limit-duration="30m"
+```
+
+**Prevent runaway processes:**
+```bash
+coi shell \
+  --limit-processes=100 \
+  --limit-duration="1h" \
+  --limit-memory="2GiB"
+```
+
+**Development profile with limits:**
+```toml
+[profiles.dev]
+image = "coi"
+persistent = true
+
+[profiles.dev.limits.cpu]
+count = "2"
+
+[profiles.dev.limits.memory]
+limit = "4GiB"
+
+[profiles.dev.limits.runtime]
+max_duration = "4h"
+```
+
+
 ## Container Lifecycle & Session Persistence
 
 Understanding how containers and sessions work in `coi`:

@@ -82,6 +82,36 @@ func loadFromEnv(cfg *Config) {
 	if env := os.Getenv("CLAUDE_ON_INCUS_PERSISTENT"); env == "true" || env == "1" {
 		cfg.Defaults.Persistent = true
 	}
+
+	// Limit environment variables (using COI_ prefix for brevity)
+	// CPU limits
+	if env := os.Getenv("COI_LIMIT_CPU"); env != "" {
+		cfg.Limits.CPU.Count = env
+	}
+	if env := os.Getenv("COI_LIMIT_CPU_ALLOWANCE"); env != "" {
+		cfg.Limits.CPU.Allowance = env
+	}
+
+	// Memory limits
+	if env := os.Getenv("COI_LIMIT_MEMORY"); env != "" {
+		cfg.Limits.Memory.Limit = env
+	}
+	if env := os.Getenv("COI_LIMIT_MEMORY_SWAP"); env != "" {
+		cfg.Limits.Memory.Swap = env
+	}
+
+	// Disk limits
+	if env := os.Getenv("COI_LIMIT_DISK_READ"); env != "" {
+		cfg.Limits.Disk.Read = env
+	}
+	if env := os.Getenv("COI_LIMIT_DISK_WRITE"); env != "" {
+		cfg.Limits.Disk.Write = env
+	}
+
+	// Runtime limits
+	if env := os.Getenv("COI_LIMIT_DURATION"); env != "" {
+		cfg.Limits.Runtime.MaxDuration = env
+	}
 }
 
 // ensureDirectories creates necessary directories if they don't exist
@@ -142,6 +172,45 @@ code_user = "code"
 # host = "/var/run/docker.sock"
 # container = "/var/run/docker.sock"
 
+[limits]
+# Resource and time limits for containers (empty = unlimited)
+
+[limits.cpu]
+# CPU count: "2", "0-3", "0,1,3" or "" for unlimited
+count = ""
+# CPU allowance: "50%", "25ms/100ms" or "" for unlimited
+allowance = ""
+# CPU priority: 0-10 (higher = more priority)
+priority = 0
+
+[limits.memory]
+# Memory limit: "512MiB", "2GiB", "50%" or "" for unlimited
+limit = ""
+# Enforcement mode: "hard" or "soft"
+enforce = "soft"
+# Swap: "true", "false", or size like "1GiB"
+swap = "true"
+
+[limits.disk]
+# Disk read rate: "10MiB/s", "1000iops" or "" for unlimited
+read = ""
+# Disk write rate: "5MiB/s", "1000iops" or "" for unlimited
+write = ""
+# Combined read+write limit (overrides read/write if set)
+max = ""
+# Disk priority: 0-10 (higher = more priority)
+priority = 0
+
+[limits.runtime]
+# Maximum container runtime: "2h", "30m", "1h30m" or "" for unlimited
+max_duration = ""
+# Maximum processes: 100 or 0 for unlimited
+max_processes = 0
+# Auto-stop when max_duration reached
+auto_stop = true
+# Graceful stop (true) or force stop (false)
+stop_graceful = true
+
 # Example profile for Rust development with persistent container
 # [profiles.rust]
 # image = "coi-rust"
@@ -153,6 +222,18 @@ code_user = "code"
 # image = "coi"
 # environment = { NODE_ENV = "development" }
 # persistent = true
+
+# Example profile with resource limits
+# [profiles.limited]
+# image = "coi"
+# persistent = false
+# [profiles.limited.limits.cpu]
+# count = "2"
+# allowance = "50%"
+# [profiles.limited.limits.memory]
+# limit = "2GiB"
+# [profiles.limited.limits.runtime]
+# max_duration = "2h"
 `
 
 	// Create directory if it doesn't exist
