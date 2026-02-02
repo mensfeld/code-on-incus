@@ -100,7 +100,7 @@ func (tm *TimeoutMonitor) handleTimeout() {
 	}
 
 	if tm.Logger != nil {
-		tm.Logger(fmt.Sprintf("[limits] Container stopped due to runtime limit"))
+		tm.Logger("[limits] Container stopped due to runtime limit")
 	}
 }
 

@@ -180,10 +180,9 @@ func RemoveLimits(containerName, project string) error {
 	}
 
 	for _, limit := range limits {
-		if err := unsetIncusConfig(containerName, limit, project); err != nil {
-			// Continue even if unsetting fails (limit might not be set)
-			// Log error but don't fail the entire operation
-		}
+		// Continue even if unsetting fails (limit might not be set)
+		// We intentionally ignore errors here to allow cleanup to proceed
+		_ = unsetIncusConfig(containerName, limit, project)
 	}
 
 	return nil

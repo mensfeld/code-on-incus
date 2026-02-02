@@ -91,9 +91,9 @@ type SetupOptions struct {
 	CLIConfigPath string       // e.g., ~/.claude (host CLI config to copy credentials from)
 	Tool          tool.Tool    // AI coding tool being used
 	NetworkConfig *config.NetworkConfig
-	DisableShift  bool              // Disable UID shifting (for Colima/Lima environments)
+	DisableShift  bool                 // Disable UID shifting (for Colima/Lima environments)
 	LimitsConfig  *config.LimitsConfig // Resource and time limits
-	IncusProject  string              // Incus project name
+	IncusProject  string               // Incus project name
 	Logger        func(string)
 }
 
@@ -110,6 +110,8 @@ type SetupResult struct {
 
 // Setup initializes a container for a Claude session
 // This configures the container with workspace mounting and user setup
+//
+//nolint:gocyclo // Sequential initialization with many configuration paths
 func Setup(opts SetupOptions) (*SetupResult, error) {
 	result := &SetupResult{}
 
