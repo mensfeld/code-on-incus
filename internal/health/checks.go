@@ -956,10 +956,10 @@ func CheckNetworkRestriction(imageName string) HealthCheck {
 	private2Blocked := private2Err != nil
 
 	details := map[string]interface{}{
-		"container_ip":       containerIP,
-		"external_access":    externalOK,
-		"private_blocked":    privateBlocked,
-		"private_10_blocked": privateBlocked,
+		"container_ip":        containerIP,
+		"external_access":     externalOK,
+		"private_blocked":     privateBlocked,
+		"private_10_blocked":  privateBlocked,
 		"private_192_blocked": private2Blocked,
 	}
 
