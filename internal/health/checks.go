@@ -700,7 +700,7 @@ func CheckContainerConnectivity(imageName string) HealthCheck {
 		_ = container.DeleteContainer(containerName)
 	}()
 
-	// Wait for container to be ready (up to 30 seconds)
+	// Wait for container to be ready and have network (up to 30 seconds)
 	var containerReady bool
 	for i := 0; i < 30; i++ {
 		running, err := container.ContainerRunning(containerName)
@@ -723,6 +723,26 @@ func CheckContainerConnectivity(imageName string) HealthCheck {
 		}
 	}
 
+	// Wait for DHCP to assign an IP (up to 15 seconds)
+	var hasIP bool
+	for i := 0; i < 15; i++ {
+		// Check if eth0 has an IPv4 address
+		ipOutput, err := container.IncusOutput("exec", containerName, "--", "ip", "-4", "addr", "show", "eth0")
+		if err == nil && strings.Contains(ipOutput, "inet ") {
+			hasIP = true
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
+
+	if !hasIP {
+		return HealthCheck{
+			Name:    "container_connectivity",
+			Status:  StatusFailed,
+			Message: "Container failed to get IP address (DHCP not working)",
+		}
+	}
+
 	// Test 1: DNS resolution using getent
 	dnsOutput, dnsErr := container.IncusOutput("exec", containerName, "--", "getent", "hosts", "api.anthropic.com")
 
@@ -731,7 +751,9 @@ func CheckContainerConnectivity(imageName string) HealthCheck {
 
 	// Analyze results
 	dnsOK := dnsErr == nil && dnsOutput != ""
-	httpOK := httpErr == nil && (httpOutput == "200" || httpOutput == "401" || httpOutput == "403")
+	// Accept any HTTP response - getting a response means connectivity works
+	// Common responses: 200 (OK), 401/403 (auth required), 404 (not found), 405 (method not allowed)
+	httpOK := httpErr == nil && httpOutput != "" && httpOutput != "000"
 
 	details := map[string]interface{}{
 		"dns_test":  dnsOK,
