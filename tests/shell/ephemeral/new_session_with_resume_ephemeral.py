@@ -109,7 +109,7 @@ def test_ephemeral_session_with_resume(coi_binary, cleanup_containers, workspace
     except Exception:
         child.close(force=True)
 
-    # Wait for container deletion (60s to account for cleanup detection + OVN teardown)
+    # Wait for container deletion (60s to account for cleanup detection + network teardown)
     # The wait function polls, so no need for a sleep before waiting
     container_deleted = wait_for_specific_container_deletion(container_name, timeout=60)
     assert container_deleted, (
@@ -170,7 +170,7 @@ def test_ephemeral_session_with_resume(coi_binary, cleanup_containers, workspace
     except Exception:
         child2.close(force=True)
 
-    # Wait for second container to be deleted (60s to account for cleanup detection + OVN teardown)
+    # Wait for second container to be deleted (60s to account for cleanup detection + network teardown)
     container_name2 = calculate_container_name(workspace_dir, 1)
     deleted = wait_for_specific_container_deletion(container_name2, timeout=60)
 

@@ -233,7 +233,7 @@ def test_restricted_blocks_metadata(coi_binary, workspace_dir, cleanup_container
     Verifies that containers cannot access the cloud metadata service.
 
     Note: In cloud environments (Azure CI), a real metadata service may exist
-    that cannot be blocked by OVN ACLs. This test is skipped in such environments.
+    that cannot be blocked by firewall rules. This test is skipped in such environments.
     """
     # Create temporary config with RESTRICTED mode
     with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as f:
@@ -295,7 +295,7 @@ mode = "restricted"
         )
 
         # In RESTRICTED mode, either outcome is acceptable:
-        # - Success (returncode == 0): Cloud environment where OVN ACLs cannot block
+        # - Success (returncode == 0): Cloud environment where firewall rules cannot block
         #   the cloud provider's own metadata service (expected behavior in cloud CI)
         # - Failure: Local environment where metadata service doesn't exist or is blocked
         # Both are valid depending on the environment
@@ -389,7 +389,7 @@ def test_restricted_allows_gateway(coi_binary, workspace_dir, cleanup_containers
     """
     Test that RESTRICTED mode allows access to the gateway.
 
-    Verifies that containers can reach the OVN gateway IP despite RFC1918 blocking.
+    Verifies that containers can reach the gateway IP despite RFC1918 blocking.
     Note: This test is informational - gateway connectivity is complex to verify.
     """
     # Create temporary config with RESTRICTED mode

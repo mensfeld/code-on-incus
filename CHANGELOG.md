@@ -44,7 +44,7 @@ Firewalld network isolation:
 - **Restricted Mode**: Allows gateway, blocks RFC1918 (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16) and metadata (169.254.0.0/16), allows all else
 - **Allowlist Mode**: Allows gateway, allows specific IPs from resolved domains, blocks RFC1918 and metadata, default deny all else
 - **Cleanup**: Rules are removed when container stops/deletes using container IP as identifier
-- **No OVN Required**: Works with standard Incus bridge networks (incusbr0), no special routing needed
+- **Standard Bridge Networks**: Works with standard Incus bridge networks (incusbr0), no special routing needed
 
 Docker/nested container support:
 - **Automatic Configuration**: All containers automatically receive Docker support flags on launch

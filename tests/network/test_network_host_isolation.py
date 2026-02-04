@@ -87,7 +87,7 @@ mode = "restricted"
             )
 
             # Verify it's blocked by ACL (can be timeout, connection refused, or unreachable)
-            # OVN ACLs can reject traffic immediately (connection refused) or via timeout
+            # Firewall rules can reject traffic immediately (connection refused) or via timeout
             error_output = (result.stdout + result.stderr).lower()
             assert (
                 "timeout" in error_output
@@ -177,7 +177,7 @@ refresh_interval_minutes = 30
             )
 
             # Verify it's blocked by ACL (can be timeout, connection refused, or unreachable)
-            # OVN ACLs can reject traffic immediately (connection refused) or via timeout
+            # Firewall rules can reject traffic immediately (connection refused) or via timeout
             error_output = (result.stdout + result.stderr).lower()
             assert (
                 "timeout" in error_output
@@ -251,7 +251,7 @@ mode = "restricted"
         assert result.returncode == 0, f"Failed to get container info: {result.stderr}"
 
         container_info = json.loads(result.stdout)[0]
-        # Get eth0 IP address (OVN network IP, not Docker bridge IP)
+        # Get eth0 IP address (container network IP, not Docker bridge IP)
         eth0_addresses = container_info["state"]["network"]["eth0"]["addresses"]
         ipv4_addresses = [addr["address"] for addr in eth0_addresses if addr["family"] == "inet"]
         assert ipv4_addresses, f"No IPv4 address found for container {container_name}"
