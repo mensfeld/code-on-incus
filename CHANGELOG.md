@@ -4,7 +4,7 @@
 
 ### Bug Fixes
 
-- [Bug Fix] **Increased test timeout values for CI reliability** - Comprehensively increased timeouts across all ephemeral shell tests to improve CI reliability. Container deletion timeout increased from 30s to 90s, container operations from 30s to 90s, OVN deletion from 60s to 120s, and other operations from 30s to 90s. CI environments need significantly more time for container cleanup after poweroff, container deletion operations, and network operations in OVN mode. This fixes all timing-related test failures in shell-ephemeral tests.
+- [Bug Fix] **Increased test timeout values for CI reliability** - Comprehensively increased timeouts across all ephemeral shell tests to improve CI reliability. Container deletion timeout increased from 30s to 90s, container operations from 30s to 90s, network teardown from 60s to 120s, and other operations from 30s to 90s. CI environments need significantly more time for container cleanup after poweroff, container deletion operations, and network teardown operations. This fixes all timing-related test failures in shell-ephemeral tests.
 
 ### Features
 
