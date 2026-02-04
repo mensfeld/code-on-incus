@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## Unreleased
+
+### Features
+
+- [Feature] **Container connectivity health check** - Added `container_connectivity` check to `coi health` command that tests actual internet connectivity from inside a container. Launches an ephemeral test container, runs DNS resolution (`getent hosts api.anthropic.com`) and HTTP connectivity (`curl https://api.anthropic.com`) tests, then cleans up. This catches real networking issues like DHCP failures, DNS misconfiguration, or firewall problems that the existing host-level checks miss. The check runs by default (not just with `--verbose`) since container networking issues are critical for COI to function. Returns OK if both tests pass, Warning if one fails, or Failed if both fail. Includes integration tests for image-not-found scenarios and cleanup verification. (#101)
+
 ## 0.6.0 (2026-02-02)
 
 ### Bug Fixes

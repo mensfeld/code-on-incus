@@ -665,6 +665,121 @@ func CheckDNS() HealthCheck {
 	}
 }
 
+// CheckContainerConnectivity tests internet connectivity from inside a container
+func CheckContainerConnectivity(imageName string) HealthCheck {
+	// Skip if no image available
+	if imageName == "" {
+		imageName = "coi"
+	}
+
+	exists, err := container.ImageExists(imageName)
+	if err != nil || !exists {
+		return HealthCheck{
+			Name:    "container_connectivity",
+			Status:  StatusWarning,
+			Message: "Skipped (image not available)",
+		}
+	}
+
+	// Create temporary container name
+	containerName := fmt.Sprintf("coi-health-check-%d", time.Now().UnixNano())
+
+	// Launch ephemeral container
+	if err := container.LaunchContainer(imageName, containerName); err != nil {
+		return HealthCheck{
+			Name:    "container_connectivity",
+			Status:  StatusFailed,
+			Message: fmt.Sprintf("Failed to launch test container: %v", err),
+		}
+	}
+
+	// Ensure cleanup on any exit path
+	defer func() {
+		// Ephemeral containers auto-delete when stopped, but force cleanup just in case
+		_ = container.StopContainer(containerName)
+		_ = container.DeleteContainer(containerName)
+	}()
+
+	// Wait for container to be ready (up to 30 seconds)
+	var containerReady bool
+	for i := 0; i < 30; i++ {
+		running, err := container.ContainerRunning(containerName)
+		if err == nil && running {
+			// Try a simple command to verify container is responsive
+			_, err := container.IncusOutput("exec", containerName, "--", "echo", "ready")
+			if err == nil {
+				containerReady = true
+				break
+			}
+		}
+		time.Sleep(1 * time.Second)
+	}
+
+	if !containerReady {
+		return HealthCheck{
+			Name:    "container_connectivity",
+			Status:  StatusFailed,
+			Message: "Test container failed to start within timeout",
+		}
+	}
+
+	// Test 1: DNS resolution using getent
+	dnsOutput, dnsErr := container.IncusOutput("exec", containerName, "--", "getent", "hosts", "api.anthropic.com")
+
+	// Test 2: HTTP connectivity using curl
+	httpOutput, httpErr := container.IncusOutput("exec", containerName, "--", "curl", "-s", "--connect-timeout", "5", "-o", "/dev/null", "-w", "%{http_code}", "https://api.anthropic.com")
+
+	// Analyze results
+	dnsOK := dnsErr == nil && dnsOutput != ""
+	httpOK := httpErr == nil && (httpOutput == "200" || httpOutput == "401" || httpOutput == "403")
+
+	details := map[string]interface{}{
+		"dns_test":  dnsOK,
+		"http_test": httpOK,
+	}
+
+	if dnsOK {
+		details["dns_result"] = strings.Split(dnsOutput, " ")[0] // First IP
+	}
+	if httpOK {
+		details["http_status"] = httpOutput
+	}
+
+	if dnsOK && httpOK {
+		return HealthCheck{
+			Name:    "container_connectivity",
+			Status:  StatusOK,
+			Message: fmt.Sprintf("DNS and HTTP working (status %s)", httpOutput),
+			Details: details,
+		}
+	}
+
+	if !dnsOK && !httpOK {
+		return HealthCheck{
+			Name:    "container_connectivity",
+			Status:  StatusFailed,
+			Message: "Both DNS and HTTP failed inside container",
+			Details: details,
+		}
+	}
+
+	if !dnsOK {
+		return HealthCheck{
+			Name:    "container_connectivity",
+			Status:  StatusWarning,
+			Message: "DNS resolution failed inside container",
+			Details: details,
+		}
+	}
+
+	return HealthCheck{
+		Name:    "container_connectivity",
+		Status:  StatusWarning,
+		Message: fmt.Sprintf("HTTP connectivity failed (DNS OK, HTTP status: %s)", httpOutput),
+		Details: details,
+	}
+}
+
 // CheckPasswordlessSudo verifies passwordless sudo for firewall-cmd
 func CheckPasswordlessSudo() HealthCheck {
 	// On macOS, not needed
