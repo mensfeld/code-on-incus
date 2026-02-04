@@ -87,6 +87,7 @@ func RunAllChecks(cfg *config.Config, verbose bool) *HealthResult {
 	if verbose {
 		checks["dns_resolution"] = CheckDNS()
 		checks["passwordless_sudo"] = CheckPasswordlessSudo()
+		checks["network_restriction"] = CheckNetworkRestriction(cfg.Defaults.Image)
 	}
 
 	// Calculate summary

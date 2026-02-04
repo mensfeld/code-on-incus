@@ -94,7 +94,7 @@ func outputHealthText(result *health.HealthResult) error {
 		"STORAGE":       {"coi_directory", "sessions_directory", "disk_space"},
 		"CONFIGURATION": {"config", "network_mode", "tool"},
 		"STATUS":        {"active_containers", "saved_sessions"},
-		"OPTIONAL":      {"dns_resolution", "passwordless_sudo"},
+		"OPTIONAL":      {"dns_resolution", "passwordless_sudo", "network_restriction"},
 	}
 
 	// Category order

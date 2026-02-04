@@ -814,6 +814,195 @@ func CheckContainerConnectivity(imageName string) HealthCheck {
 	}
 }
 
+// CheckNetworkRestriction tests that restricted network mode properly blocks private networks
+func CheckNetworkRestriction(imageName string) HealthCheck {
+	// Skip if firewall not available
+	if !network.FirewallAvailable() {
+		return HealthCheck{
+			Name:    "network_restriction",
+			Status:  StatusWarning,
+			Message: "Skipped (firewalld not available)",
+		}
+	}
+
+	// Skip if no image available
+	if imageName == "" {
+		imageName = "coi"
+	}
+
+	exists, err := container.ImageExists(imageName)
+	if err != nil || !exists {
+		return HealthCheck{
+			Name:    "network_restriction",
+			Status:  StatusWarning,
+			Message: "Skipped (image not available)",
+		}
+	}
+
+	// Create temporary container name
+	containerName := fmt.Sprintf("coi-restriction-check-%d", time.Now().UnixNano())
+
+	// Launch ephemeral container
+	if err := container.LaunchContainer(imageName, containerName); err != nil {
+		return HealthCheck{
+			Name:    "network_restriction",
+			Status:  StatusFailed,
+			Message: fmt.Sprintf("Failed to launch test container: %v", err),
+		}
+	}
+
+	// Track if we applied firewall rules (for cleanup)
+	var firewallManager *network.FirewallManager
+
+	// Ensure cleanup on any exit path
+	defer func() {
+		// Remove firewall rules first
+		if firewallManager != nil {
+			_ = firewallManager.RemoveRules()
+		}
+		// Then stop/delete container
+		_ = container.StopContainer(containerName)
+		_ = container.DeleteContainer(containerName)
+	}()
+
+	// Wait for container to be ready and have network (up to 30 seconds)
+	var containerReady bool
+	for i := 0; i < 30; i++ {
+		running, err := container.ContainerRunning(containerName)
+		if err == nil && running {
+			_, err := container.IncusOutput("exec", containerName, "--", "echo", "ready")
+			if err == nil {
+				containerReady = true
+				break
+			}
+		}
+		time.Sleep(1 * time.Second)
+	}
+
+	if !containerReady {
+		return HealthCheck{
+			Name:    "network_restriction",
+			Status:  StatusFailed,
+			Message: "Test container failed to start within timeout",
+		}
+	}
+
+	// Wait for DHCP to assign an IP (up to 15 seconds)
+	var containerIP string
+	for i := 0; i < 15; i++ {
+		ip, err := network.GetContainerIP(containerName)
+		if err == nil && ip != "" {
+			containerIP = ip
+			break
+		}
+		time.Sleep(1 * time.Second)
+	}
+
+	if containerIP == "" {
+		return HealthCheck{
+			Name:    "network_restriction",
+			Status:  StatusFailed,
+			Message: "Container failed to get IP address",
+		}
+	}
+
+	// Get gateway IP for firewall rules
+	gatewayIP := ""
+	// Try to extract gateway from container's route
+	routeOutput, err := container.IncusOutput("exec", containerName, "--", "ip", "route", "show", "default")
+	if err == nil {
+		// Parse "default via 10.128.178.1 dev eth0"
+		parts := strings.Fields(routeOutput)
+		for i, part := range parts {
+			if part == "via" && i+1 < len(parts) {
+				gatewayIP = parts[i+1]
+				break
+			}
+		}
+	}
+
+	// Apply restricted mode firewall rules
+	firewallManager = network.NewFirewallManager(containerIP, gatewayIP)
+	restrictedConfig := &config.NetworkConfig{
+		Mode:                  config.NetworkModeRestricted,
+		BlockPrivateNetworks:  true,
+		BlockMetadataEndpoint: true,
+	}
+
+	if err := firewallManager.ApplyRestricted(restrictedConfig); err != nil {
+		return HealthCheck{
+			Name:    "network_restriction",
+			Status:  StatusFailed,
+			Message: fmt.Sprintf("Failed to apply firewall rules: %v", err),
+		}
+	}
+
+	// Test 1: External internet should be accessible
+	httpOutput, httpErr := container.IncusOutput("exec", containerName, "--", "curl", "-s", "--connect-timeout", "5", "-o", "/dev/null", "-w", "%{http_code}", "https://api.anthropic.com")
+	externalOK := httpErr == nil && httpOutput != "" && httpOutput != "000"
+
+	// Test 2: RFC1918 private networks should be blocked
+	// Try to reach a private IP - we use the gateway but on a different port that won't respond
+	// Actually, let's try to reach 10.0.0.1 which should be blocked
+	// Using curl with connect-timeout to test if connection is rejected
+	_, privateErr := container.IncusOutput("exec", containerName, "--", "curl", "-s", "--connect-timeout", "2", "-o", "/dev/null", "http://10.0.0.1:80")
+
+	// If private network access is blocked, curl should fail with connection refused/rejected
+	// Exit code 7 = connection refused, 28 = timeout (both indicate blocking works)
+	privateBlocked := privateErr != nil
+
+	// Also test 192.168.0.1
+	_, private2Err := container.IncusOutput("exec", containerName, "--", "curl", "-s", "--connect-timeout", "2", "-o", "/dev/null", "http://192.168.0.1:80")
+	private2Blocked := private2Err != nil
+
+	details := map[string]interface{}{
+		"container_ip":       containerIP,
+		"external_access":    externalOK,
+		"private_blocked":    privateBlocked,
+		"private_10_blocked": privateBlocked,
+		"private_192_blocked": private2Blocked,
+	}
+
+	if externalOK {
+		details["external_status"] = httpOutput
+	}
+
+	// Evaluate results
+	if externalOK && privateBlocked && private2Blocked {
+		return HealthCheck{
+			Name:    "network_restriction",
+			Status:  StatusOK,
+			Message: "Restricted mode working (external OK, private networks blocked)",
+			Details: details,
+		}
+	}
+
+	if !externalOK {
+		return HealthCheck{
+			Name:    "network_restriction",
+			Status:  StatusFailed,
+			Message: "Restricted mode broken: external internet not accessible",
+			Details: details,
+		}
+	}
+
+	if !privateBlocked || !private2Blocked {
+		return HealthCheck{
+			Name:    "network_restriction",
+			Status:  StatusFailed,
+			Message: "Restricted mode broken: private networks NOT blocked (firewall rules ineffective)",
+			Details: details,
+		}
+	}
+
+	return HealthCheck{
+		Name:    "network_restriction",
+		Status:  StatusWarning,
+		Message: "Restricted mode partially working",
+		Details: details,
+	}
+}
+
 // CheckPasswordlessSudo verifies passwordless sudo for firewall-cmd
 func CheckPasswordlessSudo() HealthCheck {
 	// On macOS, not needed
