@@ -80,14 +80,14 @@ func RunAllChecks(cfg *config.Config, verbose bool) *HealthResult {
 	checks["active_containers"] = CheckActiveContainers()
 	checks["saved_sessions"] = CheckSavedSessions(cfg)
 
-	// Container connectivity check (critical for detecting real networking issues)
+	// Container networking checks (critical for detecting real networking issues)
 	checks["container_connectivity"] = CheckContainerConnectivity(cfg.Defaults.Image)
+	checks["network_restriction"] = CheckNetworkRestriction(cfg.Defaults.Image)
 
 	// Optional checks (only if verbose)
 	if verbose {
 		checks["dns_resolution"] = CheckDNS()
 		checks["passwordless_sudo"] = CheckPasswordlessSudo()
-		checks["network_restriction"] = CheckNetworkRestriction(cfg.Defaults.Image)
 	}
 
 	// Calculate summary
