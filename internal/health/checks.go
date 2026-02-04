@@ -761,7 +761,10 @@ func CheckContainerConnectivity(imageName string) HealthCheck {
 	}
 
 	if dnsOK {
-		details["dns_result"] = strings.Split(dnsOutput, " ")[0] // First IP
+		parts := strings.Fields(dnsOutput)
+		if len(parts) > 0 {
+			details["dns_result"] = parts[0] // First IP
+		}
 	}
 	if httpOK {
 		details["http_status"] = httpOutput
@@ -794,6 +797,15 @@ func CheckContainerConnectivity(imageName string) HealthCheck {
 		}
 	}
 
+	// DNS OK but HTTP failed - provide specific error message
+	if httpErr != nil {
+		return HealthCheck{
+			Name:    "container_connectivity",
+			Status:  StatusWarning,
+			Message: fmt.Sprintf("HTTP connectivity failed (DNS OK, curl error: %v)", httpErr),
+			Details: details,
+		}
+	}
 	return HealthCheck{
 		Name:    "container_connectivity",
 		Status:  StatusWarning,
