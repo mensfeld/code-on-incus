@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Bug Fixes
+
+- [Bug Fix] **Increased test timeout values for CI reliability** - Comprehensively increased timeouts across all ephemeral shell tests to improve CI reliability. Container deletion timeout increased from 30s to 90s, container operations from 30s to 90s, OVN deletion from 60s to 120s, and other operations from 30s to 90s. CI environments need significantly more time for container cleanup after poweroff, container deletion operations, and network operations in OVN mode. This fixes all timing-related test failures in shell-ephemeral tests.
+
 ### Features
 
 - [Feature] **Container connectivity health check** - Added `container_connectivity` check to `coi health` command that tests actual internet connectivity from inside a container. Launches an ephemeral test container, runs DNS resolution (`getent hosts api.anthropic.com`) and HTTP connectivity (`curl https://api.anthropic.com`) tests, then cleans up. This catches real networking issues like DHCP failures, DNS misconfiguration, or firewall problems that the existing host-level checks miss. The check runs by default (not just with `--verbose`) since container networking issues are critical for COI to function. Returns OK if both tests pass, Warning if one fails, or Failed if both fail. Includes integration tests for image-not-found scenarios and cleanup verification. (#102)
