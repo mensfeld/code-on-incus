@@ -367,7 +367,7 @@ def test_allowlist_blocks_public_ips_not_in_list(coi_binary, workspace_dir, clea
     """
     Test that allowlist mode blocks public IPs not in the allowlist.
 
-    Verifies that OVN's implicit default-deny blocks non-allowed public IPs.
+    Verifies that firewalld's implicit default-deny blocks non-allowed public IPs.
     """
     # Create temporary config with only DNS
     with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as f:

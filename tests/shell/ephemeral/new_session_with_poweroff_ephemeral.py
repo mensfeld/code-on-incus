@@ -107,7 +107,7 @@ def test_ephemeral_session_with_shutdown(coi_binary, cleanup_containers, workspa
     except Exception:
         child.close(force=True)
 
-    # Step 5: Wait for container to be deleted (60s to account for OVN network teardown)
+    # Step 5: Wait for container to be deleted (60s to account for network teardown)
     container_deleted = wait_for_specific_container_deletion(container_name, timeout=60)
 
     # Step 6: Verify cleanup messages
