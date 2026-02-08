@@ -1321,7 +1321,7 @@ Note: Windows support via WSL2 is experimental and not officially tested. Linux 
 - ✅ **Credential exposure** - Your SSH keys, environment variables, and API tokens are not accessible to AI tools
 - ✅ **Host system access** - AI tools can't access your entire filesystem, only the mounted workspace
 - ✅ **Lateral movement** - Network isolation prevents access to local network resources (in restricted mode)
-- ✅ **Remote code execution blast radius** - Built-in firewalld networking limits contain malicious actors from exfiltrating data or establishing command-and-control channels
+- ✅ **Remote code execution blast radius** - Built-in firewalld networking limits access to private networks and metadata services in restricted mode, and allowlist mode can constrain egress to approved domains/IPs, reducing (but not eliminating) data exfiltration and command-and-control risk
 - ✅ **Persistent damage** - Ephemeral containers mean any malicious modifications are discarded
 
 What COI **doesn't** protect against:
