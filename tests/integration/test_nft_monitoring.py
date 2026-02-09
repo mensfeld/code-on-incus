@@ -26,15 +26,12 @@ def test_container(request):
         capture_output=True,
         text=True,
         timeout=120,
-        input="exit\n"  # Exit immediately after container starts
+        input="exit\n",  # Exit immediately after container starts
     )
 
     # Get actual container name from coi list
     list_result = subprocess.run(
-        ["coi", "list", "--format=json"],
-        capture_output=True,
-        text=True,
-        timeout=30
+        ["coi", "list", "--format=json"], capture_output=True, text=True, timeout=30
     )
     containers = json.loads(list_result.stdout)
     actual_container = None
@@ -80,7 +77,7 @@ class TestNFTRuleManagement:
             ["incus", "list", test_container, "--format=json"],
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=30,
         )
         container_info = json.loads(result.stdout)
         if not container_info:
@@ -104,7 +101,7 @@ class TestNFTRuleManagement:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True
+            text=True,
         )
 
         # Give it time to set up rules
@@ -112,17 +109,15 @@ class TestNFTRuleManagement:
 
         # Check nftables rules exist
         result = subprocess.run(
-            ["sudo", "nft", "list", "ruleset"],
-            capture_output=True,
-            text=True,
-            timeout=30
+            ["sudo", "nft", "list", "ruleset"], capture_output=True, text=True, timeout=30
         )
 
         # Should have our log prefix
-        assert f"NFT_COI[{container_ip}]" in result.stdout or \
-               f"NFT_DNS[{container_ip}]" in result.stdout or \
-               f"NFT_SUSPICIOUS[{container_ip}]" in result.stdout, \
-               "NFT monitoring rules not found in ruleset"
+        assert (
+            f"NFT_COI[{container_ip}]" in result.stdout
+            or f"NFT_DNS[{container_ip}]" in result.stdout
+            or f"NFT_SUSPICIOUS[{container_ip}]" in result.stdout
+        ), "NFT monitoring rules not found in ruleset"
 
         # Cleanup
         proc.stdin.write("exit\n")
@@ -136,7 +131,7 @@ class TestNFTRuleManagement:
             ["incus", "list", test_container, "--format=json"],
             capture_output=True,
             text=True,
-            timeout=30
+            timeout=30,
         )
         container_info = json.loads(result.stdout)
         container_ip = None
@@ -156,7 +151,7 @@ class TestNFTRuleManagement:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True
+            text=True,
         )
         time.sleep(5)
         proc.stdin.write("exit\n")
@@ -168,18 +163,14 @@ class TestNFTRuleManagement:
 
         # Check rules are gone
         result = subprocess.run(
-            ["sudo", "nft", "list", "ruleset"],
-            capture_output=True,
-            text=True,
-            timeout=30
+            ["sudo", "nft", "list", "ruleset"], capture_output=True, text=True, timeout=30
         )
 
-        assert f"NFT_COI[{container_ip}]" not in result.stdout, \
-               "NFT rules not cleaned up"
-        assert f"NFT_DNS[{container_ip}]" not in result.stdout, \
-               "DNS rules not cleaned up"
-        assert f"NFT_SUSPICIOUS[{container_ip}]" not in result.stdout, \
-               "Suspicious rules not cleaned up"
+        assert f"NFT_COI[{container_ip}]" not in result.stdout, "NFT rules not cleaned up"
+        assert f"NFT_DNS[{container_ip}]" not in result.stdout, "DNS rules not cleaned up"
+        assert f"NFT_SUSPICIOUS[{container_ip}]" not in result.stdout, (
+            "Suspicious rules not cleaned up"
+        )
 
     def test_multiple_rule_types(self, test_container):
         """Verify all three rule types are created (general, DNS, suspicious)."""
@@ -189,16 +180,13 @@ class TestNFTRuleManagement:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True
+            text=True,
         )
         time.sleep(5)
 
         # Get ruleset
         result = subprocess.run(
-            ["sudo", "nft", "list", "ruleset"],
-            capture_output=True,
-            text=True,
-            timeout=30
+            ["sudo", "nft", "list", "ruleset"], capture_output=True, text=True, timeout=30
         )
 
         # Should have all three prefixes for this container
@@ -227,17 +215,25 @@ class TestNetworkThreatDetection:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True
+            text=True,
         )
         time.sleep(5)
 
         # Attempt to access metadata endpoint from inside container
         try:
             subprocess.run(
-                ["incus", "exec", test_container, "--", "curl", "-m", "5",
-                 "http://169.254.169.254/latest/meta-data/"],
+                [
+                    "incus",
+                    "exec",
+                    test_container,
+                    "--",
+                    "curl",
+                    "-m",
+                    "5",
+                    "http://169.254.169.254/latest/meta-data/",
+                ],
                 capture_output=True,
-                timeout=10
+                timeout=10,
             )
         except subprocess.TimeoutExpired:
             pass  # Expected - connection should be blocked
@@ -252,13 +248,12 @@ class TestNetworkThreatDetection:
 
             # Look for metadata endpoint alert
             metadata_events = [
-                e for e in events
-                if e.get("level") == "critical"
-                and "169.254.169.254" in str(e.get("evidence", {}))
+                e
+                for e in events
+                if e.get("level") == "critical" and "169.254.169.254" in str(e.get("evidence", {}))
             ]
 
-            assert len(metadata_events) > 0, \
-                   "Metadata endpoint access not logged as CRITICAL"
+            assert len(metadata_events) > 0, "Metadata endpoint access not logged as CRITICAL"
 
         # Cleanup
         proc.stdin.write("exit\n")
@@ -273,17 +268,16 @@ class TestNetworkThreatDetection:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True
+            text=True,
         )
         time.sleep(5)
 
         # Attempt to connect to RFC1918 address
         try:
             subprocess.run(
-                ["incus", "exec", test_container, "--", "curl", "-m", "5",
-                 "http://192.168.1.1/"],
+                ["incus", "exec", test_container, "--", "curl", "-m", "5", "http://192.168.1.1/"],
                 capture_output=True,
-                timeout=10
+                timeout=10,
             )
         except subprocess.TimeoutExpired:
             pass  # Expected - connection should be blocked
@@ -296,13 +290,10 @@ class TestNetworkThreatDetection:
                 events = [json.loads(line) for line in f if line.strip()]
 
             rfc1918_events = [
-                e for e in events
-                if e.get("level") == "high"
-                and "RFC1918" in e.get("title", "")
+                e for e in events if e.get("level") == "high" and "RFC1918" in e.get("title", "")
             ]
 
-            assert len(rfc1918_events) > 0, \
-                   "RFC1918 connection not logged as HIGH"
+            assert len(rfc1918_events) > 0, "RFC1918 connection not logged as HIGH"
 
         proc.stdin.write("exit\n")
         proc.stdin.flush()
@@ -316,17 +307,27 @@ class TestNetworkThreatDetection:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True
+            text=True,
         )
         time.sleep(5)
 
         # Attempt to connect to suspicious C2 port (4444 - Metasploit default)
         try:
             subprocess.run(
-                ["incus", "exec", test_container, "--", "nc", "-w", "2",
-                 "-z", "example.com", "4444"],
+                [
+                    "incus",
+                    "exec",
+                    test_container,
+                    "--",
+                    "nc",
+                    "-w",
+                    "2",
+                    "-z",
+                    "example.com",
+                    "4444",
+                ],
                 capture_output=True,
-                timeout=10
+                timeout=10,
             )
         except subprocess.TimeoutExpired:
             pass
@@ -339,13 +340,12 @@ class TestNetworkThreatDetection:
                 events = [json.loads(line) for line in f if line.strip()]
 
             port_events = [
-                e for e in events
-                if e.get("level") == "critical"
-                and "4444" in str(e.get("evidence", {}))
+                e
+                for e in events
+                if e.get("level") == "critical" and "4444" in str(e.get("evidence", {}))
             ]
 
-            assert len(port_events) > 0, \
-                   "Suspicious port connection not logged as CRITICAL"
+            assert len(port_events) > 0, "Suspicious port connection not logged as CRITICAL"
 
         proc.stdin.write("exit\n")
         proc.stdin.flush()
@@ -359,7 +359,7 @@ class TestNetworkThreatDetection:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True
+            text=True,
         )
         time.sleep(5)
 
@@ -368,7 +368,7 @@ class TestNetworkThreatDetection:
             subprocess.run(
                 ["incus", "exec", test_container, "--", "nslookup", "example.com"],
                 capture_output=True,
-                timeout=10
+                timeout=10,
             )
             time.sleep(0.5)
 
@@ -380,8 +380,7 @@ class TestNetworkThreatDetection:
                 content = f.read()
 
             # Should see DNS traffic logged (port 53)
-            assert "53" in content or "DNS" in content, \
-                   "DNS queries not logged"
+            assert "53" in content or "DNS" in content, "DNS queries not logged"
 
         proc.stdin.write("exit\n")
         proc.stdin.flush()
@@ -395,17 +394,26 @@ class TestNetworkThreatDetection:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True
+            text=True,
         )
         time.sleep(5)
 
         # Make quick HTTP request (should complete in <1s)
         subprocess.run(
-            ["incus", "exec", test_container, "--", "curl", "-I", "-m", "5",
-             "https://api.anthropic.com/"],
+            [
+                "incus",
+                "exec",
+                test_container,
+                "--",
+                "curl",
+                "-I",
+                "-m",
+                "5",
+                "https://api.anthropic.com/",
+            ],
             capture_output=True,
             timeout=10,
-            check=False  # Don't raise on non-zero exit
+            check=False,  # Don't raise on non-zero exit
         )
 
         time.sleep(3)
@@ -417,8 +425,7 @@ class TestNetworkThreatDetection:
 
             # Should see anthropic.com connection attempt logged
             # (Either the domain or its resolved IP)
-            assert len(content) > 0, \
-                   "Short-lived connection not logged"
+            assert len(content) > 0, "Short-lived connection not logged"
 
         proc.stdin.write("exit\n")
         proc.stdin.flush()
@@ -436,23 +443,21 @@ class TestAuditLogging:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True
+            text=True,
         )
         time.sleep(5)
 
         # Generate some network activity
         subprocess.run(
-            ["incus", "exec", test_container, "--", "curl", "-I",
-             "https://api.anthropic.com/"],
+            ["incus", "exec", test_container, "--", "curl", "-I", "https://api.anthropic.com/"],
             capture_output=True,
-            timeout=10
+            timeout=10,
         )
 
         time.sleep(3)
 
         # Check audit log exists
-        assert audit_log_path.exists(), \
-               f"Audit log not created at {audit_log_path}"
+        assert audit_log_path.exists(), f"Audit log not created at {audit_log_path}"
 
         proc.stdin.write("exit\n")
         proc.stdin.flush()
@@ -466,16 +471,15 @@ class TestAuditLogging:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True
+            text=True,
         )
         time.sleep(5)
 
         # Generate activity
         subprocess.run(
-            ["incus", "exec", test_container, "--", "curl", "-I",
-             "https://api.anthropic.com/"],
+            ["incus", "exec", test_container, "--", "curl", "-I", "https://api.anthropic.com/"],
             capture_output=True,
-            timeout=10
+            timeout=10,
         )
 
         time.sleep(3)
@@ -489,14 +493,12 @@ class TestAuditLogging:
                     try:
                         event = json.loads(line)
                         # Validate required fields
-                        assert "timestamp" in event, \
-                               f"Line {line_num}: missing timestamp"
-                        assert "level" in event, \
-                               f"Line {line_num}: missing level"
-                        assert "category" in event, \
-                               f"Line {line_num}: missing category"
-                        assert event["category"] == "network", \
-                               f"Line {line_num}: expected category=network"
+                        assert "timestamp" in event, f"Line {line_num}: missing timestamp"
+                        assert "level" in event, f"Line {line_num}: missing level"
+                        assert "category" in event, f"Line {line_num}: missing category"
+                        assert event["category"] == "network", (
+                            f"Line {line_num}: expected category=network"
+                        )
                     except json.JSONDecodeError as e:
                         pytest.fail(f"Line {line_num}: Invalid JSON: {e}")
 
@@ -516,14 +518,13 @@ class TestDaemonLifecycle:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True
+            text=True,
         )
         time.sleep(5)
 
         # Check stderr for daemon startup message
         output = proc.stderr.read()
-        assert "NFT monitoring started" in output, \
-               "NFT daemon startup message not found"
+        assert "NFT monitoring started" in output, "NFT daemon startup message not found"
 
         proc.stdin.write("exit\n")
         proc.stdin.flush()
@@ -537,12 +538,13 @@ class TestDaemonLifecycle:
             input="exit\n",
             capture_output=True,
             text=True,
-            timeout=60
+            timeout=60,
         )
 
         # Check for clean shutdown (no errors in stderr)
-        assert "Failed to stop NFT monitoring" not in result.stderr, \
-               "NFT daemon failed to stop cleanly"
+        assert "Failed to stop NFT monitoring" not in result.stderr, (
+            "NFT daemon failed to stop cleanly"
+        )
 
     def test_daemon_disabled_in_config(self, test_container):
         """Test that daemon doesn't start when disabled in config."""
@@ -557,10 +559,7 @@ class TestHealthChecks:
     def test_nftables_health_check(self):
         """Test that nftables health check works."""
         result = subprocess.run(
-            ["coi", "health", "--format=json"],
-            capture_output=True,
-            text=True,
-            timeout=60
+            ["coi", "health", "--format=json"], capture_output=True, text=True, timeout=60
         )
 
         health_data = json.loads(result.stdout)
@@ -568,16 +567,14 @@ class TestHealthChecks:
         # Check if nftables check is present
         nftables_check = health_data["checks"].get("nftables")
         if nftables_check:
-            assert nftables_check["status"] in ["ok", "warning", "failed"], \
-                   f"Invalid nftables check status: {nftables_check['status']}"
+            assert nftables_check["status"] in ["ok", "warning", "failed"], (
+                f"Invalid nftables check status: {nftables_check['status']}"
+            )
 
     def test_systemd_journal_health_check(self):
         """Test that systemd-journal health check works."""
         result = subprocess.run(
-            ["coi", "health", "--format=json"],
-            capture_output=True,
-            text=True,
-            timeout=60
+            ["coi", "health", "--format=json"], capture_output=True, text=True, timeout=60
         )
 
         health_data = json.loads(result.stdout)
@@ -585,16 +582,14 @@ class TestHealthChecks:
         # Check if systemd_journal check is present
         journal_check = health_data["checks"].get("systemd_journal")
         if journal_check:
-            assert journal_check["status"] in ["ok", "warning", "failed"], \
-                   f"Invalid journal check status: {journal_check['status']}"
+            assert journal_check["status"] in ["ok", "warning", "failed"], (
+                f"Invalid journal check status: {journal_check['status']}"
+            )
 
     def test_libsystemd_health_check(self):
         """Test that libsystemd health check works."""
         result = subprocess.run(
-            ["coi", "health", "--format=json"],
-            capture_output=True,
-            text=True,
-            timeout=60
+            ["coi", "health", "--format=json"], capture_output=True, text=True, timeout=60
         )
 
         health_data = json.loads(result.stdout)
@@ -602,8 +597,9 @@ class TestHealthChecks:
         # Check if libsystemd check is present
         lib_check = health_data["checks"].get("libsystemd")
         if lib_check:
-            assert lib_check["status"] in ["ok", "warning", "failed"], \
-                   f"Invalid libsystemd check status: {lib_check['status']}"
+            assert lib_check["status"] in ["ok", "warning", "failed"], (
+                f"Invalid libsystemd check status: {lib_check['status']}"
+            )
 
 
 class TestEdgeCases:
@@ -625,17 +621,26 @@ class TestEdgeCases:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True
+            text=True,
         )
         time.sleep(5)
 
         # Generate high volume traffic (100+ connections)
         for i in range(150):
             subprocess.run(
-                ["incus", "exec", test_container, "--", "curl", "-I", "-m", "1",
-                 "https://api.anthropic.com/"],
+                [
+                    "incus",
+                    "exec",
+                    test_container,
+                    "--",
+                    "curl",
+                    "-I",
+                    "-m",
+                    "1",
+                    "https://api.anthropic.com/",
+                ],
                 capture_output=True,
-                timeout=5
+                timeout=5,
             )
             if i % 10 == 0:
                 time.sleep(0.5)  # Brief pause every 10 requests
