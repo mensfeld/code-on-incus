@@ -123,6 +123,9 @@ Examples:
   # Run as specific user with env vars
   coi container exec my-container --user 1000 --env FOO=bar --cwd /workspace -- npm test
 
+  # Allocate a PTY for interactive sessions (required for tmux, shells, etc.)
+  coi container exec my-container -t -- bash
+
   # Capture output as JSON
   coi container exec my-container --capture -- echo "hello world"`,
 	Args: cobra.MinimumNArgs(2),
@@ -136,6 +139,7 @@ Examples:
 
 		capture, _ := cmd.Flags().GetBool("capture")
 		format, _ := cmd.Flags().GetString("format")
+		tty, _ := cmd.Flags().GetBool("tty")
 		mgr := container.NewManager(containerName)
 
 		// Validate that --format requires --capture
@@ -146,6 +150,11 @@ Examples:
 		// Validate format value
 		if format != "json" && format != "raw" {
 			return exitError(2, fmt.Sprintf("invalid format '%s': must be 'json' or 'raw'", format))
+		}
+
+		// Validate that --tty and --capture are mutually exclusive
+		if tty && capture {
+			return exitError(2, "--tty and --capture flags are mutually exclusive")
 		}
 
 		if capture {
@@ -231,8 +240,9 @@ Examples:
 		}
 
 		opts := container.ExecCommandOptions{
-			Cwd: cwd,
-			Env: env,
+			Cwd:         cwd,
+			Env:         env,
+			Interactive: tty,
 		}
 
 		if cmd.Flags().Changed("user") {
@@ -348,6 +358,7 @@ func init() {
 	containerExecCmd.Flags().String("cwd", "/workspace", "Working directory")
 	containerExecCmd.Flags().Bool("capture", false, "Capture output as JSON")
 	containerExecCmd.Flags().String("format", "json", "Output format when using --capture: json or raw")
+	containerExecCmd.Flags().BoolP("tty", "t", false, "Allocate a pseudo-terminal (PTY)")
 
 	// Add flags to mount command
 	containerMountCmd.Flags().Bool("shift", true, "Enable UID/GID shifting")
