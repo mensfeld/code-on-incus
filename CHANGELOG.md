@@ -4,7 +4,7 @@
 
 ### Bug Fixes
 
-- [Bug Fix] **Handle cross-device link and symlinks when saving session data** - Fixed `EXDEV` (cross-device link) error when `/tmp` and session directory are on different filesystems. `PullDirectory` now falls back to recursive copy when `os.Rename()` fails with cross-device error. Added proper symlink handling - symlinks (e.g., `.claude/debug/latest`) are now correctly detected and recreated instead of being treated as regular files. This prevents session save failures on systems where temp storage and session storage are on different mount points. (#106)
+- [Bug Fix] **Handle cross-device link and symlinks when saving session data** - Fixed `EXDEV` (cross-device link) error when `/tmp` and session directory are on different filesystems. `PullDirectory` now falls back to recursive copy when `os.Rename()` fails with cross-device error. Added proper symlink handling - symlinks (e.g., `.claude/debug/latest`) are now correctly detected and recreated instead of being treated as regular files. This prevents session save failures on systems where temp storage and session storage are on different mount points. Thanks @psaab! (#106)
 - [Bug Fix] **Increased test timeout values for CI reliability** - Comprehensively increased timeouts across all ephemeral shell tests to improve CI reliability. Container deletion timeout increased from 30s to 90s, container operations from 30s to 90s, network teardown from 60s to 120s, and other operations from 30s to 90s. CI environments need significantly more time for container cleanup after poweroff, container deletion operations, and network teardown operations. This fixes all timing-related test failures in shell-ephemeral tests.
 
 ### Features
