@@ -431,6 +431,166 @@ class TestNetworkThreatDetection:
         proc.stdin.flush()
         proc.wait(timeout=30)
 
+    def test_allowlist_violation_detected(self, test_container, audit_log_path):
+        """
+        Test that in allowlist mode, connections outside the allowlist are detected and logged.
+
+        This is a critical security test verifying that:
+        1. Container runs in allowlist mode with restricted access
+        2. Attempts to reach non-allowlisted destinations are blocked by firewall
+        3. NFT monitoring logs these blocked attempts at kernel level
+        4. Threat detection identifies allowlist violations
+        5. Audit log records the security event
+        """
+        # Create temporary config with allowlist mode
+        config_dir = Path.home() / ".config" / "coi"
+        config_path = config_dir / "config.toml"
+        config_backup = None
+
+        # Backup existing config if present
+        if config_path.exists():
+            config_backup = config_path.read_text()
+
+        try:
+            # Write allowlist config
+            config_dir.mkdir(parents=True, exist_ok=True)
+            config_path.write_text("""
+[network]
+mode = "allowlist"
+allowed_domains = ["github.com", "api.github.com"]
+
+[monitoring]
+enabled = true
+auto_pause_on_high = false
+auto_kill_on_critical = false
+
+[monitoring.nft]
+enabled = true
+rate_limit_per_second = 100
+""")
+
+            # Start session with allowlist config
+            proc = subprocess.Popen(
+                ["coi", "shell", "--container", test_container],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            time.sleep(5)
+
+            # Clear any existing audit log entries
+            if audit_log_path.exists():
+                audit_log_path.unlink()
+
+            # Attempt 1: Access allowlisted domain (should succeed or at least be attempted)
+            subprocess.run(
+                [
+                    "incus",
+                    "exec",
+                    test_container,
+                    "--",
+                    "curl",
+                    "-I",
+                    "-m",
+                    "5",
+                    "https://github.com",
+                ],
+                capture_output=True,
+                timeout=10,
+                check=False,
+            )
+
+            time.sleep(2)
+
+            # Attempt 2: Access NON-allowlisted domain (should be blocked)
+            result = subprocess.run(
+                [
+                    "incus",
+                    "exec",
+                    test_container,
+                    "--",
+                    "curl",
+                    "-I",
+                    "-m",
+                    "5",
+                    "https://google.com",
+                ],
+                capture_output=True,
+                timeout=10,
+                check=False,
+            )
+
+            # Connection should fail (blocked by firewall)
+            assert result.returncode != 0, (
+                "Connection to non-allowlisted domain should be blocked"
+            )
+
+            # Give monitoring time to detect and log
+            time.sleep(3)
+
+            # Verify NFT monitoring logged the attempt
+            if audit_log_path.exists():
+                with open(audit_log_path) as f:
+                    events = [json.loads(line) for line in f if line.strip()]
+
+                # Look for allowlist violation events
+                # NFT should log the connection attempt even though firewall blocks it
+                allowlist_violations = [
+                    e
+                    for e in events
+                    if (
+                        e.get("level") in ["high", "warning"]
+                        and (
+                            "allowlist" in e.get("title", "").lower()
+                            or "unauthorized" in e.get("title", "").lower()
+                            or "not in allowlist" in e.get("description", "").lower()
+                        )
+                    )
+                ]
+
+                assert len(events) > 0, (
+                    "NFT monitoring did not log any network events. "
+                    "Kernel-level logging may not be working."
+                )
+
+                assert len(allowlist_violations) > 0, (
+                    f"Allowlist violation not detected. "
+                    f"Expected HIGH/WARNING event for non-allowlisted connection. "
+                    f"Events logged: {len(events)}. "
+                    f"Event types: {[e.get('title') for e in events]}"
+                )
+
+                # Verify event details
+                violation = allowlist_violations[0]
+                assert violation.get("category") == "network", (
+                    "Violation should be categorized as network threat"
+                )
+                assert violation.get("container") == test_container, (
+                    "Violation should reference correct container"
+                )
+
+                print(f"✓ Allowlist violation detected and logged: {violation.get('title')}")
+                print(f"  Level: {violation.get('level')}")
+                print(f"  Evidence: {violation.get('evidence', {})}")
+            else:
+                pytest.fail(
+                    f"Audit log not created at {audit_log_path}. "
+                    "NFT monitoring may not be running."
+                )
+
+            # Cleanup
+            proc.stdin.write("exit\n")
+            proc.stdin.flush()
+            proc.wait(timeout=30)
+
+        finally:
+            # Restore original config
+            if config_backup:
+                config_path.write_text(config_backup)
+            elif config_path.exists():
+                config_path.unlink()
+
 
 class TestAuditLogging:
     """Test audit log functionality."""
