@@ -7,16 +7,17 @@ import (
 
 // Config represents the complete configuration
 type Config struct {
-	Defaults DefaultsConfig           `toml:"defaults"`
-	Paths    PathsConfig              `toml:"paths"`
-	Incus    IncusConfig              `toml:"incus"`
-	Network  NetworkConfig            `toml:"network"`
-	Tool     ToolConfig               `toml:"tool"`
-	Mounts   MountsConfig             `toml:"mounts"`
-	Limits   LimitsConfig             `toml:"limits"`
-	Git      GitConfig                `toml:"git"`
-	Security SecurityConfig           `toml:"security"`
-	Profiles map[string]ProfileConfig `toml:"profiles"`
+	Defaults   DefaultsConfig           `toml:"defaults"`
+	Paths      PathsConfig              `toml:"paths"`
+	Incus      IncusConfig              `toml:"incus"`
+	Network    NetworkConfig            `toml:"network"`
+	Tool       ToolConfig               `toml:"tool"`
+	Mounts     MountsConfig             `toml:"mounts"`
+	Limits     LimitsConfig             `toml:"limits"`
+	Git        GitConfig                `toml:"git"`
+	Security   SecurityConfig           `toml:"security"`
+	Monitoring MonitoringConfig         `toml:"monitoring"`
+	Profiles   map[string]ProfileConfig `toml:"profiles"`
 }
 
 // GitConfig contains git-related security settings
@@ -173,6 +174,17 @@ type RuntimeLimits struct {
 	StopGraceful bool   `toml:"stop_graceful"` // graceful vs force stop
 }
 
+// MonitoringConfig contains security monitoring settings
+type MonitoringConfig struct {
+	Enabled               bool    `toml:"enabled"`                  // Enable background monitoring
+	AutoPauseOnHigh       bool    `toml:"auto_pause_on_high"`       // Pause container on high-severity threats
+	AutoKillOnCritical    bool    `toml:"auto_kill_on_critical"`    // Kill container on critical threats
+	PollIntervalSec       int     `toml:"poll_interval_sec"`        // How often to collect stats
+	FileReadThresholdMB   float64 `toml:"file_read_threshold_mb"`   // MB read in poll interval before alert
+	FileReadRateMBPerSec  float64 `toml:"file_read_rate_mb_per_sec"` // MB/sec sustained rate before alert
+	AuditLogRetentionDays int     `toml:"audit_log_retention_days"` // How long to keep audit logs
+}
+
 // GetDefaultConfig returns the default configuration
 func GetDefaultConfig() *Config {
 	homeDir, err := os.UserHomeDir()
@@ -256,6 +268,15 @@ func GetDefaultConfig() *Config {
 				AutoStop:     true,
 				StopGraceful: true,
 			},
+		},
+		Monitoring: MonitoringConfig{
+			Enabled:               true,
+			AutoPauseOnHigh:       true,
+			AutoKillOnCritical:    true,
+			PollIntervalSec:       2,
+			FileReadThresholdMB:   50.0,
+			FileReadRateMBPerSec:  10.0,
+			AuditLogRetentionDays: 30,
 		},
 		Profiles: make(map[string]ProfileConfig),
 	}
@@ -411,6 +432,9 @@ func (c *Config) Merge(other *Config) {
 		c.Security.DisableProtection = true
 	}
 
+	// Merge monitoring
+	mergeMonitoring(&c.Monitoring, &other.Monitoring)
+
 	// Merge profiles
 	for name, profile := range other.Profiles {
 		c.Profiles[name] = profile
@@ -466,6 +490,28 @@ func mergeLimits(base *LimitsConfig, other *LimitsConfig) {
 	// This is imperfect but works for most cases
 	base.Runtime.AutoStop = other.Runtime.AutoStop
 	base.Runtime.StopGraceful = other.Runtime.StopGraceful
+}
+
+// mergeMonitoring merges monitoring configurations (other takes precedence)
+func mergeMonitoring(base *MonitoringConfig, other *MonitoringConfig) {
+	// For booleans, we take the other value
+	base.Enabled = other.Enabled
+	base.AutoPauseOnHigh = other.AutoPauseOnHigh
+	base.AutoKillOnCritical = other.AutoKillOnCritical
+
+	// Merge thresholds
+	if other.PollIntervalSec != 0 {
+		base.PollIntervalSec = other.PollIntervalSec
+	}
+	if other.FileReadThresholdMB != 0 {
+		base.FileReadThresholdMB = other.FileReadThresholdMB
+	}
+	if other.FileReadRateMBPerSec != 0 {
+		base.FileReadRateMBPerSec = other.FileReadRateMBPerSec
+	}
+	if other.AuditLogRetentionDays != 0 {
+		base.AuditLogRetentionDays = other.AuditLogRetentionDays
+	}
 }
 
 // GetProfile returns a profile by name, or nil if not found

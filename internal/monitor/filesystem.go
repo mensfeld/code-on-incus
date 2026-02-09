@@ -1,0 +1,96 @@
+package monitor
+
+import (
+	"context"
+	"sync"
+	"time"
+)
+
+// FilesystemMonitor tracks filesystem I/O statistics with delta calculation
+type FilesystemMonitor struct {
+	mu               sync.Mutex
+	previousSnapshot ioSnapshot
+	previousTime     time.Time
+}
+
+type ioSnapshot struct {
+	totalReadBytes  uint64
+	totalWriteBytes uint64
+}
+
+// NewFilesystemMonitor creates a new filesystem monitor
+func NewFilesystemMonitor() *FilesystemMonitor {
+	return &FilesystemMonitor{}
+}
+
+// Collect gathers filesystem statistics and calculates read rates
+func (fm *FilesystemMonitor) Collect(ctx context.Context, containerName string) (FilesystemStats, error) {
+	fm.mu.Lock()
+	defer fm.mu.Unlock()
+
+	// Get current resource stats (includes I/O)
+	resourceStats, err := CollectResourceStats(ctx, containerName)
+	if err != nil {
+		return FilesystemStats{Available: false}, err
+	}
+
+	// Convert to bytes (resourceStats is in MB)
+	currentReadBytes := uint64(resourceStats.IOReadMB * 1024 * 1024)
+
+	// Calculate delta and rate
+	if !fm.previousTime.IsZero() {
+		elapsed := time.Since(fm.previousTime)
+		deltaBytes := currentReadBytes - fm.previousSnapshot.totalReadBytes
+
+		if elapsed.Seconds() > 0 {
+			rateMBPerSec := float64(deltaBytes) / 1024 / 1024 / elapsed.Seconds()
+
+			stats := FilesystemStats{
+				Available:        true,
+				TotalReadMB:      float64(deltaBytes) / 1024 / 1024,
+				ReadRateMBPerSec: rateMBPerSec,
+			}
+
+			// Update snapshot
+			fm.previousSnapshot.totalReadBytes = currentReadBytes
+			fm.previousTime = time.Now()
+
+			return stats, nil
+		}
+	}
+
+	// First collection, just store baseline
+	fm.previousSnapshot.totalReadBytes = currentReadBytes
+	fm.previousTime = time.Now()
+
+	return FilesystemStats{
+		Available:        true,
+		TotalReadMB:      0,
+		ReadRateMBPerSec: 0,
+	}, nil
+}
+
+// DetectLargeReads checks if filesystem read activity exceeds thresholds
+func DetectLargeReads(stats FilesystemStats, thresholdMB float64, rateThresholdMBPerSec float64) *FilesystemThreat {
+	// Check if read amount exceeds threshold
+	if stats.TotalReadMB > thresholdMB {
+		return &FilesystemThreat{
+			ReadBytesMB: stats.TotalReadMB,
+			ReadRate:    stats.ReadRateMBPerSec,
+			Threshold:   thresholdMB,
+			Duration:    "current interval",
+		}
+	}
+
+	// Check if sustained read rate exceeds threshold
+	if rateThresholdMBPerSec > 0 && stats.ReadRateMBPerSec > rateThresholdMBPerSec {
+		return &FilesystemThreat{
+			ReadBytesMB: stats.TotalReadMB,
+			ReadRate:    stats.ReadRateMBPerSec,
+			Threshold:   rateThresholdMBPerSec,
+			Duration:    "sustained",
+		}
+	}
+
+	return nil
+}
