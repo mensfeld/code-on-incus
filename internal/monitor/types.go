@@ -14,14 +14,14 @@ const (
 
 // ThreatEvent represents a detected security event
 type ThreatEvent struct {
-	ID          string      `json:"id"`           // Unique event ID
+	ID          string      `json:"id"` // Unique event ID
 	Timestamp   time.Time   `json:"timestamp"`
 	Level       ThreatLevel `json:"level"`
-	Category    string      `json:"category"`     // "network", "process", "filesystem", "env"
-	Title       string      `json:"title"`        // "Reverse shell detected"
-	Description string      `json:"description"`  // Detailed explanation
-	Evidence    interface{} `json:"evidence"`     // Supporting data (connection, process, etc.)
-	Action      string      `json:"action"`       // "logged", "alerted", "paused", "killed"
+	Category    string      `json:"category"`    // "network", "process", "filesystem", "env"
+	Title       string      `json:"title"`       // "Reverse shell detected"
+	Description string      `json:"description"` // Detailed explanation
+	Evidence    interface{} `json:"evidence"`    // Supporting data (connection, process, etc.)
+	Action      string      `json:"action"`      // "logged", "alerted", "paused", "killed"
 }
 
 // NetworkThreat represents suspicious network activity
@@ -34,7 +34,7 @@ type NetworkThreat struct {
 // ProcessThreat represents suspicious process activity
 type ProcessThreat struct {
 	PID        int      `json:"pid"`
-	Command    string   `json:"command"`    // Full command line
+	Command    string   `json:"command"` // Full command line
 	User       string   `json:"user"`
 	Pattern    string   `json:"pattern"`    // "nc -e", "bash -i", etc.
 	Indicators []string `json:"indicators"` // List of suspicious patterns matched
@@ -101,7 +101,7 @@ type Connection struct {
 	RemoteAddr    string `json:"remote_addr"`
 	State         string `json:"state"`
 	UID           int    `json:"uid,omitempty"`
-	Suspicious    bool   `json:"suspicious"`              // Flagged as suspicious
+	Suspicious    bool   `json:"suspicious"`               // Flagged as suspicious
 	SuspectReason string `json:"suspect_reason,omitempty"` // Why flagged
 }
 
@@ -118,11 +118,11 @@ type ResourceStats struct {
 
 // DaemonConfig configures the monitoring daemon
 type DaemonConfig struct {
-	ContainerName string
-	WorkspacePath string
-	PollInterval  time.Duration
-	AuditLogPath  string
-	AllowedCIDRs  []string // CIDR ranges for allowed networks
+	ContainerName  string
+	WorkspacePath  string
+	PollInterval   time.Duration
+	AuditLogPath   string
+	AllowedCIDRs   []string // CIDR ranges for allowed networks
 	AllowedDomains []string // Domains from network allowlist
 
 	// Threat detection thresholds

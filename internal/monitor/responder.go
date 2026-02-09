@@ -17,7 +17,8 @@ type Responder struct {
 
 // NewResponder creates a new threat responder
 func NewResponder(containerName string, autoPauseOnHigh, autoKillOnCritical bool,
-	auditLog *AuditLog, onThreat func(ThreatEvent)) *Responder {
+	auditLog *AuditLog, onThreat func(ThreatEvent),
+) *Responder {
 	return &Responder{
 		containerName:      containerName,
 		autoPauseOnHigh:    autoPauseOnHigh,

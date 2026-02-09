@@ -98,11 +98,11 @@ func (d *Detector) Analyze(snapshot MonitorSnapshot) []ThreatEvent {
 		fsExfil := DetectLargeReads(snapshot.Filesystem, d.fileReadThresholdMB, d.fileReadRateMBPerSec)
 		if fsExfil != nil {
 			threats = append(threats, ThreatEvent{
-				ID:          uuid.New().String(),
-				Timestamp:   snapshot.Timestamp,
-				Level:       ThreatLevelHigh,
-				Category:    "filesystem",
-				Title:       "Large workspace read detected",
+				ID:        uuid.New().String(),
+				Timestamp: snapshot.Timestamp,
+				Level:     ThreatLevelHigh,
+				Category:  "filesystem",
+				Title:     "Large workspace read detected",
 				Description: fmt.Sprintf("Read %.2f MB at %.2f MB/sec (threshold: %.2f MB)",
 					fsExfil.ReadBytesMB, fsExfil.ReadRate, fsExfil.Threshold),
 				Evidence: fsExfil,

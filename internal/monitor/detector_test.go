@@ -159,10 +159,10 @@ func TestCheckSuspicious(t *testing.T) {
 
 func TestDetectLargeReads(t *testing.T) {
 	tests := []struct {
-		name        string
-		stats       FilesystemStats
-		threshold   float64
-		wantThreat  bool
+		name       string
+		stats      FilesystemStats
+		threshold  float64
+		wantThreat bool
 	}{
 		{
 			name: "large read exceeds threshold",

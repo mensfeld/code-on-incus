@@ -58,7 +58,7 @@ func monitorCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// Determine container name
-	containerName := ""
+	var containerName string
 	if len(args) > 0 {
 		containerName = args[0]
 	} else {
@@ -145,25 +145,25 @@ func runMonitorWatch(ctx context.Context, collector *monitor.Collector, detector
 	}
 }
 
-// Audit log command
-var monitorAuditCmd = &cobra.Command{
-	Use:   "audit [container]",
-	Short: "View audit log for a container",
-	Long: `View audit log entries for a container.
+// Audit log command - TODO: Implement or remove
+// var monitorAuditCmd = &cobra.Command{
+// 	Use:   "audit [container]",
+// 	Short: "View audit log for a container",
+// 	Long: `View audit log entries for a container.
+//
+// The audit log contains all monitoring events, threats, and security alerts
+// recorded during container sessions.
+//
+// Examples:
+//   coi monitor audit                          # Last 100 entries
+//   coi monitor audit coi-abc-1                # Specific container
+//   coi monitor audit --export=report.json     # Export to file`,
+// 	RunE: monitorAuditCommand,
+// }
 
-The audit log contains all monitoring events, threats, and security alerts
-recorded during container sessions.
-
-Examples:
-  coi monitor audit                          # Last 100 entries
-  coi monitor audit coi-abc-1                # Specific container
-  coi monitor audit --export=report.json     # Export to file`,
-	RunE: monitorAuditCommand,
-}
-
-func monitorAuditCommand(cmd *cobra.Command, args []string) error {
+func monitorAuditCommand(cmd *cobra.Command, args []string) error { //nolint:unused // TODO: Implement or remove
 	// Determine container name
-	containerName := ""
+	var containerName string
 	if len(args) > 0 {
 		containerName = args[0]
 	} else {

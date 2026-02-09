@@ -184,9 +184,9 @@ func readMemoryStats(currentPath, maxPath string) (memoryStats, error) {
 	data, err = os.ReadFile(maxPath)
 	if err == nil {
 		if strings.TrimSpace(string(data)) != "max" {
-			max, err := strconv.ParseFloat(strings.TrimSpace(string(data)), 64)
+			maxValue, err := strconv.ParseFloat(strings.TrimSpace(string(data)), 64)
 			if err == nil {
-				stats.max = max
+				stats.max = maxValue
 			}
 		}
 	}

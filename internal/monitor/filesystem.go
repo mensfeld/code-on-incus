@@ -15,7 +15,7 @@ type FilesystemMonitor struct {
 
 type ioSnapshot struct {
 	totalReadBytes  uint64
-	totalWriteBytes uint64
+	totalWriteBytes uint64 //nolint:unused // Reserved for future write monitoring
 }
 
 // NewFilesystemMonitor creates a new filesystem monitor

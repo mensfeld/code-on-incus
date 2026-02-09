@@ -9,10 +9,10 @@ import (
 
 // Collector orchestrates data collection from multiple sources
 type Collector struct {
-	containerName    string
-	containerIP      string
-	workspacePath    string
-	allowedCIDRs     []string
+	containerName     string
+	containerIP       string
+	workspacePath     string
+	allowedCIDRs      []string
 	filesystemMonitor *FilesystemMonitor
 }
 

@@ -38,8 +38,8 @@ func StartDaemon(ctx context.Context, cfg Config) (*Daemon, error) {
 	// Create responder (convert OnThreat callback)
 	responder := monitor.NewResponder(
 		cfg.ContainerName,
-		true,  // autoPauseOnHigh
-		true,  // autoKillOnCritical
+		true, // autoPauseOnHigh
+		true, // autoKillOnCritical
 		auditLog,
 		func(threat monitor.ThreatEvent) {
 			if cfg.OnThreat != nil {

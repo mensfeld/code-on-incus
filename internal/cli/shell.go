@@ -58,6 +58,7 @@ func init() {
 	shellCmd.Flags().BoolVar(&useTmux, "tmux", true, "Use tmux for session management (default true)")
 }
 
+//nolint:gocyclo // Sequential initialization with many configuration paths
 func shellCommand(cmd *cobra.Command, args []string) error {
 	// Validate no unexpected positional arguments
 	if len(args) > 0 {

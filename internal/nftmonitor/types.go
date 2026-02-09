@@ -17,16 +17,16 @@ type NetworkEvent struct {
 
 // Config holds the configuration for the NFT monitoring daemon
 type Config struct {
-	ContainerName        string
-	ContainerIP          string
-	AllowedCIDRs         []string
-	GatewayIP            string
-	AuditLogPath         string
-	RateLimitPerSecond   int
-	DNSQueryThreshold    int
-	LogDNSQueries        bool
-	LimaHost             string
-	OnThreat             func(ThreatEvent)
+	ContainerName      string
+	ContainerIP        string
+	AllowedCIDRs       []string
+	GatewayIP          string
+	AuditLogPath       string
+	RateLimitPerSecond int
+	DNSQueryThreshold  int
+	LogDNSQueries      bool
+	LimaHost           string
+	OnThreat           func(ThreatEvent)
 }
 
 // ThreatEvent represents a detected network threat

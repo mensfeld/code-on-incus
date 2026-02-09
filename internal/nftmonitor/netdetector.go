@@ -9,10 +9,10 @@ import (
 
 // NetworkDetector analyzes network events for threats
 type NetworkDetector struct {
-	config          *Config
-	dnsQueryCount   map[string]int // containerIP -> count
-	dnsQueryReset   time.Time
-	mu              sync.Mutex
+	config        *Config
+	dnsQueryCount map[string]int // containerIP -> count
+	dnsQueryReset time.Time
+	mu            sync.Mutex
 }
 
 // NewNetworkDetector creates a new network threat detector
