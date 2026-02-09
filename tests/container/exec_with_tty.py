@@ -70,8 +70,7 @@ def test_exec_with_tty(coi_binary, cleanup_containers, workspace_dir):
 
     # Without -t flag, stdin should NOT be a PTY, so 'test -t 0' should fail (exit 1)
     assert result.returncode != 0, (
-        f"Without -t flag, stdin should NOT be a tty. "
-        f"Exit code: {result.returncode}"
+        f"Without -t flag, stdin should NOT be a tty. Exit code: {result.returncode}"
     )
 
     # === Phase 4: Cleanup ===

@@ -52,6 +52,5 @@ def test_exec_tty_capture_conflict(coi_binary, workspace_dir):
     # Error message should mention the conflict
     combined_output = result.stdout + result.stderr
     assert "mutually exclusive" in combined_output.lower(), (
-        f"Error message should mention flags are mutually exclusive. "
-        f"Got output:\n{combined_output}"
+        f"Error message should mention flags are mutually exclusive. Got output:\n{combined_output}"
     )
