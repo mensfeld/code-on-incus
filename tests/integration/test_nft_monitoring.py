@@ -8,23 +8,20 @@ and integration with the monitoring system.
 
 import json
 import os
-import pytest
-import re
 import subprocess
 import time
 from pathlib import Path
+
+import pytest
+
 
 # Test fixtures
 @pytest.fixture
 def test_container(request):
     """Create a test container for NFT monitoring tests."""
-    # Generate unique container name
-    test_name = request.node.name.replace("[", "_").replace("]", "_")
-    container_name = f"coi-nft-test-{test_name}-{int(time.time())}"
-
     # Create container using coi
     workspace = os.getcwd()
-    result = subprocess.run(
+    subprocess.run(
         ["coi", "shell", "--workspace", workspace],
         capture_output=True,
         text=True,
@@ -403,11 +400,12 @@ class TestNetworkThreatDetection:
         time.sleep(5)
 
         # Make quick HTTP request (should complete in <1s)
-        result = subprocess.run(
+        subprocess.run(
             ["incus", "exec", test_container, "--", "curl", "-I", "-m", "5",
              "https://api.anthropic.com/"],
             capture_output=True,
-            timeout=10
+            timeout=10,
+            check=False  # Don't raise on non-zero exit
         )
 
         time.sleep(3)
