@@ -176,7 +176,8 @@ refresh_interval_minutes = 30
         )
 
         # Wait for firewall rules to be fully applied (CI timing issue)
-        time.sleep(2)
+        # Use longer delay (5s) as firewalld rule propagation can be slow in CI
+        time.sleep(5)
 
         # Test: curl blocked domain (should fail)
         result = subprocess.run(
