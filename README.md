@@ -354,6 +354,10 @@ coi kill --all
 
 # Cleanup stopped/orphaned containers
 coi clean
+
+# Execute commands in containers with PTY support
+coi container exec mycontainer -t -- bash        # Interactive shell with PTY
+coi container exec mycontainer -- echo "hello"   # Non-interactive command
 ```
 
 ### Global Flags
