@@ -522,9 +522,7 @@ rate_limit_per_second = 100
             )
 
             # Connection should fail (blocked by firewall)
-            assert result.returncode != 0, (
-                "Connection to non-allowlisted domain should be blocked"
-            )
+            assert result.returncode != 0, "Connection to non-allowlisted domain should be blocked"
 
             # Give monitoring time to detect and log
             time.sleep(3)
@@ -575,8 +573,7 @@ rate_limit_per_second = 100
                 print(f"  Evidence: {violation.get('evidence', {})}")
             else:
                 pytest.fail(
-                    f"Audit log not created at {audit_log_path}. "
-                    "NFT monitoring may not be running."
+                    f"Audit log not created at {audit_log_path}. NFT monitoring may not be running."
                 )
 
             # Cleanup
