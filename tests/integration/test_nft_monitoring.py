@@ -22,7 +22,7 @@ def test_container(request):
     # Create container using coi
     workspace = os.getcwd()
     subprocess.run(
-        ["coi", "shell", "--workspace", workspace],
+        [coi_binary, "shell", "--workspace", workspace],
         capture_output=True,
         text=True,
         timeout=120,
@@ -31,7 +31,7 @@ def test_container(request):
 
     # Get actual container name from coi list
     list_result = subprocess.run(
-        ["coi", "list", "--format=json"], capture_output=True, text=True, timeout=30
+        [coi_binary, "list", "--format=json"], capture_output=True, text=True, timeout=30
     )
     containers = json.loads(list_result.stdout)
     actual_container = None
@@ -46,7 +46,7 @@ def test_container(request):
     yield actual_container
 
     # Cleanup
-    subprocess.run(["coi", "kill", actual_container, "--force"], timeout=60)
+    subprocess.run([coi_binary, "kill", actual_container, "--force"], timeout=60)
 
 
 @pytest.fixture
@@ -70,7 +70,7 @@ def audit_log_path(test_container):
 class TestNFTRuleManagement:
     """Test nftables rule creation and deletion."""
 
-    def test_rules_created_on_session_start(self, test_container):
+    def test_rules_created_on_session_start(self, test_container, coi_binary):
         """Verify nftables LOG rules are created when session starts."""
         # Get container IP
         result = subprocess.run(
@@ -97,7 +97,7 @@ class TestNFTRuleManagement:
 
         # Start a monitoring session
         proc = subprocess.Popen(
-            ["coi", "shell", "--container", test_container],
+            [coi_binary, "shell", "--container", test_container],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -124,7 +124,7 @@ class TestNFTRuleManagement:
         proc.stdin.flush()
         proc.wait(timeout=30)
 
-    def test_rules_removed_on_session_end(self, test_container):
+    def test_rules_removed_on_session_end(self, test_container, coi_binary):
         """Verify nftables rules are cleaned up when session ends."""
         # Get container IP
         result = subprocess.run(
@@ -147,7 +147,7 @@ class TestNFTRuleManagement:
 
         # Start and immediately end session
         proc = subprocess.Popen(
-            ["coi", "shell", "--container", test_container],
+            [coi_binary, "shell", "--container", test_container],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -172,11 +172,11 @@ class TestNFTRuleManagement:
             "Suspicious rules not cleaned up"
         )
 
-    def test_multiple_rule_types(self, test_container):
+    def test_multiple_rule_types(self, test_container, coi_binary):
         """Verify all three rule types are created (general, DNS, suspicious)."""
         # Start session
         proc = subprocess.Popen(
-            ["coi", "shell", "--container", test_container],
+            [coi_binary, "shell", "--container", test_container],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -207,11 +207,11 @@ class TestNFTRuleManagement:
 class TestNetworkThreatDetection:
     """Test network threat detection scenarios."""
 
-    def test_metadata_endpoint_access_critical(self, test_container, audit_log_path):
+    def test_metadata_endpoint_access_critical(self, test_container, audit_log_path, coi_binary):
         """Test that metadata endpoint access triggers CRITICAL alert."""
         # Start session
         proc = subprocess.Popen(
-            ["coi", "shell", "--container", test_container],
+            [coi_binary, "shell", "--container", test_container],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -260,11 +260,11 @@ class TestNetworkThreatDetection:
         proc.stdin.flush()
         proc.wait(timeout=30)
 
-    def test_rfc1918_address_high(self, test_container, audit_log_path):
+    def test_rfc1918_address_high(self, test_container, audit_log_path, coi_binary):
         """Test that RFC1918 connections trigger HIGH alert."""
         # Start session
         proc = subprocess.Popen(
-            ["coi", "shell", "--container", test_container],
+            [coi_binary, "shell", "--container", test_container],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -299,11 +299,11 @@ class TestNetworkThreatDetection:
         proc.stdin.flush()
         proc.wait(timeout=30)
 
-    def test_suspicious_port_critical(self, test_container, audit_log_path):
+    def test_suspicious_port_critical(self, test_container, audit_log_path, coi_binary):
         """Test that connections to suspicious ports trigger CRITICAL alert."""
         # Start session
         proc = subprocess.Popen(
-            ["coi", "shell", "--container", test_container],
+            [coi_binary, "shell", "--container", test_container],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -351,11 +351,11 @@ class TestNetworkThreatDetection:
         proc.stdin.flush()
         proc.wait(timeout=30)
 
-    def test_dns_query_monitoring(self, test_container, audit_log_path):
+    def test_dns_query_monitoring(self, test_container, audit_log_path, coi_binary):
         """Test that DNS queries are logged."""
         # Start session
         proc = subprocess.Popen(
-            ["coi", "shell", "--container", test_container],
+            [coi_binary, "shell", "--container", test_container],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -386,11 +386,11 @@ class TestNetworkThreatDetection:
         proc.stdin.flush()
         proc.wait(timeout=30)
 
-    def test_short_lived_connection_detection(self, test_container, audit_log_path):
+    def test_short_lived_connection_detection(self, test_container, audit_log_path, coi_binary):
         """Test that short-lived connections (<2s) are detected."""
         # Start session
         proc = subprocess.Popen(
-            ["coi", "shell", "--container", test_container],
+            [coi_binary, "shell", "--container", test_container],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -431,7 +431,7 @@ class TestNetworkThreatDetection:
         proc.stdin.flush()
         proc.wait(timeout=30)
 
-    def test_allowlist_violation_detected(self, test_container, audit_log_path):
+    def test_allowlist_violation_detected(self, test_container, audit_log_path, coi_binary):
         """
         Test that in allowlist mode, connections outside the allowlist are detected and logged.
 
@@ -471,7 +471,7 @@ rate_limit_per_second = 100
 
             # Start session with allowlist config
             proc = subprocess.Popen(
-                ["coi", "shell", "--container", test_container],
+                [coi_binary, "shell", "--container", test_container],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -592,11 +592,11 @@ rate_limit_per_second = 100
 class TestAuditLogging:
     """Test audit log functionality."""
 
-    def test_audit_log_created(self, test_container, audit_log_path):
+    def test_audit_log_created(self, test_container, audit_log_path, coi_binary):
         """Test that audit log file is created."""
         # Start session
         proc = subprocess.Popen(
-            ["coi", "shell", "--container", test_container],
+            [coi_binary, "shell", "--container", test_container],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -620,11 +620,11 @@ class TestAuditLogging:
         proc.stdin.flush()
         proc.wait(timeout=30)
 
-    def test_audit_log_json_format(self, test_container, audit_log_path):
+    def test_audit_log_json_format(self, test_container, audit_log_path, coi_binary):
         """Test that audit log entries are valid JSON Lines."""
         # Start session
         proc = subprocess.Popen(
-            ["coi", "shell", "--container", test_container],
+            [coi_binary, "shell", "--container", test_container],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -667,11 +667,11 @@ class TestAuditLogging:
 class TestDaemonLifecycle:
     """Test NFT monitoring daemon lifecycle."""
 
-    def test_daemon_starts_with_container(self, test_container):
+    def test_daemon_starts_with_container(self, test_container, coi_binary):
         """Test that daemon starts when monitoring is enabled."""
         # Start session
         proc = subprocess.Popen(
-            ["coi", "shell", "--container", test_container],
+            [coi_binary, "shell", "--container", test_container],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -687,11 +687,11 @@ class TestDaemonLifecycle:
         proc.stdin.flush()
         proc.wait(timeout=30)
 
-    def test_daemon_stops_cleanly(self, test_container):
+    def test_daemon_stops_cleanly(self, test_container, coi_binary):
         """Test that daemon stops without errors."""
         # Start and stop session
         result = subprocess.run(
-            ["coi", "shell", "--container", test_container],
+            [coi_binary, "shell", "--container", test_container],
             input="exit\n",
             capture_output=True,
             text=True,
@@ -713,10 +713,10 @@ class TestDaemonLifecycle:
 class TestHealthChecks:
     """Test NFT monitoring health checks."""
 
-    def test_nftables_health_check(self):
+    def test_nftables_health_check(self, coi_binary):
         """Test that nftables health check works."""
         result = subprocess.run(
-            ["coi", "health", "--format=json"], capture_output=True, text=True, timeout=60
+            [coi_binary, "health", "--format=json"], capture_output=True, text=True, timeout=60
         )
 
         health_data = json.loads(result.stdout)
@@ -728,10 +728,10 @@ class TestHealthChecks:
                 f"Invalid nftables check status: {nftables_check['status']}"
             )
 
-    def test_systemd_journal_health_check(self):
+    def test_systemd_journal_health_check(self, coi_binary):
         """Test that systemd-journal health check works."""
         result = subprocess.run(
-            ["coi", "health", "--format=json"], capture_output=True, text=True, timeout=60
+            [coi_binary, "health", "--format=json"], capture_output=True, text=True, timeout=60
         )
 
         health_data = json.loads(result.stdout)
@@ -743,10 +743,10 @@ class TestHealthChecks:
                 f"Invalid journal check status: {journal_check['status']}"
             )
 
-    def test_libsystemd_health_check(self):
+    def test_libsystemd_health_check(self, coi_binary):
         """Test that libsystemd health check works."""
         result = subprocess.run(
-            ["coi", "health", "--format=json"], capture_output=True, text=True, timeout=60
+            [coi_binary, "health", "--format=json"], capture_output=True, text=True, timeout=60
         )
 
         health_data = json.loads(result.stdout)
@@ -770,11 +770,11 @@ class TestEdgeCases:
         """Test that rules are cleaned up even after abnormal termination."""
         pytest.skip("Crash recovery test - requires forced termination")
 
-    def test_high_volume_traffic(self, test_container):
+    def test_high_volume_traffic(self, test_container, coi_binary):
         """Test rate limiting with high volume traffic."""
         # Start session
         proc = subprocess.Popen(
-            ["coi", "shell", "--container", test_container],
+            [coi_binary, "shell", "--container", test_container],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
