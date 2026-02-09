@@ -358,6 +358,10 @@ coi clean
 # Execute commands in containers with PTY support
 coi container exec mycontainer -t -- bash        # Interactive shell with PTY
 coi container exec mycontainer -- echo "hello"   # Non-interactive command
+
+# List all containers (low-level, for programmatic use)
+coi container list                               # Text format (default)
+coi container list --format=json                 # JSON format
 ```
 
 ### Global Flags

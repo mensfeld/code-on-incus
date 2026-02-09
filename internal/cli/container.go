@@ -332,6 +332,49 @@ Example:
 	},
 }
 
+// containerListCmd lists all containers
+var containerListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List all containers",
+	Long: `List all containers in JSON or text format.
+
+This is a low-level command that provides raw container information,
+similar to 'incus list'. For a higher-level view with session info,
+use 'coi list' instead.
+
+Examples:
+  # List containers in text format (default)
+  coi container list
+
+  # List containers in JSON format
+  coi container list --format=json`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		format, _ := cmd.Flags().GetString("format")
+
+		// Validate format
+		if format != "json" && format != "text" {
+			return exitError(2, fmt.Sprintf("invalid format '%s': must be 'json' or 'text'", format))
+		}
+
+		// Get raw incus list output
+		var output string
+		var err error
+
+		if format == "json" {
+			output, err = container.IncusOutput("list", "--format=json")
+		} else {
+			output, err = container.IncusOutput("list")
+		}
+
+		if err != nil {
+			return exitError(1, fmt.Sprintf("failed to list containers: %v", err))
+		}
+
+		fmt.Print(output)
+		return nil
+	},
+}
+
 // exitError returns an error with a specific exit code
 func exitError(code int, message string) error {
 	if message != "" {
@@ -363,6 +406,9 @@ func init() {
 	// Add flags to mount command
 	containerMountCmd.Flags().Bool("shift", true, "Enable UID/GID shifting")
 
+	// Add flags to list command
+	containerListCmd.Flags().String("format", "text", "Output format: text or json")
+
 	// Add subcommands to container command
 	containerCmd.AddCommand(containerLaunchCmd)
 	containerCmd.AddCommand(containerStartCmd)
@@ -372,4 +418,5 @@ func init() {
 	containerCmd.AddCommand(containerExistsCmd)
 	containerCmd.AddCommand(containerRunningCmd)
 	containerCmd.AddCommand(containerMountCmd)
+	containerCmd.AddCommand(containerListCmd)
 }
