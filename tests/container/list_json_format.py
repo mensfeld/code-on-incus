@@ -37,9 +37,7 @@ def test_container_list_json_format(coi_binary):
     try:
         containers = json.loads(result.stdout)
     except json.JSONDecodeError as e:
-        raise AssertionError(
-            f"Output should be valid JSON. Error: {e}\nOutput:\n{result.stdout}"
-        )
+        raise AssertionError(f"Output should be valid JSON. Error: {e}\nOutput:\n{result.stdout}")
 
     # Verify JSON is a list
     assert isinstance(containers, list), (
