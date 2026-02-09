@@ -595,7 +595,13 @@ curl http://<container-ip>:3000
 - **Reverse shells** - Detects `nc -e`, `bash -i >& /dev/tcp/`, Python/Perl/Ruby reverse shell patterns
 - **Data exfiltration** - Monitors large workspace reads that may indicate code theft attempts
 - **Environment scanning** - Flags processes searching for API keys, secrets, and credentials
-- **Unexpected network connections** - Detects connections to suspicious IPs/ports or outside allowlist
+- **Network threats (NFT)** - Real-time kernel-level detection of:
+  - Connections to private networks (RFC1918)
+  - Cloud metadata endpoint access (169.254.169.254)
+  - Suspicious ports (4444, 5555, 31337 - common C2/backdoor ports)
+  - Allowlist violations
+  - DNS query anomalies (tunneling, unexpected servers)
+  - Short-lived connections (<2s) missed by polling
 
 **Automated Response:**
 - **INFO**: Logged for review
@@ -649,9 +655,59 @@ poll_interval_sec = 2            # Monitoring frequency
 file_read_threshold_mb = 50.0    # MB read before alerting
 file_read_rate_mb_per_sec = 10.0 # Sustained read rate threshold
 audit_log_retention_days = 30    # Audit log retention
+
+[monitoring.nft]
+enabled = true                   # Enable nftables network monitoring
+rate_limit_per_second = 100      # Log volume limit
+dns_query_threshold = 100        # Alert on >N DNS queries/min
+log_dns_queries = true           # Separate DNS logging
+lima_host = ""                   # For macOS: "lima-default"
 ```
 
 **Audit logs** are stored at `~/.coi/audit/<container-name>.jsonl` in JSON Lines format for forensics and compliance.
+
+### NFT Network Monitoring Setup
+
+NFT monitoring requires additional system dependencies. Install them with:
+
+```bash
+# Run the setup script (requires sudo)
+./scripts/install-nft-deps.sh
+
+# Or manually:
+sudo apt-get install -y libsystemd-dev nftables
+sudo usermod -a -G systemd-journal $USER
+
+# Create sudoers file for nftables
+sudo tee /etc/sudoers.d/coi <<'EOF'
+%incus-admin ALL=(ALL) NOPASSWD: /usr/sbin/nft list *
+%incus-admin ALL=(ALL) NOPASSWD: /usr/sbin/nft add rule *
+%incus-admin ALL=(ALL) NOPASSWD: /usr/sbin/nft delete rule *
+%incus-admin ALL=(ALL) NOPASSWD: /usr/sbin/nft -a list *
+EOF
+sudo chmod 0440 /etc/sudoers.d/coi
+
+# IMPORTANT: Log out and log back in for group membership to take effect
+# Or run: newgrp systemd-journal
+```
+
+**Verify setup:**
+```bash
+# Check NFT monitoring status
+coi health
+
+# Test journal access
+journalctl -k -n 10
+
+# Test nftables access
+sudo -n nft list ruleset
+```
+
+**Required packages:**
+- `libsystemd-dev` - systemd development headers for journald integration
+- `nftables` - kernel-level packet filtering for network monitoring
+- systemd-journal group membership - read kernel logs without sudo
+- Passwordless sudo for nft commands - add/remove rules without prompts
 
 ## Security Best Practices
 

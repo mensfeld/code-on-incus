@@ -373,6 +373,11 @@ func (m *Manager) GetMode() config.NetworkMode {
 	return m.config.Mode
 }
 
+// GetContainerGatewayIP exports the gateway IP detection for external use
+func GetContainerGatewayIP(containerName string) (string, error) {
+	return getContainerGatewayIP(containerName)
+}
+
 // getContainerGatewayIP auto-detects the gateway IP for a container's network
 func getContainerGatewayIP(containerName string) (string, error) {
 	// Get container's network configuration from default profile

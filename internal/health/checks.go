@@ -1394,3 +1394,136 @@ func CheckOrphanedResources() HealthCheck {
 		},
 	}
 }
+
+// CheckNFTables checks if nftables is available and properly configured
+func CheckNFTables() HealthCheck {
+	// Check if nftables binary exists
+	nftPath, err := exec.LookPath("nft")
+	if err != nil {
+		return HealthCheck{
+			Name:    "nftables",
+			Status:  StatusWarning,
+			Message: "nftables not found (required for NFT monitoring)",
+			Details: map[string]interface{}{
+				"error": err.Error(),
+			},
+		}
+	}
+
+	// Check if we can run nft commands with sudo (NOPASSWD)
+	cmd := exec.Command("sudo", "-n", "nft", "list", "ruleset")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return HealthCheck{
+			Name:    "nftables",
+			Status:  StatusWarning,
+			Message: "nftables installed but sudo access not configured",
+			Details: map[string]interface{}{
+				"nft_path": nftPath,
+				"error":    string(output),
+				"hint":     "Run scripts/install-nft-deps.sh to configure passwordless sudo",
+			},
+		}
+	}
+
+	return HealthCheck{
+		Name:    "nftables",
+		Status:  StatusOK,
+		Message: "nftables available with sudo access",
+		Details: map[string]interface{}{
+			"nft_path": nftPath,
+		},
+	}
+}
+
+// CheckSystemdJournal checks if systemd-journal access is available
+func CheckSystemdJournal() HealthCheck {
+	// Check if journalctl exists
+	journalPath, err := exec.LookPath("journalctl")
+	if err != nil {
+		return HealthCheck{
+			Name:    "systemd_journal",
+			Status:  StatusWarning,
+			Message: "journalctl not found (required for NFT monitoring)",
+			Details: map[string]interface{}{
+				"error": err.Error(),
+			},
+		}
+	}
+
+	// Check if user is in systemd-journal group
+	currentUser, err := user.Current()
+	if err != nil {
+		return HealthCheck{
+			Name:    "systemd_journal",
+			Status:  StatusWarning,
+			Message: "Failed to get current user",
+			Details: map[string]interface{}{
+				"error": err.Error(),
+			},
+		}
+	}
+
+	// Try to read kernel logs
+	cmd := exec.Command("journalctl", "-k", "-n", "1")
+	if err := cmd.Run(); err != nil {
+		return HealthCheck{
+			Name:    "systemd_journal",
+			Status:  StatusWarning,
+			Message: "No access to kernel logs (add user to systemd-journal group)",
+			Details: map[string]interface{}{
+				"journal_path": journalPath,
+				"user":         currentUser.Username,
+				"hint":         "Run scripts/install-nft-deps.sh to configure access",
+			},
+		}
+	}
+
+	return HealthCheck{
+		Name:    "systemd_journal",
+		Status:  StatusOK,
+		Message: "systemd journal access available",
+		Details: map[string]interface{}{
+			"journal_path": journalPath,
+			"user":         currentUser.Username,
+		},
+	}
+}
+
+// CheckLibsystemd checks if libsystemd development headers are installed
+func CheckLibsystemd() HealthCheck {
+	// Check if the header file exists
+	headerPaths := []string{
+		"/usr/include/systemd/sd-journal.h",
+		"/usr/include/x86_64-linux-gnu/systemd/sd-journal.h",
+		"/usr/include/aarch64-linux-gnu/systemd/sd-journal.h",
+	}
+
+	var foundPath string
+	for _, path := range headerPaths {
+		if _, err := os.Stat(path); err == nil {
+			foundPath = path
+			break
+		}
+	}
+
+	if foundPath == "" {
+		return HealthCheck{
+			Name:    "libsystemd",
+			Status:  StatusWarning,
+			Message: "libsystemd-dev not installed (required to build NFT monitoring)",
+			Details: map[string]interface{}{
+				"hint": "Run scripts/install-nft-deps.sh to install dependencies",
+			},
+		}
+	}
+
+	return HealthCheck{
+		Name:    "libsystemd",
+		Status:  StatusOK,
+		Message: "libsystemd-dev installed",
+		Details: map[string]interface{}{
+			"header_path": foundPath,
+		},
+	}
+}

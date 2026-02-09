@@ -91,6 +91,7 @@ func outputHealthText(result *health.HealthResult) error {
 		"SYSTEM":        {"os"},
 		"CRITICAL":      {"incus", "permissions", "image", "image_age"},
 		"NETWORKING":    {"network_bridge", "ip_forwarding", "firewall"},
+		"MONITORING":    {"nftables", "systemd_journal", "libsystemd"},
 		"STORAGE":       {"coi_directory", "sessions_directory", "disk_space"},
 		"CONFIGURATION": {"config", "network_mode", "tool"},
 		"STATUS":        {"active_containers", "saved_sessions", "orphaned_resources"},
@@ -98,7 +99,7 @@ func outputHealthText(result *health.HealthResult) error {
 	}
 
 	// Category order
-	categoryOrder := []string{"SYSTEM", "CRITICAL", "NETWORKING", "STORAGE", "CONFIGURATION", "STATUS", "OPTIONAL"}
+	categoryOrder := []string{"SYSTEM", "CRITICAL", "NETWORKING", "MONITORING", "STORAGE", "CONFIGURATION", "STATUS", "OPTIONAL"}
 
 	for _, category := range categoryOrder {
 		checkNames := categories[category]
@@ -210,6 +211,9 @@ func formatCheckName(name string) string {
 		"network_bridge":     "Network bridge",
 		"ip_forwarding":      "IP forwarding",
 		"firewall":           "Firewalld",
+		"nftables":           "nftables",
+		"systemd_journal":    "systemd journal",
+		"libsystemd":         "libsystemd-dev",
 		"coi_directory":      "COI directory",
 		"sessions_directory": "Sessions dir",
 		"disk_space":         "Disk space",

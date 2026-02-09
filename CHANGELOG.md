@@ -2,10 +2,15 @@
 
 ## Unreleased
 
+### Features
+
+- [Feature] **nftables-based network monitoring** - Added event-driven network monitoring using nftables and systemd-journal for complete visibility into container network activity. Replaces polling-based /proc/net/tcp monitoring with kernel-level packet filtering that captures all network events including short-lived connections (<2s), blocked connection attempts, and DNS queries. Features real-time threat detection for RFC1918 addresses, metadata endpoint access (169.254.169.254), suspicious ports (4444, 5555, 31337), allowlist violations, and DNS query anomalies. Monitoring daemon runs automatically during sessions when `[monitoring.nft]` is enabled (default: true). Logs are streamed from journald with configurable rate limiting (default: 100 packets/second for normal traffic, unlimited for suspicious traffic). Includes health checks for nftables, systemd-journal access, and libsystemd-dev installation. Setup script provided at `scripts/install-nft-deps.sh` to configure system dependencies, group membership, and passwordless sudo for nft commands. Works on Lima/macOS via limactl wrapper. Audit logs stored at `~/.coi/audit/<container-name>-nft.jsonl`. This provides kernel-level security monitoring that can't be tampered with from inside the container, catching threats that process-level monitoring might miss.
+
 ### Documentation
 
 - [Documentation] **Image management operations** - Added inline examples to README for existing `coi image` commands (list, publish, exists, delete, cleanup). These commands have been available since early releases for creating and managing custom container images, with 20 integration tests and complete wiki documentation. Quick reference examples now included in README for common operations like publishing containers as images, checking image existence, and cleaning up old image versions. See [Image Management wiki page](https://github.com/mensfeld/code-on-incus/wiki/Image-Management) for detailed usage examples and workflows.
 - [Documentation] **File transfer operations** - Documented existing `coi file push` and `coi file pull` commands in README. These commands have been available since early releases for transferring files and directories between host and containers, supporting recursive operations with the `-r` flag. Includes 16 integration tests covering various scenarios. See [File Transfer wiki page](https://github.com/mensfeld/code-on-incus/wiki/File-Transfer) for detailed usage examples.
+- [Documentation] **nftables monitoring setup** - Added comprehensive documentation for nftables-based network monitoring including system requirements, setup instructions, configuration options, and verification steps. Includes inline examples in README for installing dependencies (libsystemd-dev, nftables), configuring group membership and passwordless sudo, and verifying the setup with `coi health`. Documents the architecture, threat detection capabilities, and audit logging format.
 
 ### Bug Fixes
 
