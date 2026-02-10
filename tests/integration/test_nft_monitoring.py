@@ -21,7 +21,7 @@ import pytest
 # Skip all tests in this module in CI
 pytestmark = pytest.mark.skipif(
     os.environ.get("CI") == "true",
-    reason="NFT monitoring tests require interactive shell sessions, skip in CI for now"
+    reason="NFT monitoring tests require interactive shell sessions, skip in CI for now",
 )
 
 
