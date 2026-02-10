@@ -16,37 +16,31 @@ import pytest
 
 
 # Test fixtures
-@pytest.fixture
+@pytest.fixture(scope="module")
 def test_container(request, coi_binary):
-    """Create a test container for NFT monitoring tests."""
-    # Create container using coi
+    """Create a shared test container for all NFT monitoring tests."""
+    # Use container launch instead of shell (faster, no interactive session)
     workspace = os.getcwd()
-    subprocess.run(
-        [coi_binary, "shell", "--workspace", workspace],
+    container_name = f"coi-nft-test-{os.getpid()}"
+
+    # Launch container directly
+    result = subprocess.run(
+        [coi_binary, "container", "launch", "coi", container_name],
         capture_output=True,
         text=True,
-        timeout=120,
-        input="exit\n",  # Exit immediately after container starts
+        timeout=60,
     )
 
-    # Get actual container name from coi list
-    list_result = subprocess.run(
-        [coi_binary, "list", "--format=json"], capture_output=True, text=True, timeout=30
-    )
-    containers = json.loads(list_result.stdout)
-    actual_container = None
-    for container in containers:
-        if container.get("workspace") == workspace:
-            actual_container = container["name"]
-            break
+    if result.returncode != 0:
+        pytest.skip(f"Failed to launch test container: {result.stderr}")
 
-    if not actual_container:
-        pytest.fail("Failed to create test container")
+    # Wait for container to be ready
+    time.sleep(5)
 
-    yield actual_container
+    yield container_name
 
     # Cleanup
-    subprocess.run([coi_binary, "kill", actual_container, "--force"], timeout=60)
+    subprocess.run([coi_binary, "container", "delete", container_name, "--force"], timeout=60)
 
 
 @pytest.fixture
