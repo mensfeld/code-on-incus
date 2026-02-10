@@ -20,7 +20,6 @@ import pytest
 def test_container(request, coi_binary):
     """Create a shared test container for all NFT monitoring tests."""
     # Use container launch instead of shell (faster, no interactive session)
-    workspace = os.getcwd()
     container_name = f"coi-nft-test-{os.getpid()}"
 
     # Launch container directly
