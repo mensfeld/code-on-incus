@@ -4,6 +4,10 @@ Integration tests for nftables-based network monitoring.
 
 Tests NFT monitoring daemon lifecycle, rule management, threat detection,
 and integration with the monitoring system.
+
+NOTE: These tests require actual shell sessions with NFT monitoring enabled,
+which can be slow in CI. They are marked to skip in CI environments.
+For manual testing: pytest tests/integration/test_nft_monitoring.py
 """
 
 import json
@@ -13,6 +17,12 @@ import time
 from pathlib import Path
 
 import pytest
+
+# Skip all tests in this module in CI
+pytestmark = pytest.mark.skipif(
+    os.environ.get("CI") == "true",
+    reason="NFT monitoring tests require interactive shell sessions, skip in CI for now"
+)
 
 
 # Test fixtures
