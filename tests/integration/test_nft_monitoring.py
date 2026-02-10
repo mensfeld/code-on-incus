@@ -17,7 +17,7 @@ import pytest
 
 # Test fixtures
 @pytest.fixture
-def test_container(request):
+def test_container(request, coi_binary):
     """Create a test container for NFT monitoring tests."""
     # Create container using coi
     workspace = os.getcwd()
