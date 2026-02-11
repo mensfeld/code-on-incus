@@ -160,3 +160,38 @@ def pytest_report_teststatus(report, config):
         return report.outcome, "", word
 
     return None  # Use default formatting
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Clean up orphaned resources at the end of the test session.
+
+    This runs even if tests crash, ensuring firewall rules, veth interfaces,
+    and other resources don't leak on the developer's machine.
+    """
+    # Find the coi binary
+    coi_binary = None
+    if "COI_BINARY" in os.environ:
+        coi_binary = os.environ["COI_BINARY"]
+    else:
+        binary_path = os.path.join(os.path.dirname(__file__), "..", "coi")
+        if os.path.exists(binary_path):
+            coi_binary = os.path.abspath(binary_path)
+
+    if not coi_binary or not os.path.exists(coi_binary):
+        return  # Can't clean up without the binary
+
+    # Clean up any orphaned resources (veths, firewall rules, zone bindings)
+    subprocess.run(
+        [coi_binary, "clean", "--orphans", "--force"],
+        capture_output=True,
+        timeout=60,
+        check=False,
+    )
+
+    # Also kill all test containers to be safe
+    subprocess.run(
+        [coi_binary, "kill", "--all", "--force"],
+        capture_output=True,
+        timeout=60,
+        check=False,
+    )

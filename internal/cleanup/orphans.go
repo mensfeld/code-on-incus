@@ -15,8 +15,9 @@ import (
 
 // OrphanedResources holds information about orphaned system resources
 type OrphanedResources struct {
-	Veths         []string // Orphaned veth interfaces (no master bridge)
-	FirewallRules []string // Orphaned firewall rules (for non-existent container IPs)
+	Veths                 []string // Orphaned veth interfaces (no master bridge)
+	FirewallRules         []string // Orphaned firewall rules (for non-existent container IPs)
+	FirewalldZoneBindings []string // Orphaned firewalld zone bindings (veths in zones but not on system)
 }
 
 // DetectOrphanedVeths finds veth interfaces that have no master bridge
@@ -214,18 +215,25 @@ func DetectAll() (*OrphanedResources, error) {
 	}
 	result.FirewallRules = rules
 
+	zoneBindings, err := network.DetectOrphanedFirewalldZoneBindings()
+	if err != nil {
+		// Non-fatal - firewalld might not be available
+		log.Printf("Warning: Could not check firewalld zone bindings: %v", err)
+	}
+	result.FirewalldZoneBindings = zoneBindings
+
 	return result, nil
 }
 
 // CleanupAll cleans up all orphaned resources
-func CleanupAll(logger func(string)) (vethsCleaned, rulesCleaned int, err error) {
+func CleanupAll(logger func(string)) (vethsCleaned, rulesCleaned, zoneBindingsCleaned int, err error) {
 	if logger == nil {
 		logger = func(msg string) { log.Println(msg) }
 	}
 
 	orphans, err := DetectAll()
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, 0, err
 	}
 
 	if len(orphans.Veths) > 0 {
@@ -236,7 +244,11 @@ func CleanupAll(logger func(string)) (vethsCleaned, rulesCleaned int, err error)
 		rulesCleaned, _ = CleanupOrphanedFirewallRules(orphans.FirewallRules, logger)
 	}
 
-	return vethsCleaned, rulesCleaned, nil
+	if len(orphans.FirewalldZoneBindings) > 0 {
+		zoneBindingsCleaned, _ = network.CleanupOrphanedFirewalldZoneBindings(orphans.FirewalldZoneBindings, logger)
+	}
+
+	return vethsCleaned, rulesCleaned, zoneBindingsCleaned, nil
 }
 
 // HasOrphans returns true if there are any orphaned resources
@@ -245,5 +257,11 @@ func HasOrphans() bool {
 	if err != nil {
 		return false
 	}
-	return len(orphans.Veths) > 0 || len(orphans.FirewallRules) > 0
+	return len(orphans.Veths) > 0 || len(orphans.FirewallRules) > 0 || len(orphans.FirewalldZoneBindings) > 0
+}
+
+// CleanupOrphanedFirewalldZoneBindings removes orphaned veth interfaces from firewalld zones
+// This is a wrapper around network.CleanupOrphanedFirewalldZoneBindings
+func CleanupOrphanedFirewalldZoneBindings(veths []string, logger func(string)) (int, error) {
+	return network.CleanupOrphanedFirewalldZoneBindings(veths, logger)
 }

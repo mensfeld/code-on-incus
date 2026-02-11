@@ -11,6 +11,35 @@ import (
 	"github.com/mensfeld/code-on-incus/internal/container"
 )
 
+// cleanupTestContainer is a helper that ensures complete cleanup of a test container
+// including firewalld zone bindings. Use with t.Cleanup() to ensure cleanup even on test failure.
+func cleanupTestContainer(t *testing.T, containerName string) {
+	t.Helper()
+	mgr := container.NewManager(containerName)
+
+	// Get veth name before any cleanup (might fail if container doesn't exist)
+	vethName, _ := GetContainerVethName(containerName)
+
+	// Get container IP for firewall rule cleanup
+	containerIP, _ := GetContainerIPFast(containerName)
+
+	// Stop and delete container
+	if exists, _ := mgr.Exists(); exists {
+		_ = mgr.Stop(true)
+		_ = mgr.Delete(true)
+	}
+
+	// Clean up firewall rules for the IP
+	if containerIP != "" {
+		cleanupRulesForIP(t, containerIP)
+	}
+
+	// Clean up firewalld zone binding for the veth
+	if vethName != "" {
+		_ = RemoveVethFromFirewalldZone(vethName)
+	}
+}
+
 // TestOpenModeFirewallCleanup verifies that open mode firewall rules are cleaned up
 // when a container is torn down. This reproduces Bug #1 from ERROR.md.
 func TestOpenModeFirewallCleanup(t *testing.T) {
@@ -41,6 +70,11 @@ func TestOpenModeFirewallCleanup(t *testing.T) {
 	// Create a test container
 	containerName := "coi-firewall-test-open"
 	mgr := container.NewManager(containerName)
+
+	// Register cleanup to run even if test fails
+	t.Cleanup(func() {
+		cleanupTestContainer(t, containerName)
+	})
 
 	// Clean up any existing container
 	if exists, _ := mgr.Exists(); exists {
@@ -131,6 +165,11 @@ func TestRestrictedModeFirewallCleanup(t *testing.T) {
 	containerName := "coi-firewall-test-restricted"
 	mgr := container.NewManager(containerName)
 
+	// Register cleanup to run even if test fails
+	t.Cleanup(func() {
+		cleanupTestContainer(t, containerName)
+	})
+
 	// Clean up any existing container
 	if exists, _ := mgr.Exists(); exists {
 		_ = mgr.Stop(true)
@@ -219,6 +258,11 @@ func TestFirewallCleanupBeforeContainerDeletion(t *testing.T) {
 	// Create a test container
 	containerName := "coi-firewall-test-order"
 	mgr := container.NewManager(containerName)
+
+	// Register cleanup to run even if test fails
+	t.Cleanup(func() {
+		cleanupTestContainer(t, containerName)
+	})
 
 	// Clean up any existing container
 	if exists, _ := mgr.Exists(); exists {
@@ -319,6 +363,11 @@ func TestFirewallCleanupCorrectOrder(t *testing.T) {
 	// Create a test container
 	containerName := "coi-firewall-test-correct"
 	mgr := container.NewManager(containerName)
+
+	// Register cleanup to run even if test fails
+	t.Cleanup(func() {
+		cleanupTestContainer(t, containerName)
+	})
 
 	// Clean up any existing container
 	if exists, _ := mgr.Exists(); exists {

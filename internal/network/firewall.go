@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
 	"sort"
 	"strings"
@@ -371,4 +372,139 @@ func FirewallAvailable() bool {
 	cmd := exec.Command("sudo", "-n", "firewall-cmd", "--state")
 	err := cmd.Run()
 	return err == nil
+}
+
+// GetContainerVethName retrieves the host-side veth interface name for a container
+func GetContainerVethName(containerName string) (string, error) {
+	output, err := container.IncusOutput("list", containerName, "--format=json")
+	if err != nil {
+		return "", fmt.Errorf("failed to get container info: %w", err)
+	}
+
+	var containers []struct {
+		Name  string `json:"name"`
+		State struct {
+			Network map[string]struct {
+				HostName string `json:"host_name"`
+			} `json:"network"`
+		} `json:"state"`
+	}
+
+	if err := json.Unmarshal([]byte(output), &containers); err != nil {
+		return "", fmt.Errorf("failed to parse container info: %w", err)
+	}
+
+	for _, c := range containers {
+		if c.Name == containerName {
+			if eth0, ok := c.State.Network["eth0"]; ok {
+				if eth0.HostName != "" {
+					return eth0.HostName, nil
+				}
+			}
+		}
+	}
+
+	return "", fmt.Errorf("no veth interface found for container %s", containerName)
+}
+
+// RemoveVethFromFirewalldZone removes a veth interface from its firewalld zone
+// This cleans up stale zone bindings after container deletion
+func RemoveVethFromFirewalldZone(vethName string) error {
+	if vethName == "" {
+		return nil
+	}
+
+	if !FirewallAvailable() {
+		return nil
+	}
+
+	// Try to remove from common zones (public, trusted)
+	// firewall-cmd returns success if interface wasn't in the zone
+	zones := []string{"public", "trusted"}
+	for _, zone := range zones {
+		cmd := exec.Command("sudo", "-n", "firewall-cmd", "--zone="+zone, "--remove-interface="+vethName)
+		// Ignore errors - interface might not be in this zone
+		_ = cmd.Run()
+	}
+
+	return nil
+}
+
+// DetectOrphanedFirewalldZoneBindings finds veth interfaces registered in firewalld
+// that no longer exist on the system
+func DetectOrphanedFirewalldZoneBindings() ([]string, error) {
+	if !FirewallAvailable() {
+		return nil, nil
+	}
+
+	// Get all veths registered in firewalld by parsing nft output
+	cmd := exec.Command("sudo", "-n", "nft", "list", "table", "inet", "firewalld")
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list firewalld table: %w", err)
+	}
+
+	// Extract unique veth names from the output
+	vethInFirewalld := make(map[string]bool)
+	for _, line := range strings.Split(string(output), "\n") {
+		// Look for patterns like: iifname "veth01059070"
+		if strings.Contains(line, "veth") {
+			// Extract veth name using simple parsing
+			for _, part := range strings.Fields(line) {
+				part = strings.Trim(part, "\"")
+				if strings.HasPrefix(part, "veth") && len(part) > 4 {
+					vethInFirewalld[part] = true
+				}
+			}
+		}
+	}
+
+	// Get veths that actually exist on the system
+	existingVeths := make(map[string]bool)
+	entries, err := os.ReadDir("/sys/class/net")
+	if err != nil {
+		return nil, fmt.Errorf("failed to read network interfaces: %w", err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), "veth") {
+			existingVeths[entry.Name()] = true
+		}
+	}
+
+	// Find orphaned veths (in firewalld but not on system)
+	var orphaned []string
+	for veth := range vethInFirewalld {
+		if !existingVeths[veth] {
+			orphaned = append(orphaned, veth)
+		}
+	}
+
+	return orphaned, nil
+}
+
+// CleanupOrphanedFirewalldZoneBindings removes orphaned veth interfaces from firewalld zones
+func CleanupOrphanedFirewalldZoneBindings(veths []string, logger func(string)) (int, error) {
+	if logger == nil {
+		logger = func(msg string) { log.Printf("%s", msg) }
+	}
+
+	cleaned := 0
+	for _, veth := range veths {
+		logger(fmt.Sprintf("Removing orphaned firewalld zone binding: %s", veth))
+		if err := RemoveVethFromFirewalldZone(veth); err != nil {
+			logger(fmt.Sprintf("  Warning: Failed to remove %s: %v", veth, err))
+			continue
+		}
+		cleaned++
+	}
+
+	// Reload firewalld to apply changes if we cleaned anything
+	if cleaned > 0 {
+		cmd := exec.Command("sudo", "-n", "firewall-cmd", "--reload")
+		if err := cmd.Run(); err != nil {
+			logger(fmt.Sprintf("Warning: Failed to reload firewalld: %v", err))
+		}
+	}
+
+	return cleaned, nil
 }

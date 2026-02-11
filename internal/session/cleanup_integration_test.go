@@ -12,6 +12,35 @@ import (
 	"github.com/mensfeld/code-on-incus/internal/network"
 )
 
+// cleanupTestContainer is a helper that ensures complete cleanup of a test container
+// including firewalld zone bindings. Use with t.Cleanup() to ensure cleanup even on test failure.
+func cleanupTestContainer(t *testing.T, containerName string) {
+	t.Helper()
+	mgr := container.NewManager(containerName)
+
+	// Get veth name before any cleanup (might fail if container doesn't exist)
+	vethName, _ := network.GetContainerVethName(containerName)
+
+	// Get container IP for firewall rule cleanup
+	containerIP, _ := network.GetContainerIPFast(containerName)
+
+	// Stop and delete container
+	if exists, _ := mgr.Exists(); exists {
+		_ = mgr.Stop(true)
+		_ = mgr.Delete(true)
+	}
+
+	// Clean up firewall rules for the IP
+	if containerIP != "" {
+		cleanupRulesForIP(t, containerIP)
+	}
+
+	// Clean up firewalld zone binding for the veth
+	if vethName != "" {
+		_ = network.RemoveVethFromFirewalldZone(vethName)
+	}
+}
+
 // TestEndToEndCleanupWithOpenMode tests the complete cleanup flow with open mode networking.
 // This is an end-to-end test that verifies the fix for Bug #1 (open mode rules never cleaned).
 func TestEndToEndCleanupWithOpenMode(t *testing.T) {
@@ -43,6 +72,11 @@ func TestEndToEndCleanupWithOpenMode(t *testing.T) {
 	// Create a test container
 	containerName := "coi-e2e-cleanup-open"
 	mgr := container.NewManager(containerName)
+
+	// Register cleanup to run even if test fails
+	t.Cleanup(func() {
+		cleanupTestContainer(t, containerName)
+	})
 
 	// Clean up any existing container
 	if exists, _ := mgr.Exists(); exists {
@@ -173,6 +207,11 @@ func TestEndToEndCleanupWithRestrictedMode(t *testing.T) {
 	containerName := "coi-e2e-cleanup-restricted"
 	mgr := container.NewManager(containerName)
 
+	// Register cleanup to run even if test fails
+	t.Cleanup(func() {
+		cleanupTestContainer(t, containerName)
+	})
+
 	// Clean up any existing container
 	if exists, _ := mgr.Exists(); exists {
 		_ = mgr.Stop(true)
@@ -288,6 +327,14 @@ func TestEndToEndCleanupMultipleContainers(t *testing.T) {
 	// Count firewall rules before
 	rulesBefore := countFirewallRules(t)
 	t.Logf("Firewall rules before test: %d", rulesBefore)
+
+	// Register cleanup for all test containers (in case of test failure)
+	t.Cleanup(func() {
+		for i := 1; i <= 3; i++ {
+			containerName := "coi-e2e-multi-" + string(rune('0'+i))
+			cleanupTestContainer(t, containerName)
+		}
+	})
 
 	// Test launching and cleaning up 3 containers in sequence
 	for i := 1; i <= 3; i++ {
