@@ -354,7 +354,7 @@ coi kill coi-abc12345-1
 # Kill all containers
 coi kill --all
 
-# Cleanup stopped/orphaned containers
+# Cleanup stopped containers and orphaned resources (veths, firewall rules, zone bindings)
 coi clean
 
 # Execute commands in containers with PTY support
