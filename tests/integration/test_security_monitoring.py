@@ -116,9 +116,7 @@ def cleanup_container(container_name, coi_binary):
 class TestBasicMonitoring:
     """Test basic monitoring functionality."""
 
-    def test_shell_starts_with_monitoring(
-        self, test_workspace, enable_monitoring, coi_binary
-    ):
+    def test_shell_starts_with_monitoring(self, test_workspace, enable_monitoring, coi_binary):
         """Verify coi shell starts successfully with monitoring enabled."""
         proc = subprocess.Popen(
             [coi_binary, "shell", "--workspace", test_workspace, "--debug"],
@@ -136,9 +134,7 @@ class TestBasicMonitoring:
         proc.stdin.flush()
         proc.wait(timeout=15)
 
-    def test_normal_commands_no_threats(
-        self, test_workspace, enable_monitoring, coi_binary
-    ):
+    def test_normal_commands_no_threats(self, test_workspace, enable_monitoring, coi_binary):
         """Verify normal commands don't trigger false alerts."""
         proc = subprocess.Popen(
             [coi_binary, "shell", "--workspace", test_workspace, "--debug"],
@@ -177,9 +173,7 @@ class TestBasicMonitoring:
 class TestThreatDetection:
     """Test detection of various threat types."""
 
-    def test_reverse_shell_detected(
-        self, test_workspace, enable_monitoring, coi_binary
-    ):
+    def test_reverse_shell_detected(self, test_workspace, enable_monitoring, coi_binary):
         """Verify reverse shell attempts are detected as CRITICAL."""
         proc = subprocess.Popen(
             [coi_binary, "shell", "--workspace", test_workspace, "--debug"],
