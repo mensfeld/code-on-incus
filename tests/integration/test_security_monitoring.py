@@ -25,7 +25,7 @@ def test_container(request, coi_binary):
     """Create a fresh test container for each test (to avoid test interference)."""
     container_name = f"coi-sec-test-{os.getpid()}-{id(request)}"
 
-    # Launch container directly (no interactive shell needed)
+    # Launch container
     result = subprocess.run(
         [coi_binary, "container", "launch", "coi", container_name],
         capture_output=True,
@@ -36,8 +36,16 @@ def test_container(request, coi_binary):
     if result.returncode != 0:
         pytest.skip(f"Failed to launch test container: {result.stderr}")
 
-    # Wait for container to be ready
-    time.sleep(5)
+    # Start a long-running process inside container to keep it alive for monitoring
+    # This gives the container a PID that monitoring can track
+    subprocess.Popen(
+        ["incus", "exec", container_name, "--", "sh", "-c", "sleep 3600"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+    # Wait for container to be fully ready
+    time.sleep(3)
 
     yield container_name
 
