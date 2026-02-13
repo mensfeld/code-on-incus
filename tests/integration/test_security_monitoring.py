@@ -20,10 +20,10 @@ import pytest
 
 
 # Test fixtures
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="function")
 def test_container(request, coi_binary):
-    """Create a shared test container for all security monitoring tests."""
-    container_name = f"coi-sec-test-{os.getpid()}"
+    """Create a fresh test container for each test (to avoid test interference)."""
+    container_name = f"coi-sec-test-{os.getpid()}-{id(request)}"
 
     # Launch container directly (no interactive shell needed)
     result = subprocess.run(
