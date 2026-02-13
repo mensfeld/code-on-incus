@@ -241,10 +241,17 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Warning: Failed to save early metadata: %v\n", err)
 	}
 
-	// Start monitoring daemons if enabled
+	// Start monitoring daemons if enabled (via config or --monitor flag)
 	var monitorDaemon *monitor.Daemon
 	var nftDaemon *nftmonitor.Daemon
-	if cfg.Monitoring.Enabled {
+	monitoringEnabled := cfg.Monitoring.Enabled || enableMonitoring
+	if monitoringEnabled {
+		// Override config settings when --monitor flag is used
+		if enableMonitoring {
+			cfg.Monitoring.Enabled = true
+			cfg.Monitoring.AutoKillOnCritical = true
+			cfg.Monitoring.AutoPauseOnHigh = true
+		}
 		// Start traditional monitoring (process/filesystem)
 		if err := startMonitoringDaemon(result.ContainerName, absWorkspace, cfg, &monitorDaemon); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: Failed to start monitoring daemon: %v\n", err)

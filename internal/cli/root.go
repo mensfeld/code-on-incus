@@ -26,6 +26,9 @@ var (
 	// Git security flag
 	writableGitHooks bool
 
+	// Monitoring flag
+	enableMonitoring bool
+
 	// Limit flags
 	limitCPU           string
 	limitCPUAllowance  string
@@ -115,6 +118,8 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&networkMode, "network", "", "Network mode: restricted (default), open")
 	rootCmd.PersistentFlags().BoolVar(&writableGitHooks, "writable-git-hooks", false,
 		"Allow container to write to .git/hooks (disables security protection)")
+	rootCmd.PersistentFlags().BoolVar(&enableMonitoring, "monitor", false,
+		"Enable security monitoring with automatic threat response")
 
 	// Resource limit flags
 	rootCmd.PersistentFlags().StringVar(&limitCPU, "limit-cpu", "", "CPU count limit (e.g., '2', '0-3', '0,1,3')")
