@@ -22,10 +22,10 @@ import (
 )
 
 var (
-	debugShell     bool
-	background     bool
-	useTmux        bool
-	containerName  string
+	debugShell    bool
+	background    bool
+	useTmux       bool
+	containerName string
 )
 
 var shellCmd = &cobra.Command{
