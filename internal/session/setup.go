@@ -228,7 +228,8 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 
 		if running {
 			// Container is running - this is an active session!
-			if opts.Persistent {
+			if opts.Persistent || opts.ContainerName != "" {
+				// Reuse running container if: persistent mode OR --container flag specified
 				opts.Logger("Container already running, reusing...")
 				skipLaunch = true
 			} else {
@@ -238,9 +239,10 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 			}
 		} else {
 			// Container exists but is stopped
-			if opts.Persistent {
-				// Restart the stopped persistent container
-				opts.Logger("Restarting existing persistent container...")
+			if opts.Persistent || opts.ContainerName != "" {
+				// Restart the stopped container
+				// This includes: persistent containers OR containers specified via --container flag
+				opts.Logger("Starting existing container...")
 				if err := result.Manager.Start(); err != nil {
 					return nil, fmt.Errorf("failed to start container: %w", err)
 				}
