@@ -22,9 +22,10 @@ import (
 )
 
 var (
-	debugShell bool
-	background bool
-	useTmux    bool
+	debugShell     bool
+	background     bool
+	useTmux        bool
+	containerName  string
 )
 
 var shellCmd = &cobra.Command{
@@ -56,6 +57,7 @@ func init() {
 	shellCmd.Flags().BoolVar(&debugShell, "debug", false, "Launch interactive bash instead of AI tool (for debugging)")
 	shellCmd.Flags().BoolVar(&background, "background", false, "Run AI tool in background tmux session (detached)")
 	shellCmd.Flags().BoolVar(&useTmux, "tmux", true, "Use tmux for session management (default true)")
+	shellCmd.Flags().StringVar(&containerName, "container", "", "Use existing container (for testing)")
 }
 
 //nolint:gocyclo // Sequential initialization with many configuration paths
@@ -212,6 +214,7 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 		LimitsConfig:   limitsConfig,
 		IncusProject:   cfg.Incus.Project,
 		ProtectedPaths: protectedPaths,
+		ContainerName:  containerName,
 	}
 
 	// Parse and validate mount configuration

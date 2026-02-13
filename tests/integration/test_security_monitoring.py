@@ -5,21 +5,10 @@ Integration tests for security monitoring (process, filesystem, threat detection
 Tests process-level threats, filesystem monitoring, and automated response system.
 Complements test_nft_monitoring.py which focuses on network-level threats.
 
-NOTE: These tests are currently SKIPPED because they use an incorrect test pattern.
-They try to use `coi shell --container <name>` but that flag doesn't exist.
-The tests need to be rewritten to use `coi shell` (ephemeral containers) properly.
-
-TODO: Rewrite tests to:
-1. Use `coi shell` without --container flag (creates ephemeral container)
-2. Parse container name from stderr output
-3. Use that container name for incus exec commands
-4. Or better: send commands through stdin to the shell session itself
-
+NOTE: These tests require actual container sessions and can be slow.
+They are NOT skipped in CI by default to ensure security features work.
 For manual testing: pytest tests/integration/test_security_monitoring.py -v
 """
-
-# Skip all tests in this module until they're properly rewritten
-pytestmark = pytest.mark.skip(reason="Tests need rewrite - use 'coi shell' not '--container'")
 
 import json
 import os
@@ -31,14 +20,33 @@ import pytest
 
 
 # Test fixtures
-@pytest.fixture
-def test_workspace(tmp_path):
-    """Create a temporary workspace for testing."""
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    # Create a test file so workspace isn't empty
-    (workspace / "test.txt").write_text("test content")
-    return str(workspace)
+@pytest.fixture(scope="module")
+def test_container(request, coi_binary):
+    """Create a shared test container for all security monitoring tests."""
+    container_name = f"coi-sec-test-{os.getpid()}"
+
+    # Launch container directly (no interactive shell needed)
+    result = subprocess.run(
+        [coi_binary, "container", "launch", "coi", container_name],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    if result.returncode != 0:
+        pytest.skip(f"Failed to launch test container: {result.stderr}")
+
+    # Wait for container to be ready
+    time.sleep(5)
+
+    yield container_name
+
+    # Cleanup - force delete in case it's frozen/stopped
+    subprocess.run(
+        [coi_binary, "container", "delete", container_name, "--force"],
+        timeout=60,
+        check=False,
+    )
 
 
 @pytest.fixture
@@ -155,14 +163,6 @@ poll_interval_sec = 2
 
         # Wait for monitoring to start
         time.sleep(5)
-
-        # Check stderr for monitoring startup or errors
-        # Use select to read without blocking
-        import select
-
-        if select.select([proc.stderr], [], [], 0)[0]:
-            stderr_output = proc.stderr.read()
-            print(f"DEBUG: Shell stderr output:\n{stderr_output}")
 
         # Verify container is running
         assert get_container_state(test_container) == "Running", (

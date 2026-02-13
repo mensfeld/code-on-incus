@@ -97,6 +97,7 @@ type SetupOptions struct {
 	IncusProject   string               // Incus project name
 	ProtectedPaths []string             // Paths to mount read-only for security (e.g., .git/hooks, .vscode)
 	Logger         func(string)
+	ContainerName  string // Use existing container (for testing) - skips container creation
 }
 
 // SetupResult contains the result of setup
@@ -124,11 +125,19 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 		}
 	}
 
-	// 1. Generate container name
-	containerName := ContainerName(opts.WorkspacePath, opts.Slot)
+	// 1. Generate or use existing container name
+	var containerName string
+	if opts.ContainerName != "" {
+		// Use existing container (for testing)
+		containerName = opts.ContainerName
+		opts.Logger(fmt.Sprintf("Using existing container: %s", containerName))
+	} else {
+		// Generate new container name
+		containerName = ContainerName(opts.WorkspacePath, opts.Slot)
+		opts.Logger(fmt.Sprintf("Container name: %s", containerName))
+	}
 	result.ContainerName = containerName
 	result.Manager = container.NewManager(containerName)
-	opts.Logger(fmt.Sprintf("Container name: %s", containerName))
 
 	// 1.5 Validate Bedrock setup if running in Colima/Lima
 	if isColimaOrLimaEnvironment() && opts.CLIConfigPath != "" {
@@ -198,6 +207,13 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 
 	// 4. Check if container already exists
 	var skipLaunch bool
+
+	// If using existing container, skip launch
+	if opts.ContainerName != "" {
+		skipLaunch = true
+		opts.Logger("Using existing container, skipping creation...")
+	}
+
 	exists, err = result.Manager.Exists()
 	if err != nil {
 		return nil, fmt.Errorf("failed to check if container exists: %w", err)
