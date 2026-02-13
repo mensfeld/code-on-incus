@@ -113,9 +113,7 @@ class TestMonitoringFeature:
 class TestThreatDetection:
     """Test threat detection for different attack types."""
 
-    def test_reverse_shell_detection(
-        self, test_workspace, enable_monitoring, coi_binary
-    ):
+    def test_reverse_shell_detection(self, test_workspace, enable_monitoring, coi_binary):
         """Test reverse shell detection and auto-kill."""
         # Start shell in background (don't read stdout/stderr to avoid blocking)
         proc = subprocess.Popen(
@@ -174,9 +172,7 @@ class TestThreatDetection:
         proc.terminate()
         cleanup_container(container_name, coi_binary)
 
-    def test_env_scanning_detection(
-        self, test_workspace, enable_monitoring, coi_binary
-    ):
+    def test_env_scanning_detection(self, test_workspace, enable_monitoring, coi_binary):
         """Test environment scanning detection (WARNING level)."""
         proc = subprocess.Popen(
             [coi_binary, "shell", "--workspace", test_workspace, "--slot", "2", "--debug"],
@@ -187,9 +183,7 @@ class TestThreatDetection:
 
         time.sleep(8)
 
-        container_name = get_container_name_from_workspace(test_workspace).replace(
-            "-1", "-2"
-        )
+        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-2")
 
         state = get_container_state(container_name)
         if state == "Unknown":
@@ -230,9 +224,7 @@ class TestThreatDetection:
 class TestAutomatedResponse:
     """Test automated threat response system."""
 
-    def test_critical_threat_kills_container(
-        self, test_workspace, enable_monitoring, coi_binary
-    ):
+    def test_critical_threat_kills_container(self, test_workspace, enable_monitoring, coi_binary):
         """Verify CRITICAL threats trigger auto-kill."""
         proc = subprocess.Popen(
             [coi_binary, "shell", "--workspace", test_workspace, "--slot", "3", "--debug"],
@@ -243,9 +235,7 @@ class TestAutomatedResponse:
 
         time.sleep(8)
 
-        container_name = get_container_name_from_workspace(test_workspace).replace(
-            "-1", "-3"
-        )
+        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-3")
 
         if get_container_state(container_name) == "Unknown":
             proc.terminate()
