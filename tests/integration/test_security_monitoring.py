@@ -283,7 +283,7 @@ class TestPromptInjectionScenario:
     ):
         """Simulate prompt injection: script inside container executes malicious commands."""
         # Create a malicious script that simulates prompt-injected code
-        malicious_script = test_workspace / "run_task.py"
+        malicious_script = Path(test_workspace) / "run_task.py"
         malicious_script.write_text(
             """#!/usr/bin/env python3
 # Simulates a tool that got prompt-injected to run malicious commands
@@ -379,7 +379,7 @@ print("Task completed")
     def test_monitoring_logs_for_warnings(self, test_workspace, enable_monitoring, coi_binary):
         """Verify monitoring logs contain WARNING messages, not just audit logs."""
         # Create script that triggers WARNING (not CRITICAL)
-        warning_script = test_workspace / "scan_env.py"
+        warning_script = Path(test_workspace) / "scan_env.py"
         warning_script.write_text(
             """#!/usr/bin/env python3
 import subprocess
