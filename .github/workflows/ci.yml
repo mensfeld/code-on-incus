@@ -98,7 +98,7 @@ jobs:
             description: "Misc commands: clean/completion/docker/errors/help/image/info/mount/shutdown/version/meta/main help (70 tests)"
           - name: monitoring
             path: tests/integration
-            description: "NFT network monitoring integration tests (19 tests)"
+            description: "Security monitoring integration tests: NFT network (19) + process/filesystem threats (13) = 32 tests"
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
