@@ -406,12 +406,19 @@ class TestEnvironmentScanningDetection:
         )
         time.sleep(5)
 
-        # Run env command
-        subprocess.run(
-            ["incus", "exec", test_container, "--", "env"],
-            capture_output=True,
-            timeout=10,
-            check=False,
+        # Run env command - keep process alive for detection
+        subprocess.Popen(
+            [
+                "incus",
+                "exec",
+                test_container,
+                "--",
+                "sh",
+                "-c",
+                "exec -a 'env' sleep 30",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
 
         wait_for_monitoring_detection(seconds=4)
@@ -449,12 +456,19 @@ class TestEnvironmentScanningDetection:
         )
         time.sleep(5)
 
-        # Search for API keys
-        subprocess.run(
-            ["incus", "exec", test_container, "--", "grep", "-r", "API_KEY", "/workspace"],
-            capture_output=True,
-            timeout=10,
-            check=False,
+        # Search for API keys - keep process alive for detection
+        subprocess.Popen(
+            [
+                "incus",
+                "exec",
+                test_container,
+                "--",
+                "sh",
+                "-c",
+                "exec -a 'grep -r API_KEY /workspace' sleep 30",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
 
         wait_for_monitoring_detection(seconds=4)
@@ -494,12 +508,19 @@ class TestEnvironmentScanningDetection:
         )
         time.sleep(5)
 
-        # Run printenv
-        subprocess.run(
-            ["incus", "exec", test_container, "--", "printenv"],
-            capture_output=True,
-            timeout=10,
-            check=False,
+        # Run printenv - keep process alive for detection
+        subprocess.Popen(
+            [
+                "incus",
+                "exec",
+                test_container,
+                "--",
+                "sh",
+                "-c",
+                "exec -a 'printenv' sleep 30",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
 
         wait_for_monitoring_detection(seconds=4)
