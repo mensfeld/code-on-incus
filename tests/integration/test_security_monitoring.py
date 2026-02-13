@@ -114,7 +114,7 @@ def get_audit_events(audit_log_path):
         print(f"DEBUG: Audit log does not exist at {audit_log_path}")
         # Check if parent directory exists
         if audit_log_path.parent.exists():
-            print(f"DEBUG: Parent directory exists, listing contents:")
+            print("DEBUG: Parent directory exists, listing contents:")
             for f in audit_log_path.parent.iterdir():
                 print(f"  - {f.name}")
         return []
