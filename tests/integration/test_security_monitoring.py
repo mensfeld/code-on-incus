@@ -7,7 +7,6 @@ Reflects real user workflow: start monitored shell, execute commands, verify det
 """
 
 import json
-import os
 import subprocess
 import time
 from pathlib import Path
