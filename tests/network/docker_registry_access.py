@@ -34,9 +34,9 @@ def test_docker_registry_accessible_in_restricted_mode(coi_binary, test_workspac
     )
 
     # Either nc or curl should succeed
-    assert (
-        result.returncode == 0 or "Connected" in result.stderr or "200 OK" in result.stdout
-    ), "Docker registry should be accessible in restricted mode"
+    assert result.returncode == 0 or "Connected" in result.stderr or "200 OK" in result.stdout, (
+        "Docker registry should be accessible in restricted mode"
+    )
 
 
 def test_docker_pull_works_in_restricted_mode(coi_binary, test_workspace, test_image):
