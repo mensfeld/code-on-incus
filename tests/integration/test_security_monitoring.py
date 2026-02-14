@@ -1639,6 +1639,280 @@ class TestAuditLogValidation:
         cleanup_container(container_name, coi_binary)
 
 
+class TestFalsePositives:
+    """Test that legitimate commands don't trigger false alerts."""
+
+    def test_legitimate_file_reads_no_alert(self, test_workspace, enable_monitoring, coi_binary):
+        """Test that small file reads don't trigger false alerts."""
+        # Create a small file (well below 50MB threshold)
+        small_file = Path(test_workspace) / "data.txt"
+        small_file.write_text("Some data\n" * 1000)  # ~10KB
+
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                test_workspace,
+                "--slot",
+                "23",
+                "--monitor",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(8)
+
+        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-23")
+
+        if get_container_state(container_name) == "Unknown":
+            proc.terminate()
+            pytest.skip(f"Container {container_name} not found")
+
+        # Read the small file - should NOT trigger
+        subprocess.Popen(
+            [
+                "incus",
+                "exec",
+                container_name,
+                "--",
+                "cat",
+                "/workspace/data.txt",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        # Wait to see if it would be detected
+        time.sleep(5)
+
+        # Container should still be running (no false positive)
+        state = get_container_state(container_name)
+        assert state == "Running", f"Container should stay running on small file read, got {state}"
+
+        # Check audit log - should have no HIGH threats for file reads
+        events = get_threat_events(container_name)
+        high_fs_threats = [
+            e for e in events if e.get("level") == "high" and e.get("category") == "filesystem"
+        ]
+        assert len(high_fs_threats) == 0, "Small file read should not trigger HIGH threat"
+
+        proc.terminate()
+        cleanup_container(container_name, coi_binary)
+
+    def test_legitimate_nc_usage_no_alert(self, test_workspace, enable_monitoring, coi_binary):
+        """Test that nc without -e flag doesn't trigger false alert."""
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                test_workspace,
+                "--slot",
+                "24",
+                "--monitor",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(8)
+
+        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-24")
+
+        if get_container_state(container_name) == "Unknown":
+            proc.terminate()
+            pytest.skip(f"Container {container_name} not found")
+
+        # Use nc for legitimate port listening (no -e, no network connection)
+        # Just check if nc exists, don't actually listen
+        subprocess.Popen(
+            [
+                "incus",
+                "exec",
+                container_name,
+                "--",
+                "sh",
+                "-c",
+                "which nc || echo 'nc not found'",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(5)
+
+        # Container should still be running
+        state = get_container_state(container_name)
+        assert state == "Running", (
+            f"Container should stay running on legitimate nc check, got {state}"
+        )
+
+        # No CRITICAL threats should be logged for simple nc check
+        events = get_threat_events(container_name)
+        critical = [e for e in events if e.get("level") == "critical"]
+
+        # If any critical events, they shouldn't be about nc without -e
+        for event in critical:
+            desc = event.get("description", "").lower()
+            # Should not flag nc without suspicious patterns
+            assert "nc" not in desc or "-e" in desc or "tcp" in desc, (
+                f"nc without -e or network shouldn't trigger: {desc}"
+            )
+
+        proc.terminate()
+        cleanup_container(container_name, coi_binary)
+
+    def test_python_import_socket_no_alert(self, test_workspace, enable_monitoring, coi_binary):
+        """Test that importing socket without using it doesn't trigger."""
+        # Create a script that imports socket but doesn't use it maliciously
+        benign_script = Path(test_workspace) / "benign.py"
+        benign_script.write_text(
+            """#!/usr/bin/env python3
+import socket
+import time
+
+# Just print something benign
+print("Hello world")
+time.sleep(2)
+"""
+        )
+        benign_script.chmod(0o755)
+
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                test_workspace,
+                "--slot",
+                "25",
+                "--monitor",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(8)
+
+        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-25")
+
+        if get_container_state(container_name) == "Unknown":
+            proc.terminate()
+            pytest.skip(f"Container {container_name} not found")
+
+        # Run the benign script
+        subprocess.Popen(
+            [
+                "incus",
+                "exec",
+                container_name,
+                "--",
+                "python3",
+                "/workspace/benign.py",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(5)
+
+        # Container should still be running
+        state = get_container_state(container_name)
+        assert state == "Running", "Benign python script should not trigger alerts"
+
+        # No CRITICAL reverse shell alerts
+        events = get_threat_events(container_name)
+        critical = [e for e in events if e.get("level") == "critical"]
+
+        # Reverse shell detection requires network activity, not just socket import
+        reverse_shells = [e for e in critical if "reverse shell" in e.get("title", "").lower()]
+        assert len(reverse_shells) == 0, (
+            "Importing socket without network activity should not trigger"
+        )
+
+        proc.terminate()
+        cleanup_container(container_name, coi_binary)
+
+    def test_normal_build_operations_no_alert(self, test_workspace, enable_monitoring, coi_binary):
+        """Test that normal development operations don't trigger alerts."""
+        # Create a simple build script
+        build_script = Path(test_workspace) / "build.sh"
+        build_script.write_text(
+            """#!/bin/bash
+# Normal build operations
+echo "Building..."
+ls -la
+cat package.json 2>/dev/null || echo "No package.json"
+echo "Build complete"
+"""
+        )
+        build_script.chmod(0o755)
+
+        # Create a small package.json
+        package_json = Path(test_workspace) / "package.json"
+        package_json.write_text('{"name": "test", "version": "1.0.0"}')
+
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                test_workspace,
+                "--slot",
+                "26",
+                "--monitor",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(8)
+
+        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-26")
+
+        if get_container_state(container_name) == "Unknown":
+            proc.terminate()
+            pytest.skip(f"Container {container_name} not found")
+
+        # Run build script
+        subprocess.Popen(
+            [
+                "incus",
+                "exec",
+                container_name,
+                "--",
+                "bash",
+                "/workspace/build.sh",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(5)
+
+        # Container should still be running
+        state = get_container_state(container_name)
+        assert state == "Running", "Normal build operations should not trigger alerts"
+
+        # No high-level threats from normal operations
+        events = get_threat_events(container_name)
+        high_or_critical = [e for e in events if e.get("level") in ["high", "critical"]]
+
+        # Normal ls, cat, echo shouldn't trigger high/critical
+        assert len(high_or_critical) == 0, (
+            "Normal build operations should not trigger high/critical alerts"
+        )
+
+        proc.terminate()
+        cleanup_container(container_name, coi_binary)
+
+
 # These end-to-end tests verify all monitoring aspects:
 # - Threat detection (reverse shells, env scanning, large file reads, network connections)
 # - Reverse shell patterns (netcat, bash, python, perl, php)
