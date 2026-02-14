@@ -6,7 +6,9 @@ Tests all aspects: threat detection, automated responses, audit logging.
 Uses background shell processes and direct container command injection.
 """
 
+import hashlib
 import json
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -49,9 +51,19 @@ poll_interval_sec = 1
 
 
 def get_container_name_from_workspace(workspace):
-    """Generate expected container name from workspace path."""
-    # Container name format: coi-<workspace-basename>-<slot>
-    return f"coi-{Path(workspace).name}-1"
+    """Generate expected container name from workspace path.
+
+    Matches Go implementation in internal/session/naming.go:
+    - Generates SHA256 hash of absolute workspace path
+    - Takes first 8 hex characters
+    - Format: coi-<hash>-<slot>
+    """
+    # Get absolute path (normalize like Go does)
+    abs_path = os.path.abspath(workspace)
+    # Generate SHA256 hash and take first 8 characters
+    hash_digest = hashlib.sha256(abs_path.encode()).hexdigest()[:8]
+    # Container name format: coi-<workspace-hash>-<slot>
+    return f"coi-{hash_digest}-1"
 
 
 def get_container_state(name):
