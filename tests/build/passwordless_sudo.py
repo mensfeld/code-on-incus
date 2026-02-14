@@ -11,7 +11,7 @@ Why this matters:
 - Breaking this would severely impact the user experience
 """
 
-from support.helpers import run, snapshot_stdout
+from support.helpers import run
 
 
 def test_passwordless_sudo_works(coi_binary, test_workspace, test_image):
