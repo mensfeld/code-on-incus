@@ -1786,7 +1786,7 @@ func CheckMonitoringConfiguration(cfg *config.Config) HealthCheck {
 		return HealthCheck{
 			Name:    "monitoring_configuration",
 			Status:  StatusWarning,
-			Message: "Security monitoring is disabled",
+			Message: "Security monitoring is disabled (use --monitor flag or set monitoring.enabled=true in config)",
 			Details: details,
 		}
 	}
