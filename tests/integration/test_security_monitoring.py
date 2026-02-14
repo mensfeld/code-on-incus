@@ -1913,6 +1913,207 @@ echo "Build complete"
         cleanup_container(container_name, coi_binary)
 
 
+class TestThresholdBoundaries:
+    """Test detector behavior at threshold boundaries."""
+
+    def test_file_read_below_threshold_no_alert(
+        self, test_workspace, enable_monitoring, coi_binary
+    ):
+        """Test that reading 49MB (below 50MB threshold) doesn't trigger."""
+        # Create a 49MB file (just below threshold)
+        large_file = Path(test_workspace) / "data49mb.bin"
+        # 49MB = 49 * 1024 * 1024 bytes
+        large_file.write_bytes(b"A" * (49 * 1024 * 1024))
+
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                test_workspace,
+                "--slot",
+                "27",
+                "--monitor",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(8)
+
+        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-27")
+
+        if get_container_state(container_name) == "Unknown":
+            proc.terminate()
+            pytest.skip(f"Container {container_name} not found")
+
+        # Read the 49MB file
+        subprocess.Popen(
+            [
+                "incus",
+                "exec",
+                container_name,
+                "--",
+                "cat",
+                "/workspace/data49mb.bin",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        # Wait for potential detection
+        time.sleep(10)
+
+        # Container should still be running (below threshold)
+        state = get_container_state(container_name)
+        assert state == "Running", f"Container should stay running for <50MB read, got {state}"
+
+        # No HIGH filesystem threats
+        events = get_threat_events(container_name)
+        high_fs = [
+            e for e in events if e.get("level") == "high" and e.get("category") == "filesystem"
+        ]
+        assert len(high_fs) == 0, "49MB read should not trigger HIGH threat (threshold is 50MB)"
+
+        proc.terminate()
+        cleanup_container(container_name, coi_binary)
+
+    def test_file_read_at_threshold_triggers(self, test_workspace, enable_monitoring, coi_binary):
+        """Test that reading exactly 50MB triggers HIGH threat."""
+        # Create exactly 50MB file
+        large_file = Path(test_workspace) / "data50mb.bin"
+        large_file.write_bytes(b"B" * (50 * 1024 * 1024))
+
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                test_workspace,
+                "--slot",
+                "28",
+                "--monitor",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(8)
+
+        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-28")
+
+        if get_container_state(container_name) == "Unknown":
+            proc.terminate()
+            pytest.skip(f"Container {container_name} not found")
+
+        # Read the 50MB file
+        subprocess.Popen(
+            [
+                "incus",
+                "exec",
+                container_name,
+                "--",
+                "cat",
+                "/workspace/data50mb.bin",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        # Wait for detection and pause
+        time.sleep(10)
+
+        paused = False
+        for _ in range(15):
+            time.sleep(1)
+            state = get_container_state(container_name)
+            if state == "Frozen":
+                paused = True
+                break
+
+        assert paused, "Container should be paused on 50MB read (at threshold)"
+
+        # Verify HIGH threat logged
+        events = get_threat_events(container_name)
+        high_fs = [
+            e for e in events if e.get("level") == "high" and e.get("category") == "filesystem"
+        ]
+        assert len(high_fs) > 0, "50MB read should trigger HIGH filesystem threat"
+
+        proc.terminate()
+        cleanup_container(container_name, coi_binary)
+
+    def test_file_read_above_threshold_triggers(
+        self, test_workspace, enable_monitoring, coi_binary
+    ):
+        """Test that reading 60MB (above threshold) triggers HIGH threat."""
+        # Create 60MB file (well above threshold)
+        large_file = Path(test_workspace) / "data60mb.bin"
+        large_file.write_bytes(b"C" * (60 * 1024 * 1024))
+
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                test_workspace,
+                "--slot",
+                "29",
+                "--monitor",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(8)
+
+        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-29")
+
+        if get_container_state(container_name) == "Unknown":
+            proc.terminate()
+            pytest.skip(f"Container {container_name} not found")
+
+        # Read the 60MB file
+        subprocess.Popen(
+            [
+                "incus",
+                "exec",
+                container_name,
+                "--",
+                "cat",
+                "/workspace/data60mb.bin",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        # Wait for detection and pause
+        time.sleep(10)
+
+        paused = False
+        for _ in range(15):
+            time.sleep(1)
+            state = get_container_state(container_name)
+            if state == "Frozen":
+                paused = True
+                break
+
+        assert paused, "Container should be paused on 60MB read (above threshold)"
+
+        # Verify HIGH threat logged
+        events = get_threat_events(container_name)
+        high_fs = [
+            e for e in events if e.get("level") == "high" and e.get("category") == "filesystem"
+        ]
+        assert len(high_fs) > 0, "60MB read should trigger HIGH filesystem threat"
+
+        proc.terminate()
+        cleanup_container(container_name, coi_binary)
+
+
 # These end-to-end tests verify all monitoring aspects:
 # - Threat detection (reverse shells, env scanning, large file reads, network connections)
 # - Reverse shell patterns (netcat, bash, python, perl, php)
