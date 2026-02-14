@@ -129,7 +129,7 @@ class TestThreatDetection:
         """Test reverse shell detection and auto-kill."""
         # Capture stderr to debug file to see monitoring logs
         stderr_file = Path("/tmp") / "coi-test-debug.log"
-        stderr_fd = open(stderr_file, "w")
+        stderr_fd = open(stderr_file, "w")  # noqa: SIM115 - need to keep open for subprocess
 
         # Start shell in background (don't read stdout/stderr to avoid blocking)
         proc = subprocess.Popen(
