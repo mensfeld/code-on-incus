@@ -94,6 +94,7 @@ func checkEnvAccess(command string) bool {
 	// Check if command is exactly one of the env commands
 	for _, envCmd := range envCommands {
 		if strings.HasPrefix(cmdLower, envCmd+" ") || cmdLower == envCmd {
+			log.Printf("[detector] checkEnvAccess: MATCHED env command %q in %q", envCmd, command)
 			return true
 		}
 	}
@@ -104,11 +105,13 @@ func checkEnvAccess(command string) bool {
 		strings.Contains(cmdLower, "password") ||
 		strings.Contains(cmdLower, "secret") ||
 		strings.Contains(cmdLower, "token")) {
+		log.Printf("[detector] checkEnvAccess: MATCHED grep pattern in %q", command)
 		return true
 	}
 
 	// Check for /proc/*/environ access
 	if strings.Contains(cmdLower, "/proc/") && strings.Contains(cmdLower, "environ") {
+		log.Printf("[detector] checkEnvAccess: MATCHED /proc/environ in %q", command)
 		return true
 	}
 
@@ -118,6 +121,8 @@ func checkEnvAccess(command string) bool {
 // DetectReverseShells checks processes for reverse shell indicators
 func DetectReverseShells(processes []Process) []ProcessThreat {
 	var threats []ProcessThreat
+
+	log.Printf("[detector] DetectReverseShells: checking %d processes", len(processes))
 
 	reverseShellPatterns := []struct {
 		pattern    string
@@ -163,9 +168,12 @@ func DetectReverseShells(processes []Process) []ProcessThreat {
 
 	for _, proc := range processes {
 		cmdLower := strings.ToLower(proc.Command)
+		log.Printf("[detector] Checking PID %d: %q", proc.PID, proc.Command)
 
 		for _, pattern := range reverseShellPatterns {
 			if strings.Contains(cmdLower, strings.ToLower(pattern.pattern)) {
+				log.Printf("[detector] Pattern MATCHED: %q in command %q", pattern.pattern, proc.Command)
+
 				// Additional check: if it's a network-related command, it's more suspicious
 				isNetworkRelated := strings.Contains(cmdLower, ":") ||
 					strings.Contains(cmdLower, "socket") ||
@@ -173,7 +181,10 @@ func DetectReverseShells(processes []Process) []ProcessThreat {
 					strings.Contains(cmdLower, "udp") ||
 					containsIPPattern(cmdLower)
 
+				log.Printf("[detector] isNetworkRelated=%v, pattern=%q", isNetworkRelated, pattern.pattern)
+
 				if isNetworkRelated || pattern.pattern == "bash -i" || pattern.pattern == "sh -i" {
+					log.Printf("[detector] THREAT DETECTED: PID %d, pattern %q", proc.PID, pattern.pattern)
 					threats = append(threats, ProcessThreat{
 						PID:        proc.PID,
 						Command:    proc.Command,
@@ -182,10 +193,14 @@ func DetectReverseShells(processes []Process) []ProcessThreat {
 						Indicators: pattern.indicators,
 					})
 					break
+				} else {
+					log.Printf("[detector] Pattern matched but not network-related, skipping")
 				}
 			}
 		}
 	}
+
+	log.Printf("[detector] DetectReverseShells: found %d threats", len(threats))
 
 	return threats
 }
@@ -216,8 +231,12 @@ func containsIPPattern(cmd string) bool {
 func DetectEnvScanning(processes []Process) []ProcessThreat {
 	var threats []ProcessThreat
 
+	log.Printf("[detector] DetectEnvScanning: checking %d processes", len(processes))
+
 	for _, proc := range processes {
+		log.Printf("[detector] PID %d EnvAccess=%v: %q", proc.PID, proc.EnvAccess, proc.Command)
 		if proc.EnvAccess {
+			log.Printf("[detector] ENV SCANNING DETECTED: PID %d", proc.PID)
 			threats = append(threats, ProcessThreat{
 				PID:        proc.PID,
 				Command:    proc.Command,
@@ -228,5 +247,6 @@ func DetectEnvScanning(processes []Process) []ProcessThreat {
 		}
 	}
 
+	log.Printf("[detector] DetectEnvScanning: found %d threats", len(threats))
 	return threats
 }
