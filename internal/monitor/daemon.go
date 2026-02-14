@@ -75,9 +75,19 @@ func (d *Daemon) run() {
 				continue
 			}
 
+			// DEBUG: Log process count
+			log.Printf("[monitor] Collected %d processes", len(snapshot.Processes.Processes))
+
 			// Detect threats
 			threats := d.detector.Analyze(snapshot)
 			snapshot.Threats = threats
+
+			// DEBUG: Log threat detection results
+			log.Printf("[monitor] Analyzer returned %d threats", len(threats))
+			for i, threat := range threats {
+				log.Printf("[monitor] Threat %d: level=%s category=%s title=%q",
+					i, threat.Level, threat.Category, threat.Title)
+			}
 
 			// Log snapshot to audit log
 			if err := d.auditLog.WriteSnapshot(snapshot); err != nil {
@@ -88,10 +98,14 @@ func (d *Daemon) run() {
 
 			// Handle threats
 			for _, threat := range threats {
+				log.Printf("[monitor] Calling responder.Handle for threat: %s", threat.Title)
 				if err := d.responder.Handle(threat); err != nil {
+					log.Printf("[monitor] ERROR handling threat: %v", err)
 					if d.config.OnError != nil {
 						d.config.OnError(fmt.Errorf("threat response failed: %w", err))
 					}
+				} else {
+					log.Printf("[monitor] Threat handled successfully, action=%s", threat.Action)
 				}
 
 				// If container was killed, stop monitoring

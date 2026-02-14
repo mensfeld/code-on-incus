@@ -127,12 +127,16 @@ class TestThreatDetection:
 
     def test_reverse_shell_detection(self, test_workspace, enable_monitoring, coi_binary):
         """Test reverse shell detection and auto-kill."""
+        # Capture stderr to debug file to see monitoring logs
+        stderr_file = Path("/tmp") / "coi-test-debug.log"
+        stderr_fd = open(stderr_file, "w")
+
         # Start shell in background (don't read stdout/stderr to avoid blocking)
         proc = subprocess.Popen(
             [coi_binary, "shell", "--workspace", test_workspace, "--slot", "1", "--debug"],
             stdin=subprocess.DEVNULL,  # Don't interact
             stdout=subprocess.DEVNULL,  # Ignore output
-            stderr=subprocess.DEVNULL,  # Ignore errors
+            stderr=stderr_fd,  # Capture stderr for debugging
         )
 
         # Wait for container to be created
@@ -179,9 +183,19 @@ class TestThreatDetection:
         # Verify threat event logged
         events = get_threat_events(container_name)
         critical = [e for e in events if e.get("level") == "critical"]
-        assert len(critical) > 0, "Expected CRITICAL threat event"
 
+        # Close stderr file and print contents for debugging
         proc.terminate()
+        stderr_fd.close()
+
+        # Print debug log for CI visibility
+        print("\n=== COI Debug Log ===")
+        if stderr_file.exists():
+            print(stderr_file.read_text())
+        print("=== End Debug Log ===\n")
+
+        assert len(critical) > 0, f"Expected CRITICAL threat event, found {len(critical)}"
+
         cleanup_container(container_name, coi_binary)
 
     def test_env_scanning_detection(self, test_workspace, enable_monitoring, coi_binary):
