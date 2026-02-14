@@ -139,7 +139,7 @@ func outputHealthText(result *health.HealthResult) error {
 			// Format the check name for display
 			displayName := formatCheckName(name)
 
-			fmt.Printf("  %-6s %-18s %s\n", statusIcon, displayName, check.Message)
+			fmt.Printf("  %-6s %-18s: %s\n", statusIcon, displayName, check.Message)
 		}
 		fmt.Println()
 	}
@@ -174,7 +174,7 @@ func outputHealthText(result *health.HealthResult) error {
 				statusIcon = "[FAIL]"
 			}
 			displayName := formatCheckName(name)
-			fmt.Printf("  %-6s %-18s %s\n", statusIcon, displayName, check.Message)
+			fmt.Printf("  %-6s %-18s: %s\n", statusIcon, displayName, check.Message)
 		}
 		fmt.Println()
 	}
