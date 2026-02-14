@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/network"
 )
@@ -346,4 +347,100 @@ func TestCheckNetworkRestriction_Cleanup(t *testing.T) {
 	} else {
 		t.Logf("Cleanup verified: no leftover containers after restriction check")
 	}
+}
+
+// TestCheckAuditLogDirectory verifies audit log directory check
+func TestCheckAuditLogDirectory(t *testing.T) {
+	result := CheckAuditLogDirectory()
+
+	if result.Name != "audit_log_directory" {
+		t.Errorf("Expected check name 'audit_log_directory', got '%s'", result.Name)
+	}
+
+	if result.Status != StatusOK {
+		t.Errorf("Expected StatusOK for audit log directory, got %s: %s",
+			result.Status, result.Message)
+	}
+
+	if result.Details["path"] == nil {
+		t.Error("Expected 'path' in details")
+	}
+
+	t.Logf("Audit log directory check passed: %s", result.Message)
+}
+
+// TestCheckCgroupAvailability verifies cgroup availability check
+func TestCheckCgroupAvailability(t *testing.T) {
+	result := CheckCgroupAvailability()
+
+	if result.Name != "cgroup_availability" {
+		t.Errorf("Expected check name 'cgroup_availability', got '%s'", result.Name)
+	}
+
+	// Should be OK or Warning (v1 vs v2)
+	if result.Status != StatusOK && result.Status != StatusWarning {
+		t.Errorf("Expected StatusOK or StatusWarning for cgroups, got %s: %s",
+			result.Status, result.Message)
+	}
+
+	if result.Details["path"] == nil {
+		t.Error("Expected 'path' in details")
+	}
+
+	t.Logf("Cgroup availability check: %s (status: %s)", result.Message, result.Status)
+}
+
+// TestCheckMonitoringConfiguration verifies monitoring configuration check
+func TestCheckMonitoringConfiguration(t *testing.T) {
+	// Use default config
+	cfg := config.GetDefaultConfig()
+
+	result := CheckMonitoringConfiguration(cfg)
+
+	if result.Name != "monitoring_configuration" {
+		t.Errorf("Expected check name 'monitoring_configuration', got '%s'", result.Name)
+	}
+
+	// Should be OK or Warning depending on if monitoring is enabled
+	if result.Status != StatusOK && result.Status != StatusWarning {
+		t.Errorf("Expected StatusOK or StatusWarning for monitoring config, got %s: %s",
+			result.Status, result.Message)
+	}
+
+	if result.Details["enabled"] == nil {
+		t.Error("Expected 'enabled' in details")
+	}
+
+	t.Logf("Monitoring configuration check: %s (enabled: %v)",
+		result.Message, result.Details["enabled"])
+}
+
+// TestCheckProcessMonitoringCapability verifies process monitoring capability check
+func TestCheckProcessMonitoringCapability(t *testing.T) {
+	// Skip if incus is not available
+	if _, err := exec.LookPath("incus"); err != nil {
+		t.Skip("incus not found, skipping integration test")
+	}
+
+	// Skip if incus daemon is not running
+	if !container.Available() {
+		t.Skip("incus daemon not running, skipping integration test")
+	}
+
+	// Get default image
+	cfg := config.GetDefaultConfig()
+
+	result := CheckProcessMonitoringCapability(cfg.Defaults.Image)
+
+	if result.Name != "process_monitoring" {
+		t.Errorf("Expected check name 'process_monitoring', got '%s'", result.Name)
+	}
+
+	// Could be OK, Warning, or Failed depending on environment
+	if result.Status != StatusOK && result.Status != StatusWarning && result.Status != StatusFailed {
+		t.Errorf("Unexpected status: %s", result.Status)
+	}
+
+	t.Logf("Process monitoring capability check: %s (status: %s)",
+		result.Message, result.Status)
 }

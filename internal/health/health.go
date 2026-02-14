@@ -92,10 +92,16 @@ func RunAllChecks(cfg *config.Config, verbose bool) *HealthResult {
 		checks["libsystemd"] = CheckLibsystemd()
 	}
 
+	// Process/Filesystem monitoring checks (always run)
+	checks["monitoring_configuration"] = CheckMonitoringConfiguration(cfg)
+	checks["audit_log_directory"] = CheckAuditLogDirectory()
+	checks["cgroup_availability"] = CheckCgroupAvailability()
+
 	// Optional checks (only if verbose)
 	if verbose {
 		checks["dns_resolution"] = CheckDNS()
 		checks["passwordless_sudo"] = CheckPasswordlessSudo()
+		checks["process_monitoring"] = CheckProcessMonitoringCapability(cfg.Defaults.Image)
 	}
 
 	// Calculate summary
