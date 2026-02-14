@@ -173,6 +173,16 @@ class TestThreatDetection:
             if state in ["Stopped", "Frozen"]:
                 break
 
+        # Close stderr file and print contents for debugging (before assertions)
+        proc.terminate()
+        stderr_fd.close()
+
+        # Print debug log for CI visibility (BEFORE assertions so we see it even on failure)
+        print("\n=== COI Debug Log ===")
+        if stderr_file.exists():
+            print(stderr_file.read_text())
+        print("=== End Debug Log ===\n")
+
         # Verify container was killed
         final_state = get_container_state(container_name)
         assert final_state in [
@@ -183,17 +193,6 @@ class TestThreatDetection:
         # Verify threat event logged
         events = get_threat_events(container_name)
         critical = [e for e in events if e.get("level") == "critical"]
-
-        # Close stderr file and print contents for debugging
-        proc.terminate()
-        stderr_fd.close()
-
-        # Print debug log for CI visibility
-        print("\n=== COI Debug Log ===")
-        if stderr_file.exists():
-            print(stderr_file.read_text())
-        print("=== End Debug Log ===\n")
-
         assert len(critical) > 0, f"Expected CRITICAL threat event, found {len(critical)}"
 
         cleanup_container(container_name, coi_binary)
