@@ -184,7 +184,7 @@ def pytest_sessionfinish(session, exitstatus):
     subprocess.run(
         [coi_binary, "clean", "--orphans", "--force"],
         capture_output=True,
-        timeout=60,
+        timeout=120,
         check=False,
     )
 
@@ -192,6 +192,6 @@ def pytest_sessionfinish(session, exitstatus):
     subprocess.run(
         [coi_binary, "kill", "--all", "--force"],
         capture_output=True,
-        timeout=60,
+        timeout=120,
         check=False,
     )
