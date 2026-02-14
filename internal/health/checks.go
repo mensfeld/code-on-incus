@@ -1658,7 +1658,9 @@ func CheckProcessMonitoringCapability(imageName string) HealthCheck {
 				},
 			}
 		}
-		defer container.IncusExec("delete", testContainer, "--force")
+		defer func() {
+			_ = container.IncusExec("delete", testContainer, "--force")
+		}()
 
 		// Wait for container to start
 		time.Sleep(2 * time.Second)
