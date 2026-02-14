@@ -234,13 +234,25 @@ For users who prefer to verify each step or cannot use the automated installer:
 
 If you prefer to build from source or need a specific version:
 
+**Build Dependencies:**
 ```bash
-# Prerequisites: Go 1.24.4 or later
+# Required: Go 1.24.4 or later
+sudo apt-get install golang-go
+
+# Optional: For NFT network monitoring support
+# (Not needed if you only use process/filesystem monitoring)
+sudo apt-get install libsystemd-dev
+```
+
+**Build and Install:**
+```bash
 git clone https://github.com/mensfeld/code-on-incus.git
 cd code-on-incus
 make build
 sudo make install
 ```
+
+**Note:** If you don't have `libsystemd-dev` installed, the build will still succeed but NFT network monitoring features won't be available. Process monitoring, filesystem monitoring, and all core features will work normally.
 
 **Post-Install Setup:**
 
