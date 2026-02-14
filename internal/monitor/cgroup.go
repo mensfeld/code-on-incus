@@ -44,11 +44,12 @@ func findCgroupPathViaIncus(ctx context.Context, containerName string) (string, 
 		return "", fmt.Errorf("failed to get container info: %w", err)
 	}
 
-	// Look for PID in the output
+	// Look for PID in the output (format: "PID: 12345")
 	var pid string
 	lines := strings.Split(output, "\n")
 	for _, line := range lines {
-		if strings.Contains(line, "Pid:") {
+		// Match both "PID:" and "Pid:" for compatibility
+		if strings.Contains(line, "PID:") || strings.Contains(line, "Pid:") {
 			parts := strings.Fields(line)
 			if len(parts) >= 2 {
 				pid = parts[1]
