@@ -221,6 +221,280 @@ class TestThreatDetection:
         cleanup_container(container_name, coi_binary)
 
 
+class TestEnvironmentScanningPatterns:
+    """Test detection of various environment scanning patterns."""
+
+    def test_printenv_command_detection(self, test_workspace, enable_monitoring, coi_binary):
+        """Test printenv command detection."""
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                test_workspace,
+                "--slot",
+                "14",
+                "--monitor",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(8)
+
+        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-14")
+
+        if get_container_state(container_name) == "Unknown":
+            proc.terminate()
+            pytest.skip(f"Container {container_name} not found")
+
+        # Inject printenv command
+        subprocess.Popen(
+            [
+                "incus",
+                "exec",
+                container_name,
+                "--",
+                "sh",
+                "-c",
+                "exec -a 'printenv' sleep 30",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(5)
+
+        # Container should stay running (WARNING level)
+        state = get_container_state(container_name)
+        assert state == "Running", f"Expected Running on WARNING, got {state}"
+
+        # Verify WARNING event for printenv
+        events = get_threat_events(container_name)
+        warnings = [e for e in events if e.get("level") == "warning"]
+        assert len(warnings) > 0, "Expected WARNING for printenv command"
+
+        proc.terminate()
+        cleanup_container(container_name, coi_binary)
+
+    def test_grep_api_key_detection(self, test_workspace, enable_monitoring, coi_binary):
+        """Test grep searching for API keys."""
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                test_workspace,
+                "--slot",
+                "15",
+                "--monitor",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(8)
+
+        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-15")
+
+        if get_container_state(container_name) == "Unknown":
+            proc.terminate()
+            pytest.skip(f"Container {container_name} not found")
+
+        # Inject grep searching for API_KEY
+        subprocess.Popen(
+            [
+                "incus",
+                "exec",
+                container_name,
+                "--",
+                "sh",
+                "-c",
+                "exec -a 'grep -r API_KEY /workspace' sleep 30",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(5)
+
+        # Container should stay running
+        state = get_container_state(container_name)
+        assert state == "Running", f"Expected Running on WARNING, got {state}"
+
+        # Verify WARNING for grep with API keyword
+        events = get_threat_events(container_name)
+        warnings = [e for e in events if e.get("level") == "warning"]
+        assert len(warnings) > 0, "Expected WARNING for grep API_KEY pattern"
+
+        proc.terminate()
+        cleanup_container(container_name, coi_binary)
+
+    def test_grep_password_detection(self, test_workspace, enable_monitoring, coi_binary):
+        """Test grep searching for passwords."""
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                test_workspace,
+                "--slot",
+                "16",
+                "--monitor",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(8)
+
+        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-16")
+
+        if get_container_state(container_name) == "Unknown":
+            proc.terminate()
+            pytest.skip(f"Container {container_name} not found")
+
+        # Inject grep searching for password
+        subprocess.Popen(
+            [
+                "incus",
+                "exec",
+                container_name,
+                "--",
+                "sh",
+                "-c",
+                "exec -a 'grep -i password .env' sleep 30",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(5)
+
+        # Container should stay running
+        state = get_container_state(container_name)
+        assert state == "Running", f"Expected Running on WARNING, got {state}"
+
+        # Verify WARNING for grep with password keyword
+        events = get_threat_events(container_name)
+        warnings = [e for e in events if e.get("level") == "warning"]
+        assert len(warnings) > 0, "Expected WARNING for grep password pattern"
+
+        proc.terminate()
+        cleanup_container(container_name, coi_binary)
+
+    def test_grep_secret_detection(self, test_workspace, enable_monitoring, coi_binary):
+        """Test grep searching for secrets."""
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                test_workspace,
+                "--slot",
+                "17",
+                "--monitor",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(8)
+
+        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-17")
+
+        if get_container_state(container_name) == "Unknown":
+            proc.terminate()
+            pytest.skip(f"Container {container_name} not found")
+
+        # Inject grep searching for secret
+        subprocess.Popen(
+            [
+                "incus",
+                "exec",
+                container_name,
+                "--",
+                "sh",
+                "-c",
+                "exec -a 'grep -r secret /workspace' sleep 30",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(5)
+
+        # Container should stay running
+        state = get_container_state(container_name)
+        assert state == "Running", f"Expected Running on WARNING, got {state}"
+
+        # Verify WARNING for grep with secret keyword
+        events = get_threat_events(container_name)
+        warnings = [e for e in events if e.get("level") == "warning"]
+        assert len(warnings) > 0, "Expected WARNING for grep secret pattern"
+
+        proc.terminate()
+        cleanup_container(container_name, coi_binary)
+
+    def test_proc_environ_access_detection(self, test_workspace, enable_monitoring, coi_binary):
+        """Test /proc/*/environ access detection."""
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                test_workspace,
+                "--slot",
+                "18",
+                "--monitor",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(8)
+
+        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-18")
+
+        if get_container_state(container_name) == "Unknown":
+            proc.terminate()
+            pytest.skip(f"Container {container_name} not found")
+
+        # Inject command accessing /proc/*/environ
+        subprocess.Popen(
+            [
+                "incus",
+                "exec",
+                container_name,
+                "--",
+                "sh",
+                "-c",
+                "exec -a 'cat /proc/1/environ' sleep 30",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(5)
+
+        # Container should stay running
+        state = get_container_state(container_name)
+        assert state == "Running", f"Expected Running on WARNING, got {state}"
+
+        # Verify WARNING for /proc/environ access
+        events = get_threat_events(container_name)
+        warnings = [e for e in events if e.get("level") == "warning"]
+        assert len(warnings) > 0, "Expected WARNING for /proc/environ access"
+
+        proc.terminate()
+        cleanup_container(container_name, coi_binary)
+
+
 class TestAutomatedResponse:
     """Test automated threat response system."""
 
