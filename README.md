@@ -591,6 +591,24 @@ coi shell --network=allowlist  # Allowlist mode
 coi shell --network=open       # Open mode
 ```
 
+**Docker Registry Access:**
+
+Docker registries (docker.io, ghcr.io, etc.) are accessible in **restricted mode** by default. In **allowlist mode**, you'll need to add registry domains to your allowlist:
+
+```bash
+# For Docker Hub
+coi config set network.allowlist "registry-1.docker.io,auth.docker.io,production.cloudflare.docker.com"
+
+# Or use open mode for the session
+coi shell --network=open
+```
+
+The `code` user has **passwordless sudo** access, so Docker commands work without password prompts:
+```bash
+sudo docker pull alpine
+sudo docker run -it alpine sh
+```
+
 **Accessing container services from host:**
 ```bash
 coi list  # Get container IP
