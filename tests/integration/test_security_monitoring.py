@@ -170,7 +170,7 @@ class TestThreatDetection:
         for _ in range(max_wait):
             time.sleep(1)
             state = get_container_state(container_name)
-            if state in ["Stopped", "Frozen"]:
+            if state in ["Stopped", "Frozen", "Unknown"]:
                 break
 
         # Close stderr file and print contents for debugging (before assertions)
@@ -559,7 +559,7 @@ class TestAutomatedResponse:
         killed = False
         for _ in range(15):
             time.sleep(1)
-            if get_container_state(container_name) in ["Stopped", "Frozen"]:
+            if get_container_state(container_name) in ["Stopped", "Frozen", "Unknown"]:
                 killed = True
                 break
 
@@ -653,7 +653,7 @@ print("Task completed")
         for _ in range(15):
             time.sleep(1)
             state = get_container_state(container_name)
-            if state in ["Stopped", "Frozen"]:
+            if state in ["Stopped", "Frozen", "Unknown"]:
                 killed = True
                 break
 
@@ -973,7 +973,7 @@ time.sleep(60)
         for _ in range(10):
             time.sleep(1)
             state = get_container_state(container_name)
-            if state in ["Stopped", "Frozen"]:
+            if state in ["Stopped", "Frozen", "Unknown"]:
                 break
 
         # Check audit log for network threats
@@ -1100,7 +1100,7 @@ class TestReverseShellPatterns:
         for _ in range(15):
             time.sleep(1)
             state = get_container_state(container_name)
-            if state in ["Stopped", "Frozen"]:
+            if state in ["Stopped", "Frozen", "Unknown"]:
                 killed = True
                 break
 
@@ -1164,7 +1164,7 @@ class TestReverseShellPatterns:
         for _ in range(15):
             time.sleep(1)
             state = get_container_state(container_name)
-            if state in ["Stopped", "Frozen"]:
+            if state in ["Stopped", "Frozen", "Unknown"]:
                 killed = True
                 break
 
@@ -1224,7 +1224,7 @@ class TestReverseShellPatterns:
         for _ in range(15):
             time.sleep(1)
             state = get_container_state(container_name)
-            if state in ["Stopped", "Frozen"]:
+            if state in ["Stopped", "Frozen", "Unknown"]:
                 killed = True
                 break
 
@@ -1369,7 +1369,7 @@ poll_interval_sec = 1
             for _ in range(15):
                 time.sleep(1)
                 state = get_container_state(container_name)
-                if state in ["Stopped", "Frozen"]:
+                if state in ["Stopped", "Frozen", "Unknown"]:
                     killed = True
                     break
 
@@ -1473,7 +1473,7 @@ class TestMultipleThreats:
         for _ in range(15):
             time.sleep(1)
             state = get_container_state(container_name)
-            if state in ["Stopped", "Frozen"]:
+            if state in ["Stopped", "Frozen", "Unknown"]:
                 killed = True
                 break
 
