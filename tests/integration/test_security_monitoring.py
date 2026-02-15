@@ -188,6 +188,7 @@ class TestThreatDetection:
         assert final_state in [
             "Stopped",
             "Frozen",
+            "Unknown",  # Container deleted after critical threat
         ], f"Expected container killed, got {final_state}"
 
         # Verify threat event logged
@@ -666,7 +667,7 @@ print("Task completed")
         assert len(critical) > 0, "Expected CRITICAL threat event for prompt injection"
 
         # Verify the threat description mentions reverse shell
-        threat_descriptions = [e.get("threat", "") for e in critical]
+        threat_descriptions = [e.get("description", "") for e in critical]
         assert any("reverse shell" in desc.lower() for desc in threat_descriptions), (
             "Expected reverse shell detection"
         )
@@ -1112,7 +1113,7 @@ class TestReverseShellPatterns:
         assert len(critical) > 0, "Expected CRITICAL threat for Python reverse shell"
 
         # Verify pattern mentioned in threat
-        threats_text = " ".join([e.get("threat", "") for e in critical])
+        threats_text = " ".join([e.get("description", "") for e in critical])
         assert "python" in threats_text.lower(), "Expected 'python' in threat description"
 
         proc.terminate()
