@@ -751,7 +751,7 @@ time.sleep(60)
         # Check that audit log has proper structure
         for warning in warnings:
             assert "timestamp" in warning, "Audit event missing timestamp"
-            assert "threat" in warning, "Audit event missing threat description"
+            assert "description" in warning, "Audit event missing description"
             assert "level" in warning, "Audit event missing level"
 
         proc.terminate()
@@ -1547,51 +1547,45 @@ class TestAuditLogValidation:
         assert log_path.exists(), "Audit log file should exist"
 
         # Parse and validate JSONL format
-        with open(log_path) as f:
-            lines = [line.strip() for line in f if line.strip()]
-            assert len(lines) > 0, "Audit log should contain at least one event"
+        # Get ThreatEvent objects (not MonitorSnapshots)
+        events = get_threat_events(container_name)
+        assert len(events) > 0, "Audit log should contain at least one ThreatEvent"
 
-            for i, line in enumerate(lines):
-                # Each line should be valid JSON
-                try:
-                    event = json.loads(line)
-                except json.JSONDecodeError as e:
-                    pytest.fail(f"Line {i + 1} is not valid JSON: {e}")
+        for i, event in enumerate(events):
+            # Verify required fields for ThreatEvent
+            required_fields = [
+                "id",
+                "timestamp",
+                "level",
+                "category",
+                "title",
+                "description",
+                "action",
+            ]
+            for field in required_fields:
+                assert field in event, f"Missing required field '{field}' in event {i + 1}"
 
-                # Verify required fields
-                required_fields = [
-                    "id",
-                    "timestamp",
-                    "level",
-                    "category",
-                    "title",
-                    "description",
-                    "action",
-                ]
-                for field in required_fields:
-                    assert field in event, f"Missing required field '{field}' in event {i + 1}"
+            # Verify field types
+            assert isinstance(event["id"], str), "id should be string"
+            assert isinstance(event["timestamp"], str), "timestamp should be string"
+            assert isinstance(event["level"], str), "level should be string"
+            assert isinstance(event["category"], str), "category should be string"
+            assert isinstance(event["title"], str), "title should be string"
+            assert isinstance(event["description"], str), "description should be string"
+            assert isinstance(event["action"], str), "action should be string"
 
-                # Verify field types
-                assert isinstance(event["id"], str), "id should be string"
-                assert isinstance(event["timestamp"], str), "timestamp should be string"
-                assert isinstance(event["level"], str), "level should be string"
-                assert isinstance(event["category"], str), "category should be string"
-                assert isinstance(event["title"], str), "title should be string"
-                assert isinstance(event["description"], str), "description should be string"
-                assert isinstance(event["action"], str), "action should be string"
+            # Verify level is valid
+            assert event["level"] in ["info", "warning", "high", "critical"], (
+                f"Invalid threat level: {event['level']}"
+            )
 
-                # Verify level is valid
-                assert event["level"] in ["info", "warning", "high", "critical"], (
-                    f"Invalid threat level: {event['level']}"
-                )
+            # Verify action is valid
+            assert event["action"] in ["logged", "alerted", "paused", "killed", "pending"], (
+                f"Invalid action: {event['action']}"
+            )
 
-                # Verify action is valid
-                assert event["action"] in ["logged", "alerted", "paused", "killed", "pending"], (
-                    f"Invalid action: {event['action']}"
-                )
-
-                # Verify evidence field exists and has content
-                assert "evidence" in event, "Missing evidence field"
+            # Verify evidence field exists and has content
+            assert "evidence" in event, "Missing evidence field"
 
         proc.terminate()
         cleanup_container(container_name, coi_binary)
