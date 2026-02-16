@@ -214,8 +214,8 @@ while true; do
         echo ""
         echo "Exiting to bash shell..."
         echo ""
-        # Drop to bash shell instead of exiting
-        exec /bin/bash
+        # Drop to interactive bash shell instead of exiting
+        exec /bin/bash -i
     fi
 
     # Save user message to session
