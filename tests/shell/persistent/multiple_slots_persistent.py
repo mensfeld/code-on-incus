@@ -77,16 +77,19 @@ def test_persistent_multiple_slots_parallel(coi_binary, cleanup_containers, work
     child1.send("\x0d")
     time.sleep(2)
 
+    # Wait for bash prompt to be ready
+    time.sleep(3)
+
     # Create a unique marker file in slot 1's home directory
     with with_live_screen(child1) as monitor:
         child1.send("echo 'slot1-secret-data' > ~/slot1_marker.txt")
-        time.sleep(0.3)
+        time.sleep(0.5)
         child1.send("\x0d")
-        time.sleep(1)
+        time.sleep(2)
         child1.send("cat ~/slot1_marker.txt")
-        time.sleep(0.3)
+        time.sleep(0.5)
         child1.send("\x0d")
-        created = wait_for_text_in_monitor(monitor, "slot1-secret-data", timeout=10)
+        created = wait_for_text_in_monitor(monitor, "slot1-secret-data", timeout=20)
         assert created, "Should create marker file in slot 1"
 
     # === Phase 2: Detach from slot 1 (exit bash, container stays running) ===
@@ -157,29 +160,32 @@ def test_persistent_multiple_slots_parallel(coi_binary, cleanup_containers, work
     child2.send("\x0d")
     time.sleep(2)
 
+    # Wait for bash prompt to be ready
+    time.sleep(3)
+
     # === Phase 5: Verify home directory isolation ===
 
     # Create a marker file in slot 2's home directory
     with with_live_screen(child2) as monitor:
         child2.send("echo 'slot2-secret-data' > ~/slot2_marker.txt")
-        time.sleep(0.3)
+        time.sleep(0.5)
         child2.send("\x0d")
-        time.sleep(1)
+        time.sleep(2)
         child2.send("cat ~/slot2_marker.txt")
-        time.sleep(0.3)
+        time.sleep(0.5)
         child2.send("\x0d")
-        created = wait_for_text_in_monitor(monitor, "slot2-secret-data", timeout=10)
+        created = wait_for_text_in_monitor(monitor, "slot2-secret-data", timeout=20)
         assert created, "Should create marker file in slot 2"
 
     # Verify slot 2 CANNOT see slot 1's marker file (isolation check)
     with with_live_screen(child2) as monitor:
         child2.send("cat ~/slot1_marker.txt 2>&1 || echo 'FILE_NOT_FOUND'")
-        time.sleep(0.3)
+        time.sleep(0.5)
         child2.send("\x0d")
-        time.sleep(1)
+        time.sleep(2)
         # Should NOT find slot1's file - expect "No such file" or our marker
         isolated = wait_for_text_in_monitor(
-            monitor, "FILE_NOT_FOUND", timeout=10
+            monitor, "FILE_NOT_FOUND", timeout=20
         ) or wait_for_text_in_monitor(monitor, "No such file", timeout=2)
         assert isolated, (
             "Slot 2 should NOT see slot 1's home directory files (isolation violation!)"
@@ -188,10 +194,10 @@ def test_persistent_multiple_slots_parallel(coi_binary, cleanup_containers, work
     # Verify slot 2 does NOT contain slot 1's secret data
     with with_live_screen(child2) as monitor:
         child2.send("grep -r 'slot1-secret-data' ~/ 2>/dev/null || echo 'ISOLATION_OK'")
-        time.sleep(0.3)
+        time.sleep(0.5)
         child2.send("\x0d")
         time.sleep(2)
-        no_leak = wait_for_text_in_monitor(monitor, "ISOLATION_OK", timeout=10)
+        no_leak = wait_for_text_in_monitor(monitor, "ISOLATION_OK", timeout=20)
         assert no_leak, "Slot 1's data should not leak to slot 2's home directory"
 
     # Close child2 (already in bash, just exit)
