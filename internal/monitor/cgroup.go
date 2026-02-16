@@ -29,12 +29,18 @@ func GetCgroupPath(ctx context.Context, containerName string) (string, error) {
 
 	for _, path := range possiblePaths {
 		if _, err := os.Stat(path); err == nil {
+			log.Printf("[cgroup] Found cgroup path: %s", path)
 			return path, nil
 		}
 	}
 
 	// Fallback: try to find it via incus info
-	return findCgroupPathViaIncus(ctx, containerName)
+	log.Printf("[cgroup] Standard paths not found, using incus info fallback")
+	path, err := findCgroupPathViaIncus(ctx, containerName)
+	if err == nil {
+		log.Printf("[cgroup] Found cgroup path via incus: %s", path)
+	}
+	return path, err
 }
 
 // findCgroupPathViaIncus uses incus info to find the cgroup path
