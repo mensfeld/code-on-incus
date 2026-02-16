@@ -1393,6 +1393,17 @@ poll_interval_sec = 1
                     killed = True
                     break
 
+            # DEBUG: Print state and events if not killed
+            if not killed:
+                events = get_threat_events(container_name)
+                print("\n=== DEBUG: Config test - container not killed ===")
+                print(f"Final state: {get_container_state(container_name)}")
+                print(f"Total threat events: {len(events)}")
+                if events:
+                    for i, event in enumerate(events):
+                        print(f"Event {i}: level={event.get('level')}, desc={event.get('description')[:50] if event.get('description') else 'N/A'}")
+                print("=== END DEBUG ===")
+
             assert killed, "Container should be killed when monitoring enabled via config"
 
             # Verify threat logged
