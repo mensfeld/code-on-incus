@@ -771,17 +771,18 @@ class TestHighLevelThreats:
         # Create 100MB file (exceeds default threshold)
         large_file.write_text("SECRET_DATA\n" * 10_000_000)
 
-        # Create script that reads the large file slowly (in chunks)
-        # This ensures I/O is spread over multiple monitoring polls
+        # Create script that reads the large file VERY slowly (in small chunks with delays)
+        # CRITICAL: Must spread I/O over 15-20 seconds (15-20 monitoring polls at 1s interval)
+        # to accumulate deltas > 50MB threshold
         exfil_script = Path(test_workspace) / "exfiltrate.py"
         exfil_script.write_text(
             """#!/usr/bin/env python3
 import time
 
-# Simulate data exfiltration by reading large file in chunks
-# Read in 10MB chunks with small delays to spread I/O over time
+# Simulate data exfiltration by reading large file in small chunks with delays
+# Read in 5MB chunks with 1-second delays = 100MB over 20 seconds
 total_bytes = 0
-chunk_size = 10 * 1024 * 1024  # 10MB chunks
+chunk_size = 5 * 1024 * 1024  # 5MB chunks
 
 with open('/workspace/secrets.txt', 'rb') as f:
     while True:
@@ -789,7 +790,7 @@ with open('/workspace/secrets.txt', 'rb') as f:
         if not chunk:
             break
         total_bytes += len(chunk)
-        time.sleep(0.1)  # Small delay between chunks
+        time.sleep(1.0)  # 1 second delay between chunks (one monitoring poll per chunk)
 
 print(f"Read {total_bytes} bytes")
 time.sleep(60)
@@ -818,8 +819,10 @@ time.sleep(60)
             stderr_fd.close()
             pytest.skip(f"Container {container_name} not found")
 
-        # IMPORTANT: Wait for monitoring to establish baseline (2-3 poll cycles)
-        time.sleep(3)
+        # IMPORTANT: Wait for monitoring to establish stable baseline
+        # Container startup I/O can take 10-15 seconds to complete
+        # Need at least 5-10 baseline polls before test operations
+        time.sleep(10)
 
         # Execute the exfiltration script
         subprocess.Popen(
@@ -2128,9 +2131,9 @@ class TestThresholdBoundaries:
             stderr_fd.close()
             pytest.skip(f"Container {container_name} not found")
 
-        # IMPORTANT: Wait for monitoring to establish baseline (2-3 poll cycles)
-        # Monitoring polls every 1 second, so wait 3 seconds for stable baseline
-        time.sleep(3)
+        # IMPORTANT: Wait for monitoring to establish stable baseline
+        # Container startup I/O can take 10-15 seconds to settle
+        time.sleep(10)
 
         # Read the 50MB file slowly (using dd with limited block size)
         # This ensures the I/O is spread over multiple monitoring polls
@@ -2217,8 +2220,8 @@ class TestThresholdBoundaries:
             stderr_fd.close()
             pytest.skip(f"Container {container_name} not found")
 
-        # IMPORTANT: Wait for monitoring to establish baseline (2-3 poll cycles)
-        time.sleep(3)
+        # IMPORTANT: Wait for monitoring to establish stable baseline
+        time.sleep(10)
 
         # Read the 60MB file slowly (using dd with limited block size)
         subprocess.Popen(
