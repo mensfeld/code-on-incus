@@ -3,8 +3,12 @@ package monitor
 import (
 	"context"
 	"log"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/mensfeld/code-on-incus/internal/container"
 )
 
 // FilesystemMonitor tracks filesystem I/O statistics with delta calculation
@@ -38,6 +42,12 @@ func (fm *FilesystemMonitor) Collect(ctx context.Context, containerName string) 
 	// Convert to bytes (resourceStats is in MB)
 	currentReadBytes := uint64(resourceStats.IOReadMB * 1024 * 1024)
 
+	// Collect disk space stats (non-fatal if fails)
+	tmpUsed, tmpTotal, tmpPercent, diskErr := CollectDiskSpace(ctx, containerName)
+	if diskErr != nil {
+		log.Printf("[filesystem] Warning: Failed to collect disk space: %v", diskErr)
+	}
+
 	// Calculate delta and rate
 	if !fm.previousTime.IsZero() {
 		elapsed := time.Since(fm.previousTime)
@@ -50,11 +60,17 @@ func (fm *FilesystemMonitor) Collect(ctx context.Context, containerName string) 
 				Available:        true,
 				TotalReadMB:      float64(deltaBytes) / 1024 / 1024,
 				ReadRateMBPerSec: rateMBPerSec,
+				TmpUsedMB:        tmpUsed,
+				TmpTotalMB:       tmpTotal,
+				TmpUsedPercent:   tmpPercent,
 			}
 
 			// DEBUG: Log filesystem I/O delta
 			log.Printf("[filesystem] Delta: %.2fMB read in %.2fs (rate: %.2f MB/s)",
 				stats.TotalReadMB, elapsed.Seconds(), rateMBPerSec)
+			if diskErr == nil {
+				log.Printf("[filesystem] /tmp: %.0fMB / %.0fMB (%.1f%%)", tmpUsed, tmpTotal, tmpPercent)
+			}
 
 			// Update snapshot
 			fm.previousSnapshot.totalReadBytes = currentReadBytes
@@ -72,6 +88,9 @@ func (fm *FilesystemMonitor) Collect(ctx context.Context, containerName string) 
 		Available:        true,
 		TotalReadMB:      0,
 		ReadRateMBPerSec: 0,
+		TmpUsedMB:        tmpUsed,
+		TmpTotalMB:       tmpTotal,
+		TmpUsedPercent:   tmpPercent,
 	}, nil
 }
 
@@ -98,4 +117,36 @@ func DetectLargeReads(stats FilesystemStats, thresholdMB float64, rateThresholdM
 	}
 
 	return nil
+}
+
+// CollectDiskSpace gathers disk space stats for /tmp and other critical paths
+func CollectDiskSpace(ctx context.Context, containerName string) (tmpUsedMB, tmpTotalMB, tmpUsedPercent float64, err error) {
+	// Execute df command in container to get /tmp usage
+	output, err := container.IncusOutput("exec", containerName, "--", "df", "-BM", "/tmp")
+	if err != nil {
+		return 0, 0, 0, err
+	}
+
+	// Parse df output (format: Filesystem 1M-blocks Used Available Use% Mounted on)
+	// Example: tmpfs        2048M  100M   1948M   5% /tmp
+	lines := strings.Split(output, "\n")
+	if len(lines) < 2 {
+		return 0, 0, 0, nil // No data
+	}
+
+	fields := strings.Fields(lines[1])
+	if len(fields) < 5 {
+		return 0, 0, 0, nil // Unexpected format
+	}
+
+	// Parse size (remove 'M' suffix)
+	totalStr := strings.TrimSuffix(fields[1], "M")
+	usedStr := strings.TrimSuffix(fields[2], "M")
+	usedPercentStr := strings.TrimSuffix(fields[4], "%")
+
+	total, _ := strconv.ParseFloat(totalStr, 64)
+	used, _ := strconv.ParseFloat(usedStr, 64)
+	usedPercent, _ := strconv.ParseFloat(usedPercentStr, 64)
+
+	return used, total, usedPercent, nil
 }

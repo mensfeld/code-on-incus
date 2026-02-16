@@ -305,6 +305,15 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 			return nil, fmt.Errorf("failed to add workspace device: %w", err)
 		}
 
+		// Configure /tmp tmpfs size (prevent space exhaustion during builds/operations)
+		if opts.LimitsConfig != nil && opts.LimitsConfig.Disk.TmpfsSize != "" {
+			opts.Logger(fmt.Sprintf("Configuring /tmp size: %s", opts.LimitsConfig.Disk.TmpfsSize))
+			if err := result.Manager.SetTmpfsSize(opts.LimitsConfig.Disk.TmpfsSize); err != nil {
+				opts.Logger(fmt.Sprintf("Warning: Failed to set /tmp size: %v", err))
+				// Non-fatal: continue with default tmpfs size
+			}
+		}
+
 		// Mount all configured directories
 		if err := setupMounts(result.Manager, opts.MountConfig, useShift, opts.Logger); err != nil {
 			return nil, err

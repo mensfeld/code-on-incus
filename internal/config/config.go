@@ -160,10 +160,11 @@ type MemoryLimits struct {
 
 // DiskLimits contains disk I/O resource limits
 type DiskLimits struct {
-	Read     string `toml:"read"`     // "10MiB/s", "1000iops", "" (unlimited)
-	Write    string `toml:"write"`    // "5MiB/s", "1000iops", "" (unlimited)
-	Max      string `toml:"max"`      // combined read+write limit
-	Priority int    `toml:"priority"` // 0-10
+	Read        string `toml:"read"`         // "10MiB/s", "1000iops", "" (unlimited)
+	Write       string `toml:"write"`        // "5MiB/s", "1000iops", "" (unlimited)
+	Max         string `toml:"max"`          // combined read+write limit
+	Priority    int    `toml:"priority"`     // 0-10
+	TmpfsSize   string `toml:"tmpfs_size"`   // /tmp size: "2GiB", "1024MiB" (default: "2GiB")
 }
 
 // RuntimeLimits contains time-based and process limits
@@ -267,10 +268,11 @@ func GetDefaultConfig() *Config {
 				Swap:    "true",
 			},
 			Disk: DiskLimits{
-				Read:     "",
-				Write:    "",
-				Max:      "",
-				Priority: 0,
+				Read:      "",
+				Write:     "",
+				Max:       "",
+				Priority:  0,
+				TmpfsSize: "2GiB", // Default /tmp size (prevent space exhaustion)
 			},
 			Runtime: RuntimeLimits{
 				MaxDuration:  "",

@@ -200,6 +200,9 @@ write = ""
 max = ""
 # Disk priority: 0-10 (higher = more priority)
 priority = 0
+# /tmp tmpfs size: "2GiB", "4GiB", etc. (default: "2GiB")
+# Increase this if containers run out of /tmp space during builds/operations
+tmpfs_size = "2GiB"
 
 [limits.runtime]
 # Maximum container runtime: "2h", "30m", "1h30m" or "" for unlimited

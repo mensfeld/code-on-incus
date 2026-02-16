@@ -85,6 +85,10 @@ type FilesystemStats struct {
 	TotalReadMB      float64 `json:"total_read_mb"`
 	ReadRateMBPerSec float64 `json:"read_rate_mb_per_sec"`
 	FilesAccessed    int     `json:"files_accessed,omitempty"`
+	// Disk space monitoring (for /tmp and /workspace)
+	TmpUsedMB      float64 `json:"tmp_used_mb,omitempty"`
+	TmpTotalMB     float64 `json:"tmp_total_mb,omitempty"`
+	TmpUsedPercent float64 `json:"tmp_used_percent,omitempty"`
 }
 
 // NetworkStats represents network connection information

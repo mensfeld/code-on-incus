@@ -121,5 +121,33 @@ func (d *Detector) Analyze(snapshot MonitorSnapshot) []ThreatEvent {
 		log.Printf("[detector] Filesystem stats NOT available")
 	}
 
+	// 5. Detect low disk space (WARNING level)
+	if snapshot.Filesystem.Available && snapshot.Filesystem.TmpTotalMB > 0 {
+		// Warn if /tmp is >80% full
+		if snapshot.Filesystem.TmpUsedPercent > 80 {
+			log.Printf("[detector] WARNING: /tmp is %.1f%% full (%.0f/%.0fMB)",
+				snapshot.Filesystem.TmpUsedPercent,
+				snapshot.Filesystem.TmpUsedMB,
+				snapshot.Filesystem.TmpTotalMB)
+			threats = append(threats, ThreatEvent{
+				ID:        uuid.New().String(),
+				Timestamp: snapshot.Timestamp,
+				Level:     ThreatLevelWarning,
+				Category:  "filesystem",
+				Title:     "Low disk space on /tmp",
+				Description: fmt.Sprintf("/tmp is %.1f%% full (%.0fMB used of %.0fMB total). Consider increasing tmpfs_size in config.",
+					snapshot.Filesystem.TmpUsedPercent,
+					snapshot.Filesystem.TmpUsedMB,
+					snapshot.Filesystem.TmpTotalMB),
+				Evidence: map[string]interface{}{
+					"tmp_used_mb":      snapshot.Filesystem.TmpUsedMB,
+					"tmp_total_mb":     snapshot.Filesystem.TmpTotalMB,
+					"tmp_used_percent": snapshot.Filesystem.TmpUsedPercent,
+				},
+				Action: "pending",
+			})
+		}
+	}
+
 	return threats
 }
