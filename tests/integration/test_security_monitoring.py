@@ -1236,8 +1236,10 @@ class TestReverseShellPatterns:
             print(f"Final state: {get_container_state(container_name)}")
             print(f"Total threat events: {len(events)}")
             for event in events:
-                print(f"- level={event.get('level')}, category={event.get('category')}, "
-                      f"title={event.get('title')}, desc={event.get('description')[:100] if event.get('description') else 'N/A'}")
+                print(
+                    f"- level={event.get('level')}, category={event.get('category')}, "
+                    f"title={event.get('title')}, desc={event.get('description')[:100] if event.get('description') else 'N/A'}"
+                )
             print("=== END DEBUG ===\n")
 
         assert killed, "Container should be killed on PHP reverse shell detection"
@@ -1942,13 +1944,17 @@ echo "Build complete"
             print(f"\n=== DEBUG: Container killed unexpectedly (state={state}) ===")
             print(f"Total threat events: {len(events)}")
             for i, event in enumerate(events):
-                print(f"Threat {i+1}: level={event.get('level')}, "
-                      f"category={event.get('category')}, "
-                      f"title={event.get('title')}, "
-                      f"description={event.get('description')}")
+                print(
+                    f"Threat {i + 1}: level={event.get('level')}, "
+                    f"category={event.get('category')}, "
+                    f"title={event.get('title')}, "
+                    f"description={event.get('description')}"
+                )
             print("=== END DEBUG ===\n")
 
-        assert state == "Running", f"Normal build operations should not trigger alerts (state={state})"
+        assert state == "Running", (
+            f"Normal build operations should not trigger alerts (state={state})"
+        )
 
         # No high-level threats from normal operations
         events = get_threat_events(container_name)
