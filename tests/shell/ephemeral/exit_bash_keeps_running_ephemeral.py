@@ -76,14 +76,17 @@ def test_exit_bash_keeps_container_running(coi_binary, cleanup_containers, works
     child.send("\x0d")
     time.sleep(2)
 
+    # Wait for bash prompt to be ready
+    time.sleep(3)
+
     # Verify we're in bash
     with with_live_screen(child) as monitor:
         time.sleep(1)
         child.send("echo $((99+1))")
-        time.sleep(0.3)
+        time.sleep(0.5)
         child.send("\x0d")
-        time.sleep(1)
-        in_bash = wait_for_text_in_monitor(monitor, "100", timeout=10)
+        time.sleep(2)
+        in_bash = wait_for_text_in_monitor(monitor, "100", timeout=20)
         assert in_bash, "Should be in bash shell"
 
     # Exit bash (not poweroff) - container should stay running

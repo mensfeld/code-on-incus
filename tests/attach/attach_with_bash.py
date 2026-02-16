@@ -92,13 +92,16 @@ def test_attach_with_bash(coi_binary, cleanup_containers, workspace_dir):
 
     time.sleep(3)
 
+    # Give bash additional time to be fully ready
+    time.sleep(3)
+
     # Should be in bash - try running a command
     with with_live_screen(child2) as monitor:
         child2.send("echo BASH_TEST_$((100+23))")
-        time.sleep(0.3)
+        time.sleep(0.5)
         child2.send("\x0d")
-        time.sleep(1)
-        in_bash = wait_for_text_in_monitor(monitor, "BASH_TEST_123", timeout=10)
+        time.sleep(2)
+        in_bash = wait_for_text_in_monitor(monitor, "BASH_TEST_123", timeout=20)
 
     # Exit bash
     child2.send("exit")

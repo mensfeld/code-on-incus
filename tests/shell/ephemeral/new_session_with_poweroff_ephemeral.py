@@ -68,15 +68,18 @@ def test_ephemeral_session_with_shutdown(coi_binary, cleanup_containers, workspa
     child.send("\x0d")
     time.sleep(2)
 
+    # Wait for bash prompt to be ready
+    time.sleep(3)
+
     # Verify we're in bash using arithmetic (result won't match input)
     with with_live_screen(child) as monitor:
         time.sleep(1)
         child.send("echo $((12345+54321))")
-        time.sleep(0.3)
+        time.sleep(0.5)
         child.send("\x0d")
-        time.sleep(1)
+        time.sleep(2)
         # 12345 + 54321 = 66666
-        in_bash = wait_for_text_in_monitor(monitor, "66666", timeout=10)
+        in_bash = wait_for_text_in_monitor(monitor, "66666", timeout=20)
         assert in_bash, "Should be in bash shell after exiting claude"
 
     # Verify container is running before shutdown

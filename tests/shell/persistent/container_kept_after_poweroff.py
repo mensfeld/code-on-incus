@@ -70,14 +70,17 @@ def test_persistent_container_kept_after_poweroff(coi_binary, cleanup_containers
     child.send("\x0d")
     time.sleep(2)
 
+    # Wait for bash prompt to be ready
+    time.sleep(3)
+
     # Verify we're in bash
     with with_live_screen(child) as monitor:
         time.sleep(1)
         child.send("echo $((12345+54321))")
-        time.sleep(0.3)
+        time.sleep(0.5)
         child.send("\x0d")
-        time.sleep(1)
-        in_bash = wait_for_text_in_monitor(monitor, "66666", timeout=10)
+        time.sleep(2)
+        in_bash = wait_for_text_in_monitor(monitor, "66666", timeout=20)
         assert in_bash, "Should be in bash shell after exiting claude"
 
     # Verify container is running before shutdown

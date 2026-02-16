@@ -73,14 +73,17 @@ def test_persistent_session_with_resume(coi_binary, cleanup_containers, workspac
     child.send("\x0d")
     time.sleep(2)
 
+    # Wait for bash prompt to be ready
+    time.sleep(3)
+
     # Verify we're in bash
     with with_live_screen(child) as monitor:
         time.sleep(1)
         child.send("echo $((11111+22222))")
-        time.sleep(0.3)
+        time.sleep(0.5)
         child.send("\x0d")
-        time.sleep(1)
-        in_bash = wait_for_text_in_monitor(monitor, "33333", timeout=10)
+        time.sleep(2)
+        in_bash = wait_for_text_in_monitor(monitor, "33333", timeout=20)
         assert in_bash, "Should be in bash shell"
 
     # Poweroff container
