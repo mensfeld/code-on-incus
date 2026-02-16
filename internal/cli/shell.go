@@ -618,7 +618,7 @@ func runCLIInTmux(result *session.SetupResult, sessionID string, detached bool, 
 	if detached {
 		// Background mode: create detached session
 		createCmd := fmt.Sprintf(
-			"tmux new-session -d -s %s -c /workspace \"bash -c 'trap : INT; %s %s; exec bash -i'\"",
+			"tmux new-session -d -s %s -c /workspace \"bash -c 'trap : INT; %s %s; exec bash'\"",
 			tmuxSessionName,
 			envExports,
 			cliCmd,
@@ -679,7 +679,7 @@ func runCLIInTmux(result *session.SetupResult, sessionID string, detached bool, 
 		// Step 2: Create detached session if it doesn't exist
 		if checkErr != nil {
 			createCmd := fmt.Sprintf(
-				"tmux new-session -d -s %s -c /workspace \"bash -c 'trap : INT; %s %s; exec bash -i'\"",
+				"tmux new-session -d -s %s -c /workspace \"bash -c 'trap : INT; %s %s; exec bash'\"",
 				tmuxSessionName,
 				envExports,
 				cliCmd,
