@@ -1401,7 +1401,9 @@ poll_interval_sec = 1
                 print(f"Total threat events: {len(events)}")
                 if events:
                     for i, event in enumerate(events):
-                        print(f"Event {i}: level={event.get('level')}, desc={event.get('description')[:50] if event.get('description') else 'N/A'}")
+                        print(
+                            f"Event {i}: level={event.get('level')}, desc={event.get('description')[:50] if event.get('description') else 'N/A'}"
+                        )
                 print("=== END DEBUG ===")
 
             assert killed, "Container should be killed when monitoring enabled via config"
