@@ -56,20 +56,23 @@ def test_persist_running_session(coi_binary, cleanup_containers, workspace_dir):
     child.send("\x0d")
     time.sleep(2)
 
+    # Wait for bash prompt to be ready
+    time.sleep(3)
+
     # Create a test file
     with with_live_screen(child) as monitor:
         child.send(f"echo '{marker_content}' > {marker_file}")
-        time.sleep(0.3)
+        time.sleep(0.5)
         child.send("\x0d")
-        time.sleep(1)
+        time.sleep(2)
 
         # Verify file was created
         child.send(f"cat {marker_file}")
-        time.sleep(0.3)
+        time.sleep(0.5)
         child.send("\x0d")
-        time.sleep(1)
+        time.sleep(2)
 
-        file_created = wait_for_text_in_monitor(monitor, marker_content, timeout=10)
+        file_created = wait_for_text_in_monitor(monitor, marker_content, timeout=20)
         assert file_created, "File should be created successfully"
 
     # === Phase 2: While session is running, persist from outside ===
