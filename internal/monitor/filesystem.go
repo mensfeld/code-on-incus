@@ -42,6 +42,8 @@ func (fm *FilesystemMonitor) Collect(ctx context.Context, containerName string) 
 	// Convert to bytes (resourceStats is in MB)
 	currentReadBytes := uint64(resourceStats.IOReadMB * 1024 * 1024)
 
+	log.Printf("[filesystem] Current cumulative I/O: %.2f MB (from cgroup)", resourceStats.IOReadMB)
+
 	// Collect disk space stats (non-fatal if fails)
 	tmpUsed, tmpTotal, tmpPercent, diskErr := CollectDiskSpace(ctx, containerName)
 	if diskErr != nil {
@@ -52,6 +54,12 @@ func (fm *FilesystemMonitor) Collect(ctx context.Context, containerName string) 
 	if !fm.previousTime.IsZero() {
 		elapsed := time.Since(fm.previousTime)
 		deltaBytes := currentReadBytes - fm.previousSnapshot.totalReadBytes
+
+		log.Printf("[filesystem] Baseline: %.2f MB, Current: %.2f MB, Delta: %.2f MB, Elapsed: %.2fs",
+			float64(fm.previousSnapshot.totalReadBytes)/1024/1024,
+			float64(currentReadBytes)/1024/1024,
+			float64(deltaBytes)/1024/1024,
+			elapsed.Seconds())
 
 		if elapsed.Seconds() > 0 {
 			rateMBPerSec := float64(deltaBytes) / 1024 / 1024 / elapsed.Seconds()
@@ -66,7 +74,7 @@ func (fm *FilesystemMonitor) Collect(ctx context.Context, containerName string) 
 			}
 
 			// DEBUG: Log filesystem I/O delta
-			log.Printf("[filesystem] Delta: %.2fMB read in %.2fs (rate: %.2f MB/s)",
+			log.Printf("[filesystem] ✓ Returning delta: %.2fMB read in %.2fs (rate: %.2f MB/s)",
 				stats.TotalReadMB, elapsed.Seconds(), rateMBPerSec)
 			if diskErr == nil {
 				log.Printf("[filesystem] /tmp: %.0fMB / %.0fMB (%.1f%%)", tmpUsed, tmpTotal, tmpPercent)
@@ -77,10 +85,13 @@ func (fm *FilesystemMonitor) Collect(ctx context.Context, containerName string) 
 			fm.previousTime = time.Now()
 
 			return stats, nil
+		} else {
+			log.Printf("[filesystem] WARNING: Elapsed time <= 0, skipping delta calculation")
 		}
 	}
 
 	// First collection, just store baseline
+	log.Printf("[filesystem] First collection - setting baseline: %.2f MB", float64(currentReadBytes)/1024/1024)
 	fm.previousSnapshot.totalReadBytes = currentReadBytes
 	fm.previousTime = time.Now()
 
