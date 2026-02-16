@@ -1229,11 +1229,28 @@ class TestReverseShellPatterns:
                 killed = True
                 break
 
+        # DEBUG: Print state and events if not killed
+        if not killed:
+            events = get_threat_events(container_name)
+            print(f"\n=== DEBUG: PHP test - container not killed ===")
+            print(f"Final state: {get_container_state(container_name)}")
+            print(f"Total threat events: {len(events)}")
+            for event in events:
+                print(f"- level={event.get('level')}, category={event.get('category')}, "
+                      f"title={event.get('title')}, desc={event.get('description')[:100] if event.get('description') else 'N/A'}")
+            print("=== END DEBUG ===\n")
+
         assert killed, "Container should be killed on PHP reverse shell detection"
 
         # Verify threat logged
         events = get_threat_events(container_name)
         critical = [e for e in events if e.get("level") == "critical"]
+
+        if len(critical) == 0:
+            print(f"\n=== DEBUG: No CRITICAL events found ===")
+            print(f"All events: {events}")
+            print("=== END DEBUG ===\n")
+
         assert len(critical) > 0, "Expected CRITICAL threat for PHP reverse shell"
 
         proc.terminate()
@@ -1918,15 +1935,35 @@ echo "Build complete"
 
         # Container should still be running
         state = get_container_state(container_name)
-        assert state == "Running", "Normal build operations should not trigger alerts"
+
+        # DEBUG: Print all threats if container was killed
+        if state != "Running":
+            events = get_threat_events(container_name)
+            print(f"\n=== DEBUG: Container killed unexpectedly (state={state}) ===")
+            print(f"Total threat events: {len(events)}")
+            for i, event in enumerate(events):
+                print(f"Threat {i+1}: level={event.get('level')}, "
+                      f"category={event.get('category')}, "
+                      f"title={event.get('title')}, "
+                      f"description={event.get('description')}")
+            print("=== END DEBUG ===\n")
+
+        assert state == "Running", f"Normal build operations should not trigger alerts (state={state})"
 
         # No high-level threats from normal operations
         events = get_threat_events(container_name)
         high_or_critical = [e for e in events if e.get("level") in ["high", "critical"]]
 
         # Normal ls, cat, echo shouldn't trigger high/critical
+        if len(high_or_critical) > 0:
+            print(f"\n=== DEBUG: Unexpected high/critical threats ===")
+            for event in high_or_critical:
+                print(f"- {event}")
+            print("=== END DEBUG ===\n")
+
         assert len(high_or_critical) == 0, (
-            "Normal build operations should not trigger high/critical alerts"
+            f"Normal build operations should not trigger high/critical alerts. "
+            f"Found {len(high_or_critical)} threats: {[e.get('title') for e in high_or_critical]}"
         )
 
         proc.terminate()
