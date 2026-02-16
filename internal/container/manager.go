@@ -99,14 +99,23 @@ func (m *Manager) MountDisk(name, source, path string, shift, readonly bool) err
 // SetTmpfsSize configures the tmpfs size for /tmp in the container
 // size should be a string like "2GiB", "1024MiB", etc.
 func (m *Manager) SetTmpfsSize(size string) error {
-	// Use incus config device add to create/update tmpfs for /tmp
+	// For tmpfs, we need to use limits.memory instead of disk device size
+	// First, add tmpfs disk device (without size, which would error)
 	args := []string{
-		"config", "device", "add", m.ContainerName, "tmp", "disk",
+		"config", "device", "override", m.ContainerName, "tmp", "disk",
 		"source=tmpfs",
 		"path=/tmp",
-		fmt.Sprintf("size=%s", size),
 	}
-	return IncusExec(args...)
+	if err := IncusExec(args...); err != nil {
+		// If override fails, try adding (container might not have tmp device)
+		args[2] = "add"
+		if err := IncusExec(args...); err != nil {
+			return err
+		}
+	}
+
+	// Then set the size via limits.memory.tmpfs
+	return IncusExec("config", "set", m.ContainerName, fmt.Sprintf("limits.memory.tmpfs=%s", size))
 }
 
 // Exec executes a command in the container (no output capture)
