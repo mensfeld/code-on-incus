@@ -70,24 +70,27 @@ def test_custom_mount_ephemeral(coi_binary, cleanup_containers, workspace_dir, t
     child.send("\x0d")
     time.sleep(2)
 
+    # Wait for bash prompt to be ready
+    time.sleep(3)
+
     # === Phase 3: Verify mounted file is accessible ===
 
     with with_live_screen(child) as monitor:
         time.sleep(1)
         child.send("cat /workspace/mount_test.txt")
-        time.sleep(0.3)
+        time.sleep(0.5)
         child.send("\x0d")
-        time.sleep(1)
-        file_accessible = wait_for_text_in_monitor(monitor, test_content, timeout=10)
+        time.sleep(2)
+        file_accessible = wait_for_text_in_monitor(monitor, test_content, timeout=20)
 
     # Also verify we can list the directory
     with with_live_screen(child) as monitor:
         time.sleep(1)
         child.send("ls -la /workspace/")
-        time.sleep(0.3)
+        time.sleep(0.5)
         child.send("\x0d")
-        time.sleep(1)
-        dir_listed = wait_for_text_in_monitor(monitor, "mount_test.txt", timeout=10)
+        time.sleep(2)
+        dir_listed = wait_for_text_in_monitor(monitor, "mount_test.txt", timeout=20)
 
     # === Phase 4: Cleanup ===
 

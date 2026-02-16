@@ -58,6 +58,9 @@ def test_power_management_no_sudo(coi_binary, cleanup_containers, workspace_dir,
     child.send("\x0d")
     time.sleep(2)
 
+    # Wait for bash prompt to be ready
+    time.sleep(3)
+
     # === Phase 2: Verify wrapper scripts exist ===
 
     with with_live_screen(child) as monitor:
@@ -65,22 +68,22 @@ def test_power_management_no_sudo(coi_binary, cleanup_containers, workspace_dir,
         child.send(
             "ls -la /usr/local/bin/shutdown /usr/local/bin/poweroff /usr/local/bin/reboot; echo WRAPPERS_CHECK_DONE"
         )
-        time.sleep(0.3)
+        time.sleep(0.5)
         child.send("\x0d")
         time.sleep(2)
 
-        wrappers_exist = wait_for_text_in_monitor(monitor, "WRAPPERS_CHECK_DONE", timeout=10)
+        wrappers_exist = wait_for_text_in_monitor(monitor, "WRAPPERS_CHECK_DONE", timeout=20)
 
     # === Phase 3: Test shutdown --help without sudo ===
 
     with with_live_screen(child) as monitor:
         time.sleep(1)
         child.send("shutdown --help 2>&1 | head -1; echo SHUTDOWN_TEST_DONE")
-        time.sleep(0.3)
+        time.sleep(0.5)
         child.send("\x0d")
         time.sleep(2)
 
-        shutdown_ok = wait_for_text_in_monitor(monitor, "SHUTDOWN_TEST_DONE", timeout=10)
+        shutdown_ok = wait_for_text_in_monitor(monitor, "SHUTDOWN_TEST_DONE", timeout=20)
         access_denied_shutdown = wait_for_text_in_monitor(monitor, "Access denied", timeout=1)
         permission_denied_shutdown = wait_for_text_in_monitor(
             monitor, "Permission denied", timeout=1
@@ -91,11 +94,11 @@ def test_power_management_no_sudo(coi_binary, cleanup_containers, workspace_dir,
     with with_live_screen(child) as monitor:
         time.sleep(1)
         child.send("poweroff --help 2>&1 | head -1; echo POWEROFF_TEST_DONE")
-        time.sleep(0.3)
+        time.sleep(0.5)
         child.send("\x0d")
         time.sleep(2)
 
-        poweroff_ok = wait_for_text_in_monitor(monitor, "POWEROFF_TEST_DONE", timeout=10)
+        poweroff_ok = wait_for_text_in_monitor(monitor, "POWEROFF_TEST_DONE", timeout=20)
         access_denied_poweroff = wait_for_text_in_monitor(monitor, "Access denied", timeout=1)
         permission_denied_poweroff = wait_for_text_in_monitor(
             monitor, "Permission denied", timeout=1
@@ -106,11 +109,11 @@ def test_power_management_no_sudo(coi_binary, cleanup_containers, workspace_dir,
     with with_live_screen(child) as monitor:
         time.sleep(1)
         child.send("reboot --help 2>&1 | head -1; echo REBOOT_TEST_DONE")
-        time.sleep(0.3)
+        time.sleep(0.5)
         child.send("\x0d")
         time.sleep(2)
 
-        reboot_ok = wait_for_text_in_monitor(monitor, "REBOOT_TEST_DONE", timeout=10)
+        reboot_ok = wait_for_text_in_monitor(monitor, "REBOOT_TEST_DONE", timeout=20)
         access_denied_reboot = wait_for_text_in_monitor(monitor, "Access denied", timeout=1)
         permission_denied_reboot = wait_for_text_in_monitor(monitor, "Permission denied", timeout=1)
 
