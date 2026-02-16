@@ -1,6 +1,6 @@
 # Temporarily skipped tests - to be fixed one by one
-# Shell-persistent failures (5 tests) - enabling test_persistent_session_with_resume first
-# tests/shell/persistent/session_with_resume.py::test_persistent_session_with_resume
+# Shell-persistent failures (6 tests)
+tests/shell/persistent/session_with_resume.py::test_persistent_session_with_resume
 tests/shell/persistent/multiple_slots_persistent.py::test_persistent_multiple_slots_parallel
 tests/shell/persistent/resume_does_not_persist_home.py::test_persistent_resume_does_not_persist_home_files
 tests/shell/persistent/custom_mount_persistent.py::test_custom_mount_persistent
@@ -20,7 +20,7 @@ tests/shell/ephemeral/custom_mount_ephemeral.py::test_custom_mount_ephemeral
 # Core failures (1 test)
 tests/persist/persist_running_session.py::test_persist_running_session
 
-# Monitoring failures (9 tests)
+# Monitoring failures (14 tests - 5 new failures appeared when enabling other tests)
 tests/integration/test_security_monitoring.py::TestThreatDetection::test_env_scanning_detection
 tests/integration/test_security_monitoring.py::TestEnvironmentScanningPatterns::test_proc_environ_access_detection
 tests/integration/test_security_monitoring.py::TestFalsePositives::test_normal_build_operations_no_alert
@@ -31,3 +31,8 @@ tests/integration/test_security_monitoring.py::TestReverseShellPatterns::test_ph
 tests/integration/test_security_monitoring.py::TestThresholdBoundaries::test_file_read_below_threshold_no_alert
 tests/integration/test_security_monitoring.py::TestFalsePositives::test_legitimate_file_reads_no_alert
 tests/integration/test_security_monitoring.py::TestHighLevelThreats::test_large_file_read_triggers_auto_pause
+tests/integration/test_security_monitoring.py::TestMonitoringConfiguration::test_monitoring_enabled_via_config_only
+tests/integration/test_security_monitoring.py::TestEnvironmentScanningPatterns::test_grep_password_detection
+tests/integration/test_security_monitoring.py::TestReverseShellPatterns::test_perl_reverse_shell_detection
+tests/integration/test_security_monitoring.py::TestReverseShellPatterns::test_python_reverse_shell_detection
+tests/integration/test_security_monitoring.py::TestThreatDetection::test_reverse_shell_detection
