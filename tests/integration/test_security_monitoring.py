@@ -1232,7 +1232,7 @@ class TestReverseShellPatterns:
         # DEBUG: Print state and events if not killed
         if not killed:
             events = get_threat_events(container_name)
-            print(f"\n=== DEBUG: PHP test - container not killed ===")
+            print("\n=== DEBUG: PHP test - container not killed ===")
             print(f"Final state: {get_container_state(container_name)}")
             print(f"Total threat events: {len(events)}")
             for event in events:
@@ -1247,7 +1247,7 @@ class TestReverseShellPatterns:
         critical = [e for e in events if e.get("level") == "critical"]
 
         if len(critical) == 0:
-            print(f"\n=== DEBUG: No CRITICAL events found ===")
+            print("\n=== DEBUG: No CRITICAL events found ===")
             print(f"All events: {events}")
             print("=== END DEBUG ===\n")
 
@@ -1956,7 +1956,7 @@ echo "Build complete"
 
         # Normal ls, cat, echo shouldn't trigger high/critical
         if len(high_or_critical) > 0:
-            print(f"\n=== DEBUG: Unexpected high/critical threats ===")
+            print("\n=== DEBUG: Unexpected high/critical threats ===")
             for event in high_or_critical:
                 print(f"- {event}")
             print("=== END DEBUG ===\n")
