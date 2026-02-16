@@ -171,6 +171,13 @@ func DetectReverseShells(processes []Process) []ProcessThreat {
 		cmdLower := strings.ToLower(proc.Command)
 		log.Printf("[detector] Checking PID %d: %q", proc.PID, proc.Command)
 
+		// DEBUG: Log if we see PHP, fsockopen, python, perl, socket
+		if strings.Contains(cmdLower, "php") || strings.Contains(cmdLower, "fsockopen") ||
+			strings.Contains(cmdLower, "python") || strings.Contains(cmdLower, "perl") ||
+			strings.Contains(cmdLower, "socket") {
+			log.Printf("[detector] ⚠️  INTERESTING PROCESS: PID %d contains suspicious keyword: %q", proc.PID, proc.Command)
+		}
+
 		for _, pattern := range reverseShellPatterns {
 			if strings.Contains(cmdLower, strings.ToLower(pattern.pattern)) {
 				log.Printf("[detector] Pattern MATCHED: %q in command %q", pattern.pattern, proc.Command)
