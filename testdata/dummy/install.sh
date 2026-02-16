@@ -23,3 +23,20 @@ chmod +x /usr/local/bin/claude
 /usr/local/bin/claude --version
 
 echo "✓ Dummy CLI installed successfully"
+
+# Configure power management wrappers (same as main coi image)
+echo "Configuring power management command wrappers..."
+
+for cmd in shutdown poweroff reboot halt; do
+    cat > "/usr/local/bin/${cmd}" << 'WRAPPER_EOF'
+#!/bin/bash
+# Wrapper to run power management commands with sudo automatically
+# This works around the lack of login sessions in container environments
+exec sudo /usr/sbin/COMMAND_NAME "$@"
+WRAPPER_EOF
+    # Replace COMMAND_NAME with actual command
+    sed -i "s/COMMAND_NAME/${cmd}/" "/usr/local/bin/${cmd}"
+    chmod 755 "/usr/local/bin/${cmd}"
+done
+
+echo "✓ Power management wrappers configured"
