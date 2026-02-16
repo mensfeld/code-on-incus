@@ -184,7 +184,7 @@ func DetectReverseShells(processes []Process) []ProcessThreat {
 
 				// Additional check: if it's a network-related command, it's more suspicious
 				isNetworkRelated := strings.Contains(cmdLower, ":") ||
-					strings.Contains(cmdLower, "socket") ||
+					strings.Contains(cmdLower, "sock") || // Matches socket, fsockopen, etc.
 					strings.Contains(cmdLower, "tcp") ||
 					strings.Contains(cmdLower, "udp") ||
 					containsIPPattern(cmdLower)
