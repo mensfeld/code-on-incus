@@ -97,8 +97,21 @@ def dummy_image(coi_binary):
     tests to run 10x+ faster without requiring actual software licenses.
 
     The image is built once per test session and reused across all tests.
+    The image name includes a hash of the install script to force rebuilds
+    when the script changes.
     """
-    image_name = "coi-test-dummy"
+    # Build image with dummy
+    script_path = os.path.join(os.path.dirname(__file__), "..", "testdata", "dummy", "install.sh")
+
+    if not os.path.exists(script_path):
+        pytest.skip(f"Dummy install script not found: {script_path}")
+
+    # Generate hash of install script to version the image
+    import hashlib
+    with open(script_path, 'rb') as f:
+        script_hash = hashlib.sha256(f.read()).hexdigest()[:8]
+
+    image_name = f"coi-test-dummy-{script_hash}"
 
     # Check if image already exists
     result = subprocess.run([coi_binary, "image", "exists", image_name], capture_output=True)
@@ -106,13 +119,7 @@ def dummy_image(coi_binary):
     if result.returncode == 0:
         return image_name  # Already built
 
-    # Build image with dummy
-    script_path = os.path.join(os.path.dirname(__file__), "..", "testdata", "dummy", "install.sh")
-
-    if not os.path.exists(script_path):
-        pytest.skip(f"Dummy install script not found: {script_path}")
-
-    print("\nBuilding test image with dummy (one-time setup)...")
+    print(f"\nBuilding test image with dummy (script hash: {script_hash})...")
 
     result = subprocess.run(
         [coi_binary, "build", "custom", image_name, "--script", script_path],
