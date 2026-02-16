@@ -771,17 +771,27 @@ class TestHighLevelThreats:
         # Create 100MB file (exceeds default threshold)
         large_file.write_text("SECRET_DATA\n" * 10_000_000)
 
-        # Create script that reads the large file
+        # Create script that reads the large file slowly (in chunks)
+        # This ensures I/O is spread over multiple monitoring polls
         exfil_script = Path(test_workspace) / "exfiltrate.py"
         exfil_script.write_text(
             """#!/usr/bin/env python3
 import time
 
-# Simulate data exfiltration by reading large file
-with open('/workspace/secrets.txt', 'r') as f:
-    data = f.read()
+# Simulate data exfiltration by reading large file in chunks
+# Read in 10MB chunks with small delays to spread I/O over time
+total_bytes = 0
+chunk_size = 10 * 1024 * 1024  # 10MB chunks
 
-print(f"Read {len(data)} bytes")
+with open('/workspace/secrets.txt', 'rb') as f:
+    while True:
+        chunk = f.read(chunk_size)
+        if not chunk:
+            break
+        total_bytes += len(chunk)
+        time.sleep(0.1)  # Small delay between chunks
+
+print(f"Read {total_bytes} bytes")
 time.sleep(60)
 """
         )
@@ -807,6 +817,9 @@ time.sleep(60)
             proc.terminate()
             stderr_fd.close()
             pytest.skip(f"Container {container_name} not found")
+
+        # IMPORTANT: Wait for monitoring to establish baseline (2-3 poll cycles)
+        time.sleep(3)
 
         # Execute the exfiltration script
         subprocess.Popen(
@@ -2115,15 +2128,23 @@ class TestThresholdBoundaries:
             stderr_fd.close()
             pytest.skip(f"Container {container_name} not found")
 
-        # Read the 50MB file
+        # IMPORTANT: Wait for monitoring to establish baseline (2-3 poll cycles)
+        # Monitoring polls every 1 second, so wait 3 seconds for stable baseline
+        time.sleep(3)
+
+        # Read the 50MB file slowly (using dd with limited block size)
+        # This ensures the I/O is spread over multiple monitoring polls
         subprocess.Popen(
             [
                 "incus",
                 "exec",
                 container_name,
                 "--",
-                "cat",
-                "/workspace/data50mb.bin",
+                "dd",
+                "if=/workspace/data50mb.bin",
+                "of=/dev/null",
+                "bs=1M",
+                "iflag=direct",  # Bypass cache to ensure actual I/O
             ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -2196,15 +2217,21 @@ class TestThresholdBoundaries:
             stderr_fd.close()
             pytest.skip(f"Container {container_name} not found")
 
-        # Read the 60MB file
+        # IMPORTANT: Wait for monitoring to establish baseline (2-3 poll cycles)
+        time.sleep(3)
+
+        # Read the 60MB file slowly (using dd with limited block size)
         subprocess.Popen(
             [
                 "incus",
                 "exec",
                 container_name,
                 "--",
-                "cat",
-                "/workspace/data60mb.bin",
+                "dd",
+                "if=/workspace/data60mb.bin",
+                "of=/dev/null",
+                "bs=1M",
+                "iflag=direct",  # Bypass cache to ensure actual I/O
             ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
