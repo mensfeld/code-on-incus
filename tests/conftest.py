@@ -17,9 +17,7 @@ if tests_dir not in sys.path:
 # Load skip list for temporarily disabled tests
 def pytest_collection_modifyitems(config, items):
     """Skip tests listed in pytest_skip_list.txt"""
-    skip_list_path = os.path.join(
-        os.path.dirname(__file__), "..", "pytest_skip_list.txt"
-    )
+    skip_list_path = os.path.join(os.path.dirname(__file__), "..", "pytest_skip_list.txt")
 
     if not os.path.exists(skip_list_path):
         return
