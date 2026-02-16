@@ -44,17 +44,17 @@ func main() {
 
 		// Skip non-event lines
 		if !strings.Contains(line, ": Warning ") &&
-		   !strings.Contains(line, ": Notice ") &&
-		   !strings.Contains(line, ": Error ") &&
-		   !strings.Contains(line, ": Critical ") &&
-		   !strings.Contains(line, ": Alert ") &&
-		   !strings.Contains(line, ": Emergency ") {
+			!strings.Contains(line, ": Notice ") &&
+			!strings.Contains(line, ": Error ") &&
+			!strings.Contains(line, ": Critical ") &&
+			!strings.Contains(line, ": Alert ") &&
+			!strings.Contains(line, ": Emergency ") {
 			continue
 		}
 
 		// Filter by container name
 		if !strings.Contains(line, "container_id="+containerName) &&
-		   !strings.Contains(line, "container_name="+containerName) {
+			!strings.Contains(line, "container_name="+containerName) {
 			continue
 		}
 
