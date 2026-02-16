@@ -2,6 +2,7 @@ package monitor
 
 import (
 	"context"
+	"log"
 	"sync"
 	"time"
 )
@@ -50,6 +51,10 @@ func (fm *FilesystemMonitor) Collect(ctx context.Context, containerName string) 
 				TotalReadMB:      float64(deltaBytes) / 1024 / 1024,
 				ReadRateMBPerSec: rateMBPerSec,
 			}
+
+			// DEBUG: Log filesystem I/O delta
+			log.Printf("[filesystem] Delta: %.2fMB read in %.2fs (rate: %.2f MB/s)",
+				stats.TotalReadMB, elapsed.Seconds(), rateMBPerSec)
 
 			// Update snapshot
 			fm.previousSnapshot.totalReadBytes = currentReadBytes

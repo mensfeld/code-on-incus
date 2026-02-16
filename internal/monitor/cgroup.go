@@ -114,11 +114,13 @@ func CollectResourceStats(ctx context.Context, containerName string) (ResourceSt
 	ioStats, err := readIOStats(filepath.Join(cgroupPath, "io.stat"))
 	if err != nil {
 		// I/O stats might not be available, don't fail
+		log.Printf("[cgroup] WARNING: Failed to read I/O stats for %s: %v", containerName, err)
 		stats.IOReadMB = 0
 		stats.IOWriteMB = 0
 	} else {
 		stats.IOReadMB = ioStats.read / 1024.0 / 1024.0
 		stats.IOWriteMB = ioStats.write / 1024.0 / 1024.0
+		log.Printf("[cgroup] I/O stats for %s: read=%.2fMB write=%.2fMB", containerName, stats.IOReadMB, stats.IOWriteMB)
 	}
 
 	return stats, nil
