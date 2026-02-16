@@ -14,6 +14,35 @@ if tests_dir not in sys.path:
     sys.path.insert(0, tests_dir)
 
 
+# Load skip list for temporarily disabled tests
+def pytest_collection_modifyitems(config, items):
+    """Skip tests listed in pytest_skip_list.txt"""
+    skip_list_path = os.path.join(
+        os.path.dirname(__file__), "..", "pytest_skip_list.txt"
+    )
+
+    if not os.path.exists(skip_list_path):
+        return
+
+    # Read skip list
+    skip_tests = set()
+    with open(skip_list_path) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#"):
+                skip_tests.add(line)
+
+    # Mark matching tests to skip
+    for item in items:
+        # Get test node ID relative to project root
+        test_id = item.nodeid
+        # Also try with tests/ prefix since skip list has full paths
+        if test_id in skip_tests or f"tests/{test_id}" in skip_tests:
+            item.add_marker(
+                pytest.mark.skip(reason="Temporarily disabled - see pytest_skip_list.txt")
+            )
+
+
 @pytest.fixture(scope="session")
 def coi_binary():
     """Return path to coi binary."""
