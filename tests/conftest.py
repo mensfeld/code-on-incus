@@ -108,7 +108,8 @@ def dummy_image(coi_binary):
 
     # Generate hash of install script to version the image
     import hashlib
-    with open(script_path, 'rb') as f:
+
+    with open(script_path, "rb") as f:
         script_hash = hashlib.sha256(f.read()).hexdigest()[:8]
 
     image_name = f"coi-test-dummy-{script_hash}"
