@@ -3,6 +3,7 @@ package monitor
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 )
@@ -78,9 +79,12 @@ func (c *Collector) Collect(ctx context.Context) (MonitorSnapshot, error) {
 		mu.Lock()
 		defer mu.Unlock()
 		if err != nil {
+			log.Printf("[collector] Filesystem collection ERROR: %v", err)
 			snapshot.Errors = append(snapshot.Errors, fmt.Sprintf("filesystem: %v", err))
 			snapshot.Filesystem = FilesystemStats{Available: false}
 		} else {
+			log.Printf("[collector] Filesystem stats: TotalReadMB=%.2f, Available=%v",
+				filesystemStats.TotalReadMB, filesystemStats.Available)
 			snapshot.Filesystem = filesystemStats
 			snapshot.Filesystem.WorkspacePath = c.workspacePath
 		}
