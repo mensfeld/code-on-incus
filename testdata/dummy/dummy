@@ -207,12 +207,15 @@ MSG_NUM=1
 while true; do
     read -r input || break
 
-    # Exit commands
+    # Exit commands - drop to bash shell (like real Claude CLI)
     if [[ "$input" == "exit" || "$input" == "quit" || "$input" == "/exit" ]]; then
         # Save final state
         echo "{\"type\":\"system\",\"content\":\"Session ended\",\"timestamp\":\"$(date -Iseconds)\"}" >> "$SESSION_FILE"
-        echo "Goodbye!"
-        exit 0
+        echo ""
+        echo "Exiting to bash shell..."
+        echo ""
+        # Drop to bash shell instead of exiting
+        exec /bin/bash
     fi
 
     # Save user message to session
