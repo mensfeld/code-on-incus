@@ -275,6 +275,9 @@ class TestEnvironmentScanningPatterns:
             proc.terminate()
             pytest.skip(f"Container {container_name} not found")
 
+        # Wait for monitoring baseline to stabilize
+        time.sleep(10)
+
         # Inject printenv command
         subprocess.Popen(
             [
@@ -329,7 +332,10 @@ class TestEnvironmentScanningPatterns:
             proc.terminate()
             pytest.skip(f"Container {container_name} not found")
 
-        # Inject grep searching for API_KEY
+        # Wait for monitoring baseline to stabilize
+        time.sleep(10)
+
+                # Inject grep searching for API_KEY
         subprocess.Popen(
             [
                 "incus",
@@ -383,7 +389,10 @@ class TestEnvironmentScanningPatterns:
             proc.terminate()
             pytest.skip(f"Container {container_name} not found")
 
-        # Inject grep searching for password
+        # Wait for monitoring baseline to stabilize
+        time.sleep(10)
+
+                # Inject grep searching for password
         subprocess.Popen(
             [
                 "incus",
@@ -437,7 +446,10 @@ class TestEnvironmentScanningPatterns:
             proc.terminate()
             pytest.skip(f"Container {container_name} not found")
 
-        # Inject grep searching for secret
+        # Wait for monitoring baseline to stabilize
+        time.sleep(10)
+
+                # Inject grep searching for secret
         subprocess.Popen(
             [
                 "incus",
@@ -491,7 +503,10 @@ class TestEnvironmentScanningPatterns:
             proc.terminate()
             pytest.skip(f"Container {container_name} not found")
 
-        # Inject command accessing /proc/*/environ
+        # Wait for monitoring baseline to stabilize
+        time.sleep(10)
+
+                # Inject command accessing /proc/*/environ
         subprocess.Popen(
             [
                 "incus",
@@ -541,7 +556,10 @@ class TestAutomatedResponse:
             proc.terminate()
             pytest.skip(f"Container {container_name} not found")
 
-        # Trigger CRITICAL threat
+        # Wait for monitoring baseline to stabilize
+        time.sleep(10)
+
+                # Trigger CRITICAL threat
         subprocess.Popen(
             [
                 "incus",
@@ -632,7 +650,10 @@ print("Task completed")
             proc.terminate()
             pytest.skip(f"Container {container_name} not found")
 
-        # Execute the malicious script from INSIDE the container (realistic scenario)
+        # Wait for monitoring baseline to stabilize
+        time.sleep(10)
+
+                # Execute the malicious script from INSIDE the container (realistic scenario)
         exec_proc = subprocess.Popen(
             [
                 "incus",
@@ -723,7 +744,10 @@ time.sleep(60)
             proc.terminate()
             pytest.skip(f"Container {container_name} not found")
 
-        # Run the warning-triggering script
+        # Wait for monitoring baseline to stabilize
+        time.sleep(10)
+
+                # Run the warning-triggering script
         subprocess.Popen(
             [
                 "incus",
@@ -819,7 +843,10 @@ time.sleep(60)
             stderr_fd.close()
             pytest.skip(f"Container {container_name} not found")
 
-        # IMPORTANT: Wait for monitoring to establish stable baseline
+        # Wait for monitoring baseline to stabilize
+        time.sleep(10)
+
+                # IMPORTANT: Wait for monitoring to establish stable baseline
         # Container startup I/O can take 10-15 seconds to complete
         # Need at least 5-10 baseline polls before test operations
         time.sleep(10)
@@ -916,7 +943,10 @@ time.sleep(30)
             proc.terminate()
             pytest.skip(f"Container {container_name} not found")
 
-        # Trigger HIGH threat
+        # Wait for monitoring baseline to stabilize
+        time.sleep(10)
+
+                # Trigger HIGH threat
         subprocess.Popen(
             ["incus", "exec", container_name, "--", "python3", "/workspace/read_data.py"],
             stdout=subprocess.DEVNULL,
@@ -988,7 +1018,10 @@ time.sleep(60)
             proc.terminate()
             pytest.skip(f"Container {container_name} not found")
 
-        # Execute connection script
+        # Wait for monitoring baseline to stabilize
+        time.sleep(10)
+
+                # Execute connection script
         subprocess.Popen(
             ["incus", "exec", container_name, "--", "python3", "/workspace/connect.py"],
             stdout=subprocess.DEVNULL,
@@ -1056,7 +1089,10 @@ time.sleep(60)
             proc.terminate()
             pytest.skip(f"Container {container_name} not found")
 
-        # Execute metadata access attempt
+        # Wait for monitoring baseline to stabilize
+        time.sleep(10)
+
+                # Execute metadata access attempt
         subprocess.Popen(
             ["incus", "exec", container_name, "--", "python3", "/workspace/metadata.py"],
             stdout=subprocess.DEVNULL,
@@ -1108,7 +1144,10 @@ class TestReverseShellPatterns:
             proc.terminate()
             pytest.skip(f"Container {container_name} not found")
 
-        # Inject Python reverse shell pattern
+        # Wait for monitoring baseline to stabilize
+        time.sleep(10)
+
+                # Inject Python reverse shell pattern
         subprocess.Popen(
             [
                 "incus",
@@ -1178,7 +1217,10 @@ class TestReverseShellPatterns:
             stderr_fd.close()
             pytest.skip(f"Container {container_name} not found")
 
-        # Inject Perl reverse shell pattern
+        # Wait for monitoring baseline to stabilize
+        time.sleep(10)
+
+                # Inject Perl reverse shell pattern
         subprocess.Popen(
             [
                 "incus",
@@ -1246,7 +1288,10 @@ class TestReverseShellPatterns:
             proc.terminate()
             pytest.skip(f"Container {container_name} not found")
 
-        # Inject PHP reverse shell pattern
+        # Wait for monitoring baseline to stabilize
+        time.sleep(10)
+
+                # Inject PHP reverse shell pattern
         subprocess.Popen(
             [
                 "incus",
@@ -1494,7 +1539,10 @@ class TestMultipleThreats:
             proc.terminate()
             pytest.skip(f"Container {container_name} not found")
 
-        # Inject multiple threats simultaneously
+        # Wait for monitoring baseline to stabilize
+        time.sleep(10)
+
+                # Inject multiple threats simultaneously
         # Threat 1: Reverse shell (CRITICAL)
         subprocess.Popen(
             [
@@ -1599,7 +1647,10 @@ class TestAuditLogValidation:
             proc.terminate()
             pytest.skip(f"Container {container_name} not found")
 
-        # Trigger a threat to generate audit log entry
+        # Wait for monitoring baseline to stabilize
+        time.sleep(10)
+
+                # Trigger a threat to generate audit log entry
         subprocess.Popen(
             [
                 "incus",
@@ -1690,7 +1741,10 @@ class TestAuditLogValidation:
             proc.terminate()
             pytest.skip(f"Container {container_name} not found")
 
-        # Trigger environment scanning (easier to verify evidence structure)
+        # Wait for monitoring baseline to stabilize
+        time.sleep(10)
+
+                # Trigger environment scanning (easier to verify evidence structure)
         subprocess.Popen(
             [
                 "incus",
@@ -1765,6 +1819,13 @@ class TestFalsePositives:
             proc.terminate()
             pytest.skip(f"Container {container_name} not found")
 
+        # Wait for monitoring baseline to stabilize
+        time.sleep(10)
+
+                # IMPORTANT: Wait for monitoring baseline to stabilize
+        # This prevents cumulative startup I/O from affecting the test
+        time.sleep(10)
+
         # Read the small file - should NOT trigger
         subprocess.Popen(
             [
@@ -1821,7 +1882,10 @@ class TestFalsePositives:
             proc.terminate()
             pytest.skip(f"Container {container_name} not found")
 
-        # Use nc for legitimate port listening (no -e, no network connection)
+        # Wait for monitoring baseline to stabilize
+        time.sleep(10)
+
+                # Use nc for legitimate port listening (no -e, no network connection)
         # Just check if nc exists, don't actually listen
         subprocess.Popen(
             [
@@ -1899,6 +1963,9 @@ time.sleep(2)
             proc.terminate()
             pytest.skip(f"Container {container_name} not found")
 
+        # Wait for monitoring baseline to stabilize
+        time.sleep(10)
+
         # Run the benign script
         subprocess.Popen(
             [
@@ -1973,6 +2040,9 @@ echo "Build complete"
         if get_container_state(container_name) == "Unknown":
             proc.terminate()
             pytest.skip(f"Container {container_name} not found")
+
+        # Wait for monitoring baseline to stabilize
+        time.sleep(10)
 
         # Run build script
         subprocess.Popen(
@@ -2066,7 +2136,10 @@ class TestThresholdBoundaries:
             proc.terminate()
             pytest.skip(f"Container {container_name} not found")
 
-        # Read the 49MB file
+        # Wait for monitoring baseline to stabilize
+        time.sleep(10)
+
+                # Read the 49MB file
         subprocess.Popen(
             [
                 "incus",
@@ -2131,7 +2204,10 @@ class TestThresholdBoundaries:
             stderr_fd.close()
             pytest.skip(f"Container {container_name} not found")
 
-        # IMPORTANT: Wait for monitoring to establish stable baseline
+        # Wait for monitoring baseline to stabilize
+        time.sleep(10)
+
+                # IMPORTANT: Wait for monitoring to establish stable baseline
         # Container startup I/O can take 10-15 seconds to settle
         time.sleep(10)
 
@@ -2220,7 +2296,10 @@ class TestThresholdBoundaries:
             stderr_fd.close()
             pytest.skip(f"Container {container_name} not found")
 
-        # IMPORTANT: Wait for monitoring to establish stable baseline
+        # Wait for monitoring baseline to stabilize
+        time.sleep(10)
+
+                # IMPORTANT: Wait for monitoring to establish stable baseline
         time.sleep(10)
 
         # Read the 60MB file slowly (using dd with limited block size)
