@@ -335,7 +335,7 @@ class TestEnvironmentScanningPatterns:
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
 
-                # Inject grep searching for API_KEY
+        # Inject grep searching for API_KEY
         subprocess.Popen(
             [
                 "incus",
@@ -392,7 +392,7 @@ class TestEnvironmentScanningPatterns:
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
 
-                # Inject grep searching for password
+        # Inject grep searching for password
         subprocess.Popen(
             [
                 "incus",
@@ -449,7 +449,7 @@ class TestEnvironmentScanningPatterns:
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
 
-                # Inject grep searching for secret
+        # Inject grep searching for secret
         subprocess.Popen(
             [
                 "incus",
@@ -506,7 +506,7 @@ class TestEnvironmentScanningPatterns:
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
 
-                # Inject command accessing /proc/*/environ
+        # Inject command accessing /proc/*/environ
         subprocess.Popen(
             [
                 "incus",
@@ -559,7 +559,7 @@ class TestAutomatedResponse:
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
 
-                # Trigger CRITICAL threat
+        # Trigger CRITICAL threat
         subprocess.Popen(
             [
                 "incus",
@@ -653,7 +653,7 @@ print("Task completed")
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
 
-                # Execute the malicious script from INSIDE the container (realistic scenario)
+        # Execute the malicious script from INSIDE the container (realistic scenario)
         exec_proc = subprocess.Popen(
             [
                 "incus",
@@ -747,7 +747,7 @@ time.sleep(60)
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
 
-                # Run the warning-triggering script
+        # Run the warning-triggering script
         subprocess.Popen(
             [
                 "incus",
@@ -846,7 +846,7 @@ time.sleep(60)
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
 
-                # IMPORTANT: Wait for monitoring to establish stable baseline
+        # IMPORTANT: Wait for monitoring to establish stable baseline
         # Container startup I/O can take 10-15 seconds to complete
         # Need at least 5-10 baseline polls before test operations
         time.sleep(10)
@@ -946,7 +946,7 @@ time.sleep(30)
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
 
-                # Trigger HIGH threat
+        # Trigger HIGH threat
         subprocess.Popen(
             ["incus", "exec", container_name, "--", "python3", "/workspace/read_data.py"],
             stdout=subprocess.DEVNULL,
@@ -1021,7 +1021,7 @@ time.sleep(60)
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
 
-                # Execute connection script
+        # Execute connection script
         subprocess.Popen(
             ["incus", "exec", container_name, "--", "python3", "/workspace/connect.py"],
             stdout=subprocess.DEVNULL,
@@ -1092,7 +1092,7 @@ time.sleep(60)
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
 
-                # Execute metadata access attempt
+        # Execute metadata access attempt
         subprocess.Popen(
             ["incus", "exec", container_name, "--", "python3", "/workspace/metadata.py"],
             stdout=subprocess.DEVNULL,
@@ -1147,7 +1147,7 @@ class TestReverseShellPatterns:
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
 
-                # Inject Python reverse shell pattern
+        # Inject Python reverse shell pattern
         subprocess.Popen(
             [
                 "incus",
@@ -1220,7 +1220,7 @@ class TestReverseShellPatterns:
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
 
-                # Inject Perl reverse shell pattern
+        # Inject Perl reverse shell pattern
         subprocess.Popen(
             [
                 "incus",
@@ -1291,7 +1291,7 @@ class TestReverseShellPatterns:
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
 
-                # Inject PHP reverse shell pattern
+        # Inject PHP reverse shell pattern
         subprocess.Popen(
             [
                 "incus",
@@ -1542,7 +1542,7 @@ class TestMultipleThreats:
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
 
-                # Inject multiple threats simultaneously
+        # Inject multiple threats simultaneously
         # Threat 1: Reverse shell (CRITICAL)
         subprocess.Popen(
             [
@@ -1650,7 +1650,7 @@ class TestAuditLogValidation:
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
 
-                # Trigger a threat to generate audit log entry
+        # Trigger a threat to generate audit log entry
         subprocess.Popen(
             [
                 "incus",
@@ -1744,7 +1744,7 @@ class TestAuditLogValidation:
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
 
-                # Trigger environment scanning (easier to verify evidence structure)
+        # Trigger environment scanning (easier to verify evidence structure)
         subprocess.Popen(
             [
                 "incus",
@@ -1822,7 +1822,7 @@ class TestFalsePositives:
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
 
-                # IMPORTANT: Wait for monitoring baseline to stabilize
+        # IMPORTANT: Wait for monitoring baseline to stabilize
         # This prevents cumulative startup I/O from affecting the test
         time.sleep(10)
 
@@ -1885,7 +1885,7 @@ class TestFalsePositives:
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
 
-                # Use nc for legitimate port listening (no -e, no network connection)
+        # Use nc for legitimate port listening (no -e, no network connection)
         # Just check if nc exists, don't actually listen
         subprocess.Popen(
             [
@@ -2139,7 +2139,7 @@ class TestThresholdBoundaries:
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
 
-                # Read the 49MB file
+        # Read the 49MB file
         subprocess.Popen(
             [
                 "incus",
@@ -2207,7 +2207,7 @@ class TestThresholdBoundaries:
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
 
-                # IMPORTANT: Wait for monitoring to establish stable baseline
+        # IMPORTANT: Wait for monitoring to establish stable baseline
         # Container startup I/O can take 10-15 seconds to settle
         time.sleep(10)
 
@@ -2299,7 +2299,7 @@ class TestThresholdBoundaries:
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
 
-                # IMPORTANT: Wait for monitoring to establish stable baseline
+        # IMPORTANT: Wait for monitoring to establish stable baseline
         time.sleep(10)
 
         # Read the 60MB file slowly (using dd with limited block size)
