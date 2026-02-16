@@ -207,15 +207,15 @@ MSG_NUM=1
 while true; do
     read -r input || break
 
-    # Exit commands - drop to bash shell (like real Claude CLI)
+    # Exit commands - exit and let tmux command handle bash transition
     if [[ "$input" == "exit" || "$input" == "quit" || "$input" == "/exit" ]]; then
         # Save final state
         echo "{\"type\":\"system\",\"content\":\"Session ended\",\"timestamp\":\"$(date -Iseconds)\"}" >> "$SESSION_FILE"
         echo ""
         echo "Exiting to bash shell..."
         echo ""
-        # Drop to interactive bash shell instead of exiting
-        exec /bin/bash -i
+        # Exit normally - tmux command will exec bash -i after this
+        exit 0
     fi
 
     # Save user message to session
