@@ -787,12 +787,16 @@ time.sleep(60)
         )
         exfil_script.chmod(0o755)
 
+        # Capture stderr for debugging
+        stderr_file = Path("/tmp") / "coi-test-large-file-debug.log"
+        stderr_fd = open(stderr_file, "w")  # noqa: SIM115
+
         # Start shell with monitoring enabled (auto_pause_on_high=true)
         proc = subprocess.Popen(
             [coi_binary, "shell", "--workspace", str(test_workspace), "--slot", "6", "--monitor"],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=stderr_fd,
         )
 
         time.sleep(8)
@@ -801,6 +805,7 @@ time.sleep(60)
 
         if get_container_state(container_name) == "Unknown":
             proc.terminate()
+            stderr_fd.close()
             pytest.skip(f"Container {container_name} not found")
 
         # Execute the exfiltration script
@@ -829,6 +834,15 @@ time.sleep(60)
                 paused = True
                 break
 
+        # Close stderr and print debug log BEFORE assertions
+        proc.terminate()
+        stderr_fd.close()
+
+        print("\n=== COI Large File Read Debug Log ===")
+        if stderr_file.exists():
+            print(stderr_file.read_text())
+        print("=== End Debug Log ===\n")
+
         assert paused, "Container should be auto-paused on HIGH threat (large file read)"
 
         # Verify HIGH threat in audit log
@@ -840,7 +854,6 @@ time.sleep(60)
         paused_events = [e for e in events if e.get("action") == "paused"]
         assert len(paused_events) > 0, "Expected action='paused' in audit log"
 
-        proc.terminate()
         cleanup_container(container_name, coi_binary)
 
     def test_high_threat_without_auto_pause(self, test_workspace, enable_monitoring, coi_binary):
@@ -1121,6 +1134,10 @@ class TestReverseShellPatterns:
 
     def test_perl_reverse_shell_detection(self, test_workspace, enable_monitoring, coi_binary):
         """Test Perl reverse shell pattern detection."""
+        # Capture stderr for debugging
+        stderr_file = Path("/tmp") / "coi-test-perl-debug.log"
+        stderr_fd = open(stderr_file, "w")  # noqa: SIM115
+
         proc = subprocess.Popen(
             [
                 coi_binary,
@@ -1133,7 +1150,7 @@ class TestReverseShellPatterns:
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=stderr_fd,
         )
 
         time.sleep(8)
@@ -1142,6 +1159,7 @@ class TestReverseShellPatterns:
 
         if get_container_state(container_name) == "Unknown":
             proc.terminate()
+            stderr_fd.close()
             pytest.skip(f"Container {container_name} not found")
 
         # Inject Perl reverse shell pattern
@@ -1169,6 +1187,15 @@ class TestReverseShellPatterns:
                 killed = True
                 break
 
+        # Close stderr and print debug log BEFORE assertions
+        proc.terminate()
+        stderr_fd.close()
+
+        print("\n=== COI Perl Test Debug Log ===")
+        if stderr_file.exists():
+            print(stderr_file.read_text())
+        print("=== End Debug Log ===\n")
+
         assert killed, "Container should be killed on Perl reverse shell detection"
 
         # Verify threat logged
@@ -1176,7 +1203,6 @@ class TestReverseShellPatterns:
         critical = [e for e in events if e.get("level") == "critical"]
         assert len(critical) > 0, "Expected CRITICAL threat for Perl reverse shell"
 
-        proc.terminate()
         cleanup_container(container_name, coi_binary)
 
     def test_php_reverse_shell_detection(self, test_workspace, enable_monitoring, coi_binary):
@@ -2061,6 +2087,10 @@ class TestThresholdBoundaries:
         large_file = Path(test_workspace) / "data50mb.bin"
         large_file.write_bytes(b"B" * (50 * 1024 * 1024))
 
+        # Capture stderr for debugging
+        stderr_file = Path("/tmp") / "coi-test-50mb-debug.log"
+        stderr_fd = open(stderr_file, "w")  # noqa: SIM115
+
         proc = subprocess.Popen(
             [
                 coi_binary,
@@ -2073,7 +2103,7 @@ class TestThresholdBoundaries:
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=stderr_fd,
         )
 
         time.sleep(8)
@@ -2082,6 +2112,7 @@ class TestThresholdBoundaries:
 
         if get_container_state(container_name) == "Unknown":
             proc.terminate()
+            stderr_fd.close()
             pytest.skip(f"Container {container_name} not found")
 
         # Read the 50MB file
@@ -2109,6 +2140,15 @@ class TestThresholdBoundaries:
                 paused = True
                 break
 
+        # Close stderr and print debug log BEFORE assertions
+        proc.terminate()
+        stderr_fd.close()
+
+        print("\n=== COI 50MB Read Debug Log ===")
+        if stderr_file.exists():
+            print(stderr_file.read_text())
+        print("=== End Debug Log ===\n")
+
         assert paused, "Container should be paused on 50MB read (at threshold)"
 
         # Verify HIGH threat logged
@@ -2118,7 +2158,6 @@ class TestThresholdBoundaries:
         ]
         assert len(high_fs) > 0, "50MB read should trigger HIGH filesystem threat"
 
-        proc.terminate()
         cleanup_container(container_name, coi_binary)
 
     def test_file_read_above_threshold_triggers(
@@ -2128,6 +2167,10 @@ class TestThresholdBoundaries:
         # Create 60MB file (well above threshold)
         large_file = Path(test_workspace) / "data60mb.bin"
         large_file.write_bytes(b"C" * (60 * 1024 * 1024))
+
+        # Capture stderr for debugging
+        stderr_file = Path("/tmp") / "coi-test-60mb-debug.log"
+        stderr_fd = open(stderr_file, "w")  # noqa: SIM115
 
         proc = subprocess.Popen(
             [
@@ -2141,7 +2184,7 @@ class TestThresholdBoundaries:
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=stderr_fd,
         )
 
         time.sleep(8)
@@ -2150,6 +2193,7 @@ class TestThresholdBoundaries:
 
         if get_container_state(container_name) == "Unknown":
             proc.terminate()
+            stderr_fd.close()
             pytest.skip(f"Container {container_name} not found")
 
         # Read the 60MB file
@@ -2177,6 +2221,15 @@ class TestThresholdBoundaries:
                 paused = True
                 break
 
+        # Close stderr and print debug log BEFORE assertions
+        proc.terminate()
+        stderr_fd.close()
+
+        print("\n=== COI 60MB Read Debug Log ===")
+        if stderr_file.exists():
+            print(stderr_file.read_text())
+        print("=== End Debug Log ===\n")
+
         assert paused, "Container should be paused on 60MB read (above threshold)"
 
         # Verify HIGH threat logged
@@ -2186,7 +2239,6 @@ class TestThresholdBoundaries:
         ]
         assert len(high_fs) > 0, "60MB read should trigger HIGH filesystem threat"
 
-        proc.terminate()
         cleanup_container(container_name, coi_binary)
 
 
