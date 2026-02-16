@@ -724,18 +724,17 @@ func CheckContainerConnectivity(imageName string) HealthCheck {
 	}
 
 	// Wait for DHCP to assign an IP (up to 15 seconds)
-	var hasIP bool
+	var containerIP string
 	for i := 0; i < 15; i++ {
-		// Check if eth0 has an IPv4 address
-		ipOutput, err := container.IncusOutput("exec", containerName, "--", "ip", "-4", "addr", "show", "eth0")
-		if err == nil && strings.Contains(ipOutput, "inet ") {
-			hasIP = true
+		ip, err := network.GetContainerIP(containerName)
+		if err == nil && ip != "" {
+			containerIP = ip
 			break
 		}
 		time.Sleep(1 * time.Second)
 	}
 
-	if !hasIP {
+	if containerIP == "" {
 		return HealthCheck{
 			Name:    "container_connectivity",
 			Status:  StatusFailed,
@@ -743,11 +742,29 @@ func CheckContainerConnectivity(imageName string) HealthCheck {
 		}
 	}
 
+	// Apply firewall rules to allow container traffic
+	// (FORWARD chain policy may be DROP with firewalld)
+	if err := network.EnsureOpenModeRules(containerIP); err != nil {
+		return HealthCheck{
+			Name:    "container_connectivity",
+			Status:  StatusWarning,
+			Message: fmt.Sprintf("Failed to apply firewall rules: %v", err),
+		}
+	}
+
+	// Clean up firewall rules on exit
+	defer func() {
+		_ = network.RemoveOpenModeRules(containerIP)
+	}()
+
+	// Give networking additional time to fully stabilize after DHCP
+	time.Sleep(3 * time.Second)
+
 	// Test 1: DNS resolution using getent
 	dnsOutput, dnsErr := container.IncusOutput("exec", containerName, "--", "getent", "hosts", "api.anthropic.com")
 
 	// Test 2: HTTP connectivity using curl
-	httpOutput, httpErr := container.IncusOutput("exec", containerName, "--", "curl", "-s", "--connect-timeout", "5", "-o", "/dev/null", "-w", "%{http_code}", "https://api.anthropic.com")
+	httpOutput, httpErr := container.IncusOutput("exec", containerName, "--", "curl", "-s", "--connect-timeout", "10", "-o", "/dev/null", "-w", "%{http_code}", "https://api.anthropic.com")
 
 	// Analyze results
 	dnsOK := dnsErr == nil && dnsOutput != ""
