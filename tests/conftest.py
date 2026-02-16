@@ -106,12 +106,23 @@ def dummy_image(coi_binary):
     if not os.path.exists(script_path):
         pytest.skip(f"Dummy install script not found: {script_path}")
 
-    # Generate hash of install script to version the image
+    # Generate hash of install script AND dummy binary to version the image
+    # Both files affect the image content, so changes to either should trigger rebuild
     import hashlib
 
-    with open(script_path, "rb") as f:
-        script_hash = hashlib.sha256(f.read()).hexdigest()[:8]
+    hasher = hashlib.sha256()
 
+    # Hash install script
+    with open(script_path, "rb") as f:
+        hasher.update(f.read())
+
+    # Hash dummy binary
+    dummy_path = os.path.join(os.path.dirname(__file__), "..", "testdata", "dummy", "dummy")
+    if os.path.exists(dummy_path):
+        with open(dummy_path, "rb") as f:
+            hasher.update(f.read())
+
+    script_hash = hasher.hexdigest()[:8]
     image_name = f"coi-test-dummy-{script_hash}"
 
     # Check if image already exists
