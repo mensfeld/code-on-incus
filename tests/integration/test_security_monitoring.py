@@ -39,6 +39,7 @@ enabled = true
 auto_pause_on_high = true
 auto_kill_on_critical = true
 poll_interval_sec = 1
+file_read_rate_mb_per_sec = 0
 """
     )
 
@@ -699,25 +700,6 @@ print("Task completed")
 
     def test_monitoring_logs_for_warnings(self, test_workspace, enable_monitoring, coi_binary):
         """Verify monitoring logs contain WARNING messages, not just audit logs."""
-        # Create script that triggers WARNING (not CRITICAL)
-        warning_script = Path(test_workspace) / "scan_env.py"
-        warning_script.write_text(
-            """#!/usr/bin/env python3
-import subprocess
-import time
-
-# Simulate environment scanning (WARNING level)
-subprocess.Popen(
-    ["bash", "-c", "exec -a 'env' sleep 30"],
-    stdout=subprocess.DEVNULL,
-    stderr=subprocess.DEVNULL,
-)
-
-time.sleep(60)
-"""
-        )
-        warning_script.chmod(0o755)
-
         # Start shell and capture stderr (where monitoring logs go)
         proc = subprocess.Popen(
             [
@@ -728,12 +710,10 @@ time.sleep(60)
                 "--slot",
                 "5",
                 "--monitor",
-                "--debug",
             ],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
 
         time.sleep(8)
@@ -747,15 +727,16 @@ time.sleep(60)
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
 
-        # Run the warning-triggering script
+        # Inject env scanning process directly (simulates environment scanning - WARNING level)
         subprocess.Popen(
             [
                 "incus",
                 "exec",
                 container_name,
                 "--",
-                "python3",
-                "/workspace/scan_env.py",
+                "bash",
+                "-c",
+                "exec -a 'env' sleep 30",
             ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
