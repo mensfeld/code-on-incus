@@ -1810,6 +1810,9 @@ poll_interval_sec = 1
                 proc.terminate()
                 pytest.skip(f"Container {container_name} not found")
 
+            # Wait for monitoring baseline to stabilize
+            time.sleep(10)
+
             # Inject malicious command - should be detected via config-enabled monitoring
             subprocess.Popen(
                 [
