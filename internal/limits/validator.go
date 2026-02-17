@@ -245,7 +245,7 @@ func FormatValidationErrors(errors map[string]error) string {
 	var sb strings.Builder
 	sb.WriteString("validation errors:\n")
 	for field, err := range errors {
-		sb.WriteString(fmt.Sprintf("  - %s: %v\n", field, err))
+		fmt.Fprintf(&sb, "  - %s: %v\n", field, err)
 	}
 	return sb.String()
 }

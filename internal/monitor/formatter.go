@@ -12,12 +12,12 @@ func FormatSnapshot(snapshot MonitorSnapshot) string {
 	var sb strings.Builder
 
 	// Header
-	sb.WriteString(fmt.Sprintf("Container: %s", snapshot.ContainerName))
+	fmt.Fprintf(&sb, "Container: %s", snapshot.ContainerName)
 	if snapshot.ContainerIP != "" {
-		sb.WriteString(fmt.Sprintf(" (%s)", snapshot.ContainerIP))
+		fmt.Fprintf(&sb, " (%s)", snapshot.ContainerIP)
 	}
 	sb.WriteString("\n")
-	sb.WriteString(fmt.Sprintf("Timestamp: %s\n", snapshot.Timestamp.Format(time.RFC3339)))
+	fmt.Fprintf(&sb, "Timestamp: %s\n", snapshot.Timestamp.Format(time.RFC3339))
 	sb.WriteString(strings.Repeat("━", 70) + "\n\n")
 
 	// Threats summary
@@ -72,22 +72,22 @@ func FormatSnapshot(snapshot MonitorSnapshot) string {
 				levelStr = "INFO    "
 			}
 
-			sb.WriteString(fmt.Sprintf("  [%s] %s  %s\n",
+			fmt.Fprintf(&sb, "  [%s] %s  %s\n",
 				threat.Timestamp.Format("15:04:05"),
 				levelStr,
-				threat.Title))
-			sb.WriteString(fmt.Sprintf("                      %s\n", threat.Description))
+				threat.Title)
+			fmt.Fprintf(&sb, "                      %s\n", threat.Description)
 			if threat.Action != "" && threat.Action != "logged" {
-				sb.WriteString(fmt.Sprintf("                      → Action: %s\n", threat.Action))
+				fmt.Fprintf(&sb, "                      → Action: %s\n", threat.Action)
 			}
 			sb.WriteString("\n")
 		}
 	}
 
 	// Network stats
-	sb.WriteString(fmt.Sprintf("NETWORK (%d active connections", snapshot.Network.ActiveConnections))
+	fmt.Fprintf(&sb, "NETWORK (%d active connections", snapshot.Network.ActiveConnections)
 	if snapshot.Network.SuspiciousCount > 0 {
-		sb.WriteString(fmt.Sprintf(", %d suspicious", snapshot.Network.SuspiciousCount))
+		fmt.Fprintf(&sb, ", %d suspicious", snapshot.Network.SuspiciousCount)
 	}
 	sb.WriteString(")\n")
 
@@ -98,8 +98,8 @@ func FormatSnapshot(snapshot MonitorSnapshot) string {
 			if conn.Suspicious {
 				status = "⚠ SUSPICIOUS"
 			}
-			sb.WriteString(fmt.Sprintf("  %-8s  %-18s  %-18s  %-11s  %s\n",
-				conn.Protocol, conn.LocalAddr, conn.RemoteAddr, conn.State, status))
+			fmt.Fprintf(&sb, "  %-8s  %-18s  %-18s  %-11s  %s\n",
+				conn.Protocol, conn.LocalAddr, conn.RemoteAddr, conn.State, status)
 		}
 	} else {
 		sb.WriteString("  No active connections\n")
@@ -108,7 +108,7 @@ func FormatSnapshot(snapshot MonitorSnapshot) string {
 
 	// Process stats
 	if snapshot.Processes.Available {
-		sb.WriteString(fmt.Sprintf("PROCESSES (%d running)\n", snapshot.Processes.TotalCount))
+		fmt.Fprintf(&sb, "PROCESSES (%d running)\n", snapshot.Processes.TotalCount)
 		if len(snapshot.Processes.Processes) > 0 {
 			sb.WriteString("  PID    User   Command                                  Flags\n")
 			for _, proc := range snapshot.Processes.Processes {
@@ -123,8 +123,8 @@ func FormatSnapshot(snapshot MonitorSnapshot) string {
 					cmd = cmd[:37] + "..."
 				}
 
-				sb.WriteString(fmt.Sprintf("  %-6d %-6s %-40s %s\n",
-					proc.PID, proc.User, cmd, flags))
+				fmt.Fprintf(&sb, "  %-6d %-6s %-40s %s\n",
+					proc.PID, proc.User, cmd, flags)
 			}
 		}
 	} else {
@@ -135,10 +135,10 @@ func FormatSnapshot(snapshot MonitorSnapshot) string {
 	// Filesystem stats
 	if snapshot.Filesystem.Available {
 		sb.WriteString("FILESYSTEM\n")
-		sb.WriteString(fmt.Sprintf("  Workspace Reads:  %.2f MB (%.2f MB/sec)\n",
-			snapshot.Filesystem.TotalReadMB, snapshot.Filesystem.ReadRateMBPerSec))
+		fmt.Fprintf(&sb, "  Workspace Reads:  %.2f MB (%.2f MB/sec)\n",
+			snapshot.Filesystem.TotalReadMB, snapshot.Filesystem.ReadRateMBPerSec)
 		if snapshot.Filesystem.FilesAccessed > 0 {
-			sb.WriteString(fmt.Sprintf("  Files Accessed:   %d\n", snapshot.Filesystem.FilesAccessed))
+			fmt.Fprintf(&sb, "  Files Accessed:   %d\n", snapshot.Filesystem.FilesAccessed)
 		}
 	} else {
 		sb.WriteString("FILESYSTEM\n  Not available\n")
@@ -147,23 +147,23 @@ func FormatSnapshot(snapshot MonitorSnapshot) string {
 
 	// Resource stats
 	sb.WriteString("RESOURCES\n")
-	sb.WriteString(fmt.Sprintf("  CPU:     %.1fs total (%.1fs user, %.1fs system)\n",
-		snapshot.Resources.CPUTimeSeconds, snapshot.Resources.UserCPUSeconds, snapshot.Resources.SysCPUSeconds))
+	fmt.Fprintf(&sb, "  CPU:     %.1fs total (%.1fs user, %.1fs system)\n",
+		snapshot.Resources.CPUTimeSeconds, snapshot.Resources.UserCPUSeconds, snapshot.Resources.SysCPUSeconds)
 	if snapshot.Resources.MemoryLimitMB > 0 {
 		memPercent := (snapshot.Resources.MemoryMB / snapshot.Resources.MemoryLimitMB) * 100
-		sb.WriteString(fmt.Sprintf("  Memory:  %.0f MB / %.0f MB (%.1f%%)\n",
-			snapshot.Resources.MemoryMB, snapshot.Resources.MemoryLimitMB, memPercent))
+		fmt.Fprintf(&sb, "  Memory:  %.0f MB / %.0f MB (%.1f%%)\n",
+			snapshot.Resources.MemoryMB, snapshot.Resources.MemoryLimitMB, memPercent)
 	} else {
-		sb.WriteString(fmt.Sprintf("  Memory:  %.0f MB\n", snapshot.Resources.MemoryMB))
+		fmt.Fprintf(&sb, "  Memory:  %.0f MB\n", snapshot.Resources.MemoryMB)
 	}
-	sb.WriteString(fmt.Sprintf("  I/O:     %.0f MB read, %.0f MB write\n",
-		snapshot.Resources.IOReadMB, snapshot.Resources.IOWriteMB))
+	fmt.Fprintf(&sb, "  I/O:     %.0f MB read, %.0f MB write\n",
+		snapshot.Resources.IOReadMB, snapshot.Resources.IOWriteMB)
 
 	// Errors
 	if len(snapshot.Errors) > 0 {
 		sb.WriteString("\nERRORS\n")
 		for _, err := range snapshot.Errors {
-			sb.WriteString(fmt.Sprintf("  - %s\n", err))
+			fmt.Fprintf(&sb, "  - %s\n", err)
 		}
 	}
 
@@ -188,11 +188,11 @@ func FormatThreatAlert(threat ThreatEvent) string {
 	reset := "\033[0m"
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("\n%s⚠ SECURITY ALERT [%s]%s\n", color, strings.ToUpper(string(threat.Level)), reset))
-	sb.WriteString(fmt.Sprintf("%s%s%s\n", color, threat.Title, reset))
-	sb.WriteString(fmt.Sprintf("%s\n", threat.Description))
+	fmt.Fprintf(&sb, "\n%s⚠ SECURITY ALERT [%s]%s\n", color, strings.ToUpper(string(threat.Level)), reset)
+	fmt.Fprintf(&sb, "%s%s%s\n", color, threat.Title, reset)
+	fmt.Fprintf(&sb, "%s\n", threat.Description)
 	if threat.Action != "" && threat.Action != "logged" {
-		sb.WriteString(fmt.Sprintf("\n→ Action taken: %s\n", threat.Action))
+		fmt.Fprintf(&sb, "\n→ Action taken: %s\n", threat.Action)
 	}
 	sb.WriteString("\n")
 

@@ -1550,11 +1550,11 @@ func CheckAuditLogDirectory() HealthCheck {
 	auditDir := filepath.Join(os.Getenv("HOME"), ".coi", "audit")
 
 	// Check if directory exists
-	info, err := os.Stat(auditDir)
+	info, err := os.Stat(auditDir) //nolint:gosec // G703: path is derived from HOME env var + fixed ".coi/audit" suffix, not user-supplied
 	if err != nil {
 		if os.IsNotExist(err) {
 			// Try to create it
-			if err := os.MkdirAll(auditDir, 0o755); err != nil {
+			if err := os.MkdirAll(auditDir, 0o755); err != nil { //nolint:gosec // G703: same path as above
 				return HealthCheck{
 					Name:    "audit_log_directory",
 					Status:  StatusFailed,
@@ -1599,7 +1599,7 @@ func CheckAuditLogDirectory() HealthCheck {
 
 	// Check if writable by creating a test file
 	testFile := filepath.Join(auditDir, ".write_test")
-	if err := os.WriteFile(testFile, []byte("test"), 0o644); err != nil {
+	if err := os.WriteFile(testFile, []byte("test"), 0o644); err != nil { //nolint:gosec // G703: testFile is derived from HOME env var + fixed path suffix, not user-supplied
 		return HealthCheck{
 			Name:    "audit_log_directory",
 			Status:  StatusFailed,
@@ -1610,7 +1610,7 @@ func CheckAuditLogDirectory() HealthCheck {
 			},
 		}
 	}
-	os.Remove(testFile)
+	os.Remove(testFile) //nolint:gosec // G703: testFile is derived from HOME env var + fixed path suffix, not user-supplied
 
 	return HealthCheck{
 		Name:    "audit_log_directory",

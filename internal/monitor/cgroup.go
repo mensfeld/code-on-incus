@@ -240,7 +240,7 @@ func readIOStats(path string) (ioStats, error) {
 	for scanner.Scan() {
 		line := scanner.Text()
 		lineCount++
-		log.Printf("[cgroup] I/O stat line %d: %q", lineCount, line)
+		log.Printf("[cgroup] I/O stat line %d: %q", lineCount, line) //nolint:gosec // G706: line is from kernel cgroup file, not user input
 
 		fields := strings.Fields(line)
 		if len(fields) < 2 {
@@ -262,10 +262,10 @@ func readIOStats(path string) (ioStats, error) {
 			switch parts[0] {
 			case "rbytes":
 				stats.read += value
-				log.Printf("[cgroup] Found rbytes: %.0f (total read now: %.0f)", value, stats.read)
+				log.Printf("[cgroup] Found rbytes: %.0f (total read now: %.0f)", value, stats.read) //nolint:gosec // G706: float from kernel cgroup file, not user-controlled
 			case "wbytes":
 				stats.write += value
-				log.Printf("[cgroup] Found wbytes: %.0f (total write now: %.0f)", value, stats.write)
+				log.Printf("[cgroup] Found wbytes: %.0f (total write now: %.0f)", value, stats.write) //nolint:gosec // G706: float from kernel cgroup file, not user-controlled
 			}
 		}
 	}

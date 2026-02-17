@@ -392,7 +392,7 @@ func copyFile(src, dst string) error {
 		return err
 	}
 
-	dstFile, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, srcInfo.Mode())
+	dstFile, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, srcInfo.Mode()) //nolint:gosec // G703: dst is a validated internal path passed by the caller, not user-supplied
 	if err != nil {
 		return err
 	}
