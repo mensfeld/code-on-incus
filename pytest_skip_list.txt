@@ -1,21 +1,5 @@
-# Temporarily skipped tests - to be fixed one by one
-# Root cause for all shell/core failures was CI config having monitoring.enabled=true globally.
+# All tests re-enabled after root cause fix:
+# CI config was setting monitoring.enabled=true globally, causing monitoring daemon
+# to run during all tests and interfere with bash shell interactivity.
 # Fixed in .github/workflows/ci.yml - monitoring now disabled in CI config.
 # Monitoring tests use enable_monitoring fixture to set up their own config.
-
-# Monitoring failures (14 tests) - need fixing in monitoring feature code
-tests/integration/test_security_monitoring.py::TestThreatDetection::test_env_scanning_detection
-tests/integration/test_security_monitoring.py::TestEnvironmentScanningPatterns::test_proc_environ_access_detection
-tests/integration/test_security_monitoring.py::TestFalsePositives::test_normal_build_operations_no_alert
-tests/integration/test_security_monitoring.py::TestPromptInjectionScenario::test_monitoring_logs_for_warnings
-tests/integration/test_security_monitoring.py::TestMultipleThreats::test_multiple_simultaneous_threats
-tests/integration/test_security_monitoring.py::TestPromptInjectionScenario::test_malicious_script_execution_inside_container
-tests/integration/test_security_monitoring.py::TestReverseShellPatterns::test_php_reverse_shell_detection
-tests/integration/test_security_monitoring.py::TestThresholdBoundaries::test_file_read_below_threshold_no_alert
-tests/integration/test_security_monitoring.py::TestFalsePositives::test_legitimate_file_reads_no_alert
-tests/integration/test_security_monitoring.py::TestHighLevelThreats::test_large_file_read_triggers_auto_pause
-tests/integration/test_security_monitoring.py::TestMonitoringConfiguration::test_monitoring_enabled_via_config_only
-tests/integration/test_security_monitoring.py::TestEnvironmentScanningPatterns::test_grep_password_detection
-tests/integration/test_security_monitoring.py::TestReverseShellPatterns::test_perl_reverse_shell_detection
-tests/integration/test_security_monitoring.py::TestReverseShellPatterns::test_python_reverse_shell_detection
-tests/integration/test_security_monitoring.py::TestThreatDetection::test_reverse_shell_detection
