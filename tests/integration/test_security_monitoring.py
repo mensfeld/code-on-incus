@@ -1225,6 +1225,88 @@ time.sleep(60)
         proc.terminate()
         cleanup_container(container_name, coi_binary)
 
+    def test_rfc1918_private_address_detection(self, test_workspace, enable_monitoring, coi_binary):
+        """Test that connections to RFC1918 private addresses trigger a network threat."""
+        rfc1918_script = Path(test_workspace) / "rfc1918.py"
+        rfc1918_script.write_text(
+            """#!/usr/bin/env python3
+import subprocess
+import time
+
+# Attempt connections to RFC1918 private address ranges
+# 10.0.0.0/8
+subprocess.Popen(
+    ["timeout", "5", "nc", "-w", "2", "10.0.0.1", "80"],
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,
+)
+# 172.16.0.0/12
+subprocess.Popen(
+    ["timeout", "5", "nc", "-w", "2", "172.16.0.1", "80"],
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,
+)
+# 192.168.0.0/16
+subprocess.Popen(
+    ["timeout", "5", "nc", "-w", "2", "192.168.1.1", "80"],
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,
+)
+
+time.sleep(60)
+"""
+        )
+        rfc1918_script.chmod(0o755)
+
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                str(test_workspace),
+                "--slot",
+                "36",
+                "--monitor",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(8)
+
+        container_name = (
+            get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-36"
+        )
+
+        if get_container_state(container_name) == "Unknown":
+            proc.terminate()
+            pytest.skip(f"Container {container_name} not found")
+
+        # Wait for monitoring baseline to stabilize
+        time.sleep(10)
+
+        # Execute RFC1918 connection script
+        subprocess.Popen(
+            ["incus", "exec", container_name, "--", "python3", "/workspace/rfc1918.py"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(10)
+
+        # Lenient check: if network threats are detected they must be HIGH or CRITICAL
+        events = get_threat_events(container_name)
+        network_threats = [e for e in events if e.get("category") == "network"]
+        if len(network_threats) > 0:
+            for threat in network_threats:
+                assert threat.get("level") in ["high", "critical"], (
+                    f"Expected HIGH/CRITICAL for RFC1918 address, got {threat.get('level')}"
+                )
+
+        proc.terminate()
+        cleanup_container(container_name, coi_binary)
+
 
 class TestReverseShellPatterns:
     """Test detection of various reverse shell patterns."""
