@@ -291,23 +291,13 @@ jobs:
         run: |
           # Use open mode by default so image builds can access internet
           # Tests will explicitly use restricted/allowlist modes when testing network isolation
+          # Monitoring is NOT enabled globally - monitoring tests use their own enable_monitoring fixture
           mkdir -p ~/.config/coi
           cat > ~/.config/coi/config.toml << 'EOF'
           [network]
           mode = "open"
-
-          [monitoring]
-          enabled = true
-          auto_pause_on_high = false
-          auto_kill_on_critical = false
-
-          [monitoring.nft]
-          enabled = true
-          rate_limit_per_second = 100
-          dns_query_threshold = 100
-          log_dns_queries = true
           EOF
-          echo "Created COI config with network.mode = open and NFT monitoring enabled"
+          echo "Created COI config with network.mode = open (monitoring disabled by default)"
 
       - name: Test bind mount functionality
         run: |
