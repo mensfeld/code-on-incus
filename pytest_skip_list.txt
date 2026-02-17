@@ -1,6 +1,7 @@
 # Temporarily skipped tests - to be fixed one by one
-# Root cause for all shell/core failures was monitoring enabled by default.
-# Fixed in config.go (Enabled: false). All shell/core tests now re-enabled.
+# Root cause for all shell/core failures was CI config having monitoring.enabled=true globally.
+# Fixed in .github/workflows/ci.yml - monitoring now disabled in CI config.
+# Monitoring tests use enable_monitoring fixture to set up their own config.
 
 # Monitoring failures (14 tests) - need fixing in monitoring feature code
 tests/integration/test_security_monitoring.py::TestThreatDetection::test_env_scanning_detection
