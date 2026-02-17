@@ -627,6 +627,9 @@ print("Task completed")
         malicious_script.chmod(0o755)
 
         # Start shell with monitoring enabled
+        # Use DEVNULL for all pipes - monitoring daemon writes many log lines to stderr,
+        # and if the pipe buffer fills (64KB), the monitoring goroutine blocks on stderr
+        # writes and can no longer poll the process list for threats.
         proc = subprocess.Popen(
             [
                 coi_binary,
@@ -637,10 +640,9 @@ print("Task completed")
                 "4",
                 "--monitor",  # Enable monitoring
             ],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
 
         time.sleep(8)
