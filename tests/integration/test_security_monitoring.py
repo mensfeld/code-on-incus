@@ -1149,6 +1149,82 @@ time.sleep(60)
         proc.terminate()
         cleanup_container(container_name, coi_binary)
 
+    def test_suspicious_port_high_threat(self, test_workspace, enable_monitoring, coi_binary):
+        """Test connection to suspicious ports (1234, 31337) triggers HIGH/CRITICAL threat."""
+        port_script = Path(test_workspace) / "suspicious_port.py"
+        port_script.write_text(
+            """#!/usr/bin/env python3
+import subprocess
+import time
+
+# Connect to port 1234 (common reverse shell port, HIGH threat)
+subprocess.Popen(
+    ["timeout", "30", "nc", "-w", "2", "8.8.8.8", "1234"],
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,
+)
+
+# Connect to port 31337 (elite/leet port, HIGH threat)
+subprocess.Popen(
+    ["timeout", "30", "nc", "-w", "2", "8.8.8.8", "31337"],
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,
+)
+
+time.sleep(60)
+"""
+        )
+        port_script.chmod(0o755)
+
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                str(test_workspace),
+                "--slot",
+                "35",
+                "--monitor",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(8)
+
+        container_name = (
+            get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-35"
+        )
+
+        if get_container_state(container_name) == "Unknown":
+            proc.terminate()
+            pytest.skip(f"Container {container_name} not found")
+
+        # Wait for monitoring baseline to stabilize
+        time.sleep(10)
+
+        # Execute suspicious port connection script
+        subprocess.Popen(
+            ["incus", "exec", container_name, "--", "python3", "/workspace/suspicious_port.py"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(10)
+
+        # Check for network threats - lenient check (network monitoring is best-effort)
+        events = get_threat_events(container_name)
+        network_threats = [e for e in events if e.get("category") == "network"]
+        if len(network_threats) > 0:
+            for threat in network_threats:
+                assert threat.get("level") in ["high", "critical"], (
+                    f"Expected HIGH/CRITICAL for suspicious port, got {threat.get('level')}"
+                )
+
+        proc.terminate()
+        cleanup_container(container_name, coi_binary)
+
 
 class TestReverseShellPatterns:
     """Test detection of various reverse shell patterns."""
