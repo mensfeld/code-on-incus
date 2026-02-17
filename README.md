@@ -16,6 +16,8 @@ Run AI coding assistants (Claude Code, Aider, and more) in isolated, production-
 
 **Security First:** Unlike Docker or bare-metal execution, your environment variables, SSH keys, and Git credentials are **never** exposed to AI tools. Containers run in complete isolation with no access to your host credentials unless explicitly mounted.
 
+**Proactive Defense:** COI doesn't just isolate AI tools — it actively watches them. A built-in security monitoring daemon detects reverse shells, credential scanning, and large data reads in real time, automatically pausing or killing the container before damage can occur. No manual intervention needed.
+
 *Think Docker for AI coding tools, but with system containers that actually work like real machines.*
 
 ![Demo](misc/demo.gif)

@@ -778,52 +778,18 @@ class TestHighLevelThreats:
         self, test_workspace, enable_monitoring, coi_binary
     ):
         """Test large file read detection (HIGH) triggers auto-pause."""
-        # Create a large file to read (simulating data exfiltration)
-        large_file = Path(test_workspace) / "secrets.txt"
-        # Create 100MB file (exceeds default threshold)
-        large_file.write_text("SECRET_DATA\n" * 10_000_000)
+        # Create a 200MB binary file (well above the 50MB threshold).
+        # Using a binary file with write_bytes and direct dd (same pattern as the
+        # reliably passing test_file_read_above_threshold_triggers) to ensure
+        # O_DIRECT succeeds and block I/O is counted by the cgroup monitor.
+        large_file = Path(test_workspace) / "secrets.bin"
+        large_file.write_bytes(b"S" * (200 * 1024 * 1024))
 
-        # Create script that generates actual block I/O using dd with iflag=direct.
-        # Regular Python open() reads are served from the OS page cache (shared between
-        # host and bind-mounted workspace) → cgroup block I/O counter stays at zero.
-        # dd iflag=direct uses O_DIRECT which bypasses the page cache, ensuring reads
-        # are counted in cgroup rbytes. This is the same approach used by the passing
-        # test_file_read_at_threshold_triggers and test_file_read_above_threshold_triggers.
-        exfil_script = Path(test_workspace) / "exfiltrate.py"
-        exfil_script.write_text(
-            """#!/usr/bin/env python3
-import subprocess
-import time
-
-# Simulate data exfiltration: read secrets.txt with direct I/O to bypass page cache.
-# iflag=direct (O_DIRECT) ensures reads go to the block device and are counted in
-# the container's cgroup I/O stats, which the monitoring daemon tracks.
-result = subprocess.run(
-    ["dd", "if=/workspace/secrets.txt", "of=/dev/null", "bs=1M", "iflag=direct"],
-    capture_output=True,
-)
-print(f"dd exit code: {result.returncode}")
-if result.returncode != 0:
-    # Fallback without direct I/O if filesystem doesn't support it
-    subprocess.run(
-        ["dd", "if=/workspace/secrets.txt", "of=/dev/null", "bs=1M"],
-        capture_output=True,
-    )
-time.sleep(60)
-"""
-        )
-        exfil_script.chmod(0o755)
-
-        # Capture stderr for debugging
-        stderr_file = Path("/tmp") / "coi-test-large-file-debug.log"
-        stderr_fd = open(stderr_file, "w")  # noqa: SIM115
-
-        # Start shell with monitoring enabled (auto_pause_on_high=true)
         proc = subprocess.Popen(
             [coi_binary, "shell", "--workspace", str(test_workspace), "--slot", "6", "--monitor"],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
-            stderr=stderr_fd,
+            stderr=subprocess.DEVNULL,
         )
 
         time.sleep(8)
@@ -832,26 +798,28 @@ time.sleep(60)
 
         if get_container_state(container_name) == "Unknown":
             proc.terminate()
-            stderr_fd.close()
             pytest.skip(f"Container {container_name} not found")
 
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
 
-        # IMPORTANT: Wait for monitoring to establish stable baseline
-        # Container startup I/O can take 10-15 seconds to complete
-        # Need at least 5-10 baseline polls before test operations
+        # Wait for monitoring to establish stable baseline
         time.sleep(10)
 
-        # Execute the exfiltration script
+        # Read the 200MB file directly with dd and O_DIRECT to bypass page cache.
+        # Running dd directly (not via a python wrapper) matches the reliable pattern
+        # used in test_file_read_above_threshold_triggers which consistently passes.
         subprocess.Popen(
             [
                 "incus",
                 "exec",
                 container_name,
                 "--",
-                "python3",
-                "/workspace/exfiltrate.py",
+                "dd",
+                "if=/workspace/secrets.bin",
+                "of=/dev/null",
+                "bs=1M",
+                "iflag=direct",
             ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -869,14 +837,19 @@ time.sleep(60)
                 paused = True
                 break
 
-        # Close stderr and print debug log BEFORE assertions
-        proc.terminate()
-        stderr_fd.close()
+        if not paused:
+            events = get_threat_events(container_name)
+            print("\n=== DEBUG: large file read test - container not paused ===")
+            print(f"Final state: {get_container_state(container_name)}")
+            print(f"Total threat events: {len(events)}")
+            for event in events:
+                print(
+                    f"- level={event.get('level')}, category={event.get('category')}, "
+                    f"action={event.get('action')}, desc={event.get('description')[:80] if event.get('description') else 'N/A'}"
+                )
+            print("=== END DEBUG ===\n")
 
-        print("\n=== COI Large File Read Debug Log ===")
-        if stderr_file.exists():
-            print(stderr_file.read_text())
-        print("=== End Debug Log ===\n")
+        proc.terminate()
 
         assert paused, "Container should be auto-paused on HIGH threat (large file read)"
 
