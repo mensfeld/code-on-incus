@@ -1,26 +1,8 @@
 # Temporarily skipped tests - to be fixed one by one
-# Shell-persistent failures (5 tests) - test_persistent_session_with_resume enabled
-# tests/shell/persistent/session_with_resume.py::test_persistent_session_with_resume
-tests/shell/persistent/multiple_slots_persistent.py::test_persistent_multiple_slots_parallel
-tests/shell/persistent/resume_does_not_persist_home.py::test_persistent_resume_does_not_persist_home_files
-tests/shell/persistent/custom_mount_persistent.py::test_custom_mount_persistent
-tests/shell/persistent/exit_bash_keeps_running_persistent.py::test_persistent_exit_bash_keeps_container_running
-tests/shell/persistent/container_kept_after_poweroff.py::test_persistent_container_kept_after_poweroff
+# Root cause for all shell/core failures was monitoring enabled by default.
+# Fixed in config.go (Enabled: false). All shell/core tests now re-enabled.
 
-# Shell-ephemeral failures (8 tests)
-tests/shell/ephemeral/multiple_slots_ephemeral.py::test_multiple_slots_parallel
-tests/shell/ephemeral/resume_without_storage_ephemeral.py::test_resume_does_not_persist_home_files
-tests/shell/ephemeral/power_management_no_sudo_ephemeral.py::test_power_management_no_sudo
-tests/shell/ephemeral/new_session_with_poweroff_ephemeral.py::test_ephemeral_session_with_shutdown
-tests/shell/ephemeral/new_session_with_resume_ephemeral.py::test_ephemeral_session_with_resume
-tests/shell/ephemeral/docker_in_container_ephemeral.py::test_docker_in_container
-tests/shell/ephemeral/exit_bash_keeps_running_ephemeral.py::test_exit_bash_keeps_container_running
-tests/shell/ephemeral/custom_mount_ephemeral.py::test_custom_mount_ephemeral
-
-# Core failures (1 test)
-tests/persist/persist_running_session.py::test_persist_running_session
-
-# Monitoring failures (14 tests - 5 new failures appeared when enabling other tests)
+# Monitoring failures (14 tests) - need fixing in monitoring feature code
 tests/integration/test_security_monitoring.py::TestThreatDetection::test_env_scanning_detection
 tests/integration/test_security_monitoring.py::TestEnvironmentScanningPatterns::test_proc_environ_access_detection
 tests/integration/test_security_monitoring.py::TestFalsePositives::test_normal_build_operations_no_alert

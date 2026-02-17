@@ -282,7 +282,7 @@ func GetDefaultConfig() *Config {
 			},
 		},
 		Monitoring: MonitoringConfig{
-			Enabled:               true,
+			Enabled:               false,
 			AutoPauseOnHigh:       true,
 			AutoKillOnCritical:    true,
 			PollIntervalSec:       2,
@@ -290,7 +290,7 @@ func GetDefaultConfig() *Config {
 			FileReadRateMBPerSec:  10.0,
 			AuditLogRetentionDays: 30,
 			NFT: NFTMonitoringConfig{
-				Enabled:            true,
+				Enabled:            false,
 				RateLimitPerSecond: 100,
 				DNSQueryThreshold:  100,
 				LogDNSQueries:      true,
