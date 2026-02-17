@@ -210,7 +210,7 @@ class TestThreatDetection:
 
         time.sleep(8)
 
-        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-2")
+        container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-2"
 
         state = get_container_state(container_name)
         if state == "Unknown":
@@ -270,7 +270,7 @@ class TestEnvironmentScanningPatterns:
 
         time.sleep(8)
 
-        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-14")
+        container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-14"
 
         if get_container_state(container_name) == "Unknown":
             proc.terminate()
@@ -327,7 +327,7 @@ class TestEnvironmentScanningPatterns:
 
         time.sleep(8)
 
-        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-15")
+        container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-15"
 
         if get_container_state(container_name) == "Unknown":
             proc.terminate()
@@ -384,7 +384,7 @@ class TestEnvironmentScanningPatterns:
 
         time.sleep(8)
 
-        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-16")
+        container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-16"
 
         if get_container_state(container_name) == "Unknown":
             proc.terminate()
@@ -441,7 +441,7 @@ class TestEnvironmentScanningPatterns:
 
         time.sleep(8)
 
-        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-17")
+        container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-17"
 
         if get_container_state(container_name) == "Unknown":
             proc.terminate()
@@ -498,7 +498,7 @@ class TestEnvironmentScanningPatterns:
 
         time.sleep(8)
 
-        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-18")
+        container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-18"
 
         if get_container_state(container_name) == "Unknown":
             proc.terminate()
@@ -551,7 +551,7 @@ class TestAutomatedResponse:
 
         time.sleep(8)
 
-        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-3")
+        container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-3"
 
         if get_container_state(container_name) == "Unknown":
             proc.terminate()
@@ -647,7 +647,7 @@ print("Task completed")
 
         time.sleep(8)
 
-        container_name = get_container_name_from_workspace(str(test_workspace)).replace("-1", "-4")
+        container_name = get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-4"
 
         if get_container_state(container_name) == "Unknown":
             proc.terminate()
@@ -725,7 +725,7 @@ print("Task completed")
 
         time.sleep(8)
 
-        container_name = get_container_name_from_workspace(str(test_workspace)).replace("-1", "-5")
+        container_name = get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-5"
 
         if get_container_state(container_name) == "Unknown":
             proc.terminate()
@@ -794,7 +794,7 @@ class TestHighLevelThreats:
 
         time.sleep(8)
 
-        container_name = get_container_name_from_workspace(str(test_workspace)).replace("-1", "-6")
+        container_name = get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-6"
 
         if get_container_state(container_name) == "Unknown":
             proc.terminate()
@@ -902,7 +902,7 @@ time.sleep(30)
 
         time.sleep(8)
 
-        container_name = get_container_name_from_workspace(str(test_workspace)).replace("-1", "-7")
+        container_name = get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-7"
 
         if get_container_state(container_name) == "Unknown":
             proc.terminate()
@@ -977,7 +977,7 @@ time.sleep(60)
 
         time.sleep(8)
 
-        container_name = get_container_name_from_workspace(str(test_workspace)).replace("-1", "-8")
+        container_name = get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-8"
 
         if get_container_state(container_name) == "Unknown":
             proc.terminate()
@@ -1048,7 +1048,7 @@ time.sleep(60)
 
         time.sleep(8)
 
-        container_name = get_container_name_from_workspace(str(test_workspace)).replace("-1", "-9")
+        container_name = get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-9"
 
         if get_container_state(container_name) == "Unknown":
             proc.terminate()
@@ -1103,7 +1103,7 @@ class TestReverseShellPatterns:
 
         time.sleep(8)
 
-        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-10")
+        container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-10"
 
         if get_container_state(container_name) == "Unknown":
             proc.terminate()
@@ -1175,7 +1175,7 @@ class TestReverseShellPatterns:
 
         time.sleep(8)
 
-        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-11")
+        container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-11"
 
         if get_container_state(container_name) == "Unknown":
             proc.terminate()
@@ -1247,7 +1247,7 @@ class TestReverseShellPatterns:
 
         time.sleep(8)
 
-        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-12")
+        container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-12"
 
         if get_container_state(container_name) == "Unknown":
             proc.terminate()
@@ -1329,7 +1329,7 @@ class TestReverseShellPatterns:
 
         time.sleep(8)
 
-        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-30")
+        container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-30"
 
         if get_container_state(container_name) == "Unknown":
             proc.terminate()
@@ -1409,7 +1409,7 @@ class TestReverseShellPatterns:
 
         time.sleep(8)
 
-        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-31")
+        container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-31"
 
         if get_container_state(container_name) == "Unknown":
             proc.terminate()
@@ -1499,7 +1499,7 @@ enabled = false
 
             time.sleep(8)
 
-            container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-13")
+            container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-13"
 
             if get_container_state(container_name) == "Unknown":
                 proc.terminate()
@@ -1573,7 +1573,7 @@ poll_interval_sec = 1
 
             time.sleep(8)
 
-            container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-19")
+            container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-19"
 
             if get_container_state(container_name) == "Unknown":
                 proc.terminate()
@@ -1669,7 +1669,7 @@ poll_interval_sec = 1
 
             time.sleep(8)
 
-            container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-32")
+            container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-32"
 
             if get_container_state(container_name) == "Unknown":
                 proc.terminate()
@@ -1757,7 +1757,7 @@ class TestMultipleThreats:
 
         time.sleep(8)
 
-        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-20")
+        container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-20"
 
         if get_container_state(container_name) == "Unknown":
             proc.terminate()
@@ -1865,7 +1865,7 @@ class TestAuditLogValidation:
 
         time.sleep(8)
 
-        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-21")
+        container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-21"
 
         if get_container_state(container_name) == "Unknown":
             proc.terminate()
@@ -1959,7 +1959,7 @@ class TestAuditLogValidation:
 
         time.sleep(8)
 
-        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-22")
+        container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-22"
 
         if get_container_state(container_name) == "Unknown":
             proc.terminate()
@@ -2037,7 +2037,7 @@ class TestFalsePositives:
 
         time.sleep(8)
 
-        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-23")
+        container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-23"
 
         if get_container_state(container_name) == "Unknown":
             proc.terminate()
@@ -2100,7 +2100,7 @@ class TestFalsePositives:
 
         time.sleep(8)
 
-        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-24")
+        container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-24"
 
         if get_container_state(container_name) == "Unknown":
             proc.terminate()
@@ -2181,7 +2181,7 @@ time.sleep(2)
 
         time.sleep(8)
 
-        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-25")
+        container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-25"
 
         if get_container_state(container_name) == "Unknown":
             proc.terminate()
@@ -2259,7 +2259,7 @@ echo "Build complete"
 
         time.sleep(8)
 
-        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-26")
+        container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-26"
 
         if get_container_state(container_name) == "Unknown":
             proc.terminate()
@@ -2354,7 +2354,7 @@ class TestThresholdBoundaries:
 
         time.sleep(8)
 
-        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-27")
+        container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-27"
 
         if get_container_state(container_name) == "Unknown":
             proc.terminate()
@@ -2421,7 +2421,7 @@ class TestThresholdBoundaries:
 
         time.sleep(8)
 
-        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-28")
+        container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-28"
 
         if get_container_state(container_name) == "Unknown":
             proc.terminate()
@@ -2518,7 +2518,7 @@ class TestThresholdBoundaries:
 
         time.sleep(8)
 
-        container_name = get_container_name_from_workspace(test_workspace).replace("-1", "-29")
+        container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-29"
 
         if get_container_state(container_name) == "Unknown":
             proc.terminate()
