@@ -293,8 +293,9 @@ func TestToolConfigDefaults(t *testing.T) {
 func TestDefaultTmpfsSize(t *testing.T) {
 	cfg := GetDefaultConfig()
 
-	if cfg.Limits.Disk.TmpfsSize != "4GiB" {
-		t.Errorf("Expected default TmpfsSize '4GiB', got '%s'", cfg.Limits.Disk.TmpfsSize)
+	// Default is empty: /tmp uses the container's root disk, not a RAM-backed tmpfs.
+	if cfg.Limits.Disk.TmpfsSize != "" {
+		t.Errorf("Expected default TmpfsSize '' (disk-backed), got '%s'", cfg.Limits.Disk.TmpfsSize)
 	}
 }
 

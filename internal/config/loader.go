@@ -200,9 +200,12 @@ write = ""
 max = ""
 # Disk priority: 0-10 (higher = more priority)
 priority = 0
-# /tmp tmpfs size: "2GiB", "4GiB", etc. (default: "4GiB")
-# Increase this if containers run out of /tmp space during builds/operations
-tmpfs_size = "4GiB"
+# /tmp storage backend (default: "" = use container root disk).
+# Leave empty to let /tmp share the container's virtual disk — no RAM used,
+# no size cap, cleaned up when the container is deleted.
+# Set to a size like "4GiB" to use a RAM-backed tmpfs instead (faster but
+# limited; useful when builds produce very large temp data).
+tmpfs_size = ""
 
 [limits.runtime]
 # Maximum container runtime: "2h", "30m", "1h30m" or "" for unlimited

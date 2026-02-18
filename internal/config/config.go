@@ -272,7 +272,7 @@ func GetDefaultConfig() *Config {
 				Write:     "",
 				Max:       "",
 				Priority:  0,
-				TmpfsSize: "4GiB", // Default /tmp size (prevent space exhaustion)
+				TmpfsSize: "", // Default: use container root disk. Set "4GiB" etc. for RAM-backed tmpfs.
 			},
 			Runtime: RuntimeLimits{
 				MaxDuration:  "",
