@@ -72,6 +72,7 @@ install_base_dependencies() {
         curl wget git ca-certificates gnupg jq unzip sudo \
         tmux \
         dnsutils \
+        ripgrep fzf \
         build-essential libssl-dev libreadline-dev zlib1g-dev \
         libffi-dev libyaml-dev libgmp-dev \
         libsqlite3-dev libpq-dev libmysqlclient-dev \
