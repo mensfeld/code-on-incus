@@ -1,6 +1,7 @@
 package container
 
 import (
+	"fmt"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -75,9 +76,16 @@ func TestSetTmpfsSize(t *testing.T) {
 	}
 }
 
-// TestSetTmpfsSizeDefault verifies that the default tmpfs size (4GiB) is
-// applied when no explicit size is configured.
-func TestSetTmpfsSizeDefault(t *testing.T) {
+// TestTmpDefaultUsesDisk verifies that when no tmpfs is configured (the
+// default), /tmp lives on the same filesystem as / — i.e. it is backed by
+// the container's virtual root disk, not a separate RAM-backed tmpfs.
+//
+// The assertion has two parts:
+//  1. The filesystem type of /tmp is not "tmpfs" (it would be if a separate
+//     mount had been applied).
+//  2. The total size reported for /tmp equals the total size reported for /,
+//     confirming they share the same disk allocation.
+func TestTmpDefaultUsesDisk(t *testing.T) {
 	if _, err := exec.LookPath("incus"); err != nil {
 		t.Skip("incus not found, skipping integration test")
 	}
@@ -89,7 +97,7 @@ func TestSetTmpfsSizeDefault(t *testing.T) {
 		t.Skip("coi image not found, skipping integration test (run 'coi build' first)")
 	}
 
-	containerName := "coi-test-tmpfs-default"
+	containerName := "coi-test-tmp-disk-default"
 	mgr := NewManager(containerName)
 
 	t.Cleanup(func() {
@@ -102,37 +110,51 @@ func TestSetTmpfsSizeDefault(t *testing.T) {
 		_ = mgr.Delete(true)
 	}
 
+	// Launch with no SetTmpfsSize call — this is the default code path.
 	if err := mgr.Launch("coi", false); err != nil {
 		t.Fatalf("Failed to launch container: %v", err)
 	}
 
-	const defaultSize = "4GiB"
-	if err := mgr.SetTmpfsSize(defaultSize); err != nil {
-		t.Fatalf("SetTmpfsSize(%q) failed: %v", defaultSize, err)
-	}
+	opts := ExecCommandOptions{}
 
-	output, err := mgr.ExecArgsCapture(
-		[]string{"df", "--output=size", "/tmp"},
-		ExecCommandOptions{},
-	)
+	// 1. Check filesystem type of /tmp — must not be "tmpfs".
+	fstype, err := mgr.ExecArgsCapture([]string{"df", "--output=fstype", "/tmp"}, opts)
 	if err != nil {
-		t.Fatalf("df /tmp inside container failed: %v", err)
+		t.Fatalf("df --output=fstype /tmp failed: %v", err)
+	}
+	// df prints a header line then the value; grab the last token.
+	fstypeFields := strings.Fields(fstype)
+	if len(fstypeFields) < 2 {
+		t.Fatalf("Unexpected df fstype output: %q", fstype)
+	}
+	gotFstype := fstypeFields[len(fstypeFields)-1]
+	if gotFstype == "tmpfs" {
+		t.Errorf("/tmp filesystem type = %q, want anything other than tmpfs (disk-backed default)", gotFstype)
 	}
 
-	lines := strings.Fields(output)
-	if len(lines) < 2 {
-		t.Fatalf("Unexpected df output: %q", output)
+	// 2. Total size of /tmp must equal total size of / (same disk).
+	sizeOfPath := func(path string) (int64, error) {
+		out, err := mgr.ExecArgsCapture([]string{"df", "--output=size", path}, opts)
+		if err != nil {
+			return 0, err
+		}
+		fields := strings.Fields(out)
+		if len(fields) < 2 {
+			return 0, fmt.Errorf("unexpected df output for %s: %q", path, out)
+		}
+		return strconv.ParseInt(fields[len(fields)-1], 10, 64)
 	}
-	sizeStr := lines[len(lines)-1]
-	sizeKB, err := strconv.ParseInt(sizeStr, 10, 64)
+
+	rootSize, err := sizeOfPath("/")
 	if err != nil {
-		t.Fatalf("Could not parse df size %q: %v", sizeStr, err)
+		t.Fatalf("df / failed: %v", err)
+	}
+	tmpSize, err := sizeOfPath("/tmp")
+	if err != nil {
+		t.Fatalf("df /tmp failed: %v", err)
 	}
 
-	// 4GiB = 4194304 KiB; allow ±5% tolerance
-	const expectedKB = 4194304
-	const tolerance = expectedKB / 20
-	if sizeKB < expectedKB-tolerance || sizeKB > expectedKB+tolerance {
-		t.Errorf("/tmp size = %d KiB, want ~%d KiB (4GiB ±5%%)", sizeKB, expectedKB)
+	if rootSize != tmpSize {
+		t.Errorf("/tmp size = %d KiB, / size = %d KiB — expected equal (same disk)", tmpSize, rootSize)
 	}
 }
