@@ -306,9 +306,13 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 		}
 
 		// Configure /tmp tmpfs size (prevent space exhaustion during builds/operations)
-		// DISABLED: Incus tmpfs configuration needs investigation
-		// TODO: Re-enable once proper tmpfs size configuration method is determined
-		_ = opts.LimitsConfig // Avoid unused variable warning
+		if opts.LimitsConfig != nil && opts.LimitsConfig.Disk.TmpfsSize != "" {
+			if err := result.Manager.SetTmpfsSize(opts.LimitsConfig.Disk.TmpfsSize); err != nil {
+				opts.Logger(fmt.Sprintf("Warning: Failed to set /tmp size: %v", err))
+			} else {
+				opts.Logger(fmt.Sprintf("Set /tmp size to %s", opts.LimitsConfig.Disk.TmpfsSize))
+			}
+		}
 
 		// Mount all configured directories
 		if err := setupMounts(result.Manager, opts.MountConfig, useShift, opts.Logger); err != nil {

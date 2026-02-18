@@ -290,6 +290,58 @@ func TestToolConfigDefaults(t *testing.T) {
 	}
 }
 
+func TestDefaultTmpfsSize(t *testing.T) {
+	cfg := GetDefaultConfig()
+
+	if cfg.Limits.Disk.TmpfsSize != "4GiB" {
+		t.Errorf("Expected default TmpfsSize '4GiB', got '%s'", cfg.Limits.Disk.TmpfsSize)
+	}
+}
+
+func TestLimitsMergeTmpfsSize(t *testing.T) {
+	tests := []struct {
+		name         string
+		baseTmpfs    string
+		otherTmpfs   string
+		expectedSize string
+	}{
+		{
+			name:         "other overrides base",
+			baseTmpfs:    "2GiB",
+			otherTmpfs:   "8GiB",
+			expectedSize: "8GiB",
+		},
+		{
+			name:         "empty other does not override base",
+			baseTmpfs:    "4GiB",
+			otherTmpfs:   "",
+			expectedSize: "4GiB",
+		},
+		{
+			name:         "both empty stays empty",
+			baseTmpfs:    "",
+			otherTmpfs:   "",
+			expectedSize: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			base := GetDefaultConfig()
+			base.Limits.Disk.TmpfsSize = tt.baseTmpfs
+
+			other := &Config{}
+			other.Limits.Disk.TmpfsSize = tt.otherTmpfs
+
+			base.Merge(other)
+
+			if base.Limits.Disk.TmpfsSize != tt.expectedSize {
+				t.Errorf("TmpfsSize: expected %q, got %q", tt.expectedSize, base.Limits.Disk.TmpfsSize)
+			}
+		})
+	}
+}
+
 func TestToolConfigMerge(t *testing.T) {
 	base := GetDefaultConfig()
 	base.Tool.Name = "claude"

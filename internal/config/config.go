@@ -272,7 +272,7 @@ func GetDefaultConfig() *Config {
 				Write:     "",
 				Max:       "",
 				Priority:  0,
-				TmpfsSize: "2GiB", // Default /tmp size (prevent space exhaustion)
+				TmpfsSize: "4GiB", // Default /tmp size (prevent space exhaustion)
 			},
 			Runtime: RuntimeLimits{
 				MaxDuration:  "",
@@ -496,6 +496,9 @@ func mergeLimits(base *LimitsConfig, other *LimitsConfig) {
 	}
 	if other.Disk.Priority != 0 {
 		base.Disk.Priority = other.Disk.Priority
+	}
+	if other.Disk.TmpfsSize != "" {
+		base.Disk.TmpfsSize = other.Disk.TmpfsSize
 	}
 
 	// Merge runtime limits
