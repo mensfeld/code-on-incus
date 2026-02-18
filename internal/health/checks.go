@@ -1146,9 +1146,9 @@ func CheckIncusStoragePool() HealthCheck {
 	for _, line := range strings.Split(string(out), "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "space used:") {
-			fmt.Sscanf(strings.TrimPrefix(line, "space used:"), "%f", &usedGiB)
+			_, _ = fmt.Sscanf(strings.TrimPrefix(line, "space used:"), "%f", &usedGiB)
 		} else if strings.HasPrefix(line, "total space:") {
-			fmt.Sscanf(strings.TrimPrefix(line, "total space:"), "%f", &totalGiB)
+			_, _ = fmt.Sscanf(strings.TrimPrefix(line, "total space:"), "%f", &totalGiB)
 		}
 	}
 
