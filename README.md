@@ -46,6 +46,7 @@ Run AI coding assistants (Claude Code, Aider, and more) in isolated, production-
 
 Currently supported:
 - **Claude Code** (default) - Anthropic's official CLI tool
+- **opencode** - Open-source AI coding agent (https://opencode.ai)
 
 Coming soon:
 - Aider - AI pair programming in your terminal
@@ -511,7 +512,7 @@ persistent = true
 mount_claude_config = true
 
 [tool]
-name = "claude"  # AI coding tool to use (currently supports: claude)
+name = "claude"  # AI coding tool to use: "claude" (default) or "opencode"
 # binary = "claude"  # Optional: override binary name
 
 [paths]
