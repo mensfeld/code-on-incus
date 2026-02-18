@@ -142,10 +142,12 @@ def test_docker_works_in_container(coi_binary, cleanup_containers, workspace_dir
 
     # === Phase 5: Verify docker works without sudo as the code user ===
     #
-    # The code user (UID 1000) must be able to run docker without sudo.
-    # Docker daemon is configured to use the 'code' group as the socket owner
-    # so the code user's primary group gives access regardless of whether
-    # supplementary groups are loaded by incus exec.
+    # The code user (UID 1000, GID 1000) must be able to run docker without sudo.
+    # This replicates the real-world call: incus exec --user 1000 --group 1000
+    # which sets UID/GID but does NOT load supplementary groups (including 'docker').
+    # Docker daemon is configured to use the 'code' group (GID 1000) as the socket
+    # owner, so the primary group GID 1000 gives access even without supplementary
+    # groups being loaded.
 
     result = subprocess.run(
         [
@@ -154,6 +156,8 @@ def test_docker_works_in_container(coi_binary, cleanup_containers, workspace_dir
             "exec",
             container_name,
             "--user",
+            "1000",
+            "--group",
             "1000",
             "--",
             "docker",
@@ -169,7 +173,7 @@ def test_docker_works_in_container(coi_binary, cleanup_containers, workspace_dir
     )
 
     assert result.returncode == 0, (
-        f"docker should work without sudo as code user (UID 1000). "
+        f"docker should work without sudo as code user (UID 1000, GID 1000). "
         f"Check /etc/docker/daemon.json 'group' setting. stderr: {result.stderr}"
     )
     output = result.stdout + result.stderr
