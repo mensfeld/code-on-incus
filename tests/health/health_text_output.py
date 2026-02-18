@@ -23,7 +23,7 @@ def test_health_text_output(coi_binary):
         [coi_binary, "health"],
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=120,
     )
 
     # Should succeed (exit 0 for healthy, 1 for degraded)

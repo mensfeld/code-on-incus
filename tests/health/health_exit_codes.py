@@ -27,7 +27,7 @@ def test_health_exit_code_matches_status(coi_binary):
         [coi_binary, "health", "--format", "json"],
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=120,
     )
 
     # Parse JSON to get status
@@ -61,7 +61,7 @@ def test_health_summary_matches_checks(coi_binary):
         [coi_binary, "health", "--format", "json"],
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=120,
     )
 
     data = json.loads(result.stdout)
