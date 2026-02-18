@@ -234,6 +234,48 @@ install_github_cli() {
 }
 
 #######################################
+# Configure /tmp auto-cleanup
+#
+# By default Ubuntu's systemd-tmpfiles-clean.timer runs daily and only
+# removes files older than 10 days. AI coding agents can fill /tmp in
+# minutes, so we:
+#   1. Lower the age threshold to 1 hour so abandoned temp files are
+#      collected promptly.
+#   2. Run the cleanup timer every 15 minutes instead of daily so recovery
+#      happens automatically between heavy operations.
+#
+# This complements the hard tmpfs size cap set by COI at container start.
+#######################################
+configure_tmp_cleanup() {
+    log "Configuring /tmp auto-cleanup..."
+
+    # Age threshold: remove files in /tmp not accessed for more than 1 hour.
+    # The 'D' type removes the directory contents but keeps /tmp itself.
+    cat > /etc/tmpfiles.d/coi-tmp-cleanup.conf << 'EOF'
+# COI: clean files in /tmp that have not been accessed for 1 hour.
+# This prevents abandoned build artefacts from exhausting the tmpfs.
+D /tmp 1777 root root 1h
+EOF
+
+    # Override the cleanup timer to run every 15 minutes.
+    mkdir -p /etc/systemd/system/systemd-tmpfiles-clean.timer.d
+    cat > /etc/systemd/system/systemd-tmpfiles-clean.timer.d/coi-interval.conf << 'EOF'
+[Timer]
+# Reset inherited values before setting our own
+OnBootSec=
+OnUnitActiveSec=
+# Start 5 minutes after boot, then every 15 minutes
+OnBootSec=5min
+OnUnitActiveSec=15min
+EOF
+
+    # Enable the timer (it is masked in some minimal Ubuntu images)
+    systemctl enable systemd-tmpfiles-clean.timer 2>/dev/null || true
+
+    log "/tmp cleanup configured (1h age threshold, 15min timer)"
+}
+
+#######################################
 # Cleanup
 #######################################
 cleanup() {
@@ -254,6 +296,7 @@ main() {
     install_nodejs
     create_code_user
     configure_power_wrappers
+    configure_tmp_cleanup
     install_claude_cli
     install_dummy
     install_docker
