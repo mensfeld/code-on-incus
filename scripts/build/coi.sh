@@ -211,20 +211,35 @@ install_docker() {
     # on its own — see daemon config below for the reliable fix)
     usermod -aG docker "$CODE_USER"
 
-    # Configure Docker daemon to use the code user's PRIMARY group as the socket
-    # owner instead of the 'docker' supplementary group.
+    # Make the Docker socket accessible to the code user's PRIMARY group.
     #
     # Why: incus exec may not call initgroups() when --group is specified,
     # so supplementary groups (including 'docker') may not be active in the
     # session. The user's primary group (code, GID 1000) is always active
-    # regardless of how the session was started. Setting "group": "code" makes
-    # /var/run/docker.sock owned by root:code (0660) instead of root:docker,
-    # so the code user can always run docker without sudo.
+    # regardless of how the session was started.
+    #
+    # Two layers of config are needed:
+    #
+    # 1. daemon.json "group": "code" — Docker daemon chowns the socket to
+    #    root:code on startup (works when Docker creates the socket itself).
+    #
+    # 2. docker.socket systemd drop-in SocketGroup=code — Ubuntu's Docker
+    #    package uses systemd socket activation: systemd creates
+    #    /var/run/docker.sock before the daemon starts using the group from
+    #    the socket unit (default: docker). The daemon.json setting alone is
+    #    not enough when systemd socket activation is in play; this drop-in
+    #    ensures the socket is created with root:code (0660) from the start.
     mkdir -p /etc/docker
     cat > /etc/docker/daemon.json << 'EOF'
 {
     "group": "code"
 }
+EOF
+
+    mkdir -p /etc/systemd/system/docker.socket.d
+    cat > /etc/systemd/system/docker.socket.d/override.conf << 'EOF'
+[Socket]
+SocketGroup=code
 EOF
 
     log "Docker $(docker --version 2>/dev/null || echo 'installed')"
