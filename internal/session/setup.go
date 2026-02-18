@@ -751,8 +751,8 @@ func setupCLIConfig(mgr *container.Manager, hostCLIConfigPath, homeDir string, t
 // setupHomeConfigFile handles config injection for tools that use a single
 // home-dir JSON file (e.g., ~/.opencode.json).
 func setupHomeConfigFile(mgr *container.Manager, hostConfigFilePath, homeDir string,
-	twh tool.ToolWithHomeConfigFile, t tool.Tool, logger func(string)) {
-
+	twh tool.ToolWithHomeConfigFile, t tool.Tool, logger func(string),
+) {
 	destPath := filepath.Join(homeDir, twh.HomeConfigFileName())
 
 	// Copy host config if it exists
