@@ -182,10 +182,15 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// Determine CLI config path based on tool
-	// For ENV-based tools (ConfigDirName returns ""), this will be empty
+	// For file-based tools (ToolWithHomeConfigFile), point at the single config file.
+	// For directory-based tools (ConfigDirName != ""), point at the config directory.
+	// For ENV-based tools (both return ""), leave empty.
 	var cliConfigPath string
-	configDirName := toolInstance.ConfigDirName()
-	if configDirName != "" {
+	if twh, ok := toolInstance.(tool.ToolWithHomeConfigFile); ok {
+		// File-based config (e.g., ~/.opencode.json)
+		cliConfigPath = filepath.Join(homeDir, twh.HomeConfigFileName())
+	} else if configDirName := toolInstance.ConfigDirName(); configDirName != "" {
+		// Directory-based config (e.g., ~/.claude/)
 		cliConfigPath = filepath.Join(homeDir, configDirName)
 	}
 

@@ -406,8 +406,14 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 	}
 
 	// 9. When resuming: restore session data if container was recreated, then inject credentials
-	// Skip if tool uses ENV-based auth (no config directory)
-	if opts.ResumeFromID != "" && opts.Tool != nil && opts.Tool.ConfigDirName() != "" {
+	// Skip if tool uses ENV-based auth (no config directory and not file-based)
+	isFileBased := func(t tool.Tool) bool {
+		twh, ok := t.(tool.ToolWithHomeConfigFile)
+		return ok && twh.HomeConfigFileName() != ""
+	}
+
+	if opts.ResumeFromID != "" && opts.Tool != nil &&
+		(opts.Tool.ConfigDirName() != "" || isFileBased(opts.Tool)) {
 		// If we launched a new container (not reusing persistent one), restore config from saved session
 		if !skipLaunch && opts.SessionsDir != "" {
 			if err := restoreSessionData(result.Manager, opts.ResumeFromID, result.HomeDir, opts.SessionsDir, opts.Tool, opts.Logger); err != nil {
@@ -417,8 +423,12 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 
 		// Always inject fresh credentials when resuming (whether persistent container or restored session)
 		if opts.CLIConfigPath != "" {
-			if err := injectCredentials(result.Manager, opts.CLIConfigPath, result.HomeDir, opts.Tool, opts.Logger); err != nil {
-				opts.Logger(fmt.Sprintf("Warning: Could not inject credentials: %v", err))
+			if twh, ok := opts.Tool.(tool.ToolWithHomeConfigFile); ok {
+				setupHomeConfigFile(result.Manager, opts.CLIConfigPath, result.HomeDir, twh, opts.Tool, opts.Logger)
+			} else {
+				if err := injectCredentials(result.Manager, opts.CLIConfigPath, result.HomeDir, opts.Tool, opts.Logger); err != nil {
+					opts.Logger(fmt.Sprintf("Warning: Could not inject credentials: %v", err))
+				}
 			}
 		}
 	}
@@ -429,29 +439,38 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 	}
 
 	// 11. Setup CLI tool config (skip if resuming - config already restored)
-	// Skip entirely if tool uses ENV-based auth (ConfigDirName returns "")
-	if opts.Tool != nil && opts.Tool.ConfigDirName() != "" {
-		if opts.CLIConfigPath != "" && opts.ResumeFromID == "" {
-			// Check if host config directory exists
-			if _, err := os.Stat(opts.CLIConfigPath); err == nil {
-				// Copy and inject settings (but only if NOT resuming)
-				// Only run on first launch, not when restarting persistent container
-				if !skipLaunch {
-					opts.Logger(fmt.Sprintf("Setting up %s config...", opts.Tool.Name()))
-					if err := setupCLIConfig(result.Manager, opts.CLIConfigPath, result.HomeDir, opts.Tool, opts.Logger); err != nil {
-						opts.Logger(fmt.Sprintf("Warning: Failed to setup %s config: %v", opts.Tool.Name(), err))
-					}
-				} else {
-					opts.Logger(fmt.Sprintf("Reusing existing %s config (persistent container)", opts.Tool.Name()))
-				}
-			} else if !os.IsNotExist(err) {
-				return nil, fmt.Errorf("failed to check %s config directory: %w", opts.Tool.Name(), err)
+	if opts.Tool != nil {
+		if twh, ok := opts.Tool.(tool.ToolWithHomeConfigFile); ok {
+			// File-based config injection (opencode-style)
+			if opts.CLIConfigPath != "" && opts.ResumeFromID == "" && !skipLaunch {
+				setupHomeConfigFile(result.Manager, opts.CLIConfigPath, result.HomeDir, twh, opts.Tool, opts.Logger)
+			} else if opts.ResumeFromID != "" {
+				opts.Logger(fmt.Sprintf("Resuming session - using restored %s config", opts.Tool.Name()))
 			}
-		} else if opts.ResumeFromID != "" {
-			opts.Logger(fmt.Sprintf("Resuming session - using restored %s config", opts.Tool.Name()))
+		} else if opts.Tool.ConfigDirName() != "" {
+			// Directory-based config injection (claude-style)
+			if opts.CLIConfigPath != "" && opts.ResumeFromID == "" {
+				// Check if host config directory exists
+				if _, err := os.Stat(opts.CLIConfigPath); err == nil {
+					// Copy and inject settings (but only if NOT resuming)
+					// Only run on first launch, not when restarting persistent container
+					if !skipLaunch {
+						opts.Logger(fmt.Sprintf("Setting up %s config...", opts.Tool.Name()))
+						if err := setupCLIConfig(result.Manager, opts.CLIConfigPath, result.HomeDir, opts.Tool, opts.Logger); err != nil {
+							opts.Logger(fmt.Sprintf("Warning: Failed to setup %s config: %v", opts.Tool.Name(), err))
+						}
+					} else {
+						opts.Logger(fmt.Sprintf("Reusing existing %s config (persistent container)", opts.Tool.Name()))
+					}
+				} else if !os.IsNotExist(err) {
+					return nil, fmt.Errorf("failed to check %s config directory: %w", opts.Tool.Name(), err)
+				}
+			} else if opts.ResumeFromID != "" {
+				opts.Logger(fmt.Sprintf("Resuming session - using restored %s config", opts.Tool.Name()))
+			}
+		} else {
+			opts.Logger(fmt.Sprintf("Tool %s uses ENV-based auth, skipping config setup", opts.Tool.Name()))
 		}
-	} else if opts.Tool != nil {
-		opts.Logger(fmt.Sprintf("Tool %s uses ENV-based auth, skipping config setup", opts.Tool.Name()))
 	}
 
 	opts.Logger("Container setup complete!")
@@ -727,6 +746,64 @@ func setupCLIConfig(mgr *container.Manager, hostCLIConfigPath, homeDir string, t
 	}
 
 	return nil
+}
+
+// setupHomeConfigFile handles config injection for tools that use a single
+// home-dir JSON file (e.g., ~/.opencode.json).
+func setupHomeConfigFile(mgr *container.Manager, hostConfigFilePath, homeDir string,
+	twh tool.ToolWithHomeConfigFile, t tool.Tool, logger func(string)) {
+
+	destPath := filepath.Join(homeDir, twh.HomeConfigFileName())
+
+	// Copy host config if it exists
+	if _, err := os.Stat(hostConfigFilePath); err == nil {
+		logger(fmt.Sprintf("Copying %s from host...", twh.HomeConfigFileName()))
+		if err := mgr.PushFile(hostConfigFilePath, destPath); err != nil {
+			logger(fmt.Sprintf("Warning: Failed to copy %s: %v", twh.HomeConfigFileName(), err))
+		}
+	}
+
+	// Inject sandbox settings (merge into existing or create fresh)
+	sandboxSettings := t.GetSandboxSettings()
+	if len(sandboxSettings) > 0 {
+		logger(fmt.Sprintf("Injecting sandbox settings into %s...", twh.HomeConfigFileName()))
+
+		// Check if file exists in container
+		checkCmd := fmt.Sprintf("test -f %s && echo exists || echo missing", destPath)
+		result, _ := mgr.ExecCommand(checkCmd, container.ExecCommandOptions{Capture: true})
+		if strings.TrimSpace(result) == "missing" {
+			// Create fresh config with sandbox settings
+			settingsBytes, err := json.MarshalIndent(sandboxSettings, "", "  ")
+			if err != nil {
+				logger(fmt.Sprintf("Warning: Failed to marshal sandbox settings: %v", err))
+			} else {
+				if err := mgr.CreateFile(destPath, string(settingsBytes)+"\n"); err != nil {
+					logger(fmt.Sprintf("Warning: Failed to create %s: %v", twh.HomeConfigFileName(), err))
+				}
+			}
+		} else {
+			// Merge sandbox settings into existing config
+			settingsJSON, err := buildJSONFromSettings(sandboxSettings)
+			if err != nil {
+				logger(fmt.Sprintf("Warning: Failed to build JSON from settings: %v", err))
+			} else {
+				escapedJSON := strings.ReplaceAll(settingsJSON, "'", "'\"'\"'")
+				mergeCmd := fmt.Sprintf(
+					`python3 -c 'import json; f=open("%s","r+"); d=json.load(f); updates=json.loads('"'"'%s'"'"'); d.update(updates); f.seek(0); json.dump(d,f,indent=2); f.truncate()'`,
+					destPath, escapedJSON)
+				if _, err := mgr.ExecCommand(mergeCmd, container.ExecCommandOptions{Capture: true}); err != nil {
+					logger(fmt.Sprintf("Warning: Failed to inject settings into %s: %v", twh.HomeConfigFileName(), err))
+				}
+			}
+		}
+
+		// Fix ownership
+		if homeDir != "/root" {
+			if err := mgr.Chown(destPath, container.CodeUID, container.CodeUID); err != nil {
+				logger(fmt.Sprintf("Warning: Failed to set %s ownership: %v", twh.HomeConfigFileName(), err))
+			}
+		}
+	}
 }
 
 // hasLimits checks if any limits are configured

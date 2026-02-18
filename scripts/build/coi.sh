@@ -168,6 +168,27 @@ install_claude_cli() {
 }
 
 #######################################
+# Install opencode
+# See: https://opencode.ai
+#######################################
+install_opencode() {
+    log "Installing opencode..."
+
+    su - "$CODE_USER" -c 'curl -fsSL https://raw.githubusercontent.com/opencode-ai/opencode/refs/heads/main/install | bash'
+
+    local OPENCODE_PATH="/home/$CODE_USER/.opencode/bin/opencode"
+    if [[ ! -x "$OPENCODE_PATH" ]]; then
+        log "ERROR: opencode binary not found at $OPENCODE_PATH after installation."
+        log "Installation may have failed or installed to an unexpected location."
+        exit 1
+    fi
+
+    ln -sf "$OPENCODE_PATH" /usr/local/bin/opencode
+
+    log "opencode $(opencode --version 2>/dev/null || echo 'installed')"
+}
+
+#######################################
 # Install dummy (test stub for testing)
 #######################################
 install_dummy() {
@@ -330,6 +351,7 @@ main() {
     configure_power_wrappers
     configure_tmp_cleanup
     install_claude_cli
+    install_opencode
     install_dummy
     install_docker
     install_github_cli

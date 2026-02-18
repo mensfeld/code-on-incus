@@ -1,0 +1,43 @@
+package tool
+
+// OpencodeTool implements Tool for opencode (https://opencode.ai)
+type OpencodeTool struct{}
+
+// NewOpencode creates a new opencode tool instance
+func NewOpencode() Tool { return &OpencodeTool{} }
+
+func (c *OpencodeTool) Name() string { return "opencode" }
+
+func (c *OpencodeTool) Binary() string { return "opencode" }
+
+// ConfigDirName returns "" because opencode uses a single file, not a directory.
+// See HomeConfigFileName for the actual config file name.
+func (c *OpencodeTool) ConfigDirName() string { return "" }
+
+func (c *OpencodeTool) SessionsDirName() string { return "sessions-opencode" }
+
+// BuildCommand builds the opencode launch command.
+// New session: ["opencode"]
+// Resume: ["opencode", "--continue"] — continues last session from workspace .opencode/ SQLite
+func (c *OpencodeTool) BuildCommand(sessionID string, resume bool, resumeSessionID string) []string {
+	if resume {
+		return []string{"opencode", "--continue"}
+	}
+	return []string{"opencode"}
+}
+
+// DiscoverSessionID returns "" because opencode uses SQLite (not JSONL files).
+func (c *OpencodeTool) DiscoverSessionID(stateDir string) string { return "" }
+
+// GetSandboxSettings returns the opencode permission bypass config.
+// Injected into ~/.opencode.json so opencode runs without interactive prompts.
+func (c *OpencodeTool) GetSandboxSettings() map[string]interface{} {
+	return map[string]interface{}{
+		"permission": map[string]interface{}{
+			"*": "allow",
+		},
+	}
+}
+
+// HomeConfigFileName implements ToolWithHomeConfigFile.
+func (c *OpencodeTool) HomeConfigFileName() string { return ".opencode.json" }

@@ -111,3 +111,13 @@ func (c *ClaudeTool) GetSandboxSettings() map[string]interface{} {
 		},
 	}
 }
+
+// ToolWithHomeConfigFile is an optional interface for tools that store their
+// configuration in a single JSON file in the user's home directory
+// (e.g., ~/.opencode.json), rather than a subdirectory.
+type ToolWithHomeConfigFile interface {
+	Tool
+	// HomeConfigFileName returns the dot-prefixed filename in the home dir
+	// (e.g., ".opencode.json").
+	HomeConfigFileName() string
+}
