@@ -70,6 +70,7 @@ func RunAllChecks(cfg *config.Config, verbose bool) *HealthResult {
 	checks["coi_directory"] = CheckCOIDirectory()
 	checks["sessions_directory"] = CheckSessionsDirectory(cfg)
 	checks["disk_space"] = CheckDiskSpace()
+	checks["incus_storage_pool"] = CheckIncusStoragePool()
 
 	// Configuration checks
 	checks["config"] = CheckConfiguration(cfg)

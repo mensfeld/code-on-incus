@@ -1115,6 +1115,87 @@ func CheckDiskSpace() HealthCheck {
 	}
 }
 
+// CheckIncusStoragePool checks the Incus storage pool usage.
+// It queries `incus storage info <pool>` for the default pool and warns
+// when free space is critically low (< 3 GiB free or > 90% used).
+func CheckIncusStoragePool() HealthCheck {
+	// Find the default storage pool from the default profile
+	poolName := "default"
+	profileOut, err := exec.Command("incus", "profile", "show", "default").Output()
+	if err == nil {
+		for _, line := range strings.Split(string(profileOut), "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "pool:") {
+				poolName = strings.TrimSpace(strings.TrimPrefix(line, "pool:"))
+				break
+			}
+		}
+	}
+
+	out, err := exec.Command("incus", "storage", "info", poolName).Output()
+	if err != nil {
+		return HealthCheck{
+			Name:    "incus_storage_pool",
+			Status:  StatusWarning,
+			Message: fmt.Sprintf("Could not query storage pool '%s': %v", poolName, err),
+		}
+	}
+
+	// Parse "space used: X.XXGiB" and "total space: Y.YYGiB"
+	var usedGiB, totalGiB float64
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "space used:") {
+			fmt.Sscanf(strings.TrimPrefix(line, "space used:"), "%f", &usedGiB)
+		} else if strings.HasPrefix(line, "total space:") {
+			fmt.Sscanf(strings.TrimPrefix(line, "total space:"), "%f", &totalGiB)
+		}
+	}
+
+	if totalGiB == 0 {
+		return HealthCheck{
+			Name:    "incus_storage_pool",
+			Status:  StatusWarning,
+			Message: fmt.Sprintf("Could not parse storage pool '%s' usage", poolName),
+		}
+	}
+
+	freeGiB := totalGiB - usedGiB
+	usedPct := (usedGiB / totalGiB) * 100
+
+	details := map[string]interface{}{
+		"pool":      poolName,
+		"used_gib":  usedGiB,
+		"total_gib": totalGiB,
+		"free_gib":  freeGiB,
+		"used_pct":  usedPct,
+	}
+
+	switch {
+	case freeGiB < 2 || usedPct > 90:
+		return HealthCheck{
+			Name:    "incus_storage_pool",
+			Status:  StatusFailed,
+			Message: fmt.Sprintf("Pool '%s' critically low: %.1f GiB free of %.1f GiB (%.0f%% used)", poolName, freeGiB, totalGiB, usedPct),
+			Details: details,
+		}
+	case freeGiB < 5 || usedPct > 80:
+		return HealthCheck{
+			Name:    "incus_storage_pool",
+			Status:  StatusWarning,
+			Message: fmt.Sprintf("Pool '%s' low: %.1f GiB free of %.1f GiB (%.0f%% used)", poolName, freeGiB, totalGiB, usedPct),
+			Details: details,
+		}
+	default:
+		return HealthCheck{
+			Name:    "incus_storage_pool",
+			Status:  StatusOK,
+			Message: fmt.Sprintf("Pool '%s': %.1f GiB free of %.1f GiB (%.0f%% used)", poolName, freeGiB, totalGiB, usedPct),
+			Details: details,
+		}
+	}
+}
+
 // CheckActiveContainers counts running COI containers
 func CheckActiveContainers() HealthCheck {
 	prefix := session.GetContainerPrefix()
