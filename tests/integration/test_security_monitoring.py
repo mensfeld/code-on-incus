@@ -1957,8 +1957,16 @@ poll_interval_sec = 1
                 "even when config has auto_kill_on_critical=false"
             )
 
-            events = get_threat_events(container_name)
-            critical = [e for e in events if e.get("level") == "critical"]
+            # The monitoring daemon writes to the audit log and kills the
+            # container concurrently. On fast CI machines the log flush may
+            # lag behind the kill by a few seconds, so retry before failing.
+            critical = []
+            for _ in range(10):
+                events = get_threat_events(container_name)
+                critical = [e for e in events if e.get("level") == "critical"]
+                if critical:
+                    break
+                time.sleep(1)
             assert len(critical) > 0, "Expected CRITICAL threat logged"
 
             proc.terminate()
