@@ -80,7 +80,7 @@ jobs:
         test_group:
           - name: shell-ephemeral
             path: tests/shell/ephemeral
-            description: "Ephemeral shell session tests (15 tests)"
+            description: "Ephemeral shell session tests (17 tests)"
           - name: shell-persistent
             path: tests/shell/persistent
             description: "Persistent shell session tests (9 tests)"
