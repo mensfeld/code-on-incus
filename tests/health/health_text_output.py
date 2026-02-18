@@ -49,6 +49,7 @@ def test_health_text_output(coi_binary):
     assert "Operating system" in output, "Should show OS info"
     assert "Network bridge" in output, "Should check network bridge"
     assert "Disk space" in output, "Should check disk space"
+    assert "Incus storage pool" in output, "Should check Incus storage pool"
 
     # Verify summary line
     assert "checks passed" in output or "checks failed" in output, "Should have summary"
