@@ -140,7 +140,44 @@ def test_docker_works_in_container(coi_binary, cleanup_containers, workspace_dir
         f"Should not have sysctl errors. stderr: {result.stderr}"
     )
 
-    # === Phase 5: Test Docker with network isolation (default behavior) ===
+    # === Phase 5: Verify docker works without sudo as the code user ===
+    #
+    # The code user (UID 1000) must be able to run docker without sudo.
+    # Docker daemon is configured to use the 'code' group as the socket owner
+    # so the code user's primary group gives access regardless of whether
+    # supplementary groups are loaded by incus exec.
+
+    result = subprocess.run(
+        [
+            coi_binary,
+            "container",
+            "exec",
+            container_name,
+            "--user",
+            "1000",
+            "--",
+            "docker",
+            "run",
+            "--rm",
+            "alpine:latest",
+            "echo",
+            "Docker without sudo works!",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+    assert result.returncode == 0, (
+        f"docker should work without sudo as code user (UID 1000). "
+        f"Check /etc/docker/daemon.json 'group' setting. stderr: {result.stderr}"
+    )
+    output = result.stdout + result.stderr
+    assert "Docker without sudo works!" in output, (
+        f"Docker as code user should produce expected output. output: {output}"
+    )
+
+    # === Phase 6: Test Docker with network isolation (default behavior) ===
 
     # Run another container to verify network namespaces work properly
     result = subprocess.run(
@@ -172,7 +209,7 @@ def test_docker_works_in_container(coi_binary, cleanup_containers, workspace_dir
         f"Docker container should have network interfaces. output: {output}"
     )
 
-    # === Phase 6: Cleanup ===
+    # === Phase 7: Cleanup ===
 
     subprocess.run(
         [coi_binary, "container", "delete", container_name, "--force"],

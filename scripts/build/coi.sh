@@ -207,8 +207,25 @@ install_docker() {
         docker-ce docker-ce-cli containerd.io \
         docker-buildx-plugin docker-compose-plugin
 
-    # Add code user to docker group
+    # Add code user to docker group (belt-and-suspenders, may not be sufficient
+    # on its own — see daemon config below for the reliable fix)
     usermod -aG docker "$CODE_USER"
+
+    # Configure Docker daemon to use the code user's PRIMARY group as the socket
+    # owner instead of the 'docker' supplementary group.
+    #
+    # Why: incus exec may not call initgroups() when --group is specified,
+    # so supplementary groups (including 'docker') may not be active in the
+    # session. The user's primary group (code, GID 1000) is always active
+    # regardless of how the session was started. Setting "group": "code" makes
+    # /var/run/docker.sock owned by root:code (0660) instead of root:docker,
+    # so the code user can always run docker without sudo.
+    mkdir -p /etc/docker
+    cat > /etc/docker/daemon.json << 'EOF'
+{
+    "group": "code"
+}
+EOF
 
     log "Docker $(docker --version 2>/dev/null || echo 'installed')"
 }
