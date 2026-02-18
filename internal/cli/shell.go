@@ -26,6 +26,7 @@ var (
 	background    bool
 	useTmux       bool
 	containerName string
+	toolFlag      string
 )
 
 var shellCmd = &cobra.Command{
@@ -43,6 +44,7 @@ All sessions run in tmux for monitoring and detach/reattach support:
 
 Examples:
   coi shell                         # Interactive session in tmux
+  coi shell --tool opencode         # Use opencode instead of configured tool
   coi shell --background            # Run in background (detached)
   coi shell --resume                # Resume latest session (auto)
   coi shell --resume=<session-id>   # Resume specific session (note: = is required)
@@ -58,6 +60,7 @@ func init() {
 	shellCmd.Flags().BoolVar(&background, "background", false, "Run AI tool in background tmux session (detached)")
 	shellCmd.Flags().BoolVar(&useTmux, "tmux", true, "Use tmux for session management (default true)")
 	shellCmd.Flags().StringVar(&containerName, "container", "", "Use existing container (for testing)")
+	shellCmd.Flags().StringVar(&toolFlag, "tool", "", "Override AI tool (e.g. claude, opencode, aider)")
 }
 
 //nolint:gocyclo // Sequential initialization with many configuration paths
@@ -79,6 +82,10 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// Get configured tool (needed to determine tool-specific sessions directory)
+	// --tool flag overrides whatever is in .coi.toml or global config
+	if toolFlag != "" {
+		cfg.Tool.Name = toolFlag
+	}
 	toolInstance, err := getConfiguredTool(cfg)
 	if err != nil {
 		return err
