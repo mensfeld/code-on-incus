@@ -57,9 +57,7 @@ def test_health_storage_pool_present_in_json(coi_binary):
     # Sanity: total > 0, free >= 0, used_pct in [0, 100]
     assert details["total_gib"] > 0, "total_gib should be positive"
     assert details["free_gib"] >= 0, "free_gib should be non-negative"
-    assert 0 <= details["used_pct"] <= 100, (
-        f"used_pct should be 0-100, got: {details['used_pct']}"
-    )
+    assert 0 <= details["used_pct"] <= 100, f"used_pct should be 0-100, got: {details['used_pct']}"
 
 
 def test_health_storage_pool_in_text_output(coi_binary):
