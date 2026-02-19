@@ -114,6 +114,33 @@ func IncusOutputRaw(args ...string) (string, error) {
 	return output, nil
 }
 
+// IncusOutputWithStderr executes an Incus command and returns combined stdout+stderr
+// This is useful when error messages from Incus need to be inspected (e.g., "already frozen")
+func IncusOutputWithStderr(args ...string) (string, error) {
+	cmdArgs := buildIncusCommand(args...)
+	cmd := execIncusCommand(cmdArgs)
+
+	var combined bytes.Buffer
+	cmd.Stdout = &combined
+	cmd.Stderr = &combined
+
+	err := cmd.Run()
+	output := strings.TrimSpace(combined.String())
+
+	if err != nil {
+		// Extract exit code if available
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return output, &ExitError{
+				ExitCode: exitErr.ExitCode(),
+				Err:      err,
+			}
+		}
+		return output, err
+	}
+
+	return output, nil
+}
+
 // IncusOutputWithArgs executes incus with raw args (no additional wrapping)
 func IncusOutputWithArgs(args ...string) (string, error) {
 	// Build command with project flag

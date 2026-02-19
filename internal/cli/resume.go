@@ -108,6 +108,9 @@ func getContainerStatus(name string) (string, error) {
 	}
 
 	status := strings.TrimSpace(output)
+	if status == "" {
+		return "", fmt.Errorf("container not found")
+	}
 	// Normalize status
 	if status == "FROZEN" {
 		return "Frozen", nil

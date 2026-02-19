@@ -157,11 +157,14 @@ func (r *Responder) pauseContainer() error {
 	}
 	r.mu.Unlock()
 
-	_, err := container.IncusOutput("pause", r.containerName)
+	// Use IncusOutputWithStderr to capture error messages from Incus
+	// (like "already frozen" which goes to stderr)
+	output, err := container.IncusOutputWithStderr("pause", r.containerName)
 	if err != nil {
 		// Check if error is because container is already paused
 		// Incus returns "The container is already frozen" for this case
-		errStr := err.Error()
+		// The message may be in err.Error() or in the combined output
+		errStr := err.Error() + " " + output
 		if strings.Contains(errStr, "already frozen") ||
 			strings.Contains(errStr, "already paused") {
 			r.mu.Lock()
