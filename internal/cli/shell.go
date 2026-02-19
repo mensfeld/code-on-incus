@@ -114,11 +114,10 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 	// Check if tool uses workspace-based sessions (like opencode stores in .opencode/)
 	// These tools don't need COI session tracking - their data is in the workspace
 	isWorkspaceSessionTool := false
-	workspaceSessionDir := ""
 	if _, ok := toolInstance.(tool.ToolWithHomeConfigFile); ok {
 		// File-based tools like opencode store sessions in workspace, not ~/.coi/sessions-*
 		// Check for .opencode/ or similar in workspace
-		workspaceSessionDir = filepath.Join(absWorkspace, ".opencode")
+		workspaceSessionDir := filepath.Join(absWorkspace, ".opencode")
 		if info, err := os.Stat(workspaceSessionDir); err == nil && info.IsDir() {
 			isWorkspaceSessionTool = true
 		}
