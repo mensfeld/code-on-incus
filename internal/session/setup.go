@@ -415,7 +415,9 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 	if opts.ResumeFromID != "" && opts.Tool != nil &&
 		(opts.Tool.ConfigDirName() != "" || isFileBased(opts.Tool)) {
 		// If we launched a new container (not reusing persistent one), restore config from saved session
-		if !skipLaunch && opts.SessionsDir != "" {
+		// Only for directory-based tools (claude-style) - file-based tools (opencode) store sessions
+		// in the workspace which is already bind-mounted
+		if !skipLaunch && opts.SessionsDir != "" && opts.Tool.ConfigDirName() != "" {
 			if err := restoreSessionData(result.Manager, opts.ResumeFromID, result.HomeDir, opts.SessionsDir, opts.Tool, opts.Logger); err != nil {
 				opts.Logger(fmt.Sprintf("Warning: Could not restore session data: %v", err))
 			}
