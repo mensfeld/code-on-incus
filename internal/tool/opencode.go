@@ -17,8 +17,9 @@ func (c *OpencodeTool) ConfigDirName() string { return "" }
 func (c *OpencodeTool) SessionsDirName() string { return "sessions-opencode" }
 
 // BuildCommand builds the opencode launch command.
-// opencode automatically continues from the last session in the workspace's .opencode/ SQLite DB,
-// so no special flag is needed for resume — just run "opencode".
+// opencode stores all sessions in the workspace's .opencode/ SQLite DB.
+// It always starts with a new session — use Ctrl+S inside opencode to switch
+// to a previous session. There's no CLI flag for auto-resume.
 func (c *OpencodeTool) BuildCommand(sessionID string, resume bool, resumeSessionID string) []string {
 	return []string{"opencode"}
 }
