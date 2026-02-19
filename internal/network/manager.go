@@ -329,6 +329,9 @@ func countIPs(domainIPs map[string][]string) int {
 
 // Teardown removes network isolation for a container
 func (m *Manager) Teardown(ctx context.Context, containerName string) error {
+	log.Printf("[NETWORK-DIAG] Teardown called for container %s, mode=%s, containerIP=%s, firewall=%v",
+		containerName, m.config.Mode, m.containerIP, m.firewall != nil)
+
 	// Stop background refresher if running (for allowlist mode)
 	m.stopRefresher()
 
@@ -336,6 +339,7 @@ func (m *Manager) Teardown(ctx context.Context, containerName string) error {
 	// Open mode creates ACCEPT rules via EnsureOpenModeRules()
 	if m.config.Mode == config.NetworkModeOpen {
 		if !FirewallAvailable() {
+			log.Printf("[NETWORK-DIAG] Teardown: firewall not available, skipping cleanup")
 			return nil // No firewall, no rules to clean up
 		}
 
@@ -344,25 +348,30 @@ func (m *Manager) Teardown(ctx context.Context, containerName string) error {
 		if m.containerIP == "" {
 			containerIP, err := GetContainerIP(containerName)
 			if err != nil {
-				log.Printf("Warning: could not get container IP for cleanup: %v", err)
+				log.Printf("[NETWORK-DIAG] Teardown: could not get container IP: %v", err)
 				return nil // Container might be already deleted, and IP wasn't cached
 			}
 			m.containerIP = containerIP
+			log.Printf("[NETWORK-DIAG] Teardown: retrieved container IP %s", containerIP)
 		}
 
 		// Create firewall manager if not already created
 		if m.firewall == nil {
 			m.firewall = NewFirewallManager(m.containerIP, "")
+			log.Printf("[NETWORK-DIAG] Teardown: created FirewallManager for IP %s", m.containerIP)
 		}
 	}
 
 	// Remove firewall rules for ALL modes
 	if m.firewall != nil {
+		log.Printf("[NETWORK-DIAG] Teardown: calling RemoveRules for container %s", containerName)
 		if err := m.firewall.RemoveRules(); err != nil {
 			log.Printf("Warning: failed to remove firewall rules: %v", err)
 		} else {
 			log.Printf("Firewall rules removed for container %s", containerName)
 		}
+	} else {
+		log.Printf("[NETWORK-DIAG] Teardown: firewall is nil, no rules to remove for %s", containerName)
 	}
 
 	return nil

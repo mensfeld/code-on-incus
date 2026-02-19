@@ -2,6 +2,7 @@ package nftmonitor
 
 import (
 	"fmt"
+	"log"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -23,29 +24,37 @@ func NewRuleManager(cfg *Config) *RuleManager {
 
 // AddRules adds nftables LOG rules for the container
 func (rm *RuleManager) AddRules() error {
+	log.Printf("[NFT-DIAG] AddRules starting for container IP %s", rm.config.ContainerIP)
+
 	// Rule 1: High priority - Always log suspicious traffic (no rate limit)
 	// Metadata endpoint, RFC1918, suspicious ports
 	if err := rm.addSuspiciousTrafficRule(); err != nil {
 		return fmt.Errorf("failed to add suspicious traffic rule: %w", err)
 	}
+	log.Printf("[NFT-DIAG] Added suspicious traffic rules for %s", rm.config.ContainerIP)
 
 	// Rule 2: Medium priority - Always log DNS queries (if enabled)
 	if rm.config.LogDNSQueries {
 		if err := rm.addDNSRule(); err != nil {
 			return fmt.Errorf("failed to add DNS rule: %w", err)
 		}
+		log.Printf("[NFT-DIAG] Added DNS rule for %s", rm.config.ContainerIP)
 	}
 
 	// Rule 3: Low priority - Rate-limited logging for all other traffic
 	if err := rm.addGeneralTrafficRule(); err != nil {
 		return fmt.Errorf("failed to add general traffic rule: %w", err)
 	}
+	log.Printf("[NFT-DIAG] Added general traffic rule for %s", rm.config.ContainerIP)
 
+	log.Printf("[NFT-DIAG] AddRules completed for container IP %s", rm.config.ContainerIP)
 	return nil
 }
 
 // RemoveRules removes all nftables LOG rules added by this manager
 func (rm *RuleManager) RemoveRules() error {
+	log.Printf("[NFT-DIAG] RemoveRules starting for container IP %s", rm.config.ContainerIP)
+
 	// List all rules with handles in FORWARD chain
 	output, err := rm.runNFTCommand("list", "chain", "ip", "filter", "FORWARD", "-a")
 	if err != nil {
@@ -54,18 +63,29 @@ func (rm *RuleManager) RemoveRules() error {
 
 	// Find and delete all rules with our log prefix
 	lines := strings.Split(string(output), "\n")
+	totalLines := len(lines)
+	matchingRules := 0
+	removedRules := 0
+
 	for _, line := range lines {
 		if strings.Contains(line, fmt.Sprintf("NFT_COI[%s]", rm.config.ContainerIP)) ||
 			strings.Contains(line, fmt.Sprintf("NFT_DNS[%s]", rm.config.ContainerIP)) ||
 			strings.Contains(line, fmt.Sprintf("NFT_SUSPICIOUS[%s]", rm.config.ContainerIP)) {
+			matchingRules++
 			// Extract handle number from line like: "... # handle 123"
 			if handle := extractHandle(line); handle != "" {
 				if err := rm.deleteRuleByHandle(handle); err != nil {
+					log.Printf("[NFT-DIAG] Failed to delete rule handle %s: %v", handle, err)
 					return fmt.Errorf("failed to delete rule handle %s: %w", handle, err)
 				}
+				removedRules++
+				log.Printf("[NFT-DIAG] Removed NFT rule handle %s for %s", handle, rm.config.ContainerIP)
 			}
 		}
 	}
+
+	log.Printf("[NFT-DIAG] RemoveRules completed for %s: scanned %d lines, found %d matching, removed %d",
+		rm.config.ContainerIP, totalLines, matchingRules, removedRules)
 
 	return nil
 }
