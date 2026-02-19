@@ -498,13 +498,9 @@ func CleanupOrphanedFirewalldZoneBindings(veths []string, logger func(string)) (
 		cleaned++
 	}
 
-	// Reload firewalld to apply changes if we cleaned anything
-	if cleaned > 0 {
-		cmd := exec.Command("sudo", "-n", "firewall-cmd", "--reload")
-		if err := cmd.Run(); err != nil {
-			logger(fmt.Sprintf("Warning: Failed to reload firewalld: %v", err))
-		}
-	}
+	// Note: We intentionally do NOT reload firewalld here.
+	// The --remove-interface command already applies the change at runtime,
+	// and reloading firewalld would wipe out Docker's dynamically-added nft rules.
 
 	return cleaned, nil
 }
