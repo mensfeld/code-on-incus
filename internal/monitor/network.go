@@ -230,8 +230,9 @@ func checkSuspicious(conn Connection, allowedCIDRs []string) string {
 		return ""
 	}
 
-	// Check RFC1918 addresses (should be blocked by firewall in production)
-	if isRFC1918(remoteIP) {
+	// Check RFC1918 addresses only when network is restricted (allowedCIDRs not empty)
+	// In "open" network mode (no restrictions), RFC1918 addresses are expected/allowed
+	if len(allowedCIDRs) > 0 && isRFC1918(remoteIP) {
 		return "RFC1918 private address (should be blocked by firewall)"
 	}
 

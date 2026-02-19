@@ -93,13 +93,13 @@ func TestCheckSuspicious(t *testing.T) {
 		wantReason   string
 	}{
 		{
-			name: "RFC1918 private address",
+			name: "RFC1918 private address with network restrictions",
 			conn: Connection{
 				LocalAddr:  "10.47.62.50:12345",
 				RemoteAddr: "192.168.1.100:4444",
 				State:      "ESTABLISHED",
 			},
-			allowedCIDRs: []string{},
+			allowedCIDRs: []string{"8.8.8.8/32"}, // Network restricted - RFC1918 should be flagged
 			wantReason:   "RFC1918 private address",
 		},
 		{
