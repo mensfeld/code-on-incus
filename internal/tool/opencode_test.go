@@ -31,18 +31,19 @@ func TestOpencodeTool_BuildCommand_NewSession(t *testing.T) {
 
 func TestOpencodeTool_BuildCommand_Resume(t *testing.T) {
 	oc := NewOpencode()
+	// opencode auto-continues from workspace .opencode/ SQLite, no flag needed
 	cmd := oc.BuildCommand("", true, "")
-	if len(cmd) != 2 || cmd[0] != "opencode" || cmd[1] != "--continue" {
-		t.Errorf("BuildCommand(resume) = %v, want [opencode --continue]", cmd)
+	if len(cmd) != 1 || cmd[0] != "opencode" {
+		t.Errorf("BuildCommand(resume) = %v, want [opencode]", cmd)
 	}
 }
 
 func TestOpencodeTool_BuildCommand_ResumeWithID(t *testing.T) {
 	oc := NewOpencode()
-	// Even with a resumeSessionID, opencode only uses --continue (no ID flag)
+	// opencode auto-continues from workspace .opencode/ SQLite, no flag needed
 	cmd := oc.BuildCommand("", true, "some-id")
-	if len(cmd) != 2 || cmd[0] != "opencode" || cmd[1] != "--continue" {
-		t.Errorf("BuildCommand(resume with ID) = %v, want [opencode --continue]", cmd)
+	if len(cmd) != 1 || cmd[0] != "opencode" {
+		t.Errorf("BuildCommand(resume with ID) = %v, want [opencode]", cmd)
 	}
 }
 
