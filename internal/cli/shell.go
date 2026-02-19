@@ -299,8 +299,9 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Setup cleanup on exit
-	defer func() {
+	// Define cleanup function so it can be called from both defer and signal handler
+	// Note: os.Exit() does NOT run deferred functions, so we must call cleanup explicitly
+	doCleanup := func() {
 		fmt.Fprintf(os.Stderr, "\nCleaning up session...\n")
 
 		// Stop monitoring daemons if they were started
@@ -333,15 +334,19 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 		if err := session.Cleanup(cleanupOpts); err != nil {
 			fmt.Fprintf(os.Stderr, "Cleanup error: %v\n", err)
 		}
-	}()
+	}
 
-	// Handle Ctrl+C gracefully
+	// Setup cleanup on exit (for normal return paths)
+	defer doCleanup()
+
+	// Handle Ctrl+C gracefully - must call cleanup explicitly since os.Exit skips defers
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-sigChan
 		fmt.Fprintf(os.Stderr, "\nReceived interrupt signal, cleaning up...\n")
-		os.Exit(0) // Defer will run
+		doCleanup()
+		os.Exit(0)
 	}()
 
 	// Run CLI tool
