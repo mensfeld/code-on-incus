@@ -56,6 +56,11 @@ func StartDaemon(ctx context.Context, cfg Config) (*Daemon, error) {
 		},
 	)
 
+	// Set action callback for pause/kill notifications
+	if cfg.OnAction != nil {
+		responder.SetOnAction(cfg.OnAction)
+	}
+
 	// Create daemon context
 	daemonCtx, cancel := context.WithCancel(ctx)
 

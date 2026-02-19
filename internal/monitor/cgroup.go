@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -27,23 +26,14 @@ func GetCgroupPath(ctx context.Context, containerName string) (string, error) {
 		fmt.Sprintf("/sys/fs/cgroup/incus/%s", containerName),
 	}
 
-	log.Printf("[cgroup] Searching for cgroup path for container: %s", containerName)
 	for _, path := range possiblePaths {
-		log.Printf("[cgroup] Trying: %s", path)
 		if _, err := os.Stat(path); err == nil {
-			log.Printf("[cgroup] ✓ Found cgroup path: %s", path)
 			return path, nil
 		}
 	}
-	log.Printf("[cgroup] None of the standard paths exist, trying incus info fallback...")
 
 	// Fallback: try to find it via incus info
-	log.Printf("[cgroup] Standard paths not found, using incus info fallback")
-	path, err := findCgroupPathViaIncus(ctx, containerName)
-	if err == nil {
-		log.Printf("[cgroup] Found cgroup path via incus: %s", path)
-	}
-	return path, err
+	return findCgroupPathViaIncus(ctx, containerName)
 }
 
 // findCgroupPathViaIncus uses incus info to find the cgroup path
@@ -124,24 +114,20 @@ func CollectResourceStats(ctx context.Context, containerName string) (ResourceSt
 	ioStats, err := readIOStats(filepath.Join(cgroupPath, "io.stat"))
 	if err != nil {
 		// I/O stats might not be available, don't fail
-		log.Printf("[cgroup] WARNING: Failed to read I/O stats for %s: %v", containerName, err)
 		stats.IOReadMB = 0
 		stats.IOWriteMB = 0
 	} else {
 		// If stats are zero, try parent cgroup (in case init.scope doesn't track I/O)
 		if ioStats.read == 0 && ioStats.write == 0 {
-			log.Printf("[cgroup] I/O stats from init.scope are zero, trying parent cgroup...")
 			parentPath := filepath.Dir(cgroupPath)
 			parentStats, parentErr := readIOStats(filepath.Join(parentPath, "io.stat"))
 			if parentErr == nil && (parentStats.read > 0 || parentStats.write > 0) {
-				log.Printf("[cgroup] Using parent cgroup I/O stats from: %s", parentPath)
 				ioStats = parentStats
 			}
 		}
 
 		stats.IOReadMB = ioStats.read / 1024.0 / 1024.0
 		stats.IOWriteMB = ioStats.write / 1024.0 / 1024.0
-		log.Printf("[cgroup] I/O stats for %s: read=%.2fMB write=%.2fMB", containerName, stats.IOReadMB, stats.IOWriteMB)
 	}
 
 	return stats, nil
@@ -224,24 +210,17 @@ type ioStats struct {
 }
 
 func readIOStats(path string) (ioStats, error) {
-	log.Printf("[cgroup] Reading I/O stats from: %s", path)
-
 	file, err := os.Open(path)
 	if err != nil {
-		log.Printf("[cgroup] Failed to open I/O stat file: %v", err)
 		return ioStats{}, err
 	}
 	defer file.Close()
 
 	var stats ioStats
 	scanner := bufio.NewScanner(file)
-	lineCount := 0
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		lineCount++
-		log.Printf("[cgroup] I/O stat line %d: %q", lineCount, line) //nolint:gosec // G706: line is from kernel cgroup file, not user input
-
 		fields := strings.Fields(line)
 		if len(fields) < 2 {
 			continue
@@ -262,25 +241,15 @@ func readIOStats(path string) (ioStats, error) {
 			switch parts[0] {
 			case "rbytes":
 				stats.read += value
-				log.Printf("[cgroup] Found rbytes: %.0f (total read now: %.0f)", value, stats.read) //nolint:gosec // G706: float from kernel cgroup file, not user-controlled
 			case "wbytes":
 				stats.write += value
-				log.Printf("[cgroup] Found wbytes: %.0f (total write now: %.0f)", value, stats.write) //nolint:gosec // G706: float from kernel cgroup file, not user-controlled
 			}
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
-		log.Printf("[cgroup] Scanner error: %v", err)
 		return ioStats{}, err
 	}
-
-	if lineCount == 0 {
-		log.Printf("[cgroup] WARNING: I/O stat file is EMPTY at %s", path)
-	}
-
-	log.Printf("[cgroup] Final I/O stats: read=%.2fMB write=%.2fMB (from %d lines)",
-		stats.read/1024/1024, stats.write/1024/1024, lineCount)
 
 	return stats, nil
 }

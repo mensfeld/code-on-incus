@@ -27,6 +27,7 @@ type Config struct {
 	LogDNSQueries      bool
 	LimaHost           string
 	OnThreat           func(ThreatEvent)
+	OnAction           func(action, message string) // Called when container is paused/killed
 }
 
 // ThreatEvent represents a detected network threat

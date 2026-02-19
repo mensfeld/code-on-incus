@@ -54,7 +54,9 @@ func (lr *LogReader) Start(ctx context.Context) error {
 		case msg := <-lr.journalChan:
 			if event := lr.parseNFTLog(msg); event != nil {
 				// Filter to only this container's IP
-				if event.ContainerIP == lr.config.ContainerIP {
+				// Check both the prefix IP and the actual SRC IP match
+				if event.ContainerIP == lr.config.ContainerIP &&
+					event.SrcIP == lr.config.ContainerIP {
 					select {
 					case lr.eventChan <- event:
 					case <-ctx.Done():

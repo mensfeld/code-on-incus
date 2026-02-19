@@ -140,4 +140,5 @@ type DaemonConfig struct {
 	// Callbacks
 	OnThreat func(ThreatEvent)
 	OnError  func(error)
+	OnAction func(action, message string) // Called when container is paused/killed
 }

@@ -769,11 +769,14 @@ func startMonitoringDaemon(containerName, workspacePath string, cfg *config.Conf
 		AutoPauseOnHigh:      cfg.Monitoring.AutoPauseOnHigh,
 		AutoKillOnCritical:   cfg.Monitoring.AutoKillOnCritical,
 		OnThreat: func(threat monitor.ThreatEvent) {
-			// Display alert in terminal
-			fmt.Fprint(os.Stderr, monitor.FormatThreatAlert(threat))
+			// Threats are logged to audit file - no terminal output to avoid corrupting TUI
 		},
 		OnError: func(err error) {
-			fmt.Fprintf(os.Stderr, "[monitor] Error: %v\n", err)
+			// Errors are logged to audit file - no terminal output to avoid corrupting TUI
+		},
+		OnAction: func(action, message string) {
+			// Critical actions (pause/kill) should notify the user
+			fmt.Fprintf(os.Stderr, "\n\n*** SECURITY: %s ***\n\n", message)
 		},
 	}
 
@@ -785,7 +788,7 @@ func startMonitoringDaemon(containerName, workspacePath string, cfg *config.Conf
 	}
 
 	*daemon = d
-	fmt.Fprintf(os.Stderr, "Monitoring daemon started (audit log: %s)\n", auditLogPath)
+	// No terminal output to avoid corrupting TUI - audit log path shown in session info
 	return nil
 }
 
@@ -801,7 +804,6 @@ func startNFTMonitoringDaemon(containerName string, cfg *config.Config, daemon *
 	gatewayIP, err := network.GetContainerGatewayIP(containerName)
 	if err != nil {
 		// Non-fatal - we can still monitor without gateway IP check
-		fmt.Fprintf(os.Stderr, "Warning: Failed to get gateway IP: %v\n", err)
 		gatewayIP = ""
 	}
 
@@ -829,16 +831,11 @@ func startNFTMonitoringDaemon(containerName string, cfg *config.Config, daemon *
 		LogDNSQueries:      cfg.Monitoring.NFT.LogDNSQueries,
 		LimaHost:           cfg.Monitoring.NFT.LimaHost,
 		OnThreat: func(threat nftmonitor.ThreatEvent) {
-			// Display alert in terminal using existing formatter
-			monitorThreat := monitor.ThreatEvent{
-				Timestamp:   threat.Timestamp,
-				Level:       monitor.ThreatLevel(threat.Level),
-				Category:    threat.Category,
-				Title:       threat.Title,
-				Description: threat.Description,
-				Evidence:    threat.Evidence,
-			}
-			fmt.Fprint(os.Stderr, monitor.FormatThreatAlert(monitorThreat))
+			// Threats are logged to audit file - no terminal output to avoid corrupting TUI
+		},
+		OnAction: func(action, message string) {
+			// Critical actions (pause/kill) should notify the user
+			fmt.Fprintf(os.Stderr, "\n\n*** SECURITY: %s ***\n\n", message)
 		},
 	}
 
@@ -850,6 +847,6 @@ func startNFTMonitoringDaemon(containerName string, cfg *config.Config, daemon *
 	}
 
 	*daemon = d
-	fmt.Fprintf(os.Stderr, "NFT monitoring started (container IP: %s, audit log: %s)\n", containerIP, auditLogPath)
+	// No terminal output to avoid corrupting TUI - audit log path shown in session info
 	return nil
 }

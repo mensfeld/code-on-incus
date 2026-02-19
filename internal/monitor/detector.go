@@ -2,7 +2,6 @@ package monitor
 
 import (
 	"fmt"
-	"log"
 
 	"github.com/google/uuid"
 )
@@ -96,12 +95,8 @@ func (d *Detector) Analyze(snapshot MonitorSnapshot) []ThreatEvent {
 
 	// 4. Detect large workspace reads (possible data exfiltration)
 	if snapshot.Filesystem.Available {
-		log.Printf("[detector] Filesystem available, checking for large reads (threshold: %.2f MB)", d.fileReadThresholdMB)
-		log.Printf("[detector] Filesystem stats: TotalReadMB=%.2f, ReadRate=%.2f MB/s",
-			snapshot.Filesystem.TotalReadMB, snapshot.Filesystem.ReadRateMBPerSec)
 		fsExfil := DetectLargeReads(snapshot.Filesystem, d.fileReadThresholdMB, d.fileReadRateMBPerSec)
 		if fsExfil != nil {
-			log.Printf("[detector] FILESYSTEM THREAT DETECTED: %.2f MB read", fsExfil.ReadBytesMB)
 			threats = append(threats, ThreatEvent{
 				ID:        uuid.New().String(),
 				Timestamp: snapshot.Timestamp,
@@ -113,22 +108,13 @@ func (d *Detector) Analyze(snapshot MonitorSnapshot) []ThreatEvent {
 				Evidence: fsExfil,
 				Action:   "pending",
 			})
-		} else {
-			log.Printf("[detector] No filesystem threat: read %.2f MB below threshold %.2f MB",
-				snapshot.Filesystem.TotalReadMB, d.fileReadThresholdMB)
 		}
-	} else {
-		log.Printf("[detector] Filesystem stats NOT available")
 	}
 
 	// 5. Detect low disk space (WARNING level)
 	if snapshot.Filesystem.Available && snapshot.Filesystem.TmpTotalMB > 0 {
 		// Warn if /tmp is >80% full
 		if snapshot.Filesystem.TmpUsedPercent > 80 {
-			log.Printf("[detector] WARNING: /tmp is %.1f%% full (%.0f/%.0fMB)",
-				snapshot.Filesystem.TmpUsedPercent,
-				snapshot.Filesystem.TmpUsedMB,
-				snapshot.Filesystem.TmpTotalMB)
 			threats = append(threats, ThreatEvent{
 				ID:        uuid.New().String(),
 				Timestamp: snapshot.Timestamp,

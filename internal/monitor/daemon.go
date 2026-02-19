@@ -3,7 +3,6 @@ package monitor
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 )
 
@@ -36,6 +35,11 @@ func StartDaemon(ctx context.Context, cfg DaemonConfig) (*Daemon, error) {
 	responder := NewResponder(cfg.ContainerName, cfg.AutoPauseOnHigh, cfg.AutoKillOnCritical,
 		auditLog, cfg.OnThreat)
 
+	// Set action callback for pause/kill notifications
+	if cfg.OnAction != nil {
+		responder.SetOnAction(cfg.OnAction)
+	}
+
 	daemon := &Daemon{
 		ctx:       daemonCtx,
 		cancel:    cancel,
@@ -61,8 +65,6 @@ func (d *Daemon) run() {
 	ticker := time.NewTicker(d.config.PollInterval)
 	defer ticker.Stop()
 
-	log.Printf("[monitor] Starting monitoring daemon for container %s", d.config.ContainerName)
-
 	for {
 		select {
 		case <-ticker.C:
@@ -75,19 +77,9 @@ func (d *Daemon) run() {
 				continue
 			}
 
-			// DEBUG: Log process count
-			log.Printf("[monitor] Collected %d processes", len(snapshot.Processes.Processes))
-
 			// Detect threats
 			threats := d.detector.Analyze(snapshot)
 			snapshot.Threats = threats
-
-			// DEBUG: Log threat detection results
-			log.Printf("[monitor] Analyzer returned %d threats", len(threats))
-			for i, threat := range threats {
-				log.Printf("[monitor] Threat %d: level=%s category=%s title=%q",
-					i, threat.Level, threat.Category, threat.Title)
-			}
 
 			// Log snapshot to audit log
 			if err := d.auditLog.WriteSnapshot(snapshot); err != nil {
@@ -98,25 +90,19 @@ func (d *Daemon) run() {
 
 			// Handle threats
 			for _, threat := range threats {
-				log.Printf("[monitor] Calling responder.Handle for threat: %s", threat.Title)
 				if err := d.responder.Handle(threat); err != nil {
-					log.Printf("[monitor] ERROR handling threat: %v", err)
 					if d.config.OnError != nil {
 						d.config.OnError(fmt.Errorf("threat response failed: %w", err))
 					}
-				} else {
-					log.Printf("[monitor] Threat handled successfully, action=%s", threat.Action)
 				}
 
 				// If container was killed, stop monitoring
 				if threat.Action == "killed" {
-					log.Printf("[monitor] Container killed due to critical threat, stopping daemon")
 					return
 				}
 			}
 
 		case <-d.ctx.Done():
-			log.Printf("[monitor] Monitoring daemon stopped for container %s", d.config.ContainerName)
 			return
 		}
 	}
@@ -124,7 +110,6 @@ func (d *Daemon) run() {
 
 // Stop gracefully stops the monitoring daemon
 func (d *Daemon) Stop() error {
-	log.Printf("[monitor] Stopping monitoring daemon for container %s", d.config.ContainerName)
 	d.cancel()
 
 	// Wait for daemon to finish (with timeout)
