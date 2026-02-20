@@ -156,7 +156,6 @@ func (f *FirewallManager) ApplyAllowlist(cfg *config.NetworkConfig, allowedIPs [
 // RemoveRules removes all firewall rules for this container's IP
 func (f *FirewallManager) RemoveRules() error {
 	if f.containerIP == "" {
-		log.Printf("[FIREWALL-DIAG] RemoveRules called with empty containerIP - skipping")
 		return nil
 	}
 
@@ -166,31 +165,14 @@ func (f *FirewallManager) RemoveRules() error {
 		return fmt.Errorf("failed to list firewall rules: %w", err)
 	}
 
-	// Diagnostic: count total rules and rules for this container
-	totalRules := len(rules)
-	matchingRules := 0
-	for _, rule := range rules {
-		if strings.Contains(rule, f.containerIP) {
-			matchingRules++
-		}
-	}
-	log.Printf("[FIREWALL-DIAG] RemoveRules for IP %s: found %d total rules, %d matching this container",
-		f.containerIP, totalRules, matchingRules)
-
 	// Remove rules that match this container's IP
-	removed := 0
 	for _, rule := range rules {
 		if strings.Contains(rule, f.containerIP) {
 			if err := f.removeRule(rule); err != nil {
 				log.Printf("Warning: failed to remove firewall rule: %v", err)
-			} else {
-				removed++
 			}
 		}
 	}
-
-	log.Printf("[FIREWALL-DIAG] RemoveRules completed: removed %d/%d rules for IP %s",
-		removed, matchingRules, f.containerIP)
 
 	return nil
 }
@@ -269,9 +251,6 @@ func (f *FirewallManager) addRule(priority int, source, destination, action stri
 		return fmt.Errorf("firewall-cmd failed: %s: %w", strings.TrimSpace(string(output)), err)
 	}
 
-	// Diagnostic logging for rule accumulation debugging
-	log.Printf("[FIREWALL-DIAG] ADD rule: priority=%d src=%s dst=%s action=%s", priority, source, destination, action)
-
 	return nil
 }
 
@@ -311,9 +290,6 @@ func (f *FirewallManager) removeRule(rule string) error {
 	if err != nil {
 		return fmt.Errorf("failed to remove rule: %s: %w", strings.TrimSpace(string(output)), err)
 	}
-
-	// Diagnostic logging for rule accumulation debugging
-	log.Printf("[FIREWALL-DIAG] REMOVE rule: %s", rule)
 
 	return nil
 }
