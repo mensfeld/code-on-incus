@@ -45,21 +45,21 @@ func TestNetworkDetector_SuspiciousPorts(t *testing.T) {
 		port        int
 		shouldAlert bool
 	}{
-		{4444, true},   // Metasploit default
-		{5555, true},   // Common backdoor
-		{1234, true},   // Reverse shell
-		{31337, true},  // Leet port
-		{12345, true},  // NetBus
-		{6666, true},   // Various backdoors
-		{6667, true},   // IRC
-		{6697, true},   // IRC SSL
-		{8080, true},   // HTTP alt
-		{80, false},    // Normal HTTP
-		{443, false},   // Normal HTTPS
-		{22, false},    // SSH
-		{53, false},    // DNS (handled separately)
-		{123, false},   // NTP
-		{25, false},    // SMTP
+		{4444, true},  // Metasploit default
+		{5555, true},  // Common backdoor
+		{1234, true},  // Reverse shell
+		{31337, true}, // Leet port
+		{12345, true}, // NetBus
+		{6666, true},  // Various backdoors
+		{6667, true},  // IRC
+		{6697, true},  // IRC SSL
+		{8080, true},  // HTTP alt
+		{80, false},   // Normal HTTP
+		{443, false},  // Normal HTTPS
+		{22, false},   // SSH
+		{53, false},   // DNS (handled separately)
+		{123, false},  // NTP
+		{25, false},   // SMTP
 	}
 
 	for _, tt := range tests {

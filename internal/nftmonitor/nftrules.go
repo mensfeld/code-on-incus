@@ -97,7 +97,7 @@ func (rm *RuleManager) ensureChainExists() error {
 	}
 
 	// Create the table if it doesn't exist (ignore error if already exists)
-	rm.runNFTCommand("add", "table", "ip", "filter")
+	_, _ = rm.runNFTCommand("add", "table", "ip", "filter")
 
 	// Create the FORWARD chain as a filter chain
 	// type filter, hook forward, priority 0 (same as iptables FORWARD)
