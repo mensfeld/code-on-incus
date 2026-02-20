@@ -6,6 +6,7 @@ package nftmonitor
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/coreos/go-systemd/v22/sdjournal"
@@ -13,7 +14,10 @@ import (
 
 // JournalReader wraps systemd journal for reading kernel logs
 type JournalReader struct {
-	journal *sdjournal.Journal
+	journal   *sdjournal.Journal
+	mu        sync.Mutex
+	closed    bool
+	closeOnce sync.Once
 }
 
 // NewJournalReader creates a new journal reader for kernel logs
@@ -40,7 +44,8 @@ func NewJournalReader() (*JournalReader, error) {
 
 // StreamLogs streams kernel log messages to the provided channel
 func (jr *JournalReader) StreamLogs(ctx context.Context, msgChan chan<- string) error {
-	defer jr.journal.Close()
+	// Close journal when we're done streaming
+	defer jr.Close()
 
 	for {
 		select {
@@ -49,12 +54,40 @@ func (jr *JournalReader) StreamLogs(ctx context.Context, msgChan chan<- string) 
 		default:
 		}
 
+		// Check if we've been closed
+		jr.mu.Lock()
+		if jr.closed {
+			jr.mu.Unlock()
+			return nil
+		}
+		journal := jr.journal
+		jr.mu.Unlock()
+
+		if journal == nil {
+			return nil
+		}
+
 		// Wait for new journal entries (with timeout)
-		jr.journal.Wait(time.Second)
+		journal.Wait(time.Second)
+
+		// Check again after wait
+		jr.mu.Lock()
+		if jr.closed {
+			jr.mu.Unlock()
+			return nil
+		}
+		jr.mu.Unlock()
 
 		// Read all available entries
 		for {
+			jr.mu.Lock()
+			if jr.closed || jr.journal == nil {
+				jr.mu.Unlock()
+				return nil
+			}
 			n, err := jr.journal.Next()
+			jr.mu.Unlock()
+
 			if err != nil {
 				return fmt.Errorf("failed to read next journal entry: %w", err)
 			}
@@ -62,8 +95,15 @@ func (jr *JournalReader) StreamLogs(ctx context.Context, msgChan chan<- string) 
 				break // No more entries
 			}
 
+			jr.mu.Lock()
+			if jr.closed || jr.journal == nil {
+				jr.mu.Unlock()
+				return nil
+			}
 			// Get the MESSAGE field (kernel log message)
 			msg, err := jr.journal.GetData("MESSAGE")
+			jr.mu.Unlock()
+
 			if err != nil {
 				continue // Skip entries without MESSAGE
 			}
@@ -80,10 +120,17 @@ func (jr *JournalReader) StreamLogs(ctx context.Context, msgChan chan<- string) 
 	}
 }
 
-// Close closes the journal reader
+// Close closes the journal reader (safe to call multiple times)
 func (jr *JournalReader) Close() error {
-	if jr.journal != nil {
-		return jr.journal.Close()
-	}
-	return nil
+	var closeErr error
+	jr.closeOnce.Do(func() {
+		jr.mu.Lock()
+		defer jr.mu.Unlock()
+		jr.closed = true
+		if jr.journal != nil {
+			closeErr = jr.journal.Close()
+			jr.journal = nil
+		}
+	})
+	return closeErr
 }

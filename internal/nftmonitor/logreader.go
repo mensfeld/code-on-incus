@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -18,6 +19,7 @@ type LogReader struct {
 	journal     *JournalReader
 	eventChan   chan *NetworkEvent
 	journalChan chan string
+	closeOnce   sync.Once
 }
 
 // NewLogReader creates a new log reader
@@ -75,11 +77,18 @@ func (lr *LogReader) Events() <-chan *NetworkEvent {
 	return lr.eventChan
 }
 
-// Close closes the log reader
+// Close closes the log reader (safe to call multiple times)
 func (lr *LogReader) Close() error {
-	close(lr.eventChan)
-	close(lr.journalChan)
-	return lr.journal.Close()
+	var closeErr error
+	lr.closeOnce.Do(func() {
+		// Close journal first - this will cause StreamLogs to exit
+		if lr.journal != nil {
+			closeErr = lr.journal.Close()
+		}
+		// Note: Don't close channels here as StreamLogs goroutine may still
+		// be trying to write. Let them be garbage collected when no longer referenced.
+	})
+	return closeErr
 }
 
 // parseNFTLog parses a nftables kernel log message into a NetworkEvent
