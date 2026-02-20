@@ -434,6 +434,154 @@ class TestNetworkThreatDetection:
         proc.stdin.flush()
         proc.wait(timeout=30)
 
+    def test_container_killed_on_critical_threat(self, coi_binary):
+        """Test that container is actually KILLED when CRITICAL threat detected.
+
+        This is the most important security test - verifies the full pipeline:
+        1. Container runs with monitoring
+        2. Suspicious network activity triggers nftables LOG
+        3. Journal captures the log
+        4. Detector identifies CRITICAL threat
+        5. Responder KILLS the container
+        6. Container is actually deleted
+        """
+        container_name = f"coi-kill-test-{os.getpid()}"
+
+        # Start a fresh container with monitoring enabled
+        # Use subprocess.Popen so we can monitor the session
+        proc = subprocess.Popen(
+            [coi_binary, "shell", "--name", container_name, "--monitor"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        # Wait for container to be fully ready
+        time.sleep(8)
+
+        # Verify container exists and is running
+        result = subprocess.run(
+            ["incus", "list", container_name, "--format=json"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        containers = json.loads(result.stdout) if result.stdout.strip() else []
+        assert len(containers) > 0, f"Container {container_name} not found after startup"
+        assert containers[0]["status"] == "Running", f"Container not running: {containers[0]['status']}"
+
+        # Trigger CRITICAL threat: attempt connection to suspicious port 4444
+        # This should trigger auto-kill
+        try:
+            subprocess.run(
+                ["incus", "exec", container_name, "--", "nc", "-w", "1", "-z", "1.2.3.4", "4444"],
+                capture_output=True,
+                timeout=10,
+            )
+        except subprocess.TimeoutExpired:
+            pass  # Expected - connection will fail
+
+        # Wait for detection and kill response
+        time.sleep(5)
+
+        # Verify container was killed (should no longer exist or be stopped)
+        result = subprocess.run(
+            ["incus", "list", container_name, "--format=json"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        containers = json.loads(result.stdout) if result.stdout.strip() else []
+
+        # Container should either not exist or be stopped
+        if len(containers) > 0:
+            status = containers[0]["status"]
+            assert status != "Running", (
+                f"Container {container_name} should have been KILLED but is still {status}. "
+                "NFT monitoring detection or response may not be working!"
+            )
+
+        # Clean up the session process
+        try:
+            proc.terminate()
+            proc.wait(timeout=5)
+        except:
+            proc.kill()
+
+        # Final cleanup - ensure container is removed
+        subprocess.run(
+            [coi_binary, "container", "delete", container_name, "--force"],
+            capture_output=True,
+            timeout=30,
+        )
+
+    def test_container_killed_on_metadata_access(self, coi_binary):
+        """Test that container is KILLED when accessing cloud metadata endpoint.
+
+        Accessing 169.254.169.254 is a CRITICAL threat (credential theft attempt).
+        """
+        container_name = f"coi-meta-test-{os.getpid()}"
+
+        proc = subprocess.Popen(
+            [coi_binary, "shell", "--name", container_name, "--monitor"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        time.sleep(8)
+
+        # Verify container is running
+        result = subprocess.run(
+            ["incus", "list", container_name, "--format=json"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        containers = json.loads(result.stdout) if result.stdout.strip() else []
+        assert len(containers) > 0, f"Container {container_name} not found"
+
+        # Trigger CRITICAL: attempt to access metadata endpoint
+        try:
+            subprocess.run(
+                ["incus", "exec", container_name, "--", "curl", "-s", "-m", "2", "http://169.254.169.254/"],
+                capture_output=True,
+                timeout=10,
+            )
+        except subprocess.TimeoutExpired:
+            pass
+
+        # Wait for kill
+        time.sleep(5)
+
+        # Verify killed
+        result = subprocess.run(
+            ["incus", "list", container_name, "--format=json"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        containers = json.loads(result.stdout) if result.stdout.strip() else []
+
+        if len(containers) > 0:
+            assert containers[0]["status"] != "Running", (
+                f"Container should be KILLED after metadata access but is {containers[0]['status']}"
+            )
+
+        try:
+            proc.terminate()
+            proc.wait(timeout=5)
+        except:
+            proc.kill()
+
+        subprocess.run(
+            [coi_binary, "container", "delete", container_name, "--force"],
+            capture_output=True,
+            timeout=30,
+        )
+
     def test_dns_query_monitoring(self, test_container, audit_log_path, coi_binary):
         """Test that DNS queries are logged."""
         # Start session with --monitor to enable NFT monitoring
