@@ -23,6 +23,11 @@ func NewRuleManager(cfg *Config) *RuleManager {
 
 // AddRules adds nftables LOG rules for the container
 func (rm *RuleManager) AddRules() error {
+	// First, ensure the ip filter table and FORWARD chain exist
+	if err := rm.ensureChainExists(); err != nil {
+		return fmt.Errorf("failed to ensure chain exists: %w", err)
+	}
+
 	// Rule 1: High priority - Always log suspicious traffic (no rate limit)
 	// Metadata endpoint, RFC1918, suspicious ports
 	if err := rm.addSuspiciousTrafficRule(); err != nil {
@@ -66,6 +71,30 @@ func (rm *RuleManager) RemoveRules() error {
 				}
 			}
 		}
+	}
+
+	return nil
+}
+
+// ensureChainExists creates the ip filter table and FORWARD chain if they don't exist
+// This is needed because nftables doesn't create iptables-legacy compatible tables by default
+func (rm *RuleManager) ensureChainExists() error {
+	// Check if the chain exists
+	_, err := rm.runNFTCommand("list", "chain", "ip", "filter", "FORWARD")
+	if err == nil {
+		// Chain already exists
+		return nil
+	}
+
+	// Create the table if it doesn't exist (ignore error if already exists)
+	rm.runNFTCommand("add", "table", "ip", "filter")
+
+	// Create the FORWARD chain as a filter chain
+	// type filter, hook forward, priority 0 (same as iptables FORWARD)
+	_, err = rm.runNFTCommand("add", "chain", "ip", "filter", "FORWARD",
+		"{", "type", "filter", "hook", "forward", "priority", "0", ";", "}")
+	if err != nil {
+		return fmt.Errorf("failed to create FORWARD chain: %w", err)
 	}
 
 	return nil
