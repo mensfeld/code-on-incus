@@ -192,11 +192,11 @@ func (rm *RuleManager) runNFTCommand(args ...string) ([]byte, error) {
 
 	if rm.config.LimaHost != "" {
 		// Run inside Lima VM
-		cmdArgs := append([]string{"shell", rm.config.LimaHost, "sudo", "nft"}, args...)
+		cmdArgs := append([]string{"shell", rm.config.LimaHost, "sudo", "-n", "nft"}, args...)
 		cmd = exec.Command("limactl", cmdArgs...)
 	} else {
-		// Native Linux - use sudo
-		cmdArgs := append([]string{"nft"}, args...)
+		// Native Linux - use sudo -n (non-interactive, fail if password required)
+		cmdArgs := append([]string{"-n", "nft"}, args...)
 		cmd = exec.Command("sudo", cmdArgs...)
 	}
 
