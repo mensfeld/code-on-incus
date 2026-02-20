@@ -40,9 +40,15 @@ func NewJournalReader() (*JournalReader, error) {
 	}
 
 	// Filter to kernel messages only
-	if err := journal.AddMatch("_TRANSPORT=kernel"); err != nil {
-		journal.Close()
-		return nil, fmt.Errorf("failed to add kernel filter: %w", err)
+	// Note: Set COI_NFT_NO_FILTER=1 to disable filtering for debugging
+	if os.Getenv("COI_NFT_NO_FILTER") != "1" {
+		if err := journal.AddMatch("_TRANSPORT=kernel"); err != nil {
+			journal.Close()
+			return nil, fmt.Errorf("failed to add kernel filter: %w", err)
+		}
+		debugf("Added journal filter: _TRANSPORT=kernel")
+	} else {
+		debugf("WARNING: Journal filter disabled (COI_NFT_NO_FILTER=1)")
 	}
 
 	// Start from the end (only read new logs)
