@@ -124,17 +124,24 @@ func (d *Daemon) start() {
 
 // processEvents processes network events and detects threats
 func (d *Daemon) processEvents() {
+	debugf("Daemon.processEvents started")
 	for {
 		select {
 		case <-d.ctx.Done():
+			debugf("Daemon.processEvents context done")
 			return
 		case event := <-d.logReader.Events():
 			if event == nil {
+				debugf("Received nil event, skipping")
 				continue
 			}
 
+			debugf("Daemon received event: DstIP=%s DstPort=%d", event.DstIP, event.DstPort)
+
 			// Analyze event for threats
 			if threat := d.detector.Analyze(event); threat != nil {
+				debugf("THREAT DETECTED: Level=%s Title=%s", threat.Level, threat.Title)
+
 				// Convert to monitor.ThreatEvent
 				monitorThreat := monitor.ThreatEvent{
 					ID:          uuid.New().String(),
@@ -148,9 +155,15 @@ func (d *Daemon) processEvents() {
 				}
 
 				// Handle threat (logging, alerting, response)
+				debugf("Calling responder.Handle for threat")
 				if err := d.responder.Handle(monitorThreat); err != nil {
 					fmt.Printf("Error handling threat: %v\n", err)
+					debugf("Responder error: %v", err)
+				} else {
+					debugf("Responder.Handle completed successfully")
 				}
+			} else {
+				debugf("No threat detected for event to %s:%d", event.DstIP, event.DstPort)
 			}
 		}
 	}

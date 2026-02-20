@@ -75,6 +75,7 @@ func TestParseNFTLog(t *testing.T) {
 			if tt.expectEvent {
 				if event == nil {
 					t.Fatal("Expected event but got nil")
+					return // unreachable but helps staticcheck
 				}
 				if event.ContainerIP != tt.expectedIP {
 					t.Errorf("Expected ContainerIP %q, got %q", tt.expectedIP, event.ContainerIP)
@@ -108,6 +109,7 @@ func TestLogReaderFiltering(t *testing.T) {
 
 	if event == nil {
 		t.Skip("Parser didn't return event - this is acceptable")
+		return // unreachable but helps staticcheck
 	}
 
 	// The event's ContainerIP (from prefix) should be 10.47.62.50

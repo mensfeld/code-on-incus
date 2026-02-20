@@ -26,6 +26,7 @@ func TestNetworkDetector_MetadataEndpoint(t *testing.T) {
 	threat := nd.Analyze(event)
 	if threat == nil {
 		t.Fatal("Expected threat for metadata endpoint, got nil")
+		return // unreachable but helps staticcheck
 	}
 	if threat.Level != ThreatLevelCritical {
 		t.Errorf("Expected CRITICAL level, got %s", threat.Level)
@@ -173,6 +174,7 @@ func TestNetworkDetector_DNSQueryThreshold(t *testing.T) {
 	threat := nd.Analyze(event)
 	if threat == nil {
 		t.Fatal("Expected threat for exceeding DNS threshold, got nil")
+		return // unreachable but helps staticcheck
 	}
 	if threat.Level != ThreatLevelWarning {
 		t.Errorf("Expected WARNING level for DNS threshold, got %s", threat.Level)
@@ -202,6 +204,7 @@ func TestNetworkDetector_DNSToNonStandardServer(t *testing.T) {
 	threat := nd.Analyze(event)
 	if threat == nil {
 		t.Fatal("Expected threat for DNS to non-standard server, got nil")
+		return // unreachable but helps staticcheck
 	}
 	if threat.Level != ThreatLevelWarning {
 		t.Errorf("Expected WARNING level, got %s", threat.Level)

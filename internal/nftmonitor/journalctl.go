@@ -6,11 +6,23 @@ package nftmonitor
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/coreos/go-systemd/v22/sdjournal"
 )
+
+// Debug controls whether debug output is enabled
+// Set COI_NFT_DEBUG=1 to enable
+var Debug = os.Getenv("COI_NFT_DEBUG") == "1"
+
+func debugf(format string, args ...interface{}) {
+	if Debug {
+		fmt.Fprintf(os.Stderr, "[NFT-DEBUG] "+format+"\n", args...)
+	}
+}
 
 // JournalReader wraps systemd journal for reading kernel logs
 type JournalReader struct {
@@ -39,6 +51,13 @@ func NewJournalReader() (*JournalReader, error) {
 		return nil, fmt.Errorf("failed to seek to end of journal: %w", err)
 	}
 
+	// Skip past the current tail entry so Next() reads truly NEW entries
+	// Without this, the first Wait()+Next() might read the last existing entry
+	// instead of waiting for new ones
+	_, _ = journal.Next()
+
+	debugf("JournalReader initialized, waiting for new kernel log entries")
+
 	return &JournalReader{journal: journal}, nil
 }
 
@@ -47,9 +66,12 @@ func (jr *JournalReader) StreamLogs(ctx context.Context, msgChan chan<- string) 
 	// Close journal when we're done streaming
 	defer jr.Close()
 
+	debugf("StreamLogs started, entering main loop")
+
 	for {
 		select {
 		case <-ctx.Done():
+			debugf("Context done, exiting StreamLogs")
 			return ctx.Err()
 		default:
 		}
@@ -58,17 +80,23 @@ func (jr *JournalReader) StreamLogs(ctx context.Context, msgChan chan<- string) 
 		jr.mu.Lock()
 		if jr.closed {
 			jr.mu.Unlock()
+			debugf("Journal closed, exiting StreamLogs")
 			return nil
 		}
 		journal := jr.journal
 		jr.mu.Unlock()
 
 		if journal == nil {
+			debugf("Journal is nil, exiting StreamLogs")
 			return nil
 		}
 
 		// Wait for new journal entries (with timeout)
-		journal.Wait(time.Second)
+		// Returns: SD_JOURNAL_NOP (0) = nothing, SD_JOURNAL_APPEND (1) = new entries
+		waitResult := journal.Wait(time.Second)
+		if waitResult == sdjournal.SD_JOURNAL_APPEND {
+			debugf("Journal.Wait returned APPEND - new entries available")
+		}
 
 		// Check again after wait
 		jr.mu.Lock()
@@ -101,19 +129,28 @@ func (jr *JournalReader) StreamLogs(ctx context.Context, msgChan chan<- string) 
 				return nil
 			}
 			// Get the MESSAGE field (kernel log message)
+			// Note: GetData returns "MESSAGE=<content>", we need to strip the prefix
 			msg, err := jr.journal.GetData("MESSAGE")
 			jr.mu.Unlock()
 
 			if err != nil {
+				debugf("GetData(MESSAGE) failed: %v", err)
 				continue // Skip entries without MESSAGE
 			}
+
+			// Strip the "MESSAGE=" prefix that GetData returns
+			msg = strings.TrimPrefix(msg, "MESSAGE=")
+
+			debugf("Got journal message: %.100s...", msg)
 
 			// Send to channel (non-blocking)
 			select {
 			case msgChan <- msg:
+				debugf("Message sent to channel")
 			case <-ctx.Done():
 				return ctx.Err()
 			default:
+				debugf("Channel full, skipping message")
 				// Channel full, skip this message
 			}
 		}

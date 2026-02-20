@@ -13,6 +13,8 @@ import (
 	"time"
 )
 
+// debugf is defined in journalctl.go
+
 // LogReader reads and parses nftables logs from journald
 type LogReader struct {
 	config      *Config
@@ -39,6 +41,8 @@ func NewLogReader(cfg *Config) (*LogReader, error) {
 
 // Start begins reading and parsing logs
 func (lr *LogReader) Start(ctx context.Context) error {
+	debugf("LogReader.Start called, container IP: %s", lr.config.ContainerIP)
+
 	// Start journal streaming in background
 	go func() {
 		if err := lr.journal.StreamLogs(ctx, lr.journalChan); err != nil {
@@ -52,20 +56,35 @@ func (lr *LogReader) Start(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
+			debugf("LogReader context done")
 			return ctx.Err()
 		case msg := <-lr.journalChan:
+			debugf("LogReader received message from journal")
 			if event := lr.parseNFTLog(msg); event != nil {
+				debugf("Parsed event: ContainerIP=%s SrcIP=%s DstIP=%s DstPort=%d",
+					event.ContainerIP, event.SrcIP, event.DstIP, event.DstPort)
 				// Filter to only this container's IP
 				// Check both the prefix IP and the actual SRC IP match
 				if event.ContainerIP == lr.config.ContainerIP &&
 					event.SrcIP == lr.config.ContainerIP {
+					debugf("Event matches container IP, sending to event channel")
 					select {
 					case lr.eventChan <- event:
+						debugf("Event sent to channel")
 					case <-ctx.Done():
 						return ctx.Err()
 					default:
+						debugf("Event channel full, dropping event")
 						// Channel full, skip
 					}
+				} else {
+					debugf("Event IP mismatch: event.ContainerIP=%s event.SrcIP=%s config.ContainerIP=%s",
+						event.ContainerIP, event.SrcIP, lr.config.ContainerIP)
+				}
+			} else {
+				// Check if the message contains NFT prefix but parsing failed
+				if strings.Contains(msg, "NFT_") {
+					debugf("Message contains NFT_ but parsing returned nil: %s", msg)
 				}
 			}
 		}
