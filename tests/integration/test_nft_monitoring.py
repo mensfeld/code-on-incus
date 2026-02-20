@@ -180,7 +180,9 @@ class TestNFTRuleManagement:
 
         for i, line in enumerate(lines):
             if container_ip in line:
-                if "log prefix" in line and ("NFT_COI" in line or "NFT_DNS" in line or "NFT_SUSPICIOUS" in line):
+                if "log prefix" in line and (
+                    "NFT_COI" in line or "NFT_DNS" in line or "NFT_SUSPICIOUS" in line
+                ):
                     log_rule_positions.append(i)
                 elif "accept" in line.lower() and "ct state" not in line:
                     # ACCEPT rule for this container (not the conntrack rule)
@@ -193,8 +195,7 @@ class TestNFTRuleManagement:
 
         # Verify we found both types of rules
         assert len(log_rule_positions) > 0, (
-            f"No LOG rules found for container {container_ip}. "
-            f"Rules output:\n{result.stdout}"
+            f"No LOG rules found for container {container_ip}. Rules output:\n{result.stdout}"
         )
 
         # If there are ACCEPT rules for this container, LOG rules must come first
@@ -469,7 +470,9 @@ class TestNetworkThreatDetection:
         )
         containers = json.loads(result.stdout) if result.stdout.strip() else []
         assert len(containers) > 0, f"Container {container_name} not found after startup"
-        assert containers[0]["status"] == "Running", f"Container not running: {containers[0]['status']}"
+        assert containers[0]["status"] == "Running", (
+            f"Container not running: {containers[0]['status']}"
+        )
 
         # Trigger CRITICAL threat: attempt connection to suspicious port 4444
         # This should trigger auto-kill
@@ -506,7 +509,7 @@ class TestNetworkThreatDetection:
         try:
             proc.terminate()
             proc.wait(timeout=5)
-        except:
+        except Exception:
             proc.kill()
 
         # Final cleanup - ensure container is removed
@@ -546,7 +549,17 @@ class TestNetworkThreatDetection:
         # Trigger CRITICAL: attempt to access metadata endpoint
         try:
             subprocess.run(
-                ["incus", "exec", container_name, "--", "curl", "-s", "-m", "2", "http://169.254.169.254/"],
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "curl",
+                    "-s",
+                    "-m",
+                    "2",
+                    "http://169.254.169.254/",
+                ],
                 capture_output=True,
                 timeout=10,
             )
@@ -573,7 +586,7 @@ class TestNetworkThreatDetection:
         try:
             proc.terminate()
             proc.wait(timeout=5)
-        except:
+        except Exception:
             proc.kill()
 
         subprocess.run(
