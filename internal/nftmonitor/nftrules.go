@@ -60,18 +60,27 @@ func (rm *RuleManager) RemoveRules() error {
 
 	// Find and delete all rules with our log prefix
 	lines := strings.Split(string(output), "\n")
+	containerIP := rm.config.ContainerIP
 
+	rulesRemoved := 0
 	for _, line := range lines {
-		if strings.Contains(line, fmt.Sprintf("NFT_COI[%s]", rm.config.ContainerIP)) ||
-			strings.Contains(line, fmt.Sprintf("NFT_DNS[%s]", rm.config.ContainerIP)) ||
-			strings.Contains(line, fmt.Sprintf("NFT_SUSPICIOUS[%s]", rm.config.ContainerIP)) {
+		if strings.Contains(line, fmt.Sprintf("NFT_COI[%s]", containerIP)) ||
+			strings.Contains(line, fmt.Sprintf("NFT_DNS[%s]", containerIP)) ||
+			strings.Contains(line, fmt.Sprintf("NFT_SUSPICIOUS[%s]", containerIP)) {
 			// Extract handle number from line like: "... # handle 123"
 			if handle := extractHandle(line); handle != "" {
 				if err := rm.deleteRuleByHandle(handle); err != nil {
 					return fmt.Errorf("failed to delete rule handle %s: %w", handle, err)
 				}
+				rulesRemoved++
 			}
 		}
+	}
+
+	if rulesRemoved == 0 {
+		// This might indicate a problem - we added rules but found none to remove
+		// Could happen if container IP changed or rules were already cleaned
+		return fmt.Errorf("no NFT rules found to remove for IP %s (this may indicate rules were not created or IP changed)", containerIP)
 	}
 
 	return nil
