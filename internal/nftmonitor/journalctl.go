@@ -159,7 +159,12 @@ func (jr *JournalReader) StreamLogs(ctx context.Context, msgChan chan<- string) 
 			// Strip the "MESSAGE=" prefix that GetData returns
 			msg = strings.TrimPrefix(msg, "MESSAGE=")
 
-			debugf("Got journal message: %.100s...", msg)
+			// Show more of the message for debugging
+			msgPreview := msg
+			if len(msgPreview) > 200 {
+				msgPreview = msgPreview[:200] + "..."
+			}
+			debugf("Got journal message: %s", msgPreview)
 
 			// Send to channel (non-blocking)
 			select {
