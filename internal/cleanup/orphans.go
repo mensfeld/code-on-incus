@@ -203,7 +203,8 @@ func CleanupOrphanedFirewallRules(rules []string, logger func(string)) (int, err
 // These are rules with prefixes: NFT_COI[ip], NFT_DNS[ip], NFT_SUSPICIOUS[ip]
 func DetectOrphanedNFTMonitorRules() ([]string, error) {
 	// List all rules in the FORWARD chain with handles
-	cmd := exec.Command("sudo", "-n", "nft", "list", "chain", "ip", "filter", "FORWARD", "-a")
+	// Note: -a must come before the command (nft -a list chain...)
+	cmd := exec.Command("sudo", "-n", "nft", "-a", "list", "chain", "ip", "filter", "FORWARD")
 	output, err := cmd.Output()
 	if err != nil {
 		// Chain might not exist, which is fine

@@ -52,7 +52,8 @@ func (rm *RuleManager) AddRules() error {
 // RemoveRules removes all nftables LOG rules added by this manager
 func (rm *RuleManager) RemoveRules() error {
 	// List all rules with handles in FORWARD chain
-	output, err := rm.runNFTCommand("list", "chain", "ip", "filter", "FORWARD", "-a")
+	// Note: -a must come before the command (nft -a list chain...)
+	output, err := rm.runNFTCommand("-a", "list", "chain", "ip", "filter", "FORWARD")
 	if err != nil {
 		return fmt.Errorf("failed to list rules: %w", err)
 	}

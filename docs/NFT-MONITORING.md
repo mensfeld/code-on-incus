@@ -310,7 +310,7 @@ If rules persist after session ends:
 sudo nft list ruleset | grep "NFT_.*\[10.47.62.50\]"
 
 # Manual cleanup (replace IP)
-sudo nft list ruleset -a | grep "NFT_.*\[10.47.62.50\]" | \
+sudo nft -a list ruleset | grep "NFT_.*\[10.47.62.50\]" | \
     grep -oP 'handle \K\d+' | xargs -I {} sudo nft delete rule ip filter FORWARD handle {}
 ```
 
