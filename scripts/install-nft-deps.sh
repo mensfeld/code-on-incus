@@ -27,15 +27,8 @@ $SUDO usermod -a -G systemd-journal $USER
 
 # Create sudoers file for nftables (NOPASSWD)
 echo "Creating sudoers file for nftables..."
-$SUDO tee /etc/sudoers.d/coi <<'EOF'
-# COI nftables monitoring (NOPASSWD for specific commands)
-%incus-admin ALL=(ALL) NOPASSWD: /usr/sbin/nft list *
-%incus-admin ALL=(ALL) NOPASSWD: /usr/sbin/nft add rule *
-%incus-admin ALL=(ALL) NOPASSWD: /usr/sbin/nft delete rule *
-%incus-admin ALL=(ALL) NOPASSWD: /usr/sbin/nft -a list *
-EOF
-
-$SUDO chmod 0440 /etc/sudoers.d/coi
+echo '%incus-admin ALL=(ALL) NOPASSWD: /usr/sbin/nft' | $SUDO tee /etc/sudoers.d/coi-nft
+$SUDO chmod 0440 /etc/sudoers.d/coi-nft
 
 echo ""
 echo "✓ Dependencies installed successfully!"

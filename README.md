@@ -714,14 +714,9 @@ NFT monitoring requires additional system dependencies. Install them with:
 sudo apt-get install -y libsystemd-dev nftables
 sudo usermod -a -G systemd-journal $USER
 
-# Create sudoers file for nftables
-sudo tee /etc/sudoers.d/coi <<'EOF'
-%incus-admin ALL=(ALL) NOPASSWD: /usr/sbin/nft list *
-%incus-admin ALL=(ALL) NOPASSWD: /usr/sbin/nft add rule *
-%incus-admin ALL=(ALL) NOPASSWD: /usr/sbin/nft delete rule *
-%incus-admin ALL=(ALL) NOPASSWD: /usr/sbin/nft -a list *
-EOF
-sudo chmod 0440 /etc/sudoers.d/coi
+# Configure passwordless sudo for nft commands
+echo '%incus-admin ALL=(ALL) NOPASSWD: /usr/sbin/nft' | sudo tee /etc/sudoers.d/coi-nft
+sudo chmod 0440 /etc/sudoers.d/coi-nft
 
 # IMPORTANT: Log out and log back in for group membership to take effect
 # Or run: newgrp systemd-journal

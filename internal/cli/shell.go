@@ -283,6 +283,7 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 			cfg.Monitoring.Enabled = true
 			cfg.Monitoring.AutoKillOnCritical = true
 			cfg.Monitoring.AutoPauseOnHigh = true
+			cfg.Monitoring.NFT.Enabled = true // Also enable NFT network monitoring
 		}
 		// Start traditional monitoring (process/filesystem)
 		if err := startMonitoringDaemon(result.ContainerName, absWorkspace, cfg, &monitorDaemon); err != nil {

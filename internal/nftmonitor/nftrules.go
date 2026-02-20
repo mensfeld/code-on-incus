@@ -74,11 +74,12 @@ func (rm *RuleManager) RemoveRules() error {
 // addSuspiciousTrafficRule adds high-priority rule for suspicious destinations
 func (rm *RuleManager) addSuspiciousTrafficRule() error {
 	// Metadata endpoint + RFC1918 addresses + suspicious ports
+	// Note: log prefix must be quoted because [] are special nft syntax characters
 	ruleArgs := []string{
 		"add", "rule", "ip", "filter", "FORWARD",
 		"ip", "saddr", rm.config.ContainerIP,
 		"ip", "daddr", "{", "169.254.169.254", ",", "10.0.0.0/8", ",", "172.16.0.0/12", ",", "192.168.0.0/16", "}",
-		"log", "prefix", fmt.Sprintf("NFT_SUSPICIOUS[%s]: ", rm.config.ContainerIP),
+		"log", "prefix", fmt.Sprintf(`"NFT_SUSPICIOUS[%s]: "`, rm.config.ContainerIP),
 		"level", "info",
 		"counter",
 	}
@@ -96,7 +97,7 @@ func (rm *RuleManager) addSuspiciousTrafficRule() error {
 		"tcp", "dport", "{",
 	}
 	portsArgs = append(portsArgs, strings.Join(suspiciousPorts, ","))
-	portsArgs = append(portsArgs, "}", "log", "prefix", fmt.Sprintf("NFT_SUSPICIOUS[%s]: ", rm.config.ContainerIP),
+	portsArgs = append(portsArgs, "}", "log", "prefix", fmt.Sprintf(`"NFT_SUSPICIOUS[%s]: "`, rm.config.ContainerIP),
 		"level", "info", "counter")
 
 	_, err = rm.runNFTCommand(portsArgs...)
@@ -109,7 +110,7 @@ func (rm *RuleManager) addDNSRule() error {
 		"add", "rule", "ip", "filter", "FORWARD",
 		"ip", "saddr", rm.config.ContainerIP,
 		"udp", "dport", "53",
-		"log", "prefix", fmt.Sprintf("NFT_DNS[%s]: ", rm.config.ContainerIP),
+		"log", "prefix", fmt.Sprintf(`"NFT_DNS[%s]: "`, rm.config.ContainerIP),
 		"level", "info",
 		"counter",
 	}
@@ -129,7 +130,7 @@ func (rm *RuleManager) addGeneralTrafficRule() error {
 		"add", "rule", "ip", "filter", "FORWARD",
 		"ip", "saddr", rm.config.ContainerIP,
 		"limit", "rate", fmt.Sprintf("%d/second", rateLimit),
-		"log", "prefix", fmt.Sprintf("NFT_COI[%s]: ", rm.config.ContainerIP),
+		"log", "prefix", fmt.Sprintf(`"NFT_COI[%s]: "`, rm.config.ContainerIP),
 		"level", "info",
 		"counter",
 	}

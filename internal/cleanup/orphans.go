@@ -18,6 +18,7 @@ type OrphanedResources struct {
 	Veths                 []string // Orphaned veth interfaces (no master bridge)
 	FirewallRules         []string // Orphaned firewall rules (for non-existent container IPs)
 	FirewalldZoneBindings []string // Orphaned firewalld zone bindings (veths in zones but not on system)
+	NFTMonitorRules       []string // Orphaned nft monitoring rules (NFT_COI/NFT_DNS/NFT_SUSPICIOUS)
 }
 
 // DetectOrphanedVeths finds veth interfaces that have no master bridge
@@ -198,6 +199,85 @@ func CleanupOrphanedFirewallRules(rules []string, logger func(string)) (int, err
 	return cleaned, nil
 }
 
+// DetectOrphanedNFTMonitorRules finds nft monitoring rules for IPs that don't belong to any running container
+// These are rules with prefixes: NFT_COI[ip], NFT_DNS[ip], NFT_SUSPICIOUS[ip]
+func DetectOrphanedNFTMonitorRules() ([]string, error) {
+	// List all rules in the FORWARD chain with handles
+	cmd := exec.Command("sudo", "-n", "nft", "list", "chain", "ip", "filter", "FORWARD", "-a")
+	output, err := cmd.Output()
+	if err != nil {
+		// Chain might not exist, which is fine
+		return nil, nil
+	}
+
+	// Get all running container IPs
+	containerIPs, err := getRunningContainerIPs()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get container IPs: %w", err)
+	}
+
+	var orphaned []string
+	scanner := bufio.NewScanner(strings.NewReader(string(output)))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+
+		// Look for our monitoring rule prefixes
+		if !strings.Contains(line, "NFT_COI[") &&
+			!strings.Contains(line, "NFT_DNS[") &&
+			!strings.Contains(line, "NFT_SUSPICIOUS[") {
+			continue
+		}
+
+		// Extract handle for cleanup
+		handleIdx := strings.Index(line, "# handle ")
+		if handleIdx == -1 {
+			continue
+		}
+
+		// Check if any running container IP is referenced in this rule
+		isOrphaned := true
+		for _, ip := range containerIPs {
+			if strings.Contains(line, ip) {
+				isOrphaned = false
+				break
+			}
+		}
+
+		if isOrphaned {
+			// Store the handle number for cleanup
+			handlePart := line[handleIdx+9:] // skip "# handle "
+			if spaceIdx := strings.Index(handlePart, " "); spaceIdx != -1 {
+				handlePart = handlePart[:spaceIdx]
+			}
+			handlePart = strings.TrimSpace(handlePart)
+			orphaned = append(orphaned, handlePart)
+		}
+	}
+
+	return orphaned, nil
+}
+
+// CleanupOrphanedNFTMonitorRules removes orphaned nft monitoring rules by handle
+func CleanupOrphanedNFTMonitorRules(handles []string, logger func(string)) (int, error) {
+	if logger == nil {
+		logger = func(msg string) { log.Println(msg) }
+	}
+
+	cleaned := 0
+	for _, handle := range handles {
+		logger(fmt.Sprintf("Removing orphaned nft monitoring rule handle: %s", handle))
+
+		cmd := exec.Command("sudo", "-n", "nft", "delete", "rule", "ip", "filter", "FORWARD", "handle", handle)
+		if err := cmd.Run(); err != nil {
+			logger(fmt.Sprintf("  Warning: Failed to remove rule handle %s: %v", handle, err))
+			continue
+		}
+		cleaned++
+	}
+
+	return cleaned, nil
+}
+
 // DetectAll detects all orphaned resources
 func DetectAll() (*OrphanedResources, error) {
 	result := &OrphanedResources{}
@@ -222,18 +302,25 @@ func DetectAll() (*OrphanedResources, error) {
 	}
 	result.FirewalldZoneBindings = zoneBindings
 
+	nftRules, err := DetectOrphanedNFTMonitorRules()
+	if err != nil {
+		// Non-fatal - nft might not be available
+		log.Printf("Warning: Could not check nft monitoring rules: %v", err)
+	}
+	result.NFTMonitorRules = nftRules
+
 	return result, nil
 }
 
 // CleanupAll cleans up all orphaned resources
-func CleanupAll(logger func(string)) (vethsCleaned, rulesCleaned, zoneBindingsCleaned int, err error) {
+func CleanupAll(logger func(string)) (vethsCleaned, rulesCleaned, zoneBindingsCleaned, nftRulesCleaned int, err error) {
 	if logger == nil {
 		logger = func(msg string) { log.Println(msg) }
 	}
 
 	orphans, err := DetectAll()
 	if err != nil {
-		return 0, 0, 0, err
+		return 0, 0, 0, 0, err
 	}
 
 	if len(orphans.Veths) > 0 {
@@ -248,7 +335,11 @@ func CleanupAll(logger func(string)) (vethsCleaned, rulesCleaned, zoneBindingsCl
 		zoneBindingsCleaned, _ = network.CleanupOrphanedFirewalldZoneBindings(orphans.FirewalldZoneBindings, logger)
 	}
 
-	return vethsCleaned, rulesCleaned, zoneBindingsCleaned, nil
+	if len(orphans.NFTMonitorRules) > 0 {
+		nftRulesCleaned, _ = CleanupOrphanedNFTMonitorRules(orphans.NFTMonitorRules, logger)
+	}
+
+	return vethsCleaned, rulesCleaned, zoneBindingsCleaned, nftRulesCleaned, nil
 }
 
 // HasOrphans returns true if there are any orphaned resources
@@ -257,7 +348,7 @@ func HasOrphans() bool {
 	if err != nil {
 		return false
 	}
-	return len(orphans.Veths) > 0 || len(orphans.FirewallRules) > 0 || len(orphans.FirewalldZoneBindings) > 0
+	return len(orphans.Veths) > 0 || len(orphans.FirewallRules) > 0 || len(orphans.FirewalldZoneBindings) > 0 || len(orphans.NFTMonitorRules) > 0
 }
 
 // CleanupOrphanedFirewalldZoneBindings removes orphaned veth interfaces from firewalld zones
