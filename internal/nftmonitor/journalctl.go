@@ -51,10 +51,10 @@ func NewJournalReader() (*JournalReader, error) {
 		return nil, fmt.Errorf("failed to seek to end of journal: %w", err)
 	}
 
-	// Skip past the current tail entry so Next() reads truly NEW entries
-	// Without this, the first Wait()+Next() might read the last existing entry
-	// instead of waiting for new ones
-	_, _ = journal.Next()
+	// SeekTail positions past the last entry. We need to step back
+	// to a valid position, then Next() will read truly new entries.
+	n, _ := journal.Previous()
+	debugf("After SeekTail+Previous: Previous() returned %d", n)
 
 	debugf("JournalReader initialized, waiting for new kernel log entries")
 
@@ -107,6 +107,7 @@ func (jr *JournalReader) StreamLogs(ctx context.Context, msgChan chan<- string) 
 		jr.mu.Unlock()
 
 		// Read all available entries
+		entriesRead := 0
 		for {
 			jr.mu.Lock()
 			if jr.closed || jr.journal == nil {
@@ -117,17 +118,34 @@ func (jr *JournalReader) StreamLogs(ctx context.Context, msgChan chan<- string) 
 			jr.mu.Unlock()
 
 			if err != nil {
+				debugf("journal.Next() error: %v", err)
 				return fmt.Errorf("failed to read next journal entry: %w", err)
 			}
 			if n == 0 {
+				if entriesRead == 0 && waitResult == sdjournal.SD_JOURNAL_APPEND {
+					debugf("WARNING: Wait() returned APPEND but Next() returned 0 entries")
+				}
 				break // No more entries
 			}
+			entriesRead++
+			debugf("journal.Next() returned entry %d", entriesRead)
 
 			jr.mu.Lock()
 			if jr.closed || jr.journal == nil {
 				jr.mu.Unlock()
 				return nil
 			}
+
+			// Debug: get and log some key fields
+			if Debug {
+				if transport, err := jr.journal.GetData("_TRANSPORT"); err == nil {
+					debugf("  _TRANSPORT: %s", transport)
+				}
+				if syslogID, err := jr.journal.GetData("SYSLOG_IDENTIFIER"); err == nil {
+					debugf("  SYSLOG_IDENTIFIER: %s", syslogID)
+				}
+			}
+
 			// Get the MESSAGE field (kernel log message)
 			// Note: GetData returns "MESSAGE=<content>", we need to strip the prefix
 			msg, err := jr.journal.GetData("MESSAGE")
