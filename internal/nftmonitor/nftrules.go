@@ -105,8 +105,10 @@ func (rm *RuleManager) ensureChainExists() error {
 func (rm *RuleManager) addSuspiciousTrafficRule() error {
 	// Metadata endpoint + RFC1918 addresses + suspicious ports
 	// Note: log prefix must be quoted because [] are special nft syntax characters
+	// Use "insert" instead of "add" to place rules at the BEGINNING of the chain
+	// This ensures our LOG rules run BEFORE any ACCEPT rules from firewalld
 	ruleArgs := []string{
-		"add", "rule", "ip", "filter", "FORWARD",
+		"insert", "rule", "ip", "filter", "FORWARD",
 		"ip", "saddr", rm.config.ContainerIP,
 		"ip", "daddr", "{", "169.254.169.254", ",", "10.0.0.0/8", ",", "172.16.0.0/12", ",", "192.168.0.0/16", "}",
 		"log", "prefix", fmt.Sprintf(`"NFT_SUSPICIOUS[%s]: "`, rm.config.ContainerIP),
@@ -119,10 +121,10 @@ func (rm *RuleManager) addSuspiciousTrafficRule() error {
 		return err
 	}
 
-	// Add rule for suspicious ports
+	// Insert rule for suspicious ports
 	suspiciousPorts := []string{"4444", "5555", "1234", "31337", "12345", "6666-6697"}
 	portsArgs := []string{
-		"add", "rule", "ip", "filter", "FORWARD",
+		"insert", "rule", "ip", "filter", "FORWARD",
 		"ip", "saddr", rm.config.ContainerIP,
 		"tcp", "dport", "{",
 	}
@@ -137,7 +139,7 @@ func (rm *RuleManager) addSuspiciousTrafficRule() error {
 // addDNSRule adds medium-priority rule for DNS queries
 func (rm *RuleManager) addDNSRule() error {
 	ruleArgs := []string{
-		"add", "rule", "ip", "filter", "FORWARD",
+		"insert", "rule", "ip", "filter", "FORWARD",
 		"ip", "saddr", rm.config.ContainerIP,
 		"udp", "dport", "53",
 		"log", "prefix", fmt.Sprintf(`"NFT_DNS[%s]: "`, rm.config.ContainerIP),
@@ -157,7 +159,7 @@ func (rm *RuleManager) addGeneralTrafficRule() error {
 	}
 
 	ruleArgs := []string{
-		"add", "rule", "ip", "filter", "FORWARD",
+		"insert", "rule", "ip", "filter", "FORWARD",
 		"ip", "saddr", rm.config.ContainerIP,
 		"limit", "rate", fmt.Sprintf("%d/second", rateLimit),
 		"log", "prefix", fmt.Sprintf(`"NFT_COI[%s]: "`, rm.config.ContainerIP),
