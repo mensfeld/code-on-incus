@@ -1,10 +1,12 @@
 package nftmonitor
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // RuleManager manages nftables LOG rules for container monitoring
@@ -186,21 +188,31 @@ func (rm *RuleManager) deleteRuleByHandle(handle string) error {
 	return err
 }
 
+// NFTCommandTimeout is the maximum time to wait for nft commands
+const NFTCommandTimeout = 10 * time.Second
+
 // runNFTCommand executes an nft command with proper sudo/lima handling
+// Uses a timeout to prevent hanging if nft command blocks
 func (rm *RuleManager) runNFTCommand(args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), NFTCommandTimeout)
+	defer cancel()
+
 	var cmd *exec.Cmd
 
 	if rm.config.LimaHost != "" {
 		// Run inside Lima VM
 		cmdArgs := append([]string{"shell", rm.config.LimaHost, "sudo", "-n", "nft"}, args...)
-		cmd = exec.Command("limactl", cmdArgs...)
+		cmd = exec.CommandContext(ctx, "limactl", cmdArgs...)
 	} else {
 		// Native Linux - use sudo -n (non-interactive, fail if password required)
 		cmdArgs := append([]string{"-n", "nft"}, args...)
-		cmd = exec.Command("sudo", cmdArgs...)
+		cmd = exec.CommandContext(ctx, "sudo", cmdArgs...)
 	}
 
 	output, err := cmd.CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		return output, fmt.Errorf("nft command timed out after %v", NFTCommandTimeout)
+	}
 	if err != nil {
 		return output, fmt.Errorf("nft command failed: %w (output: %s)", err, string(output))
 	}

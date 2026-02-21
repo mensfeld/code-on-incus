@@ -1,0 +1,5 @@
+# All tests re-enabled after root cause fix:
+# CI config was setting monitoring.enabled=true globally, causing monitoring daemon
+# to run during all tests and interfere with bash shell interactivity.
+# Fixed in .github/workflows/ci.yml - monitoring now disabled in CI config.
+# Monitoring tests use enable_monitoring fixture to set up their own config.

@@ -32,12 +32,40 @@ type JournalReader struct {
 	closeOnce sync.Once
 }
 
+// JournalOpenTimeout is the maximum time to wait for journal to open
+const JournalOpenTimeout = 5 * time.Second
+
 // NewJournalReader creates a new journal reader for kernel logs
+// Uses a timeout to prevent hanging if journal access is blocked
 func NewJournalReader() (*JournalReader, error) {
+	type result struct {
+		reader *JournalReader
+		err    error
+	}
+
+	resultChan := make(chan result, 1)
+
+	go func() {
+		reader, err := newJournalReaderInternal()
+		resultChan <- result{reader, err}
+	}()
+
+	select {
+	case res := <-resultChan:
+		return res.reader, res.err
+	case <-time.After(JournalOpenTimeout):
+		return nil, fmt.Errorf("timeout opening systemd journal (waited %v) - journal may not be accessible", JournalOpenTimeout)
+	}
+}
+
+// newJournalReaderInternal does the actual journal opening
+func newJournalReaderInternal() (*JournalReader, error) {
+	debugf("Opening systemd journal...")
 	journal, err := sdjournal.NewJournal()
 	if err != nil {
 		return nil, fmt.Errorf("failed to open systemd journal: %w", err)
 	}
+	debugf("Journal opened successfully")
 
 	// Filter to kernel messages only
 	// Note: Set COI_NFT_NO_FILTER=1 to disable filtering for debugging
