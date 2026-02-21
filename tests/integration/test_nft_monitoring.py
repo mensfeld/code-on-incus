@@ -376,7 +376,9 @@ class TestNetworkThreatDetection:
                     events = [json.loads(line) for line in f if line.strip()]
 
                 rfc1918_events = [
-                    e for e in events if e.get("level") == "high" and "RFC1918" in e.get("title", "")
+                    e
+                    for e in events
+                    if e.get("level") == "high" and "RFC1918" in e.get("title", "")
                 ]
 
                 assert len(rfc1918_events) > 0, "RFC1918 connection not logged as HIGH"
@@ -502,9 +504,9 @@ class TestNetworkThreatDetection:
             )
 
             # Container should be gone or stopped
-            assert (
-                container_name not in check.stdout or "STOPPED" in check.stdout
-            ), f"Container {container_name} should have been killed but is still running"
+            assert container_name not in check.stdout or "STOPPED" in check.stdout, (
+                f"Container {container_name} should have been killed but is still running"
+            )
 
         finally:
             # Force cleanup if test failed
@@ -571,9 +573,9 @@ class TestNetworkThreatDetection:
                 text=True,
                 timeout=10,
             )
-            assert (
-                container_name not in check.stdout or "STOPPED" in check.stdout
-            ), "Container should have been killed after metadata access"
+            assert container_name not in check.stdout or "STOPPED" in check.stdout, (
+                "Container should have been killed after metadata access"
+            )
 
         finally:
             subprocess.run(
@@ -640,7 +642,17 @@ class TestNetworkThreatDetection:
 
             # Try to connect to a domain not in allowlist
             result = subprocess.run(
-                ["incus", "exec", test_container, "--", "curl", "-I", "-m", "5", "https://google.com"],
+                [
+                    "incus",
+                    "exec",
+                    test_container,
+                    "--",
+                    "curl",
+                    "-I",
+                    "-m",
+                    "5",
+                    "https://google.com",
+                ],
                 capture_output=True,
                 timeout=30,
             )
@@ -648,9 +660,9 @@ class TestNetworkThreatDetection:
             # In strict allowlist mode, this should fail or be logged
             # For now, just verify the connection attempt was made
             # The actual blocking depends on configuration
-            assert result.returncode != 0 or "HTTP" in result.stdout.decode("utf-8", errors="ignore"), (
-                "Connection to non-allowlisted domain should be blocked"
-            )
+            assert result.returncode != 0 or "HTTP" in result.stdout.decode(
+                "utf-8", errors="ignore"
+            ), "Connection to non-allowlisted domain should be blocked"
         finally:
             cleanup_session(coi_binary, test_container)
 
@@ -670,7 +682,18 @@ class TestNetworkThreatDetection:
             # Quick connection attempt (will fail but should be logged)
             try:
                 subprocess.run(
-                    ["incus", "exec", test_container, "--", "nc", "-w", "1", "-z", "1.2.3.4", "12345"],
+                    [
+                        "incus",
+                        "exec",
+                        test_container,
+                        "--",
+                        "nc",
+                        "-w",
+                        "1",
+                        "-z",
+                        "1.2.3.4",
+                        "12345",
+                    ],
                     capture_output=True,
                     timeout=5,
                 )
@@ -864,7 +887,17 @@ class TestEdgeCases:
             # Generate high volume of traffic
             for _ in range(20):
                 subprocess.run(
-                    ["incus", "exec", test_container, "--", "curl", "-s", "-m", "1", "https://example.com"],
+                    [
+                        "incus",
+                        "exec",
+                        test_container,
+                        "--",
+                        "curl",
+                        "-s",
+                        "-m",
+                        "1",
+                        "https://example.com",
+                    ],
                     capture_output=True,
                     timeout=10,
                 )
