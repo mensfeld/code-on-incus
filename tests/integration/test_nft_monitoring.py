@@ -449,7 +449,7 @@ class TestNetworkThreatDetection:
 
         try:
             # Start a fresh container with monitoring enabled in background mode
-            result = subprocess.run(
+            subprocess.run(
                 [coi_binary, "shell", "--name", container_name, "--monitor", "--background"],
                 capture_output=True,
                 text=True,
@@ -524,7 +524,7 @@ class TestNetworkThreatDetection:
 
         try:
             # Start container with monitoring in background mode
-            result = subprocess.run(
+            subprocess.run(
                 [coi_binary, "shell", "--name", container_name, "--monitor", "--background"],
                 capture_output=True,
                 text=True,
@@ -573,7 +573,7 @@ class TestNetworkThreatDetection:
             )
             assert (
                 container_name not in check.stdout or "STOPPED" in check.stdout
-            ), f"Container should have been killed after metadata access"
+            ), "Container should have been killed after metadata access"
 
         finally:
             subprocess.run(
@@ -783,7 +783,7 @@ class TestDaemonLifecycle:
     def test_daemon_stops_cleanly(self, test_container, coi_binary):
         """Test that daemon stops without errors."""
         # Start session in background mode
-        result = subprocess.run(
+        subprocess.run(
             [coi_binary, "shell", "--container", test_container, "--monitor", "--background"],
             capture_output=True,
             text=True,
