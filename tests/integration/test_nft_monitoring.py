@@ -597,6 +597,147 @@ class TestDaemonLifecycle:
                 stderr_file.unlink(missing_ok=True)
 
 
+class TestNFTRuleCleanupOnKill:
+    """Test NFT rule cleanup when containers are killed."""
+
+    @pytest.fixture(autouse=True)
+    def check_nft_available(self, nft_monitoring_available):
+        """Ensure NFT monitoring is available before running tests."""
+        pass
+
+    def test_nft_rules_cleaned_on_coi_kill(self, test_workspace, coi_binary):
+        """Verify NFT rules are removed when container is killed via coi kill."""
+        slot = 60
+        container_name = get_container_name_from_workspace(test_workspace, slot)
+
+        # Start session with monitoring
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                test_workspace,
+                "--slot",
+                str(slot),
+                "--monitor",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        try:
+            time.sleep(10)
+            if not wait_for_container_ready(container_name, timeout=30):
+                pytest.skip("Container failed to start")
+
+            container_ip = get_container_ip(container_name)
+            if not container_ip:
+                pytest.skip("Container has no IP address")
+
+            # Verify rules exist before kill
+            assert check_nft_rules_exist(container_ip), (
+                f"NFT rules should exist for {container_ip} before kill"
+            )
+
+            # Kill using coi kill command
+            kill_result = subprocess.run(
+                [coi_binary, "kill", container_name, "--force"],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            assert kill_result.returncode == 0, f"coi kill failed: {kill_result.stderr}"
+
+            # Give cleanup time to complete
+            time.sleep(2)
+
+            # Verify NFT rules are cleaned up
+            assert not check_nft_rules_exist(container_ip), (
+                f"NFT rules should be cleaned up for {container_ip} after coi kill"
+            )
+
+        finally:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            cleanup_container(container_name, coi_binary)
+
+    def test_nft_rules_cleaned_on_auto_kill(self, test_workspace, coi_binary):
+        """Verify NFT rules are removed when container is auto-killed by responder."""
+        slot = 61
+        container_name = get_container_name_from_workspace(test_workspace, slot)
+
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                test_workspace,
+                "--slot",
+                str(slot),
+                "--monitor",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        try:
+            time.sleep(10)
+            if not wait_for_container_ready(container_name, timeout=30):
+                pytest.skip("Container failed to start")
+
+            container_ip = get_container_ip(container_name)
+            if not container_ip:
+                pytest.skip("Container has no IP address")
+
+            # Verify rules exist before triggering kill
+            assert check_nft_rules_exist(container_ip), (
+                f"NFT rules should exist for {container_ip} before auto-kill"
+            )
+
+            # Trigger auto-kill by accessing metadata endpoint (CRITICAL threat)
+            subprocess.run(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "curl",
+                    "-m",
+                    "3",
+                    "http://169.254.169.254/",
+                ],
+                capture_output=True,
+                timeout=10,
+            )
+
+            # Wait for responder to detect threat and kill container
+            time.sleep(10)
+
+            # Verify container was killed
+            state = get_container_state(container_name)
+            assert state in ("Stopped", "Unknown"), (
+                f"Container should have been killed but state is {state}"
+            )
+
+            # Verify NFT rules are cleaned up
+            assert not check_nft_rules_exist(container_ip), (
+                f"NFT rules should be cleaned up for {container_ip} after auto-kill"
+            )
+
+        finally:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            cleanup_container(container_name, coi_binary)
+
+
 class TestHealthChecks:
     """Test NFT monitoring health checks."""
 

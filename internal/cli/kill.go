@@ -133,6 +133,10 @@ func killCommand(cmd *cobra.Command, args []string) error {
 			if err := cleanupFirewallRulesForIP(containerIP); err != nil {
 				fmt.Fprintf(os.Stderr, "  Warning: Failed to cleanup firewall rules: %v\n", err)
 			}
+			// Also clean up NFT monitoring rules for this IP
+			if err := cleanupNFTMonitoringRulesForIP(containerIP); err != nil {
+				fmt.Fprintf(os.Stderr, "  Warning: Failed to cleanup NFT monitoring rules: %v\n", err)
+			}
 		}
 
 		// Delete container
@@ -173,4 +177,9 @@ func cleanupFirewallRulesForIP(containerIP string) error {
 	// Create a temporary firewall manager to remove rules for this IP
 	fm := network.NewFirewallManager(containerIP, "")
 	return fm.RemoveRules()
+}
+
+// cleanupNFTMonitoringRulesForIP removes any NFT monitoring rules for a container IP
+func cleanupNFTMonitoringRulesForIP(containerIP string) error {
+	return network.CleanupNFTMonitoringRules(containerIP)
 }

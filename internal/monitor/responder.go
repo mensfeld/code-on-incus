@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/mensfeld/code-on-incus/internal/container"
+	"github.com/mensfeld/code-on-incus/internal/network"
 )
 
 // Responder handles automated responses to threats
@@ -201,10 +202,24 @@ func (r *Responder) killContainer() error {
 		r.onAction("killed", fmt.Sprintf("Container %s KILLED due to critical security threat", r.containerName))
 	}
 
+	// Get container IP BEFORE stopping (needed for firewall/NFT cleanup)
+	var containerIP string
+	if network.FirewallAvailable() {
+		containerIP, _ = network.GetContainerIPFast(r.containerName)
+	}
+
 	// First stop the container
 	_, err := container.IncusOutput("stop", r.containerName, "--force")
 	if err != nil {
 		return fmt.Errorf("failed to stop container: %w", err)
+	}
+
+	// Clean up NFT monitoring rules BEFORE deleting container
+	if containerIP != "" {
+		if err := r.cleanupNFTRules(containerIP); err != nil {
+			// Log warning but don't fail the kill operation
+			fmt.Printf("Warning: Failed to cleanup NFT monitoring rules: %v\n", err)
+		}
 	}
 
 	// Then delete it
@@ -217,4 +232,9 @@ func (r *Responder) killContainer() error {
 	r.killed = true
 	r.mu.Unlock()
 	return nil
+}
+
+// cleanupNFTRules removes NFT monitoring rules for a container IP
+func (r *Responder) cleanupNFTRules(containerIP string) error {
+	return network.CleanupNFTMonitoringRules(containerIP)
 }
