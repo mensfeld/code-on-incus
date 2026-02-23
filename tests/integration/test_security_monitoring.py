@@ -3400,9 +3400,9 @@ class TestConcurrentThreats:
         # Wait for monitoring baseline
         time.sleep(5)
 
-        # Fire multiple WARNING-level threats in rapid succession
-        # Using env command which is WARNING level (won't kill container)
-        # These commands need to stay running long enough to be caught by the monitor
+        # Fire multiple WARNING-level threats using the exec -a pattern
+        # This replaces the process name (argv[0]) so it appears as 'env' in ps/proc
+        # while actually running sleep for long enough to be detected
         for _ in range(3):
             subprocess.Popen(
                 [
@@ -3412,13 +3412,13 @@ class TestConcurrentThreats:
                     "--",
                     "bash",
                     "-c",
-                    # Run env multiple times with sleep to ensure it's caught
-                    "for j in 1 2 3; do env > /dev/null; sleep 1; done",
+                    # exec -a replaces argv[0] so the process appears as 'env' to monitoring
+                    "exec -a 'env' sleep 10",
                 ],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-            time.sleep(2)  # Wait between bursts to get multiple detections
+            time.sleep(2)
 
         # Wait for monitoring to process
         time.sleep(15)
@@ -3434,6 +3434,8 @@ class TestConcurrentThreats:
         print("\n=== Rapid Threat Burst Test Debug ===")
         print(f"Total events: {len(events)}")
         print(f"Env warning events: {len(env_warnings)}")
+        for e in events:
+            print(f"  - {e.get('level')} / {e.get('category')} / {e.get('title')}")
         print("=== End Debug ===\n")
 
         # Should detect at least some of the rapid threats
