@@ -2998,7 +2998,7 @@ class TestDiskSpaceMonitoring:
         proc.terminate()
 
         print("\n=== Disk Space Test Debug ===")
-        print(f"Total /tmp size: {total_mb}MB, filled: {fill_mb}MB ({fill_mb*100//total_mb}%)")
+        print(f"Total /tmp size: {total_mb}MB, filled: {fill_mb}MB ({fill_mb * 100 // total_mb}%)")
         print(f"Total events: {len(events)}")
         for event in events:
             print(
@@ -3009,7 +3009,7 @@ class TestDiskSpaceMonitoring:
 
         assert len(disk_warnings) > 0, (
             f"Expected WARNING threat for /tmp > 80% full, got {len(disk_warnings)} disk warnings. "
-            f"Filled {fill_mb}MB of {total_mb}MB ({fill_mb*100//total_mb}%)"
+            f"Filled {fill_mb}MB of {total_mb}MB ({fill_mb * 100 // total_mb}%)"
         )
 
         cleanup_container(container_name, coi_binary)
@@ -3108,9 +3108,7 @@ class TestDiskSpaceMonitoring:
 class TestLargeWriteDetection:
     """Test large write detection for data exfiltration prevention."""
 
-    def test_large_write_triggers_high_threat(
-        self, test_workspace, enable_monitoring, coi_binary
-    ):
+    def test_large_write_triggers_high_threat(self, test_workspace, enable_monitoring, coi_binary):
         """Test that large writes (potential data exfiltration) trigger HIGH threat."""
         proc = subprocess.Popen(
             [
@@ -3188,9 +3186,7 @@ class TestLargeWriteDetection:
 
         cleanup_container(container_name, coi_binary)
 
-    def test_small_write_no_alert(
-        self, test_workspace, enable_monitoring, coi_binary
-    ):
+    def test_small_write_no_alert(self, test_workspace, enable_monitoring, coi_binary):
         """Test that small writes do NOT trigger alerts."""
         proc = subprocess.Popen(
             [
@@ -3243,8 +3239,7 @@ class TestLargeWriteDetection:
         write_threats = [
             e
             for e in events
-            if e.get("category") == "filesystem"
-            and "write" in e.get("title", "").lower()
+            if e.get("category") == "filesystem" and "write" in e.get("title", "").lower()
         ]
 
         proc.terminate()
@@ -3327,12 +3322,10 @@ class TestConcurrentThreats:
         events = get_threat_events(container_name)
 
         critical_process = [
-            e for e in events
-            if e.get("level") == "critical" and e.get("category") == "process"
+            e for e in events if e.get("level") == "critical" and e.get("category") == "process"
         ]
         warning_env = [
-            e for e in events
-            if e.get("level") == "warning" and e.get("category") == "environment"
+            e for e in events if e.get("level") == "warning" and e.get("category") == "environment"
         ]
 
         proc.terminate()
@@ -3355,9 +3348,7 @@ class TestConcurrentThreats:
 
         cleanup_container(container_name, coi_binary)
 
-    def test_rapid_threat_burst(
-        self, test_workspace, enable_monitoring, coi_binary
-    ):
+    def test_rapid_threat_burst(self, test_workspace, enable_monitoring, coi_binary):
         """Test that rapid successive threats are all detected and logged."""
         proc = subprocess.Popen(
             [
@@ -3409,8 +3400,7 @@ class TestConcurrentThreats:
         # Check that multiple threats were logged
         events = get_threat_events(container_name)
         env_warnings = [
-            e for e in events
-            if e.get("level") == "warning" and e.get("category") == "environment"
+            e for e in events if e.get("level") == "warning" and e.get("category") == "environment"
         ]
 
         proc.terminate()
