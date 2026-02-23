@@ -8,15 +8,29 @@ import (
 
 // Detector analyzes monitoring snapshots for security threats
 type Detector struct {
-	fileReadThresholdMB  float64
-	fileReadRateMBPerSec float64
+	fileReadThresholdMB   float64
+	fileReadRateMBPerSec  float64
+	fileWriteThresholdMB  float64
+	fileWriteRateMBPerSec float64
 }
 
 // NewDetector creates a new threat detector
 func NewDetector(fileReadThresholdMB, fileReadRateMBPerSec float64) *Detector {
 	return &Detector{
-		fileReadThresholdMB:  fileReadThresholdMB,
-		fileReadRateMBPerSec: fileReadRateMBPerSec,
+		fileReadThresholdMB:   fileReadThresholdMB,
+		fileReadRateMBPerSec:  fileReadRateMBPerSec,
+		fileWriteThresholdMB:  fileReadThresholdMB,  // Default: same as read threshold
+		fileWriteRateMBPerSec: fileReadRateMBPerSec, // Default: same as read rate threshold
+	}
+}
+
+// NewDetectorWithWriteThresholds creates a new threat detector with explicit write thresholds
+func NewDetectorWithWriteThresholds(fileReadThresholdMB, fileReadRateMBPerSec, fileWriteThresholdMB, fileWriteRateMBPerSec float64) *Detector {
+	return &Detector{
+		fileReadThresholdMB:   fileReadThresholdMB,
+		fileReadRateMBPerSec:  fileReadRateMBPerSec,
+		fileWriteThresholdMB:  fileWriteThresholdMB,
+		fileWriteRateMBPerSec: fileWriteRateMBPerSec,
 	}
 }
 
@@ -106,6 +120,22 @@ func (d *Detector) Analyze(snapshot MonitorSnapshot) []ThreatEvent {
 				Description: fmt.Sprintf("Read %.2f MB at %.2f MB/sec (threshold: %.2f MB)",
 					fsExfil.ReadBytesMB, fsExfil.ReadRate, fsExfil.Threshold),
 				Evidence: fsExfil,
+				Action:   "pending",
+			})
+		}
+
+		// 4b. Detect large workspace writes (possible data exfiltration via tar, dd, etc.)
+		fsWriteExfil := DetectLargeWrites(snapshot.Filesystem, d.fileWriteThresholdMB, d.fileWriteRateMBPerSec)
+		if fsWriteExfil != nil {
+			threats = append(threats, ThreatEvent{
+				ID:        uuid.New().String(),
+				Timestamp: snapshot.Timestamp,
+				Level:     ThreatLevelHigh,
+				Category:  "filesystem",
+				Title:     "Large workspace write detected",
+				Description: fmt.Sprintf("Write %.2f MB at %.2f MB/sec (threshold: %.2f MB)",
+					fsWriteExfil.WriteBytesMB, fsWriteExfil.WriteRate, fsWriteExfil.Threshold),
+				Evidence: fsWriteExfil,
 				Action:   "pending",
 			})
 		}
