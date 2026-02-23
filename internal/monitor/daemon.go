@@ -31,17 +31,7 @@ func StartDaemon(ctx context.Context, cfg DaemonConfig) (*Daemon, error) {
 
 	// Create components
 	collector := NewCollector(cfg.ContainerName, "", cfg.WorkspacePath, cfg.AllowedCIDRs)
-
-	// Use write thresholds if configured, otherwise default to read thresholds
-	writeThresholdMB := cfg.FileWriteThresholdMB
-	if writeThresholdMB == 0 {
-		writeThresholdMB = cfg.FileReadThresholdMB
-	}
-	writeRateMBPerSec := cfg.FileWriteRateMBPerSec
-	if writeRateMBPerSec == 0 {
-		writeRateMBPerSec = cfg.FileReadRateMBPerSec
-	}
-	detector := NewDetectorWithWriteThresholds(cfg.FileReadThresholdMB, cfg.FileReadRateMBPerSec, writeThresholdMB, writeRateMBPerSec)
+	detector := NewDetector(cfg.FileReadThresholdMB, cfg.FileReadRateMBPerSec)
 	responder := NewResponder(cfg.ContainerName, cfg.AutoPauseOnHigh, cfg.AutoKillOnCritical,
 		auditLog, cfg.OnThreat)
 
