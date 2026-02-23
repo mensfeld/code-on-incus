@@ -80,13 +80,13 @@ type Process struct {
 
 // FilesystemStats holds workspace access statistics
 type FilesystemStats struct {
-	Available        bool    `json:"available"`
-	WorkspacePath    string  `json:"workspace_path,omitempty"`
-	TotalReadMB      float64 `json:"total_read_mb"`
-	ReadRateMBPerSec float64 `json:"read_rate_mb_per_sec"`
+	Available         bool    `json:"available"`
+	WorkspacePath     string  `json:"workspace_path,omitempty"`
+	TotalReadMB       float64 `json:"total_read_mb"`
+	ReadRateMBPerSec  float64 `json:"read_rate_mb_per_sec"`
 	TotalWriteMB      float64 `json:"total_write_mb"`
 	WriteRateMBPerSec float64 `json:"write_rate_mb_per_sec"`
-	FilesAccessed    int     `json:"files_accessed,omitempty"`
+	FilesAccessed     int     `json:"files_accessed,omitempty"`
 	// Disk space monitoring (for /tmp and /workspace)
 	TmpUsedMB      float64 `json:"tmp_used_mb,omitempty"`
 	TmpTotalMB     float64 `json:"tmp_total_mb,omitempty"`
