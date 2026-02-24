@@ -3162,22 +3162,26 @@ class TestLargeWriteDetection:
 
         # Write a large file (200MB) - potential data exfiltration
         # This uses dd with direct I/O to ensure block I/O is counted
-        subprocess.run(
-            [
-                "incus",
-                "exec",
-                container_name,
-                "--",
-                "dd",
-                "if=/dev/zero",
-                "of=/workspace/exfiltration_test.bin",
-                "bs=1M",
-                "count=200",
-                "oflag=direct",
-            ],
-            capture_output=True,
-            timeout=120,
-        )
+        # Note: The dd command may timeout or be interrupted if monitoring pauses/kills container
+        try:
+            subprocess.run(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "dd",
+                    "if=/dev/zero",
+                    "of=/workspace/exfiltration_test.bin",
+                    "bs=1M",
+                    "count=200",
+                    "oflag=direct",
+                ],
+                capture_output=True,
+                timeout=60,  # Shorter timeout - monitoring should detect before completion
+            )
+        except subprocess.TimeoutExpired:
+            pass  # Expected if monitoring pauses/stops the container
 
         # Wait for monitoring to detect
         time.sleep(10)
