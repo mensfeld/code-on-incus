@@ -4,6 +4,8 @@
 
 ### Features
 
+- [Feature] **Preserve workspace path option** - Added `preserve_workspace_path` config option that mounts the workspace at the same absolute path inside the container as on the host, instead of `/workspace`. This is useful for tools like opencode that store session data relative to the workspace directory, allowing sessions to persist correctly when the same project is opened from different machines or after container recreation. Configure with `[paths] preserve_workspace_path = true` in `~/.config/coi/config.toml` or `.coi.toml`. Off by default. Fixes #108.
+
 - [Feature] **Large write detection for data exfiltration prevention** - Added detection for large filesystem writes as a potential data exfiltration vector. When write activity exceeds the threshold (default: same as read threshold, 50MB), a HIGH-level threat is triggered. This complements existing read monitoring to catch scenarios where an attacker uses `tar`, `dd`, or similar tools to package and exfiltrate data. Configurable via `file_write_threshold_mb` and `file_write_rate_mb_per_sec` in monitoring config. Includes integration tests for write detection and no-alert scenarios.
 
 - [Feature] **Disk space monitoring** - The monitoring system detects when `/tmp` exceeds 80% usage and triggers a WARNING threat. This protects against runaway builds that could fill tmpfs and cause container hangs. The detection logic is verified via Go unit tests in `internal/monitor/detector_test.go`. Note: Integration tests for this feature were removed as they require a small tmpfs (<500MB) which cannot be configured in CI due to base image limitations.
