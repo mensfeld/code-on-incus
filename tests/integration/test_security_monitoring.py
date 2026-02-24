@@ -2909,7 +2909,14 @@ class TestThresholdBoundaries:
 
 
 class TestDiskSpaceMonitoring:
-    """Test disk space monitoring and alerts."""
+    """Test disk space monitoring and alerts.
+
+    NOTE: These tests require /tmp to be small enough to fill quickly (<500MB).
+    If the container's /tmp is on the root filesystem or a large tmpfs,
+    the tests will be skipped. The disk space monitoring feature is verified
+    via unit tests in Go; these integration tests verify end-to-end behavior
+    when the environment supports it.
+    """
 
     def test_disk_space_80_percent_triggers_warning(
         self, test_workspace, enable_monitoring, coi_binary
@@ -2941,8 +2948,7 @@ class TestDiskSpaceMonitoring:
         # Wait for monitoring baseline
         time.sleep(5)
 
-        # Get /tmp size and fill it to 85%
-        # First check tmpfs size
+        # Get /tmp size
         result = subprocess.run(
             ["incus", "exec", container_name, "--", "df", "-BM", "/tmp"],
             capture_output=True,
@@ -2954,7 +2960,6 @@ class TestDiskSpaceMonitoring:
             cleanup_container(container_name, coi_binary)
             pytest.skip("Could not get /tmp size")
 
-        # Parse df output to get total size
         lines = result.stdout.strip().split("\n")
         if len(lines) < 2:
             proc.terminate()
@@ -2964,36 +2969,33 @@ class TestDiskSpaceMonitoring:
         fields = lines[1].split()
         total_mb = int(fields[1].replace("M", ""))
 
-        # Skip if /tmp is too large (> 2GB) - would take too long to fill in CI
-        # The monitoring feature is tested via unit tests; this integration test
-        # requires a constrained tmpfs
-        if total_mb > 2048:
+        # Skip if /tmp is too large - filling would take too long
+        # This test requires a small tmpfs (<500MB) to run in reasonable time
+        if total_mb > 500:
             proc.terminate()
             cleanup_container(container_name, coi_binary)
-            pytest.skip(f"/tmp is {total_mb}MB (>2GB), too large to fill in CI timeout")
+            pytest.skip(
+                f"/tmp is {total_mb}MB (>500MB) - test requires small tmpfs. "
+                "Configure tmpfs_size in config or use container with small /tmp."
+            )
 
         # Fill /tmp to 85% (above the 80% threshold)
         fill_mb = int(total_mb * 0.85)
-        try:
-            subprocess.run(
-                [
-                    "incus",
-                    "exec",
-                    container_name,
-                    "--",
-                    "dd",
-                    "if=/dev/zero",
-                    f"of=/tmp/fill_disk_{fill_mb}mb",
-                    "bs=1M",
-                    f"count={fill_mb}",
-                ],
-                capture_output=True,
-                timeout=60,
-            )
-        except subprocess.TimeoutExpired:
-            proc.terminate()
-            cleanup_container(container_name, coi_binary)
-            pytest.skip("dd command timed out - /tmp too large or I/O too slow")
+        subprocess.run(
+            [
+                "incus",
+                "exec",
+                container_name,
+                "--",
+                "dd",
+                "if=/dev/zero",
+                f"of=/tmp/fill_disk_{fill_mb}mb",
+                "bs=1M",
+                f"count={fill_mb}",
+            ],
+            capture_output=True,
+            timeout=30,
+        )
 
         # Wait for monitoring to detect
         time.sleep(10)
@@ -3021,8 +3023,9 @@ class TestDiskSpaceMonitoring:
         print("=== End Debug ===\n")
 
         assert len(disk_warnings) > 0, (
-            f"Expected WARNING threat for /tmp > 80% full, got {len(disk_warnings)} disk warnings. "
-            f"Filled {fill_mb}MB of {total_mb}MB ({fill_mb * 100 // total_mb}%)"
+            f"Expected WARNING threat for /tmp > 80% full, got {len(disk_warnings)} "
+            f"disk warnings. Filled {fill_mb}MB of {total_mb}MB "
+            f"({fill_mb * 100 // total_mb}%)"
         )
 
         cleanup_container(container_name, coi_binary)
@@ -3057,7 +3060,7 @@ class TestDiskSpaceMonitoring:
         # Wait for monitoring baseline
         time.sleep(5)
 
-        # Get /tmp size and fill it to only 50% (below threshold)
+        # Get /tmp size
         result = subprocess.run(
             ["incus", "exec", container_name, "--", "df", "-BM", "/tmp"],
             capture_output=True,
@@ -3078,34 +3081,32 @@ class TestDiskSpaceMonitoring:
         fields = lines[1].split()
         total_mb = int(fields[1].replace("M", ""))
 
-        # Skip if /tmp is too large (> 2GB) - would take too long to fill in CI
-        if total_mb > 2048:
+        # Skip if /tmp is too large - filling would take too long
+        if total_mb > 500:
             proc.terminate()
             cleanup_container(container_name, coi_binary)
-            pytest.skip(f"/tmp is {total_mb}MB (>2GB), too large to fill in CI timeout")
+            pytest.skip(
+                f"/tmp is {total_mb}MB (>500MB) - test requires small tmpfs. "
+                "Configure tmpfs_size in config or use container with small /tmp."
+            )
 
         # Fill /tmp to only 50% (well below 80% threshold)
         fill_mb = int(total_mb * 0.50)
-        try:
-            subprocess.run(
-                [
-                    "incus",
-                    "exec",
-                    container_name,
-                    "--",
-                    "dd",
-                    "if=/dev/zero",
-                    f"of=/tmp/fill_disk_{fill_mb}mb",
-                    "bs=1M",
-                    f"count={fill_mb}",
-                ],
-                capture_output=True,
-                timeout=60,
-            )
-        except subprocess.TimeoutExpired:
-            proc.terminate()
-            cleanup_container(container_name, coi_binary)
-            pytest.skip("dd command timed out - /tmp too large or I/O too slow")
+        subprocess.run(
+            [
+                "incus",
+                "exec",
+                container_name,
+                "--",
+                "dd",
+                "if=/dev/zero",
+                f"of=/tmp/fill_disk_{fill_mb}mb",
+                "bs=1M",
+                f"count={fill_mb}",
+            ],
+            capture_output=True,
+            timeout=30,
+        )
 
         # Wait for monitoring cycles
         time.sleep(10)
