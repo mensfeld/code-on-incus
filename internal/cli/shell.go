@@ -233,20 +233,21 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 
 	// Setup session
 	setupOpts := session.SetupOptions{
-		WorkspacePath:  absWorkspace,
-		Image:          imageName,
-		Persistent:     persistent,
-		ResumeFromID:   resumeID,
-		Slot:           slotNum,
-		SessionsDir:    sessionsDir,
-		CLIConfigPath:  cliConfigPath,
-		Tool:           toolInstance,
-		NetworkConfig:  &networkConfig,
-		DisableShift:   cfg.Incus.DisableShift,
-		LimitsConfig:   limitsConfig,
-		IncusProject:   cfg.Incus.Project,
-		ProtectedPaths: protectedPaths,
-		ContainerName:  containerName,
+		WorkspacePath:         absWorkspace,
+		Image:                 imageName,
+		Persistent:            persistent,
+		ResumeFromID:          resumeID,
+		Slot:                  slotNum,
+		SessionsDir:           sessionsDir,
+		CLIConfigPath:         cliConfigPath,
+		Tool:                  toolInstance,
+		NetworkConfig:         &networkConfig,
+		DisableShift:          cfg.Incus.DisableShift,
+		LimitsConfig:          limitsConfig,
+		IncusProject:          cfg.Incus.Project,
+		ProtectedPaths:        protectedPaths,
+		PreserveWorkspacePath: cfg.Paths.PreserveWorkspacePath,
+		ContainerName:         containerName,
 	}
 
 	// Parse and validate mount configuration

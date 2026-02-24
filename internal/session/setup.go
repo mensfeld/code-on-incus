@@ -82,22 +82,23 @@ func setupMounts(mgr *container.Manager, mountConfig *MountConfig, useShift bool
 
 // SetupOptions contains options for setting up a session
 type SetupOptions struct {
-	WorkspacePath  string
-	Image          string
-	Persistent     bool // Keep container between sessions (don't delete on cleanup)
-	ResumeFromID   string
-	Slot           int
-	MountConfig    *MountConfig // Multi-mount support
-	SessionsDir    string       // e.g., ~/.coi/sessions-claude
-	CLIConfigPath  string       // e.g., ~/.claude (host CLI config to copy credentials from)
-	Tool           tool.Tool    // AI coding tool being used
-	NetworkConfig  *config.NetworkConfig
-	DisableShift   bool                 // Disable UID shifting (for Colima/Lima environments)
-	LimitsConfig   *config.LimitsConfig // Resource and time limits
-	IncusProject   string               // Incus project name
-	ProtectedPaths []string             // Paths to mount read-only for security (e.g., .git/hooks, .vscode)
-	Logger         func(string)
-	ContainerName  string // Use existing container (for testing) - skips container creation
+	WorkspacePath         string
+	Image                 string
+	Persistent            bool // Keep container between sessions (don't delete on cleanup)
+	ResumeFromID          string
+	Slot                  int
+	MountConfig           *MountConfig // Multi-mount support
+	SessionsDir           string       // e.g., ~/.coi/sessions-claude
+	CLIConfigPath         string       // e.g., ~/.claude (host CLI config to copy credentials from)
+	Tool                  tool.Tool    // AI coding tool being used
+	NetworkConfig         *config.NetworkConfig
+	DisableShift          bool                 // Disable UID shifting (for Colima/Lima environments)
+	LimitsConfig          *config.LimitsConfig // Resource and time limits
+	IncusProject          string               // Incus project name
+	ProtectedPaths        []string             // Paths to mount read-only for security (e.g., .git/hooks, .vscode)
+	PreserveWorkspacePath bool                 // Mount workspace at same path as host instead of /workspace
+	Logger                func(string)
+	ContainerName         string // Use existing container (for testing) - skips container creation
 }
 
 // SetupResult contains the result of setup
@@ -300,8 +301,15 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 		}
 
 		// Add disk devices BEFORE starting container
-		opts.Logger(fmt.Sprintf("Adding workspace mount: %s", opts.WorkspacePath))
-		if err := result.Manager.MountDisk("workspace", opts.WorkspacePath, "/workspace", useShift, false); err != nil {
+		// Determine container mount path - either /workspace (default) or same as host path
+		containerWorkspacePath := "/workspace"
+		if opts.PreserveWorkspacePath {
+			containerWorkspacePath = opts.WorkspacePath
+			opts.Logger(fmt.Sprintf("Adding workspace mount: %s -> %s (preserving host path)", opts.WorkspacePath, containerWorkspacePath))
+		} else {
+			opts.Logger(fmt.Sprintf("Adding workspace mount: %s -> %s", opts.WorkspacePath, containerWorkspacePath))
+		}
+		if err := result.Manager.MountDisk("workspace", opts.WorkspacePath, containerWorkspacePath, useShift, false); err != nil {
 			return nil, fmt.Errorf("failed to add workspace device: %w", err)
 		}
 

@@ -68,9 +68,10 @@ type DefaultsConfig struct {
 
 // PathsConfig contains path settings
 type PathsConfig struct {
-	SessionsDir string `toml:"sessions_dir"`
-	StorageDir  string `toml:"storage_dir"`
-	LogsDir     string `toml:"logs_dir"`
+	SessionsDir           string `toml:"sessions_dir"`
+	StorageDir            string `toml:"storage_dir"`
+	LogsDir               string `toml:"logs_dir"`
+	PreserveWorkspacePath bool   `toml:"preserve_workspace_path"` // Mount workspace at same path as host (e.g., /home/user/project instead of /workspace)
 }
 
 // IncusConfig contains Incus-specific settings
@@ -373,6 +374,9 @@ func (c *Config) Merge(other *Config) {
 	}
 	if other.Paths.LogsDir != "" {
 		c.Paths.LogsDir = ExpandPath(other.Paths.LogsDir)
+	}
+	if other.Paths.PreserveWorkspacePath {
+		c.Paths.PreserveWorkspacePath = true
 	}
 
 	// Merge Incus settings

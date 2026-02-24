@@ -411,3 +411,56 @@ func TestToolConfigMerge(t *testing.T) {
 		})
 	}
 }
+
+func TestPreserveWorkspacePathMerge(t *testing.T) {
+	tests := []struct {
+		name     string
+		base     bool
+		other    bool
+		expected bool
+	}{
+		{
+			name:     "false base, true other = true",
+			base:     false,
+			other:    true,
+			expected: true,
+		},
+		{
+			name:     "true base, false other = true (sticky)",
+			base:     true,
+			other:    false,
+			expected: true,
+		},
+		{
+			name:     "false base, false other = false",
+			base:     false,
+			other:    false,
+			expected: false,
+		},
+		{
+			name:     "true base, true other = true",
+			base:     true,
+			other:    true,
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			base := GetDefaultConfig()
+			base.Paths.PreserveWorkspacePath = tt.base
+
+			other := &Config{
+				Paths: PathsConfig{
+					PreserveWorkspacePath: tt.other,
+				},
+			}
+
+			base.Merge(other)
+
+			if base.Paths.PreserveWorkspacePath != tt.expected {
+				t.Errorf("Expected PreserveWorkspacePath=%v, got %v", tt.expected, base.Paths.PreserveWorkspacePath)
+			}
+		})
+	}
+}
