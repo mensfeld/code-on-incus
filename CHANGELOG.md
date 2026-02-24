@@ -14,6 +14,8 @@
 
 ### Bug Fixes
 
+- [Bug Fix] **Protected paths work with preserve_workspace_path** - Fixed protected paths (`.git/hooks`, `.vscode`, etc.) not being mounted at the correct location when `preserve_workspace_path` was enabled. The security mounts were hardcoded to use `/workspace` instead of the dynamic container workspace path. Also added validation to prevent mounting workspace over critical system directories (`/etc`, `/bin`, `/usr`, etc.) and updated all CLI code paths to use the dynamic workspace path. Includes integration tests for protected paths with `preserve_workspace_path`.
+
 - [Bug Fix] **Large write detection test timeout handling** - Fixed the large write detection integration test timing out on slow CI systems. The test now handles `TimeoutExpired` exceptions gracefully and still verifies threat detection by checking audit logs. Reduced subprocess timeout and added proper cleanup on timeout scenarios.
 
 - [Bug Fix] **NFT monitoring rules now cleaned up on container kill** - Fixed NFT monitoring rules not being removed when containers are killed via `coi kill` or auto-killed by the security responder (e.g., when metadata endpoint access is detected). Added `CleanupNFTMonitoringRules()` to the network package and integrated it into both kill paths: `coi kill` command and the responder's `killContainer()` method. The cleanup gracefully handles cases where no rules exist (monitoring wasn't enabled) or the nftables chain doesn't exist.

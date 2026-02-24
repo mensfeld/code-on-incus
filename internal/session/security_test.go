@@ -76,12 +76,12 @@ func TestSetupSecurityMounts_EmptyPaths(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	// Empty paths should return nil
-	err = SetupSecurityMounts(nil, tmpDir, []string{}, false)
+	err = SetupSecurityMounts(nil, tmpDir, "/workspace", []string{}, false)
 	if err != nil {
 		t.Errorf("Expected nil error for empty paths, got: %v", err)
 	}
 
-	err = SetupSecurityMounts(nil, tmpDir, nil, false)
+	err = SetupSecurityMounts(nil, tmpDir, "/workspace", nil, false)
 	if err != nil {
 		t.Errorf("Expected nil error for nil paths, got: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestSetupSecurityMounts_NonExistentPaths(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	// Non-existent paths should be silently skipped (except .git/hooks which is created)
-	err = SetupSecurityMounts(nil, tmpDir, []string{".vscode", ".husky"}, false)
+	err = SetupSecurityMounts(nil, tmpDir, "/workspace", []string{".vscode", ".husky"}, false)
 	if err != nil {
 		t.Errorf("Expected nil error for non-existent paths, got: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestSetupSecurityMounts_SymlinkRejection(t *testing.T) {
 	}
 
 	// Should return error for symlinked paths
-	err = SetupSecurityMounts(nil, tmpDir, []string{".vscode"}, false)
+	err = SetupSecurityMounts(nil, tmpDir, "/workspace", []string{".vscode"}, false)
 	if err == nil {
 		t.Error("Expected error for symlinked path, got nil")
 	}
@@ -147,7 +147,7 @@ func TestSetupSecurityMounts_GitSymlinkSkipped(t *testing.T) {
 	}
 
 	// Should skip .git/hooks when .git is a symlink (no error, just skip)
-	err = SetupSecurityMounts(nil, tmpDir, []string{".git/hooks"}, false)
+	err = SetupSecurityMounts(nil, tmpDir, "/workspace", []string{".git/hooks"}, false)
 	if err != nil {
 		t.Errorf("Expected nil error when .git is symlink, got: %v", err)
 	}
@@ -167,7 +167,7 @@ func TestSetupSecurityMounts_GitFileSkipped(t *testing.T) {
 	}
 
 	// Should skip .git/hooks when .git is a file (no error, just skip)
-	err = SetupSecurityMounts(nil, tmpDir, []string{".git/hooks"}, false)
+	err = SetupSecurityMounts(nil, tmpDir, "/workspace", []string{".git/hooks"}, false)
 	if err != nil {
 		t.Errorf("Expected nil error when .git is file, got: %v", err)
 	}

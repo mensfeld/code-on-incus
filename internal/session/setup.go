@@ -103,13 +103,14 @@ type SetupOptions struct {
 
 // SetupResult contains the result of setup
 type SetupResult struct {
-	ContainerName  string
-	Manager        *container.Manager
-	NetworkManager *network.Manager
-	TimeoutMonitor *limits.TimeoutMonitor
-	HomeDir        string
-	RunAsRoot      bool
-	Image          string
+	ContainerName          string
+	Manager                *container.Manager
+	NetworkManager         *network.Manager
+	TimeoutMonitor         *limits.TimeoutMonitor
+	HomeDir                string
+	RunAsRoot              bool
+	Image                  string
+	ContainerWorkspacePath string // Path where workspace is mounted inside container (default: /workspace)
 }
 
 // Setup initializes a container for a Claude session
@@ -304,11 +305,29 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 		// Determine container mount path - either /workspace (default) or same as host path
 		containerWorkspacePath := "/workspace"
 		if opts.PreserveWorkspacePath {
-			containerWorkspacePath = opts.WorkspacePath
-			opts.Logger(fmt.Sprintf("Adding workspace mount: %s -> %s (preserving host path)", opts.WorkspacePath, containerWorkspacePath))
-		} else {
+			// Validate that the path doesn't conflict with critical system directories
+			cleanPath := filepath.Clean(opts.WorkspacePath)
+			disallowedPrefixes := []string{
+				"/etc", "/bin", "/sbin", "/usr", "/root", "/boot", "/sys", "/proc", "/dev", "/lib", "/lib64",
+			}
+			isDisallowed := false
+			for _, prefix := range disallowedPrefixes {
+				if cleanPath == prefix || strings.HasPrefix(cleanPath, prefix+"/") {
+					isDisallowed = true
+					break
+				}
+			}
+			if isDisallowed {
+				opts.Logger(fmt.Sprintf("Warning: preserve_workspace_path requested for %q conflicts with system directories; using /workspace instead", opts.WorkspacePath))
+			} else {
+				containerWorkspacePath = cleanPath
+				opts.Logger(fmt.Sprintf("Adding workspace mount: %s -> %s (preserving host path)", opts.WorkspacePath, containerWorkspacePath))
+			}
+		}
+		if containerWorkspacePath == "/workspace" && !opts.PreserveWorkspacePath {
 			opts.Logger(fmt.Sprintf("Adding workspace mount: %s -> %s", opts.WorkspacePath, containerWorkspacePath))
 		}
+		result.ContainerWorkspacePath = containerWorkspacePath
 		if err := result.Manager.MountDisk("workspace", opts.WorkspacePath, containerWorkspacePath, useShift, false); err != nil {
 			return nil, fmt.Errorf("failed to add workspace device: %w", err)
 		}
@@ -330,7 +349,7 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 		// Protect security-sensitive paths by mounting read-only (security feature)
 		// This must be added after the workspace mount for the overlay to work
 		if len(opts.ProtectedPaths) > 0 {
-			if err := SetupSecurityMounts(result.Manager, opts.WorkspacePath, opts.ProtectedPaths, useShift); err != nil {
+			if err := SetupSecurityMounts(result.Manager, opts.WorkspacePath, containerWorkspacePath, opts.ProtectedPaths, useShift); err != nil {
 				opts.Logger(fmt.Sprintf("Warning: Failed to setup security mounts: %v", err))
 				// Non-fatal: continue even if protection fails
 			} else {

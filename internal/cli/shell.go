@@ -508,9 +508,13 @@ func runCLI(result *session.SetupResult, sessionID string, useResumeFlag, restor
 		containerEnv["TERM"] = terminal.SanitizeTerm(userTerm)
 	}
 
+	workspacePath := result.ContainerWorkspacePath
+	if workspacePath == "" {
+		workspacePath = "/workspace" // Fallback for backwards compatibility
+	}
 	opts := container.ExecCommandOptions{
 		User:        userPtr,
-		Cwd:         "/workspace",
+		Cwd:         workspacePath,
 		Env:         containerEnv,
 		Interactive: true, // Attach stdin/stdout/stderr for interactive session
 	}
@@ -522,6 +526,12 @@ func runCLI(result *session.SetupResult, sessionID string, useResumeFlag, restor
 // runCLIInTmux executes CLI tool in a tmux session for background/monitoring support
 func runCLIInTmux(result *session.SetupResult, sessionID string, detached bool, useResumeFlag, restoreOnly bool, sessionsDir, resumeID string, t tool.Tool) error {
 	tmuxSessionName := fmt.Sprintf("coi-%s", result.ContainerName)
+
+	// Get workspace path (with fallback for backwards compatibility)
+	workspacePath := result.ContainerWorkspacePath
+	if workspacePath == "" {
+		workspacePath = "/workspace"
+	}
 
 	// Build CLI command
 	var cliCmd string
@@ -642,7 +652,7 @@ func runCLIInTmux(result *session.SetupResult, sessionID string, detached bool, 
 			attachCmd := fmt.Sprintf("tmux attach -t %s", tmuxSessionName)
 			opts := container.ExecCommandOptions{
 				User:        userPtr,
-				Cwd:         "/workspace",
+				Cwd:         workspacePath,
 				Interactive: true,
 			}
 			_, err := result.Manager.ExecCommand(attachCmd, opts)
@@ -657,8 +667,9 @@ func runCLIInTmux(result *session.SetupResult, sessionID string, detached bool, 
 	if detached {
 		// Background mode: create detached session
 		createCmd := fmt.Sprintf(
-			"tmux new-session -d -s %s -c /workspace \"bash -c 'trap : INT; %s %s; exec bash'\"",
+			"tmux new-session -d -s %s -c %s \"bash -c 'trap : INT; %s %s; exec bash'\"",
 			tmuxSessionName,
+			workspacePath,
 			envExports,
 			cliCmd,
 		)
@@ -718,14 +729,15 @@ func runCLIInTmux(result *session.SetupResult, sessionID string, detached bool, 
 		// Step 2: Create detached session if it doesn't exist
 		if checkErr != nil {
 			createCmd := fmt.Sprintf(
-				"tmux new-session -d -s %s -c /workspace \"bash -c 'trap : INT; %s %s; exec bash'\"",
+				"tmux new-session -d -s %s -c %s \"bash -c 'trap : INT; %s %s; exec bash'\"",
 				tmuxSessionName,
+				workspacePath,
 				envExports,
 				cliCmd,
 			)
 			createOpts := container.ExecCommandOptions{
 				User:    userPtr,
-				Cwd:     "/workspace",
+				Cwd:     workspacePath,
 				Capture: true,
 			}
 			if _, err := result.Manager.ExecCommand(createCmd, createOpts); err != nil {
@@ -740,7 +752,7 @@ func runCLIInTmux(result *session.SetupResult, sessionID string, detached bool, 
 		attachCmd := fmt.Sprintf("tmux attach -t %s", tmuxSessionName)
 		attachOpts := container.ExecCommandOptions{
 			User:        userPtr,
-			Cwd:         "/workspace",
+			Cwd:         workspacePath,
 			Interactive: true,
 			Env:         containerEnv,
 		}

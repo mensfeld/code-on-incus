@@ -209,10 +209,11 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		}
 
 		// Protect security-sensitive paths by mounting read-only (security feature)
+		// Note: coi run always uses /workspace as the container path
 		if !writableGitHooks && !cfg.Security.DisableProtection {
 			protectedPaths := cfg.Security.GetEffectiveProtectedPaths()
 			if len(protectedPaths) > 0 {
-				if err := session.SetupSecurityMounts(mgr, absWorkspace, protectedPaths, useShift); err != nil {
+				if err := session.SetupSecurityMounts(mgr, absWorkspace, "/workspace", protectedPaths, useShift); err != nil {
 					fmt.Fprintf(os.Stderr, "Warning: Failed to setup security mounts: %v\n", err)
 				} else {
 					// Log which paths were actually protected
