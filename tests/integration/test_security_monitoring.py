@@ -2003,7 +2003,7 @@ poll_interval_sec = 1
 
             # Always print debug info for this test to help diagnose CI failures
             events = get_threat_events(container_name)
-            print(f"\n=== DEBUG: --monitor override test ===")
+            print("\n=== DEBUG: --monitor override test ===")
             print(f"Container killed: {killed}, Final state: {final_state}")
             print(f"Total threat events: {len(events)}")
             for event in events:
@@ -2037,7 +2037,7 @@ poll_interval_sec = 1
             # Print final event state for debugging
             if not critical:
                 events = get_threat_events(container_name)
-                print(f"\n=== DEBUG: No CRITICAL events found after retries ===")
+                print("\n=== DEBUG: No CRITICAL events found after retries ===")
                 print(f"Total events: {len(events)}")
                 for event in events:
                     print(f"- {event}")
