@@ -1028,10 +1028,15 @@ file_read_rate_mb_per_sec = 1000
         high_threats = [e for e in events if e.get("level") == "high"]
         # This might be empty if large file read detection is slow, but that's ok
         if len(high_threats) > 0:
-            # Verify action was "alerted" not "paused"
+            # Verify action was NOT "paused" (since auto_pause_on_high=false)
+            # Valid actions: "alerted" (first detection), "pending", or "deduplicated" (subsequent detections)
             for threat in high_threats:
-                assert threat.get("action") in ["alerted", "pending"], (
-                    f"Expected action='alerted', got {threat.get('action')}"
+                assert threat.get("action") in ["alerted", "pending", "deduplicated"], (
+                    f"Expected action='alerted' or 'deduplicated', got {threat.get('action')}"
+                )
+                # Most importantly: action should NEVER be "paused"
+                assert threat.get("action") != "paused", (
+                    "Container should NOT be paused when auto_pause_on_high=false"
                 )
 
         proc.terminate()
