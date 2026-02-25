@@ -1825,6 +1825,7 @@ enabled = true
 auto_pause_on_high = true
 auto_kill_on_critical = true
 poll_interval_sec = 1
+file_read_rate_mb_per_sec = 1000
 
 [network]
 mode = "restricted"
