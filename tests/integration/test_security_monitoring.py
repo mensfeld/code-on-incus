@@ -2054,10 +2054,9 @@ file_read_rate_mb_per_sec = 1000
                 )
             print("=== END DEBUG ===\n")
 
-            # If container is "Unknown", it may have failed to start - skip rather than fail
-            if final_state == "Unknown":
-                proc.terminate()
-                pytest.skip("Container became Unknown - may not have started properly")
+            # Note: "Unknown" state after injecting threat typically means the container
+            # was successfully killed and cleaned up by monitoring. We already passed
+            # the startup check, so we proceed with verification.
 
             assert killed, (
                 "--monitor flag should force auto_kill_on_critical=true "
@@ -2762,12 +2761,10 @@ class TestThresholdBoundaries:
         # Container should still be running (below threshold)
         state = get_container_state(container_name)
 
-        # If container is Unknown, it may have failed for infrastructure reasons - skip
-        if state == "Unknown":
-            proc.terminate()
-            pytest.skip("Container became Unknown during test - possible CI infrastructure issue")
-
-        assert state == "Running", f"Container should stay running for <50MB read, got {state}"
+        assert state == "Running", (
+            f"Container should stay running for <50MB read (below threshold), got {state}. "
+            "If Unknown, check if monitoring spuriously triggered or container crashed."
+        )
 
         # No HIGH filesystem threats
         events = get_threat_events(container_name)
