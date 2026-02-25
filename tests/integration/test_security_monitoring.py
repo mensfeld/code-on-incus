@@ -27,7 +27,12 @@ def test_workspace(tmp_path):
 
 @pytest.fixture
 def enable_monitoring():
-    """Enable monitoring for tests."""
+    """Enable monitoring for tests with high thresholds to avoid spurious alerts.
+
+    Uses file_read_threshold_mb=500 to prevent container startup activity
+    from triggering HIGH threats. Use enable_monitoring_low_thresholds
+    for tests that specifically test threshold behavior.
+    """
     config_path = Path.home() / ".config" / "coi" / "config.toml"
     backup = config_path.read_text() if config_path.exists() else None
 
@@ -39,6 +44,37 @@ enabled = true
 auto_pause_on_high = true
 auto_kill_on_critical = true
 poll_interval_sec = 1
+file_read_threshold_mb = 500
+file_read_rate_mb_per_sec = 1000
+"""
+    )
+
+    yield config_path
+
+    if backup:
+        config_path.write_text(backup)
+    elif config_path.exists():
+        config_path.unlink()
+
+
+@pytest.fixture
+def enable_monitoring_low_thresholds():
+    """Enable monitoring with default low thresholds for threshold-specific tests.
+
+    Uses file_read_threshold_mb=50 (default) so tests can verify threshold behavior.
+    """
+    config_path = Path.home() / ".config" / "coi" / "config.toml"
+    backup = config_path.read_text() if config_path.exists() else None
+
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        """
+[monitoring]
+enabled = true
+auto_pause_on_high = true
+auto_kill_on_critical = true
+poll_interval_sec = 1
+file_read_threshold_mb = 50
 file_read_rate_mb_per_sec = 1000
 """
     )
@@ -261,6 +297,7 @@ class TestEnvironmentScanningPatterns:
                 test_workspace,
                 "--slot",
                 "14",
+                "--monitor",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -317,6 +354,7 @@ class TestEnvironmentScanningPatterns:
                 test_workspace,
                 "--slot",
                 "15",
+                "--monitor",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -373,6 +411,7 @@ class TestEnvironmentScanningPatterns:
                 test_workspace,
                 "--slot",
                 "16",
+                "--monitor",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -429,6 +468,7 @@ class TestEnvironmentScanningPatterns:
                 test_workspace,
                 "--slot",
                 "17",
+                "--monitor",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -485,6 +525,7 @@ class TestEnvironmentScanningPatterns:
                 test_workspace,
                 "--slot",
                 "18",
+                "--monitor",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -541,6 +582,7 @@ class TestEnvironmentScanningPatterns:
                 test_workspace,
                 "--slot",
                 "34",
+                "--monitor",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -689,6 +731,7 @@ print("Task completed")
                 str(test_workspace),
                 "--slot",
                 "4",
+                "--monitor",  # Enable monitoring
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -830,7 +873,7 @@ class TestHighLevelThreats:
     """Test HIGH-level threats that trigger auto-pause."""
 
     def test_large_file_read_triggers_auto_pause(
-        self, test_workspace, enable_monitoring, coi_binary
+        self, test_workspace, enable_monitoring_low_thresholds, coi_binary
     ):
         """Test large file read detection (HIGH) triggers auto-pause."""
         # Create a 200MB binary file (well above the 50MB threshold).
@@ -841,7 +884,7 @@ class TestHighLevelThreats:
         large_file.write_bytes(b"S" * (200 * 1024 * 1024))
 
         proc = subprocess.Popen(
-            [coi_binary, "shell", "--workspace", str(test_workspace), "--slot", "6"],
+            [coi_binary, "shell", "--workspace", str(test_workspace), "--slot", "6", "--monitor"],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -1065,7 +1108,7 @@ time.sleep(60)
         network_script.chmod(0o755)
 
         proc = subprocess.Popen(
-            [coi_binary, "shell", "--workspace", str(test_workspace), "--slot", "8"],
+            [coi_binary, "shell", "--workspace", str(test_workspace), "--slot", "8", "--monitor"],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -1138,6 +1181,7 @@ time.sleep(60)
         metadata_script.chmod(0o755)
 
         proc = subprocess.Popen(
+            [coi_binary, "shell", "--workspace", str(test_workspace), "--slot", "9", "--monitor"],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -1214,6 +1258,7 @@ time.sleep(60)
                 str(test_workspace),
                 "--slot",
                 "35",
+                "--monitor",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -1295,6 +1340,7 @@ time.sleep(60)
                 str(test_workspace),
                 "--slot",
                 "36",
+                "--monitor",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -1349,6 +1395,7 @@ class TestReverseShellPatterns:
                 test_workspace,
                 "--slot",
                 "10",
+                "--monitor",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -1420,6 +1467,7 @@ class TestReverseShellPatterns:
                 test_workspace,
                 "--slot",
                 "11",
+                "--monitor",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -1491,6 +1539,7 @@ class TestReverseShellPatterns:
                 test_workspace,
                 "--slot",
                 "12",
+                "--monitor",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -1572,6 +1621,7 @@ class TestReverseShellPatterns:
                 test_workspace,
                 "--slot",
                 "30",
+                "--monitor",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -1651,6 +1701,7 @@ class TestReverseShellPatterns:
                 test_workspace,
                 "--slot",
                 "31",
+                "--monitor",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -2058,6 +2109,7 @@ class TestMultipleThreats:
                 test_workspace,
                 "--slot",
                 "20",
+                "--monitor",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -2165,6 +2217,7 @@ class TestAuditLogValidation:
                 test_workspace,
                 "--slot",
                 "21",
+                "--monitor",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -2258,6 +2311,7 @@ class TestAuditLogValidation:
                 test_workspace,
                 "--slot",
                 "22",
+                "--monitor",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -2335,6 +2389,7 @@ class TestFalsePositives:
                 test_workspace,
                 "--slot",
                 "23",
+                "--monitor",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -2415,6 +2470,7 @@ class TestFalsePositives:
                 test_workspace,
                 "--slot",
                 "24",
+                "--monitor",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -2495,6 +2551,7 @@ time.sleep(2)
                 test_workspace,
                 "--slot",
                 "25",
+                "--monitor",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -2572,6 +2629,7 @@ echo "Build complete"
                 test_workspace,
                 "--slot",
                 "26",
+                "--monitor",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -2650,7 +2708,7 @@ class TestThresholdBoundaries:
     """Test detector behavior at threshold boundaries."""
 
     def test_file_read_below_threshold_no_alert(
-        self, test_workspace, enable_monitoring, coi_binary
+        self, test_workspace, enable_monitoring_low_thresholds, coi_binary
     ):
         """Test that reading 49MB (below 50MB threshold) doesn't trigger."""
         # Create a 49MB file (just below threshold)
@@ -2666,6 +2724,7 @@ class TestThresholdBoundaries:
                 test_workspace,
                 "--slot",
                 "27",
+                "--monitor",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -2720,7 +2779,9 @@ class TestThresholdBoundaries:
         proc.terminate()
         cleanup_container(container_name, coi_binary)
 
-    def test_file_read_at_threshold_triggers(self, test_workspace, enable_monitoring, coi_binary):
+    def test_file_read_at_threshold_triggers(
+        self, test_workspace, enable_monitoring_low_thresholds, coi_binary
+    ):
         """Test that reading exactly 50MB triggers HIGH threat."""
         # Create exactly 50MB file
         large_file = Path(test_workspace) / "data50mb.bin"
@@ -2738,6 +2799,7 @@ class TestThresholdBoundaries:
                 test_workspace,
                 "--slot",
                 "28",
+                "--monitor",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -2810,7 +2872,7 @@ class TestThresholdBoundaries:
         cleanup_container(container_name, coi_binary)
 
     def test_file_read_above_threshold_triggers(
-        self, test_workspace, enable_monitoring, coi_binary
+        self, test_workspace, enable_monitoring_low_thresholds, coi_binary
     ):
         """Test that reading 100MB (above threshold) triggers HIGH threat."""
         # Create 100MB file (well above threshold).
@@ -2834,6 +2896,7 @@ class TestThresholdBoundaries:
                 test_workspace,
                 "--slot",
                 "29",
+                "--monitor",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -2917,6 +2980,7 @@ class TestThresholdBoundaries:
                 test_workspace,
                 "--slot",
                 "33",
+                "--monitor",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -3008,6 +3072,7 @@ class DisabledTestDiskSpaceMonitoring:
                 test_workspace,
                 "--slot",
                 "40",
+                "--monitor",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -3119,6 +3184,7 @@ class DisabledTestDiskSpaceMonitoring:
                 test_workspace,
                 "--slot",
                 "41",
+                "--monitor",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -3209,7 +3275,9 @@ class DisabledTestDiskSpaceMonitoring:
 class TestLargeWriteDetection:
     """Test large write detection for data exfiltration prevention."""
 
-    def test_large_write_triggers_high_threat(self, test_workspace, enable_monitoring, coi_binary):
+    def test_large_write_triggers_high_threat(
+        self, test_workspace, enable_monitoring_low_thresholds, coi_binary
+    ):
         """Test that large writes (potential data exfiltration) trigger HIGH threat."""
         proc = subprocess.Popen(
             [
@@ -3219,6 +3287,7 @@ class TestLargeWriteDetection:
                 test_workspace,
                 "--slot",
                 "42",
+                "--monitor",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -3300,6 +3369,7 @@ class TestLargeWriteDetection:
                 test_workspace,
                 "--slot",
                 "43",
+                "--monitor",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -3369,6 +3439,7 @@ class TestConcurrentThreats:
                 test_workspace,
                 "--slot",
                 "44",
+                "--monitor",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -3460,6 +3531,7 @@ class TestConcurrentThreats:
                 test_workspace,
                 "--slot",
                 "45",
+                "--monitor",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
