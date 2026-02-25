@@ -972,7 +972,7 @@ file_read_rate_mb_per_sec = 1000
         if pre_state != "Running":
             proc.terminate()
             events = get_threat_events(container_name)
-            print(f"\n=== DEBUG: Container not running before file read ===")
+            print("\n=== DEBUG: Container not running before file read ===")
             print(f"State: {pre_state}")
             print(f"Events: {len(events)}")
             for e in events:
@@ -1006,7 +1006,7 @@ file_read_rate_mb_per_sec = 1000
         # Print debug info if state is unexpected
         if state != "Running":
             events = get_threat_events(container_name)
-            print(f"\n=== DEBUG: Container not running after file read ===")
+            print("\n=== DEBUG: Container not running after file read ===")
             print(f"State: {state}")
             print(f"Events: {len(events)}")
             for e in events:
@@ -1016,7 +1016,7 @@ file_read_rate_mb_per_sec = 1000
         # The key assertion: container should NOT be Frozen (paused) because auto_pause_on_high=false
         # This is the core behavior we're testing - HIGH threats should alert, not pause
         assert state != "Frozen", (
-            f"Container should NOT be paused when auto_pause_on_high=false, but got Frozen"
+            "Container should NOT be paused when auto_pause_on_high=false, but got Frozen"
         )
 
         assert state == "Running", (
