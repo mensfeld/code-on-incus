@@ -96,9 +96,17 @@ jobs:
           - name: misc
             path: tests/clean tests/completion tests/docker tests/errors tests/help tests/image tests/info tests/mount tests/shutdown tests/version tests/meta tests/main_help_flag.py tests/main_help_shorthand.py
             description: "Misc commands: clean/completion/docker/errors/help/image/info/mount/shutdown/version/meta/main help (70 tests)"
-          - name: monitoring
-            path: tests/integration
-            description: "Security monitoring integration tests: NFT network (19) + process/filesystem threats (13) = 32 tests"
+          - name: monitoring-nft
+            path: tests/integration/test_nft_monitoring.py
+            description: "NFT network monitoring tests (17 tests)"
+          - name: monitoring-threats
+            path: tests/integration/test_security_monitoring.py
+            pytest_args: "-k 'TestThreatDetection or TestEnvironmentScanningPatterns or TestReverseShellPatterns or TestNetworkThreats or TestPromptInjectionScenario or TestMonitoringFeature'"
+            description: "Threat detection tests (20 tests)"
+          - name: monitoring-response
+            path: tests/integration/test_security_monitoring.py
+            pytest_args: "-k 'TestAutomatedResponse or TestHighLevelThreats or TestLargeWriteDetection or TestMonitoringConfiguration or TestMultipleThreats or TestAuditLogValidation or TestFalsePositives or TestThresholdBoundaries or TestConcurrentThreats'"
+            description: "Response and threshold tests (22 tests)"
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -384,10 +392,12 @@ jobs:
           echo "============================================"
           echo "Running: ${{ matrix.test_group.description }}"
           echo "Path: ${{ matrix.test_group.path }}"
+          echo "Args: ${{ matrix.test_group.pytest_args }}"
           echo "============================================"
 
           # Run test group with coverage reporting
-          python -m pytest ${{ matrix.test_group.path }} -v --tb=short --durations=0 --cov=tests --cov-report=term-missing
+          # pytest_args allows filtering specific test classes within a file
+          python -m pytest ${{ matrix.test_group.path }} ${{ matrix.test_group.pytest_args }} -v --tb=short --durations=0 --cov=tests --cov-report=term-missing
         env:
           COI_BINARY: ./coi
           GITHUB_REPOSITORY_URL: ${{ github.event.pull_request.head.repo.clone_url || format('https://github.com/{0}.git', github.repository) }}
