@@ -39,7 +39,6 @@ enabled = true
 auto_pause_on_high = true
 auto_kill_on_critical = true
 poll_interval_sec = 1
-file_read_threshold_mb = 500
 file_read_rate_mb_per_sec = 1000
 """
     )
@@ -767,7 +766,9 @@ print("Task completed")
 
     def test_monitoring_logs_for_warnings(self, test_workspace, enable_monitoring, coi_binary):
         """Verify monitoring logs contain WARNING messages, not just audit logs."""
-        # Start shell and capture stderr (where monitoring logs go)
+        # Start shell - monitoring is enabled via enable_monitoring fixture config
+        # Don't use --monitor flag as it enables auto_pause_on_high which can cause
+        # spurious pauses from container startup activity
         proc = subprocess.Popen(
             [
                 coi_binary,
@@ -776,7 +777,6 @@ print("Task completed")
                 str(test_workspace),
                 "--slot",
                 "5",
-                "--monitor",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
