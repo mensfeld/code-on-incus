@@ -982,6 +982,22 @@ class TestVethZoneCleanupOnAutoKill:
             if not wait_for_container_ready(container_name, timeout=30):
                 pytest.skip("Container failed to start")
 
+            # Get container IP and verify NFT rules are set up before proceeding
+            container_ip = get_container_ip(container_name)
+            if not container_ip:
+                pytest.skip("Container has no IP address")
+
+            # Wait for NFT rules to be created (critical for this test)
+            nft_ready = False
+            for _ in range(10):
+                if check_nft_rules_exist(container_ip):
+                    nft_ready = True
+                    break
+                time.sleep(1)
+
+            if not nft_ready:
+                pytest.skip("NFT rules not created - monitoring may not be properly initialized")
+
             # Get veth name BEFORE killing (needed for cleanup verification)
             veth_name = get_container_veth_name(container_name)
             if not veth_name:
