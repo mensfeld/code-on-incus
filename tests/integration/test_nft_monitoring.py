@@ -1007,13 +1007,26 @@ class TestVethZoneCleanupOnAutoKill:
             )
 
             # Wait for responder to detect threat and kill container
-            time.sleep(10)
+            # Use retry loop since this test runs early and may need more time
+            killed = False
+            for _ in range(15):
+                time.sleep(1)
+                state = get_container_state(container_name)
+                if state in ("Stopped", "Unknown"):
+                    killed = True
+                    break
 
-            # Verify container was killed
-            state = get_container_state(container_name)
-            assert state in ("Stopped", "Unknown"), (
-                f"Container should have been killed but state is {state}"
-            )
+            # Debug output if not killed
+            if not killed:
+                events = get_nft_threat_events(container_name)
+                print("\n=== DEBUG: Veth test - Container not killed ===")
+                print(f"State: {state}")
+                print(f"NFT events: {len(events)}")
+                for e in events:
+                    print(f"  - {e.get('level')}: {e.get('title')}")
+                print("=== END DEBUG ===\n")
+
+            assert killed, f"Container should have been killed but state is {state}"
 
             # Verify veth zone binding is cleaned up
             assert not check_veth_in_firewalld_zone(veth_name), (
