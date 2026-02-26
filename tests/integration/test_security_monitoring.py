@@ -32,6 +32,9 @@ def enable_monitoring():
     Uses file_read_threshold_mb=500 to prevent container startup activity
     from triggering HIGH threats. Use enable_monitoring_low_thresholds
     for tests that specifically test threshold behavior.
+
+    IMPORTANT: Includes [network] mode = "open" to prevent false positive
+    network threats in CI environment.
     """
     config_path = Path.home() / ".config" / "coi" / "config.toml"
     backup = config_path.read_text() if config_path.exists() else None
@@ -39,6 +42,9 @@ def enable_monitoring():
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(
         """
+[network]
+mode = "open"
+
 [monitoring]
 enabled = true
 auto_pause_on_high = true
@@ -62,6 +68,9 @@ def enable_monitoring_low_thresholds():
     """Enable monitoring with default low thresholds for threshold-specific tests.
 
     Uses file_read_threshold_mb=50 (default) so tests can verify threshold behavior.
+
+    IMPORTANT: Includes [network] mode = "open" to prevent false positive
+    network threats in CI environment.
     """
     config_path = Path.home() / ".config" / "coi" / "config.toml"
     backup = config_path.read_text() if config_path.exists() else None
@@ -69,6 +78,9 @@ def enable_monitoring_low_thresholds():
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(
         """
+[network]
+mode = "open"
+
 [monitoring]
 enabled = true
 auto_pause_on_high = true
@@ -967,14 +979,21 @@ class TestHighLevelThreats:
     def test_high_threat_without_auto_pause(self, test_workspace, enable_monitoring, coi_binary):
         """Test HIGH threat only alerts when auto_pause_on_high=false."""
         # Modify config to disable auto-pause but keep other settings from fixture
+        # IMPORTANT: Must include file_read_threshold_mb to avoid spurious HIGH threats
+        # from container startup activity, and network mode = open to prevent false
+        # positive network threats in CI
         config_path = Path.home() / ".config" / "coi" / "config.toml"
         config_path.write_text(
             """
+[network]
+mode = "open"
+
 [monitoring]
 enabled = true
 auto_pause_on_high = false
 auto_kill_on_critical = true
 poll_interval_sec = 1
+file_read_threshold_mb = 500
 file_read_rate_mb_per_sec = 1000
 """
         )
@@ -1778,12 +1797,16 @@ class TestMonitoringConfiguration:
     def test_monitoring_disabled_no_detection(self, test_workspace, coi_binary):
         """Test that threats are NOT detected when monitoring is disabled."""
         # Create config with monitoring disabled
+        # Include network mode = open to prevent network-related issues in CI
         config_path = Path.home() / ".config" / "coi" / "config.toml"
         backup = config_path.read_text() if config_path.exists() else None
 
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(
             """
+[network]
+mode = "open"
+
 [monitoring]
 enabled = false
 """
@@ -1975,6 +1998,9 @@ mode = "restricted"
         config_path.parent.mkdir(parents=True, exist_ok=True)
         config_path.write_text(
             """
+[network]
+mode = "open"
+
 [monitoring]
 enabled = true
 auto_kill_on_critical = false
