@@ -212,8 +212,10 @@ def test_docker_compose_works(coi_binary, cleanup_containers, workspace_dir):
     )
 
     assert result.returncode == 0, f"docker compose ps should succeed. stderr: {result.stderr}"
-    assert "running" in result.stdout.lower(), (
-        f"Compose service should be running. output: {result.stdout}"
+    # docker compose ps --format json may output to stderr (via coi exec piping)
+    ps_output = (result.stdout + result.stderr).lower()
+    assert "running" in ps_output, (
+        f"Compose service should be running. stdout: {result.stdout}, stderr: {result.stderr}"
     )
 
     # === Phase 6: Docker compose down ===
