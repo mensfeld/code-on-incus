@@ -392,6 +392,12 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 			}
 		}
 
+		// Enable Docker/nested container support (must be set before first boot)
+		opts.Logger("Enabling Docker support...")
+		if err := container.EnableDockerSupport(result.ContainerName); err != nil {
+			return nil, fmt.Errorf("failed to enable Docker support: %w", err)
+		}
+
 		// Now start the container
 		opts.Logger("Starting container...")
 		if err := result.Manager.Start(); err != nil {

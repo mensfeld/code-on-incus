@@ -244,35 +244,47 @@ func IncusFilePush(source, destination string) error {
 	return IncusFilePushContext(context.Background(), source, destination)
 }
 
-// LaunchContainer launches an ephemeral container
+// LaunchContainer launches an ephemeral container.
+// Uses init+configure+start (not launch) so security flags are set before first boot.
 func LaunchContainer(imageAlias, containerName string) error {
-	args := []string{"launch", imageAlias, containerName, "--ephemeral"}
+	args := []string{"init", imageAlias, containerName, "--ephemeral"}
 	if err := IncusExec(args...); err != nil {
 		return err
 	}
-	return enableDockerSupport(containerName)
+	if err := EnableDockerSupport(containerName); err != nil {
+		return err
+	}
+	return IncusExec("start", containerName)
 }
 
-// LaunchContainerPersistent launches a non-ephemeral container
+// LaunchContainerPersistent launches a non-ephemeral container.
+// Uses init+configure+start (not launch) so security flags are set before first boot.
 func LaunchContainerPersistent(imageAlias, containerName string) error {
-	args := []string{"launch", imageAlias, containerName}
+	args := []string{"init", imageAlias, containerName}
 	if err := IncusExec(args...); err != nil {
 		return err
 	}
-	return enableDockerSupport(containerName)
+	if err := EnableDockerSupport(containerName); err != nil {
+		return err
+	}
+	return IncusExec("start", containerName)
 }
 
-// enableDockerSupport configures the container to support Docker/nested containers.
+// EnableDockerSupport configures the container to support Docker/nested containers.
 //
 // This function sets three security flags required for Docker to work properly:
 // - security.nesting=true: Enables nested containerization
 // - security.syscalls.intercept.mknod=true: Safe device node creation
 // - security.syscalls.intercept.setxattr=true: Safe filesystem attribute handling
 //
+// These flags must be set before the container's first boot so the kernel loads
+// the correct seccomp profile. Setting them on a running container is a race
+// condition that can cause Docker Compose to fail with sysctl permission errors.
+//
 // Note: If an error occurs during configuration, the container may be left in a
 // partially configured state with some but not all flags set. Future troubleshooting
 // should verify all three flags are properly configured if Docker isn't working.
-func enableDockerSupport(containerName string) error {
+func EnableDockerSupport(containerName string) error {
 	// Enable container nesting for Docker support
 	if err := IncusExec("config", "set", containerName, "security.nesting=true"); err != nil {
 		return err

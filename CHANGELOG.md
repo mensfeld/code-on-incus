@@ -14,6 +14,8 @@
 
 ### Bug Fixes
 
+- [Bug Fix] **Docker Compose fails inside session containers** - Fixed Docker/nested container support flags (`security.nesting`, `security.syscalls.intercept.mknod`, `security.syscalls.intercept.setxattr`) not being set on session containers created via `coi shell`. The main session setup path (`session/setup.go`) used `incus init` + `incus start` but never called `enableDockerSupport()`, so containers launched via the primary user-facing flow had no Docker support. Also changed `LaunchContainer`/`LaunchContainerPersistent` to set security flags before first boot (using `incus init` + configure + `incus start` instead of `incus launch` + configure) to eliminate a race condition. Added Docker Compose integration test.
+
 - [Bug Fix] **Fix double-cleanup race condition in shell signal handler** - When a signal (e.g., SIGINT/SIGTERM) arrived while `shellCommand` was already returning normally, both the `defer` and the signal handler goroutine could call `doCleanup()` concurrently — stopping monitoring daemons twice and running session cleanup twice. Wrapped `doCleanup` in `sync.Once` to ensure cleanup executes exactly once regardless of which path triggers first. Includes integration test.
 
 - [Bug Fix] **Container user UID/GID remapping for non-default code_uid** - When `code_uid` is set to a value other than 1000, COI now remaps the container user's UID/GID to match. Previously, the container user stayed at UID 1000 (baked into the image), causing "Permission denied" on `.bashrc`, "I have no name!" prompts, and group lookup failures. Fixes #166.
