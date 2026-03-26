@@ -74,7 +74,8 @@ install_base_dependencies() {
         dnsutils \
         ripgrep fzf fd-find bat tree \
         strace lsof \
-        sqlite3 postgresql-client \
+        sqlite3 postgresql-client redis-tools \
+        imagemagick \
         python3 python3-pip python3-venv \
         build-essential libssl-dev libreadline-dev zlib1g-dev \
         libffi-dev libyaml-dev libgmp-dev \

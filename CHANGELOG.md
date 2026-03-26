@@ -4,7 +4,7 @@
 
 ### Features
 
-- [Feature] **Expanded container toolset** — Added modern CLI utilities (`fd-find`, `bat`, `tree`), debugging tools (`strace`, `lsof`), database clients (`sqlite3`, `postgresql-client`), Python 3 runtime (`python3`, `python3-pip`, `python3-venv`), global Node.js dev tools (`typescript`, `tsx`, `pnpm`), and `mise` polyglot runtime manager to the base container image. These give AI coding agents better file discovery, code review, project exploration, database inspection, scripting capabilities, and easy runtime version management out of the box.
+- [Feature] **Expanded container toolset** — Added modern CLI utilities (`fd-find`, `bat`, `tree`), debugging tools (`strace`, `lsof`), database clients (`sqlite3`, `postgresql-client`, `redis-tools`), `imagemagick` for image processing, Python 3 runtime (`python3`, `python3-pip`, `python3-venv`), global Node.js dev tools (`typescript`, `tsx`, `pnpm`), and `mise` polyglot runtime manager to the base container image. These give AI coding agents better file discovery, code review, project exploration, database inspection, image manipulation, scripting capabilities, and easy runtime version management out of the box.
 
 ### Bug Fixes
 
