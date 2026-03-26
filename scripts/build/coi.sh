@@ -72,7 +72,10 @@ install_base_dependencies() {
         curl wget git ca-certificates gnupg jq unzip sudo \
         tmux \
         dnsutils \
-        ripgrep fzf \
+        ripgrep fzf fd-find bat tree \
+        strace lsof \
+        sqlite3 postgresql-client \
+        python3 python3-pip python3-venv \
         build-essential libssl-dev libreadline-dev zlib1g-dev \
         libffi-dev libyaml-dev libgmp-dev \
         libsqlite3-dev libpq-dev libmysqlclient-dev \
@@ -91,6 +94,17 @@ install_nodejs() {
     apt-get install -y -qq nodejs
 
     log "Node.js $(node --version) installed"
+}
+
+#######################################
+# Install global Node.js dev tools
+#######################################
+install_node_globals() {
+    log "Installing global Node.js dev tools..."
+
+    npm install -g typescript tsx pnpm
+
+    log "Global Node.js tools installed (typescript, tsx, pnpm)"
 }
 
 #######################################
@@ -115,6 +129,19 @@ create_code_user() {
     usermod -aG sudo "$CODE_USER"
 
     log "User '$CODE_USER' created with passwordless sudo (uid: $CODE_UID)"
+}
+
+#######################################
+# Install mise (polyglot runtime manager)
+# See: https://mise.jdx.dev
+#######################################
+install_mise() {
+    log "Installing mise..."
+
+    # Install to /usr/local/bin so it's available system-wide
+    curl -fsSL https://mise.jdx.dev/install.sh | MISE_INSTALL_PATH=/usr/local/bin/mise sh
+
+    log "mise $(mise --version 2>/dev/null || echo 'installed')"
 }
 
 #######################################
@@ -388,7 +415,9 @@ main() {
     configure_dns_if_needed
     install_base_dependencies
     install_nodejs
+    install_node_globals
     create_code_user
+    install_mise
     configure_power_wrappers
     configure_tmp_cleanup
     install_claude_cli

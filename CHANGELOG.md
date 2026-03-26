@@ -2,6 +2,10 @@
 
 ## 0.8.0 (Unreleased)
 
+### Features
+
+- [Feature] **Expanded container toolset** — Added modern CLI utilities (`fd-find`, `bat`, `tree`), debugging tools (`strace`, `lsof`), database clients (`sqlite3`, `postgresql-client`), Python 3 runtime (`python3`, `python3-pip`, `python3-venv`), global Node.js dev tools (`typescript`, `tsx`, `pnpm`), and `mise` polyglot runtime manager to the base container image. These give AI coding agents better file discovery, code review, project exploration, database inspection, scripting capabilities, and easy runtime version management out of the box.
+
 ### Bug Fixes
 
 - [Bug Fix] **Dynamic UID mapping for workspace bind mounts** — When the host user's UID differs from the container's code user UID (default 1000), `shift=true` silently fails — files appear owned by the wrong UID inside the container, causing "Permission denied" for the code user. This affected CI runners (UID 1001) and any non-standard host UID. COI now auto-detects the mismatch using `os.Getuid()` and applies `raw.idmap "both <hostUID> <codeUID>"` to explicitly map the host UID to the container code UID, replacing the previous CI-only hardcoded workaround. Includes integration tests that reproduce the `shift=true` bug and validate the `raw.idmap` fix. Fixes #226.
