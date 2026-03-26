@@ -82,6 +82,11 @@ install_base_dependencies() {
         libsqlite3-dev libpq-dev libmysqlclient-dev \
         libxml2-dev libxslt1-dev libcurl4-openssl-dev
 
+    # On Ubuntu/Debian, fd-find and bat install as fdfind and batcat.
+    # Create symlinks so the standard names work.
+    ln -sf "$(command -v fdfind)" /usr/local/bin/fd
+    ln -sf "$(command -v batcat)" /usr/local/bin/bat
+
     log "Base dependencies installed"
 }
 
@@ -103,7 +108,30 @@ install_nodejs() {
 install_node_globals() {
     log "Installing global Node.js dev tools..."
 
-    npm install -g typescript tsx pnpm
+    local attempt
+    for attempt in 1 2 3; do
+        if npm install -g typescript tsx pnpm; then
+            break
+        fi
+        if [ "$attempt" -eq 3 ]; then
+            log "ERROR: npm install -g failed after 3 attempts."
+            exit 1
+        fi
+        log "npm install failed (attempt $attempt/3), retrying in 10s..."
+        sleep 10
+    done
+
+    # Verify binaries are on PATH
+    for bin in tsc tsx pnpm; do
+        if ! command -v "$bin" >/dev/null 2>&1; then
+            log "ERROR: '$bin' not found on PATH after installation."
+            exit 1
+        fi
+    done
+
+    # Clean npm cache to avoid bloating the image
+    npm cache clean --force || true
+    rm -rf /root/.npm || true
 
     log "Global Node.js tools installed (typescript, tsx, pnpm)"
 }
@@ -140,9 +168,25 @@ install_mise() {
     log "Installing mise..."
 
     # Install to /usr/local/bin so it's available system-wide
-    curl -fsSL https://mise.jdx.dev/install.sh | MISE_INSTALL_PATH=/usr/local/bin/mise sh
+    local attempt
+    for attempt in 1 2 3; do
+        if curl -fsSL https://mise.jdx.dev/install.sh | MISE_INSTALL_PATH=/usr/local/bin/mise sh; then
+            break
+        fi
+        if [ "$attempt" -eq 3 ]; then
+            log "ERROR: mise installation failed after 3 attempts."
+            exit 1
+        fi
+        log "mise install failed (attempt $attempt/3), retrying in 10s..."
+        sleep 10
+    done
 
-    log "mise $(mise --version 2>/dev/null || echo 'installed')"
+    if [[ ! -x /usr/local/bin/mise ]]; then
+        log "ERROR: mise binary not found at /usr/local/bin/mise after installation."
+        exit 1
+    fi
+
+    log "mise $(/usr/local/bin/mise --version 2>/dev/null || echo 'installed')"
 }
 
 #######################################
