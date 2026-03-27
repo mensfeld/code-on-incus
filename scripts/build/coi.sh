@@ -138,6 +138,19 @@ eval "$(mise activate bash)"
 MISE_EOF
     fi
 
+    # Add a system-wide profile hook so shells that source /etc/profile
+    # (including non-interactive shells started by COI tooling via bash -c
+    # inside tmux) get mise-managed shims on PATH as well.
+    if [ ! -f /etc/profile.d/mise.sh ]; then
+        cat > /etc/profile.d/mise.sh << 'MISE_PROFILE_EOF'
+# system-wide mise activation for all users
+if command -v mise >/dev/null 2>&1; then
+    eval "$(mise activate bash)"
+fi
+MISE_PROFILE_EOF
+        chmod 644 /etc/profile.d/mise.sh
+    fi
+
     # Install default tools globally via mise as the code user.
     # This sets ~/.config/mise/config.toml with global tool versions.
     local attempt

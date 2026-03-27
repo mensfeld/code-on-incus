@@ -251,21 +251,21 @@ type ContextInfo struct {
 
 // contextTemplateData holds the resolved values passed to the context file template.
 type contextTemplateData struct {
-	WorkspacePath      string
-	HomeDir            string
-	OSDesc             string
-	ArchDesc           string
-	PersistenceDesc    string
-	NetworkDesc        string
-	NetworkLimitation  string
-	SSHDesc            string
-	GitHubCLIDesc      string
-	DockerDesc         string
-	UserDesc           string
-	SudoDesc           string
-	ProtectedPaths     string
-	Persistent         bool
-	ForwardedEnvVars   string
+	WorkspacePath       string
+	HomeDir             string
+	OSDesc              string
+	ArchDesc            string
+	PersistenceDesc     string
+	NetworkDesc         string
+	NetworkLimitation   string
+	SSHDesc             string
+	GitHubCLIDesc       string
+	DockerDesc          string
+	UserDesc            string
+	SudoDesc            string
+	ProtectedPaths      string
+	Persistent          bool
+	ForwardedEnvVars    string
 	HasForwardedEnvVars bool
 }
 

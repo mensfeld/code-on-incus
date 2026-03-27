@@ -46,7 +46,7 @@ This sandbox uses **[mise](https://mise.jdx.dev)** to manage language runtimes a
 - **Run with a specific version**: `mise exec python@3.11 -- python script.py`
 - **Per-project config**: Create `.mise.toml` in project root to pin versions for that project
 
-mise activation is in `.bashrc` — tools are automatically available in all shell sessions.
+mise activation is configured system-wide (`/etc/profile.d/mise.sh`) and in the user's `.bashrc` and `.profile`, so tools are available in interactive, login, and non-interactive shells.
 
 {{- if .HasForwardedEnvVars}}
 

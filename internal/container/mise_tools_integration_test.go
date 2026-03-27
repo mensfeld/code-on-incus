@@ -91,6 +91,20 @@ func TestMiseTools_AvailableInImage(t *testing.T) {
 		}
 	})
 
+	// Verify system-wide mise activation in /etc/profile.d
+	t.Run("mise_activated_system_wide", func(t *testing.T) {
+		out, err := mgr.ExecCommand("cat /etc/profile.d/mise.sh", ExecCommandOptions{
+			Capture: true,
+			User:    &user,
+		})
+		if err != nil {
+			t.Fatalf("/etc/profile.d/mise.sh not found: %v", err)
+		}
+		if !strings.Contains(out, "mise activate bash") {
+			t.Error("Expected 'mise activate bash' in /etc/profile.d/mise.sh")
+		}
+	})
+
 	// Verify each mise-managed tool is accessible via `mise exec`
 	tools := []struct {
 		name    string
