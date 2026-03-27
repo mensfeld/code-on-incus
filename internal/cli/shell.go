@@ -244,6 +244,12 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 		protectedPaths = cfg.Security.GetEffectiveProtectedPaths()
 	}
 
+	// Resolve which forwarded env vars are actually set on the host.
+	// This list is passed to the context file so AI tools know what's available.
+	resolvedForwardedEnvVars := resolveForwardedEnvVarNames(
+		config.MergeStringSliceUnique(cfg.Defaults.ForwardEnv, forwardEnvVars),
+	)
+
 	// Setup session
 	setupOpts := session.SetupOptions{
 		WorkspacePath:         absWorkspace,
@@ -261,6 +267,7 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 		ProtectedPaths:        protectedPaths,
 		PreserveWorkspacePath: cfg.Paths.PreserveWorkspacePath,
 		ForwardSSHAgent:       sshAgent || config.BoolVal(cfg.SSH.ForwardAgent),
+		ForwardedEnvVars:      resolvedForwardedEnvVars,
 		ContextFilePath:       cfg.Tool.ContextFile,
 		ContainerName:         containerName,
 	}
@@ -570,6 +577,18 @@ func buildContainerEnv(result *session.SetupResult) (map[string]string, *int) {
 	}
 
 	return containerEnv, userPtr
+}
+
+// resolveForwardedEnvVarNames returns the subset of env var names that are actually
+// set on the host. This is used to inform the context file about what's available.
+func resolveForwardedEnvVarNames(names []string) []string {
+	var resolved []string
+	for _, name := range names {
+		if _, ok := os.LookupEnv(name); ok {
+			resolved = append(resolved, name)
+		}
+	}
+	return resolved
 }
 
 // ensureTmuxServer starts the tmux server and polls until it is ready (up to 2 seconds).

@@ -98,6 +98,7 @@ type SetupOptions struct {
 	ProtectedPaths        []string             // Paths to mount read-only for security (e.g., .git/hooks, .vscode)
 	PreserveWorkspacePath bool                 // Mount workspace at same path as host instead of /workspace
 	ForwardSSHAgent       bool                 // Forward host SSH agent to container
+	ForwardedEnvVars      []string             // Names of host env vars being forwarded (for context file)
 	ContextFilePath       string               // Path to custom context .md file on host (overrides tool default)
 	Logger                func(string)
 	ContainerName         string // Use existing container (for testing) - skips container creation
@@ -532,14 +533,25 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 		if opts.NetworkConfig != nil {
 			networkMode = string(opts.NetworkConfig.Mode)
 		}
+		// Check if GH_TOKEN or GITHUB_TOKEN is among forwarded env vars
+		ghAuthenticated := false
+		for _, name := range opts.ForwardedEnvVars {
+			if name == "GH_TOKEN" || name == "GITHUB_TOKEN" {
+				ghAuthenticated = true
+				break
+			}
+		}
+
 		ctxInfo := tool.ContextInfo{
-			WorkspacePath:     result.ContainerWorkspacePath,
-			HomeDir:           result.HomeDir,
-			Persistent:        opts.Persistent,
-			NetworkMode:       networkMode,
-			SSHAgentForwarded: result.SSHAgentSocketPath != "",
-			RunAsRoot:         result.RunAsRoot,
-			ProtectedPaths:    opts.ProtectedPaths,
+			WorkspacePath:      result.ContainerWorkspacePath,
+			HomeDir:            result.HomeDir,
+			Persistent:         opts.Persistent,
+			NetworkMode:        networkMode,
+			SSHAgentForwarded:  result.SSHAgentSocketPath != "",
+			RunAsRoot:          result.RunAsRoot,
+			ProtectedPaths:     opts.ProtectedPaths,
+			GHCLIAuthenticated: ghAuthenticated,
+			ForwardedEnvVars:   opts.ForwardedEnvVars,
 		}
 		if err := injectContextFile(result.Manager, ctxInfo, opts.ContextFilePath, result.HomeDir, opts.Logger); err != nil {
 			opts.Logger(fmt.Sprintf("Warning: Failed to inject context file: %v", err))

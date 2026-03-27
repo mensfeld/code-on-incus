@@ -245,23 +245,28 @@ type ContextInfo struct {
 	OSName            string   // OS name (e.g., "Ubuntu 22.04")
 	Architecture      string   // CPU architecture (e.g., "amd64", "arm64")
 	ProtectedPaths    []string // Paths mounted read-only for security
+	GHCLIAuthenticated bool    // Whether GitHub CLI auth is available (GH_TOKEN or GITHUB_TOKEN forwarded)
+	ForwardedEnvVars  []string // Names of host environment variables forwarded into the container
 }
 
 // contextTemplateData holds the resolved values passed to the context file template.
 type contextTemplateData struct {
-	WorkspacePath     string
-	HomeDir           string
-	OSDesc            string
-	ArchDesc          string
-	PersistenceDesc   string
-	NetworkDesc       string
-	NetworkLimitation string
-	SSHDesc           string
-	DockerDesc        string
-	UserDesc          string
-	SudoDesc          string
-	ProtectedPaths    string
-	Persistent        bool
+	WorkspacePath      string
+	HomeDir            string
+	OSDesc             string
+	ArchDesc           string
+	PersistenceDesc    string
+	NetworkDesc        string
+	NetworkLimitation  string
+	SSHDesc            string
+	GitHubCLIDesc      string
+	DockerDesc         string
+	UserDesc           string
+	SudoDesc           string
+	ProtectedPaths     string
+	Persistent         bool
+	ForwardedEnvVars   string
+	HasForwardedEnvVars bool
 }
 
 // RenderContextFileContent renders the embedded sandbox context template with
@@ -277,6 +282,7 @@ func RenderContextFileContent(info ContextInfo) string {
 		Persistent:      info.Persistent,
 		NetworkDesc:     "Unknown",
 		SSHDesc:         "Not available",
+		GitHubCLIDesc:   "Not authenticated",
 		DockerDesc:      "Available (Docker-in-Docker)",
 		UserDesc:        "Non-root user (code)",
 		SudoDesc:        "Available via passwordless sudo",
@@ -308,6 +314,15 @@ func RenderContextFileContent(info ContextInfo) string {
 
 	if info.SSHAgentForwarded {
 		data.SSHDesc = "Forwarded from host (available via SSH_AUTH_SOCK)"
+	}
+
+	if info.GHCLIAuthenticated {
+		data.GitHubCLIDesc = "Authenticated via forwarded token (gh CLI ready to use)"
+	}
+
+	if len(info.ForwardedEnvVars) > 0 {
+		data.ForwardedEnvVars = strings.Join(info.ForwardedEnvVars, ", ")
+		data.HasForwardedEnvVars = true
 	}
 
 	if info.RunAsRoot {

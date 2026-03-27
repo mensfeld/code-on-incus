@@ -114,8 +114,12 @@ func TestContextFile_DefaultInjection(t *testing.T) {
 		{"ephemeral mode", "Ephemeral"},
 		{"restricted network", "Restricted"},
 		{"ssh not available", "Not available"},
+		{"github cli not auth", "Not authenticated"},
 		{"non-root user", "Non-root user"},
 		{"OS info", "Ubuntu"},
+		{"mise section", "Runtime Manager (mise)"},
+		{"python in mise table", "Python 3"},
+		{"pnpm in mise table", "pnpm"},
 		{"troubleshooting section", "Troubleshooting"},
 		{"limitations section", "Limitations"},
 	}
@@ -300,4 +304,137 @@ func TestContextFile_Regeneration(t *testing.T) {
 	if strings.Contains(content2, "Ephemeral") {
 		t.Error("Second injection should not contain 'Ephemeral' from first run")
 	}
+}
+
+// TestContextFile_GitHubCLIAuthenticated verifies that the context file reflects
+// GitHub CLI authentication status when GH_TOKEN or GITHUB_TOKEN is forwarded.
+func TestContextFile_GitHubCLIAuthenticated(t *testing.T) {
+	skipUnlessContextFileTestable(t)
+
+	containerName := "coi-test-ctx-ghauth"
+	mgr := launchContextTestContainer(t, containerName)
+
+	homeDir := "/home/" + container.CodeUser
+	logger := func(msg string) { t.Logf("[context] %s", msg) }
+	destPath := filepath.Join(homeDir, "SANDBOX_CONTEXT.md")
+	user := container.CodeUID
+
+	// Test with GH CLI authenticated
+	ctxInfo := tool.ContextInfo{
+		WorkspacePath:      "/workspace",
+		HomeDir:            homeDir,
+		GHCLIAuthenticated: true,
+	}
+	if err := injectContextFile(mgr, ctxInfo, "", homeDir, logger); err != nil {
+		t.Fatalf("injectContextFile failed: %v", err)
+	}
+
+	content, err := mgr.ExecCommand("cat "+destPath, container.ExecCommandOptions{
+		Capture: true,
+		User:    &user,
+	})
+	if err != nil {
+		t.Fatalf("Failed to read context file: %v", err)
+	}
+
+	if !strings.Contains(content, "Authenticated via forwarded token") {
+		t.Error("Context file should indicate GitHub CLI is authenticated")
+	}
+	if strings.Contains(content, "Not authenticated") {
+		t.Error("Context file should not say 'Not authenticated' when GH CLI is authenticated")
+	}
+
+	// Test without GH CLI authenticated
+	ctxInfo2 := tool.ContextInfo{
+		WorkspacePath:      "/workspace",
+		HomeDir:            homeDir,
+		GHCLIAuthenticated: false,
+	}
+	if err := injectContextFile(mgr, ctxInfo2, "", homeDir, logger); err != nil {
+		t.Fatalf("injectContextFile (unauthenticated) failed: %v", err)
+	}
+
+	content2, err := mgr.ExecCommand("cat "+destPath, container.ExecCommandOptions{
+		Capture: true,
+		User:    &user,
+	})
+	if err != nil {
+		t.Fatalf("Failed to read context file: %v", err)
+	}
+
+	if !strings.Contains(content2, "Not authenticated") {
+		t.Error("Context file should indicate GitHub CLI is not authenticated")
+	}
+
+	t.Logf("Authenticated context file content:\n%s", content)
+}
+
+// TestContextFile_ForwardedEnvVars verifies that forwarded environment variable
+// names appear in the context file when provided.
+func TestContextFile_ForwardedEnvVars(t *testing.T) {
+	skipUnlessContextFileTestable(t)
+
+	containerName := "coi-test-ctx-envvars"
+	mgr := launchContextTestContainer(t, containerName)
+
+	homeDir := "/home/" + container.CodeUser
+	logger := func(msg string) { t.Logf("[context] %s", msg) }
+	destPath := filepath.Join(homeDir, "SANDBOX_CONTEXT.md")
+	user := container.CodeUID
+
+	// Test with forwarded env vars
+	ctxInfo := tool.ContextInfo{
+		WorkspacePath:    "/workspace",
+		HomeDir:          homeDir,
+		ForwardedEnvVars: []string{"ANTHROPIC_API_KEY", "GH_TOKEN", "CUSTOM_VAR"},
+	}
+	if err := injectContextFile(mgr, ctxInfo, "", homeDir, logger); err != nil {
+		t.Fatalf("injectContextFile failed: %v", err)
+	}
+
+	content, err := mgr.ExecCommand("cat "+destPath, container.ExecCommandOptions{
+		Capture: true,
+		User:    &user,
+	})
+	if err != nil {
+		t.Fatalf("Failed to read context file: %v", err)
+	}
+
+	checks := []struct {
+		name   string
+		substr string
+	}{
+		{"forwarded env section", "Forwarded Environment Variables"},
+		{"anthropic key listed", "ANTHROPIC_API_KEY"},
+		{"gh token listed", "GH_TOKEN"},
+		{"custom var listed", "CUSTOM_VAR"},
+	}
+	for _, check := range checks {
+		if !strings.Contains(content, check.substr) {
+			t.Errorf("Context file missing %s (expected substring %q)", check.name, check.substr)
+		}
+	}
+
+	// Test without forwarded env vars — section should not appear
+	ctxInfo2 := tool.ContextInfo{
+		WorkspacePath: "/workspace",
+		HomeDir:       homeDir,
+	}
+	if err := injectContextFile(mgr, ctxInfo2, "", homeDir, logger); err != nil {
+		t.Fatalf("injectContextFile (no env vars) failed: %v", err)
+	}
+
+	content2, err := mgr.ExecCommand("cat "+destPath, container.ExecCommandOptions{
+		Capture: true,
+		User:    &user,
+	})
+	if err != nil {
+		t.Fatalf("Failed to read context file: %v", err)
+	}
+
+	if strings.Contains(content2, "Forwarded Environment Variables") {
+		t.Error("Context file should not contain forwarded env vars section when none are forwarded")
+	}
+
+	t.Logf("Forwarded env vars context file content:\n%s", content)
 }

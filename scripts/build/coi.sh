@@ -4,7 +4,8 @@
 #
 # It installs all dependencies needed for CLI tool execution:
 # - Base development tools
-# - Node.js LTS
+# - Node.js LTS (system, for Claude CLI)
+# - mise (polyglot runtime manager) with Python 3, pnpm, typescript, tsx
 # - Claude CLI
 # - Docker
 # - GitHub CLI
@@ -76,7 +77,6 @@ install_base_dependencies() {
         strace lsof \
         sqlite3 postgresql-client redis-tools \
         imagemagick \
-        python3 python3-pip python3-venv \
         build-essential libssl-dev libreadline-dev zlib1g-dev \
         libffi-dev libyaml-dev libgmp-dev \
         libsqlite3-dev libpq-dev libmysqlclient-dev \
@@ -103,37 +103,69 @@ install_nodejs() {
 }
 
 #######################################
-# Install global Node.js dev tools
+# Configure mise and install default runtimes
+#
+# mise manages Python, Node.js tools (pnpm, tsx), and other runtimes.
+# System Node.js (from nodesource) is kept for Claude CLI and core
+# tooling; mise handles everything else.
+#
+# See: https://mise.jdx.dev
 #######################################
-install_node_globals() {
-    log "Installing global Node.js dev tools..."
+configure_mise_tools() {
+    log "Configuring mise shell activation and default tools..."
 
+    local CODE_HOME="/home/$CODE_USER"
+
+    # Add mise activation to .bashrc so all interactive and login shells
+    # (including those started by claude/opencode) pick up mise-managed tools.
+    local BASHRC="$CODE_HOME/.bashrc"
+    if ! grep -q 'mise activate' "$BASHRC" 2>/dev/null; then
+        cat >> "$BASHRC" << 'MISE_EOF'
+
+# mise: polyglot runtime manager
+# Adds mise-managed tools (python, pnpm, tsx, etc.) to PATH
+eval "$(mise activate bash)"
+MISE_EOF
+    fi
+
+    # Also add to .profile for non-interactive login shells (e.g. `su - code -c "..."`)
+    local PROFILE="$CODE_HOME/.profile"
+    if ! grep -q 'mise activate' "$PROFILE" 2>/dev/null; then
+        cat >> "$PROFILE" << 'MISE_EOF'
+
+# mise: polyglot runtime manager
+eval "$(mise activate bash)"
+MISE_EOF
+    fi
+
+    # Install default tools globally via mise as the code user.
+    # This sets ~/.config/mise/config.toml with global tool versions.
     local attempt
     for attempt in 1 2 3; do
-        if npm install -g typescript tsx pnpm; then
+        if su - "$CODE_USER" -c 'mise use --global python@3 pnpm@latest typescript@latest tsx@latest'; then
             break
         fi
         if [ "$attempt" -eq 3 ]; then
-            log "ERROR: npm install -g failed after 3 attempts."
+            log "ERROR: mise tool installation failed after 3 attempts."
             exit 1
         fi
-        log "npm install failed (attempt $attempt/3), retrying in 10s..."
+        log "mise install failed (attempt $attempt/3), retrying in 10s..."
         sleep 10
     done
 
-    # Verify binaries are on PATH
-    for bin in tsc tsx pnpm; do
-        if ! command -v "$bin" >/dev/null 2>&1; then
-            log "ERROR: '$bin' not found on PATH after installation."
+    # Verify tools are installed and accessible via mise
+    for bin in python3 pnpm tsc tsx; do
+        if ! su - "$CODE_USER" -c "mise exec -- which $bin" >/dev/null 2>&1; then
+            log "ERROR: '$bin' not found via mise after installation."
             exit 1
         fi
     done
 
-    # Clean npm cache to avoid bloating the image
-    npm cache clean --force || true
-    rm -rf /root/.npm || true
+    # Ensure the code user owns all mise state
+    chown -R "$CODE_USER:$CODE_USER" "$CODE_HOME/.local/share/mise" 2>/dev/null || true
+    chown -R "$CODE_USER:$CODE_USER" "$CODE_HOME/.config/mise" 2>/dev/null || true
 
-    log "Global Node.js tools installed (typescript, tsx, pnpm)"
+    log "mise tools installed (python3, pnpm, typescript, tsx)"
 }
 
 #######################################
@@ -460,9 +492,9 @@ main() {
     configure_dns_if_needed
     install_base_dependencies
     install_nodejs
-    install_node_globals
     create_code_user
     install_mise
+    configure_mise_tools
     configure_power_wrappers
     configure_tmp_cleanup
     install_claude_cli

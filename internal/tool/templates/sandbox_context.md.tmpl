@@ -13,6 +13,7 @@ You are running inside a **Code on Incus (COI)** isolated container. This is a d
 | **Container mode** | {{.PersistenceDesc}} |
 | **Network** | {{.NetworkDesc}} |
 | **SSH agent** | {{.SSHDesc}} |
+| **GitHub CLI** | {{.GitHubCLIDesc}} |
 | **Docker** | {{.DockerDesc}} |
 | **User** | {{.UserDesc}} |
 | **Sudo** | {{.SudoDesc}} |
@@ -22,8 +23,39 @@ You are running inside a **Code on Incus (COI)** isolated container. This is a d
 - **Full root access**: Install packages with `sudo apt-get install -y ...`, modify system files, change configurations — no restrictions
 - **Use the workspace**: Your project files are mounted at the workspace path above. All changes there persist to the host
 - **Docker is available**: Build and run containers inside this sandbox. The Docker daemon may take a few seconds to start after container boot
-- **System tools are pre-installed**: git, curl, wget, python3, node, build-essential, and many more are ready to use
+- **System tools are pre-installed**: git, gh (GitHub CLI), curl, wget, node, build-essential, ripgrep, fd, bat, fzf, jq, tree, tmux, strace, lsof, imagemagick, sqlite3, psql, redis-cli, and more
 - **No confirmation needed**: This is a throwaway sandbox. Install packages, run builds, modify system settings without hesitation
+
+## Runtime Manager (mise)
+
+This sandbox uses **[mise](https://mise.jdx.dev)** to manage language runtimes and developer tools. The following are pre-installed globally:
+
+| Tool | Managed by | Notes |
+|------|-----------|-------|
+| **Python 3** | mise | `python3`, `pip`, `venv` — use for scripts and package installation |
+| **pnpm** | mise | Fast Node.js package manager — preferred over npm for project dependencies |
+| **TypeScript** | mise | `tsc` compiler available globally |
+| **tsx** | mise | TypeScript execution without compilation step |
+| **Node.js** | system (apt) | System Node.js for core tooling; mise can install additional versions |
+
+### Using mise
+
+- **Install a new runtime**: `mise use python@3.12` or `mise use node@22` (per-project or global with `--global`)
+- **Install a tool**: `mise use --global go@latest`, `mise use --global ruby@3`
+- **List installed tools**: `mise list`
+- **Run with a specific version**: `mise exec python@3.11 -- python script.py`
+- **Per-project config**: Create `.mise.toml` in project root to pin versions for that project
+
+mise activation is in `.bashrc` — tools are automatically available in all shell sessions.
+
+{{- if .HasForwardedEnvVars}}
+
+## Forwarded Environment Variables
+
+The following host environment variables have been forwarded into this container: `{{.ForwardedEnvVars}}`
+
+These are available in your shell environment and can be used directly.
+{{- end}}
 
 ## Limitations
 {{if .NetworkLimitation}}
@@ -51,4 +83,6 @@ You are running inside a **Code on Incus (COI)** isolated container. This is a d
 - Work within the workspace directory for persistent changes
 - Use `apt-get install -y` (not `apt`) for non-interactive package installation
 - Run `apt-get update` before installing packages if package lists are stale
-- Use `pip install` / `pip3 install` for Python packages and `npm install` for Node packages
+- Use `pip install` for Python packages and `pnpm install` (preferred) or `npm install` for Node packages
+- Use `mise use --global <tool>@<version>` to install new runtimes (Python, Ruby, Go, etc.) instead of apt when possible
+- Create a `.mise.toml` in your project root to pin runtime versions per-project
