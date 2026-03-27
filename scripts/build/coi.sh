@@ -5,7 +5,7 @@
 # It installs all dependencies needed for CLI tool execution:
 # - Base development tools
 # - Node.js LTS (system, for Claude CLI)
-# - mise (polyglot runtime manager) with Python 3, pnpm, typescript, tsx
+# - mise (polyglot runtime manager) with Python 3, pnpm, npm:typescript, npm:tsx
 # - Claude CLI
 # - Docker
 # - GitHub CLI
@@ -155,7 +155,7 @@ MISE_PROFILE_EOF
     # This sets ~/.config/mise/config.toml with global tool versions.
     local attempt
     for attempt in 1 2 3; do
-        if su - "$CODE_USER" -c 'mise use --global python@3 pnpm@latest typescript@latest tsx@latest'; then
+        if su - "$CODE_USER" -c 'mise use --global python@3 pnpm@latest npm:typescript@latest npm:tsx@latest'; then
             break
         fi
         if [ "$attempt" -eq 3 ]; then
