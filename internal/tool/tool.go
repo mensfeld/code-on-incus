@@ -236,17 +236,17 @@ type ToolWithPermissionMode interface {
 // ContextInfo provides dynamic information about the container environment
 // for generating the sandbox context file (~/SANDBOX_CONTEXT.md).
 type ContextInfo struct {
-	WorkspacePath     string   // Mount point inside container (e.g., "/workspace")
-	HomeDir           string   // Home directory inside container (e.g., "/home/code")
-	Persistent        bool     // Whether the container persists between sessions
-	NetworkMode       string   // "restricted", "open", "allowlist", or ""
-	SSHAgentForwarded bool     // Whether host SSH agent is forwarded
-	RunAsRoot         bool     // Whether the tool runs as root
-	OSName            string   // OS name (e.g., "Ubuntu 22.04")
-	Architecture      string   // CPU architecture (e.g., "amd64", "arm64")
-	ProtectedPaths    []string // Paths mounted read-only for security
-	GHCLIAuthenticated bool    // Whether GitHub CLI auth is available (GH_TOKEN or GITHUB_TOKEN forwarded)
-	ForwardedEnvVars  []string // Names of host environment variables forwarded into the container
+	WorkspacePath      string   // Mount point inside container (e.g., "/workspace")
+	HomeDir            string   // Home directory inside container (e.g., "/home/code")
+	Persistent         bool     // Whether the container persists between sessions
+	NetworkMode        string   // "restricted", "open", "allowlist", or ""
+	SSHAgentForwarded  bool     // Whether host SSH agent is forwarded
+	RunAsRoot          bool     // Whether the tool runs as root
+	OSName             string   // OS name (e.g., "Ubuntu 22.04")
+	Architecture       string   // CPU architecture (e.g., "amd64", "arm64")
+	ProtectedPaths     []string // Paths mounted read-only for security
+	GHCLIAuthenticated bool     // Whether GitHub CLI auth is available (GH_TOKEN or GITHUB_TOKEN forwarded)
+	ForwardedEnvVars   []string // Names of host environment variables forwarded into the container
 }
 
 // contextTemplateData holds the resolved values passed to the context file template.
