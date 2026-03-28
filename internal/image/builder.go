@@ -483,12 +483,15 @@ func (b *Builder) createImage(versionAlias string) (string, error) {
 	b.opts.Logger(fmt.Sprintf("Creating image '%s'...", versionAlias))
 
 	// Publish container as image
-	_, err := container.IncusOutput(
+	output, err := container.IncusOutputWithStderr(
 		"publish", BuildContainer,
 		"--alias", versionAlias,
 		fmt.Sprintf("description=%s", b.opts.Description),
 	)
 	if err != nil {
+		if output != "" {
+			b.opts.Logger(fmt.Sprintf("incus publish output: %s", output))
+		}
 		return "", fmt.Errorf("failed to create image: %w", err)
 	}
 

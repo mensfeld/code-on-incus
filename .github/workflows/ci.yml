@@ -472,6 +472,25 @@ jobs:
           echo "=== NAT table ==="
           sudo iptables -t nat -L -n -v | head -30
 
+      - name: Debug storage state before tests
+        run: |
+          echo "=== Host disk space ==="
+          df -h /
+          echo ""
+          echo "=== Incus storage pool ==="
+          incus storage info default || true
+          echo ""
+          echo "=== Incus images ==="
+          incus image list
+          echo ""
+          echo "=== Btrfs filesystem usage ==="
+          sudo btrfs filesystem usage /var/lib/incus/storage-pools/default || true
+          echo ""
+          # Clean up exported image to free disk space for tests
+          rm -f /tmp/coi-image.tar.gz /tmp/ubuntu-base-image.tar.gz
+          echo "=== Disk space after cleanup ==="
+          df -h /
+
       - name: Run ${{ matrix.test_group.name }} tests with coverage
         run: |
           echo "============================================"
