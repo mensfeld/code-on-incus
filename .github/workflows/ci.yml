@@ -250,7 +250,7 @@ jobs:
             type: bridge
           storage_pools:
           - config:
-              size: 15GiB
+              size: 20GiB
             name: default
             driver: btrfs
           profiles:
