@@ -55,17 +55,19 @@ var imagePublishCmd = &cobra.Command{
 	Short: "Publish a stopped container as an image",
 	Long: `Publish a container as an image with the given alias.
 
-Example:
-  coi image publish my-container my-image --description "Custom build with Python 3.11"`,
+Examples:
+  coi image publish my-container my-image --description "Custom build with Python 3.11"
+  coi image publish my-container my-image --compression none`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		containerName := args[0]
 		aliasName := args[1]
 
 		description, _ := cmd.Flags().GetString("description")
+		compression, _ := cmd.Flags().GetString("compression")
 
 		// Publish container
-		fingerprint, err := container.PublishContainer(containerName, aliasName, description)
+		fingerprint, err := container.PublishContainer(containerName, aliasName, description, compression)
 		if err != nil {
 			return exitError(1, fmt.Sprintf("failed to publish container: %v", err))
 		}
@@ -174,6 +176,7 @@ func init() {
 
 	// Add flags to publish command
 	imagePublishCmd.Flags().String("description", "", "Image description")
+	imagePublishCmd.Flags().String("compression", "", "Compression algorithm (e.g., none, gzip, xz; see Incus docs for all options)")
 
 	// Add flags to cleanup command
 	imageCleanupCmd.Flags().Int("keep", 0, "Number of versions to keep (required)")
