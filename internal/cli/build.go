@@ -130,7 +130,7 @@ func buildCustomCommand(cmd *cobra.Command, args []string) error {
 	opts := image.BuildOptions{
 		ImageType:   "custom",
 		AliasName:   imageName,
-		Description: fmt.Sprintf("Custom image: %s", imageName),
+		Description: fmt.Sprintf("Custom image (%s)", imageName),
 		BaseImage:   baseImage,
 		BuildScript: scriptPath,
 		Force:       buildForce,
