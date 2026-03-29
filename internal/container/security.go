@@ -25,8 +25,8 @@ func CheckNotPrivileged(containerName string) error {
 	output, err = IncusOutput("profile", "get", "default", "security.privileged")
 	if err == nil && containsPrivilegedValue(output) {
 		return fmt.Errorf(
-			"the default Incus profile has security.privileged=true which defeats all container isolation. "+
-				"COI requires unprivileged containers for security. "+
+			"the default Incus profile has security.privileged=true which defeats all container isolation. " +
+				"COI requires unprivileged containers for security. " +
 				"Remove it with: incus profile unset default security.privileged",
 		)
 	}

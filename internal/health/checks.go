@@ -2174,11 +2174,11 @@ func CheckKernelVersionHealth() HealthCheck {
 			Message: fmt.Sprintf("Kernel %s is below recommended minimum %d.%d — older kernels may lack security features for safe container isolation",
 				v.Raw, container.MinKernelVersionMajor, container.MinKernelVersionMinor),
 			Details: map[string]interface{}{
-				"kernel":      v.Raw,
-				"minimum":     fmt.Sprintf("%d.%d", container.MinKernelVersionMajor, container.MinKernelVersionMinor),
-				"major":       v.Major,
-				"minor":       v.Minor,
-				"patch":       v.Patch,
+				"kernel":        v.Raw,
+				"minimum":       fmt.Sprintf("%d.%d", container.MinKernelVersionMajor, container.MinKernelVersionMinor),
+				"major":         v.Major,
+				"minor":         v.Minor,
+				"patch":         v.Patch,
 				"meets_minimum": false,
 			},
 		}
@@ -2189,11 +2189,11 @@ func CheckKernelVersionHealth() HealthCheck {
 		Status:  StatusOK,
 		Message: fmt.Sprintf("Kernel %s (>= %d.%d)", v.Raw, container.MinKernelVersionMajor, container.MinKernelVersionMinor),
 		Details: map[string]interface{}{
-			"kernel":      v.Raw,
-			"minimum":     fmt.Sprintf("%d.%d", container.MinKernelVersionMajor, container.MinKernelVersionMinor),
-			"major":       v.Major,
-			"minor":       v.Minor,
-			"patch":       v.Patch,
+			"kernel":        v.Raw,
+			"minimum":       fmt.Sprintf("%d.%d", container.MinKernelVersionMajor, container.MinKernelVersionMinor),
+			"major":         v.Major,
+			"minor":         v.Minor,
+			"patch":         v.Patch,
 			"meets_minimum": true,
 		},
 	}
