@@ -406,6 +406,11 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 			return nil, fmt.Errorf("failed to enable Docker support: %w", err)
 		}
 
+		// Block privileged containers — they defeat all isolation
+		if err := container.CheckNotPrivileged(result.ContainerName); err != nil {
+			return nil, err
+		}
+
 		// Now start the container
 		opts.Logger("Starting container...")
 		if err := result.Manager.Start(); err != nil {

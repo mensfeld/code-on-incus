@@ -63,9 +63,12 @@ def test_health_json_output(coi_binary):
     # Verify some key checks exist
     expected_checks = [
         "os",
+        "kernel_version",
         "incus",
         "permissions",
         "image",
+        "privileged_profile",
+        "security_posture",
         "network_bridge",
         "disk_space",
         "incus_storage_pool",

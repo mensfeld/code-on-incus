@@ -59,6 +59,11 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Warn if kernel is too old (non-blocking)
+	if warning := container.CheckKernelVersion(); warning != "" {
+		fmt.Fprintf(os.Stderr, "%s\n", warning)
+	}
+
 	// Allocate slot if not specified
 	slotNum := slot
 	if slotNum == 0 {

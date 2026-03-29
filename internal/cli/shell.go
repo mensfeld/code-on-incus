@@ -87,6 +87,11 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Warn if kernel is too old (non-blocking)
+	if warning := container.CheckKernelVersion(); warning != "" {
+		fmt.Fprintf(os.Stderr, "%s\n", warning)
+	}
+
 	// Get configured tool (needed to determine tool-specific sessions directory)
 	// --tool flag overrides whatever is in .coi.toml or global config
 	if toolFlag != "" {
