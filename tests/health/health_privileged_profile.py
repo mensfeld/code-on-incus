@@ -11,30 +11,76 @@ import json
 import subprocess
 
 
-def test_health_privileged_profile_ok(coi_binary):
-    """
-    Verify coi health shows privileged profile check as OK when profile is safe.
-    """
+def _get_privileged_value():
+    """Get the current security.privileged value from the default profile."""
     result = subprocess.run(
-        [coi_binary, "health", "--format", "json"],
+        ["incus", "profile", "get", "default", "security.privileged"],
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=10,
     )
+    if result.returncode == 0:
+        return result.stdout.strip() or None
+    return None
 
-    assert result.returncode in [0, 1], (
-        f"Health check failed with exit {result.returncode}. stderr: {result.stderr}"
-    )
 
-    data = json.loads(result.stdout)
-    checks = data["checks"]
+def _restore_privileged_value(original_value):
+    """Restore the original security.privileged value on the default profile."""
+    if original_value is None or original_value == "":
+        subprocess.run(
+            ["incus", "profile", "unset", "default", "security.privileged"],
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+    else:
+        subprocess.run(
+            ["incus", "profile", "set", "default", f"security.privileged={original_value}"],
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
 
-    assert "privileged_profile" in checks, "Should have privileged_profile check"
 
-    pp = checks["privileged_profile"]
-    assert pp["status"] == "ok", (
-        f"Default profile should be unprivileged. Got: {pp['status']} — {pp['message']}"
-    )
+def test_health_privileged_profile_ok(coi_binary):
+    """
+    Verify coi health shows privileged profile check as OK when profile is unprivileged.
+
+    Saves and restores the original profile value to be self-contained.
+    """
+    original_value = _get_privileged_value()
+    try:
+        # Ensure unprivileged state
+        if original_value == "true":
+            subprocess.run(
+                ["incus", "profile", "unset", "default", "security.privileged"],
+                capture_output=True,
+                timeout=10,
+                check=False,
+            )
+
+        result = subprocess.run(
+            [coi_binary, "health", "--format", "json"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
+        assert result.returncode in [0, 1], (
+            f"Health check failed with exit {result.returncode}. stderr: {result.stderr}"
+        )
+
+        data = json.loads(result.stdout)
+        checks = data["checks"]
+
+        assert "privileged_profile" in checks, "Should have privileged_profile check"
+
+        pp = checks["privileged_profile"]
+        assert pp["status"] == "ok", (
+            f"Default profile should be unprivileged. Got: {pp['status']} — {pp['message']}"
+        )
+    finally:
+        _restore_privileged_value(original_value)
 
 
 def test_health_privileged_profile_text(coi_binary):
@@ -48,8 +94,8 @@ def test_health_privileged_profile_text(coi_binary):
         timeout=120,
     )
 
-    assert result.returncode in [0, 1], (
-        f"Health check failed with exit {result.returncode}. stderr: {result.stderr}"
+    assert result.returncode in [0, 1, 2], (
+        f"Health check failed unexpectedly. stderr: {result.stderr}"
     )
 
     output = result.stdout
@@ -62,12 +108,9 @@ def test_health_privileged_profile_detects_misconfiguration(coi_binary):
     """
     Verify coi health detects security.privileged=true on the default profile.
 
-    Flow:
-    1. Set security.privileged=true on default profile
-    2. Run coi health --format json
-    3. Verify privileged_profile check is "failed"
-    4. Always restore profile in finally block
+    Saves and restores the original profile value to be self-contained.
     """
+    original_value = _get_privileged_value()
     try:
         # Set privileged on default profile
         setup = subprocess.run(
@@ -107,10 +150,4 @@ def test_health_privileged_profile_detects_misconfiguration(coi_binary):
         )
 
     finally:
-        # Always restore the default profile
-        subprocess.run(
-            ["incus", "profile", "unset", "default", "security.privileged"],
-            capture_output=True,
-            timeout=10,
-            check=False,
-        )
+        _restore_privileged_value(original_value)

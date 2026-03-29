@@ -2211,11 +2211,13 @@ func CheckPrivilegedProfile() HealthCheck {
 
 	output, err := container.IncusOutput("profile", "get", "default", "security.privileged")
 	if err != nil {
-		// Can't check — graceful degradation
 		return HealthCheck{
 			Name:    "privileged_profile",
-			Status:  StatusOK,
-			Message: "Could not check default profile",
+			Status:  StatusWarning,
+			Message: "Could not check default profile — unable to verify container security",
+			Details: map[string]interface{}{
+				"error": err.Error(),
+			},
 		}
 	}
 

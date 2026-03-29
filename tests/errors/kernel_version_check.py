@@ -27,6 +27,7 @@ def test_no_kernel_warning_on_modern_kernel(coi_binary):
         f"stderr: {result.stderr}"
     )
 
-    assert "kernel" not in result.stderr.lower() or "warning" not in result.stderr.lower(), (
+    stderr_lower = result.stderr.lower()
+    assert not ("kernel" in stderr_lower and "warning" in stderr_lower), (
         f"Should not show kernel warning on modern kernel. Got:\n{result.stderr}"
     )
