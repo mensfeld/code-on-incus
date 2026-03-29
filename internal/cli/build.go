@@ -74,6 +74,11 @@ func buildCommand(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Warn if kernel is too old (non-blocking)
+	if warning := container.CheckKernelVersion(); warning != "" {
+		fmt.Fprintf(os.Stderr, "%s\n", warning)
+	}
+
 	// Configure build options
 	opts := image.BuildOptions{
 		Force:       buildForce,

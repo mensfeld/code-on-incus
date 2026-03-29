@@ -254,6 +254,9 @@ func LaunchContainer(imageAlias, containerName string) error {
 	if err := EnableDockerSupport(containerName); err != nil {
 		return err
 	}
+	if err := CheckNotPrivileged(containerName); err != nil {
+		return err
+	}
 	return IncusExec("start", containerName)
 }
 
@@ -265,6 +268,9 @@ func LaunchContainerPersistent(imageAlias, containerName string) error {
 		return err
 	}
 	if err := EnableDockerSupport(containerName); err != nil {
+		return err
+	}
+	if err := CheckNotPrivileged(containerName); err != nil {
 		return err
 	}
 	return IncusExec("start", containerName)

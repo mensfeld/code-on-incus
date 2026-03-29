@@ -54,12 +54,14 @@ func RunAllChecks(cfg *config.Config, verbose bool) *HealthResult {
 
 	// System checks
 	checks["os"] = CheckOS()
+	checks["kernel_version"] = CheckKernelVersionHealth()
 
 	// Critical checks
 	checks["incus"] = CheckIncus()
 	checks["permissions"] = CheckPermissions()
 	checks["image"] = CheckImage(cfg.Defaults.Image)
 	checks["image_age"] = CheckImageAge(cfg.Defaults.Image)
+	checks["privileged_profile"] = CheckPrivilegedProfile()
 
 	// Networking checks
 	checks["network_bridge"] = CheckNetworkBridge()

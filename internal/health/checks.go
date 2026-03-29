@@ -2138,3 +2138,102 @@ func CheckDockerForwardPolicy() HealthCheck {
 		Details: details,
 	}
 }
+
+// CheckKernelVersionHealth checks the running kernel version and warns if too old
+func CheckKernelVersionHealth() HealthCheck {
+	if runtime.GOOS != "linux" {
+		return HealthCheck{
+			Name:    "kernel_version",
+			Status:  StatusOK,
+			Message: fmt.Sprintf("Not applicable (%s)", runtime.GOOS),
+		}
+	}
+
+	out, err := exec.Command("uname", "-r").Output()
+	if err != nil {
+		return HealthCheck{
+			Name:    "kernel_version",
+			Status:  StatusOK,
+			Message: "Could not determine kernel version",
+		}
+	}
+
+	v, err := container.ParseKernelVersion(string(out))
+	if err != nil {
+		return HealthCheck{
+			Name:    "kernel_version",
+			Status:  StatusOK,
+			Message: fmt.Sprintf("Could not parse kernel version: %s", strings.TrimSpace(string(out))),
+		}
+	}
+
+	if !container.MeetsMinimumKernelVersion(v) {
+		return HealthCheck{
+			Name:   "kernel_version",
+			Status: StatusWarning,
+			Message: fmt.Sprintf("Kernel %s is below recommended minimum %d.%d — older kernels may lack security features for safe container isolation",
+				v.Raw, container.MinKernelVersionMajor, container.MinKernelVersionMinor),
+			Details: map[string]interface{}{
+				"kernel":      v.Raw,
+				"minimum":     fmt.Sprintf("%d.%d", container.MinKernelVersionMajor, container.MinKernelVersionMinor),
+				"major":       v.Major,
+				"minor":       v.Minor,
+				"patch":       v.Patch,
+				"meets_minimum": false,
+			},
+		}
+	}
+
+	return HealthCheck{
+		Name:    "kernel_version",
+		Status:  StatusOK,
+		Message: fmt.Sprintf("Kernel %s (>= %d.%d)", v.Raw, container.MinKernelVersionMajor, container.MinKernelVersionMinor),
+		Details: map[string]interface{}{
+			"kernel":      v.Raw,
+			"minimum":     fmt.Sprintf("%d.%d", container.MinKernelVersionMajor, container.MinKernelVersionMinor),
+			"major":       v.Major,
+			"minor":       v.Minor,
+			"patch":       v.Patch,
+			"meets_minimum": true,
+		},
+	}
+}
+
+// CheckPrivilegedProfile checks if the default Incus profile has security.privileged=true
+func CheckPrivilegedProfile() HealthCheck {
+	if !container.Available() {
+		return HealthCheck{
+			Name:    "privileged_profile",
+			Status:  StatusOK,
+			Message: "Skipped (Incus not available)",
+		}
+	}
+
+	output, err := container.IncusOutput("profile", "get", "default", "security.privileged")
+	if err != nil {
+		// Can't check — graceful degradation
+		return HealthCheck{
+			Name:    "privileged_profile",
+			Status:  StatusOK,
+			Message: "Could not check default profile",
+		}
+	}
+
+	if strings.TrimSpace(output) == "true" {
+		return HealthCheck{
+			Name:   "privileged_profile",
+			Status: StatusFailed,
+			Message: "Default profile has security.privileged=true — this defeats all container isolation. " +
+				"Remove with: incus profile unset default security.privileged",
+			Details: map[string]interface{}{
+				"security.privileged": "true",
+			},
+		}
+	}
+
+	return HealthCheck{
+		Name:    "privileged_profile",
+		Status:  StatusOK,
+		Message: "Default profile uses unprivileged containers",
+	}
+}
