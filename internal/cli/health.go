@@ -89,7 +89,7 @@ func outputHealthText(result *health.HealthResult) error {
 	// Group checks by category
 	categories := map[string][]string{
 		"SYSTEM":        {"os", "kernel_version"},
-		"CRITICAL":      {"incus", "permissions", "image", "image_age", "privileged_profile"},
+		"CRITICAL":      {"incus", "permissions", "image", "image_age", "privileged_profile", "security_posture"},
 		"NETWORKING":    {"network_bridge", "ip_forwarding", "firewall", "bridge_firewalld_zone", "docker_forward_policy"},
 		"MONITORING":    {"nftables", "systemd_journal", "libsystemd"},
 		"STORAGE":       {"coi_directory", "sessions_directory", "disk_space", "incus_storage_pool"},
@@ -230,6 +230,7 @@ func formatCheckName(name string) string {
 		"dns_resolution":        "DNS resolution",
 		"passwordless_sudo":     "Passwordless sudo",
 		"orphaned_resources":    "Orphaned resources",
+		"security_posture":      "Security posture",
 	}
 
 	if displayName, ok := specialCases[name]; ok {

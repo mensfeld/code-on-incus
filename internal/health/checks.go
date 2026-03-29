@@ -2239,3 +2239,108 @@ func CheckPrivilegedProfile() HealthCheck {
 		Message: "Default profile uses unprivileged containers",
 	}
 }
+
+// CheckSecurityPosture checks the overall container security posture by inspecting
+// seccomp, AppArmor, and privilege settings on the default Incus profile.
+func CheckSecurityPosture() HealthCheck {
+	if !container.Available() {
+		return HealthCheck{
+			Name:    "security_posture",
+			Status:  StatusOK,
+			Message: "Skipped (Incus not available)",
+		}
+	}
+
+	details := map[string]interface{}{}
+
+	// Check security.privileged
+	privOutput, err := container.IncusOutput("profile", "get", "default", "security.privileged")
+	if err != nil {
+		return HealthCheck{
+			Name:    "security_posture",
+			Status:  StatusWarning,
+			Message: "Could not check default profile — unable to verify security posture",
+			Details: map[string]interface{}{
+				"error": err.Error(),
+			},
+		}
+	}
+
+	privileged := strings.TrimSpace(privOutput) == "true"
+	details["privileged"] = privileged
+
+	if privileged {
+		details["seccomp"] = "disabled (privileged)"
+		details["apparmor"] = "disabled (privileged)"
+		details["raw_seccomp_override"] = false
+		details["raw_apparmor_override"] = false
+
+		return HealthCheck{
+			Name:   "security_posture",
+			Status: StatusFailed,
+			Message: "Privileged containers — seccomp and AppArmor are disabled. " +
+				"Remove with: incus profile unset default security.privileged",
+			Details: details,
+		}
+	}
+
+	// Check raw.seccomp override
+	rawSeccomp, _ := container.IncusOutput("profile", "get", "default", "raw.seccomp")
+	rawSeccompOverride := strings.TrimSpace(rawSeccomp) != ""
+	details["raw_seccomp_override"] = rawSeccompOverride
+
+	if rawSeccompOverride {
+		details["seccomp"] = "custom override"
+	} else {
+		details["seccomp"] = "enabled (default)"
+	}
+
+	// Check raw.apparmor override
+	rawApparmor, _ := container.IncusOutput("profile", "get", "default", "raw.apparmor")
+	rawApparmorOverride := strings.TrimSpace(rawApparmor) != ""
+	details["raw_apparmor_override"] = rawApparmorOverride
+
+	// Check host AppArmor availability
+	apparmorAvailable := false
+
+	if runtime.GOOS == "linux" {
+		if content, err := os.ReadFile("/sys/module/apparmor/parameters/enabled"); err == nil {
+			apparmorAvailable = strings.TrimSpace(string(content)) == "Y"
+		}
+	}
+
+	if rawApparmorOverride {
+		details["apparmor"] = "custom override"
+	} else if apparmorAvailable {
+		details["apparmor"] = "enabled (default)"
+	} else {
+		details["apparmor"] = "not available"
+	}
+
+	// Determine status
+	if rawSeccompOverride || rawApparmorOverride {
+		msg := "Custom security profile overrides detected — verify your raw.seccomp/raw.apparmor settings"
+		return HealthCheck{
+			Name:    "security_posture",
+			Status:  StatusWarning,
+			Message: msg,
+			Details: details,
+		}
+	}
+
+	if !apparmorAvailable {
+		return HealthCheck{
+			Name:    "security_posture",
+			Status:  StatusOK,
+			Message: "Seccomp enabled, AppArmor not available (seccomp-only isolation)",
+			Details: details,
+		}
+	}
+
+	return HealthCheck{
+		Name:    "security_posture",
+		Status:  StatusOK,
+		Message: "Full isolation — unprivileged containers with seccomp and AppArmor",
+		Details: details,
+	}
+}

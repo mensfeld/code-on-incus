@@ -11,6 +11,7 @@
 
 ### Features
 
+- [Feature] **Security posture health check** — `coi health` now shows a "Security posture" check under CRITICAL that reports whether seccomp and AppArmor isolation are active on the default Incus profile. Reports full isolation (unprivileged + seccomp + AppArmor), seccomp-only (macOS/Lima where AppArmor is unavailable), warns on custom `raw.seccomp`/`raw.apparmor` overrides, and fails when `security.privileged=true` disables all isolation. Includes detailed JSON output with per-feature status.
 - [Feature] **Kernel version check (warning)** — `coi shell`, `coi run`, and `coi build` now warn on stderr when the host kernel is below 5.15, which may lack security features needed for safe container isolation. The check skips gracefully on macOS/darwin and on any failure. Also surfaced as a SYSTEM check in `coi health`. (#237)
 - [Feature] **Privileged container guard (hard block)** — COI now refuses to start containers when `security.privileged=true` is detected on either the container config or the default Incus profile, which silently defeats all container isolation. Returns an actionable error message with the exact `incus` command to fix it. Checked in `LaunchContainer`, `LaunchContainerPersistent`, and session setup. Also surfaced as a CRITICAL check in `coi health`. (#237)
 

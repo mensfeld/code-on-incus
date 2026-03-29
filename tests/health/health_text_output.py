@@ -49,6 +49,7 @@ def test_health_text_output(coi_binary):
     assert "Operating system" in output, "Should show OS info"
     assert "Kernel version" in output, "Should check kernel version"
     assert "Privileged check" in output, "Should check privileged profile"
+    assert "Security posture" in output, "Should check security posture"
     assert "Network bridge" in output, "Should check network bridge"
     assert "Disk space" in output, "Should check disk space"
     assert "Incus storage pool" in output, "Should check Incus storage pool"
