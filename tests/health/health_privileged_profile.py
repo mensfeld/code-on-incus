@@ -76,9 +76,7 @@ def test_health_privileged_profile_detects_misconfiguration(coi_binary):
             text=True,
             timeout=10,
         )
-        assert setup.returncode == 0, (
-            f"Failed to set security.privileged=true: {setup.stderr}"
-        )
+        assert setup.returncode == 0, f"Failed to set security.privileged=true: {setup.stderr}"
 
         # Run health check
         result = subprocess.run(
