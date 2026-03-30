@@ -10,7 +10,6 @@ Verifies that:
    into the container before sandbox context is appended.
 """
 
-import os
 import subprocess
 import time
 
@@ -143,7 +142,9 @@ def test_auto_context_claude_preserves_host_claude_md(
     claude_dir.mkdir()
 
     # Create host CLAUDE.md with user instructions
-    host_instructions = "# My Custom Instructions\n\nAlways use TypeScript.\nPrefer functional style.\n"
+    host_instructions = (
+        "# My Custom Instructions\n\nAlways use TypeScript.\nPrefer functional style.\n"
+    )
     claude_md_file = claude_dir / "CLAUDE.md"
     claude_md_file.write_text(host_instructions)
 

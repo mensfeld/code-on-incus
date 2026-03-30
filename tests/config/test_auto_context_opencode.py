@@ -19,13 +19,10 @@ from support.helpers import (
     calculate_container_name,
     spawn_coi,
     wait_for_container_ready,
-    wait_for_text_on_screen,
 )
 
 
-def test_auto_context_opencode_instructions_injected(
-    coi_binary, cleanup_containers, workspace_dir
-):
+def test_auto_context_opencode_instructions_injected(coi_binary, cleanup_containers, workspace_dir):
     """
     Test that opencode.json includes instructions field with path to
     SANDBOX_CONTEXT.md when auto_context is enabled.
@@ -131,5 +128,5 @@ def test_auto_context_opencode_instructions_injected(
         f"Got config: {debug_output}"
     )
     assert permission_injected, (
-        f'opencode.json should still contain permission bypass. Got config: {debug_output}'
+        f"opencode.json should still contain permission bypass. Got config: {debug_output}"
     )

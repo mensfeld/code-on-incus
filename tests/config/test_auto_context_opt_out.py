@@ -21,9 +21,7 @@ from support.helpers import (
 )
 
 
-def test_auto_context_opt_out_no_claude_md(
-    coi_binary, cleanup_containers, workspace_dir, tmp_path
-):
+def test_auto_context_opt_out_no_claude_md(coi_binary, cleanup_containers, workspace_dir, tmp_path):
     """
     Test that setting auto_context = false prevents creation of ~/.claude/CLAUDE.md.
 
@@ -40,7 +38,7 @@ def test_auto_context_opt_out_no_claude_md(
     # Write .coi.toml with auto_context = false
     config_path = os.path.join(workspace_dir, ".coi.toml")
     with open(config_path, "w") as f:
-        f.write('[tool]\nauto_context = false\n')
+        f.write("[tool]\nauto_context = false\n")
 
     # Use fake home with .claude dir (credentials needed for config setup)
     fake_home = tmp_path / "fake_home"
