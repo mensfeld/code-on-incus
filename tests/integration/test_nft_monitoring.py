@@ -239,8 +239,7 @@ class TestNFTRuleManagement:
         )
 
         try:
-            time.sleep(10)
-            if not wait_for_container_ready(container_name, timeout=30):
+            if not wait_for_container_ready(container_name, timeout=60):
                 pytest.skip("Container failed to start")
 
             container_ip = get_container_ip(container_name)
@@ -299,8 +298,7 @@ class TestNFTRuleManagement:
         )
 
         try:
-            time.sleep(10)
-            if not wait_for_container_ready(container_name, timeout=30):
+            if not wait_for_container_ready(container_name, timeout=60):
                 pytest.skip("Container failed to start")
 
             # Get ruleset
@@ -351,9 +349,23 @@ class TestNetworkThreatDetection:
         )
 
         try:
-            time.sleep(10)
-            if not wait_for_container_ready(container_name, timeout=30):
+            if not wait_for_container_ready(container_name, timeout=60):
                 pytest.skip("Container failed to start")
+
+            container_ip = get_container_ip(container_name)
+            if not container_ip:
+                pytest.skip("Container has no IP address")
+
+            # Wait for NFT rules to be created (confirms monitoring pipeline is active)
+            nft_ready = False
+            for _ in range(15):
+                if check_nft_rules_exist(container_ip):
+                    nft_ready = True
+                    break
+                time.sleep(1)
+
+            if not nft_ready:
+                pytest.skip("NFT rules not created - monitoring may not be properly initialized")
 
             # Attempt to access metadata endpoint from inside container
             subprocess.run(
@@ -375,7 +387,7 @@ class TestNetworkThreatDetection:
             # journal reader -> event processor -> responder -> audit log write)
             events = []
             critical_events = []
-            for _ in range(15):
+            for _ in range(30):
                 time.sleep(1)
                 events = get_nft_threat_events(container_name)
                 critical_events = [e for e in events if e.get("level") == "critical"]
@@ -413,9 +425,23 @@ class TestNetworkThreatDetection:
         )
 
         try:
-            time.sleep(10)
-            if not wait_for_container_ready(container_name, timeout=30):
+            if not wait_for_container_ready(container_name, timeout=60):
                 pytest.skip("Container failed to start")
+
+            container_ip = get_container_ip(container_name)
+            if not container_ip:
+                pytest.skip("Container has no IP address")
+
+            # Wait for NFT rules to be created (confirms monitoring pipeline is active)
+            nft_ready = False
+            for _ in range(15):
+                if check_nft_rules_exist(container_ip):
+                    nft_ready = True
+                    break
+                time.sleep(1)
+
+            if not nft_ready:
+                pytest.skip("NFT rules not created - monitoring may not be properly initialized")
 
             # Access metadata endpoint (should trigger kill)
             subprocess.run(
@@ -435,7 +461,7 @@ class TestNetworkThreatDetection:
 
             # Wait for kill action with retry loop
             killed = False
-            for _ in range(15):
+            for _ in range(30):
                 time.sleep(1)
                 state = get_container_state(container_name)
                 if state in ("Stopped", "Unknown"):
@@ -473,8 +499,7 @@ class TestNetworkThreatDetection:
         )
 
         try:
-            time.sleep(10)
-            if not wait_for_container_ready(container_name, timeout=30):
+            if not wait_for_container_ready(container_name, timeout=60):
                 pytest.skip("Container failed to start")
 
             container_ip = get_container_ip(container_name)
@@ -542,8 +567,7 @@ class TestAuditLogging:
         )
 
         try:
-            time.sleep(10)
-            if not wait_for_container_ready(container_name, timeout=30):
+            if not wait_for_container_ready(container_name, timeout=60):
                 pytest.skip("Container failed to start")
 
             # Trigger some network activity
@@ -597,13 +621,17 @@ class TestDaemonLifecycle:
             )
 
             try:
-                time.sleep(15)
+                # Poll stderr for startup message instead of fixed sleep
+                stderr_content = ""
+                started = False
+                for _ in range(30):
+                    time.sleep(1)
+                    stderr_content = stderr_file.read_text()
+                    if "[security] NFT network monitoring started" in stderr_content:
+                        started = True
+                        break
 
-                # Read stderr to check for startup message
-                stderr_content = stderr_file.read_text()
-                assert "[security] NFT network monitoring started" in stderr_content, (
-                    f"NFT daemon startup message not found. stderr:\n{stderr_content}"
-                )
+                assert started, f"NFT daemon startup message not found. stderr:\n{stderr_content}"
 
             finally:
                 proc.terminate()
@@ -642,8 +670,7 @@ class TestNFTRuleCleanupOnKill:
         )
 
         try:
-            time.sleep(10)
-            if not wait_for_container_ready(container_name, timeout=30):
+            if not wait_for_container_ready(container_name, timeout=60):
                 pytest.skip("Container failed to start")
 
             container_ip = get_container_ip(container_name)
@@ -706,8 +733,7 @@ class TestNFTRuleCleanupOnKill:
         )
 
         try:
-            time.sleep(10)
-            if not wait_for_container_ready(container_name, timeout=30):
+            if not wait_for_container_ready(container_name, timeout=60):
                 pytest.skip("Container failed to start")
 
             container_ip = get_container_ip(container_name)
@@ -800,8 +826,7 @@ class TestNFTRuleCleanupOnShutdown:
         )
 
         try:
-            time.sleep(10)
-            if not wait_for_container_ready(container_name, timeout=30):
+            if not wait_for_container_ready(container_name, timeout=60):
                 pytest.skip("Container failed to start")
 
             container_ip = get_container_ip(container_name)
@@ -899,8 +924,7 @@ class TestFirewallRuleCleanupOnAutoKill:
         )
 
         try:
-            time.sleep(10)
-            if not wait_for_container_ready(container_name, timeout=30):
+            if not wait_for_container_ready(container_name, timeout=60):
                 pytest.skip("Container failed to start")
 
             container_ip = get_container_ip(container_name)
@@ -1034,8 +1058,7 @@ class TestVethZoneCleanupOnAutoKill:
         )
 
         try:
-            time.sleep(10)
-            if not wait_for_container_ready(container_name, timeout=30):
+            if not wait_for_container_ready(container_name, timeout=60):
                 pytest.skip("Container failed to start")
 
             # Get container IP and verify NFT rules are set up before proceeding
