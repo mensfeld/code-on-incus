@@ -94,6 +94,7 @@ See the [Supported Tools wiki page](https://github.com/mensfeld/code-on-incus/wi
 **Host Integration**
 - SSH agent forwarding - Use git-over-SSH inside containers without copying private keys (`--ssh-agent` or `[ssh] forward_agent = true`)
 - Environment variable forwarding - Selectively forward host env vars by name (`--forward-env` or `forward_env` in config)
+- Host timezone inheritance - Containers automatically inherit the host's timezone (configurable via `--timezone` or `[timezone]` config)
 - Sandbox context file - Auto-injected `~/SANDBOX_CONTEXT.md` tells AI tools about their environment (network mode, workspace path, persistence, etc.)
 
 **Security & Isolation**
@@ -196,6 +197,9 @@ curl -fsSL https://raw.githubusercontent.com/mensfeld/code-on-incus/master/insta
 # Build the unified coi image (5-10 minutes)
 coi build
 
+# Build without compression (faster iteration)
+coi build --compression none
+
 # Custom image from your own build script
 coi build custom my-rust-image --script build-rust.sh
 coi build custom my-image --base coi --script setup.sh
@@ -274,6 +278,8 @@ coi clean
 --ssh-agent             # Forward host SSH agent into container (git over SSH without copying keys)
 --forward-env VARS      # Forward host environment variables by name (comma-separated)
 --monitor               # Enable security monitoring with automatic threat response
+--timezone ZONE         # Container timezone: host (default), utc, or IANA name (e.g., Europe/Warsaw)
+--compression ALG       # Compression for build/publish: none, gzip, xz (default: gzip)
 --writable-git-hooks    # Allow container to write to .git/hooks (disables protection)
 ```
 
