@@ -4,7 +4,8 @@ import "path/filepath"
 
 // OpencodeTool implements Tool for opencode (https://opencode.ai)
 type OpencodeTool struct {
-	permissionMode string // "bypass" (default) or "interactive"
+	permissionMode  string // "bypass" (default) or "interactive"
+	contextFilePath string // absolute path to sandbox context file inside container (set by SetAutoContextPath)
 }
 
 // NewOpencode creates a new opencode tool instance
@@ -43,24 +44,40 @@ func (c *OpencodeTool) DiscoverSessionID(stateDir string) string { return "" }
 // In interactive mode: injects {"permission": {"*": "ask"}} so opencode prompts the
 // user before each action (human-in-the-loop).
 func (c *OpencodeTool) GetSandboxSettings() map[string]interface{} {
+	var settings map[string]interface{}
 	if c.permissionMode == "interactive" {
-		return map[string]interface{}{
+		settings = map[string]interface{}{
 			"permission": map[string]interface{}{
 				"*": "ask",
 			},
 		}
+	} else {
+		settings = map[string]interface{}{
+			"permission": map[string]interface{}{
+				"*": "allow",
+			},
+		}
 	}
-	return map[string]interface{}{
-		"permission": map[string]interface{}{
-			"*": "allow",
-		},
+
+	// Include instructions field referencing the sandbox context file
+	if c.contextFilePath != "" {
+		settings["instructions"] = []string{c.contextFilePath}
 	}
+
+	return settings
 }
 
 // SetPermissionMode sets the permission mode for opencode.
 // Valid values: "bypass" (default) or "interactive" (human-in-the-loop).
 func (c *OpencodeTool) SetPermissionMode(mode string) {
 	c.permissionMode = mode
+}
+
+// SetAutoContextPath implements ToolWithAutoContextPath.
+// Stores the absolute path to the sandbox context file so it can be
+// referenced in the opencode.json instructions field.
+func (c *OpencodeTool) SetAutoContextPath(path string) {
+	c.contextFilePath = path
 }
 
 // EssentialConfigFiles implements ToolWithConfigDirFiles.

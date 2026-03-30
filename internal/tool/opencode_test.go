@@ -226,6 +226,79 @@ func TestOpencodeTool_GetContainerEnv_CustomWorkspace(t *testing.T) {
 	}
 }
 
+func TestOpencodeTool_SetAutoContextPath(t *testing.T) {
+	oc := NewOpencode()
+
+	acp, ok := oc.(ToolWithAutoContextPath)
+	if !ok {
+		t.Fatal("OpencodeTool should implement ToolWithAutoContextPath")
+	}
+
+	// Verify method works without panic
+	acp.SetAutoContextPath("/home/code/SANDBOX_CONTEXT.md")
+}
+
+func TestOpencodeTool_GetSandboxSettings_WithAutoContext(t *testing.T) {
+	oc := &OpencodeTool{contextFilePath: "/home/code/SANDBOX_CONTEXT.md"}
+	settings := oc.GetSandboxSettings()
+
+	// Should have instructions field
+	instructions, ok := settings["instructions"]
+	if !ok {
+		t.Fatal("GetSandboxSettings() missing 'instructions' key when contextFilePath is set")
+	}
+	instrSlice, ok := instructions.([]string)
+	if !ok {
+		t.Fatalf("'instructions' value is %T, want []string", instructions)
+	}
+	if len(instrSlice) != 1 || instrSlice[0] != "/home/code/SANDBOX_CONTEXT.md" {
+		t.Errorf("instructions = %v, want [/home/code/SANDBOX_CONTEXT.md]", instrSlice)
+	}
+
+	// Should still have permission field
+	if _, ok := settings["permission"]; !ok {
+		t.Error("GetSandboxSettings() missing 'permission' key")
+	}
+}
+
+func TestOpencodeTool_GetSandboxSettings_WithoutAutoContext(t *testing.T) {
+	oc := &OpencodeTool{} // No contextFilePath set
+	settings := oc.GetSandboxSettings()
+
+	// Should NOT have instructions field
+	if _, ok := settings["instructions"]; ok {
+		t.Error("GetSandboxSettings() should not have 'instructions' key when contextFilePath is empty")
+	}
+
+	// Should still have permission field
+	if _, ok := settings["permission"]; !ok {
+		t.Error("GetSandboxSettings() missing 'permission' key")
+	}
+}
+
+func TestOpencodeTool_GetSandboxSettings_InteractiveWithAutoContext(t *testing.T) {
+	oc := &OpencodeTool{
+		permissionMode:  "interactive",
+		contextFilePath: "/home/code/SANDBOX_CONTEXT.md",
+	}
+	settings := oc.GetSandboxSettings()
+
+	// Should have instructions field
+	if _, ok := settings["instructions"]; !ok {
+		t.Error("GetSandboxSettings() missing 'instructions' key in interactive mode")
+	}
+
+	// Permission should be "ask" in interactive mode
+	perm, ok := settings["permission"]
+	if !ok {
+		t.Fatal("GetSandboxSettings() missing 'permission' key")
+	}
+	permMap := perm.(map[string]interface{})
+	if permMap["*"] != "ask" {
+		t.Errorf("permission['*'] = %q, want %q", permMap["*"], "ask")
+	}
+}
+
 func TestListSupported_IncludesOpencode(t *testing.T) {
 	supported := ListSupported()
 	found := false

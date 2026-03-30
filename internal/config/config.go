@@ -141,6 +141,7 @@ type ToolConfig struct {
 	Binary         string           `toml:"binary"`          // Binary name to execute (if empty, uses tool name)
 	PermissionMode string           `toml:"permission_mode"` // Permission mode: "bypass" (default) or "interactive"
 	ContextFile    string           `toml:"context_file"`    // Path to custom context .md file (supports ~ expansion)
+	AutoContext    *bool            `toml:"auto_context"`    // Auto-inject sandbox context into tool's native system (default: true)
 	Claude         ClaudeToolConfig `toml:"claude"`          // Claude-specific settings
 }
 
@@ -267,8 +268,9 @@ func GetDefaultConfig() *Config {
 			},
 		},
 		Tool: ToolConfig{
-			Name:   "claude",
-			Binary: "", // Empty means use tool's default binary name
+			Name:        "claude",
+			Binary:      "", // Empty means use tool's default binary name
+			AutoContext: ptrBool(true),
 		},
 		Mounts: MountsConfig{
 			Default: []MountEntry{},
@@ -490,6 +492,10 @@ func (c *Config) Merge(other *Config) {
 	// Merge context file path
 	if other.Tool.ContextFile != "" {
 		c.Tool.ContextFile = ExpandPath(other.Tool.ContextFile)
+	}
+	// Merge auto-context setting
+	if other.Tool.AutoContext != nil {
+		c.Tool.AutoContext = other.Tool.AutoContext
 	}
 	// Merge Claude-specific settings
 	if other.Tool.Claude.EffortLevel != "" {

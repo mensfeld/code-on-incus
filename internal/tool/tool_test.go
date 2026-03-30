@@ -247,7 +247,7 @@ func TestClaudeToolConfigDirFiles(t *testing.T) {
 
 	// EssentialConfigFiles
 	files := tcf.EssentialConfigFiles()
-	expected := []string{".credentials.json", "config.yml", "settings.json"}
+	expected := []string{".credentials.json", "config.yml", "settings.json", "CLAUDE.md"}
 	if len(files) != len(expected) {
 		t.Fatalf("EssentialConfigFiles() = %v, want %v", files, expected)
 	}
@@ -451,6 +451,39 @@ func TestClaudeBuildCommand_ResumeInteractiveMode(t *testing.T) {
 	// Should still have --verbose
 	if !contains(cmd, "--verbose") {
 		t.Error("Expected command to contain '--verbose'")
+	}
+}
+
+func TestClaudeTool_AutoContextFile(t *testing.T) {
+	tool := NewClaude()
+	acf, ok := tool.(ToolWithAutoContextFile)
+	if !ok {
+		t.Fatal("ClaudeTool should implement ToolWithAutoContextFile")
+	}
+
+	path := acf.AutoContextFile()
+	if path != ".claude/CLAUDE.md" {
+		t.Errorf("AutoContextFile() = %q, want %q", path, ".claude/CLAUDE.md")
+	}
+}
+
+func TestClaudeTool_EssentialConfigFiles_IncludesCLAUDEMD(t *testing.T) {
+	tool := NewClaude()
+	tcf, ok := tool.(ToolWithConfigDirFiles)
+	if !ok {
+		t.Fatal("ClaudeTool does not implement ToolWithConfigDirFiles")
+	}
+
+	files := tcf.EssentialConfigFiles()
+	found := false
+	for _, f := range files {
+		if f == "CLAUDE.md" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("EssentialConfigFiles() = %v, does not include 'CLAUDE.md'", files)
 	}
 }
 

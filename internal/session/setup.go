@@ -101,6 +101,7 @@ type SetupOptions struct {
 	ForwardedEnvVars      []string             // Names of host env vars being forwarded (for context file)
 	ContextFilePath       string               // Path to custom context .md file on host (overrides tool default)
 	Timezone              string               // Resolved IANA timezone name (e.g., "America/New_York"), empty for UTC
+	AutoContext           *bool                // Auto-inject sandbox context into tool's native system (default: true)
 	Logger                func(string)
 	ContainerName         string // Use existing container (for testing) - skips container creation
 }
@@ -527,6 +528,14 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 		opts.Logger("Reusing existing workspace and mount configurations")
 	}
 
+	// 10.5 Set auto-context path for config-based tools (must happen before setupCLIConfig
+	// so the path is included in GetSandboxSettings output)
+	if opts.Tool != nil && config.BoolVal(opts.AutoContext) {
+		if acp, ok := opts.Tool.(tool.ToolWithAutoContextPath); ok {
+			acp.SetAutoContextPath(filepath.Join(result.HomeDir, "SANDBOX_CONTEXT.md"))
+		}
+	}
+
 	// 11. Setup CLI tool config (skip if resuming - config already restored)
 	if opts.Tool != nil {
 		if tcf, ok := opts.Tool.(tool.ToolWithConfigDirFiles); ok {
@@ -557,6 +566,7 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 	// 12. Inject sandbox context file (~/SANDBOX_CONTEXT.md)
 	// This runs for both new and resumed sessions so dynamic info stays current.
 	// The file is tool-agnostic — any AI tool can be configured to read it.
+	var contextContent string
 	{
 		networkMode := ""
 		if opts.NetworkConfig != nil {
@@ -582,8 +592,19 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 			GHCLIAuthenticated: ghAuthenticated,
 			ForwardedEnvVars:   opts.ForwardedEnvVars,
 		}
+		contextContent = resolveContextContent(ctxInfo, opts.ContextFilePath, opts.Logger)
 		if err := injectContextFile(result.Manager, ctxInfo, opts.ContextFilePath, result.HomeDir, opts.Logger); err != nil {
 			opts.Logger(fmt.Sprintf("Warning: Failed to inject context file: %v", err))
+		}
+	}
+
+	// 13. Inject auto-context file for tools that support it (e.g., Claude's ~/.claude/CLAUDE.md)
+	// This writes sandbox context into the tool's native auto-load file so it's available at session start.
+	if opts.Tool != nil && config.BoolVal(opts.AutoContext) && contextContent != "" {
+		if acf, ok := opts.Tool.(tool.ToolWithAutoContextFile); ok {
+			if err := injectAutoContextFile(result.Manager, acf, contextContent, result.HomeDir, opts.Logger); err != nil {
+				opts.Logger(fmt.Sprintf("Warning: Failed to inject auto-context file: %v", err))
+			}
 		}
 	}
 
@@ -971,6 +992,87 @@ func injectContextFile(mgr *container.Manager, info tool.ContextInfo, customPath
 	}
 
 	logger(fmt.Sprintf("Context file injected at %s", destPath))
+	return nil
+}
+
+// resolveContextContent returns the sandbox context content string.
+// If customPath is provided, it reads the file from the host; otherwise it
+// renders the default embedded template. This is used both for ~/SANDBOX_CONTEXT.md
+// and for auto-context injection into tool-native files.
+func resolveContextContent(info tool.ContextInfo, customPath string, logger func(string)) string {
+	if customPath != "" {
+		data, err := os.ReadFile(customPath)
+		if err != nil {
+			logger(fmt.Sprintf("Warning: Failed to read custom context file %s: %v", customPath, err))
+			return ""
+		}
+		return string(data)
+	}
+	return tool.RenderContextFileContent(info)
+}
+
+// injectAutoContextFile writes sandbox context into the tool's native auto-load
+// file (e.g., ~/.claude/CLAUDE.md). If the file already exists (e.g., copied from
+// host), the sandbox context is appended with a separator. Otherwise, the file is
+// created with just the sandbox context.
+func injectAutoContextFile(mgr *container.Manager, acf tool.ToolWithAutoContextFile, contextContent, homeDir string, logger func(string)) error {
+	relPath := acf.AutoContextFile()
+	destPath := filepath.Join(homeDir, relPath)
+	destDir := filepath.Dir(destPath)
+
+	// Ensure parent directory exists
+	mkdirCmd := fmt.Sprintf("mkdir -p %s", destDir)
+	if _, err := mgr.ExecCommand(mkdirCmd, container.ExecCommandOptions{Capture: true}); err != nil {
+		return fmt.Errorf("failed to create directory for %s: %w", relPath, err)
+	}
+
+	separator := "\n\n# COI Sandbox Context\n\n"
+
+	// Check if the file already exists in the container (e.g., host's CLAUDE.md was copied)
+	checkCmd := fmt.Sprintf("test -f %s && echo exists || echo missing", destPath)
+	checkResult, err := mgr.ExecCommand(checkCmd, container.ExecCommandOptions{Capture: true})
+
+	if err == nil && strings.TrimSpace(checkResult) == "exists" {
+		// File exists — append sandbox context with separator by writing to a temp
+		// file and using cat >> inside the container
+		logger(fmt.Sprintf("Appending sandbox context to existing %s", relPath))
+		appendContent := separator + contextContent
+		tmpFile, tmpErr := os.CreateTemp("", "coi-autocontext-*")
+		if tmpErr != nil {
+			return fmt.Errorf("failed to create temp file for append: %w", tmpErr)
+		}
+		tmpPath := tmpFile.Name()
+		defer os.Remove(tmpPath)
+		if _, tmpErr = tmpFile.WriteString(appendContent); tmpErr != nil {
+			tmpFile.Close()
+			return fmt.Errorf("failed to write temp file for append: %w", tmpErr)
+		}
+		tmpFile.Close()
+		// Push temp file to a staging path in the container, then cat >> to target
+		stagingPath := destPath + ".coi-append"
+		if pushErr := mgr.PushFile(tmpPath, stagingPath); pushErr != nil {
+			return fmt.Errorf("failed to push append content to %s: %w", relPath, pushErr)
+		}
+		catCmd := fmt.Sprintf("cat %s >> %s && rm -f %s", stagingPath, destPath, stagingPath)
+		if _, catErr := mgr.ExecCommand(catCmd, container.ExecCommandOptions{Capture: true}); catErr != nil {
+			return fmt.Errorf("failed to append to %s: %w", relPath, catErr)
+		}
+	} else {
+		// File doesn't exist — create it with sandbox context
+		logger(fmt.Sprintf("Creating %s with sandbox context", relPath))
+		if err := mgr.CreateFile(destPath, contextContent); err != nil {
+			return fmt.Errorf("failed to create %s: %w", relPath, err)
+		}
+	}
+
+	// Fix ownership if running as non-root user
+	if homeDir != "/root" {
+		if err := mgr.Chown(destPath, container.CodeUID, container.CodeUID); err != nil {
+			return fmt.Errorf("failed to set %s ownership: %w", relPath, err)
+		}
+	}
+
+	logger(fmt.Sprintf("Auto-context injected at %s", destPath))
 	return nil
 }
 

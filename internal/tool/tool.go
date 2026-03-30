@@ -177,7 +177,7 @@ func (c *ClaudeTool) GetSandboxSettings() map[string]interface{} {
 
 // EssentialConfigFiles implements ToolWithConfigDirFiles.
 func (c *ClaudeTool) EssentialConfigFiles() []string {
-	return []string{".credentials.json", "config.yml", "settings.json"}
+	return []string{".credentials.json", "config.yml", "settings.json", "CLAUDE.md"}
 }
 
 // SandboxSettingsFileName implements ToolWithConfigDirFiles.
@@ -190,6 +190,10 @@ func (c *ClaudeTool) StateConfigFileName() string { return ".claude.json" }
 // AlwaysSetupConfig implements ToolWithConfigDirFiles.
 // Claude needs credentials from ~/.claude, so skip setup when host dir is missing.
 func (c *ClaudeTool) AlwaysSetupConfig() bool { return false }
+
+// AutoContextFile implements ToolWithAutoContextFile.
+// Claude Code automatically reads ~/.claude/CLAUDE.md as user-level instructions.
+func (c *ClaudeTool) AutoContextFile() string { return ".claude/CLAUDE.md" }
 
 // SetEffortLevel sets the effort level for Claude Code.
 // Valid values: "low", "medium", "high".
@@ -231,6 +235,27 @@ type ToolWithPermissionMode interface {
 	// SetPermissionMode sets the permission mode for the tool.
 	// Valid values: "bypass" (default) or "interactive" (human-in-the-loop).
 	SetPermissionMode(mode string)
+}
+
+// ToolWithAutoContextFile is implemented by tools that auto-load context
+// from a file (e.g., Claude's ~/.claude/CLAUDE.md). The setup flow writes
+// sandbox context content to this file so the tool loads it at session start.
+type ToolWithAutoContextFile interface {
+	Tool
+	// AutoContextFile returns the path relative to home dir where sandbox
+	// context should be written for the tool to auto-load at session start.
+	AutoContextFile() string
+}
+
+// ToolWithAutoContextPath is implemented by tools that reference the sandbox
+// context file path in their config (e.g., OpenCode's instructions field).
+// The setup flow calls SetAutoContextPath before config injection so the
+// path appears in the tool's sandbox settings.
+type ToolWithAutoContextPath interface {
+	Tool
+	// SetAutoContextPath sets the absolute path to the sandbox context file
+	// so the tool can reference it in its configuration.
+	SetAutoContextPath(path string)
 }
 
 // ContextInfo provides dynamic information about the container environment
