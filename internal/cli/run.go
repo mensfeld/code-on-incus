@@ -270,6 +270,9 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		containerWorkspacePath = mgr.GetWorkspacePath()
 	}
 
+	// Configure timezone in container filesystem
+	tz := applyContainerTimezone(cmd, mgr)
+
 	// Execute command directly (args are already the full command to run)
 	fmt.Fprintf(os.Stderr, "Executing: %s\n", strings.Join(args, " "))
 
@@ -279,8 +282,8 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		"--group", fmt.Sprintf("%d", container.CodeUID), "--cwd", containerWorkspacePath,
 	}
 
-	// Add all environment variables (config, forward_env, --env flags)
-	incusArgs = appendEnvArgs(incusArgs)
+	// Add all environment variables (timezone, config, forward_env, --env flags)
+	incusArgs = appendEnvArgs(incusArgs, tz)
 
 	incusArgs = append(incusArgs, "--")
 	incusArgs = append(incusArgs, args...)
@@ -352,7 +355,13 @@ func remapContainerUserIfNeeded(mgr *container.Manager, img string, wasRestarted
 
 // appendEnvArgs appends --env flags for config environment, forward_env, and --env CLI flags
 // to an incus exec args slice. Config env is lowest priority, --env flags are highest.
-func appendEnvArgs(incusArgs []string) []string {
+// tz is the resolved timezone name (may be empty).
+func appendEnvArgs(incusArgs []string, tz string) []string {
+	// Timezone (lowest priority — user can override with --env TZ=...)
+	if tz != "" {
+		incusArgs = append(incusArgs, "--env", fmt.Sprintf("TZ=%s", tz))
+	}
+
 	// Static environment from config (defaults.environment + profile environment)
 	for k, v := range cfg.Defaults.Environment {
 		incusArgs = append(incusArgs, "--env", fmt.Sprintf("%s=%s", k, v))
@@ -394,4 +403,27 @@ func hasAnyLimits(cfg *config.LimitsConfig) bool {
 		cfg.Disk.Max != "" ||
 		cfg.Disk.Priority != 0 ||
 		cfg.Runtime.MaxProcesses != 0
+}
+
+// applyContainerTimezone resolves the timezone and configures it inside the container.
+// Returns the resolved timezone name (empty for UTC).
+func applyContainerTimezone(cmd *cobra.Command, mgr *container.Manager) string {
+	tz := resolveTimezone(cmd, cfg)
+	if tz != "" {
+		tzCmd := fmt.Sprintf(
+			"ln -sf /usr/share/zoneinfo/%s /etc/localtime && echo %s > /etc/timezone",
+			tz, tz,
+		)
+		if _, err := mgr.ExecCommand(tzCmd, container.ExecCommandOptions{Capture: true}); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Failed to set timezone: %v\n", err)
+		}
+	} else {
+		// Explicitly reset to UTC — important for persistent containers that may
+		// have had a different timezone applied in a previous session.
+		resetCmd := "ln -sf /usr/share/zoneinfo/UTC /etc/localtime && echo UTC > /etc/timezone"
+		if _, err := mgr.ExecCommand(resetCmd, container.ExecCommandOptions{Capture: true}); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Failed to reset timezone to UTC: %v\n", err)
+		}
+	}
+	return tz
 }

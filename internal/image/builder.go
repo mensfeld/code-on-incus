@@ -26,6 +26,7 @@ type BuildOptions struct {
 	BaseImage   string
 	Force       bool
 	BuildScript string // For custom images
+	Compression string // Compression algorithm (e.g., "none", "gzip", "xz")
 	Logger      func(string)
 }
 
@@ -482,12 +483,18 @@ func (b *Builder) createImage(versionAlias string) (string, error) {
 
 	b.opts.Logger(fmt.Sprintf("Creating image '%s'...", versionAlias))
 
+	// Build publish arguments
+	args := []string{"publish", BuildContainer, "--alias", versionAlias}
+
+	// Add compression flag if specified
+	if b.opts.Compression != "" {
+		args = append(args, "--compression", b.opts.Compression)
+	}
+
+	args = append(args, fmt.Sprintf("description=%s", b.opts.Description))
+
 	// Publish container as image
-	output, err := container.IncusOutputWithStderr(
-		"publish", BuildContainer,
-		"--alias", versionAlias,
-		fmt.Sprintf("description=%s", b.opts.Description),
-	)
+	output, err := container.IncusOutputWithStderr(args...)
 	if err != nil {
 		if output != "" {
 			b.opts.Logger(fmt.Sprintf("incus publish output: %s", output))

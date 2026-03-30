@@ -220,6 +220,12 @@ auto_stop = true
 # Graceful stop (true) or force stop (false)
 stop_graceful = true
 
+[timezone]
+# Timezone mode: "host" (inherit from host, default), "fixed", "utc"
+mode = "host"
+# Fixed timezone name (only when mode = "fixed")
+# name = "Europe/Warsaw"
+
 [ssh]
 # Forward host SSH agent to container (default: false)
 # When enabled, the host's SSH_AUTH_SOCK is forwarded into the container via an

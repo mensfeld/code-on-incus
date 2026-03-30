@@ -100,6 +100,7 @@ type SetupOptions struct {
 	ForwardSSHAgent       bool                 // Forward host SSH agent to container
 	ForwardedEnvVars      []string             // Names of host env vars being forwarded (for context file)
 	ContextFilePath       string               // Path to custom context .md file on host (overrides tool default)
+	Timezone              string               // Resolved IANA timezone name (e.g., "America/New_York"), empty for UTC
 	Logger                func(string)
 	ContainerName         string // Use existing container (for testing) - skips container creation
 }
@@ -115,6 +116,7 @@ type SetupResult struct {
 	Image                  string
 	ContainerWorkspacePath string // Path where workspace is mounted inside container (default: /workspace)
 	SSHAgentSocketPath     string // Path to SSH agent socket inside container (empty if not forwarded)
+	Timezone               string // Resolved timezone applied to the container (empty = UTC)
 }
 
 // Setup initializes a container for a Claude session
@@ -448,6 +450,28 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 			opts.Logger(fmt.Sprintf("Warning: SSH agent forwarding failed: %v", err))
 		} else if socketPath != "" {
 			result.SSHAgentSocketPath = socketPath
+		}
+	}
+
+	// 6.7. Configure timezone inside container
+	// Always set result.Timezone so the TZ env var is applied even if the
+	// filesystem configuration fails (some programs only check TZ).
+	result.Timezone = opts.Timezone
+	if opts.Timezone != "" {
+		opts.Logger(fmt.Sprintf("Setting container timezone to %s...", opts.Timezone))
+		tzCmd := fmt.Sprintf(
+			"ln -sf /usr/share/zoneinfo/%s /etc/localtime && echo %s > /etc/timezone",
+			opts.Timezone, opts.Timezone,
+		)
+		if _, err := result.Manager.ExecCommand(tzCmd, container.ExecCommandOptions{Capture: true}); err != nil {
+			opts.Logger(fmt.Sprintf("Warning: Failed to set timezone: %v", err))
+		}
+	} else {
+		// Explicitly reset to UTC — important for persistent containers that may
+		// have had a different timezone applied in a previous session.
+		resetCmd := "ln -sf /usr/share/zoneinfo/UTC /etc/localtime && echo UTC > /etc/timezone"
+		if _, err := result.Manager.ExecCommand(resetCmd, container.ExecCommandOptions{Capture: true}); err != nil {
+			opts.Logger(fmt.Sprintf("Warning: Failed to reset timezone to UTC: %v", err))
 		}
 	}
 

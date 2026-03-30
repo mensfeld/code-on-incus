@@ -12,6 +12,8 @@ import (
 
 var buildForce bool
 
+var buildCompression string
+
 var buildCmd = &cobra.Command{
 	Use:   "build",
 	Short: "Build Incus image for AI coding sessions",
@@ -53,11 +55,13 @@ Examples:
 
 func init() {
 	buildCmd.Flags().BoolVar(&buildForce, "force", false, "Force rebuild even if image exists")
+	buildCmd.Flags().StringVar(&buildCompression, "compression", "", "Compression algorithm (e.g., none, gzip, xz; see Incus docs for all options)")
 
 	// Custom build flags
 	buildCustomCmd.Flags().String("script", "", "Path to build script (required)")
 	buildCustomCmd.Flags().String("base", "", "Base image to build from (default: coi)")
 	buildCustomCmd.Flags().BoolVar(&buildForce, "force", false, "Force rebuild even if image exists")
+	buildCustomCmd.Flags().StringVar(&buildCompression, "compression", "", "Compression algorithm (e.g., none, gzip, xz; see Incus docs for all options)")
 	_ = buildCustomCmd.MarkFlagRequired("script") // Always succeeds for valid flag names.
 
 	buildCmd.AddCommand(buildCustomCmd)
@@ -86,6 +90,7 @@ func buildCommand(cmd *cobra.Command, args []string) error {
 		BaseImage:   image.BaseImage,
 		AliasName:   image.CoiAlias,
 		Description: "coi image (Docker + build tools + Claude CLI + GitHub CLI)",
+		Compression: buildCompression,
 		Logger: func(msg string) {
 			fmt.Println(msg)
 		},
@@ -139,6 +144,7 @@ func buildCustomCommand(cmd *cobra.Command, args []string) error {
 		BaseImage:   baseImage,
 		BuildScript: scriptPath,
 		Force:       buildForce,
+		Compression: buildCompression,
 		Logger: func(msg string) {
 			fmt.Fprintf(os.Stderr, "%s\n", msg)
 		},

@@ -18,7 +18,14 @@ type Config struct {
 	SSH        SSHConfig                `toml:"ssh"`
 	Security   SecurityConfig           `toml:"security"`
 	Monitoring MonitoringConfig         `toml:"monitoring"`
+	Timezone   TimezoneConfig           `toml:"timezone"`
 	Profiles   map[string]ProfileConfig `toml:"profiles"`
+}
+
+// TimezoneConfig contains timezone settings for containers
+type TimezoneConfig struct {
+	Mode string `toml:"mode"` // "host" (default), "fixed", "utc"
+	Name string `toml:"name"` // IANA timezone name, only used when mode = "fixed"
 }
 
 // SSHConfig contains SSH-related settings
@@ -318,6 +325,9 @@ func GetDefaultConfig() *Config {
 				LimaHost:           "", // Empty for native Linux
 			},
 		},
+		Timezone: TimezoneConfig{
+			Mode: "host",
+		},
 		Profiles: make(map[string]ProfileConfig),
 	}
 }
@@ -522,6 +532,14 @@ func (c *Config) Merge(other *Config) {
 
 	// Merge monitoring
 	mergeMonitoring(&c.Monitoring, &other.Monitoring)
+
+	// Merge timezone
+	if other.Timezone.Mode != "" {
+		c.Timezone.Mode = other.Timezone.Mode
+	}
+	if other.Timezone.Name != "" {
+		c.Timezone.Name = other.Timezone.Name
+	}
 
 	// Merge profiles
 	for name, profile := range other.Profiles {

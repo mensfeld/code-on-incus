@@ -355,7 +355,7 @@ func ContainerRunning(containerName string) (bool, error) {
 }
 
 // PublishContainer publishes a stopped container as an image
-func PublishContainer(containerName, aliasName, description string) (string, error) {
+func PublishContainer(containerName, aliasName, description, compression string) (string, error) {
 	// Stop container if running (ignore error if already stopped)
 	running, _ := ContainerRunning(containerName)
 	if running {
@@ -366,6 +366,9 @@ func PublishContainer(containerName, aliasName, description string) (string, err
 
 	// Build publish command
 	args := []string{"publish", containerName, "--alias", aliasName}
+	if compression != "" {
+		args = append(args, "--compression", compression)
+	}
 	if description != "" {
 		args = append(args, fmt.Sprintf("description=%s", description))
 	}

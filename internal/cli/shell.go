@@ -255,6 +255,9 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 		config.MergeStringSliceUnique(cfg.Defaults.ForwardEnv, forwardEnvVars),
 	)
 
+	// Resolve timezone
+	resolvedTimezone := resolveTimezone(cmd, cfg)
+
 	// Setup session
 	setupOpts := session.SetupOptions{
 		WorkspacePath:         absWorkspace,
@@ -275,6 +278,7 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 		ForwardedEnvVars:      resolvedForwardedEnvVars,
 		ContextFilePath:       cfg.Tool.ContextFile,
 		ContainerName:         containerName,
+		Timezone:              resolvedTimezone,
 	}
 
 	// Parse and validate mount configuration
@@ -553,6 +557,11 @@ func buildContainerEnv(result *session.SetupResult) (map[string]string, *int) {
 		containerEnv["SSH_AUTH_SOCK"] = result.SSHAgentSocketPath
 	}
 
+	// Set TZ if timezone was configured
+	if result.Timezone != "" {
+		containerEnv["TZ"] = result.Timezone
+	}
+
 	// Apply static environment from config (defaults.environment + profile environment)
 	for k, v := range cfg.Defaults.Environment {
 		containerEnv[k] = v
@@ -780,6 +789,57 @@ func runCLIInTmux(result *session.SetupResult, sessionID string, detached bool, 
 		_, err := result.Manager.ExecCommand(attachCmd, attachOpts)
 		return err
 	}
+}
+
+// resolveTimezone determines the timezone to apply to the container.
+// Returns an IANA timezone name (e.g., "America/New_York") or "" for UTC/undetected.
+// cmd may be nil (e.g., when called from appendEnvArgs in run.go), in which case
+// only the --timezone global var and config are consulted.
+func resolveTimezone(cmd *cobra.Command, cfg *config.Config) string {
+	// Check if --timezone flag was explicitly set. When cmd is nil (e.g., called
+	// from run.go's appendEnvArgs), fall back to checking the global var directly.
+	flagChanged := cmd != nil && cmd.Flags().Changed("timezone")
+	if flagChanged || (cmd == nil && timezone != "") {
+		switch strings.ToLower(timezone) {
+		case "host":
+			return detectHostTimezone()
+		case "utc":
+			return ""
+		default:
+			if container.ValidateTimezone(timezone) {
+				return timezone
+			}
+			fmt.Fprintf(os.Stderr, "Warning: invalid timezone %q, falling back to UTC\n", timezone)
+			return ""
+		}
+	}
+
+	// Use config
+	switch strings.ToLower(cfg.Timezone.Mode) {
+	case "host", "":
+		return detectHostTimezone()
+	case "fixed":
+		if container.ValidateTimezone(cfg.Timezone.Name) {
+			return cfg.Timezone.Name
+		}
+		fmt.Fprintf(os.Stderr, "Warning: invalid timezone.name %q in config, falling back to UTC\n", cfg.Timezone.Name)
+		return ""
+	case "utc":
+		return ""
+	default:
+		fmt.Fprintf(os.Stderr, "Warning: unknown timezone.mode %q, falling back to host detection\n", cfg.Timezone.Mode)
+		return detectHostTimezone()
+	}
+}
+
+// detectHostTimezone wraps container.DetectHostTimezone with warning output
+func detectHostTimezone() string {
+	tz, err := container.DetectHostTimezone()
+	if err != nil || tz == "" {
+		fmt.Fprintf(os.Stderr, "Warning: could not detect host timezone, container will use UTC\n")
+		return ""
+	}
+	return tz
 }
 
 // startMonitoringDaemon starts the background monitoring daemon

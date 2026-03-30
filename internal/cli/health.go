@@ -88,7 +88,7 @@ func outputHealthText(result *health.HealthResult) error {
 
 	// Group checks by category
 	categories := map[string][]string{
-		"SYSTEM":        {"os", "kernel_version"},
+		"SYSTEM":        {"os", "kernel_version", "timezone"},
 		"CRITICAL":      {"incus", "permissions", "image", "image_age", "privileged_profile", "security_posture"},
 		"NETWORKING":    {"network_bridge", "ip_forwarding", "firewall", "bridge_firewalld_zone", "docker_forward_policy"},
 		"MONITORING":    {"nftables", "systemd_journal", "libsystemd"},
@@ -205,6 +205,7 @@ func formatCheckName(name string) string {
 	specialCases := map[string]string{
 		"os":                    "Operating system",
 		"kernel_version":        "Kernel version",
+		"timezone":              "Timezone",
 		"incus":                 "Incus",
 		"permissions":           "Permissions",
 		"image":                 "Default image",

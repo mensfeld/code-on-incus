@@ -55,6 +55,7 @@ func RunAllChecks(cfg *config.Config, verbose bool) *HealthResult {
 	// System checks
 	checks["os"] = CheckOS()
 	checks["kernel_version"] = CheckKernelVersionHealth()
+	checks["timezone"] = CheckTimezone()
 
 	// Critical checks
 	checks["incus"] = CheckIncus()
