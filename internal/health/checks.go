@@ -2344,3 +2344,28 @@ func CheckSecurityPosture() HealthCheck {
 		Details: details,
 	}
 }
+
+// CheckTimezone reports whether the host timezone can be detected
+func CheckTimezone() HealthCheck {
+	tz, err := container.DetectHostTimezone()
+	if err != nil || tz == "" {
+		return HealthCheck{
+			Name:    "timezone",
+			Status:  StatusWarning,
+			Message: "Could not detect host timezone — containers will use UTC",
+			Details: map[string]interface{}{
+				"detected": false,
+			},
+		}
+	}
+
+	return HealthCheck{
+		Name:    "timezone",
+		Status:  StatusOK,
+		Message: fmt.Sprintf("Host timezone: %s", tz),
+		Details: map[string]interface{}{
+			"detected": true,
+			"timezone": tz,
+		},
+	}
+}

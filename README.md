@@ -98,6 +98,9 @@ See the [Supported Tools wiki page](https://github.com/mensfeld/code-on-incus/wi
 
 **Security & Isolation**
 - Credential protection - SSH keys, `.env` files, Git credentials, and environment variables are **never** exposed unless explicitly mounted
+- Privileged container guard - Refuses to start when `security.privileged=true` is detected, which defeats all container isolation
+- Security posture verification - `coi health` checks seccomp, AppArmor, and privilege settings to confirm full isolation
+- Kernel version enforcement - Warns on host kernels below 5.15 that may lack security features for safe isolation
 - Real-time threat detection - Kernel-level nftables monitoring detects reverse shells, C2 connections, data exfiltration, DNS tunneling, and credential scanning
 - Automated response - Auto-pause on HIGH threats, auto-kill on CRITICAL — no manual intervention needed
 - Network isolation - Firewalld-based restricted/allowlist/open modes block private network access and prevent exfiltration
@@ -199,13 +202,15 @@ coi build custom my-image --base coi --script setup.sh
 ```
 
 **What's included in the `coi` image:**
-- Ubuntu 22.04 base
-- Docker (full Docker-in-container support)
-- Node.js 20 + npm
-- Claude Code CLI (default AI tool)
-- GitHub CLI (`gh`)
-- tmux for session management
-- Common build tools (git, curl, build-essential, etc.)
+- Ubuntu 22.04 base with Docker (full Docker-in-container support)
+- **mise** (polyglot runtime manager) — Python 3, pnpm, TypeScript, tsx pre-installed; add more with `mise use go@latest`, `mise use ruby@3`, etc.
+- Node.js 20 LTS (system, for Claude CLI) + npm
+- Claude Code CLI (default AI tool) + GitHub CLI (`gh`)
+- tmux, git, curl, build-essential, and common build tools
+- Modern CLI utilities: fd-find, bat, tree
+- Debugging tools: strace, lsof
+- Database clients: sqlite3, postgresql-client, redis-tools
+- imagemagick for image processing
 
 **Custom images:** Build your own specialized images using build scripts that run on top of the base `coi` image.
 
@@ -449,7 +454,7 @@ coi health --format json      # JSON output
 coi health --verbose          # Additional checks
 ```
 
-**What it checks:** System info, Incus setup, permissions, network configuration, storage, and running containers.
+**What it checks:** System info, kernel version, Incus setup, permissions, security posture (seccomp/AppArmor), privileged container detection, network configuration, storage, monitoring prerequisites, and running containers.
 
 **Exit codes:** 0 (healthy), 1 (degraded), 2 (unhealthy)
 

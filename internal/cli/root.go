@@ -33,6 +33,9 @@ var (
 	// SSH agent forwarding flag
 	sshAgent bool
 
+	// Timezone flag
+	timezone string
+
 	// Monitoring flag
 	enableMonitoring bool
 
@@ -134,6 +137,8 @@ func init() {
 		"Forward host environment variables by name (e.g., ANTHROPIC_API_KEY,GITHUB_TOKEN)")
 	rootCmd.PersistentFlags().BoolVar(&sshAgent, "ssh-agent", false,
 		"Forward host SSH agent to container (for git over SSH)")
+	rootCmd.PersistentFlags().StringVar(&timezone, "timezone", "",
+		"Container timezone: 'host' (inherit from host, default), 'utc', or IANA name (e.g., 'Europe/Warsaw')")
 
 	// Resource limit flags
 	rootCmd.PersistentFlags().StringVar(&limitCPU, "limit-cpu", "", "CPU count limit (e.g., '2', '0-3', '0,1,3')")
