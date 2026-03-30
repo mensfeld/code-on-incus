@@ -353,13 +353,11 @@ class TestEnvironmentScanningPatterns:
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(8)
-
         container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-14"
 
-        if get_container_state(container_name) == "Unknown":
+        if not wait_for_container_running(container_name, timeout=30):
             proc.terminate()
-            pytest.skip(f"Container {container_name} not found")
+            pytest.skip(f"Container {container_name} not found or not running")
 
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
@@ -410,13 +408,11 @@ class TestEnvironmentScanningPatterns:
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(8)
-
         container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-15"
 
-        if get_container_state(container_name) == "Unknown":
+        if not wait_for_container_running(container_name, timeout=30):
             proc.terminate()
-            pytest.skip(f"Container {container_name} not found")
+            pytest.skip(f"Container {container_name} not found or not running")
 
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
@@ -467,13 +463,11 @@ class TestEnvironmentScanningPatterns:
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(8)
-
         container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-16"
 
-        if get_container_state(container_name) == "Unknown":
+        if not wait_for_container_running(container_name, timeout=30):
             proc.terminate()
-            pytest.skip(f"Container {container_name} not found")
+            pytest.skip(f"Container {container_name} not found or not running")
 
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
@@ -524,13 +518,11 @@ class TestEnvironmentScanningPatterns:
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(8)
-
         container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-17"
 
-        if get_container_state(container_name) == "Unknown":
+        if not wait_for_container_running(container_name, timeout=30):
             proc.terminate()
-            pytest.skip(f"Container {container_name} not found")
+            pytest.skip(f"Container {container_name} not found or not running")
 
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
@@ -635,13 +627,11 @@ class TestEnvironmentScanningPatterns:
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(8)
-
         container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-34"
 
-        if get_container_state(container_name) == "Unknown":
+        if not wait_for_container_running(container_name, timeout=30):
             proc.terminate()
-            pytest.skip(f"Container {container_name} not found")
+            pytest.skip(f"Container {container_name} not found or not running")
 
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
@@ -688,13 +678,11 @@ class TestAutomatedResponse:
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(8)
-
         container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-3"
 
-        if get_container_state(container_name) == "Unknown":
+        if not wait_for_container_running(container_name, timeout=30):
             proc.terminate()
-            pytest.skip(f"Container {container_name} not found")
+            pytest.skip(f"Container {container_name} not found or not running")
 
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
@@ -784,15 +772,13 @@ print("Task completed")
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(8)
-
         container_name = (
             get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-4"
         )
 
-        if get_container_state(container_name) == "Unknown":
+        if not wait_for_container_running(container_name, timeout=30):
             proc.terminate()
-            pytest.skip(f"Container {container_name} not found")
+            pytest.skip(f"Container {container_name} not found or not running")
 
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
@@ -865,15 +851,13 @@ print("Task completed")
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(8)
-
         container_name = (
             get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-5"
         )
 
-        if get_container_state(container_name) == "Unknown":
+        if not wait_for_container_running(container_name, timeout=30):
             proc.terminate()
-            pytest.skip(f"Container {container_name} not found")
+            pytest.skip(f"Container {container_name} not found or not running")
 
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
@@ -936,15 +920,13 @@ class TestHighLevelThreats:
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(8)
-
         container_name = (
             get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-6"
         )
 
-        if get_container_state(container_name) == "Unknown":
+        if not wait_for_container_running(container_name, timeout=30):
             proc.terminate()
-            pytest.skip(f"Container {container_name} not found")
+            pytest.skip(f"Container {container_name} not found or not running")
 
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
@@ -1044,15 +1026,13 @@ file_read_rate_mb_per_sec = 1000
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(8)
-
         container_name = (
             get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-7"
         )
 
-        if get_container_state(container_name) == "Unknown":
+        if not wait_for_container_running(container_name, timeout=30):
             proc.terminate()
-            pytest.skip(f"Container {container_name} not found")
+            pytest.skip(f"Container {container_name} not found or not running")
 
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
@@ -1167,15 +1147,13 @@ time.sleep(60)
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(8)
-
         container_name = (
             get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-8"
         )
 
-        if get_container_state(container_name) == "Unknown":
+        if not wait_for_container_running(container_name, timeout=30):
             proc.terminate()
-            pytest.skip(f"Container {container_name} not found")
+            pytest.skip(f"Container {container_name} not found or not running")
 
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
@@ -1240,15 +1218,13 @@ time.sleep(60)
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(8)
-
         container_name = (
             get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-9"
         )
 
-        if get_container_state(container_name) == "Unknown":
+        if not wait_for_container_running(container_name, timeout=30):
             proc.terminate()
-            pytest.skip(f"Container {container_name} not found")
+            pytest.skip(f"Container {container_name} not found or not running")
 
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
@@ -1318,15 +1294,13 @@ time.sleep(60)
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(8)
-
         container_name = (
             get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-35"
         )
 
-        if get_container_state(container_name) == "Unknown":
+        if not wait_for_container_running(container_name, timeout=30):
             proc.terminate()
-            pytest.skip(f"Container {container_name} not found")
+            pytest.skip(f"Container {container_name} not found or not running")
 
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
@@ -1400,15 +1374,13 @@ time.sleep(60)
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(8)
-
         container_name = (
             get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-36"
         )
 
-        if get_container_state(container_name) == "Unknown":
+        if not wait_for_container_running(container_name, timeout=30):
             proc.terminate()
-            pytest.skip(f"Container {container_name} not found")
+            pytest.skip(f"Container {container_name} not found or not running")
 
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
@@ -1455,13 +1427,11 @@ class TestReverseShellPatterns:
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(8)
-
         container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-10"
 
-        if get_container_state(container_name) == "Unknown":
+        if not wait_for_container_running(container_name, timeout=30):
             proc.terminate()
-            pytest.skip(f"Container {container_name} not found")
+            pytest.skip(f"Container {container_name} not found or not running")
 
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
@@ -1527,14 +1497,12 @@ class TestReverseShellPatterns:
             stderr=stderr_fd,
         )
 
-        time.sleep(8)
-
         container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-11"
 
-        if get_container_state(container_name) == "Unknown":
+        if not wait_for_container_running(container_name, timeout=30):
             proc.terminate()
             stderr_fd.close()
-            pytest.skip(f"Container {container_name} not found")
+            pytest.skip(f"Container {container_name} not found or not running")
 
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
@@ -1599,13 +1567,11 @@ class TestReverseShellPatterns:
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(8)
-
         container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-12"
 
-        if get_container_state(container_name) == "Unknown":
+        if not wait_for_container_running(container_name, timeout=30):
             proc.terminate()
-            pytest.skip(f"Container {container_name} not found")
+            pytest.skip(f"Container {container_name} not found or not running")
 
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
@@ -1681,13 +1647,11 @@ class TestReverseShellPatterns:
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(8)
-
         container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-30"
 
-        if get_container_state(container_name) == "Unknown":
+        if not wait_for_container_running(container_name, timeout=30):
             proc.terminate()
-            pytest.skip(f"Container {container_name} not found")
+            pytest.skip(f"Container {container_name} not found or not running")
 
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
@@ -1761,13 +1725,11 @@ class TestReverseShellPatterns:
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(8)
-
         container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-31"
 
-        if get_container_state(container_name) == "Unknown":
+        if not wait_for_container_running(container_name, timeout=30):
             proc.terminate()
-            pytest.skip(f"Container {container_name} not found")
+            pytest.skip(f"Container {container_name} not found or not running")
 
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
@@ -1855,15 +1817,13 @@ enabled = false
                 stderr=subprocess.DEVNULL,
             )
 
-            time.sleep(8)
-
             container_name = (
                 get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-13"
             )
 
-            if get_container_state(container_name) == "Unknown":
+            if not wait_for_container_running(container_name, timeout=30):
                 proc.terminate()
-                pytest.skip(f"Container {container_name} not found")
+                pytest.skip(f"Container {container_name} not found or not running")
 
             # Inject malicious command (should NOT be detected)
             subprocess.Popen(
@@ -1936,15 +1896,13 @@ mode = "restricted"
                 stderr=subprocess.DEVNULL,
             )
 
-            time.sleep(8)
-
             container_name = (
                 get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-19"
             )
 
-            if get_container_state(container_name) == "Unknown":
+            if not wait_for_container_running(container_name, timeout=30):
                 proc.terminate()
-                pytest.skip(f"Container {container_name} not found")
+                pytest.skip(f"Container {container_name} not found or not running")
 
             # Wait for monitoring baseline to stabilize
             time.sleep(10)
@@ -2061,15 +2019,13 @@ file_read_rate_mb_per_sec = 1000
                 stderr=subprocess.DEVNULL,
             )
 
-            time.sleep(8)
-
             container_name = (
                 get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-32"
             )
 
-            if get_container_state(container_name) == "Unknown":
+            if not wait_for_container_running(container_name, timeout=30):
                 proc.terminate()
-                pytest.skip(f"Container {container_name} not found")
+                pytest.skip(f"Container {container_name} not found or not running")
 
             # Wait for monitoring baseline to stabilize
             time.sleep(10)
@@ -2175,13 +2131,11 @@ class TestMultipleThreats:
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(8)
-
         container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-20"
 
-        if get_container_state(container_name) == "Unknown":
+        if not wait_for_container_running(container_name, timeout=30):
             proc.terminate()
-            pytest.skip(f"Container {container_name} not found")
+            pytest.skip(f"Container {container_name} not found or not running")
 
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
@@ -2283,13 +2237,11 @@ class TestAuditLogValidation:
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(8)
-
         container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-21"
 
-        if get_container_state(container_name) == "Unknown":
+        if not wait_for_container_running(container_name, timeout=30):
             proc.terminate()
-            pytest.skip(f"Container {container_name} not found")
+            pytest.skip(f"Container {container_name} not found or not running")
 
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
@@ -2377,13 +2329,11 @@ class TestAuditLogValidation:
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(8)
-
         container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-22"
 
-        if get_container_state(container_name) == "Unknown":
+        if not wait_for_container_running(container_name, timeout=30):
             proc.terminate()
-            pytest.skip(f"Container {container_name} not found")
+            pytest.skip(f"Container {container_name} not found or not running")
 
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
@@ -2455,13 +2405,11 @@ class TestFalsePositives:
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(8)
-
         container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-23"
 
-        if get_container_state(container_name) == "Unknown":
+        if not wait_for_container_running(container_name, timeout=30):
             proc.terminate()
-            pytest.skip(f"Container {container_name} not found")
+            pytest.skip(f"Container {container_name} not found or not running")
 
         # Wait for monitoring baseline to stabilize (prevents startup I/O from affecting test)
         time.sleep(15)
@@ -2536,13 +2484,11 @@ class TestFalsePositives:
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(8)
-
         container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-24"
 
-        if get_container_state(container_name) == "Unknown":
+        if not wait_for_container_running(container_name, timeout=30):
             proc.terminate()
-            pytest.skip(f"Container {container_name} not found")
+            pytest.skip(f"Container {container_name} not found or not running")
 
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
@@ -2617,13 +2563,11 @@ time.sleep(2)
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(8)
-
         container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-25"
 
-        if get_container_state(container_name) == "Unknown":
+        if not wait_for_container_running(container_name, timeout=30):
             proc.terminate()
-            pytest.skip(f"Container {container_name} not found")
+            pytest.skip(f"Container {container_name} not found or not running")
 
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
@@ -2695,13 +2639,11 @@ echo "Build complete"
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(8)
-
         container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-26"
 
-        if get_container_state(container_name) == "Unknown":
+        if not wait_for_container_running(container_name, timeout=30):
             proc.terminate()
-            pytest.skip(f"Container {container_name} not found")
+            pytest.skip(f"Container {container_name} not found or not running")
 
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
@@ -2790,13 +2732,11 @@ class TestThresholdBoundaries:
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(8)
-
         container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-27"
 
-        if get_container_state(container_name) == "Unknown":
+        if not wait_for_container_running(container_name, timeout=30):
             proc.terminate()
-            pytest.skip(f"Container {container_name} not found")
+            pytest.skip(f"Container {container_name} not found or not running")
 
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
@@ -2870,14 +2810,12 @@ class TestThresholdBoundaries:
             stderr=stderr_fd,
         )
 
-        time.sleep(8)
-
         container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-28"
 
-        if get_container_state(container_name) == "Unknown":
+        if not wait_for_container_running(container_name, timeout=30):
             proc.terminate()
             stderr_fd.close()
-            pytest.skip(f"Container {container_name} not found")
+            pytest.skip(f"Container {container_name} not found or not running")
 
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
@@ -2967,14 +2905,12 @@ class TestThresholdBoundaries:
             stderr=stderr_fd,
         )
 
-        time.sleep(8)
-
         container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-29"
 
-        if get_container_state(container_name) == "Unknown":
+        if not wait_for_container_running(container_name, timeout=30):
             proc.terminate()
             stderr_fd.close()
-            pytest.skip(f"Container {container_name} not found")
+            pytest.skip(f"Container {container_name} not found or not running")
 
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
@@ -3051,13 +2987,11 @@ class TestThresholdBoundaries:
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(8)
-
         container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-33"
 
-        if get_container_state(container_name) == "Unknown":
+        if not wait_for_container_running(container_name, timeout=30):
             proc.terminate()
-            pytest.skip(f"Container {container_name} not found")
+            pytest.skip(f"Container {container_name} not found or not running")
 
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
@@ -3143,13 +3077,11 @@ class DisabledTestDiskSpaceMonitoring:
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(8)
-
         container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-40"
 
-        if get_container_state(container_name) == "Unknown":
+        if not wait_for_container_running(container_name, timeout=30):
             proc.terminate()
-            pytest.skip(f"Container {container_name} not found")
+            pytest.skip(f"Container {container_name} not found or not running")
 
         # Wait for monitoring baseline
         time.sleep(5)
@@ -3255,13 +3187,11 @@ class DisabledTestDiskSpaceMonitoring:
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(8)
-
         container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-41"
 
-        if get_container_state(container_name) == "Unknown":
+        if not wait_for_container_running(container_name, timeout=30):
             proc.terminate()
-            pytest.skip(f"Container {container_name} not found")
+            pytest.skip(f"Container {container_name} not found or not running")
 
         # Wait for monitoring baseline
         time.sleep(5)
@@ -3358,13 +3288,11 @@ class TestLargeWriteDetection:
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(8)
-
         container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-42"
 
-        if get_container_state(container_name) == "Unknown":
+        if not wait_for_container_running(container_name, timeout=30):
             proc.terminate()
-            pytest.skip(f"Container {container_name} not found")
+            pytest.skip(f"Container {container_name} not found or not running")
 
         # Wait for monitoring baseline to stabilize
         time.sleep(10)
@@ -3440,13 +3368,11 @@ class TestLargeWriteDetection:
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(8)
-
         container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-43"
 
-        if get_container_state(container_name) == "Unknown":
+        if not wait_for_container_running(container_name, timeout=30):
             proc.terminate()
-            pytest.skip(f"Container {container_name} not found")
+            pytest.skip(f"Container {container_name} not found or not running")
 
         # Wait for monitoring baseline
         time.sleep(10)
@@ -3510,13 +3436,11 @@ class TestConcurrentThreats:
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(8)
-
         container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-44"
 
-        if get_container_state(container_name) == "Unknown":
+        if not wait_for_container_running(container_name, timeout=30):
             proc.terminate()
-            pytest.skip(f"Container {container_name} not found")
+            pytest.skip(f"Container {container_name} not found or not running")
 
         # Wait for monitoring baseline
         time.sleep(5)
@@ -3602,13 +3526,11 @@ class TestConcurrentThreats:
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(8)
-
         container_name = get_container_name_from_workspace(test_workspace).rsplit("-", 1)[0] + "-45"
 
-        if get_container_state(container_name) == "Unknown":
+        if not wait_for_container_running(container_name, timeout=30):
             proc.terminate()
-            pytest.skip(f"Container {container_name} not found")
+            pytest.skip(f"Container {container_name} not found or not running")
 
         # Wait for monitoring baseline
         time.sleep(5)
