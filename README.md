@@ -95,7 +95,7 @@ See the [Supported Tools wiki page](https://github.com/mensfeld/code-on-incus/wi
 - SSH agent forwarding - Use git-over-SSH inside containers without copying private keys (`--ssh-agent` or `[ssh] forward_agent = true`)
 - Environment variable forwarding - Selectively forward host env vars by name (`--forward-env` or `forward_env` in config)
 - Host timezone inheritance - Containers automatically inherit the host's timezone (configurable via `--timezone` or `[timezone]` config)
-- Sandbox context file - Auto-injected `~/SANDBOX_CONTEXT.md` tells AI tools about their environment (network mode, workspace path, persistence, etc.)
+- Sandbox context file - Auto-injected `~/SANDBOX_CONTEXT.md` tells AI tools about their environment (network mode, workspace path, persistence, etc.). Automatically loaded into each tool's native context system: Claude Code via `~/.claude/CLAUDE.md`, OpenCode via the `instructions` field in `opencode.json` (opt out with `auto_context = false`)
 
 **Security & Isolation**
 - Credential protection - SSH keys, `.env` files, Git credentials, and environment variables are **never** exposed unless explicitly mounted
@@ -341,6 +341,7 @@ persistent = true
 [tool]
 name = "claude"
 permission_mode = "bypass"
+# auto_context = true          # Auto-inject sandbox context into tool's native system
 ```
 
 **Configuration hierarchy** (highest precedence last):
