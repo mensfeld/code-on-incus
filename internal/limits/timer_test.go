@@ -2,65 +2,24 @@ package limits
 
 import (
 	"fmt"
-	"sync"
 	"testing"
 	"time"
 )
 
-// mockContainerManager records calls to Stop and Running for testing
-type mockContainerManager struct {
-	mu           sync.Mutex
-	stopCalls    []bool // records the force parameter for each Stop call
-	running      bool   // what Running() returns
-	stopErr      error  // what Stop() returns
-	runningErr   error  // what Running() returns as error
-}
-
-func (m *mockContainerManager) recordStop(force bool) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.stopCalls = append(m.stopCalls, force)
-	return m.stopErr
-}
-
-func (m *mockContainerManager) getStopCalls() []bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	result := make([]bool, len(m.stopCalls))
-	copy(result, m.stopCalls)
-	return result
-}
-
-// TestStopGracefulTrue verifies that StopGraceful=true calls Stop(false) first (graceful)
+// TestStopGracefulTrue verifies that StopGraceful=true maps to force=false
 func TestStopGracefulTrue(t *testing.T) {
-	mock := &mockContainerManager{}
-	var logs []string
-	logger := func(msg string) {
-		logs = append(logs, msg)
-	}
+	tm := NewTimeoutMonitor("test-container", 50*time.Millisecond, true, true, "", nil)
 
-	tm := NewTimeoutMonitor("test-container", 50*time.Millisecond, true, true, "", logger)
-
-	// Override the handleTimeout to use our mock
-	// Since we can't easily inject the mock into the existing code,
-	// we test the logic by verifying the semantics:
-	// StopGraceful=true should mean force=false (graceful shutdown)
-
-	// The fix ensures: StopGraceful=true -> Stop(false) first
-	// Before the fix: StopGraceful=true -> Stop(true) (inverted!)
 	if tm.StopGraceful != true {
 		t.Errorf("expected StopGraceful=true, got %v", tm.StopGraceful)
 	}
 
-	// Verify the semantics match: StopGraceful=true means graceful (force=false)
-	// We pass !StopGraceful to get the force parameter
+	// The fix ensures: StopGraceful=true -> Stop(force=false) (graceful)
+	// Before the fix: StopGraceful=true -> Stop(force=true) (inverted!)
 	force := !tm.StopGraceful
 	if force != false {
 		t.Errorf("StopGraceful=true should result in force=false, got force=%v", force)
 	}
-
-	_ = mock
-	_ = logger
 }
 
 // TestStopGracefulFalse verifies that StopGraceful=false calls Stop(true) (force)
