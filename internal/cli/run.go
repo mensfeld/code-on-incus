@@ -77,8 +77,11 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	// Generate container name
 	containerName := session.ContainerName(absWorkspace, slotNum)
 
-	// Determine image (use custom if specified, otherwise default)
+	// Determine image: CLI --image flag > config defaults.image > "coi"
 	img := imageName
+	if img == "" && cfg.Defaults.Image != "" {
+		img = cfg.Defaults.Image
+	}
 	if img == "" {
 		img = "coi"
 	}

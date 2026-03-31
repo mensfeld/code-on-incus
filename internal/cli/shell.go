@@ -258,8 +258,11 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 	// Resolve timezone
 	resolvedTimezone := resolveTimezone(cmd, cfg)
 
-	// Auto-build image from config if needed
+	// Determine image: CLI --image flag > config defaults.image > "coi"
 	img := imageName
+	if img == "" && cfg.Defaults.Image != "" {
+		img = cfg.Defaults.Image
+	}
 	if img == "" {
 		img = "coi"
 	}
@@ -270,7 +273,7 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 	// Setup session
 	setupOpts := session.SetupOptions{
 		WorkspacePath:         absWorkspace,
-		Image:                 imageName,
+		Image:                 img,
 		Persistent:            persistent,
 		ResumeFromID:          resumeID,
 		Slot:                  slotNum,
