@@ -21,9 +21,12 @@ func setupSSHAgentForwarding(mgr *container.Manager, containerName string, logge
 		return "", nil
 	}
 
-	// Verify the socket exists
-	if _, err := os.Stat(hostSocket); err != nil {
+	// Verify the socket exists and is a Unix domain socket
+	if fi, err := os.Stat(hostSocket); err != nil {
 		logger(fmt.Sprintf("SSH agent forwarding skipped: socket %s not accessible: %v", hostSocket, err))
+		return "", nil
+	} else if fi.Mode()&os.ModeSocket == 0 {
+		logger(fmt.Sprintf("SSH agent forwarding skipped: %s is not a Unix domain socket", hostSocket))
 		return "", nil
 	}
 

@@ -309,9 +309,8 @@ func setupCLIConfig(mgr *container.Manager, hostCLIConfigPath, homeDir string, t
 			if err != nil {
 				logger(fmt.Sprintf("Warning: Failed to build JSON from settings: %v", err))
 			} else {
-				// Create new file with sandbox settings
-				createCmd := fmt.Sprintf("echo '%s' > %s", settingsJSON, stateJsonDest)
-				if _, err := mgr.ExecCommand(createCmd, container.ExecCommandOptions{Capture: true}); err != nil {
+				// Create new file with sandbox settings without going through a shell
+				if err := mgr.CreateFile(stateJsonDest, settingsJSON+"\n"); err != nil {
 					logger(fmt.Sprintf("Warning: Failed to create %s: %v", stateConfigFilename, err))
 				} else {
 					logger(fmt.Sprintf("Created %s with sandbox settings", stateConfigFilename))
