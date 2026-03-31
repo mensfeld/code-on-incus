@@ -239,6 +239,15 @@ func RemoveOpenModeRules(containerIP string) error {
 	return nil
 }
 
+// DisableIPv6ForContainer disables IPv6 in the container to prevent firewall bypass.
+// All network isolation rules are IPv4-only; IPv6 would circumvent them entirely.
+func DisableIPv6ForContainer(containerName string) error {
+	mgr := container.NewManager(containerName)
+	cmd := "sysctl -w net.ipv6.conf.all.disable_ipv6=1 net.ipv6.conf.default.disable_ipv6=1"
+	_, err := mgr.ExecCommand(cmd, container.ExecCommandOptions{Capture: true})
+	return err
+}
+
 // addRule adds a firewall direct rule using firewall-cmd
 func (f *FirewallManager) addRule(priority int, source, destination, action string) error {
 	// firewall-cmd --direct --add-rule ipv4 filter FORWARD <priority> -s <src> -d <dst> -j <action>

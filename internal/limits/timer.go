@@ -88,15 +88,34 @@ func (tm *TimeoutMonitor) handleTimeout() {
 		tm.Logger(fmt.Sprintf("[limits] Runtime limit reached (%s), stopping container %s...", tm.MaxDuration, stopType))
 	}
 
-	// Create a container manager
 	mgr := container.NewManager(tm.ContainerName)
 
-	// Stop the container
-	if err := mgr.Stop(tm.StopGraceful); err != nil {
-		if tm.Logger != nil {
-			tm.Logger(fmt.Sprintf("[limits] Error stopping container: %v", err))
+	if tm.StopGraceful {
+		// Graceful: try non-force first, escalate to force if needed
+		// StopGraceful=true means graceful shutdown (force=false)
+		if err := mgr.Stop(false); err != nil {
+			if tm.Logger != nil {
+				tm.Logger(fmt.Sprintf("[limits] Graceful stop failed: %v, forcing...", err))
+			}
+			_ = mgr.Stop(true)
 		}
-		return
+
+		// Verify container actually stopped, force if still running
+		time.Sleep(5 * time.Second)
+		if running, _ := mgr.Running(); running {
+			if tm.Logger != nil {
+				tm.Logger("[limits] Container still running after graceful stop, forcing...")
+			}
+			_ = mgr.Stop(true)
+		}
+	} else {
+		// StopGraceful=false means force stop immediately (force=true)
+		if err := mgr.Stop(true); err != nil {
+			if tm.Logger != nil {
+				tm.Logger(fmt.Sprintf("[limits] Error force-stopping container: %v", err))
+			}
+			return
+		}
 	}
 
 	if tm.Logger != nil {

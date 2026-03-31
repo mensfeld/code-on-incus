@@ -133,6 +133,11 @@ func (m *Manager) setupRestricted(ctx context.Context, containerName string) err
 		log.Printf("Gateway IP: %s", gatewayIP)
 	}
 
+	// Disable IPv6 to prevent bypass of IPv4-only firewall rules
+	if err := DisableIPv6ForContainer(containerName); err != nil {
+		log.Printf("Warning: failed to disable IPv6: %v", err)
+	}
+
 	// Create firewall manager
 	m.firewall = NewFirewallManager(containerIP, gatewayIP)
 
@@ -182,6 +187,11 @@ func (m *Manager) setupAllowlist(ctx context.Context, containerName string) erro
 		log.Printf("Warning: Could not auto-detect gateway IP: %v", err)
 	} else {
 		log.Printf("Gateway IP: %s", gatewayIP)
+	}
+
+	// Disable IPv6 to prevent bypass of IPv4-only firewall rules
+	if err := DisableIPv6ForContainer(containerName); err != nil {
+		log.Printf("Warning: failed to disable IPv6: %v", err)
 	}
 
 	// Create firewall manager
@@ -347,14 +357,19 @@ func (m *Manager) refreshAllowedIPs() (uint32, error) {
 	totalIPs := countIPs(newIPs)
 	log.Printf("IP refresh: updating firewall with %d IPs", totalIPs)
 
-	// Remove old rules and apply new ones
-	if err := m.firewall.RemoveRules(); err != nil {
-		log.Printf("Warning: failed to remove old rules: %v", err)
-	}
-
+	// Apply new rules BEFORE removing old ones to avoid a gap where no rules exist.
+	// firewall-cmd --direct --add-rule is idempotent, so duplicate rules are harmless.
 	allowedIPs := collectUniqueIPs(newIPs)
 	if err := m.firewall.ApplyAllowlist(m.config, allowedIPs); err != nil {
 		return newMinTTL, fmt.Errorf("failed to update firewall rules: %w", err)
+	}
+
+	// Now remove all rules (including stale ones) and reapply to clean up
+	if err := m.firewall.RemoveRules(); err != nil {
+		log.Printf("Warning: failed to remove old rules: %v", err)
+	}
+	if err := m.firewall.ApplyAllowlist(m.config, allowedIPs); err != nil {
+		log.Printf("Warning: failed to reapply rules after cleanup: %v", err)
 	}
 
 	// Update cache
