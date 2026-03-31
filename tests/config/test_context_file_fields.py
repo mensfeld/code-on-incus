@@ -103,9 +103,7 @@ def test_context_file_contains_environment_details(
     )
 
     # Assertions
-    assert context_exists, (
-        "~/SANDBOX_CONTEXT.md should exist in container"
-    )
+    assert context_exists, "~/SANDBOX_CONTEXT.md should exist in container"
 
     assert "COI Sandbox Environment" in context_content, (
         f"Context file should contain header. Got:\n{context_content[:500]}"
