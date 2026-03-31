@@ -128,6 +128,7 @@ commands = ["echo shell-auto-built"]
                 "--workspace",
                 workspace_dir,
                 "--debug",
+                "--tmux=false",
             ],
             timeout=300,
             env=env,
