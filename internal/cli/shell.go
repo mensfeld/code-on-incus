@@ -259,13 +259,7 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 	resolvedTimezone := resolveTimezone(cmd, cfg)
 
 	// Determine image: CLI --image flag > config defaults.image > "coi"
-	img := imageName
-	if img == "" && cfg.Defaults.Image != "" {
-		img = cfg.Defaults.Image
-	}
-	if img == "" {
-		img = "coi"
-	}
+	img := ResolveImageName(imageName, cfg)
 	if err := AutoBuildIfNeeded(cfg, img); err != nil {
 		return err
 	}

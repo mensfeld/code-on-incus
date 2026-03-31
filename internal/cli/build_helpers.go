@@ -129,6 +129,17 @@ func resolveBuildScript(cfg *config.Config) (string, func(), error) {
 	return "", noop, fmt.Errorf("no build script or commands configured")
 }
 
+// ResolveImageName returns the effective image name using: CLI flag > config defaults.image > "coi"
+func ResolveImageName(flagValue string, cfg *config.Config) string {
+	if flagValue != "" {
+		return flagValue
+	}
+	if cfg.Defaults.Image != "" {
+		return cfg.Defaults.Image
+	}
+	return "coi"
+}
+
 // CanBuildFromConfig returns true if the config has build configuration and a custom image name
 func CanBuildFromConfig(cfg *config.Config) bool {
 	return cfg.Build.HasBuildConfig() &&

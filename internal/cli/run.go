@@ -78,13 +78,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	containerName := session.ContainerName(absWorkspace, slotNum)
 
 	// Determine image: CLI --image flag > config defaults.image > "coi"
-	img := imageName
-	if img == "" && cfg.Defaults.Image != "" {
-		img = cfg.Defaults.Image
-	}
-	if img == "" {
-		img = "coi"
-	}
+	img := ResolveImageName(imageName, cfg)
 
 	// Check if image exists, auto-build from config if possible
 	if err := AutoBuildIfNeeded(cfg, img); err != nil {
