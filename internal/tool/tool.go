@@ -258,20 +258,32 @@ type ToolWithAutoContextPath interface {
 	SetAutoContextPath(path string)
 }
 
+// MountInfo describes an extra directory mounted into the container.
+type MountInfo struct {
+	ContainerPath string
+}
+
 // ContextInfo provides dynamic information about the container environment
 // for generating the sandbox context file (~/SANDBOX_CONTEXT.md).
 type ContextInfo struct {
-	WorkspacePath      string   // Mount point inside container (e.g., "/workspace")
-	HomeDir            string   // Home directory inside container (e.g., "/home/code")
-	Persistent         bool     // Whether the container persists between sessions
-	NetworkMode        string   // "restricted", "open", "allowlist", or ""
-	SSHAgentForwarded  bool     // Whether host SSH agent is forwarded
-	RunAsRoot          bool     // Whether the tool runs as root
-	OSName             string   // OS name (e.g., "Ubuntu 22.04")
-	Architecture       string   // CPU architecture (e.g., "amd64", "arm64")
-	ProtectedPaths     []string // Paths mounted read-only for security
-	GHCLIAuthenticated bool     // Whether GitHub CLI auth is available (GH_TOKEN or GITHUB_TOKEN forwarded)
-	ForwardedEnvVars   []string // Names of host environment variables forwarded into the container
+	WorkspacePath      string      // Mount point inside container (e.g., "/workspace")
+	HomeDir            string      // Home directory inside container (e.g., "/home/code")
+	Persistent         bool        // Whether the container persists between sessions
+	NetworkMode        string      // "restricted", "open", "allowlist", or ""
+	SSHAgentForwarded  bool        // Whether host SSH agent is forwarded
+	RunAsRoot          bool        // Whether the tool runs as root
+	OSName             string      // OS name (e.g., "Ubuntu 22.04")
+	Architecture       string      // CPU architecture (e.g., "amd64", "arm64")
+	ProtectedPaths     []string    // Paths mounted read-only for security
+	GHCLIAuthenticated bool        // Whether GitHub CLI auth is available (GH_TOKEN or GITHUB_TOKEN forwarded)
+	ForwardedEnvVars   []string    // Names of host environment variables forwarded into the container
+	Timezone           string      // IANA timezone (e.g., "America/New_York"), empty = UTC
+	ExtraMounts        []MountInfo // Additional mounted paths beyond workspace
+	CPULimit           string      // e.g., "2" or "0-3", empty = unlimited
+	MemoryLimit        string      // e.g., "2GiB", empty = unlimited
+	MaxDuration        string      // e.g., "2h", empty = unlimited
+	ToolName           string      // e.g., "claude", "aider"
+	ContainerName      string      // Incus container name
 }
 
 // contextTemplateData holds the resolved values passed to the context file template.
@@ -292,6 +304,15 @@ type contextTemplateData struct {
 	Persistent          bool
 	ForwardedEnvVars    string
 	HasForwardedEnvVars bool
+	TimezoneDesc        string
+	ExtraMounts         string // Comma-joined container paths
+	HasExtraMounts      bool
+	ResourceLimits      string // e.g., "2 CPUs, 2GiB memory"
+	HasResourceLimits   bool
+	MaxDuration         string
+	HasMaxDuration      bool
+	ToolName            string
+	ContainerName       string
 }
 
 // RenderContextFileContent renders the embedded sandbox context template with
@@ -357,6 +378,50 @@ func RenderContextFileContent(info ContextInfo) string {
 
 	if len(info.ProtectedPaths) > 0 {
 		data.ProtectedPaths = strings.Join(info.ProtectedPaths, ", ")
+	}
+
+	// Timezone
+	data.TimezoneDesc = "UTC"
+	if info.Timezone != "" {
+		data.TimezoneDesc = info.Timezone
+	}
+
+	// Tool name
+	data.ToolName = "AI coding tool"
+	if info.ToolName != "" {
+		data.ToolName = info.ToolName
+	}
+
+	// Container name
+	data.ContainerName = info.ContainerName
+
+	// Extra mounts
+	if len(info.ExtraMounts) > 0 {
+		paths := make([]string, len(info.ExtraMounts))
+		for i, m := range info.ExtraMounts {
+			paths[i] = m.ContainerPath
+		}
+		data.ExtraMounts = strings.Join(paths, ", ")
+		data.HasExtraMounts = true
+	}
+
+	// Resource limits
+	var limitParts []string
+	if info.CPULimit != "" {
+		limitParts = append(limitParts, info.CPULimit+" CPUs")
+	}
+	if info.MemoryLimit != "" {
+		limitParts = append(limitParts, info.MemoryLimit+" memory")
+	}
+	if len(limitParts) > 0 {
+		data.ResourceLimits = strings.Join(limitParts, ", ")
+		data.HasResourceLimits = true
+	}
+
+	// Max duration
+	if info.MaxDuration != "" {
+		data.MaxDuration = info.MaxDuration
+		data.HasMaxDuration = true
 	}
 
 	tmpl, err := template.New("context").Parse(sandboxContextTemplate)

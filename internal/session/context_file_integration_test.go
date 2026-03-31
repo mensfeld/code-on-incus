@@ -122,6 +122,8 @@ func TestContextFile_DefaultInjection(t *testing.T) {
 		{"pnpm in mise table", "pnpm"},
 		{"troubleshooting section", "Troubleshooting"},
 		{"limitations section", "Limitations"},
+		{"default timezone", "UTC"},
+		{"default tool name", "AI coding tool"},
 	}
 
 	for _, check := range checks {
@@ -437,4 +439,71 @@ func TestContextFile_ForwardedEnvVars(t *testing.T) {
 	}
 
 	t.Logf("Forwarded env vars context file content:\n%s", content)
+}
+
+// TestContextFile_WithAllNewFields verifies that all 6 new context fields
+// (timezone, tool name, container name, extra mounts, resource limits, session timeout)
+// appear correctly in the rendered context file.
+func TestContextFile_WithAllNewFields(t *testing.T) {
+	skipUnlessContextFileTestable(t)
+
+	containerName := "coi-test-ctx-newfields"
+	mgr := launchContextTestContainer(t, containerName)
+
+	homeDir := "/home/" + container.CodeUser
+	logger := func(msg string) { t.Logf("[context] %s", msg) }
+	destPath := filepath.Join(homeDir, "SANDBOX_CONTEXT.md")
+	user := container.CodeUID
+
+	ctxInfo := tool.ContextInfo{
+		WorkspacePath: "/workspace",
+		HomeDir:       homeDir,
+		Timezone:      "Europe/Warsaw",
+		ToolName:      "claude",
+		ContainerName: containerName,
+		ExtraMounts: []tool.MountInfo{
+			{ContainerPath: "/data"},
+			{ContainerPath: "/config"},
+		},
+		CPULimit:    "2",
+		MemoryLimit: "4GiB",
+		MaxDuration: "2h",
+	}
+
+	if err := injectContextFile(mgr, ctxInfo, "", homeDir, logger); err != nil {
+		t.Fatalf("injectContextFile failed: %v", err)
+	}
+
+	content, err := mgr.ExecCommand("cat "+destPath, container.ExecCommandOptions{
+		Capture: true,
+		User:    &user,
+	})
+	if err != nil {
+		t.Fatalf("Failed to read context file: %v", err)
+	}
+
+	checks := []struct {
+		name   string
+		substr string
+	}{
+		{"timezone", "Europe/Warsaw"},
+		{"tool name", "claude"},
+		{"container name", containerName},
+		{"extra mount /data", "/data"},
+		{"extra mount /config", "/config"},
+		{"additional mounts section", "Additional Mounts"},
+		{"resource limits", "Resource limits"},
+		{"cpu limit", "2 CPUs"},
+		{"memory limit", "4GiB memory"},
+		{"session timeout", "Session timeout"},
+		{"max duration", "2h"},
+	}
+
+	for _, check := range checks {
+		if !strings.Contains(content, check.substr) {
+			t.Errorf("Context file missing %s (expected substring %q)", check.name, check.substr)
+		}
+	}
+
+	t.Logf("New fields context file content:\n%s", content)
 }

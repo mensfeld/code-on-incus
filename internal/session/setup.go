@@ -522,6 +522,25 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 			}
 		}
 
+		toolName := "AI coding tool"
+		if opts.Tool != nil {
+			toolName = opts.Tool.Name()
+		}
+
+		var extraMounts []tool.MountInfo
+		if opts.MountConfig != nil {
+			for _, m := range opts.MountConfig.Mounts {
+				extraMounts = append(extraMounts, tool.MountInfo{ContainerPath: m.ContainerPath})
+			}
+		}
+
+		var cpuLimit, memoryLimit, maxDuration string
+		if opts.LimitsConfig != nil {
+			cpuLimit = opts.LimitsConfig.CPU.Count
+			memoryLimit = opts.LimitsConfig.Memory.Limit
+			maxDuration = opts.LimitsConfig.Runtime.MaxDuration
+		}
+
 		ctxInfo := tool.ContextInfo{
 			WorkspacePath:      result.ContainerWorkspacePath,
 			HomeDir:            result.HomeDir,
@@ -532,6 +551,13 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 			ProtectedPaths:     opts.ProtectedPaths,
 			GHCLIAuthenticated: ghAuthenticated,
 			ForwardedEnvVars:   opts.ForwardedEnvVars,
+			Timezone:           result.Timezone,
+			ExtraMounts:        extraMounts,
+			CPULimit:           cpuLimit,
+			MemoryLimit:        memoryLimit,
+			MaxDuration:        maxDuration,
+			ToolName:           toolName,
+			ContainerName:      result.ContainerName,
 		}
 		contextContent = resolveContextContent(ctxInfo, opts.ContextFilePath, opts.Logger)
 		if err := injectContextFile(result.Manager, ctxInfo, opts.ContextFilePath, result.HomeDir, opts.Logger); err != nil {

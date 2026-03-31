@@ -17,6 +17,9 @@ You are running inside a **Code on Incus (COI)** isolated container. This is a d
 | **Docker** | {{.DockerDesc}} |
 | **User** | {{.UserDesc}} |
 | **Sudo** | {{.SudoDesc}} |
+| **Timezone** | {{.TimezoneDesc}} |
+| **Tool** | {{.ToolName}} |
+| **Container** | {{.ContainerName}} |
 
 ## What You Can Do
 
@@ -56,6 +59,14 @@ The following host environment variables have been forwarded into this container
 
 These are available in your shell environment and can be used directly.
 {{- end}}
+{{- if .HasExtraMounts}}
+
+## Additional Mounts
+
+The following extra directories are also mounted into this container: {{.ExtraMounts}}
+
+These paths are available alongside the workspace and persist changes to the host.
+{{- end}}
 
 ## Limitations
 {{if .NetworkLimitation}}
@@ -63,6 +74,12 @@ These are available in your shell environment and can be used directly.
 {{- end}}
 - Changes outside the workspace directory do **not** persist to the host filesystem
 - The container has no access to the host filesystem outside the mounted workspace
+{{- if .HasResourceLimits}}
+- **Resource limits**: {{.ResourceLimits}} — heavy builds or processes may be constrained
+{{- end}}
+{{- if .HasMaxDuration}}
+- **Session timeout**: This session will automatically end after {{.MaxDuration}}
+{{- end}}
 {{- if .ProtectedPaths}}
 - **Protected paths** (mounted read-only): {{.ProtectedPaths}}
 {{- end}}

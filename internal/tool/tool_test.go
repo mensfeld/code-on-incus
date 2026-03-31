@@ -497,6 +497,9 @@ func TestRenderContextFileContent(t *testing.T) {
 		RunAsRoot:         false,
 		Architecture:      "amd64",
 		ProtectedPaths:    []string{".git/hooks", ".vscode"},
+		Timezone:          "America/New_York",
+		ToolName:          "claude",
+		ContainerName:     "coi-test-1",
 	}
 
 	content := RenderContextFileContent(info)
@@ -523,6 +526,9 @@ func TestRenderContextFileContent(t *testing.T) {
 		{"limitations section", "Limitations"},
 		{"protected paths", ".git/hooks, .vscode"},
 		{"ephemeral warning", "System-level changes"},
+		{"timezone", "America/New_York"},
+		{"tool name", "claude"},
+		{"container name", "coi-test-1"},
 	}
 
 	for _, check := range checks {
@@ -597,6 +603,86 @@ func TestRenderContextFileContent_NoProtectedPaths(t *testing.T) {
 	content := RenderContextFileContent(info)
 	if strings.Contains(content, "Protected paths") {
 		t.Error("Should not contain protected paths section when none configured")
+	}
+}
+
+func TestRenderContextFileContent_WithResourceLimits(t *testing.T) {
+	info := ContextInfo{
+		WorkspacePath: "/workspace",
+		HomeDir:       "/home/code",
+		CPULimit:      "2",
+		MemoryLimit:   "4GiB",
+	}
+	content := RenderContextFileContent(info)
+	if !strings.Contains(content, "Resource limits") {
+		t.Error("Expected 'Resource limits' in content when CPU and memory limits are set")
+	}
+	if !strings.Contains(content, "2 CPUs") {
+		t.Error("Expected '2 CPUs' in resource limits")
+	}
+	if !strings.Contains(content, "4GiB memory") {
+		t.Error("Expected '4GiB memory' in resource limits")
+	}
+}
+
+func TestRenderContextFileContent_WithMaxDuration(t *testing.T) {
+	info := ContextInfo{
+		WorkspacePath: "/workspace",
+		HomeDir:       "/home/code",
+		MaxDuration:   "2h",
+	}
+	content := RenderContextFileContent(info)
+	if !strings.Contains(content, "Session timeout") {
+		t.Error("Expected 'Session timeout' in content when max duration is set")
+	}
+	if !strings.Contains(content, "2h") {
+		t.Error("Expected '2h' in session timeout")
+	}
+}
+
+func TestRenderContextFileContent_WithExtraMounts(t *testing.T) {
+	info := ContextInfo{
+		WorkspacePath: "/workspace",
+		HomeDir:       "/home/code",
+		ExtraMounts:   []MountInfo{{ContainerPath: "/data"}, {ContainerPath: "/config"}},
+	}
+	content := RenderContextFileContent(info)
+	if !strings.Contains(content, "Additional Mounts") {
+		t.Error("Expected 'Additional Mounts' section when extra mounts are set")
+	}
+	if !strings.Contains(content, "/data") {
+		t.Error("Expected '/data' in extra mounts")
+	}
+	if !strings.Contains(content, "/config") {
+		t.Error("Expected '/config' in extra mounts")
+	}
+}
+
+func TestRenderContextFileContent_DefaultTimezone(t *testing.T) {
+	info := ContextInfo{
+		WorkspacePath: "/workspace",
+		HomeDir:       "/home/code",
+	}
+	content := RenderContextFileContent(info)
+	if !strings.Contains(content, "UTC") {
+		t.Error("Expected 'UTC' as default timezone")
+	}
+}
+
+func TestRenderContextFileContent_NoOptionalSections(t *testing.T) {
+	info := ContextInfo{
+		WorkspacePath: "/workspace",
+		HomeDir:       "/home/code",
+	}
+	content := RenderContextFileContent(info)
+	if strings.Contains(content, "Resource limits") {
+		t.Error("Should not contain 'Resource limits' when no limits configured")
+	}
+	if strings.Contains(content, "Session timeout") {
+		t.Error("Should not contain 'Session timeout' when no max duration configured")
+	}
+	if strings.Contains(content, "Additional Mounts") {
+		t.Error("Should not contain 'Additional Mounts' when no extra mounts configured")
 	}
 }
 
