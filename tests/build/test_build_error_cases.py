@@ -116,9 +116,9 @@ commands = ["echo hello"]
         f"Build with nonexistent base should fail. stdout: {result.stdout}"
     )
     combined = result.stdout + result.stderr
-    assert "fail" in combined.lower() or "error" in combined.lower() or "not found" in combined.lower(), (
-        f"Should indicate build failure due to missing base. Got:\n{combined}"
-    )
+    assert (
+        "fail" in combined.lower() or "error" in combined.lower() or "not found" in combined.lower()
+    ), f"Should indicate build failure due to missing base. Got:\n{combined}"
 
 
 def test_build_config_empty_commands_falls_back(coi_binary, workspace_dir):
@@ -262,9 +262,7 @@ exit 1
 
     assert result.returncode != 0, "Build should fail when script exits non-zero"
     combined = result.stdout + result.stderr
-    assert "fail" in combined.lower(), (
-        f"Error should indicate build failure. Got:\n{combined}"
-    )
+    assert "fail" in combined.lower(), f"Error should indicate build failure. Got:\n{combined}"
 
 
 def test_build_commands_that_fail(coi_binary, workspace_dir):
@@ -302,9 +300,7 @@ commands = ["echo starting", "false", "echo should-not-reach"]
 
     assert result.returncode != 0, "Build should fail when commands exit non-zero"
     combined = result.stdout + result.stderr
-    assert "fail" in combined.lower(), (
-        f"Error should indicate build failure. Got:\n{combined}"
-    )
+    assert "fail" in combined.lower(), f"Error should indicate build failure. Got:\n{combined}"
 
 
 def test_build_no_config_no_build_section(coi_binary, workspace_dir):
@@ -333,6 +329,4 @@ persistent = true
         f"Should build base coi image when no [build] section. stderr: {result.stderr}"
     )
     combined = result.stdout + result.stderr
-    assert "coi" in combined.lower(), (
-        f"Should mention building coi. Got:\n{combined}"
-    )
+    assert "coi" in combined.lower(), f"Should mention building coi. Got:\n{combined}"

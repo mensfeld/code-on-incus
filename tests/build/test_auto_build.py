@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 
+
 # Helper to skip if base coi image doesn't exist
 def skip_without_coi(coi_binary):
     result = subprocess.run(
@@ -72,9 +73,7 @@ commands = ["echo auto-built"]
         )
 
         combined = result.stdout + result.stderr
-        assert result.returncode == 0, (
-            f"Run with auto-build should succeed. Output:\n{combined}"
-        )
+        assert result.returncode == 0, f"Run with auto-build should succeed. Output:\n{combined}"
         assert "not found" in combined.lower() and "building" in combined.lower(), (
             f"Should mention auto-building. Got:\n{combined}"
         )
@@ -348,9 +347,9 @@ commands = ["echo hello"]
 
     assert result.returncode != 0, "Run should fail when base image doesn't exist"
     combined = result.stdout + result.stderr
-    assert "fail" in combined.lower() or "error" in combined.lower() or "not found" in combined.lower(), (
-        f"Error should indicate build failure. Got:\n{combined}"
-    )
+    assert (
+        "fail" in combined.lower() or "error" in combined.lower() or "not found" in combined.lower()
+    ), f"Error should indicate build failure. Got:\n{combined}"
 
 
 def test_auto_build_nonexistent_base_on_shell(coi_binary, workspace_dir):
@@ -395,9 +394,9 @@ commands = ["echo hello"]
 
     assert result.returncode != 0, "Shell should fail when base image doesn't exist"
     combined = result.stdout + result.stderr
-    assert "fail" in combined.lower() or "error" in combined.lower() or "not found" in combined.lower(), (
-        f"Error should indicate build failure. Got:\n{combined}"
-    )
+    assert (
+        "fail" in combined.lower() or "error" in combined.lower() or "not found" in combined.lower()
+    ), f"Error should indicate build failure. Got:\n{combined}"
 
 
 def test_image_flag_overrides_config_for_auto_build(coi_binary, cleanup_containers, workspace_dir):

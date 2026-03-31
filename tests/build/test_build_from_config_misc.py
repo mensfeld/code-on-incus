@@ -137,9 +137,7 @@ commands = ["echo rebuilt"]
     )
     assert result.returncode == 0, f"Force rebuild should succeed. stderr: {result.stderr}"
     combined = result.stdout + result.stderr
-    assert "built successfully" in combined.lower(), (
-        f"Should confirm rebuild. Got:\n{combined}"
-    )
+    assert "built successfully" in combined.lower(), f"Should confirm rebuild. Got:\n{combined}"
 
     # Cleanup
     subprocess.run(
@@ -210,9 +208,5 @@ image = "coi"
     # Should succeed (or skip if coi already exists)
     combined = result.stdout + result.stderr
     # Either builds successfully or says image already exists
-    assert result.returncode == 0, (
-        f"Build fallback should succeed. stderr: {result.stderr}"
-    )
-    assert "coi" in combined.lower(), (
-        f"Should mention building coi image. Got:\n{combined}"
-    )
+    assert result.returncode == 0, f"Build fallback should succeed. stderr: {result.stderr}"
+    assert "coi" in combined.lower(), f"Should mention building coi image. Got:\n{combined}"

@@ -43,14 +43,13 @@ image = "coi"
         cwd=workspace_dir,
     )
 
-    assert result.returncode != 0, (
-        f"Should fail when .coi.toml exists. stdout: {result.stdout}"
-    )
+    assert result.returncode != 0, f"Should fail when .coi.toml exists. stdout: {result.stdout}"
 
     combined_output = result.stdout + result.stderr
-    assert "found .coi.toml in project root" in combined_output.lower() or "found .coi.toml" in combined_output, (
-        f"Error should mention deprecated .coi.toml. Got:\n{combined_output}"
-    )
+    assert (
+        "found .coi.toml in project root" in combined_output.lower()
+        or "found .coi.toml" in combined_output
+    ), f"Error should mention deprecated .coi.toml. Got:\n{combined_output}"
     assert "mkdir -p .coi && mv .coi.toml .coi/config.toml" in combined_output, (
         f"Error should include migration command. Got:\n{combined_output}"
     )
@@ -88,7 +87,7 @@ def test_coi_toml_deprecation_even_with_coi_dir(coi_binary, workspace_dir):
     )
 
     assert result.returncode != 0, (
-        f"Should fail when .coi.toml exists even alongside .coi/config.toml"
+        "Should fail when .coi.toml exists even alongside .coi/config.toml"
     )
 
     combined_output = result.stdout + result.stderr
