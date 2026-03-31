@@ -965,6 +965,51 @@ func TestBuildConfigHasBuildConfig(t *testing.T) {
 	}
 }
 
+func TestBuildConfigEdgeCases(t *testing.T) {
+	t.Run("empty commands slice is not build config", func(t *testing.T) {
+		b := BuildConfig{Commands: []string{}}
+		if b.HasBuildConfig() {
+			t.Error("Empty commands slice should not count as build config")
+		}
+	})
+
+	t.Run("nil commands is not build config", func(t *testing.T) {
+		b := BuildConfig{Commands: nil}
+		if b.HasBuildConfig() {
+			t.Error("Nil commands should not count as build config")
+		}
+	})
+
+	t.Run("whitespace-only script is build config", func(t *testing.T) {
+		// A non-empty string counts — validation happens at build time
+		b := BuildConfig{Script: " "}
+		if !b.HasBuildConfig() {
+			t.Error("Non-empty script string should count as build config")
+		}
+	})
+
+	t.Run("merge does not mix script and commands across configs", func(t *testing.T) {
+		base := GetDefaultConfig()
+		base.Build.Script = "/path/to/build.sh"
+
+		other := &Config{
+			Build: BuildConfig{
+				Commands: []string{"echo hello"},
+			},
+		}
+
+		base.Merge(other)
+
+		// Both should be set after merge (script from base, commands from other)
+		if base.Build.Script != "/path/to/build.sh" {
+			t.Errorf("Script should be preserved from base, got %q", base.Build.Script)
+		}
+		if len(base.Build.Commands) != 1 || base.Build.Commands[0] != "echo hello" {
+			t.Errorf("Commands should be set from other, got %v", base.Build.Commands)
+		}
+	})
+}
+
 func TestPreserveWorkspacePathMerge(t *testing.T) {
 	tests := []struct {
 		name     string
