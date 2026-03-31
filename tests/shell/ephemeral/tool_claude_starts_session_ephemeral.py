@@ -2,7 +2,7 @@
 Test that coi shell with [tool] name = "claude" starts the real claude binary.
 
 Verifies that:
-1. Writing [tool] name = "claude" to .coi.toml is accepted
+1. Writing [tool] name = "claude" to .coi/config.toml is accepted
 2. coi shell starts the container and launches the real claude binary
 3. Claude's startup UI appears on screen (login or welcome screen)
 
@@ -28,13 +28,15 @@ def test_claude_tool_starts_session(coi_binary, cleanup_containers, workspace_di
     Smoke test: coi shell with tool = "claude" launches the real claude binary.
 
     Flow:
-    1. Write .coi.toml with [tool] name = "claude" to the workspace
+    1. Write .coi/config.toml with [tool] name = "claude" to the workspace
     2. Start coi shell (no COI_USE_DUMMY - use the real binary)
     3. Wait for container setup to complete
     4. Wait for Claude's startup UI to appear on screen
     5. Ctrl+C to exit the TUI, then poweroff
     """
-    config_path = os.path.join(workspace_dir, ".coi.toml")
+    config_dir = os.path.join(workspace_dir, ".coi")
+    os.makedirs(config_dir, exist_ok=True)
+    config_path = os.path.join(config_dir, "config.toml")
     with open(config_path, "w") as f:
         f.write('[tool]\nname = "claude"\n')
 

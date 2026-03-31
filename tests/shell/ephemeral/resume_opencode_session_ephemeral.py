@@ -6,7 +6,7 @@ The opencode tool stores its config under .config/opencode (not .claude),
 so this verifies that session detection is tool-agnostic.
 
 Flow:
-1. Write .coi.toml with [tool] name = "opencode"
+1. Write .coi/config.toml with [tool] name = "opencode"
 2. Start dummy in ephemeral mode
 3. Send a message and verify response
 4. Exit to bash shell
@@ -46,8 +46,10 @@ def test_ephemeral_opencode_session_with_resume(coi_binary, cleanup_containers, 
     """
     import os
 
-    # Write .coi.toml to select opencode as the tool
-    config_path = os.path.join(workspace_dir, ".coi.toml")
+    # Write .coi/config.toml to select opencode as the tool
+    config_dir = os.path.join(workspace_dir, ".coi")
+    os.makedirs(config_dir, exist_ok=True)
+    config_path = os.path.join(config_dir, "config.toml")
     with open(config_path, "w") as f:
         f.write('[tool]\nname = "opencode"\n')
 

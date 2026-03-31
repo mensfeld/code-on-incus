@@ -201,7 +201,9 @@ def test_git_hooks_writable_via_config(coi_binary, workspace_dir, cleanup_contai
 [git]
 writable_hooks = true
 """
-    config_file = Path(workspace_dir) / ".coi.toml"
+    config_dir = Path(workspace_dir) / ".coi"
+    config_dir.mkdir(exist_ok=True)
+    config_file = config_dir / "config.toml"
     config_file.write_text(config_content)
 
     # Ensure hooks dir exists
@@ -221,7 +223,7 @@ writable_hooks = true
         capture_output=True,
         text=True,
         timeout=120,
-        cwd=workspace_dir,  # Run from workspace to pick up .coi.toml
+        cwd=workspace_dir,  # Run from workspace to pick up .coi/config.toml
     )
 
     # Should succeed

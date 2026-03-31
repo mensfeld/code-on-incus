@@ -1,5 +1,5 @@
 """
-Test that forward_env from .coi.toml config file works.
+Test that forward_env from .coi/config.toml config file works.
 
 Tests that:
 1. forward_env in [defaults] section forwards host env vars into container
@@ -13,16 +13,18 @@ from pathlib import Path
 
 def test_forward_env_from_config(coi_binary, cleanup_containers, workspace_dir):
     """
-    Test that forward_env in .coi.toml forwards host env vars.
+    Test that forward_env in .coi/config.toml forwards host env vars.
 
     Flow:
-    1. Create .coi.toml with forward_env = ["COI_CFG_SECRET"]
+    1. Create .coi/config.toml with forward_env = ["COI_CFG_SECRET"]
     2. Set COI_CFG_SECRET on host
     3. Run coi run -- sh -c 'echo $COI_CFG_SECRET'
     4. Verify the value is forwarded
     """
     # Create project config with forward_env
-    config_path = Path(workspace_dir) / ".coi.toml"
+    config_dir = Path(workspace_dir) / ".coi"
+    config_dir.mkdir(exist_ok=True)
+    config_path = config_dir / "config.toml"
     config_path.write_text(
         """
 [defaults]
@@ -64,11 +66,13 @@ def test_forward_env_config_and_flag_merge(coi_binary, cleanup_containers, works
     Test that forward_env from config and --forward-env flag are merged.
 
     Flow:
-    1. Create .coi.toml with forward_env = ["COI_FROM_CFG"]
+    1. Create .coi/config.toml with forward_env = ["COI_FROM_CFG"]
     2. Run with --forward-env COI_FROM_FLAG
     3. Both should be forwarded
     """
-    config_path = Path(workspace_dir) / ".coi.toml"
+    config_dir = Path(workspace_dir) / ".coi"
+    config_dir.mkdir(exist_ok=True)
+    config_path = config_dir / "config.toml"
     config_path.write_text(
         """
 [defaults]

@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -140,6 +141,198 @@ func TestWriteExample(t *testing.T) {
 	cfg := GetDefaultConfig()
 	if err := loadConfigFile(cfg, examplePath); err != nil {
 		t.Errorf("Example file is not valid TOML: %v", err)
+	}
+}
+
+func TestBuildScriptPathResolution(t *testing.T) {
+	// Create a temporary config file with a relative build.script path
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".coi")
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
+		t.Fatalf("Failed to create config dir: %v", err)
+	}
+
+	configPath := filepath.Join(configDir, "config.toml")
+	configContent := `
+[build]
+script = "build.sh"
+`
+	if err := os.WriteFile(configPath, []byte(configContent), 0o644); err != nil {
+		t.Fatalf("Failed to create test config: %v", err)
+	}
+
+	cfg := GetDefaultConfig()
+	if err := loadConfigFile(cfg, configPath); err != nil {
+		t.Fatalf("loadConfigFile() failed: %v", err)
+	}
+
+	// Script should be resolved relative to config file directory (.coi/build.sh)
+	expectedPath := filepath.Join(configDir, "build.sh")
+	if cfg.Build.Script != expectedPath {
+		t.Errorf("Expected script path %q, got %q", expectedPath, cfg.Build.Script)
+	}
+}
+
+func TestBuildScriptAbsolutePath(t *testing.T) {
+	// Absolute paths should pass through unchanged
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.toml")
+	configContent := `
+[build]
+script = "/absolute/path/to/build.sh"
+`
+	if err := os.WriteFile(configPath, []byte(configContent), 0o644); err != nil {
+		t.Fatalf("Failed to create test config: %v", err)
+	}
+
+	cfg := GetDefaultConfig()
+	if err := loadConfigFile(cfg, configPath); err != nil {
+		t.Fatalf("loadConfigFile() failed: %v", err)
+	}
+
+	if cfg.Build.Script != "/absolute/path/to/build.sh" {
+		t.Errorf("Expected absolute path to be preserved, got %q", cfg.Build.Script)
+	}
+}
+
+func TestBuildScriptTildePath(t *testing.T) {
+	// Tilde paths should be expanded
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.toml")
+	configContent := `
+[build]
+script = "~/build-scripts/build.sh"
+`
+	if err := os.WriteFile(configPath, []byte(configContent), 0o644); err != nil {
+		t.Fatalf("Failed to create test config: %v", err)
+	}
+
+	cfg := GetDefaultConfig()
+	if err := loadConfigFile(cfg, configPath); err != nil {
+		t.Fatalf("loadConfigFile() failed: %v", err)
+	}
+
+	homeDir, _ := os.UserHomeDir()
+	expectedPath := filepath.Join(homeDir, "build-scripts/build.sh")
+	if cfg.Build.Script != expectedPath {
+		t.Errorf("Expected tilde-expanded path %q, got %q", expectedPath, cfg.Build.Script)
+	}
+}
+
+func TestDotCoiTomlDeprecationError(t *testing.T) {
+	// Create a temp directory and change to it
+	tmpDir := t.TempDir()
+	oldDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get cwd: %v", err)
+	}
+	defer os.Chdir(oldDir) //nolint:errcheck
+
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("Failed to chdir: %v", err)
+	}
+
+	// Create .coi.toml
+	if err := os.WriteFile(filepath.Join(tmpDir, ".coi.toml"), []byte("[defaults]\nimage = \"test\"\n"), 0o644); err != nil {
+		t.Fatalf("Failed to create .coi.toml: %v", err)
+	}
+
+	// Load should fail with deprecation error
+	_, loadErr := Load()
+	if loadErr == nil {
+		t.Fatal("Expected error when .coi.toml exists, got nil")
+	}
+
+	expectedMsg := "found .coi.toml in project root"
+	if !strings.Contains(loadErr.Error(), expectedMsg) {
+		t.Errorf("Expected error containing %q, got: %v", expectedMsg, loadErr)
+	}
+
+	// Should also mention migration command
+	expectedMigration := "mkdir -p .coi && mv .coi.toml .coi/config.toml"
+	if !strings.Contains(loadErr.Error(), expectedMigration) {
+		t.Errorf("Expected error containing migration instructions %q, got: %v", expectedMigration, loadErr)
+	}
+}
+
+func TestDotCoiDirConfigLoads(t *testing.T) {
+	// Create a temp directory with .coi/config.toml and change to it
+	tmpDir := t.TempDir()
+	oldDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get cwd: %v", err)
+	}
+	defer os.Chdir(oldDir) //nolint:errcheck
+
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("Failed to chdir: %v", err)
+	}
+
+	// Create .coi/config.toml
+	coiDir := filepath.Join(tmpDir, ".coi")
+	if err := os.MkdirAll(coiDir, 0o755); err != nil {
+		t.Fatalf("Failed to create .coi dir: %v", err)
+	}
+	configContent := `
+[defaults]
+image = "coi-test-project"
+`
+	if err := os.WriteFile(filepath.Join(coiDir, "config.toml"), []byte(configContent), 0o644); err != nil {
+		t.Fatalf("Failed to create config.toml: %v", err)
+	}
+
+	cfg, loadErr := Load()
+	if loadErr != nil {
+		t.Fatalf("Load() failed: %v", loadErr)
+	}
+
+	if cfg.Defaults.Image != "coi-test-project" {
+		t.Errorf("Expected image 'coi-test-project', got %q", cfg.Defaults.Image)
+	}
+}
+
+func TestResolveRelativePath(t *testing.T) {
+	homeDir, _ := os.UserHomeDir()
+
+	tests := []struct {
+		name     string
+		baseDir  string
+		path     string
+		expected string
+	}{
+		{
+			name:     "relative path",
+			baseDir:  "/project/.coi",
+			path:     "build.sh",
+			expected: "/project/.coi/build.sh",
+		},
+		{
+			name:     "absolute path unchanged",
+			baseDir:  "/project/.coi",
+			path:     "/usr/local/bin/build.sh",
+			expected: "/usr/local/bin/build.sh",
+		},
+		{
+			name:     "tilde path expanded",
+			baseDir:  "/project/.coi",
+			path:     "~/scripts/build.sh",
+			expected: filepath.Join(homeDir, "scripts/build.sh"),
+		},
+		{
+			name:     "nested relative path",
+			baseDir:  "/project/.coi",
+			path:     "scripts/build.sh",
+			expected: "/project/.coi/scripts/build.sh",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := resolveRelativePath(tt.baseDir, tt.path)
+			if result != tt.expected {
+				t.Errorf("resolveRelativePath(%q, %q) = %q, want %q", tt.baseDir, tt.path, result, tt.expected)
+			}
+		})
 	}
 }
 

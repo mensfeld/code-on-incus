@@ -2,7 +2,7 @@
 Test that auto_context = false disables context injection into tool-native files.
 
 Verifies that:
-1. When auto_context = false in .coi.toml, ~/.claude/CLAUDE.md is NOT created
+1. When auto_context = false in .coi/config.toml, ~/.claude/CLAUDE.md is NOT created
    (unless the host had one, in which case it's copied but no sandbox context appended).
 2. ~/SANDBOX_CONTEXT.md is still created (it's independent of auto_context).
 """
@@ -26,7 +26,7 @@ def test_auto_context_opt_out_no_claude_md(coi_binary, cleanup_containers, works
     Test that setting auto_context = false prevents creation of ~/.claude/CLAUDE.md.
 
     Flow:
-    1. Write .coi.toml with auto_context = false
+    1. Write .coi/config.toml with auto_context = false
     2. Start coi shell with dummy (no host ~/.claude/CLAUDE.md)
     3. Exit to bash
     4. Verify ~/.claude/CLAUDE.md does NOT exist in container
@@ -35,8 +35,10 @@ def test_auto_context_opt_out_no_claude_md(coi_binary, cleanup_containers, works
     env = {"COI_USE_DUMMY": "1"}
     container_name = calculate_container_name(workspace_dir, 1)
 
-    # Write .coi.toml with auto_context = false
-    config_path = os.path.join(workspace_dir, ".coi.toml")
+    # Write .coi/config.toml with auto_context = false
+    config_dir = os.path.join(workspace_dir, ".coi")
+    os.makedirs(config_dir, exist_ok=True)
+    config_path = os.path.join(config_dir, "config.toml")
     with open(config_path, "w") as f:
         f.write("[tool]\nauto_context = false\n")
 

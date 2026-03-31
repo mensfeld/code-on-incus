@@ -72,7 +72,7 @@ coi shell --tool opencode    # Use opencode instead
 
 **Permission mode** - Control whether AI tools run autonomously or ask before each action:
 ```toml
-# ~/.config/coi/config.toml or .coi.toml
+# ~/.config/coi/config.toml or .coi/config.toml
 [tool]
 name = "claude"              # Default AI tool
 permission_mode = "bypass"   # "bypass" (default) or "interactive"
@@ -348,12 +348,12 @@ permission_mode = "bypass"
 1. Built-in defaults
 2. System config (`/etc/coi/config.toml`)
 3. User config (`~/.config/coi/config.toml`)
-4. Project config (`./.coi.toml`)
+4. Project config (`./.coi/config.toml`)
 5. `COI_CONFIG` environment variable
 6. Environment variables (`CLAUDE_ON_INCUS_*`, `COI_*`)
 7. CLI flags
 
-Place a `.coi.toml` in any repository root to auto-configure COI for that project — useful for teams to share container image, environment, and resource limits.
+Place a `.coi/config.toml` in any repository root to auto-configure COI for that project — useful for teams to share container image, environment, and resource limits.
 
 See the [Configuration wiki page](https://github.com/mensfeld/code-on-incus/wiki/Configuration) for the full config reference, per-repo setup, profiles, and environment variables.
 

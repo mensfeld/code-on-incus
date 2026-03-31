@@ -42,7 +42,7 @@ def test_config_nested_mounts_rejected(coi_binary, workspace_dir, tmp_path):
     dir1.mkdir()
     dir2.mkdir()
 
-    # Create config file in workspace directory
+    # Create config file in workspace directory (.coi/config.toml)
     config_content = f"""
 [[mounts.default]]
 host = "{dir1}"
@@ -52,7 +52,9 @@ container = "/app"
 host = "{dir2}"
 container = "/app/subdir"
 """
-    config_file = Path(workspace_dir) / ".coi.toml"
+    config_dir = Path(workspace_dir) / ".coi"
+    config_dir.mkdir(exist_ok=True)
+    config_file = config_dir / "config.toml"
     config_file.write_text(config_content)
 
     # Run from workspace directory so config is loaded
@@ -61,7 +63,7 @@ container = "/app/subdir"
         capture_output=True,
         text=True,
         timeout=120,
-        cwd=workspace_dir,  # Run from workspace directory to load .coi.toml
+        cwd=workspace_dir,  # Run from workspace directory to load .coi/config.toml
     )
 
     assert result.returncode != 0

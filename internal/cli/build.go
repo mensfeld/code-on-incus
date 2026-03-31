@@ -83,7 +83,22 @@ func buildCommand(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "%s\n", warning)
 	}
 
-	// Configure build options
+	// Check if we should build from config
+	if CanBuildFromConfig(cfg) {
+		result, err := BuildFromConfig(cfg, buildForce, buildCompression)
+		if err != nil {
+			return err
+		}
+		if result.Skipped {
+			fmt.Fprintf(os.Stderr, "\nImage '%s' already exists. Use --force to rebuild.\n", result.ImageName)
+			return nil
+		}
+		fmt.Fprintf(os.Stderr, "\nImage '%s' built successfully!\n", result.ImageName)
+		fmt.Fprintf(os.Stderr, "  Fingerprint: %s\n", result.Fingerprint)
+		return nil
+	}
+
+	// Fall back to building the base coi image
 	opts := image.BuildOptions{
 		Force:       buildForce,
 		ImageType:   "coi",

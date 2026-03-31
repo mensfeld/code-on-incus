@@ -22,7 +22,9 @@ def test_custom_code_uid_user_remapped(coi_binary, cleanup_containers, workspace
     """
     With code_uid = 1001, verify `id code` shows uid=1001(code) gid=1001(code).
     """
-    config_path = os.path.join(workspace_dir, ".coi.toml")
+    config_dir = os.path.join(workspace_dir, ".coi")
+    os.makedirs(config_dir, exist_ok=True)
+    config_path = os.path.join(config_dir, "config.toml")
     with open(config_path, "w") as f:
         f.write(
             """
@@ -54,7 +56,9 @@ def test_custom_code_uid_whoami(coi_binary, cleanup_containers, workspace_dir):
     """
     With code_uid = 1001, verify `whoami` returns 'code' (not 'I have no name!').
     """
-    config_path = os.path.join(workspace_dir, ".coi.toml")
+    config_dir = os.path.join(workspace_dir, ".coi")
+    os.makedirs(config_dir, exist_ok=True)
+    config_path = os.path.join(config_dir, "config.toml")
     with open(config_path, "w") as f:
         f.write(
             """
@@ -83,7 +87,9 @@ def test_custom_code_uid_home_ownership(coi_binary, cleanup_containers, workspac
     """
     With code_uid = 1001, verify /home/code is owned by UID 1001.
     """
-    config_path = os.path.join(workspace_dir, ".coi.toml")
+    config_dir = os.path.join(workspace_dir, ".coi")
+    os.makedirs(config_dir, exist_ok=True)
+    config_path = os.path.join(config_dir, "config.toml")
     with open(config_path, "w") as f:
         f.write(
             """
@@ -112,7 +118,9 @@ def test_custom_code_uid_bashrc_readable(coi_binary, cleanup_containers, workspa
     """
     With code_uid = 1001, verify .bashrc is readable (not 'Permission denied').
     """
-    config_path = os.path.join(workspace_dir, ".coi.toml")
+    config_dir = os.path.join(workspace_dir, ".coi")
+    os.makedirs(config_dir, exist_ok=True)
+    config_path = os.path.join(config_dir, "config.toml")
     with open(config_path, "w") as f:
         f.write(
             """

@@ -831,6 +831,140 @@ func TestApplyProfileEnvironment(t *testing.T) {
 	}
 }
 
+func TestBuildConfigMerge(t *testing.T) {
+	tests := []struct {
+		name             string
+		baseBase         string
+		baseScript       string
+		baseCommands     []string
+		otherBase        string
+		otherScript      string
+		otherCommands    []string
+		expectedBase     string
+		expectedScript   string
+		expectedCommands []string
+	}{
+		{
+			name:             "empty base, set other",
+			otherBase:        "coi-custom",
+			otherScript:      "/path/to/build.sh",
+			otherCommands:    []string{"echo hello"},
+			expectedBase:     "coi-custom",
+			expectedScript:   "/path/to/build.sh",
+			expectedCommands: []string{"echo hello"},
+		},
+		{
+			name:             "set base, empty other preserves base",
+			baseBase:         "coi-rust",
+			baseScript:       "/old/build.sh",
+			baseCommands:     []string{"cargo build"},
+			expectedBase:     "coi-rust",
+			expectedScript:   "/old/build.sh",
+			expectedCommands: []string{"cargo build"},
+		},
+		{
+			name:             "other overrides base",
+			baseBase:         "coi-old",
+			baseScript:       "/old/build.sh",
+			baseCommands:     []string{"old command"},
+			otherBase:        "coi-new",
+			otherScript:      "/new/build.sh",
+			otherCommands:    []string{"new command"},
+			expectedBase:     "coi-new",
+			expectedScript:   "/new/build.sh",
+			expectedCommands: []string{"new command"},
+		},
+		{
+			name:             "commands replace entirely (not append)",
+			baseCommands:     []string{"cmd1", "cmd2"},
+			otherCommands:    []string{"cmd3"},
+			expectedCommands: []string{"cmd3"},
+		},
+		{
+			name:         "empty commands does not clear base commands",
+			baseCommands: []string{"cmd1"},
+			// otherCommands is nil
+			expectedCommands: []string{"cmd1"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			base := GetDefaultConfig()
+			base.Build.Base = tt.baseBase
+			base.Build.Script = tt.baseScript
+			base.Build.Commands = tt.baseCommands
+
+			other := &Config{
+				Build: BuildConfig{
+					Base:     tt.otherBase,
+					Script:   tt.otherScript,
+					Commands: tt.otherCommands,
+				},
+			}
+
+			base.Merge(other)
+
+			if base.Build.Base != tt.expectedBase {
+				t.Errorf("Build.Base: expected %q, got %q", tt.expectedBase, base.Build.Base)
+			}
+			if base.Build.Script != tt.expectedScript {
+				t.Errorf("Build.Script: expected %q, got %q", tt.expectedScript, base.Build.Script)
+			}
+			if len(base.Build.Commands) != len(tt.expectedCommands) {
+				t.Fatalf("Build.Commands length: expected %d, got %d (%v)", len(tt.expectedCommands), len(base.Build.Commands), base.Build.Commands)
+			}
+			for i, v := range tt.expectedCommands {
+				if base.Build.Commands[i] != v {
+					t.Errorf("Build.Commands[%d]: expected %q, got %q", i, v, base.Build.Commands[i])
+				}
+			}
+		})
+	}
+}
+
+func TestBuildConfigHasBuildConfig(t *testing.T) {
+	tests := []struct {
+		name     string
+		build    BuildConfig
+		expected bool
+	}{
+		{
+			name:     "empty config",
+			build:    BuildConfig{},
+			expected: false,
+		},
+		{
+			name:     "script only",
+			build:    BuildConfig{Script: "/path/to/build.sh"},
+			expected: true,
+		},
+		{
+			name:     "commands only",
+			build:    BuildConfig{Commands: []string{"echo hello"}},
+			expected: true,
+		},
+		{
+			name:     "both script and commands",
+			build:    BuildConfig{Script: "/path/to/build.sh", Commands: []string{"echo hello"}},
+			expected: true,
+		},
+		{
+			name:     "base only is not enough",
+			build:    BuildConfig{Base: "coi"},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.build.HasBuildConfig(); got != tt.expected {
+				t.Errorf("HasBuildConfig() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestPreserveWorkspacePathMerge(t *testing.T) {
 	tests := []struct {
 		name     string

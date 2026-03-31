@@ -1,5 +1,5 @@
 """
-Test that [defaults] environment variables from .coi.toml are applied.
+Test that [defaults] environment variables from .coi/config.toml are applied.
 
 Tests that:
 1. Static env vars in [defaults] environment are set in the container
@@ -15,11 +15,13 @@ def test_defaults_environment_applied(coi_binary, cleanup_containers, workspace_
     Test that [defaults] environment vars are injected into container.
 
     Flow:
-    1. Create .coi.toml with [defaults] environment = { MY_DEFAULT = "default-val" }
+    1. Create .coi/config.toml with [defaults] environment = { MY_DEFAULT = "default-val" }
     2. Run coi run -- sh -c 'echo $MY_DEFAULT'
     3. Verify MY_DEFAULT is set
     """
-    config_path = Path(workspace_dir) / ".coi.toml"
+    config_dir = Path(workspace_dir) / ".coi"
+    config_dir.mkdir(exist_ok=True)
+    config_path = config_dir / "config.toml"
     config_path.write_text(
         """
 [defaults]
@@ -57,11 +59,13 @@ def test_env_flag_overrides_defaults_environment(coi_binary, cleanup_containers,
     Test that --env flag takes precedence over defaults.environment.
 
     Flow:
-    1. Create .coi.toml with [defaults] environment = { MY_VAR = "from-config" }
+    1. Create .coi/config.toml with [defaults] environment = { MY_VAR = "from-config" }
     2. Run with -e MY_VAR=from-flag
     3. Verify the flag value wins
     """
-    config_path = Path(workspace_dir) / ".coi.toml"
+    config_dir = Path(workspace_dir) / ".coi"
+    config_dir.mkdir(exist_ok=True)
+    config_path = config_dir / "config.toml"
     config_path.write_text(
         """
 [defaults]

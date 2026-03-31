@@ -43,8 +43,10 @@ def test_protected_paths_work_with_preserve_workspace_path(
     """
     env = {"COI_USE_DUMMY": "1"}
 
-    # Create .coi.toml with preserve_workspace_path enabled
-    config_path = os.path.join(workspace_dir, ".coi.toml")
+    # Create .coi/config.toml with preserve_workspace_path enabled
+    config_dir = os.path.join(workspace_dir, ".coi")
+    os.makedirs(config_dir, exist_ok=True)
+    config_path = os.path.join(config_dir, "config.toml")
     with open(config_path, "w") as f:
         f.write(
             """

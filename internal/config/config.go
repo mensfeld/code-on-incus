@@ -19,7 +19,20 @@ type Config struct {
 	Security   SecurityConfig           `toml:"security"`
 	Monitoring MonitoringConfig         `toml:"monitoring"`
 	Timezone   TimezoneConfig           `toml:"timezone"`
+	Build      BuildConfig              `toml:"build"`
 	Profiles   map[string]ProfileConfig `toml:"profiles"`
+}
+
+// BuildConfig defines how to build the project's custom image
+type BuildConfig struct {
+	Base     string   `toml:"base"`     // Base image (default: "coi")
+	Script   string   `toml:"script"`   // Path to build script (relative to config file or absolute)
+	Commands []string `toml:"commands"` // Inline build commands (alternative to script)
+}
+
+// HasBuildConfig returns true if a build configuration is defined (script or commands)
+func (b *BuildConfig) HasBuildConfig() bool {
+	return b.Script != "" || len(b.Commands) > 0
 }
 
 // TimezoneConfig contains timezone settings for containers
@@ -349,7 +362,7 @@ func GetConfigPaths() []string {
 	paths := []string{
 		"/etc/coi/config.toml",                            // System config
 		filepath.Join(homeDir, ".config/coi/config.toml"), // User config
-		filepath.Join(workDir, ".coi.toml"),               // Project config
+		filepath.Join(workDir, ".coi", "config.toml"),     // Project config (.coi/config.toml)
 	}
 
 	// COI_CONFIG environment variable has highest priority
@@ -545,6 +558,17 @@ func (c *Config) Merge(other *Config) {
 	}
 	if other.Timezone.Name != "" {
 		c.Timezone.Name = other.Timezone.Name
+	}
+
+	// Merge build config
+	if other.Build.Base != "" {
+		c.Build.Base = other.Build.Base
+	}
+	if other.Build.Script != "" {
+		c.Build.Script = other.Build.Script
+	}
+	if len(other.Build.Commands) > 0 {
+		c.Build.Commands = other.Build.Commands
 	}
 
 	// Merge profiles

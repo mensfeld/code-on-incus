@@ -339,7 +339,9 @@ class TestSecurityConfigAdditionalPaths:
 [security]
 additional_protected_paths = [".idea"]
 """
-        config_file = Path(workspace_dir) / ".coi.toml"
+        config_dir = Path(workspace_dir) / ".coi"
+        config_dir.mkdir(exist_ok=True)
+        config_file = config_dir / "config.toml"
         config_file.write_text(config_content)
 
         # Create .idea directory (simulating IntelliJ project)
@@ -382,7 +384,9 @@ additional_protected_paths = [".idea"]
 [security]
 additional_protected_paths = [".idea"]
 """
-        config_file = Path(workspace_dir) / ".coi.toml"
+        config_dir = Path(workspace_dir) / ".coi"
+        config_dir.mkdir(exist_ok=True)
+        config_file = config_dir / "config.toml"
         config_file.write_text(config_content)
 
         # Initialize git repo (for .git/hooks default protection)
@@ -421,7 +425,9 @@ class TestSecurityConfigCustomPaths:
 [security]
 protected_paths = [".git/hooks"]
 """
-        config_file = Path(workspace_dir) / ".coi.toml"
+        config_dir = Path(workspace_dir) / ".coi"
+        config_dir.mkdir(exist_ok=True)
+        config_file = config_dir / "config.toml"
         config_file.write_text(config_content)
 
         # Initialize git repo
@@ -464,7 +470,9 @@ class TestSecurityConfigDisableProtection:
 [security]
 disable_protection = true
 """
-        config_file = Path(workspace_dir) / ".coi.toml"
+        config_dir = Path(workspace_dir) / ".coi"
+        config_dir.mkdir(exist_ok=True)
+        config_file = config_dir / "config.toml"
         config_file.write_text(config_content)
 
         # Initialize git repo
@@ -676,7 +684,9 @@ class TestWritableGitHooksFlagBackwardsCompat:
 [git]
 writable_hooks = true
 """
-        config_file = Path(workspace_dir) / ".coi.toml"
+        config_dir = Path(workspace_dir) / ".coi"
+        config_dir.mkdir(exist_ok=True)
+        config_file = config_dir / "config.toml"
         config_file.write_text(config_content)
 
         # Initialize git repo

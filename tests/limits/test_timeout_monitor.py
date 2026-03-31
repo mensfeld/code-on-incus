@@ -174,7 +174,9 @@ def test_normal_exit_before_timeout(coi_binary, workspace_dir, cleanup_container
 def test_timeout_applied_in_shell_mode(coi_binary, workspace_dir, cleanup_containers):
     """Test that timeout works in shell mode (not just run mode)."""
     # Create config with timeout
-    project_config = Path(workspace_dir) / ".coi.toml"
+    project_config_dir = Path(workspace_dir) / ".coi"
+    project_config_dir.mkdir(exist_ok=True)
+    project_config = project_config_dir / "config.toml"
     config_content = """
 [limits.runtime]
 max_duration = "10s"

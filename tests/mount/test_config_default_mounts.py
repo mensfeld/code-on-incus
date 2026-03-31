@@ -14,7 +14,7 @@ def test_config_default_mounts(coi_binary, cleanup_containers, workspace_dir, tm
     (mount1 / "file1.txt").write_text("content1")
     (mount2 / "file2.txt").write_text("content2")
 
-    # Create config file in current working directory (.coi.toml)
+    # Create config file in current working directory (.coi/config.toml)
     # Config is loaded from cwd, not from workspace directory
     config_content = f"""
 [mounts]
@@ -27,7 +27,9 @@ host = "{mount2}"
 container = "/mnt/data2"
 """
 
-    config_file = Path(workspace_dir) / ".coi.toml"
+    config_dir = Path(workspace_dir) / ".coi"
+    config_dir.mkdir(exist_ok=True)
+    config_file = config_dir / "config.toml"
     config_file.write_text(config_content)
 
     # Run from workspace directory so config is loaded
@@ -43,7 +45,7 @@ container = "/mnt/data2"
         capture_output=True,
         text=True,
         timeout=120,
-        cwd=workspace_dir,  # Run from workspace directory to load .coi.toml
+        cwd=workspace_dir,  # Run from workspace directory to load .coi/config.toml
     )
 
     assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
@@ -60,13 +62,15 @@ def test_cli_overrides_config_mount(coi_binary, cleanup_containers, workspace_di
     (config_mount / "file.txt").write_text("from-config")
     (cli_mount / "file.txt").write_text("from-cli")
 
-    # Create config file in workspace directory
+    # Create config file in workspace directory (.coi/config.toml)
     config_content = f"""
 [[mounts.default]]
 host = "{config_mount}"
 container = "/data"
 """
-    config_file = Path(workspace_dir) / ".coi.toml"
+    config_dir = Path(workspace_dir) / ".coi"
+    config_dir.mkdir(exist_ok=True)
+    config_file = config_dir / "config.toml"
     config_file.write_text(config_content)
 
     # CLI also mounts to /data (should override)
@@ -75,7 +79,7 @@ container = "/data"
         capture_output=True,
         text=True,
         timeout=120,
-        cwd=workspace_dir,  # Run from workspace directory to load .coi.toml
+        cwd=workspace_dir,  # Run from workspace directory to load .coi/config.toml
     )
 
     assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"

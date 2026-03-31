@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 )
@@ -13,9 +14,14 @@ import (
 // 1. Built-in defaults
 // 2. System config (/etc/coi/config.toml)
 // 3. User config (~/.config/coi/config.toml)
-// 4. Project config (./.coi.toml)
+// 4. Project config (./.coi/config.toml)
 // 5. Environment variables (CLAUDE_ON_INCUS_* or COI_*)
 func Load() (*Config, error) {
+	// Check for deprecated .coi.toml in project root
+	if err := checkDeprecatedConfig(); err != nil {
+		return nil, err
+	}
+
 	// Start with defaults
 	cfg := GetDefaultConfig()
 
@@ -53,6 +59,12 @@ func loadConfigFile(cfg *Config, path string) error {
 	var fileCfg Config
 	if _, err := toml.DecodeFile(path, &fileCfg); err != nil {
 		return err
+	}
+
+	// Resolve build script path relative to config file location
+	if fileCfg.Build.Script != "" {
+		configDir := filepath.Dir(path)
+		fileCfg.Build.Script = resolveRelativePath(configDir, fileCfg.Build.Script)
 	}
 
 	// Merge into main config
@@ -260,6 +272,13 @@ writable_hooks = false
 # To disable protection entirely (not recommended):
 # disable_protection = true
 
+[build]
+# Build configuration for custom images
+# When defaults.image is set to a custom name, 'coi build' uses this config.
+# base = "coi"                    # Base image to build from (default: "coi")
+# script = "build.sh"             # Path to build script (relative to config file)
+# commands = ["mise install ruby@3.3", "gem install bundler"]  # Or inline commands
+
 # Example profile for Rust development with persistent container
 # [profiles.rust]
 # image = "coi-rust"
@@ -293,4 +312,32 @@ writable_hooks = false
 
 	// Write file
 	return os.WriteFile(path, []byte(example), 0o644)
+}
+
+// checkDeprecatedConfig checks for the deprecated .coi.toml file in the current directory.
+// Returns an error with migration instructions if found.
+func checkDeprecatedConfig() error {
+	workDir, err := os.Getwd()
+	if err != nil {
+		return nil // Can't check, skip
+	}
+
+	oldPath := filepath.Join(workDir, ".coi.toml")
+	if _, err := os.Stat(oldPath); err == nil {
+		return fmt.Errorf(
+			"found .coi.toml in project root. As of this version, project config must be placed in .coi/config.toml. " +
+				"Please move your config: mkdir -p .coi && mv .coi.toml .coi/config.toml",
+		)
+	}
+
+	return nil
+}
+
+// resolveRelativePath resolves a path relative to a base directory.
+// Absolute paths and ~-prefixed paths are returned as-is (with ~ expanded).
+func resolveRelativePath(baseDir, path string) string {
+	if filepath.IsAbs(path) || strings.HasPrefix(path, "~") {
+		return ExpandPath(path)
+	}
+	return filepath.Join(baseDir, path)
 }

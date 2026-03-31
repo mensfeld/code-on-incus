@@ -28,13 +28,15 @@ def test_auto_context_opencode_instructions_injected(coi_binary, cleanup_contain
     SANDBOX_CONTEXT.md when auto_context is enabled.
 
     Flow:
-    1. Write .coi.toml with [tool] name = "opencode"
+    1. Write .coi/config.toml with [tool] name = "opencode"
     2. Start coi shell
     3. While running, inspect ~/.config/opencode/opencode.json via incus exec
     4. Verify it contains "instructions" field with SANDBOX_CONTEXT.md path
     5. Verify permission bypass is also present
     """
-    config_path = os.path.join(workspace_dir, ".coi.toml")
+    config_dir = os.path.join(workspace_dir, ".coi")
+    os.makedirs(config_dir, exist_ok=True)
+    config_path = os.path.join(config_dir, "config.toml")
     with open(config_path, "w") as f:
         f.write('[tool]\nname = "opencode"\n')
 

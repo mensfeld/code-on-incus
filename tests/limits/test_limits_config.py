@@ -81,7 +81,9 @@ max_processes = 100
 def test_profile_limits_override_global(coi_binary, workspace_dir, cleanup_containers):
     """Test that profile limits override global limits."""
     # Create project config with profile
-    project_config = Path(workspace_dir) / ".coi.toml"
+    project_config_dir = Path(workspace_dir) / ".coi"
+    project_config_dir.mkdir(exist_ok=True)
+    project_config = project_config_dir / "config.toml"
 
     config_content = """
 [limits.cpu]

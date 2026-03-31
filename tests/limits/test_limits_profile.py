@@ -17,7 +17,9 @@ def test_profile_with_limits(coi_binary, workspace_dir, cleanup_containers):
     container_name = f"coi-{Path(workspace_dir).name}-1"
 
     # Create config with profile that has limits
-    project_config = Path(workspace_dir) / ".coi.toml"
+    project_config_dir = Path(workspace_dir) / ".coi"
+    project_config_dir.mkdir(exist_ok=True)
+    project_config = project_config_dir / "config.toml"
     config_content = """
 [profiles.limited]
 image = "coi"
@@ -80,7 +82,9 @@ max_processes = 50
 def test_multiple_profiles_different_limits(coi_binary, workspace_dir, cleanup_containers):
     """Test that different profiles can have different limits."""
     # Create config with two profiles with different limits
-    project_config = Path(workspace_dir) / ".coi.toml"
+    project_config_dir = Path(workspace_dir) / ".coi"
+    project_config_dir.mkdir(exist_ok=True)
+    project_config = project_config_dir / "config.toml"
     config_content = """
 [profiles.small]
 image = "coi"
@@ -179,7 +183,9 @@ def test_profile_partial_limits(coi_binary, workspace_dir, cleanup_containers):
     container_name = f"coi-{Path(workspace_dir).name}-1"
 
     # Create profile with only CPU limit
-    project_config = Path(workspace_dir) / ".coi.toml"
+    project_config_dir = Path(workspace_dir) / ".coi"
+    project_config_dir.mkdir(exist_ok=True)
+    project_config = project_config_dir / "config.toml"
     config_content = """
 [profiles.cpu_only]
 image = "coi"
@@ -229,7 +235,9 @@ def test_profile_limits_with_global_config(coi_binary, workspace_dir, cleanup_co
     container_name = f"coi-{Path(workspace_dir).name}-1"
 
     # Create config with both global and profile limits
-    project_config = Path(workspace_dir) / ".coi.toml"
+    project_config_dir = Path(workspace_dir) / ".coi"
+    project_config_dir.mkdir(exist_ok=True)
+    project_config = project_config_dir / "config.toml"
     config_content = """
 # Global limits
 [limits.cpu]
@@ -294,7 +302,9 @@ def test_cli_flags_override_profile_limits(coi_binary, workspace_dir, cleanup_co
     container_name = f"coi-{Path(workspace_dir).name}-1"
 
     # Create profile with limits
-    project_config = Path(workspace_dir) / ".coi.toml"
+    project_config_dir = Path(workspace_dir) / ".coi"
+    project_config_dir.mkdir(exist_ok=True)
+    project_config = project_config_dir / "config.toml"
     config_content = """
 [profiles.base]
 image = "coi"
@@ -350,7 +360,9 @@ def test_profile_without_limits_uses_global(coi_binary, workspace_dir, cleanup_c
     container_name = f"coi-{Path(workspace_dir).name}-1"
 
     # Create config with global limits and profile without limits
-    project_config = Path(workspace_dir) / ".coi.toml"
+    project_config_dir = Path(workspace_dir) / ".coi"
+    project_config_dir.mkdir(exist_ok=True)
+    project_config = project_config_dir / "config.toml"
     config_content = """
 [limits.cpu]
 count = "2"

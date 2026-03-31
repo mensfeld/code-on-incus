@@ -18,7 +18,9 @@ def test_cli_flags_override_config(coi_binary, workspace_dir, cleanup_containers
     container_name = f"coi-{Path(workspace_dir).name}-1"
 
     # Create project config with limits
-    project_config = Path(workspace_dir) / ".coi.toml"
+    project_config_dir = Path(workspace_dir) / ".coi"
+    project_config_dir.mkdir(exist_ok=True)
+    project_config = project_config_dir / "config.toml"
     config_content = """
 [limits.cpu]
 count = "4"
@@ -69,7 +71,9 @@ def test_cli_flags_override_profile(coi_binary, workspace_dir, cleanup_container
     container_name = f"coi-{Path(workspace_dir).name}-1"
 
     # Create project config with profile
-    project_config = Path(workspace_dir) / ".coi.toml"
+    project_config_dir = Path(workspace_dir) / ".coi"
+    project_config_dir.mkdir(exist_ok=True)
+    project_config = project_config_dir / "config.toml"
     config_content = """
 [profiles.limited]
 image = "coi"
@@ -170,7 +174,9 @@ def test_profile_overrides_config(coi_binary, workspace_dir, cleanup_containers)
     container_name = f"coi-{Path(workspace_dir).name}-1"
 
     # Create project config with both global and profile limits
-    project_config = Path(workspace_dir) / ".coi.toml"
+    project_config_dir = Path(workspace_dir) / ".coi"
+    project_config_dir.mkdir(exist_ok=True)
+    project_config = project_config_dir / "config.toml"
     config_content = """
 [limits.cpu]
 count = "4"
@@ -230,7 +236,9 @@ def test_partial_cli_override(coi_binary, workspace_dir, cleanup_containers):
     container_name = f"coi-{Path(workspace_dir).name}-1"
 
     # Create project config with multiple limits
-    project_config = Path(workspace_dir) / ".coi.toml"
+    project_config_dir = Path(workspace_dir) / ".coi"
+    project_config_dir.mkdir(exist_ok=True)
+    project_config = project_config_dir / "config.toml"
     config_content = """
 [limits.cpu]
 count = "4"
@@ -280,7 +288,9 @@ def test_empty_cli_flag_does_not_override(coi_binary, workspace_dir, cleanup_con
     container_name = f"coi-{Path(workspace_dir).name}-1"
 
     # Create project config with limits
-    project_config = Path(workspace_dir) / ".coi.toml"
+    project_config_dir = Path(workspace_dir) / ".coi"
+    project_config_dir.mkdir(exist_ok=True)
+    project_config = project_config_dir / "config.toml"
     config_content = """
 [limits.cpu]
 count = "2"
