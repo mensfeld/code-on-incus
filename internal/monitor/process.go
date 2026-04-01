@@ -98,17 +98,54 @@ func checkEnvAccess(command string) bool {
 		}
 	}
 
-	// Check for grep/awk/sed parsing environment variables
-	if strings.Contains(cmdLower, "grep") && (strings.Contains(cmdLower, "api") ||
-		strings.Contains(cmdLower, "key") ||
-		strings.Contains(cmdLower, "password") ||
-		strings.Contains(cmdLower, "secret") ||
-		strings.Contains(cmdLower, "token")) {
+	// Check for grep/awk/sed parsing environment variables with secret-related keywords
+	secretKeywords := []string{"api", "key", "password", "secret", "token", "credential", "auth"}
+	if strings.Contains(cmdLower, "grep") || strings.Contains(cmdLower, "awk") || strings.Contains(cmdLower, "sed") {
+		for _, keyword := range secretKeywords {
+			if strings.Contains(cmdLower, keyword) {
+				return true
+			}
+		}
+	}
+
+	// Check for /proc/*/environ access via any tool
+	if strings.Contains(cmdLower, "/proc/") && strings.Contains(cmdLower, "environ") {
 		return true
 	}
 
-	// Check for /proc/*/environ access
-	if strings.Contains(cmdLower, "/proc/") && strings.Contains(cmdLower, "environ") {
+	// Check for language-specific environment access patterns
+	langEnvPatterns := []string{
+		// Python: os.environ, os.getenv
+		"os.environ",
+		"os.getenv",
+		// Node.js: process.env
+		"process.env",
+		// Ruby: ENV[
+		"env[",
+		// awk ENVIRON array
+		"environ[",
+	}
+	for _, pattern := range langEnvPatterns {
+		if strings.Contains(cmdLower, pattern) {
+			return true
+		}
+	}
+
+	// Check for binary tools reading /proc/*/environ
+	procEnvTools := []string{
+		"strings /proc",
+		"xxd /proc",
+		"hexdump /proc",
+		"xargs",
+	}
+	for _, tool := range procEnvTools {
+		if strings.Contains(cmdLower, tool) && strings.Contains(cmdLower, "environ") {
+			return true
+		}
+	}
+
+	// Check for xargs specifically reading null-delimited environ files
+	if strings.Contains(cmdLower, "xargs") && strings.Contains(cmdLower, "/proc/") {
 		return true
 	}
 

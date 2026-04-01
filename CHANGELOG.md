@@ -19,7 +19,7 @@
 ### Enhancements
 
 - [Enhancement] **Auto-detect container for `coi monitor`** — `coi monitor` now auto-detects the container from the current workspace when no container name is provided, using the same resolution strategy as `coi snapshot`: (1) positional argument, (2) `COI_CONTAINER` env var, (3) workspace-based detection via running containers. Also adds `--workspace`/`-w` flag to specify workspace path explicitly. Includes integration tests for all resolution paths. Fixes #112.
-
+- [Enhancement] **Expanded environment scanning detection patterns** — The monitoring system's env scanning detector now catches significantly more evasion techniques: Python (`os.environ`, `os.getenv`), Node.js (`process.env`), Ruby (`ENV[]`), awk (`ENVIRON[]`), `sed`/`awk` with secret-related keywords (`credential`, `auth` in addition to existing `api`, `key`, `password`, `secret`, `token`), and binary tools reading `/proc/*/environ` (`strings`, `xxd`, `hexdump`, `xargs`). Includes Go unit tests covering all new patterns and negative cases, plus integration tests for Python/Node/grep/awk/sed/strings detection.
 
 ### Features
 
