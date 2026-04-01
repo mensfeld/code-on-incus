@@ -240,7 +240,12 @@ func updateCommand(cmd *cobra.Command, args []string) error {
 func fetchLatestRelease() (*githubRelease, error) {
 	url := "https://api.github.com/repos/mensfeld/code-on-incus/releases/latest"
 
-	resp, err := http.Get(url)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("HTTP request failed: %w", err)
 	}
@@ -264,7 +269,12 @@ func fetchLatestRelease() (*githubRelease, error) {
 
 // downloadFile downloads a URL and returns the response body as bytes
 func downloadFile(url string) ([]byte, error) {
-	resp, err := http.Get(url)
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
