@@ -27,21 +27,15 @@ def test_update_check_shows_versions(coi_binary):
         timeout=30,
     )
 
-    assert result.returncode == 0, (
-        f"Update check should succeed. stderr: {result.stderr}"
-    )
+    assert result.returncode == 0, f"Update check should succeed. stderr: {result.stderr}"
 
     output = result.stdout
 
     # Should show current version
-    assert "Current version:" in output, (
-        f"Should show current version. Got:\n{output}"
-    )
+    assert "Current version:" in output, f"Should show current version. Got:\n{output}"
 
     # Should show latest release
-    assert "Latest release:" in output, (
-        f"Should show latest release. Got:\n{output}"
-    )
+    assert "Latest release:" in output, f"Should show latest release. Got:\n{output}"
 
 
 def test_update_check_dev_build(coi_binary):
@@ -73,9 +67,7 @@ def test_update_check_dev_build(coi_binary):
         timeout=30,
     )
 
-    assert result.returncode == 0, (
-        f"Update check should succeed. stderr: {result.stderr}"
-    )
+    assert result.returncode == 0, f"Update check should succeed. stderr: {result.stderr}"
 
     output = result.stdout
 

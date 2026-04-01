@@ -50,6 +50,4 @@ def test_update_dev_version_refuses_without_force(coi_binary):
     )
 
     # Should suggest --force
-    assert "--force" in output, (
-        f"Should suggest --force flag. Got:\n{output}"
-    )
+    assert "--force" in output, f"Should suggest --force flag. Got:\n{output}"
