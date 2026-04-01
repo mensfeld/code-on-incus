@@ -357,6 +357,52 @@ Place a `.coi/config.toml` in any repository root to auto-configure COI for that
 
 See the [Configuration wiki page](https://github.com/mensfeld/code-on-incus/wiki/Configuration) for the full config reference, per-repo setup, profiles, and environment variables.
 
+## Profiles
+
+Profiles are reusable container configurations bundling image, tool, limits, mounts, build scripts, and environment into named templates.
+
+**Inline profiles** in any `config.toml`:
+
+```toml
+[profiles.rust-dev]
+image = "coi-rust"
+persistent = true
+environment = { RUST_BACKTRACE = "1" }
+forward_env = ["CARGO_HOME"]
+
+[profiles.rust-dev.tool]
+name = "claude"
+permission_mode = "bypass"
+
+[profiles.rust-dev.limits.cpu]
+count = "4"
+```
+
+**Profile directories** — self-contained directories with their own config and build scripts:
+
+```
+.coi/profiles/
+├── rust-dev/
+│   ├── config.toml      # full profile config
+│   └── build.sh         # profile-specific build script
+└── python-ml/
+    ├── config.toml
+    └── setup.sh
+```
+
+```bash
+# Use a profile
+coi shell --profile rust-dev
+
+# List all available profiles
+coi profile list
+
+# Show profile details
+coi profile show rust-dev
+```
+
+Profile directories are scanned at all config levels (`/etc/coi/profiles/`, `~/.config/coi/profiles/`, `.coi/profiles/`). Inline `[profiles.X]` in `config.toml` overrides a directory profile of the same name.
+
 ## Resource and Time Limits
 
 See the [Resource and Time Limits guide](https://github.com/mensfeld/code-on-incus/wiki/Resource-and-Time-Limits) for complete documentation on controlling container resource consumption and runtime.
