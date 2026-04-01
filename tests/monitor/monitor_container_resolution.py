@@ -47,9 +47,7 @@ def test_monitor_auto_resolve_single_container(coi_binary, cleanup_containers, w
         timeout=60,
         cwd=workspace_dir,
     )
-    assert result.returncode == 0, (
-        f"Monitor should auto-resolve container. stderr: {result.stderr}"
-    )
+    assert result.returncode == 0, f"Monitor should auto-resolve container. stderr: {result.stderr}"
     assert f"Monitoring container: {container_name}" in result.stderr, (
         "Should print resolved container name to stderr"
     )
