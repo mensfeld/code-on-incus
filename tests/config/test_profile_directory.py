@@ -87,14 +87,10 @@ def test_profile_directory_image(coi_binary, cleanup_containers, workspace_dir):
 
     assert result.returncode == 0, f"Run should succeed. stderr: {result.stderr}"
     combined = result.stdout + result.stderr
-    assert "profile-dir-ok" in combined, (
-        f"Expected output from container. Got:\n{combined}"
-    )
+    assert "profile-dir-ok" in combined, f"Expected output from container. Got:\n{combined}"
 
 
-def test_inline_profile_overrides_directory_profile(
-    coi_binary, cleanup_containers, workspace_dir
-):
+def test_inline_profile_overrides_directory_profile(coi_binary, cleanup_containers, workspace_dir):
     """
     Test that inline [profiles.X] overrides directory profile of same name.
 

@@ -44,9 +44,7 @@ def test_empty_profile_directory_skipped(coi_binary, cleanup_containers, workspa
     assert result.returncode == 0, f"Should succeed. stderr: {result.stderr}"
     output = result.stdout + result.stderr
     assert "valid" in output, f"Valid profile should be listed. Got:\n{output}"
-    assert "emptydir" not in output, (
-        f"Empty directory should not appear as profile. Got:\n{output}"
-    )
+    assert "emptydir" not in output, f"Empty directory should not appear as profile. Got:\n{output}"
 
 
 def test_invalid_toml_profile_skipped(coi_binary, cleanup_containers, workspace_dir):
@@ -80,14 +78,10 @@ def test_invalid_toml_profile_skipped(coi_binary, cleanup_containers, workspace_
     assert result.returncode == 0, f"Should succeed despite broken profile. stderr: {result.stderr}"
     output = result.stdout + result.stderr
     assert "good" in output, f"Valid profile should still load. Got:\n{output}"
-    assert "broken" not in output, (
-        f"Broken profile should not appear. Got:\n{output}"
-    )
+    assert "broken" not in output, f"Broken profile should not appear. Got:\n{output}"
 
 
-def test_profile_dir_with_non_config_files_only(
-    coi_binary, cleanup_containers, workspace_dir
-):
+def test_profile_dir_with_non_config_files_only(coi_binary, cleanup_containers, workspace_dir):
     """
     Test that a profile directory with files but no config.toml is ignored.
     """
@@ -145,9 +139,7 @@ def test_multiple_directory_profiles(coi_binary, cleanup_containers, workspace_d
     output = result.stdout + result.stderr
     for name in ["alpha", "beta", "gamma"]:
         assert name in output, f"Profile '{name}' should be listed. Got:\n{output}"
-        assert f"img-{name}" in output, (
-            f"Image for '{name}' should be shown. Got:\n{output}"
-        )
+        assert f"img-{name}" in output, f"Image for '{name}' should be shown. Got:\n{output}"
 
 
 def test_profile_nonexistent_build_script_still_loads(
@@ -206,9 +198,7 @@ script = "this-script-does-not-exist.sh"
         cwd=workspace_dir,
     )
 
-    assert result.returncode == 0, (
-        f"profile show should succeed. stderr: {result.stderr}"
-    )
+    assert result.returncode == 0, f"profile show should succeed. stderr: {result.stderr}"
 
 
 def test_profile_with_only_build_section(coi_binary, cleanup_containers, workspace_dir):

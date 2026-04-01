@@ -56,9 +56,7 @@ name = "aider"
     )
 
 
-def test_profile_tool_inline_overrides_directory(
-    coi_binary, cleanup_containers, workspace_dir
-):
+def test_profile_tool_inline_overrides_directory(coi_binary, cleanup_containers, workspace_dir):
     """
     Test that inline profile tool settings override directory profile.
 
@@ -108,6 +106,4 @@ environment = { TOOL_SOURCE = "inline" }
     assert result.returncode == 0, f"Run should succeed. stderr: {result.stderr}"
     combined = result.stdout + result.stderr
     # Inline profile replaced the directory profile entirely (including losing tool config)
-    assert "SRC=inline" in combined, (
-        f"Inline profile should have been applied. Got:\n{combined}"
-    )
+    assert "SRC=inline" in combined, f"Inline profile should have been applied. Got:\n{combined}"

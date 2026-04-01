@@ -138,9 +138,7 @@ environment = { KEY = "val" }
     assert "KEY" in output, f"Should show environment key. Got:\n{output}"
 
 
-def test_profile_show_empty_directory_profile(
-    coi_binary, cleanup_containers, workspace_dir
-):
+def test_profile_show_empty_directory_profile(coi_binary, cleanup_containers, workspace_dir):
     """
     Test that a profile directory with minimal config (just an image) shows correctly.
     """

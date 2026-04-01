@@ -11,9 +11,7 @@ import subprocess
 from pathlib import Path
 
 
-def test_profile_build_script_relative_resolution(
-    coi_binary, cleanup_containers, workspace_dir
-):
+def test_profile_build_script_relative_resolution(coi_binary, cleanup_containers, workspace_dir):
     """
     Test that build.script in a profile directory is resolved relative to that directory.
 
@@ -58,9 +56,7 @@ script = "build.sh"
     )
 
 
-def test_profile_nonexistent_build_script(
-    coi_binary, cleanup_containers, workspace_dir
-):
+def test_profile_nonexistent_build_script(coi_binary, cleanup_containers, workspace_dir):
     """
     Test that referencing a non-existent build script in a profile is handled.
 
@@ -155,6 +151,4 @@ commands = ["echo hello", "echo world"]
 
     assert result.returncode == 0, f"profile show should succeed. stderr: {result.stderr}"
     combined = result.stdout + result.stderr
-    assert "echo hello" in combined, (
-        f"Build commands should be displayed. Got:\n{combined}"
-    )
+    assert "echo hello" in combined, f"Build commands should be displayed. Got:\n{combined}"

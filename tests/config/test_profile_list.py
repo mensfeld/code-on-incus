@@ -96,7 +96,9 @@ def test_profile_list_empty(coi_binary, cleanup_containers, workspace_dir):
         cwd=workspace_dir,
     )
 
-    assert result.returncode == 0, f"profile list should succeed even with no profiles. stderr: {result.stderr}"
+    assert result.returncode == 0, (
+        f"profile list should succeed even with no profiles. stderr: {result.stderr}"
+    )
     output = result.stdout + result.stderr
     assert "no profiles" in output.lower(), (
         f"Should indicate no profiles configured. Got:\n{output}"
