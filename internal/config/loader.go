@@ -61,16 +61,71 @@ func loadConfigFile(cfg *Config, path string) error {
 		return err
 	}
 
+	configDir := filepath.Dir(path)
+
 	// Resolve build script path relative to config file location
 	if fileCfg.Build.Script != "" {
-		configDir := filepath.Dir(path)
 		fileCfg.Build.Script = resolveRelativePath(configDir, fileCfg.Build.Script)
+	}
+
+	// Load profile directories before merging inline profiles.
+	// Directory profiles are loaded first, then inline [profiles.X] from the same
+	// config file override them (since Merge replaces profiles by name).
+	loadProfileDirectories(cfg, configDir)
+
+	// Tag inline profiles with their source
+	for name, p := range fileCfg.Profiles {
+		p.Source = path + " [profiles." + name + "]"
+		fileCfg.Profiles[name] = p
 	}
 
 	// Merge into main config
 	cfg.Merge(&fileCfg)
 
 	return nil
+}
+
+// loadProfileDirectories scans configDir/profiles/ for subdirectories containing config.toml
+// and adds them to cfg.Profiles. Each subdirectory name becomes the profile name.
+func loadProfileDirectories(cfg *Config, configDir string) {
+	profilesDir := filepath.Join(configDir, "profiles")
+	entries, err := os.ReadDir(profilesDir)
+	if err != nil {
+		return // Directory doesn't exist or can't be read — that's fine
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		profileName := entry.Name()
+		profileConfigPath := filepath.Join(profilesDir, profileName, "config.toml")
+
+		if _, err := os.Stat(profileConfigPath); err != nil {
+			continue // No config.toml in this subdirectory
+		}
+
+		var profileCfg ProfileConfig
+		if _, err := toml.DecodeFile(profileConfigPath, &profileCfg); err != nil {
+			continue // Skip profiles that can't be parsed
+		}
+
+		// Resolve build script path relative to profile directory
+		profileDir := filepath.Join(profilesDir, profileName)
+		if profileCfg.Build != nil && profileCfg.Build.Script != "" {
+			profileCfg.Build.Script = resolveRelativePath(profileDir, profileCfg.Build.Script)
+		}
+
+		// Tag with source location
+		profileCfg.Source = profileConfigPath
+
+		// Add to profiles (may be overridden by inline profiles later)
+		if cfg.Profiles == nil {
+			cfg.Profiles = make(map[string]ProfileConfig)
+		}
+		cfg.Profiles[profileName] = profileCfg
+	}
 }
 
 // loadFromEnv loads configuration from environment variables
@@ -302,6 +357,58 @@ writable_hooks = false
 # limit = "2GiB"
 # [profiles.limited.limits.runtime]
 # max_duration = "2h"
+
+# === Profile Directories ===
+# Profiles can also be defined as self-contained directories under profiles/.
+# Each directory contains its own config.toml (and optionally a build script).
+#
+# Directory structure:
+#   .coi/
+#   ├── config.toml              # project config (may contain inline [profiles.X])
+#   └── profiles/
+#       ├── rust-dev/
+#       │   ├── config.toml      # profile config
+#       │   └── build.sh         # profile-specific build script
+#       └── python-ml/
+#           ├── config.toml
+#           └── setup.sh
+#
+# Profile directory config.toml example (.coi/profiles/rust-dev/config.toml):
+#   image = "coi-rust"
+#   persistent = true
+#   forward_env = ["RUST_BACKTRACE"]
+#
+#   [environment]
+#   RUST_BACKTRACE = "1"
+#
+#   [tool]
+#   name = "claude"
+#   permission_mode = "bypass"
+#
+#   [tool.claude]
+#   effort_level = "high"
+#
+#   [build]
+#   base = "coi"
+#   script = "build.sh"    # resolved relative to this config.toml
+#
+#   [[mounts]]
+#   host = "~/.cargo"
+#   container = "/home/code/.cargo"
+#
+#   [limits.cpu]
+#   count = "4"
+#
+#   [network]
+#   mode = "restricted"
+#
+# Profile directory scan locations (lowest to highest precedence):
+#   1. /etc/coi/profiles/NAME/config.toml
+#   2. ~/.config/coi/profiles/NAME/config.toml
+#   3. .coi/profiles/NAME/config.toml
+#
+# Inline [profiles.X] in config.toml overrides a directory profile of the same name.
+# Use 'coi profile list' and 'coi profile show <name>' to inspect loaded profiles.
 `
 
 	// Create directory if it doesn't exist

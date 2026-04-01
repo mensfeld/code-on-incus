@@ -1,0 +1,169 @@
+"""
+Test coi profile show command.
+
+Tests that:
+1. Shows all profile fields correctly
+2. Handles non-existent profile name
+3. Shows directory profile details including resolved paths
+"""
+
+import subprocess
+from pathlib import Path
+
+
+def test_profile_show_full(coi_binary, cleanup_containers, workspace_dir):
+    """
+    Test that coi profile show displays all fields of a profile.
+    """
+    profile_dir = Path(workspace_dir) / ".coi" / "profiles" / "fullprof"
+    profile_dir.mkdir(parents=True)
+    (profile_dir / "config.toml").write_text(
+        """
+image = "coi-full"
+persistent = true
+forward_env = ["MY_KEY"]
+
+[environment]
+MY_VAR = "hello"
+
+[tool]
+name = "claude"
+permission_mode = "bypass"
+
+[tool.claude]
+effort_level = "high"
+
+[[mounts]]
+host = "~/.config"
+container = "/home/code/.config"
+
+[limits.cpu]
+count = "4"
+
+[network]
+mode = "restricted"
+"""
+    )
+
+    result = subprocess.run(
+        [
+            coi_binary,
+            "profile",
+            "show",
+            "fullprof",
+            "--workspace",
+            workspace_dir,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=workspace_dir,
+    )
+
+    assert result.returncode == 0, f"profile show should succeed. stderr: {result.stderr}"
+    output = result.stdout + result.stderr
+
+    assert "fullprof" in output, f"Should show profile name. Got:\n{output}"
+    assert "coi-full" in output, f"Should show image. Got:\n{output}"
+    assert "true" in output, f"Should show persistent. Got:\n{output}"
+    assert "MY_KEY" in output, f"Should show forward_env. Got:\n{output}"
+    assert "MY_VAR" in output, f"Should show environment key. Got:\n{output}"
+    assert "claude" in output, f"Should show tool name. Got:\n{output}"
+    assert "bypass" in output, f"Should show permission mode. Got:\n{output}"
+    assert "high" in output, f"Should show effort level. Got:\n{output}"
+    assert "~/.config" in output, f"Should show mount host. Got:\n{output}"
+    assert "4" in output, f"Should show CPU count. Got:\n{output}"
+    assert "restricted" in output, f"Should show network mode. Got:\n{output}"
+
+
+def test_profile_show_not_found(coi_binary, cleanup_containers, workspace_dir):
+    """
+    Test that coi profile show with non-existent name fails.
+    """
+    result = subprocess.run(
+        [
+            coi_binary,
+            "profile",
+            "show",
+            "nonexistent",
+            "--workspace",
+            workspace_dir,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=workspace_dir,
+    )
+
+    assert result.returncode != 0, "profile show should fail for non-existent profile"
+    combined = result.stdout + result.stderr
+    assert "not found" in combined.lower(), (
+        f"Error should mention profile not found. Got:\n{combined}"
+    )
+
+
+def test_profile_show_inline(coi_binary, cleanup_containers, workspace_dir):
+    """
+    Test that coi profile show works for inline profiles too.
+    """
+    config_dir = Path(workspace_dir) / ".coi"
+    config_dir.mkdir(parents=True)
+    (config_dir / "config.toml").write_text(
+        """
+[profiles.inlineprof]
+image = "coi-inline"
+environment = { KEY = "val" }
+"""
+    )
+
+    result = subprocess.run(
+        [
+            coi_binary,
+            "profile",
+            "show",
+            "inlineprof",
+            "--workspace",
+            workspace_dir,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=workspace_dir,
+    )
+
+    assert result.returncode == 0, f"profile show should succeed. stderr: {result.stderr}"
+    output = result.stdout + result.stderr
+    assert "inlineprof" in output, f"Should show profile name. Got:\n{output}"
+    assert "coi-inline" in output, f"Should show image. Got:\n{output}"
+    assert "KEY" in output, f"Should show environment key. Got:\n{output}"
+
+
+def test_profile_show_empty_directory_profile(
+    coi_binary, cleanup_containers, workspace_dir
+):
+    """
+    Test that a profile directory with minimal config (just an image) shows correctly.
+    """
+    profile_dir = Path(workspace_dir) / ".coi" / "profiles" / "minimal"
+    profile_dir.mkdir(parents=True)
+    (profile_dir / "config.toml").write_text('image = "coi"\n')
+
+    result = subprocess.run(
+        [
+            coi_binary,
+            "profile",
+            "show",
+            "minimal",
+            "--workspace",
+            workspace_dir,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=workspace_dir,
+    )
+
+    assert result.returncode == 0, f"profile show should succeed. stderr: {result.stderr}"
+    output = result.stdout + result.stderr
+    assert "minimal" in output, f"Should show profile name. Got:\n{output}"
+    assert "coi" in output, f"Should show image. Got:\n{output}"

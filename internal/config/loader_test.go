@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -359,5 +360,481 @@ func TestEnsureDirectories(t *testing.T) {
 		} else if !info.IsDir() {
 			t.Errorf("Expected directory, got file: %s", dir)
 		}
+	}
+}
+
+func TestLoadProfileFromDirectory(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".coi")
+	profileDir := filepath.Join(configDir, "profiles", "rust-dev")
+	if err := os.MkdirAll(profileDir, 0o755); err != nil {
+		t.Fatalf("Failed to create profile dir: %v", err)
+	}
+
+	// Create profile config.toml
+	profileContent := `
+image = "coi-rust"
+persistent = true
+forward_env = ["RUST_BACKTRACE"]
+
+[environment]
+RUST_BACKTRACE = "1"
+
+[tool]
+name = "claude"
+permission_mode = "bypass"
+
+[tool.claude]
+effort_level = "high"
+
+[build]
+base = "coi"
+script = "build.sh"
+
+[[mounts]]
+host = "~/.cargo"
+container = "/home/code/.cargo"
+
+[limits.cpu]
+count = "4"
+
+[network]
+mode = "restricted"
+`
+	if err := os.WriteFile(filepath.Join(profileDir, "config.toml"), []byte(profileContent), 0o644); err != nil {
+		t.Fatalf("Failed to write profile config: %v", err)
+	}
+
+	// Create main config.toml (empty)
+	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte(""), 0o644); err != nil {
+		t.Fatalf("Failed to write main config: %v", err)
+	}
+
+	cfg := GetDefaultConfig()
+	if err := loadConfigFile(cfg, filepath.Join(configDir, "config.toml")); err != nil {
+		t.Fatalf("loadConfigFile() failed: %v", err)
+	}
+
+	// Verify profile was loaded
+	p := cfg.GetProfile("rust-dev")
+	if p == nil {
+		t.Fatal("Expected profile 'rust-dev' to be loaded from directory")
+	}
+
+	if p.Image != "coi-rust" {
+		t.Errorf("Expected image 'coi-rust', got %q", p.Image)
+	}
+	if p.Persistent == nil || !*p.Persistent {
+		t.Error("Expected persistent=true")
+	}
+	if len(p.ForwardEnv) != 1 || p.ForwardEnv[0] != "RUST_BACKTRACE" {
+		t.Errorf("Expected forward_env=[RUST_BACKTRACE], got %v", p.ForwardEnv)
+	}
+	if p.Environment["RUST_BACKTRACE"] != "1" {
+		t.Errorf("Expected RUST_BACKTRACE=1, got %q", p.Environment["RUST_BACKTRACE"])
+	}
+	if p.Tool == nil || p.Tool.Name != "claude" {
+		t.Error("Expected tool.name=claude")
+	}
+	if p.Tool.PermissionMode != "bypass" {
+		t.Errorf("Expected permission_mode=bypass, got %q", p.Tool.PermissionMode)
+	}
+	if p.Tool.Claude.EffortLevel != "high" {
+		t.Errorf("Expected effort_level=high, got %q", p.Tool.Claude.EffortLevel)
+	}
+	if p.Build == nil || p.Build.Base != "coi" {
+		t.Error("Expected build.base=coi")
+	}
+	if len(p.Mounts) != 1 || p.Mounts[0].Host != "~/.cargo" {
+		t.Errorf("Expected mount host=~/.cargo, got %v", p.Mounts)
+	}
+	if p.Network == nil || p.Network.Mode != NetworkModeRestricted {
+		t.Error("Expected network.mode=restricted")
+	}
+	if p.Limits == nil || p.Limits.CPU.Count != "4" {
+		t.Error("Expected limits.cpu.count=4")
+	}
+}
+
+func TestProfileDirectoryBuildScriptResolution(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".coi")
+	profileDir := filepath.Join(configDir, "profiles", "test")
+	if err := os.MkdirAll(profileDir, 0o755); err != nil {
+		t.Fatalf("Failed to create profile dir: %v", err)
+	}
+
+	profileContent := `
+[build]
+script = "build.sh"
+`
+	if err := os.WriteFile(filepath.Join(profileDir, "config.toml"), []byte(profileContent), 0o644); err != nil {
+		t.Fatalf("Failed to write profile config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte(""), 0o644); err != nil {
+		t.Fatalf("Failed to write main config: %v", err)
+	}
+
+	cfg := GetDefaultConfig()
+	if err := loadConfigFile(cfg, filepath.Join(configDir, "config.toml")); err != nil {
+		t.Fatalf("loadConfigFile() failed: %v", err)
+	}
+
+	p := cfg.GetProfile("test")
+	if p == nil {
+		t.Fatal("Expected profile 'test' to be loaded")
+	}
+
+	expectedScript := filepath.Join(profileDir, "build.sh")
+	if p.Build.Script != expectedScript {
+		t.Errorf("Expected build script %q, got %q", expectedScript, p.Build.Script)
+	}
+}
+
+func TestProfileDirectoryAbsoluteScriptPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".coi")
+	profileDir := filepath.Join(configDir, "profiles", "test")
+	if err := os.MkdirAll(profileDir, 0o755); err != nil {
+		t.Fatalf("Failed to create profile dir: %v", err)
+	}
+
+	profileContent := `
+[build]
+script = "/absolute/path/build.sh"
+`
+	if err := os.WriteFile(filepath.Join(profileDir, "config.toml"), []byte(profileContent), 0o644); err != nil {
+		t.Fatalf("Failed to write profile config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte(""), 0o644); err != nil {
+		t.Fatalf("Failed to write main config: %v", err)
+	}
+
+	cfg := GetDefaultConfig()
+	if err := loadConfigFile(cfg, filepath.Join(configDir, "config.toml")); err != nil {
+		t.Fatalf("loadConfigFile() failed: %v", err)
+	}
+
+	p := cfg.GetProfile("test")
+	if p == nil {
+		t.Fatal("Expected profile 'test' to be loaded")
+	}
+	if p.Build.Script != "/absolute/path/build.sh" {
+		t.Errorf("Expected absolute path preserved, got %q", p.Build.Script)
+	}
+}
+
+func TestInlineProfileOverridesDirectoryProfile(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".coi")
+	profileDir := filepath.Join(configDir, "profiles", "myprofile")
+	if err := os.MkdirAll(profileDir, 0o755); err != nil {
+		t.Fatalf("Failed to create profile dir: %v", err)
+	}
+
+	// Directory profile
+	dirProfileContent := `
+image = "dir-image"
+persistent = false
+`
+	if err := os.WriteFile(filepath.Join(profileDir, "config.toml"), []byte(dirProfileContent), 0o644); err != nil {
+		t.Fatalf("Failed to write dir profile config: %v", err)
+	}
+
+	// Inline profile in main config overrides
+	mainConfigContent := `
+[profiles.myprofile]
+image = "inline-image"
+persistent = true
+`
+	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte(mainConfigContent), 0o644); err != nil {
+		t.Fatalf("Failed to write main config: %v", err)
+	}
+
+	cfg := GetDefaultConfig()
+	if err := loadConfigFile(cfg, filepath.Join(configDir, "config.toml")); err != nil {
+		t.Fatalf("loadConfigFile() failed: %v", err)
+	}
+
+	p := cfg.GetProfile("myprofile")
+	if p == nil {
+		t.Fatal("Expected profile 'myprofile' to exist")
+	}
+
+	// Inline should win
+	if p.Image != "inline-image" {
+		t.Errorf("Expected inline image 'inline-image', got %q", p.Image)
+	}
+	if p.Persistent == nil || !*p.Persistent {
+		t.Error("Expected persistent=true from inline override")
+	}
+}
+
+func TestProfileDirectoryNoConfigToml(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".coi")
+	profileDir := filepath.Join(configDir, "profiles", "empty-profile")
+	if err := os.MkdirAll(profileDir, 0o755); err != nil {
+		t.Fatalf("Failed to create profile dir: %v", err)
+	}
+
+	// No config.toml in profile directory, just create main config
+	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte(""), 0o644); err != nil {
+		t.Fatalf("Failed to write main config: %v", err)
+	}
+
+	cfg := GetDefaultConfig()
+	if err := loadConfigFile(cfg, filepath.Join(configDir, "config.toml")); err != nil {
+		t.Fatalf("loadConfigFile() failed: %v", err)
+	}
+
+	// Profile should not be loaded (no config.toml)
+	p := cfg.GetProfile("empty-profile")
+	if p != nil {
+		t.Error("Profile without config.toml should not be loaded")
+	}
+}
+
+func TestProfileDirectoryWithFileNotDir(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".coi")
+	profilesDir := filepath.Join(configDir, "profiles")
+	if err := os.MkdirAll(profilesDir, 0o755); err != nil {
+		t.Fatalf("Failed to create profiles dir: %v", err)
+	}
+
+	// Create a file (not directory) inside profiles/
+	if err := os.WriteFile(filepath.Join(profilesDir, "not-a-dir"), []byte("hello"), 0o644); err != nil {
+		t.Fatalf("Failed to create file: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte(""), 0o644); err != nil {
+		t.Fatalf("Failed to write main config: %v", err)
+	}
+
+	cfg := GetDefaultConfig()
+	if err := loadConfigFile(cfg, filepath.Join(configDir, "config.toml")); err != nil {
+		t.Fatalf("loadConfigFile() failed: %v", err)
+	}
+
+	// Should not crash or add spurious profiles
+	p := cfg.GetProfile("not-a-dir")
+	if p != nil {
+		t.Error("Files in profiles/ dir should not be loaded as profiles")
+	}
+}
+
+func TestProfileDirectorySource(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".coi")
+	profileDir := filepath.Join(configDir, "profiles", "src-test")
+	if err := os.MkdirAll(profileDir, 0o755); err != nil {
+		t.Fatalf("Failed to create profile dir: %v", err)
+	}
+
+	profileContent := `image = "test-image"`
+	if err := os.WriteFile(filepath.Join(profileDir, "config.toml"), []byte(profileContent), 0o644); err != nil {
+		t.Fatalf("Failed to write profile config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte(""), 0o644); err != nil {
+		t.Fatalf("Failed to write main config: %v", err)
+	}
+
+	cfg := GetDefaultConfig()
+	if err := loadConfigFile(cfg, filepath.Join(configDir, "config.toml")); err != nil {
+		t.Fatalf("loadConfigFile() failed: %v", err)
+	}
+
+	p := cfg.GetProfile("src-test")
+	if p == nil {
+		t.Fatal("Expected profile 'src-test'")
+	}
+
+	expectedSource := filepath.Join(profileDir, "config.toml")
+	if p.Source != expectedSource {
+		t.Errorf("Expected source %q, got %q", expectedSource, p.Source)
+	}
+}
+
+func TestApplyProfileWithNewFields(t *testing.T) {
+	cfg := GetDefaultConfig()
+	cfg.Profiles["full"] = ProfileConfig{
+		Image:      "test-image",
+		Persistent: ptrBool(true),
+		Environment: map[string]string{
+			"MY_VAR": "val",
+		},
+		Tool: &ToolConfig{
+			Name:           "aider",
+			PermissionMode: "interactive",
+			Claude: ClaudeToolConfig{
+				EffortLevel: "high",
+			},
+		},
+		Build: &BuildConfig{
+			Base:   "coi",
+			Script: "/path/to/build.sh",
+		},
+		Mounts: []MountEntry{
+			{Host: "~/.cargo", Container: "/home/code/.cargo"},
+		},
+		Network: &NetworkConfig{
+			Mode: NetworkModeOpen,
+		},
+		ForwardEnv: []string{"API_KEY", "TOKEN"},
+	}
+
+	if !cfg.ApplyProfile("full") {
+		t.Fatal("ApplyProfile should return true for existing profile")
+	}
+
+	// Verify defaults were applied
+	if cfg.Defaults.Image != "test-image" {
+		t.Errorf("Expected image 'test-image', got %q", cfg.Defaults.Image)
+	}
+	if !*cfg.Defaults.Persistent {
+		t.Error("Expected persistent=true")
+	}
+	if cfg.Defaults.Environment["MY_VAR"] != "val" {
+		t.Error("Expected environment MY_VAR=val")
+	}
+
+	// Tool
+	if cfg.Tool.Name != "aider" {
+		t.Errorf("Expected tool name 'aider', got %q", cfg.Tool.Name)
+	}
+	if cfg.Tool.PermissionMode != "interactive" {
+		t.Errorf("Expected permission_mode 'interactive', got %q", cfg.Tool.PermissionMode)
+	}
+	if cfg.Tool.Claude.EffortLevel != "high" {
+		t.Errorf("Expected effort_level 'high', got %q", cfg.Tool.Claude.EffortLevel)
+	}
+
+	// Build
+	if cfg.Build.Base != "coi" {
+		t.Errorf("Expected build base 'coi', got %q", cfg.Build.Base)
+	}
+	if cfg.Build.Script != "/path/to/build.sh" {
+		t.Errorf("Expected build script '/path/to/build.sh', got %q", cfg.Build.Script)
+	}
+
+	// Mounts (appended)
+	found := false
+	for _, m := range cfg.Mounts.Default {
+		if m.Host == "~/.cargo" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("Expected mount ~/.cargo to be appended")
+	}
+
+	// Network
+	if cfg.Network.Mode != NetworkModeOpen {
+		t.Errorf("Expected network mode 'open', got %q", cfg.Network.Mode)
+	}
+
+	// ForwardEnv
+	if len(cfg.Defaults.ForwardEnv) < 2 {
+		t.Errorf("Expected at least 2 forward_env entries, got %d", len(cfg.Defaults.ForwardEnv))
+	}
+	envMap := make(map[string]bool)
+	for _, e := range cfg.Defaults.ForwardEnv {
+		envMap[e] = true
+	}
+	if !envMap["API_KEY"] || !envMap["TOKEN"] {
+		t.Errorf("Expected API_KEY and TOKEN in forward_env, got %v", cfg.Defaults.ForwardEnv)
+	}
+}
+
+func TestApplyProfileToolPartialMerge(t *testing.T) {
+	cfg := GetDefaultConfig()
+	cfg.Tool.Name = "claude"
+	cfg.Tool.PermissionMode = "bypass"
+
+	// Profile only overrides effort level
+	cfg.Profiles["partial"] = ProfileConfig{
+		Tool: &ToolConfig{
+			Claude: ClaudeToolConfig{
+				EffortLevel: "low",
+			},
+		},
+	}
+
+	cfg.ApplyProfile("partial")
+
+	// Name and permission_mode should be preserved
+	if cfg.Tool.Name != "claude" {
+		t.Errorf("Expected tool name preserved as 'claude', got %q", cfg.Tool.Name)
+	}
+	if cfg.Tool.PermissionMode != "bypass" {
+		t.Errorf("Expected permission_mode preserved as 'bypass', got %q", cfg.Tool.PermissionMode)
+	}
+	if cfg.Tool.Claude.EffortLevel != "low" {
+		t.Errorf("Expected effort_level 'low', got %q", cfg.Tool.Claude.EffortLevel)
+	}
+}
+
+func TestMultipleProfileDirectories(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".coi")
+
+	// Create two profile directories
+	for _, name := range []string{"alpha", "beta"} {
+		profileDir := filepath.Join(configDir, "profiles", name)
+		if err := os.MkdirAll(profileDir, 0o755); err != nil {
+			t.Fatalf("Failed to create profile dir: %v", err)
+		}
+		content := fmt.Sprintf("image = \"img-%s\"\n", name)
+		if err := os.WriteFile(filepath.Join(profileDir, "config.toml"), []byte(content), 0o644); err != nil {
+			t.Fatalf("Failed to write profile config: %v", err)
+		}
+	}
+
+	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte(""), 0o644); err != nil {
+		t.Fatalf("Failed to write main config: %v", err)
+	}
+
+	cfg := GetDefaultConfig()
+	if err := loadConfigFile(cfg, filepath.Join(configDir, "config.toml")); err != nil {
+		t.Fatalf("loadConfigFile() failed: %v", err)
+	}
+
+	a := cfg.GetProfile("alpha")
+	if a == nil || a.Image != "img-alpha" {
+		t.Error("Expected profile 'alpha' with image 'img-alpha'")
+	}
+	b := cfg.GetProfile("beta")
+	if b == nil || b.Image != "img-beta" {
+		t.Error("Expected profile 'beta' with image 'img-beta'")
+	}
+}
+
+func TestInlineProfileSourceTag(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.toml")
+
+	content := `
+[profiles.tagged]
+image = "tag-image"
+`
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("Failed to write config: %v", err)
+	}
+
+	cfg := GetDefaultConfig()
+	if err := loadConfigFile(cfg, configPath); err != nil {
+		t.Fatalf("loadConfigFile() failed: %v", err)
+	}
+
+	p := cfg.GetProfile("tagged")
+	if p == nil {
+		t.Fatal("Expected profile 'tagged'")
+	}
+
+	expectedSource := configPath + " [profiles.tagged]"
+	if p.Source != expectedSource {
+		t.Errorf("Expected source %q, got %q", expectedSource, p.Source)
 	}
 }

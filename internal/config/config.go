@@ -146,6 +146,12 @@ type ProfileConfig struct {
 	Environment map[string]string `toml:"environment"`
 	Persistent  *bool             `toml:"persistent"`
 	Limits      *LimitsConfig     `toml:"limits"`
+	Tool        *ToolConfig       `toml:"tool"`
+	Build       *BuildConfig      `toml:"build"`
+	Mounts      []MountEntry      `toml:"mounts"`
+	Network     *NetworkConfig    `toml:"network"`
+	ForwardEnv  []string          `toml:"forward_env"`
+	Source      string            `toml:"-"` // Where this profile was loaded from (not serialized)
 }
 
 // ToolConfig represents AI coding tool configuration
@@ -727,6 +733,79 @@ func (c *Config) ApplyProfile(name string) bool {
 	// Apply profile limits if present
 	if profile.Limits != nil {
 		mergeLimits(&c.Limits, profile.Limits)
+	}
+
+	// Apply profile tool settings if present
+	if profile.Tool != nil {
+		if profile.Tool.Name != "" {
+			c.Tool.Name = profile.Tool.Name
+		}
+		if profile.Tool.Binary != "" {
+			c.Tool.Binary = profile.Tool.Binary
+		}
+		if profile.Tool.PermissionMode != "" {
+			c.Tool.PermissionMode = profile.Tool.PermissionMode
+		}
+		if profile.Tool.ContextFile != "" {
+			c.Tool.ContextFile = ExpandPath(profile.Tool.ContextFile)
+		}
+		if profile.Tool.AutoContext != nil {
+			c.Tool.AutoContext = profile.Tool.AutoContext
+		}
+		if profile.Tool.Claude.EffortLevel != "" {
+			c.Tool.Claude.EffortLevel = profile.Tool.Claude.EffortLevel
+		}
+	}
+
+	// Apply profile build config if present
+	if profile.Build != nil {
+		if profile.Build.Base != "" {
+			c.Build.Base = profile.Build.Base
+		}
+		if profile.Build.Script != "" {
+			c.Build.Script = profile.Build.Script
+		}
+		if len(profile.Build.Commands) > 0 {
+			c.Build.Commands = profile.Build.Commands
+		}
+	}
+
+	// Apply profile mounts if present (append to defaults)
+	if len(profile.Mounts) > 0 {
+		c.Mounts.Default = append(c.Mounts.Default, profile.Mounts...)
+	}
+
+	// Apply profile network settings if present
+	if profile.Network != nil {
+		if profile.Network.Mode != "" {
+			c.Network.Mode = profile.Network.Mode
+		}
+		if profile.Network.BlockPrivateNetworks != nil {
+			c.Network.BlockPrivateNetworks = profile.Network.BlockPrivateNetworks
+		}
+		if profile.Network.BlockMetadataEndpoint != nil {
+			c.Network.BlockMetadataEndpoint = profile.Network.BlockMetadataEndpoint
+		}
+		if profile.Network.AllowLocalNetworkAccess != nil {
+			c.Network.AllowLocalNetworkAccess = profile.Network.AllowLocalNetworkAccess
+		}
+		if len(profile.Network.AllowedDomains) > 0 {
+			c.Network.AllowedDomains = profile.Network.AllowedDomains
+		}
+		if profile.Network.RefreshIntervalMinutes != 0 {
+			c.Network.RefreshIntervalMinutes = profile.Network.RefreshIntervalMinutes
+		}
+		if profile.Network.Logging.Path != "" {
+			c.Network.Logging.Path = ExpandPath(profile.Network.Logging.Path)
+		}
+		if profile.Network.Logging.Enabled != nil {
+			c.Network.Logging.Enabled = profile.Network.Logging.Enabled
+		}
+	}
+
+	// Apply profile forward_env if present
+	if len(profile.ForwardEnv) > 0 {
+		c.Defaults.ForwardEnv = MergeStringSliceUnique(c.Defaults.ForwardEnv, profile.ForwardEnv)
 	}
 
 	return true

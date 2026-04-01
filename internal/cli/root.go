@@ -173,6 +173,7 @@ func init() {
 	rootCmd.AddCommand(snapshotCmd)
 	rootCmd.AddCommand(resumeCmd)
 	rootCmd.AddCommand(updateCmd)
+	rootCmd.AddCommand(profileCmd)
 }
 
 var versionCmd = &cobra.Command{
