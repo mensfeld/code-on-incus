@@ -411,6 +411,7 @@ mode = "restricted"
 	}
 
 	cfg := GetDefaultConfig()
+	loadProfileDirectories(cfg, configDir)
 	if err := loadConfigFile(cfg, filepath.Join(configDir, "config.toml")); err != nil {
 		t.Fatalf("loadConfigFile() failed: %v", err)
 	}
@@ -476,6 +477,7 @@ script = "build.sh"
 	}
 
 	cfg := GetDefaultConfig()
+	loadProfileDirectories(cfg, configDir)
 	if err := loadConfigFile(cfg, filepath.Join(configDir, "config.toml")); err != nil {
 		t.Fatalf("loadConfigFile() failed: %v", err)
 	}
@@ -511,6 +513,7 @@ script = "/absolute/path/build.sh"
 	}
 
 	cfg := GetDefaultConfig()
+	loadProfileDirectories(cfg, configDir)
 	if err := loadConfigFile(cfg, filepath.Join(configDir, "config.toml")); err != nil {
 		t.Fatalf("loadConfigFile() failed: %v", err)
 	}
@@ -552,6 +555,7 @@ persistent = true
 	}
 
 	cfg := GetDefaultConfig()
+	loadProfileDirectories(cfg, configDir)
 	if err := loadConfigFile(cfg, filepath.Join(configDir, "config.toml")); err != nil {
 		t.Fatalf("loadConfigFile() failed: %v", err)
 	}
@@ -584,6 +588,7 @@ func TestProfileDirectoryNoConfigToml(t *testing.T) {
 	}
 
 	cfg := GetDefaultConfig()
+	loadProfileDirectories(cfg, configDir)
 	if err := loadConfigFile(cfg, filepath.Join(configDir, "config.toml")); err != nil {
 		t.Fatalf("loadConfigFile() failed: %v", err)
 	}
@@ -613,6 +618,7 @@ func TestProfileDirectoryWithFileNotDir(t *testing.T) {
 	}
 
 	cfg := GetDefaultConfig()
+	loadProfileDirectories(cfg, configDir)
 	if err := loadConfigFile(cfg, filepath.Join(configDir, "config.toml")); err != nil {
 		t.Fatalf("loadConfigFile() failed: %v", err)
 	}
@@ -641,6 +647,7 @@ func TestProfileDirectorySource(t *testing.T) {
 	}
 
 	cfg := GetDefaultConfig()
+	loadProfileDirectories(cfg, configDir)
 	if err := loadConfigFile(cfg, filepath.Join(configDir, "config.toml")); err != nil {
 		t.Fatalf("loadConfigFile() failed: %v", err)
 	}
@@ -797,6 +804,7 @@ func TestMultipleProfileDirectories(t *testing.T) {
 	}
 
 	cfg := GetDefaultConfig()
+	loadProfileDirectories(cfg, configDir)
 	if err := loadConfigFile(cfg, filepath.Join(configDir, "config.toml")); err != nil {
 		t.Fatalf("loadConfigFile() failed: %v", err)
 	}

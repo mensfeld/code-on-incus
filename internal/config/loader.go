@@ -28,6 +28,11 @@ func Load() (*Config, error) {
 	// Load from config files (in order)
 	paths := GetConfigPaths()
 	for _, path := range paths {
+		// Always scan for profile directories at this config level,
+		// even if the config file itself doesn't exist.
+		configDir := filepath.Dir(path)
+		loadProfileDirectories(cfg, configDir)
+
 		if err := loadConfigFile(cfg, path); err != nil {
 			// Only return error if file exists but can't be parsed
 			if !os.IsNotExist(err) {
@@ -67,11 +72,6 @@ func loadConfigFile(cfg *Config, path string) error {
 	if fileCfg.Build.Script != "" {
 		fileCfg.Build.Script = resolveRelativePath(configDir, fileCfg.Build.Script)
 	}
-
-	// Load profile directories before merging inline profiles.
-	// Directory profiles are loaded first, then inline [profiles.X] from the same
-	// config file override them (since Merge replaces profiles by name).
-	loadProfileDirectories(cfg, configDir)
 
 	// Tag inline profiles with their source
 	for name, p := range fileCfg.Profiles {
