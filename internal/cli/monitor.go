@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/mensfeld/code-on-incus/internal/config"
+	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/monitor"
+	"github.com/mensfeld/code-on-incus/internal/session"
 	"github.com/spf13/cobra"
 )
 
@@ -57,15 +60,15 @@ func monitorCommand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	// Determine container name
-	var containerName string
-	if len(args) > 0 {
-		containerName = args[0]
-	} else {
-		// TODO: Auto-detect container from workspace
-		// For now, require explicit container name
-		return fmt.Errorf("container name required (auto-detect not yet implemented)")
+	// Determine container name using 3-tier resolution:
+	// 1. Positional argument
+	// 2. COI_CONTAINER environment variable
+	// 3. Auto-detect from workspace
+	containerName, err := resolveMonitorContainer(args)
+	if err != nil {
+		return err
 	}
+	fmt.Fprintf(os.Stderr, "Monitoring container: %s\n", containerName)
 
 	// Get allowed CIDRs from network config
 	allowedCIDRs := []string{}
@@ -105,6 +108,69 @@ func monitorCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+// resolveMonitorContainer resolves the container name using the following strategy:
+// 1. Use positional arg if provided
+// 2. Check COI_CONTAINER environment variable
+// 3. Find container for current workspace
+func resolveMonitorContainer(args []string) (string, error) {
+	// 1. Use positional arg if provided
+	if len(args) > 0 {
+		name := args[0]
+		mgr := container.NewManager(name)
+		exists, err := mgr.Exists()
+		if err != nil {
+			return "", fmt.Errorf("failed to check container: %w", err)
+		}
+		if !exists {
+			return "", fmt.Errorf("container '%s' not found", name)
+		}
+		return name, nil
+	}
+
+	// 2. Check COI_CONTAINER environment variable
+	if envContainer := os.Getenv("COI_CONTAINER"); envContainer != "" {
+		mgr := container.NewManager(envContainer)
+		exists, err := mgr.Exists()
+		if err != nil {
+			return "", fmt.Errorf("failed to check container: %w", err)
+		}
+		if !exists {
+			return "", fmt.Errorf("container '%s' from COI_CONTAINER not found", envContainer)
+		}
+		return envContainer, nil
+	}
+
+	// 3. Find container for current workspace
+	absWorkspace, err := filepath.Abs(workspace)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve workspace path: %w", err)
+	}
+
+	sessions, err := session.ListWorkspaceSessions(absWorkspace)
+	if err != nil {
+		return "", fmt.Errorf("failed to list workspace sessions: %w", err)
+	}
+
+	if len(sessions) == 0 {
+		return "", fmt.Errorf("no COI containers found for current workspace - pass container name as argument")
+	}
+
+	if len(sessions) > 1 {
+		var names []string
+		for _, name := range sessions {
+			names = append(names, name)
+		}
+		return "", fmt.Errorf("multiple COI containers found for workspace, pass container name as argument: %s", strings.Join(names, ", "))
+	}
+
+	// Exactly one container
+	for _, name := range sessions {
+		return name, nil
+	}
+
+	return "", fmt.Errorf("no COI containers found for current workspace")
 }
 
 func runMonitorWatch(ctx context.Context, collector *monitor.Collector, detector *monitor.Detector, intervalSec int) error {
