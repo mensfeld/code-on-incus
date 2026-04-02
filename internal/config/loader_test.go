@@ -411,7 +411,9 @@ mode = "restricted"
 	}
 
 	cfg := GetDefaultConfig()
-	loadProfileDirectories(cfg, configDir)
+	if err := loadProfileDirectories(cfg, configDir); err != nil {
+		t.Fatalf("loadProfileDirectories() failed: %v", err)
+	}
 	if err := loadConfigFile(cfg, filepath.Join(configDir, "config.toml")); err != nil {
 		t.Fatalf("loadConfigFile() failed: %v", err)
 	}
@@ -477,7 +479,9 @@ script = "build.sh"
 	}
 
 	cfg := GetDefaultConfig()
-	loadProfileDirectories(cfg, configDir)
+	if err := loadProfileDirectories(cfg, configDir); err != nil {
+		t.Fatalf("loadProfileDirectories() failed: %v", err)
+	}
 	if err := loadConfigFile(cfg, filepath.Join(configDir, "config.toml")); err != nil {
 		t.Fatalf("loadConfigFile() failed: %v", err)
 	}
@@ -513,7 +517,9 @@ script = "/absolute/path/build.sh"
 	}
 
 	cfg := GetDefaultConfig()
-	loadProfileDirectories(cfg, configDir)
+	if err := loadProfileDirectories(cfg, configDir); err != nil {
+		t.Fatalf("loadProfileDirectories() failed: %v", err)
+	}
 	if err := loadConfigFile(cfg, filepath.Join(configDir, "config.toml")); err != nil {
 		t.Fatalf("loadConfigFile() failed: %v", err)
 	}
@@ -541,7 +547,9 @@ func TestProfileDirectoryNoConfigToml(t *testing.T) {
 	}
 
 	cfg := GetDefaultConfig()
-	loadProfileDirectories(cfg, configDir)
+	if err := loadProfileDirectories(cfg, configDir); err != nil {
+		t.Fatalf("loadProfileDirectories() failed: %v", err)
+	}
 	if err := loadConfigFile(cfg, filepath.Join(configDir, "config.toml")); err != nil {
 		t.Fatalf("loadConfigFile() failed: %v", err)
 	}
@@ -571,7 +579,9 @@ func TestProfileDirectoryWithFileNotDir(t *testing.T) {
 	}
 
 	cfg := GetDefaultConfig()
-	loadProfileDirectories(cfg, configDir)
+	if err := loadProfileDirectories(cfg, configDir); err != nil {
+		t.Fatalf("loadProfileDirectories() failed: %v", err)
+	}
 	if err := loadConfigFile(cfg, filepath.Join(configDir, "config.toml")); err != nil {
 		t.Fatalf("loadConfigFile() failed: %v", err)
 	}
@@ -580,6 +590,28 @@ func TestProfileDirectoryWithFileNotDir(t *testing.T) {
 	p := cfg.GetProfile("not-a-dir")
 	if p != nil {
 		t.Error("Files in profiles/ dir should not be loaded as profiles")
+	}
+}
+
+func TestProfileDirectoryInvalidTomlReturnsError(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".coi")
+	profileDir := filepath.Join(configDir, "profiles", "broken")
+	if err := os.MkdirAll(profileDir, 0o755); err != nil {
+		t.Fatalf("Failed to create profile dir: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(profileDir, "config.toml"), []byte("[invalid toml {\n"), 0o644); err != nil {
+		t.Fatalf("Failed to write broken config: %v", err)
+	}
+
+	cfg := GetDefaultConfig()
+	err := loadProfileDirectories(cfg, configDir)
+	if err == nil {
+		t.Fatal("Expected error for invalid TOML, got nil")
+	}
+	if !strings.Contains(err.Error(), "broken") {
+		t.Errorf("Error should mention profile name 'broken', got: %v", err)
 	}
 }
 
@@ -600,7 +632,9 @@ func TestProfileDirectorySource(t *testing.T) {
 	}
 
 	cfg := GetDefaultConfig()
-	loadProfileDirectories(cfg, configDir)
+	if err := loadProfileDirectories(cfg, configDir); err != nil {
+		t.Fatalf("loadProfileDirectories() failed: %v", err)
+	}
 	if err := loadConfigFile(cfg, filepath.Join(configDir, "config.toml")); err != nil {
 		t.Fatalf("loadConfigFile() failed: %v", err)
 	}
@@ -757,7 +791,9 @@ func TestMultipleProfileDirectories(t *testing.T) {
 	}
 
 	cfg := GetDefaultConfig()
-	loadProfileDirectories(cfg, configDir)
+	if err := loadProfileDirectories(cfg, configDir); err != nil {
+		t.Fatalf("loadProfileDirectories() failed: %v", err)
+	}
 	if err := loadConfigFile(cfg, filepath.Join(configDir, "config.toml")); err != nil {
 		t.Fatalf("loadConfigFile() failed: %v", err)
 	}

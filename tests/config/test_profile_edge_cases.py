@@ -3,7 +3,7 @@ Edge case tests for profile directory loading.
 
 Tests that:
 1. Empty profile directory (no config.toml) is silently skipped
-2. Profile directory with invalid TOML is skipped without crashing
+2. Profile directory with invalid TOML causes a fatal error
 3. Profile directory with only non-config files is ignored
 4. Multiple profiles from directories work simultaneously
 5. Non-existent build script in profile does not prevent profile from loading
@@ -47,19 +47,14 @@ def test_empty_profile_directory_skipped(coi_binary, cleanup_containers, workspa
     assert "emptydir" not in output, f"Empty directory should not appear as profile. Got:\n{output}"
 
 
-def test_invalid_toml_profile_skipped(coi_binary, cleanup_containers, workspace_dir):
+def test_invalid_toml_profile_crashes(coi_binary, cleanup_containers, workspace_dir):
     """
-    Test that a profile directory with invalid TOML is skipped without error.
+    Test that a profile directory with invalid TOML causes a fatal error.
     """
     # Create profile with broken TOML
     bad_dir = Path(workspace_dir) / ".coi" / "profiles" / "broken"
     bad_dir.mkdir(parents=True)
     (bad_dir / "config.toml").write_text("[invalid toml {\n")
-
-    # Create a valid profile
-    valid_dir = Path(workspace_dir) / ".coi" / "profiles" / "good"
-    valid_dir.mkdir(parents=True)
-    (valid_dir / "config.toml").write_text('image = "coi"\n')
 
     result = subprocess.run(
         [
@@ -75,10 +70,11 @@ def test_invalid_toml_profile_skipped(coi_binary, cleanup_containers, workspace_
         cwd=workspace_dir,
     )
 
-    assert result.returncode == 0, f"Should succeed despite broken profile. stderr: {result.stderr}"
-    output = result.stdout + result.stderr
-    assert "good" in output, f"Valid profile should still load. Got:\n{output}"
-    assert "broken" not in output, f"Broken profile should not appear. Got:\n{output}"
+    assert result.returncode != 0, f"Should fail on invalid TOML profile. stdout: {result.stdout}"
+    combined = result.stdout + result.stderr
+    assert "broken" in combined.lower(), (
+        f"Error should mention the broken profile. Got:\n{combined}"
+    )
 
 
 def test_profile_dir_with_non_config_files_only(coi_binary, cleanup_containers, workspace_dir):

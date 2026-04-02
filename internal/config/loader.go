@@ -31,7 +31,9 @@ func Load() (*Config, error) {
 		// Always scan for profile directories at this config level,
 		// even if the config file itself doesn't exist.
 		configDir := filepath.Dir(path)
-		loadProfileDirectories(cfg, configDir)
+		if err := loadProfileDirectories(cfg, configDir); err != nil {
+			return nil, err
+		}
 
 		if err := loadConfigFile(cfg, path); err != nil {
 			// Only return error if file exists but can't be parsed
@@ -81,11 +83,11 @@ func loadConfigFile(cfg *Config, path string) error {
 
 // loadProfileDirectories scans configDir/profiles/ for subdirectories containing config.toml
 // and adds them to cfg.Profiles. Each subdirectory name becomes the profile name.
-func loadProfileDirectories(cfg *Config, configDir string) {
+func loadProfileDirectories(cfg *Config, configDir string) error {
 	profilesDir := filepath.Join(configDir, "profiles")
 	entries, err := os.ReadDir(profilesDir)
 	if err != nil {
-		return // Directory doesn't exist or can't be read — that's fine
+		return nil // Directory doesn't exist or can't be read — that's fine
 	}
 
 	for _, entry := range entries {
@@ -102,7 +104,7 @@ func loadProfileDirectories(cfg *Config, configDir string) {
 
 		var profileCfg ProfileConfig
 		if _, err := toml.DecodeFile(profileConfigPath, &profileCfg); err != nil {
-			continue // Skip profiles that can't be parsed
+			return fmt.Errorf("failed to parse profile %q config at %s: %w", profileName, profileConfigPath, err)
 		}
 
 		// Resolve build script path relative to profile directory
@@ -114,12 +116,12 @@ func loadProfileDirectories(cfg *Config, configDir string) {
 		// Tag with source location
 		profileCfg.Source = profileConfigPath
 
-		// Add to profiles (may be overridden by inline profiles later)
 		if cfg.Profiles == nil {
 			cfg.Profiles = make(map[string]ProfileConfig)
 		}
 		cfg.Profiles[profileName] = profileCfg
 	}
+	return nil
 }
 
 // loadFromEnv loads configuration from environment variables
