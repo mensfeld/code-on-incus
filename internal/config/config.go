@@ -577,7 +577,6 @@ func (c *Config) Merge(other *Config) {
 	if len(other.Build.Commands) > 0 {
 		c.Build.Commands = other.Build.Commands
 	}
-
 }
 
 // mergeLimits merges limit configurations (other takes precedence)

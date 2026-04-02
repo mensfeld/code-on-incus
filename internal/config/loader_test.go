@@ -892,4 +892,3 @@ func TestMultipleProfileDirectories(t *testing.T) {
 		t.Error("Expected profile 'beta' with image 'img-beta'")
 	}
 }
-
