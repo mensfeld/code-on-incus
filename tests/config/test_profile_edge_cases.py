@@ -263,3 +263,124 @@ def test_profile_file_in_profiles_dir_not_treated_as_profile(
     assert "not-a-profile" not in output, (
         f"Regular file should not be treated as profile. Got:\n{output}"
     )
+
+
+def test_profile_validation_missing_build_script(coi_binary, cleanup_containers, workspace_dir):
+    """
+    Test that using a profile with a non-existent build script fails at runtime.
+    """
+    profile_dir = Path(workspace_dir) / ".coi" / "profiles" / "badbuild"
+    profile_dir.mkdir(parents=True)
+    (profile_dir / "config.toml").write_text(
+        """
+image = "coi"
+
+[build]
+base = "coi"
+script = "nonexistent.sh"
+"""
+    )
+
+    result = subprocess.run(
+        [
+            coi_binary,
+            "run",
+            "--workspace",
+            workspace_dir,
+            "--profile",
+            "badbuild",
+            "echo",
+            "test",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=workspace_dir,
+    )
+
+    assert result.returncode != 0, (
+        f"Should fail when build script doesn't exist. stdout: {result.stdout}"
+    )
+    combined = result.stdout + result.stderr
+    assert "build script" in combined.lower(), (
+        f"Error should mention build script. Got:\n{combined}"
+    )
+
+
+def test_profile_validation_invalid_network_mode(coi_binary, cleanup_containers, workspace_dir):
+    """
+    Test that using a profile with an invalid network mode fails at runtime.
+    """
+    profile_dir = Path(workspace_dir) / ".coi" / "profiles" / "badnet"
+    profile_dir.mkdir(parents=True)
+    (profile_dir / "config.toml").write_text(
+        """
+image = "coi"
+
+[network]
+mode = "bogus"
+"""
+    )
+
+    result = subprocess.run(
+        [
+            coi_binary,
+            "run",
+            "--workspace",
+            workspace_dir,
+            "--profile",
+            "badnet",
+            "echo",
+            "test",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=workspace_dir,
+    )
+
+    assert result.returncode != 0, f"Should fail with invalid network mode. stdout: {result.stdout}"
+    combined = result.stdout + result.stderr
+    assert "network mode" in combined.lower(), (
+        f"Error should mention invalid network mode. Got:\n{combined}"
+    )
+
+
+def test_profile_validation_incomplete_mount(coi_binary, cleanup_containers, workspace_dir):
+    """
+    Test that using a profile with an incomplete mount entry fails at runtime.
+    """
+    profile_dir = Path(workspace_dir) / ".coi" / "profiles" / "badmount"
+    profile_dir.mkdir(parents=True)
+    (profile_dir / "config.toml").write_text(
+        """
+image = "coi"
+
+[[mounts]]
+host = "~/data"
+# missing container path
+"""
+    )
+
+    result = subprocess.run(
+        [
+            coi_binary,
+            "run",
+            "--workspace",
+            workspace_dir,
+            "--profile",
+            "badmount",
+            "echo",
+            "test",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=workspace_dir,
+    )
+
+    assert result.returncode != 0, f"Should fail with incomplete mount. stdout: {result.stdout}"
+    combined = result.stdout + result.stderr
+    assert "container" in combined.lower(), (
+        f"Error should mention missing container path. Got:\n{combined}"
+    )

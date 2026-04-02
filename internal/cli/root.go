@@ -90,8 +90,8 @@ Examples:
 
 		// Apply profile if specified
 		if profile != "" {
-			if !cfg.ApplyProfile(profile) {
-				return fmt.Errorf("profile '%s' not found", profile)
+			if err := cfg.ApplyProfile(profile); err != nil {
+				return err
 			}
 		}
 

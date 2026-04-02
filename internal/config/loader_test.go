@@ -651,6 +651,13 @@ func TestProfileDirectorySource(t *testing.T) {
 }
 
 func TestApplyProfileWithNewFields(t *testing.T) {
+	// Create a real build script for validation
+	tmpDir := t.TempDir()
+	buildScript := filepath.Join(tmpDir, "build.sh")
+	if err := os.WriteFile(buildScript, []byte("#!/bin/bash\necho build\n"), 0o755); err != nil {
+		t.Fatalf("Failed to create build script: %v", err)
+	}
+
 	cfg := GetDefaultConfig()
 	cfg.Profiles["full"] = ProfileConfig{
 		Image:      "test-image",
@@ -667,7 +674,7 @@ func TestApplyProfileWithNewFields(t *testing.T) {
 		},
 		Build: &BuildConfig{
 			Base:   "coi",
-			Script: "/path/to/build.sh",
+			Script: buildScript,
 		},
 		Mounts: []MountEntry{
 			{Host: "~/.cargo", Container: "/home/code/.cargo"},
@@ -678,8 +685,8 @@ func TestApplyProfileWithNewFields(t *testing.T) {
 		ForwardEnv: []string{"API_KEY", "TOKEN"},
 	}
 
-	if !cfg.ApplyProfile("full") {
-		t.Fatal("ApplyProfile should return true for existing profile")
+	if err := cfg.ApplyProfile("full"); err != nil {
+		t.Fatalf("ApplyProfile failed: %v", err)
 	}
 
 	// Verify defaults were applied
@@ -708,8 +715,8 @@ func TestApplyProfileWithNewFields(t *testing.T) {
 	if cfg.Build.Base != "coi" {
 		t.Errorf("Expected build base 'coi', got %q", cfg.Build.Base)
 	}
-	if cfg.Build.Script != "/path/to/build.sh" {
-		t.Errorf("Expected build script '/path/to/build.sh', got %q", cfg.Build.Script)
+	if cfg.Build.Script != buildScript {
+		t.Errorf("Expected build script %q, got %q", buildScript, cfg.Build.Script)
 	}
 
 	// Mounts (appended)
@@ -756,7 +763,9 @@ func TestApplyProfileToolPartialMerge(t *testing.T) {
 		},
 	}
 
-	cfg.ApplyProfile("partial")
+	if err := cfg.ApplyProfile("partial"); err != nil {
+		t.Fatalf("ApplyProfile failed: %v", err)
+	}
 
 	// Name and permission_mode should be preserved
 	if cfg.Tool.Name != "claude" {
@@ -767,6 +776,82 @@ func TestApplyProfileToolPartialMerge(t *testing.T) {
 	}
 	if cfg.Tool.Claude.EffortLevel != "low" {
 		t.Errorf("Expected effort_level 'low', got %q", cfg.Tool.Claude.EffortLevel)
+	}
+}
+
+func TestProfileValidation(t *testing.T) {
+	tests := []struct {
+		name      string
+		profile   ProfileConfig
+		wantErr   bool
+		errSubstr string
+	}{
+		{
+			name:    "valid empty profile",
+			profile: ProfileConfig{Image: "coi"},
+			wantErr: false,
+		},
+		{
+			name: "missing build script",
+			profile: ProfileConfig{
+				Build: &BuildConfig{Script: "/nonexistent/build.sh"},
+			},
+			wantErr:   true,
+			errSubstr: "build script",
+		},
+		{
+			name: "mount missing host",
+			profile: ProfileConfig{
+				Mounts: []MountEntry{{Container: "/data"}},
+			},
+			wantErr:   true,
+			errSubstr: "missing 'host'",
+		},
+		{
+			name: "mount missing container",
+			profile: ProfileConfig{
+				Mounts: []MountEntry{{Host: "~/data"}},
+			},
+			wantErr:   true,
+			errSubstr: "missing 'container'",
+		},
+		{
+			name: "invalid network mode",
+			profile: ProfileConfig{
+				Network: &NetworkConfig{Mode: "bogus"},
+			},
+			wantErr:   true,
+			errSubstr: "invalid network mode",
+		},
+		{
+			name: "valid network mode restricted",
+			profile: ProfileConfig{
+				Network: &NetworkConfig{Mode: "restricted"},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid network mode allowlist",
+			profile: ProfileConfig{
+				Network: &NetworkConfig{Mode: "allowlist"},
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.profile.Validate("test")
+			if tt.wantErr && err == nil {
+				t.Error("Expected error, got nil")
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("Expected no error, got: %v", err)
+			}
+			if tt.wantErr && err != nil && !strings.Contains(err.Error(), tt.errSubstr) {
+				t.Errorf("Expected error containing %q, got: %v", tt.errSubstr, err)
+			}
+		})
 	}
 }
 

@@ -147,9 +147,8 @@ func TestApplyProfile(t *testing.T) {
 	}
 
 	// Apply the profile
-	success := cfg.ApplyProfile("rust")
-	if !success {
-		t.Error("Expected ApplyProfile to return true")
+	if err := cfg.ApplyProfile("rust"); err != nil {
+		t.Errorf("Expected ApplyProfile to succeed, got: %v", err)
 	}
 
 	// Check that defaults were updated
@@ -162,9 +161,8 @@ func TestApplyProfile(t *testing.T) {
 	}
 
 	// Try to apply non-existent profile
-	success = cfg.ApplyProfile("nonexistent")
-	if success {
-		t.Error("Expected ApplyProfile to return false for non-existent profile")
+	if err := cfg.ApplyProfile("nonexistent"); err == nil {
+		t.Error("Expected ApplyProfile to return error for non-existent profile")
 	}
 }
 
@@ -818,7 +816,9 @@ func TestApplyProfileEnvironment(t *testing.T) {
 		Environment: map[string]string{"RUST_BACKTRACE": "1", "FOO": "bar"},
 	}
 
-	cfg.ApplyProfile("test")
+	if err := cfg.ApplyProfile("test"); err != nil {
+		t.Fatalf("ApplyProfile failed: %v", err)
+	}
 
 	if cfg.Defaults.Environment == nil {
 		t.Fatal("Expected Environment to be set after ApplyProfile")
