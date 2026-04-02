@@ -103,3 +103,11 @@ These paths are available alongside the workspace and persist changes to the hos
 - Use `pip install` for Python packages and `pnpm install` (preferred) or `npm install` for Node packages
 - Use `mise use --global <tool>@<version>` to install new runtimes (Python, Ruby, Go, etc.) instead of apt when possible
 - Create a `.mise.toml` in your project root to pin runtime versions per-project
+{{- if .HasProfileContext}}
+
+# User-Provided Profile Context
+
+The following instructions were provided by the user via their COI profile configuration. Follow them as sandbox-profile-specific guidelines.
+
+{{.ProfileContext}}
+{{- end}}

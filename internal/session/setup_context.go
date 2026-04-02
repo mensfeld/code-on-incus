@@ -13,8 +13,7 @@ import (
 // injectContextFile creates ~/SANDBOX_CONTEXT.md inside the container.
 // If customPath is provided, it reads the file from the host and uses its content.
 // Otherwise, it renders the default embedded template with dynamic environment info.
-// If profileContextFile is set, its content is appended under a "# Profile Context" heading.
-func injectContextFile(mgr *container.Manager, info tool.ContextInfo, customPath, profileContextFile, homeDir string, logger func(string)) error {
+func injectContextFile(mgr *container.Manager, info tool.ContextInfo, customPath, homeDir string, logger func(string)) error {
 	destPath := filepath.Join(homeDir, "SANDBOX_CONTEXT.md")
 
 	var content string
@@ -29,8 +28,6 @@ func injectContextFile(mgr *container.Manager, info tool.ContextInfo, customPath
 		content = tool.RenderContextFileContent(info)
 		logger("Injecting default sandbox context file")
 	}
-
-	content = appendProfileContext(content, profileContextFile, logger)
 
 	// Create the file
 	if err := mgr.CreateFile(destPath, content); err != nil {
@@ -52,35 +49,16 @@ func injectContextFile(mgr *container.Manager, info tool.ContextInfo, customPath
 // If customPath is provided, it reads the file from the host; otherwise it
 // renders the default embedded template. This is used both for ~/SANDBOX_CONTEXT.md
 // and for auto-context injection into tool-native files.
-// If profileContextFile is set, its content is appended under a "# Profile Context" heading.
-func resolveContextContent(info tool.ContextInfo, customPath, profileContextFile string, logger func(string)) string {
-	var content string
+func resolveContextContent(info tool.ContextInfo, customPath string, logger func(string)) string {
 	if customPath != "" {
 		data, err := os.ReadFile(customPath)
 		if err != nil {
 			logger(fmt.Sprintf("Warning: Failed to read custom context file %s: %v", customPath, err))
 			return ""
 		}
-		content = string(data)
-	} else {
-		content = tool.RenderContextFileContent(info)
+		return string(data)
 	}
-	return appendProfileContext(content, profileContextFile, logger)
-}
-
-// appendProfileContext appends profile context file content to the given content string.
-// Returns the content unchanged if profileContextFile is empty or unreadable.
-func appendProfileContext(content, profileContextFile string, logger func(string)) string {
-	if profileContextFile == "" {
-		return content
-	}
-	data, err := os.ReadFile(profileContextFile)
-	if err != nil {
-		logger(fmt.Sprintf("Warning: Failed to read profile context file %s: %v", profileContextFile, err))
-		return content
-	}
-	logger(fmt.Sprintf("Appended profile context from %s", profileContextFile))
-	return content + "\n\n# User-Provided Profile Context\n\nThe following instructions were provided by the user via their COI profile configuration. Follow them as sandbox-profile-specific guidelines.\n\n" + string(data)
+	return tool.RenderContextFileContent(info)
 }
 
 // injectAutoContextFile writes sandbox context into the tool's native auto-load

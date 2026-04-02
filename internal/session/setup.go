@@ -542,6 +542,18 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 			maxDuration = opts.LimitsConfig.Runtime.MaxDuration
 		}
 
+		// Read profile context file content if configured
+		var profileContext string
+		if opts.ProfileContextFile != "" {
+			data, err := os.ReadFile(opts.ProfileContextFile)
+			if err != nil {
+				opts.Logger(fmt.Sprintf("Warning: Failed to read profile context file %s: %v", opts.ProfileContextFile, err))
+			} else {
+				profileContext = string(data)
+				opts.Logger(fmt.Sprintf("Loaded profile context from %s", opts.ProfileContextFile))
+			}
+		}
+
 		ctxInfo := tool.ContextInfo{
 			WorkspacePath:      result.ContainerWorkspacePath,
 			HomeDir:            result.HomeDir,
@@ -559,9 +571,10 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 			MaxDuration:        maxDuration,
 			ToolName:           toolName,
 			ContainerName:      result.ContainerName,
+			ProfileContext:     profileContext,
 		}
-		contextContent = resolveContextContent(ctxInfo, opts.ContextFilePath, opts.ProfileContextFile, opts.Logger)
-		if err := injectContextFile(result.Manager, ctxInfo, opts.ContextFilePath, opts.ProfileContextFile, result.HomeDir, opts.Logger); err != nil {
+		contextContent = resolveContextContent(ctxInfo, opts.ContextFilePath, opts.Logger)
+		if err := injectContextFile(result.Manager, ctxInfo, opts.ContextFilePath, result.HomeDir, opts.Logger); err != nil {
 			opts.Logger(fmt.Sprintf("Warning: Failed to inject context file: %v", err))
 		}
 	}

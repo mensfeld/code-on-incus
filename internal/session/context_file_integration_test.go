@@ -78,7 +78,7 @@ func TestContextFile_DefaultInjection(t *testing.T) {
 	}
 
 	// Inject the context file
-	err := injectContextFile(mgr, ctxInfo, "", "", homeDir, logger)
+	err := injectContextFile(mgr, ctxInfo, "", homeDir, logger)
 	if err != nil {
 		t.Fatalf("injectContextFile failed: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestContextFile_CustomFile(t *testing.T) {
 	}
 
 	// Inject with custom file path
-	err := injectContextFile(mgr, ctxInfo, customFile, "", homeDir, logger)
+	err := injectContextFile(mgr, ctxInfo, customFile, homeDir, logger)
 	if err != nil {
 		t.Fatalf("injectContextFile with custom file failed: %v", err)
 	}
@@ -226,7 +226,7 @@ func TestContextFile_CustomFileNotFound(t *testing.T) {
 	}
 
 	// Try to inject with non-existent file
-	err := injectContextFile(mgr, ctxInfo, "/tmp/nonexistent-context-file-12345.md", "", homeDir, logger)
+	err := injectContextFile(mgr, ctxInfo, "/tmp/nonexistent-context-file-12345.md", homeDir, logger)
 	if err == nil {
 		t.Fatal("Expected error when custom file doesn't exist, got nil")
 	}
@@ -255,7 +255,7 @@ func TestContextFile_Regeneration(t *testing.T) {
 		Persistent:    false,
 		NetworkMode:   "restricted",
 	}
-	if err := injectContextFile(mgr, ctxInfo1, "", "", homeDir, logger); err != nil {
+	if err := injectContextFile(mgr, ctxInfo1, "", homeDir, logger); err != nil {
 		t.Fatalf("First injectContextFile failed: %v", err)
 	}
 
@@ -281,7 +281,7 @@ func TestContextFile_Regeneration(t *testing.T) {
 		NetworkMode:       "open",
 		SSHAgentForwarded: true,
 	}
-	if err := injectContextFile(mgr, ctxInfo2, "", "", homeDir, logger); err != nil {
+	if err := injectContextFile(mgr, ctxInfo2, "", homeDir, logger); err != nil {
 		t.Fatalf("Second injectContextFile failed: %v", err)
 	}
 
@@ -327,7 +327,7 @@ func TestContextFile_GitHubCLIAuthenticated(t *testing.T) {
 		HomeDir:            homeDir,
 		GHCLIAuthenticated: true,
 	}
-	if err := injectContextFile(mgr, ctxInfo, "", "", homeDir, logger); err != nil {
+	if err := injectContextFile(mgr, ctxInfo, "", homeDir, logger); err != nil {
 		t.Fatalf("injectContextFile failed: %v", err)
 	}
 
@@ -352,7 +352,7 @@ func TestContextFile_GitHubCLIAuthenticated(t *testing.T) {
 		HomeDir:            homeDir,
 		GHCLIAuthenticated: false,
 	}
-	if err := injectContextFile(mgr, ctxInfo2, "", "", homeDir, logger); err != nil {
+	if err := injectContextFile(mgr, ctxInfo2, "", homeDir, logger); err != nil {
 		t.Fatalf("injectContextFile (unauthenticated) failed: %v", err)
 	}
 
@@ -390,7 +390,7 @@ func TestContextFile_ForwardedEnvVars(t *testing.T) {
 		HomeDir:          homeDir,
 		ForwardedEnvVars: []string{"ANTHROPIC_API_KEY", "GH_TOKEN", "CUSTOM_VAR"},
 	}
-	if err := injectContextFile(mgr, ctxInfo, "", "", homeDir, logger); err != nil {
+	if err := injectContextFile(mgr, ctxInfo, "", homeDir, logger); err != nil {
 		t.Fatalf("injectContextFile failed: %v", err)
 	}
 
@@ -422,7 +422,7 @@ func TestContextFile_ForwardedEnvVars(t *testing.T) {
 		WorkspacePath: "/workspace",
 		HomeDir:       homeDir,
 	}
-	if err := injectContextFile(mgr, ctxInfo2, "", "", homeDir, logger); err != nil {
+	if err := injectContextFile(mgr, ctxInfo2, "", homeDir, logger); err != nil {
 		t.Fatalf("injectContextFile (no env vars) failed: %v", err)
 	}
 
@@ -470,7 +470,7 @@ func TestContextFile_WithAllNewFields(t *testing.T) {
 		MaxDuration: "2h",
 	}
 
-	if err := injectContextFile(mgr, ctxInfo, "", "", homeDir, logger); err != nil {
+	if err := injectContextFile(mgr, ctxInfo, "", homeDir, logger); err != nil {
 		t.Fatalf("injectContextFile failed: %v", err)
 	}
 

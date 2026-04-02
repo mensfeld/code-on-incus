@@ -284,6 +284,7 @@ type ContextInfo struct {
 	MaxDuration        string      // e.g., "2h", empty = unlimited
 	ToolName           string      // e.g., "claude", "aider"
 	ContainerName      string      // Incus container name
+	ProfileContext     string      // User-provided profile context content (from profile CONTEXT.md)
 }
 
 // contextTemplateData holds the resolved values passed to the context file template.
@@ -313,6 +314,8 @@ type contextTemplateData struct {
 	HasMaxDuration      bool
 	ToolName            string
 	ContainerName       string
+	ProfileContext      string
+	HasProfileContext   bool
 }
 
 // RenderContextFileContent renders the embedded sandbox context template with
@@ -422,6 +425,12 @@ func RenderContextFileContent(info ContextInfo) string {
 	if info.MaxDuration != "" {
 		data.MaxDuration = info.MaxDuration
 		data.HasMaxDuration = true
+	}
+
+	// Profile context
+	if info.ProfileContext != "" {
+		data.ProfileContext = info.ProfileContext
+		data.HasProfileContext = true
 	}
 
 	tmpl, err := template.New("context").Parse(sandboxContextTemplate)
