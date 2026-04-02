@@ -24,7 +24,7 @@ var profileListCmd = &cobra.Command{
 	Short: "List available profiles",
 	Long: `List all profiles from system, user, and project configuration.
 
-Profiles can be defined inline in config.toml or as directories under profiles/.
+Profiles are defined as directories under profiles/, each containing a config.toml.
 
 Examples:
   coi profile list`,
