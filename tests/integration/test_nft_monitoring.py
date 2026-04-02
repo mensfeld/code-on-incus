@@ -159,9 +159,23 @@ def nft_monitoring_available():
 
 @pytest.fixture
 def test_workspace(tmp_path):
-    """Create a temporary workspace for tests."""
+    """Create a temporary workspace for tests with monitoring config."""
     workspace = tmp_path / "nft-test-workspace"
     workspace.mkdir()
+
+    # Create config that enables monitoring (replaces --monitor flag)
+    config_dir = workspace / ".coi"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "config.toml").write_text('''
+[monitoring]
+enabled = true
+auto_kill_on_critical = true
+auto_pause_on_high = true
+
+[monitoring.nft]
+enabled = true
+''')
+
     return str(workspace)
 
 
@@ -187,7 +201,6 @@ class TestNFTRuleManagement:
                 test_workspace,
                 "--slot",
                 str(slot),
-                "--monitor",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -231,7 +244,6 @@ class TestNFTRuleManagement:
                 test_workspace,
                 "--slot",
                 str(slot),
-                "--monitor",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -290,7 +302,6 @@ class TestNFTRuleManagement:
                 test_workspace,
                 "--slot",
                 str(slot),
-                "--monitor",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -356,7 +367,6 @@ class TestNetworkThreatDetection:
                 test_workspace,
                 "--slot",
                 str(slot),
-                "--monitor",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -432,7 +442,6 @@ class TestNetworkThreatDetection:
                 test_workspace,
                 "--slot",
                 str(slot),
-                "--monitor",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -506,7 +515,6 @@ class TestNetworkThreatDetection:
                 test_workspace,
                 "--slot",
                 str(slot),
-                "--monitor",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -574,7 +582,6 @@ class TestAuditLogging:
                 test_workspace,
                 "--slot",
                 str(slot),
-                "--monitor",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -612,8 +619,8 @@ class TestDaemonLifecycle:
         """Ensure NFT monitoring is available before running tests."""
         pass
 
-    def test_daemon_starts_with_monitoring_flag(self, test_workspace, coi_binary):
-        """Test that daemon starts when --monitor flag is used."""
+    def test_daemon_starts_with_monitoring_config(self, test_workspace, coi_binary):
+        """Test that daemon starts when monitoring is enabled via config."""
         slot = 57
         container_name = get_container_name_from_workspace(test_workspace, slot)
 
@@ -628,7 +635,6 @@ class TestDaemonLifecycle:
                     test_workspace,
                     "--slot",
                     str(slot),
-                    "--monitor",
                 ],
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
@@ -677,7 +683,6 @@ class TestNFTRuleCleanupOnKill:
                 test_workspace,
                 "--slot",
                 str(slot),
-                "--monitor",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -740,7 +745,6 @@ class TestNFTRuleCleanupOnKill:
                 test_workspace,
                 "--slot",
                 str(slot),
-                "--monitor",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -833,7 +837,6 @@ class TestNFTRuleCleanupOnShutdown:
                 test_workspace,
                 "--slot",
                 str(slot),
-                "--monitor",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -920,7 +923,14 @@ class TestFirewallRuleCleanupOnAutoKill:
         slot = 63
         container_name = get_container_name_from_workspace(test_workspace, slot)
 
-        # Start session with monitoring AND restricted network (to have firewall rules)
+        # Add restricted network to config (needed for firewall rules)
+        import pathlib
+        config_path = pathlib.Path(test_workspace) / ".coi" / "config.toml"
+        config_text = config_path.read_text()
+        if "[network]" not in config_text:
+            config_path.write_text(config_text + '\n[network]\nmode = "restricted"\n')
+
+        # Start session with monitoring (via config) AND restricted network (to have firewall rules)
         proc = subprocess.Popen(
             [
                 coi_binary,
@@ -929,9 +939,6 @@ class TestFirewallRuleCleanupOnAutoKill:
                 test_workspace,
                 "--slot",
                 str(slot),
-                "--monitor",
-                "--network",
-                "restricted",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
@@ -1054,7 +1061,14 @@ class TestVethZoneCleanupOnAutoKill:
         slot = 64
         container_name = get_container_name_from_workspace(test_workspace, slot)
 
-        # Start session with monitoring AND restricted network (to have veth zone bindings)
+        # Add restricted network to config (needed for veth zone bindings)
+        import pathlib
+        config_path = pathlib.Path(test_workspace) / ".coi" / "config.toml"
+        config_text = config_path.read_text()
+        if "[network]" not in config_text:
+            config_path.write_text(config_text + '\n[network]\nmode = "restricted"\n')
+
+        # Start session with monitoring (via config) AND restricted network (to have veth zone bindings)
         proc = subprocess.Popen(
             [
                 coi_binary,
@@ -1063,9 +1077,6 @@ class TestVethZoneCleanupOnAutoKill:
                 test_workspace,
                 "--slot",
                 str(slot),
-                "--monitor",
-                "--network",
-                "restricted",
             ],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,

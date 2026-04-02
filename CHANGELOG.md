@@ -4,6 +4,8 @@
 
 ### Breaking Changes
 
+- [Breaking] **Removed redundant CLI flags in favor of config/profiles** — The following CLI flags have been removed: `--mount`, `--env`/`-e`, `--forward-env`, `--network`, `--writable-git-hooks`, `--ssh-agent`, `--timezone`, `--monitor`, all `--limit-*` flags (12 total), and the unimplemented `--capture`, `--timeout`, `--format` flags from `coi run`. Use the equivalent settings in `config.toml` or profile directories instead. Retained flags: `--workspace`, `--slot`, `--image`, `--persistent`, `--resume`/`--continue`, `--profile`, `--debug`, `--background`, `--tmux`, `--container`, `--tool`.
+
 - [Breaking] **Project config moved from `.coi.toml` to `.coi/config.toml`** — Project-level configuration must now be placed in `.coi/config.toml` instead of `.coi.toml` in the project root. This enables co-locating build scripts and other project assets alongside config in the `.coi/` directory. COI will refuse to start if a `.coi.toml` file is detected, displaying a migration command: `mkdir -p .coi && mv .coi.toml .coi/config.toml`. (#251)
 
 ### Bug Fixes
@@ -22,6 +24,8 @@
 - [Enhancement] **Expanded environment scanning detection patterns** — The monitoring system's env scanning detector now catches significantly more evasion techniques: Python (`os.environ`, `os.getenv`), Node.js (`process.env`), Ruby (`ENV[]`), awk (`ENVIRON[]`), `sed`/`awk` with secret-related keywords (`credential`, `auth` in addition to existing `api`, `key`, `password`, `secret`, `token`), and binary tools reading `/proc/*/environ` (`strings`, `xxd`, `hexdump`, `xargs`). Includes Go unit tests covering all new patterns and negative cases, plus integration tests for Python/Node/grep/awk/sed/strings detection.
 
 ### Features
+
+- [Feature] **Read-only mount support** — Mount entries in config now support a `readonly = true` option. This enables safely sharing host directories (like `~/.claude/skills`, `~/.claude/commands`) into containers without allowing the container to modify them. Example: `[[mounts.default]]` with `host = "~/.claude/skills"`, `container = "/home/code/.claude/skills"`, `readonly = true`. For readonly mounts, if the host source directory does not exist, COI logs a warning and skips the mount instead of creating an empty directory. Addresses #260.
 
 - [Feature] **Self-contained profile directories** — Profiles are defined as self-contained directories under `profiles/` (at system, user, or project level), each with its own `config.toml` and optional build script. Profile directory config mirrors the main config structure and supports all fields: `image`, `persistent`, `environment`, `forward_env`, `[tool]` (name, permission_mode, effort_level), `[build]` (base, script resolved relative to profile directory, commands), `[[mounts]]`, `[network]` (mode, allowed_domains), and `[limits]`. Directory structure: `.coi/profiles/NAME/config.toml`. Precedence: system dirs < user dirs < project dirs < CLI flags. Added `coi profile list` (tabular view with name, image, persistent, source) and `coi profile show <name>` (full TOML-like detail view). Profile directories missing `config.toml` are silently skipped; invalid TOML causes a fatal error. Includes Go unit tests and Python integration tests with edge cases. Partial implementation of #114.
 

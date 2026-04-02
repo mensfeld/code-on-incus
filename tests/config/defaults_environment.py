@@ -2,8 +2,8 @@
 Test that [defaults] environment variables from .coi/config.toml are applied.
 
 Tests that:
-1. Static env vars in [defaults] environment are set in the container
-2. --env flag takes precedence over defaults.environment
+1. Static env vars in [defaults.environment] are set in the container
+2. Multiple env vars in [defaults.environment] are all applied
 """
 
 import subprocess
@@ -15,7 +15,7 @@ def test_defaults_environment_applied(coi_binary, cleanup_containers, workspace_
     Test that [defaults] environment vars are injected into container.
 
     Flow:
-    1. Create .coi/config.toml with [defaults] environment = { MY_DEFAULT = "default-val" }
+    1. Create .coi/config.toml with [defaults.environment] MY_DEFAULT = "default-val-55"
     2. Run coi run -- sh -c 'echo $MY_DEFAULT'
     3. Verify MY_DEFAULT is set
     """
@@ -24,8 +24,8 @@ def test_defaults_environment_applied(coi_binary, cleanup_containers, workspace_
     config_path = config_dir / "config.toml"
     config_path.write_text(
         """
-[defaults]
-environment = { MY_DEFAULT = "default-val-55" }
+[defaults.environment]
+MY_DEFAULT = "default-val-55"
 """
     )
 
@@ -54,22 +54,22 @@ environment = { MY_DEFAULT = "default-val-55" }
     )
 
 
-def test_env_flag_overrides_defaults_environment(coi_binary, cleanup_containers, workspace_dir):
+def test_defaults_environment_multiple_vars(coi_binary, cleanup_containers, workspace_dir):
     """
-    Test that --env flag takes precedence over defaults.environment.
+    Test that multiple [defaults.environment] vars are all applied.
 
     Flow:
-    1. Create .coi/config.toml with [defaults] environment = { MY_VAR = "from-config" }
-    2. Run with -e MY_VAR=from-flag
-    3. Verify the flag value wins
+    1. Create .coi/config.toml with [defaults.environment] containing two vars
+    2. Run coi run and check both are set
     """
     config_dir = Path(workspace_dir) / ".coi"
     config_dir.mkdir(exist_ok=True)
     config_path = config_dir / "config.toml"
     config_path.write_text(
         """
-[defaults]
-environment = { MY_VAR = "from-config" }
+[defaults.environment]
+MY_VAR = "from-config"
+MY_OTHER_VAR = "also-from-config"
 """
     )
 
@@ -79,12 +79,10 @@ environment = { MY_VAR = "from-config" }
             "run",
             "--workspace",
             workspace_dir,
-            "-e",
-            "MY_VAR=from-flag",
             "--",
             "sh",
             "-c",
-            "echo $MY_VAR",
+            "echo V1=$MY_VAR V2=$MY_OTHER_VAR",
         ],
         capture_output=True,
         text=True,
@@ -95,6 +93,9 @@ environment = { MY_VAR = "from-config" }
     assert result.returncode == 0, f"Run should succeed. stderr: {result.stderr}"
 
     combined_output = result.stdout + result.stderr
-    assert "from-flag" in combined_output, (
-        f"--env flag should override defaults.environment. Got:\n{combined_output}"
+    assert "V1=from-config" in combined_output, (
+        f"MY_VAR should be set from defaults.environment. Got:\n{combined_output}"
+    )
+    assert "V2=also-from-config" in combined_output, (
+        f"MY_OTHER_VAR should be set from defaults.environment. Got:\n{combined_output}"
     )

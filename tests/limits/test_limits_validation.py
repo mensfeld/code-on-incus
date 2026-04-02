@@ -8,6 +8,7 @@ Tests that:
 """
 
 import subprocess
+from pathlib import Path
 
 
 def test_valid_cpu_count_formats(coi_binary, workspace_dir, cleanup_containers):
@@ -15,16 +16,17 @@ def test_valid_cpu_count_formats(coi_binary, workspace_dir, cleanup_containers):
     valid_formats = ["1", "2", "0-3", "0,1,3", "0-1,3"]
 
     for cpu_count in valid_formats:
+        config_dir = Path(workspace_dir) / ".coi"
+        config_dir.mkdir(exist_ok=True)
+        (config_dir / "config.toml").write_text(
+            f"""
+[limits.cpu]
+count = "{cpu_count}"
+"""
+        )
+
         result = subprocess.run(
-            [
-                coi_binary,
-                "run",
-                "--workspace",
-                workspace_dir,
-                f"--limit-cpu={cpu_count}",
-                "echo",
-                "test",
-            ],
+            [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
             capture_output=True,
             text=True,
             timeout=120,
@@ -40,16 +42,17 @@ def test_invalid_cpu_count_formats(coi_binary, workspace_dir):
     invalid_formats = ["abc", "1.5", "-1", "1-", "a-b"]
 
     for cpu_count in invalid_formats:
+        config_dir = Path(workspace_dir) / ".coi"
+        config_dir.mkdir(exist_ok=True)
+        (config_dir / "config.toml").write_text(
+            f"""
+[limits.cpu]
+count = "{cpu_count}"
+"""
+        )
+
         result = subprocess.run(
-            [
-                coi_binary,
-                "run",
-                "--workspace",
-                workspace_dir,
-                f"--limit-cpu={cpu_count}",
-                "echo",
-                "test",
-            ],
+            [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
             capture_output=True,
             text=True,
             timeout=30,
@@ -66,16 +69,17 @@ def test_valid_memory_formats(coi_binary, workspace_dir, cleanup_containers):
     valid_formats = ["512MiB", "1GiB", "2GB", "50%"]
 
     for memory in valid_formats:
+        config_dir = Path(workspace_dir) / ".coi"
+        config_dir.mkdir(exist_ok=True)
+        (config_dir / "config.toml").write_text(
+            f"""
+[limits.memory]
+limit = "{memory}"
+"""
+        )
+
         result = subprocess.run(
-            [
-                coi_binary,
-                "run",
-                "--workspace",
-                workspace_dir,
-                f"--limit-memory={memory}",
-                "echo",
-                "test",
-            ],
+            [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
             capture_output=True,
             text=True,
             timeout=120,
@@ -89,16 +93,17 @@ def test_invalid_memory_formats(coi_binary, workspace_dir):
     invalid_formats = ["2", "abc", "2XB", "100%%"]
 
     for memory in invalid_formats:
+        config_dir = Path(workspace_dir) / ".coi"
+        config_dir.mkdir(exist_ok=True)
+        (config_dir / "config.toml").write_text(
+            f"""
+[limits.memory]
+limit = "{memory}"
+"""
+        )
+
         result = subprocess.run(
-            [
-                coi_binary,
-                "run",
-                "--workspace",
-                workspace_dir,
-                f"--limit-memory={memory}",
-                "echo",
-                "test",
-            ],
+            [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
             capture_output=True,
             text=True,
             timeout=30,
@@ -115,16 +120,17 @@ def test_valid_cpu_allowance_formats(coi_binary, workspace_dir, cleanup_containe
     valid_formats = ["50%", "25ms/100ms", "10ms/50ms"]
 
     for allowance in valid_formats:
+        config_dir = Path(workspace_dir) / ".coi"
+        config_dir.mkdir(exist_ok=True)
+        (config_dir / "config.toml").write_text(
+            f"""
+[limits.cpu]
+allowance = "{allowance}"
+"""
+        )
+
         result = subprocess.run(
-            [
-                coi_binary,
-                "run",
-                "--workspace",
-                workspace_dir,
-                f"--limit-cpu-allowance={allowance}",
-                "echo",
-                "test",
-            ],
+            [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
             capture_output=True,
             text=True,
             timeout=120,
@@ -140,16 +146,17 @@ def test_invalid_cpu_allowance_formats(coi_binary, workspace_dir):
     invalid_formats = ["abc", "200", "50", "25/100"]
 
     for allowance in invalid_formats:
+        config_dir = Path(workspace_dir) / ".coi"
+        config_dir.mkdir(exist_ok=True)
+        (config_dir / "config.toml").write_text(
+            f"""
+[limits.cpu]
+allowance = "{allowance}"
+"""
+        )
+
         result = subprocess.run(
-            [
-                coi_binary,
-                "run",
-                "--workspace",
-                workspace_dir,
-                f"--limit-cpu-allowance={allowance}",
-                "echo",
-                "test",
-            ],
+            [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
             capture_output=True,
             text=True,
             timeout=30,
@@ -166,16 +173,17 @@ def test_valid_disk_io_formats(coi_binary, workspace_dir, cleanup_containers):
     valid_formats = ["10MiB/s", "100KiB/s", "1GiB/s", "1000iops"]
 
     for io_rate in valid_formats:
+        config_dir = Path(workspace_dir) / ".coi"
+        config_dir.mkdir(exist_ok=True)
+        (config_dir / "config.toml").write_text(
+            f"""
+[limits.disk]
+read = "{io_rate}"
+"""
+        )
+
         result = subprocess.run(
-            [
-                coi_binary,
-                "run",
-                "--workspace",
-                workspace_dir,
-                f"--limit-disk-read={io_rate}",
-                "echo",
-                "test",
-            ],
+            [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
             capture_output=True,
             text=True,
             timeout=120,
@@ -191,16 +199,17 @@ def test_invalid_disk_io_formats(coi_binary, workspace_dir):
     invalid_formats = ["fast", "10MB", "1000", "abc"]
 
     for io_rate in invalid_formats:
+        config_dir = Path(workspace_dir) / ".coi"
+        config_dir.mkdir(exist_ok=True)
+        (config_dir / "config.toml").write_text(
+            f"""
+[limits.disk]
+read = "{io_rate}"
+"""
+        )
+
         result = subprocess.run(
-            [
-                coi_binary,
-                "run",
-                "--workspace",
-                workspace_dir,
-                f"--limit-disk-read={io_rate}",
-                "echo",
-                "test",
-            ],
+            [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
             capture_output=True,
             text=True,
             timeout=30,
@@ -217,16 +226,17 @@ def test_valid_duration_formats(coi_binary, workspace_dir, cleanup_containers):
     valid_formats = ["30s", "5m", "2h", "1h30m"]
 
     for duration in valid_formats:
+        config_dir = Path(workspace_dir) / ".coi"
+        config_dir.mkdir(exist_ok=True)
+        (config_dir / "config.toml").write_text(
+            f"""
+[limits.runtime]
+max_duration = "{duration}"
+"""
+        )
+
         result = subprocess.run(
-            [
-                coi_binary,
-                "run",
-                "--workspace",
-                workspace_dir,
-                f"--limit-duration={duration}",
-                "echo",
-                "test",
-            ],
+            [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
             capture_output=True,
             text=True,
             timeout=120,
@@ -242,16 +252,17 @@ def test_invalid_duration_formats(coi_binary, workspace_dir):
     invalid_formats = ["2x", "-1h", "abc", "100"]
 
     for duration in invalid_formats:
+        config_dir = Path(workspace_dir) / ".coi"
+        config_dir.mkdir(exist_ok=True)
+        (config_dir / "config.toml").write_text(
+            f"""
+[limits.runtime]
+max_duration = "{duration}"
+"""
+        )
+
         result = subprocess.run(
-            [
-                coi_binary,
-                "run",
-                "--workspace",
-                workspace_dir,
-                f"--limit-duration={duration}",
-                "echo",
-                "test",
-            ],
+            [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
             capture_output=True,
             text=True,
             timeout=30,
@@ -267,16 +278,17 @@ def test_priority_range_validation(coi_binary, workspace_dir, cleanup_containers
     """Test that priority values are validated (0-10)."""
     # Valid priorities
     for priority in [0, 5, 10]:
+        config_dir = Path(workspace_dir) / ".coi"
+        config_dir.mkdir(exist_ok=True)
+        (config_dir / "config.toml").write_text(
+            f"""
+[limits.cpu]
+priority = {priority}
+"""
+        )
+
         result = subprocess.run(
-            [
-                coi_binary,
-                "run",
-                "--workspace",
-                workspace_dir,
-                f"--limit-cpu-priority={priority}",
-                "echo",
-                "test",
-            ],
+            [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
             capture_output=True,
             text=True,
             timeout=120,
@@ -288,16 +300,17 @@ def test_priority_range_validation(coi_binary, workspace_dir, cleanup_containers
 
     # Invalid priorities
     for priority in [-1, 11, 100]:
+        config_dir = Path(workspace_dir) / ".coi"
+        config_dir.mkdir(exist_ok=True)
+        (config_dir / "config.toml").write_text(
+            f"""
+[limits.cpu]
+priority = {priority}
+"""
+        )
+
         result = subprocess.run(
-            [
-                coi_binary,
-                "run",
-                "--workspace",
-                workspace_dir,
-                f"--limit-cpu-priority={priority}",
-                "echo",
-                "test",
-            ],
+            [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
             capture_output=True,
             text=True,
             timeout=30,

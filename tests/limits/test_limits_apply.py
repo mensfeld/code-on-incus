@@ -17,16 +17,17 @@ def test_cpu_limit_applied(coi_binary, workspace_dir, cleanup_containers):
     """Test that CPU limits are applied to the container."""
     container_name = f"coi-{Path(workspace_dir).name}-1"
 
+    config_dir = Path(workspace_dir) / ".coi"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "config.toml").write_text(
+        """
+[limits.cpu]
+count = "2"
+"""
+    )
+
     result = subprocess.run(
-        [
-            coi_binary,
-            "run",
-            "--workspace",
-            workspace_dir,
-            "--limit-cpu=2",
-            "echo",
-            "test",
-        ],
+        [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
         capture_output=True,
         text=True,
         timeout=120,
@@ -52,16 +53,17 @@ def test_cpu_allowance_applied(coi_binary, workspace_dir, cleanup_containers):
     """Test that CPU allowance is applied to the container."""
     container_name = f"coi-{Path(workspace_dir).name}-1"
 
+    config_dir = Path(workspace_dir) / ".coi"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "config.toml").write_text(
+        """
+[limits.cpu]
+allowance = "50%"
+"""
+    )
+
     result = subprocess.run(
-        [
-            coi_binary,
-            "run",
-            "--workspace",
-            workspace_dir,
-            "--limit-cpu-allowance=50%",
-            "echo",
-            "test",
-        ],
+        [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
         capture_output=True,
         text=True,
         timeout=120,
@@ -87,16 +89,17 @@ def test_memory_limit_applied(coi_binary, workspace_dir, cleanup_containers):
     """Test that memory limits are applied to the container."""
     container_name = f"coi-{Path(workspace_dir).name}-1"
 
+    config_dir = Path(workspace_dir) / ".coi"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "config.toml").write_text(
+        """
+[limits.memory]
+limit = "2GiB"
+"""
+    )
+
     result = subprocess.run(
-        [
-            coi_binary,
-            "run",
-            "--workspace",
-            workspace_dir,
-            "--limit-memory=2GiB",
-            "echo",
-            "test",
-        ],
+        [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
         capture_output=True,
         text=True,
         timeout=120,
@@ -122,17 +125,18 @@ def test_memory_swap_applied(coi_binary, workspace_dir, cleanup_containers):
     """Test that memory swap configuration is applied."""
     container_name = f"coi-{Path(workspace_dir).name}-1"
 
+    config_dir = Path(workspace_dir) / ".coi"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "config.toml").write_text(
+        """
+[limits.memory]
+limit = "1GiB"
+swap = "false"
+"""
+    )
+
     result = subprocess.run(
-        [
-            coi_binary,
-            "run",
-            "--workspace",
-            workspace_dir,
-            "--limit-memory=1GiB",
-            "--limit-memory-swap=false",
-            "echo",
-            "test",
-        ],
+        [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
         capture_output=True,
         text=True,
         timeout=120,
@@ -158,17 +162,18 @@ def test_disk_io_limits_applied(coi_binary, workspace_dir, cleanup_containers):
     """Test that disk I/O limits are applied to the container."""
     container_name = f"coi-{Path(workspace_dir).name}-1"
 
+    config_dir = Path(workspace_dir) / ".coi"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "config.toml").write_text(
+        """
+[limits.disk]
+read = "10MiB/s"
+write = "5MiB/s"
+"""
+    )
+
     result = subprocess.run(
-        [
-            coi_binary,
-            "run",
-            "--workspace",
-            workspace_dir,
-            "--limit-disk-read=10MiB/s",
-            "--limit-disk-write=5MiB/s",
-            "echo",
-            "test",
-        ],
+        [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
         capture_output=True,
         text=True,
         timeout=120,
@@ -197,16 +202,17 @@ def test_process_limit_applied(coi_binary, workspace_dir, cleanup_containers):
     """Test that process limits are applied to the container."""
     container_name = f"coi-{Path(workspace_dir).name}-1"
 
+    config_dir = Path(workspace_dir) / ".coi"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "config.toml").write_text(
+        """
+[limits.runtime]
+max_processes = 100
+"""
+    )
+
     result = subprocess.run(
-        [
-            coi_binary,
-            "run",
-            "--workspace",
-            workspace_dir,
-            "--limit-processes=100",
-            "echo",
-            "test",
-        ],
+        [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
         capture_output=True,
         text=True,
         timeout=120,
@@ -232,19 +238,26 @@ def test_multiple_limits_combined(coi_binary, workspace_dir, cleanup_containers)
     """Test that multiple limits can be applied together."""
     container_name = f"coi-{Path(workspace_dir).name}-1"
 
+    config_dir = Path(workspace_dir) / ".coi"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "config.toml").write_text(
+        """
+[limits.cpu]
+count = "2"
+
+[limits.memory]
+limit = "2GiB"
+
+[limits.disk]
+read = "10MiB/s"
+
+[limits.runtime]
+max_processes = 100
+"""
+    )
+
     result = subprocess.run(
-        [
-            coi_binary,
-            "run",
-            "--workspace",
-            workspace_dir,
-            "--limit-cpu=2",
-            "--limit-memory=2GiB",
-            "--limit-disk-read=10MiB/s",
-            "--limit-processes=100",
-            "echo",
-            "test",
-        ],
+        [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
         capture_output=True,
         text=True,
         timeout=120,
@@ -273,17 +286,18 @@ def test_cpu_priority_applied(coi_binary, workspace_dir, cleanup_containers):
     """Test that CPU priority is applied."""
     container_name = f"coi-{Path(workspace_dir).name}-1"
 
+    config_dir = Path(workspace_dir) / ".coi"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "config.toml").write_text(
+        """
+[limits.cpu]
+count = "2"
+priority = 5
+"""
+    )
+
     result = subprocess.run(
-        [
-            coi_binary,
-            "run",
-            "--workspace",
-            workspace_dir,
-            "--limit-cpu=2",
-            "--limit-cpu-priority=5",
-            "echo",
-            "test",
-        ],
+        [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
         capture_output=True,
         text=True,
         timeout=120,
@@ -309,6 +323,18 @@ def test_limits_work_with_persistent_containers(coi_binary, workspace_dir, clean
     """Test that limits work with persistent containers."""
     container_name = f"coi-{Path(workspace_dir).name}-1"
 
+    config_dir = Path(workspace_dir) / ".coi"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "config.toml").write_text(
+        """
+[limits.cpu]
+count = "2"
+
+[limits.memory]
+limit = "2GiB"
+"""
+    )
+
     # Launch persistent container with limits
     result = subprocess.run(
         [
@@ -317,8 +343,6 @@ def test_limits_work_with_persistent_containers(coi_binary, workspace_dir, clean
             "--workspace",
             workspace_dir,
             "--persistent",
-            "--limit-cpu=2",
-            "--limit-memory=2GiB",
             "echo",
             "test",
         ],

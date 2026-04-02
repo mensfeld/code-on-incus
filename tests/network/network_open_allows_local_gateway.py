@@ -28,15 +28,19 @@ def test_open_allows_local_gateway(coi_binary, workspace_dir, cleanup_containers
     7. Verify connection is NOT blocked by ACL (may still fail if nothing listening, but won't be ACL-rejected)
     8. Cleanup container
     """
-    # Start shell in background with open network mode
+    # Create config with open network mode
+    import pathlib
+    config_dir = pathlib.Path(workspace_dir) / ".coi"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "config.toml").write_text('[network]\nmode = "open"\n')
+
+    # Start shell in background with open network mode (via config)
     result = subprocess.run(
         [
             coi_binary,
             "shell",
             "--workspace",
             workspace_dir,
-            "--network",
-            "open",
             "--background",
             "--debug",
         ],

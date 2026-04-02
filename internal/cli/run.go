@@ -13,12 +13,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	capture bool
-	timeout int
-	format  string
-)
-
 var runCmd = &cobra.Command{
 	Use:   "run COMMAND",
 	Short: "Run a command in an ephemeral container",
@@ -28,18 +22,11 @@ The container is automatically cleaned up after the command completes.
 
 Examples:
   coi run "echo hello"
-  coi run "npm test" --capture
-  coi run "pytest" --slot 2
+  coi run "npm test" --slot 2
   coi run --workspace ~/project "make build"
 `,
 	Args: cobra.MinimumNArgs(1),
 	RunE: runCommand,
-}
-
-func init() {
-	runCmd.Flags().BoolVar(&capture, "capture", false, "Capture output instead of streaming")
-	runCmd.Flags().IntVar(&timeout, "timeout", 120, "Command timeout in seconds")
-	runCmd.Flags().StringVar(&format, "format", "pretty", "Output format (pretty|json)")
 }
 
 func runCommand(cmd *cobra.Command, args []string) error {
@@ -138,7 +125,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	// Apply resource limits (only for new containers, not restarted persistent ones)
 	wasRestarted := containerExists && persistent
 	if !wasRestarted {
-		limitsConfig := mergeLimitsConfig(cmd)
+		limitsConfig := &cfg.Limits
 		if limitsConfig != nil && hasAnyLimits(limitsConfig) {
 			fmt.Fprintf(os.Stderr, "Applying resource limits...\n")
 			applyOpts := limits.ApplyOptions{
@@ -216,7 +203,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		}
 
 		// Parse and validate mount configuration
-		mountConfig, err := ParseMountConfig(cfg, mountPairs)
+		mountConfig, err := ParseMountConfig(cfg)
 		if err != nil {
 			return fmt.Errorf("invalid mount configuration: %w", err)
 		}
@@ -229,21 +216,30 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		// Mount all configured directories
 		if mountConfig != nil && len(mountConfig.Mounts) > 0 {
 			for _, mount := range mountConfig.Mounts {
-				// Create host directory if it doesn't exist
-				if err := os.MkdirAll(mount.HostPath, 0o755); err != nil {
-					return fmt.Errorf("failed to create mount directory '%s': %w", mount.HostPath, err)
+				if mount.Readonly {
+					// For readonly mounts, skip creating host directory — if the source
+					// doesn't exist, log a warning and skip the mount
+					if _, err := os.Stat(mount.HostPath); os.IsNotExist(err) {
+						fmt.Fprintf(os.Stderr, "Warning: readonly mount source %s does not exist, skipping\n", mount.HostPath)
+						continue
+					}
+					fmt.Fprintf(os.Stderr, "Adding mount (read-only): %s -> %s\n", mount.HostPath, mount.ContainerPath)
+				} else {
+					// Create host directory if it doesn't exist (writable mounts only)
+					if err := os.MkdirAll(mount.HostPath, 0o755); err != nil {
+						return fmt.Errorf("failed to create mount directory '%s': %w", mount.HostPath, err)
+					}
+					fmt.Fprintf(os.Stderr, "Adding mount: %s -> %s\n", mount.HostPath, mount.ContainerPath)
 				}
 
-				fmt.Fprintf(os.Stderr, "Adding mount: %s -> %s\n", mount.HostPath, mount.ContainerPath)
-
-				if err := mgr.MountDisk(mount.DeviceName, mount.HostPath, mount.ContainerPath, useShift, false); err != nil {
+				if err := mgr.MountDisk(mount.DeviceName, mount.HostPath, mount.ContainerPath, useShift, mount.Readonly); err != nil {
 					return fmt.Errorf("failed to add mount '%s': %w", mount.DeviceName, err)
 				}
 			}
 		}
 
 		// Protect security-sensitive paths by mounting read-only (security feature)
-		if !writableGitHooks && !cfg.Security.DisableProtection {
+		if !cfg.Security.DisableProtection {
 			protectedPaths := cfg.Security.GetEffectiveProtectedPaths()
 			if len(protectedPaths) > 0 {
 				if err := session.SetupSecurityMounts(mgr, absWorkspace, containerWorkspacePath, protectedPaths, useShift); err != nil {
@@ -264,7 +260,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// Configure timezone in container filesystem
-	tz := applyContainerTimezone(cmd, mgr)
+	tz := applyContainerTimezone(mgr)
 
 	// Execute command directly (args are already the full command to run)
 	fmt.Fprintf(os.Stderr, "Executing: %s\n", strings.Join(args, " "))
@@ -275,7 +271,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		"--group", fmt.Sprintf("%d", container.CodeUID), "--cwd", containerWorkspacePath,
 	}
 
-	// Add all environment variables (timezone, config, forward_env, --env flags)
+	// Add all environment variables (timezone, config, forward_env)
 	incusArgs = appendEnvArgs(incusArgs, tz)
 
 	incusArgs = append(incusArgs, "--")
@@ -346,11 +342,11 @@ func remapContainerUserIfNeeded(mgr *container.Manager, img string, wasRestarted
 	return nil
 }
 
-// appendEnvArgs appends --env flags for config environment, forward_env, and --env CLI flags
-// to an incus exec args slice. Config env is lowest priority, --env flags are highest.
+// appendEnvArgs appends --env flags for config environment and forward_env
+// to an incus exec args slice.
 // tz is the resolved timezone name (may be empty).
 func appendEnvArgs(incusArgs []string, tz string) []string {
-	// Timezone (lowest priority — user can override with --env TZ=...)
+	// Timezone (lowest priority — user can override with config env)
 	if tz != "" {
 		incusArgs = append(incusArgs, "--env", fmt.Sprintf("TZ=%s", tz))
 	}
@@ -360,19 +356,13 @@ func appendEnvArgs(incusArgs []string, tz string) []string {
 		incusArgs = append(incusArgs, "--env", fmt.Sprintf("%s=%s", k, v))
 	}
 
-	// Resolve forward_env: merge config + --forward-env flag, deduplicate, look up host values
-	forwardNames := config.MergeStringSliceUnique(cfg.Defaults.ForwardEnv, forwardEnvVars)
-	for _, name := range forwardNames {
+	// Resolve forward_env from config, look up host values
+	for _, name := range cfg.Defaults.ForwardEnv {
 		if val, ok := os.LookupEnv(name); ok {
 			incusArgs = append(incusArgs, "--env", fmt.Sprintf("%s=%s", name, val))
 		} else {
 			fmt.Fprintf(os.Stderr, "Warning: forward_env variable %q is not set on host, skipping\n", name)
 		}
-	}
-
-	// User-provided --env flags (highest priority — last wins)
-	for _, e := range envVars {
-		incusArgs = append(incusArgs, "--env", e)
 	}
 
 	return incusArgs
@@ -400,8 +390,8 @@ func hasAnyLimits(cfg *config.LimitsConfig) bool {
 
 // applyContainerTimezone resolves the timezone and configures it inside the container.
 // Returns the resolved timezone name (empty for UTC).
-func applyContainerTimezone(cmd *cobra.Command, mgr *container.Manager) string {
-	tz := resolveTimezone(cmd, cfg)
+func applyContainerTimezone(mgr *container.Manager) string {
+	tz := resolveTimezone(cfg)
 	if tz != "" {
 		tzCmd := fmt.Sprintf(
 			"ln -sf /usr/share/zoneinfo/%s /etc/localtime && echo %s > /etc/timezone",

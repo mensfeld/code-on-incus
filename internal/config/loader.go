@@ -224,22 +224,30 @@ code_user = "code"
 
 [mounts]
 # Default mounts applied to all sessions
-# These can be overridden by CLI flags
+# Each mount can optionally be read-only (readonly = true)
+
+# Example: Mount Claude Code skills (read-only)
+# [[mounts.default]]
+# host = "~/.claude/skills"
+# container = "/home/code/.claude/skills"
+# readonly = true
+
+# Example: Mount Claude Code commands (read-only)
+# [[mounts.default]]
+# host = "~/.claude/commands"
+# container = "/home/code/.claude/commands"
+# readonly = true
 
 # Example: Mount AWS credentials (read-only recommended)
 # [[mounts.default]]
 # host = "~/.aws"
-# container = "/home/user/.aws"
+# container = "/home/code/.aws"
+# readonly = true
 
-# Example: Mount shared data directory
+# Example: Mount shared data directory (read-write)
 # [[mounts.default]]
 # host = "~/shared-data"
 # container = "/data"
-
-# Example: Mount Docker socket (advanced users)
-# [[mounts.default]]
-# host = "/var/run/docker.sock"
-# container = "/var/run/docker.sock"
 
 [limits]
 # Resource and time limits for containers (empty = unlimited)
@@ -296,14 +304,14 @@ mode = "host"
 # Forward host SSH agent to container (default: false)
 # When enabled, the host's SSH_AUTH_SOCK is forwarded into the container via an
 # Incus proxy device. This allows git over SSH to work inside the container without
-# copying SSH keys. Can also be enabled per-session with --ssh-agent flag.
+# copying SSH keys.
 forward_agent = false
 
 [git]
 # Allow container to write to .git/hooks (default: false)
 # By default, .git/hooks is mounted read-only to prevent containers from
 # modifying git hooks that could execute malicious code on the host
-# Set to true if you need the container to manage git hooks (same as --writable-git-hooks flag)
+# Set to true if you need the container to manage git hooks
 writable_hooks = false
 
 [security]

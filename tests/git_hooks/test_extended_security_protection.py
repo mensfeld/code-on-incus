@@ -633,15 +633,23 @@ class TestSymlinkSecurity:
         assert result.returncode == 0
 
 
-class TestWritableGitHooksFlagBackwardsCompat:
-    """Tests for --writable-git-hooks flag backwards compatibility."""
+class TestWritableGitHooksConfigCompat:
+    """Tests for [git] writable_hooks config compatibility."""
 
-    def test_writable_git_hooks_disables_all_protection(
+    def test_writable_git_hooks_config_disables_all_protection(
         self, coi_binary, workspace_dir, cleanup_containers
     ):
-        """Test that --writable-git-hooks disables all path protection."""
+        """Test that writable_hooks config disables all path protection."""
         # Initialize git repo
         subprocess.run(["git", "init"], cwd=workspace_dir, check=True, capture_output=True)
+
+        # Create config that enables writable hooks
+        config_dir = Path(workspace_dir) / ".coi"
+        config_dir.mkdir(exist_ok=True)
+        (config_dir / "config.toml").write_text('''
+[git]
+writable_hooks = true
+''')
 
         # Create protected paths
         hooks_dir = Path(workspace_dir) / ".git" / "hooks"
@@ -650,14 +658,13 @@ class TestWritableGitHooksFlagBackwardsCompat:
         vscode_dir = Path(workspace_dir) / ".vscode"
         vscode_dir.mkdir(parents=True, exist_ok=True)
 
-        # Run with --writable-git-hooks - should disable all protection
+        # Run with writable hooks enabled via config - should disable all protection
         result = subprocess.run(
             [
                 coi_binary,
                 "run",
                 "--workspace",
                 workspace_dir,
-                "--writable-git-hooks",
                 "--",
                 "sh",
                 "-c",

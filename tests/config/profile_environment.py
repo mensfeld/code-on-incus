@@ -4,6 +4,7 @@ Test that profile environment variables are applied to container.
 Tests that:
 1. Profile environment map is applied when --profile is used
 2. Profile env vars are available inside the container
+3. Profile environment overrides defaults environment
 """
 
 import subprocess
@@ -59,16 +60,25 @@ MY_PROFILE_VAR = "profile-val-77"
     )
 
 
-def test_env_flag_overrides_profile_environment(coi_binary, cleanup_containers, workspace_dir):
+def test_profile_environment_overrides_defaults(coi_binary, cleanup_containers, workspace_dir):
     """
-    Test that --env flag takes precedence over profile environment.
+    Test that profile environment takes precedence over defaults environment.
 
     Flow:
-    1. Create profile with MY_VAR = "from-profile"
-    2. Run with --profile and -e MY_VAR=from-flag
-    3. Verify the flag value wins
+    1. Create .coi/config.toml with [defaults.environment] MY_VAR = "from-defaults"
+    2. Create profile with [environment] MY_VAR = "from-profile"
+    3. Run with --profile and verify profile value wins
     """
-    profile_dir = Path(workspace_dir) / ".coi" / "profiles" / "test"
+    config_dir = Path(workspace_dir) / ".coi"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "config.toml").write_text(
+        """
+[defaults.environment]
+MY_VAR = "from-defaults"
+"""
+    )
+
+    profile_dir = config_dir / "profiles" / "test"
     profile_dir.mkdir(parents=True)
     (profile_dir / "config.toml").write_text(
         """
@@ -85,8 +95,6 @@ MY_VAR = "from-profile"
             workspace_dir,
             "--profile",
             "test",
-            "-e",
-            "MY_VAR=from-flag",
             "--",
             "sh",
             "-c",
@@ -101,6 +109,6 @@ MY_VAR = "from-profile"
     assert result.returncode == 0, f"Run should succeed. stderr: {result.stderr}"
 
     combined_output = result.stdout + result.stderr
-    assert "from-flag" in combined_output, (
-        f"--env flag should override profile environment. Got:\n{combined_output}"
+    assert "from-profile" in combined_output, (
+        f"Profile environment should override defaults environment. Got:\n{combined_output}"
     )

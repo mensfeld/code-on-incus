@@ -5,7 +5,7 @@ Tests that:
 1. Profiles can define their own limits
 2. Profile limits override global config limits
 3. Multiple profiles can have different limits
-4. Profile limits work with CLI flag overrides
+4. Profile limits work correctly with global config
 """
 
 import subprocess
@@ -291,17 +291,15 @@ count = "1"
     )
 
 
-def test_cli_flags_override_profile_limits(coi_binary, workspace_dir, cleanup_containers):
-    """Test that CLI flags can override profile limits."""
+def test_profile_overrides_global_config_limits(coi_binary, workspace_dir, cleanup_containers):
+    """Test that profile limits override global config limits."""
     container_name = f"coi-{Path(workspace_dir).name}-1"
 
-    # Create directory profile with limits
-    profile_dir = Path(workspace_dir) / ".coi" / "profiles" / "base"
-    profile_dir.mkdir(parents=True)
-    (profile_dir / "config.toml").write_text(
+    # Create global config with limits
+    project_config_dir = Path(workspace_dir) / ".coi"
+    project_config_dir.mkdir(exist_ok=True)
+    (project_config_dir / "config.toml").write_text(
         """
-image = "coi"
-
 [limits.cpu]
 count = "2"
 
@@ -310,7 +308,22 @@ limit = "2GiB"
 """
     )
 
-    # Launch with profile but override with CLI flags
+    # Create directory profile with higher limits
+    profile_dir = project_config_dir / "profiles" / "bigger"
+    profile_dir.mkdir(parents=True)
+    (profile_dir / "config.toml").write_text(
+        """
+image = "coi"
+
+[limits.cpu]
+count = "4"
+
+[limits.memory]
+limit = "4GiB"
+"""
+    )
+
+    # Launch with profile -- profile limits should override global config
     result = subprocess.run(
         [
             coi_binary,
@@ -318,9 +331,7 @@ limit = "2GiB"
             "--workspace",
             workspace_dir,
             "--profile",
-            "base",
-            "--limit-cpu=4",
-            "--limit-memory=4GiB",
+            "bigger",
             "echo",
             "test",
         ],
@@ -331,7 +342,7 @@ limit = "2GiB"
 
     assert result.returncode == 0, f"Command should succeed. stderr: {result.stderr}"
 
-    # Verify CLI flags overrode profile
+    # Verify profile limits overrode global config
     result = subprocess.run(
         ["incus", "config", "show", container_name],
         capture_output=True,
@@ -341,10 +352,10 @@ limit = "2GiB"
 
     config_output = result.stdout
     assert 'limits.cpu: "4"' in config_output, (
-        "CLI flag should override profile CPU (should be 4, not 2)"
+        "Profile should override global config CPU (should be 4, not 2)"
     )
     assert "limits.memory: 4GiB" in config_output, (
-        "CLI flag should override profile memory (should be 4GiB, not 2GiB)"
+        "Profile should override global config memory (should be 4GiB, not 2GiB)"
     )
 
 

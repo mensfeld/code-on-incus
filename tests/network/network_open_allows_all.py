@@ -2,13 +2,14 @@
 Test for network isolation - open mode allows all connections.
 
 Tests that:
-1. Container with --network=open can access everything
+1. Container with network mode "open" can access everything
 2. Both public internet and private networks work
 3. No network restrictions applied
 """
 
 import subprocess
 import time
+from pathlib import Path
 
 
 def test_open_mode_allows_all(coi_binary, workspace_dir, cleanup_containers):
@@ -16,11 +17,19 @@ def test_open_mode_allows_all(coi_binary, workspace_dir, cleanup_containers):
     Test that open mode allows all network access.
 
     Flow:
-    1. Start shell with --network=open
+    1. Start shell with network mode "open" via config file
     2. Try to curl both public internet and private networks
     3. Verify all connections work (or fail for normal reasons, not ACL blocking)
     4. Cleanup container
     """
+    # Write network config to workspace .coi/config.toml
+    config_dir = Path(workspace_dir) / ".coi"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "config.toml").write_text('''
+[network]
+mode = "open"
+''')
+
     # Start shell in background with open network mode
     result = subprocess.run(
         [
@@ -28,8 +37,6 @@ def test_open_mode_allows_all(coi_binary, workspace_dir, cleanup_containers):
             "shell",
             "--workspace",
             workspace_dir,
-            "--network",
-            "open",
             "--background",
             "--debug",
         ],

@@ -1,24 +1,35 @@
 """
-Test for coi run - with --forward-env flag.
+Test for coi run - with forward_env via config file.
 
 Tests that:
-1. Run command with --forward-env to forward a host env var by name
+1. Create .coi/config.toml with forward_env to forward a host env var by name
 2. Verify env var value from host is available in container
 """
 
 import os
 import subprocess
+from pathlib import Path
 
 
 def test_run_with_forward_env(coi_binary, cleanup_containers, workspace_dir):
     """
-    Test running command with --forward-env flag.
+    Test running command with forward_env set via config file.
 
     Flow:
     1. Set a host env var
-    2. Run coi run --forward-env VAR_NAME -- sh -c 'echo $VAR_NAME'
-    3. Verify the host value appears in container output
+    2. Create .coi/config.toml with forward_env = ["COI_TEST_FORWARD_VAR"]
+    3. Run coi run -- sh -c 'echo $COI_TEST_FORWARD_VAR'
+    4. Verify the host value appears in container output
     """
+    config_dir = Path(workspace_dir) / ".coi"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "config.toml").write_text(
+        """
+[defaults]
+forward_env = ["COI_TEST_FORWARD_VAR"]
+"""
+    )
+
     env = os.environ.copy()
     env["COI_TEST_FORWARD_VAR"] = "forwarded-value-42"
 
@@ -28,8 +39,6 @@ def test_run_with_forward_env(coi_binary, cleanup_containers, workspace_dir):
             "run",
             "--workspace",
             workspace_dir,
-            "--forward-env",
-            "COI_TEST_FORWARD_VAR",
             "--",
             "sh",
             "-c",

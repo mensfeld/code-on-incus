@@ -17,6 +17,16 @@ def test_container_auto_stops_after_timeout(coi_binary, workspace_dir, cleanup_c
     """Test that container auto-stops after max_duration is reached."""
     container_name = f"coi-{Path(workspace_dir).name}-1"
 
+    # Create config with short timeout
+    config_dir = Path(workspace_dir) / ".coi"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "config.toml").write_text(
+        """
+[limits.runtime]
+max_duration = "10s"
+"""
+    )
+
     # Create a script that runs longer than timeout
     test_script = Path(workspace_dir) / "long_script.sh"
     test_script.write_text(
@@ -36,7 +46,6 @@ echo "Script completed"
             "run",
             "--workspace",
             workspace_dir,
-            "--limit-duration=10s",
             "bash",
             "/workspace/long_script.sh",
         ],
@@ -82,6 +91,16 @@ def test_timeout_with_persistent_container(coi_binary, workspace_dir, cleanup_co
     """Test that timeout works with persistent containers."""
     container_name = f"coi-{Path(workspace_dir).name}-1"
 
+    # Create config with short timeout
+    config_dir = Path(workspace_dir) / ".coi"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "config.toml").write_text(
+        """
+[limits.runtime]
+max_duration = "10s"
+"""
+    )
+
     # Create a script
     test_script = Path(workspace_dir) / "test_script.sh"
     test_script.write_text(
@@ -102,7 +121,6 @@ echo "Done"
             "--workspace",
             workspace_dir,
             "--persistent",
-            "--limit-duration=10s",
             "bash",
             "/workspace/test_script.sh",
         ],
@@ -144,6 +162,17 @@ echo "Done"
 
 def test_normal_exit_before_timeout(coi_binary, workspace_dir, cleanup_containers):
     """Test that normal exit before timeout works correctly."""
+
+    # Create config with long timeout
+    config_dir = Path(workspace_dir) / ".coi"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "config.toml").write_text(
+        """
+[limits.runtime]
+max_duration = "30s"
+"""
+    )
+
     # Run a quick command with a long timeout
     start_time = time.time()
     result = subprocess.run(
@@ -152,7 +181,6 @@ def test_normal_exit_before_timeout(coi_binary, workspace_dir, cleanup_container
             "run",
             "--workspace",
             workspace_dir,
-            "--limit-duration=30s",
             "echo",
             "quick command",
         ],
@@ -228,6 +256,17 @@ def test_zero_duration_means_unlimited(coi_binary, workspace_dir, cleanup_contai
 
 def test_timeout_logging_message(coi_binary, workspace_dir, cleanup_containers):
     """Test that timeout start message appears in logs."""
+
+    # Create config with short timeout
+    config_dir = Path(workspace_dir) / ".coi"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "config.toml").write_text(
+        """
+[limits.runtime]
+max_duration = "5s"
+"""
+    )
+
     # Create a script
     test_script = Path(workspace_dir) / "test.sh"
     test_script.write_text(
@@ -244,7 +283,6 @@ sleep 15
             "run",
             "--workspace",
             workspace_dir,
-            "--limit-duration=5s",
             "bash",
             "/workspace/test.sh",
         ],

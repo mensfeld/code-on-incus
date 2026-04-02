@@ -42,6 +42,31 @@ func TestValidateMounts_DetectsNesting(t *testing.T) {
 	}
 }
 
+func TestValidateMounts_ReadonlyField(t *testing.T) {
+	config := &MountConfig{
+		Mounts: []MountEntry{
+			{ContainerPath: "/data1", Readonly: true},
+			{ContainerPath: "/data2", Readonly: false},
+			{ContainerPath: "/app"},
+		},
+	}
+
+	if err := ValidateMounts(config); err != nil {
+		t.Errorf("Expected no error for mounts with readonly field, got: %v", err)
+	}
+
+	// Verify readonly field is set correctly
+	if !config.Mounts[0].Readonly {
+		t.Error("Expected first mount to be readonly")
+	}
+	if config.Mounts[1].Readonly {
+		t.Error("Expected second mount to NOT be readonly")
+	}
+	if config.Mounts[2].Readonly {
+		t.Error("Expected third mount to NOT be readonly (default)")
+	}
+}
+
 func TestValidateMounts_SimilarNamesOK(t *testing.T) {
 	config := &MountConfig{
 		Mounts: []MountEntry{

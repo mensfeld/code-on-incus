@@ -176,6 +176,7 @@ type ClaudeToolConfig struct {
 type MountEntry struct {
 	Host      string `toml:"host"`      // Host path (supports ~ expansion)
 	Container string `toml:"container"` // Container path (must be absolute)
+	Readonly  bool   `toml:"readonly"`  // Mount read-only (default: false)
 }
 
 // MountsConfig contains mount-related configuration

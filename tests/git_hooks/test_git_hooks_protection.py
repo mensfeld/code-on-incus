@@ -155,23 +155,30 @@ def test_git_hooks_readonly_rm_fails(coi_binary, workspace_dir, cleanup_containe
     ), f"Expected read-only error, got: {combined}"
 
 
-def test_git_hooks_writable_with_flag(coi_binary, workspace_dir, cleanup_containers):
-    """Test that --writable-git-hooks allows writing to .git/hooks."""
+def test_git_hooks_writable_with_config(coi_binary, workspace_dir, cleanup_containers):
+    """Test that writable_hooks config allows writing to .git/hooks."""
     # Initialize git repo
     subprocess.run(["git", "init"], cwd=workspace_dir, check=True, capture_output=True)
+
+    # Create config that enables writable hooks
+    config_dir = Path(workspace_dir) / ".coi"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "config.toml").write_text('''
+[git]
+writable_hooks = true
+''')
 
     # Ensure hooks dir exists
     hooks_dir = Path(workspace_dir) / ".git" / "hooks"
     hooks_dir.mkdir(parents=True, exist_ok=True)
 
-    # Run with --writable-git-hooks flag
+    # Run with writable hooks enabled via config
     result = subprocess.run(
         [
             coi_binary,
             "run",
             "--workspace",
             workspace_dir,
-            "--writable-git-hooks",
             "--",
             "sh",
             "-c",

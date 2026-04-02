@@ -4,6 +4,7 @@ Test that forward_env from .coi/config.toml config file works.
 Tests that:
 1. forward_env in [defaults] section forwards host env vars into container
 2. Values are resolved from the host, not stored in config
+3. Multiple forward_env entries are all forwarded
 """
 
 import os
@@ -61,14 +62,14 @@ forward_env = ["COI_CFG_SECRET"]
     )
 
 
-def test_forward_env_config_and_flag_merge(coi_binary, cleanup_containers, workspace_dir):
+def test_forward_env_config_multiple(coi_binary, cleanup_containers, workspace_dir):
     """
-    Test that forward_env from config and --forward-env flag are merged.
+    Test that multiple forward_env entries in config are all forwarded.
 
     Flow:
-    1. Create .coi/config.toml with forward_env = ["COI_FROM_CFG"]
-    2. Run with --forward-env COI_FROM_FLAG
-    3. Both should be forwarded
+    1. Create .coi/config.toml with forward_env = ["COI_FROM_CFG", "COI_FROM_CFG2"]
+    2. Set both vars on host
+    3. Run and verify both are forwarded
     """
     config_dir = Path(workspace_dir) / ".coi"
     config_dir.mkdir(exist_ok=True)
@@ -76,13 +77,13 @@ def test_forward_env_config_and_flag_merge(coi_binary, cleanup_containers, works
     config_path.write_text(
         """
 [defaults]
-forward_env = ["COI_FROM_CFG"]
+forward_env = ["COI_FROM_CFG", "COI_FROM_CFG2"]
 """
     )
 
     env = os.environ.copy()
     env["COI_FROM_CFG"] = "cfg-value"
-    env["COI_FROM_FLAG"] = "flag-value"
+    env["COI_FROM_CFG2"] = "cfg2-value"
 
     result = subprocess.run(
         [
@@ -90,12 +91,10 @@ forward_env = ["COI_FROM_CFG"]
             "run",
             "--workspace",
             workspace_dir,
-            "--forward-env",
-            "COI_FROM_FLAG",
             "--",
             "sh",
             "-c",
-            "echo CFG=$COI_FROM_CFG FLAG=$COI_FROM_FLAG",
+            "echo CFG=$COI_FROM_CFG CFG2=$COI_FROM_CFG2",
         ],
         capture_output=True,
         text=True,
@@ -108,8 +107,8 @@ forward_env = ["COI_FROM_CFG"]
 
     combined_output = result.stdout + result.stderr
     assert "CFG=cfg-value" in combined_output, (
-        f"Config forward_env should be forwarded. Got:\n{combined_output}"
+        f"First config forward_env should be forwarded. Got:\n{combined_output}"
     )
-    assert "FLAG=flag-value" in combined_output, (
-        f"Flag forward_env should be forwarded. Got:\n{combined_output}"
+    assert "CFG2=cfg2-value" in combined_output, (
+        f"Second config forward_env should be forwarded. Got:\n{combined_output}"
     )

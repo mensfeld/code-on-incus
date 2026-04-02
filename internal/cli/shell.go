@@ -224,12 +224,8 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Prepare network configuration
-	networkConfig := cfg.Network // Copy from loaded config
-	// Override network mode from flag if specified
-	if networkMode != "" {
-		networkConfig.Mode = config.NetworkMode(networkMode)
-	}
+	// Prepare network configuration from config
+	networkConfig := cfg.Network
 
 	// Determine CLI config path based on tool
 	// For directory-based tools (ConfigDirName != ""), point at the config directory.
@@ -239,24 +235,21 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 		cliConfigPath = filepath.Join(homeDir, configDirName)
 	}
 
-	// Merge limits configuration from config file and CLI flags
-	limitsConfig := mergeLimitsConfig(cmd)
+	// Use limits directly from config
+	limitsConfig := &cfg.Limits
 
-	// Determine protected paths for security mounts
-	// Use config's protected paths unless disabled via flag or config
+	// Determine protected paths for security mounts from config
 	var protectedPaths []string
-	if !writableGitHooks && !cfg.Security.DisableProtection {
+	if !cfg.Security.DisableProtection {
 		protectedPaths = cfg.Security.GetEffectiveProtectedPaths()
 	}
 
 	// Resolve which forwarded env vars are actually set on the host.
 	// This list is passed to the context file so AI tools know what's available.
-	resolvedForwardedEnvVars := resolveForwardedEnvVarNames(
-		config.MergeStringSliceUnique(cfg.Defaults.ForwardEnv, forwardEnvVars),
-	)
+	resolvedForwardedEnvVars := resolveForwardedEnvVarNames(cfg.Defaults.ForwardEnv)
 
-	// Resolve timezone
-	resolvedTimezone := resolveTimezone(cmd, cfg)
+	// Resolve timezone from config
+	resolvedTimezone := resolveTimezone(cfg)
 
 	// Determine image: CLI --image flag > config defaults.image > "coi"
 	img := ResolveImageName(imageName, cfg)
@@ -280,7 +273,7 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 		IncusProject:          cfg.Incus.Project,
 		ProtectedPaths:        protectedPaths,
 		PreserveWorkspacePath: cfg.Paths.PreserveWorkspacePath,
-		ForwardSSHAgent:       sshAgent || config.BoolVal(cfg.SSH.ForwardAgent),
+		ForwardSSHAgent:       config.BoolVal(cfg.SSH.ForwardAgent),
 		ForwardedEnvVars:      resolvedForwardedEnvVars,
 		ContextFilePath:       cfg.Tool.ContextFile,
 		ProfileContextFile:    cfg.ProfileContextFile,
@@ -290,7 +283,7 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// Parse and validate mount configuration
-	mountConfig, err := ParseMountConfig(cfg, mountPairs)
+	mountConfig, err := ParseMountConfig(cfg)
 	if err != nil {
 		return fmt.Errorf("invalid mount configuration: %w", err)
 	}
@@ -313,18 +306,10 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Warning: Failed to save early metadata: %v\n", err)
 	}
 
-	// Start monitoring daemons if enabled (via config or --monitor flag)
+	// Start monitoring daemons if enabled via config
 	var monitorDaemon *monitor.Daemon
 	var nftDaemon *nftmonitor.Daemon
-	monitoringEnabled := config.BoolVal(cfg.Monitoring.Enabled) || enableMonitoring
-	if monitoringEnabled {
-		// Override config settings when --monitor flag is used
-		if enableMonitoring {
-			cfg.Monitoring.Enabled = ptrBool(true)
-			cfg.Monitoring.AutoKillOnCritical = ptrBool(true)
-			cfg.Monitoring.AutoPauseOnHigh = ptrBool(true)
-			cfg.Monitoring.NFT.Enabled = ptrBool(true) // Also enable NFT network monitoring
-		}
+	if config.BoolVal(cfg.Monitoring.Enabled) {
 		// Start traditional monitoring (process/filesystem)
 		if err := startMonitoringDaemon(result.ContainerName, absWorkspace, cfg, &monitorDaemon); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: Failed to start monitoring daemon: %v\n", err)
@@ -462,19 +447,6 @@ func ptrBool(b bool) *bool {
 	return &b
 }
 
-// getEnvValue checks for an env var in --env flags first, then os.Getenv
-func getEnvValue(key string) string {
-	// Check --env flags first
-	for _, e := range envVars {
-		parts := strings.SplitN(e, "=", 2)
-		if len(parts) == 2 && parts[0] == key {
-			return parts[1]
-		}
-	}
-	// Fall back to os.Getenv
-	return os.Getenv(key)
-}
-
 // getConfiguredTool returns the tool to use based on config
 func getConfiguredTool(cfg *config.Config) (tool.Tool, error) {
 	toolName := cfg.Tool.Name
@@ -534,7 +506,7 @@ func buildCLICommand(sessionID string, useResumeFlag, restoreOnly bool, sessions
 	cmd := t.BuildCommand(sessionID, useResumeFlag || restoreOnly, cliSessionID)
 
 	// Handle dummy mode override (for testing)
-	if getEnvValue("COI_USE_DUMMY") == "1" {
+	if os.Getenv("COI_USE_DUMMY") == "1" {
 		if len(cmd) > 0 {
 			cmd[0] = "dummy"
 		}
@@ -545,8 +517,7 @@ func buildCLICommand(sessionID string, useResumeFlag, restoreOnly bool, sessions
 }
 
 // buildContainerEnv constructs the environment variables map and user pointer for container execution.
-// It sets HOME, TERM (sanitized), IS_SANDBOX, merges config environment, resolves forward_env from
-// both config and --forward-env flag, merges user-provided --env vars, and re-sanitizes TERM if overridden.
+// It sets HOME, TERM (sanitized), IS_SANDBOX, merges config environment, and resolves forward_env from config.
 func buildContainerEnv(result *session.SetupResult) (map[string]string, *int) {
 	user := container.CodeUID
 	if result.RunAsRoot {
@@ -575,9 +546,8 @@ func buildContainerEnv(result *session.SetupResult) (map[string]string, *int) {
 		containerEnv[k] = v
 	}
 
-	// Resolve forward_env: merge config + --forward-env flag, deduplicate, then look up host values
-	forwardNames := config.MergeStringSliceUnique(cfg.Defaults.ForwardEnv, forwardEnvVars)
-	for _, name := range forwardNames {
+	// Resolve forward_env from config, deduplicate, then look up host values
+	for _, name := range cfg.Defaults.ForwardEnv {
 		if val, ok := os.LookupEnv(name); ok {
 			containerEnv[name] = val
 		} else {
@@ -585,15 +555,7 @@ func buildContainerEnv(result *session.SetupResult) (map[string]string, *int) {
 		}
 	}
 
-	// Merge user-provided --env vars
-	for _, e := range envVars {
-		parts := strings.SplitN(e, "=", 2)
-		if len(parts) == 2 {
-			containerEnv[parts[0]] = parts[1]
-		}
-	}
-
-	// Sanitize TERM if user explicitly provided it via -e flag
+	// Sanitize TERM if user explicitly provided it via config
 	if userTerm, exists := containerEnv["TERM"]; exists {
 		containerEnv["TERM"] = terminal.SanitizeTerm(userTerm)
 	}
@@ -801,27 +763,7 @@ func runCLIInTmux(result *session.SetupResult, sessionID string, detached bool, 
 
 // resolveTimezone determines the timezone to apply to the container.
 // Returns an IANA timezone name (e.g., "America/New_York") or "" for UTC/undetected.
-// cmd may be nil (e.g., when called from appendEnvArgs in run.go), in which case
-// only the --timezone global var and config are consulted.
-func resolveTimezone(cmd *cobra.Command, cfg *config.Config) string {
-	// Check if --timezone flag was explicitly set. When cmd is nil (e.g., called
-	// from run.go's appendEnvArgs), fall back to checking the global var directly.
-	flagChanged := cmd != nil && cmd.Flags().Changed("timezone")
-	if flagChanged || (cmd == nil && timezone != "") {
-		switch strings.ToLower(timezone) {
-		case "host":
-			return detectHostTimezone()
-		case "utc":
-			return ""
-		default:
-			if container.ValidateTimezone(timezone) {
-				return timezone
-			}
-			fmt.Fprintf(os.Stderr, "Warning: invalid timezone %q, falling back to UTC\n", timezone)
-			return ""
-		}
-	}
-
+func resolveTimezone(cfg *config.Config) string {
 	// Use config
 	switch strings.ToLower(cfg.Timezone.Mode) {
 	case "host", "":

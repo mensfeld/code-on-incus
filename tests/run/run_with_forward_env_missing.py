@@ -1,14 +1,15 @@
 """
-Test for coi run - forward_env with unset host variable.
+Test for coi run - forward_env with unset host variable via config file.
 
 Tests that:
-1. --forward-env with a variable NOT set on host produces a warning
+1. forward_env in config with a variable NOT set on host produces a warning
 2. The variable is NOT set in the container
 3. The command still succeeds (unset vars are skipped, not fatal)
 """
 
 import os
 import subprocess
+from pathlib import Path
 
 
 def test_run_with_forward_env_missing(coi_binary, cleanup_containers, workspace_dir):
@@ -17,10 +18,20 @@ def test_run_with_forward_env_missing(coi_binary, cleanup_containers, workspace_
 
     Flow:
     1. Ensure COI_NONEXISTENT_VAR is NOT set on host
-    2. Run coi run --forward-env COI_NONEXISTENT_VAR -- sh -c 'echo VAL=${COI_NONEXISTENT_VAR:-empty}'
-    3. Verify warning appears in stderr
-    4. Verify container sees the var as empty
+    2. Create .coi/config.toml with forward_env = ["COI_NONEXISTENT_VAR"]
+    3. Run coi run -- sh -c 'echo VAL=${COI_NONEXISTENT_VAR:-empty}'
+    4. Verify warning appears in stderr
+    5. Verify container sees the var as empty
     """
+    config_dir = Path(workspace_dir) / ".coi"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "config.toml").write_text(
+        """
+[defaults]
+forward_env = ["COI_NONEXISTENT_VAR"]
+"""
+    )
+
     env = os.environ.copy()
     env.pop("COI_NONEXISTENT_VAR", None)
 
@@ -30,8 +41,6 @@ def test_run_with_forward_env_missing(coi_binary, cleanup_containers, workspace_
             "run",
             "--workspace",
             workspace_dir,
-            "--forward-env",
-            "COI_NONEXISTENT_VAR",
             "--",
             "sh",
             "-c",

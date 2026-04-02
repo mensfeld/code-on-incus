@@ -14,10 +14,8 @@ def test_config_default_mounts(coi_binary, cleanup_containers, workspace_dir, tm
     (mount1 / "file1.txt").write_text("content1")
     (mount2 / "file2.txt").write_text("content2")
 
-    # Create config file in current working directory (.coi/config.toml)
-    # Config is loaded from cwd, not from workspace directory
-    config_content = f"""
-[mounts]
+    # Create config file in workspace directory (.coi/config.toml)
+    config_content = f"""\
 [[mounts.default]]
 host = "{mount1}"
 container = "/mnt/data1"
@@ -53,19 +51,19 @@ container = "/mnt/data2"
     assert "content2" in result.stdout
 
 
-def test_cli_overrides_config_mount(coi_binary, cleanup_containers, workspace_dir, tmp_path):
-    """Test that CLI --mount overrides config mount for same container path."""
-    config_mount = tmp_path / "config-data"
-    cli_mount = tmp_path / "cli-data"
-    config_mount.mkdir()
-    cli_mount.mkdir()
-    (config_mount / "file.txt").write_text("from-config")
-    (cli_mount / "file.txt").write_text("from-cli")
+def test_config_mount_replaces_previous(coi_binary, cleanup_containers, workspace_dir, tmp_path):
+    """Test that updating config mount entries works correctly."""
+    mount1 = tmp_path / "first-data"
+    mount2 = tmp_path / "second-data"
+    mount1.mkdir()
+    mount2.mkdir()
+    (mount1 / "file.txt").write_text("from-first")
+    (mount2 / "file.txt").write_text("from-second")
 
-    # Create config file in workspace directory (.coi/config.toml)
-    config_content = f"""
+    # Create config file with only the second mount at /data
+    config_content = f"""\
 [[mounts.default]]
-host = "{config_mount}"
+host = "{mount2}"
 container = "/data"
 """
     config_dir = Path(workspace_dir) / ".coi"
@@ -73,15 +71,14 @@ container = "/data"
     config_file = config_dir / "config.toml"
     config_file.write_text(config_content)
 
-    # CLI also mounts to /data (should override)
     result = subprocess.run(
-        [coi_binary, "run", "--mount", f"{cli_mount}:/data", "--", "cat", "/data/file.txt"],
+        [coi_binary, "run", "--", "cat", "/data/file.txt"],
         capture_output=True,
         text=True,
         timeout=120,
-        cwd=workspace_dir,  # Run from workspace directory to load .coi/config.toml
+        cwd=workspace_dir,
     )
 
     assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
-    assert "from-cli" in result.stdout
-    assert "from-config" not in result.stdout
+    assert "from-second" in result.stdout
+    assert "from-first" not in result.stdout

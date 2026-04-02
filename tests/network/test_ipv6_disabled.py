@@ -31,7 +31,6 @@ mode = "{network_mode}"
             "shell",
             "--workspace",
             workspace_dir,
-            f"--network={network_mode}",
             "--background",
         ],
         capture_output=True,

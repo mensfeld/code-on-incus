@@ -1,9 +1,10 @@
-"""Test mounting extra directories via --mount (e.g., config dirs, agents/)."""
+"""Test mounting extra directories via config file (e.g., config dirs, agents/)."""
 
 import os
 import subprocess
 import tempfile
 import time
+from pathlib import Path
 
 from support.helpers import calculate_container_name
 
@@ -22,14 +23,20 @@ def test_extra_dir_mount_readable(coi_binary, cleanup_containers, workspace_dir,
     (agents_dir / "review.md").write_text("Review agent config")
     (agents_dir / "plan.md").write_text("Plan agent config")
 
+    # Create config file in workspace directory (.coi/config.toml)
+    mount_config = f"""\
+[[mounts.default]]
+host = "{config_dir}"
+container = "/home/code/.config/custom"
+"""
+    coi_dir = Path(workspace_dir) / ".coi"
+    coi_dir.mkdir(exist_ok=True)
+    (coi_dir / "config.toml").write_text(mount_config)
+
     result = subprocess.run(
         [
             coi_binary,
             "run",
-            "--workspace",
-            workspace_dir,
-            "--mount",
-            f"{config_dir}:/home/code/.config/custom",
             "--",
             "sh",
             "-c",
@@ -40,6 +47,7 @@ def test_extra_dir_mount_readable(coi_binary, cleanup_containers, workspace_dir,
         capture_output=True,
         text=True,
         timeout=120,
+        cwd=workspace_dir,
     )
 
     assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"

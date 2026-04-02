@@ -1,24 +1,35 @@
 """
-Test for coi run - with multiple --forward-env variables.
+Test for coi run - with multiple forward_env variables via config file.
 
 Tests that:
-1. Run command with --forward-env forwarding multiple host env vars
+1. Create .coi/config.toml with forward_env forwarding multiple host env vars
 2. Verify all forwarded values are available in container
 """
 
 import os
 import subprocess
+from pathlib import Path
 
 
 def test_run_with_forward_env_multiple(coi_binary, cleanup_containers, workspace_dir):
     """
-    Test running command with multiple forwarded env vars.
+    Test running command with multiple forwarded env vars via config file.
 
     Flow:
     1. Set multiple host env vars
-    2. Run coi run --forward-env VAR1,VAR2 -- sh -c 'echo $VAR1 $VAR2'
-    3. Verify both values appear in container output
+    2. Create .coi/config.toml with forward_env = ["COI_FWD_A", "COI_FWD_B"]
+    3. Run coi run -- sh -c 'echo $COI_FWD_A $COI_FWD_B'
+    4. Verify both values appear in container output
     """
+    config_dir = Path(workspace_dir) / ".coi"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "config.toml").write_text(
+        """
+[defaults]
+forward_env = ["COI_FWD_A", "COI_FWD_B"]
+"""
+    )
+
     env = os.environ.copy()
     env["COI_FWD_A"] = "alpha-val"
     env["COI_FWD_B"] = "beta-val"
@@ -29,8 +40,6 @@ def test_run_with_forward_env_multiple(coi_binary, cleanup_containers, workspace
             "run",
             "--workspace",
             workspace_dir,
-            "--forward-env",
-            "COI_FWD_A,COI_FWD_B",
             "--",
             "sh",
             "-c",

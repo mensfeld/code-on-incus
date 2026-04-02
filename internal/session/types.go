@@ -6,6 +6,7 @@ type MountEntry struct {
 	ContainerPath string // Absolute path in container
 	DeviceName    string // Unique device name for Incus
 	UseShift      bool   // Whether to use UID shifting
+	Readonly      bool   // Mount read-only
 }
 
 // MountConfig holds all mount configurations for a session

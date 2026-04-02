@@ -1,30 +1,39 @@
 """
-Test for coi run - with single environment variable.
+Test for coi run - with single environment variable via config file.
 
 Tests that:
-1. Run command with -e flag to set env var
-2. Verify env var is available in container
+1. Create .coi/config.toml with [defaults.environment] to set env var
+2. Run command and verify env var is available in container
 """
 
 import subprocess
+from pathlib import Path
 
 
 def test_run_with_env(coi_binary, cleanup_containers, workspace_dir):
     """
-    Test running command with environment variables.
+    Test running command with environment variables set via config file.
 
     Flow:
-    1. Run coi run -e MY_VAR=test123 env
-    2. Verify MY_VAR appears in output
+    1. Create .coi/config.toml with [defaults.environment] MY_TEST_VAR = "test-value-xyz"
+    2. Run coi run -- sh -c 'echo $MY_TEST_VAR'
+    3. Verify MY_TEST_VAR appears in output
     """
+    config_dir = Path(workspace_dir) / ".coi"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "config.toml").write_text(
+        """
+[defaults.environment]
+MY_TEST_VAR = "test-value-xyz"
+"""
+    )
+
     result = subprocess.run(
         [
             coi_binary,
             "run",
             "--workspace",
             workspace_dir,
-            "-e",
-            "MY_TEST_VAR=test-value-xyz",
             "--",
             "sh",
             "-c",

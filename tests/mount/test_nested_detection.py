@@ -11,16 +11,24 @@ def test_nested_mounts_rejected(coi_binary, workspace_dir, tmp_path):
     dir1.mkdir()
     dir2.mkdir()
 
+    # Create config file with nested mount paths
+    config_content = f"""\
+[[mounts.default]]
+host = "{dir1}"
+container = "/data"
+
+[[mounts.default]]
+host = "{dir2}"
+container = "/data/nested"
+"""
+    config_dir = Path(workspace_dir) / ".coi"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "config.toml").write_text(config_content)
+
     result = subprocess.run(
         [
             coi_binary,
             "run",
-            "--workspace",
-            workspace_dir,
-            "--mount",
-            f"{dir1}:/data",
-            "--mount",
-            f"{dir2}:/data/nested",  # Nested!
             "--",
             "echo",
             "test",
@@ -28,6 +36,7 @@ def test_nested_mounts_rejected(coi_binary, workspace_dir, tmp_path):
         capture_output=True,
         text=True,
         timeout=120,
+        cwd=workspace_dir,
     )
 
     assert result.returncode != 0
@@ -43,7 +52,7 @@ def test_config_nested_mounts_rejected(coi_binary, workspace_dir, tmp_path):
     dir2.mkdir()
 
     # Create config file in workspace directory (.coi/config.toml)
-    config_content = f"""
+    config_content = f"""\
 [[mounts.default]]
 host = "{dir1}"
 container = "/app"

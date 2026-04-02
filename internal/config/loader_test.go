@@ -678,6 +678,7 @@ func TestApplyProfileWithNewFields(t *testing.T) {
 		},
 		Mounts: []MountEntry{
 			{Host: "~/.cargo", Container: "/home/code/.cargo"},
+			{Host: "~/.claude/skills", Container: "/home/code/.claude/skills", Readonly: true},
 		},
 		Network: &NetworkConfig{
 			Mode: NetworkModeOpen,
@@ -721,14 +722,26 @@ func TestApplyProfileWithNewFields(t *testing.T) {
 
 	// Mounts (appended)
 	found := false
+	foundReadonly := false
 	for _, m := range cfg.Mounts.Default {
 		if m.Host == "~/.cargo" {
 			found = true
-			break
+			if m.Readonly {
+				t.Error("Expected ~/.cargo mount to NOT be readonly")
+			}
+		}
+		if m.Host == "~/.claude/skills" {
+			foundReadonly = true
+			if !m.Readonly {
+				t.Error("Expected ~/.claude/skills mount to be readonly")
+			}
 		}
 	}
 	if !found {
 		t.Error("Expected mount ~/.cargo to be appended")
+	}
+	if !foundReadonly {
+		t.Error("Expected readonly mount ~/.claude/skills to be appended")
 	}
 
 	// Network
@@ -746,6 +759,94 @@ func TestApplyProfileWithNewFields(t *testing.T) {
 	}
 	if !envMap["API_KEY"] || !envMap["TOKEN"] {
 		t.Errorf("Expected API_KEY and TOKEN in forward_env, got %v", cfg.Defaults.ForwardEnv)
+	}
+}
+
+func TestLoadConfigFileWithReadonlyMount(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.toml")
+
+	configContent := `
+[defaults]
+image = "coi"
+
+[[mounts.default]]
+host = "~/.claude/skills"
+container = "/home/code/.claude/skills"
+readonly = true
+
+[[mounts.default]]
+host = "~/data"
+container = "/data"
+`
+
+	if err := os.WriteFile(configPath, []byte(configContent), 0o644); err != nil {
+		t.Fatalf("Failed to create test config: %v", err)
+	}
+
+	cfg := GetDefaultConfig()
+	if err := loadConfigFile(cfg, configPath); err != nil {
+		t.Fatalf("loadConfigFile() failed: %v", err)
+	}
+
+	if len(cfg.Mounts.Default) != 2 {
+		t.Fatalf("Expected 2 mounts, got %d", len(cfg.Mounts.Default))
+	}
+
+	// First mount should be readonly
+	if cfg.Mounts.Default[0].Host != "~/.claude/skills" {
+		t.Errorf("Expected first mount host '~/.claude/skills', got %q", cfg.Mounts.Default[0].Host)
+	}
+	if !cfg.Mounts.Default[0].Readonly {
+		t.Error("Expected first mount to be readonly")
+	}
+
+	// Second mount should not be readonly
+	if cfg.Mounts.Default[1].Host != "~/data" {
+		t.Errorf("Expected second mount host '~/data', got %q", cfg.Mounts.Default[1].Host)
+	}
+	if cfg.Mounts.Default[1].Readonly {
+		t.Error("Expected second mount to NOT be readonly")
+	}
+}
+
+func TestLoadProfileWithReadonlyMount(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".coi")
+	profileDir := filepath.Join(configDir, "profiles", "readonly-test")
+	if err := os.MkdirAll(profileDir, 0o755); err != nil {
+		t.Fatalf("Failed to create profile dir: %v", err)
+	}
+
+	profileContent := `
+image = "coi"
+
+[[mounts]]
+host = "~/.claude/commands"
+container = "/home/code/.claude/commands"
+readonly = true
+`
+	if err := os.WriteFile(filepath.Join(profileDir, "config.toml"), []byte(profileContent), 0o644); err != nil {
+		t.Fatalf("Failed to write profile config: %v", err)
+	}
+
+	cfg := GetDefaultConfig()
+	if err := loadProfileDirectories(cfg, configDir); err != nil {
+		t.Fatalf("loadProfileDirectories() failed: %v", err)
+	}
+
+	p := cfg.GetProfile("readonly-test")
+	if p == nil {
+		t.Fatal("Expected profile 'readonly-test' to be loaded")
+	}
+	if len(p.Mounts) != 1 {
+		t.Fatalf("Expected 1 mount, got %d", len(p.Mounts))
+	}
+	if !p.Mounts[0].Readonly {
+		t.Error("Expected mount to be readonly")
+	}
+	if p.Mounts[0].Host != "~/.claude/commands" {
+		t.Errorf("Expected host '~/.claude/commands', got %q", p.Mounts[0].Host)
 	}
 }
 
