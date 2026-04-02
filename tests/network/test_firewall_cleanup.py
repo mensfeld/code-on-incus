@@ -119,10 +119,10 @@ def test_open_mode_firewall_cleanup(coi_binary, workspace_dir, cleanup_container
     # Write network config to workspace .coi/config.toml
     config_dir = Path(workspace_dir) / ".coi"
     config_dir.mkdir(exist_ok=True)
-    (config_dir / "config.toml").write_text('''
+    (config_dir / "config.toml").write_text("""
 [network]
 mode = "open"
-''')
+""")
 
     # Start shell in background with open network mode
     result = subprocess.run(
@@ -219,10 +219,10 @@ def test_restricted_mode_firewall_cleanup(coi_binary, workspace_dir, cleanup_con
     # Write network config to workspace .coi/config.toml
     config_dir = Path(workspace_dir) / ".coi"
     config_dir.mkdir(exist_ok=True)
-    (config_dir / "config.toml").write_text('''
+    (config_dir / "config.toml").write_text("""
 [network]
 mode = "restricted"
-''')
+""")
 
     # Start shell with restricted network mode
     result = subprocess.run(
@@ -312,10 +312,10 @@ def test_no_firewall_rule_accumulation(coi_binary, workspace_dir, cleanup_contai
         # Write network config to workspace .coi/config.toml
         iter_config_dir = Path(iter_workspace) / ".coi"
         iter_config_dir.mkdir(exist_ok=True)
-        (iter_config_dir / "config.toml").write_text('''
+        (iter_config_dir / "config.toml").write_text("""
 [network]
 mode = "open"
-''')
+""")
 
         # Start container with open mode
         result = subprocess.run(
@@ -406,10 +406,10 @@ def test_kill_cleans_up_restricted_rules(coi_binary, workspace_dir, cleanup_cont
     # Write network config to workspace .coi/config.toml
     config_dir = Path(workspace_dir) / ".coi"
     config_dir.mkdir(exist_ok=True)
-    (config_dir / "config.toml").write_text('''
+    (config_dir / "config.toml").write_text("""
 [network]
 mode = "restricted"
-''')
+""")
 
     # Start shell with restricted mode (creates more rules to verify cleanup)
     result = subprocess.run(

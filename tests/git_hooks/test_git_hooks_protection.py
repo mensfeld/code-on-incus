@@ -163,10 +163,10 @@ def test_git_hooks_writable_with_config(coi_binary, workspace_dir, cleanup_conta
     # Create config that enables writable hooks
     config_dir = Path(workspace_dir) / ".coi"
     config_dir.mkdir(exist_ok=True)
-    (config_dir / "config.toml").write_text('''
+    (config_dir / "config.toml").write_text("""
 [git]
 writable_hooks = true
-''')
+""")
 
     # Ensure hooks dir exists
     hooks_dir = Path(workspace_dir) / ".git" / "hooks"

@@ -28,11 +28,11 @@ def test_run_timezone_fixed_workspace(coi_binary, cleanup_containers, workspace_
     # Create config with fixed timezone
     config_dir = Path(workspace_dir) / ".coi"
     config_dir.mkdir(exist_ok=True)
-    (config_dir / "config.toml").write_text('''
+    (config_dir / "config.toml").write_text("""
 [timezone]
 mode = "fixed"
 name = "Asia/Tokyo"
-''')
+""")
 
     result = subprocess.run(
         [

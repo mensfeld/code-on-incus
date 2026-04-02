@@ -25,10 +25,10 @@ def test_open_mode_allows_all(coi_binary, workspace_dir, cleanup_containers):
     # Write network config to workspace .coi/config.toml
     config_dir = Path(workspace_dir) / ".coi"
     config_dir.mkdir(exist_ok=True)
-    (config_dir / "config.toml").write_text('''
+    (config_dir / "config.toml").write_text("""
 [network]
 mode = "open"
-''')
+""")
 
     # Start shell in background with open network mode
     result = subprocess.run(

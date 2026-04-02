@@ -30,6 +30,7 @@ def test_open_allows_local_gateway(coi_binary, workspace_dir, cleanup_containers
     """
     # Create config with open network mode
     import pathlib
+
     config_dir = pathlib.Path(workspace_dir) / ".coi"
     config_dir.mkdir(exist_ok=True)
     (config_dir / "config.toml").write_text('[network]\nmode = "open"\n')

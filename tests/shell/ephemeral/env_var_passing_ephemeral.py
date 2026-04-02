@@ -9,8 +9,8 @@ Tests that:
 
 import subprocess
 import time
-
 from pathlib import Path
+
 from pexpect import EOF, TIMEOUT
 
 from support.helpers import (

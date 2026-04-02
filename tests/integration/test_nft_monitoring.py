@@ -166,7 +166,7 @@ def test_workspace(tmp_path):
     # Create config that enables monitoring (replaces --monitor flag)
     config_dir = workspace / ".coi"
     config_dir.mkdir(exist_ok=True)
-    (config_dir / "config.toml").write_text('''
+    (config_dir / "config.toml").write_text("""
 [monitoring]
 enabled = true
 auto_kill_on_critical = true
@@ -174,7 +174,7 @@ auto_pause_on_high = true
 
 [monitoring.nft]
 enabled = true
-''')
+""")
 
     return str(workspace)
 
@@ -925,6 +925,7 @@ class TestFirewallRuleCleanupOnAutoKill:
 
         # Add restricted network to config (needed for firewall rules)
         import pathlib
+
         config_path = pathlib.Path(test_workspace) / ".coi" / "config.toml"
         config_text = config_path.read_text()
         if "[network]" not in config_text:
@@ -1063,6 +1064,7 @@ class TestVethZoneCleanupOnAutoKill:
 
         # Add restricted network to config (needed for veth zone bindings)
         import pathlib
+
         config_path = pathlib.Path(test_workspace) / ".coi" / "config.toml"
         config_text = config_path.read_text()
         if "[network]" not in config_text:

@@ -646,10 +646,10 @@ class TestWritableGitHooksConfigCompat:
         # Create config that enables writable hooks
         config_dir = Path(workspace_dir) / ".coi"
         config_dir.mkdir(exist_ok=True)
-        (config_dir / "config.toml").write_text('''
+        (config_dir / "config.toml").write_text("""
 [git]
 writable_hooks = true
-''')
+""")
 
         # Create protected paths
         hooks_dir = Path(workspace_dir) / ".git" / "hooks"
