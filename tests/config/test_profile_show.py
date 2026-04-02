@@ -102,42 +102,6 @@ def test_profile_show_not_found(coi_binary, cleanup_containers, workspace_dir):
     )
 
 
-def test_profile_show_inline(coi_binary, cleanup_containers, workspace_dir):
-    """
-    Test that coi profile show works for inline profiles too.
-    """
-    config_dir = Path(workspace_dir) / ".coi"
-    config_dir.mkdir(parents=True)
-    (config_dir / "config.toml").write_text(
-        """
-[profiles.inlineprof]
-image = "coi-inline"
-environment = { KEY = "val" }
-"""
-    )
-
-    result = subprocess.run(
-        [
-            coi_binary,
-            "profile",
-            "show",
-            "inlineprof",
-            "--workspace",
-            workspace_dir,
-        ],
-        capture_output=True,
-        text=True,
-        timeout=60,
-        cwd=workspace_dir,
-    )
-
-    assert result.returncode == 0, f"profile show should succeed. stderr: {result.stderr}"
-    output = result.stdout + result.stderr
-    assert "inlineprof" in output, f"Should show profile name. Got:\n{output}"
-    assert "coi-inline" in output, f"Should show image. Got:\n{output}"
-    assert "KEY" in output, f"Should show environment key. Got:\n{output}"
-
-
 def test_profile_show_empty_directory_profile(coi_binary, cleanup_containers, workspace_dir):
     """
     Test that a profile directory with minimal config (just an image) shows correctly.

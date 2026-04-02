@@ -80,7 +80,7 @@ max_processes = 100
 
 def test_profile_limits_override_global(coi_binary, workspace_dir, cleanup_containers):
     """Test that profile limits override global limits."""
-    # Create project config with profile
+    # Create project config with global limits
     project_config_dir = Path(workspace_dir) / ".coi"
     project_config_dir.mkdir(exist_ok=True)
     project_config = project_config_dir / "config.toml"
@@ -91,17 +91,23 @@ count = "4"
 
 [limits.memory]
 limit = "4GiB"
-
-[profiles.limited]
-image = "coi"
-
-[profiles.limited.limits.cpu]
-count = "1"
-
-[profiles.limited.limits.memory]
-limit = "512MiB"
 """
     project_config.write_text(config_content)
+
+    # Create directory profile with overriding limits
+    profile_dir = project_config_dir / "profiles" / "limited"
+    profile_dir.mkdir(parents=True)
+    (profile_dir / "config.toml").write_text(
+        """
+image = "coi"
+
+[limits.cpu]
+count = "1"
+
+[limits.memory]
+limit = "512MiB"
+"""
+    )
 
     container_name = f"coi-{Path(workspace_dir).name}-1"
 

@@ -73,12 +73,6 @@ func loadConfigFile(cfg *Config, path string) error {
 		fileCfg.Build.Script = resolveRelativePath(configDir, fileCfg.Build.Script)
 	}
 
-	// Tag inline profiles with their source
-	for name, p := range fileCfg.Profiles {
-		p.Source = path + " [profiles." + name + "]"
-		fileCfg.Profiles[name] = p
-	}
-
 	// Merge into main config
 	cfg.Merge(&fileCfg)
 
@@ -334,37 +328,13 @@ writable_hooks = false
 # script = "build.sh"             # Path to build script (relative to config file)
 # commands = ["mise install ruby@3.3", "gem install bundler"]  # Or inline commands
 
-# Example profile for Rust development with persistent container
-# [profiles.rust]
-# image = "coi-rust"
-# environment = { RUST_BACKTRACE = "1" }
-# persistent = true
-
-# Example profile for web development
-# [profiles.web]
-# image = "coi"
-# environment = { NODE_ENV = "development" }
-# persistent = true
-
-# Example profile with resource limits
-# [profiles.limited]
-# image = "coi"
-# persistent = false
-# [profiles.limited.limits.cpu]
-# count = "2"
-# allowance = "50%"
-# [profiles.limited.limits.memory]
-# limit = "2GiB"
-# [profiles.limited.limits.runtime]
-# max_duration = "2h"
-
-# === Profile Directories ===
-# Profiles can also be defined as self-contained directories under profiles/.
+# === Profiles ===
+# Profiles are self-contained directories under profiles/.
 # Each directory contains its own config.toml (and optionally a build script).
 #
 # Directory structure:
 #   .coi/
-#   ├── config.toml              # project config (may contain inline [profiles.X])
+#   ├── config.toml              # project config
 #   └── profiles/
 #       ├── rust-dev/
 #       │   ├── config.toml      # profile config
@@ -407,7 +377,6 @@ writable_hooks = false
 #   2. ~/.config/coi/profiles/NAME/config.toml
 #   3. .coi/profiles/NAME/config.toml
 #
-# Inline [profiles.X] in config.toml overrides a directory profile of the same name.
 # Use 'coi profile list' and 'coi profile show <name>' to inspect loaded profiles.
 `
 

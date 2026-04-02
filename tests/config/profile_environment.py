@@ -12,20 +12,20 @@ from pathlib import Path
 
 def test_profile_environment_applied(coi_binary, cleanup_containers, workspace_dir):
     """
-    Test that [profiles.X] environment vars are injected into container.
+    Test that profile environment vars are injected into container.
 
     Flow:
-    1. Create .coi/config.toml with a profile that has environment = { RUST_BACKTRACE = "1" }
+    1. Create .coi/profiles/rust/config.toml with environment
     2. Run coi run --profile rust -- sh -c 'echo $RUST_BACKTRACE'
-    3. Verify RUST_BACKTRACE is set to "1"
+    3. Verify RUST_BACKTRACE is set to "full"
     """
-    config_dir = Path(workspace_dir) / ".coi"
-    config_dir.mkdir(exist_ok=True)
-    config_path = config_dir / "config.toml"
-    config_path.write_text(
+    profile_dir = Path(workspace_dir) / ".coi" / "profiles" / "rust"
+    profile_dir.mkdir(parents=True)
+    (profile_dir / "config.toml").write_text(
         """
-[profiles.rust]
-environment = { RUST_BACKTRACE = "full", MY_PROFILE_VAR = "profile-val-77" }
+[environment]
+RUST_BACKTRACE = "full"
+MY_PROFILE_VAR = "profile-val-77"
 """
     )
 
@@ -68,13 +68,12 @@ def test_env_flag_overrides_profile_environment(coi_binary, cleanup_containers, 
     2. Run with --profile and -e MY_VAR=from-flag
     3. Verify the flag value wins
     """
-    config_dir = Path(workspace_dir) / ".coi"
-    config_dir.mkdir(exist_ok=True)
-    config_path = config_dir / "config.toml"
-    config_path.write_text(
+    profile_dir = Path(workspace_dir) / ".coi" / "profiles" / "test"
+    profile_dir.mkdir(parents=True)
+    (profile_dir / "config.toml").write_text(
         """
-[profiles.test]
-environment = { MY_VAR = "from-profile" }
+[environment]
+MY_VAR = "from-profile"
 """
     )
 

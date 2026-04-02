@@ -359,35 +359,34 @@ See the [Configuration wiki page](https://github.com/mensfeld/code-on-incus/wiki
 
 ## Profiles
 
-Profiles are reusable container configurations bundling image, tool, limits, mounts, build scripts, and environment into named templates.
-
-**Inline profiles** in any `config.toml`:
-
-```toml
-[profiles.rust-dev]
-image = "coi-rust"
-persistent = true
-environment = { RUST_BACKTRACE = "1" }
-forward_env = ["CARGO_HOME"]
-
-[profiles.rust-dev.tool]
-name = "claude"
-permission_mode = "bypass"
-
-[profiles.rust-dev.limits.cpu]
-count = "4"
-```
-
-**Profile directories** — self-contained directories with their own config and build scripts:
+Profiles are reusable container configurations bundling image, tool, limits, mounts, build scripts, and environment into named templates. Each profile is a self-contained directory with its own `config.toml` and optional build script.
 
 ```
 .coi/profiles/
 ├── rust-dev/
-│   ├── config.toml      # full profile config
+│   ├── config.toml      # profile config
 │   └── build.sh         # profile-specific build script
 └── python-ml/
     ├── config.toml
     └── setup.sh
+```
+
+Example profile config (`.coi/profiles/rust-dev/config.toml`):
+
+```toml
+image = "coi-rust"
+persistent = true
+forward_env = ["CARGO_HOME"]
+
+[environment]
+RUST_BACKTRACE = "1"
+
+[tool]
+name = "claude"
+permission_mode = "bypass"
+
+[limits.cpu]
+count = "4"
 ```
 
 ```bash
@@ -401,7 +400,7 @@ coi profile list
 coi profile show rust-dev
 ```
 
-Profile directories are scanned at all config levels (`/etc/coi/profiles/`, `~/.config/coi/profiles/`, `.coi/profiles/`). Inline `[profiles.X]` in `config.toml` overrides a directory profile of the same name.
+Profile directories are scanned at all config levels (`/etc/coi/profiles/`, `~/.config/coi/profiles/`, `.coi/profiles/`).
 
 ## Resource and Time Limits
 

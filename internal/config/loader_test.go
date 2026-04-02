@@ -527,53 +527,6 @@ script = "/absolute/path/build.sh"
 	}
 }
 
-func TestInlineProfileOverridesDirectoryProfile(t *testing.T) {
-	tmpDir := t.TempDir()
-	configDir := filepath.Join(tmpDir, ".coi")
-	profileDir := filepath.Join(configDir, "profiles", "myprofile")
-	if err := os.MkdirAll(profileDir, 0o755); err != nil {
-		t.Fatalf("Failed to create profile dir: %v", err)
-	}
-
-	// Directory profile
-	dirProfileContent := `
-image = "dir-image"
-persistent = false
-`
-	if err := os.WriteFile(filepath.Join(profileDir, "config.toml"), []byte(dirProfileContent), 0o644); err != nil {
-		t.Fatalf("Failed to write dir profile config: %v", err)
-	}
-
-	// Inline profile in main config overrides
-	mainConfigContent := `
-[profiles.myprofile]
-image = "inline-image"
-persistent = true
-`
-	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte(mainConfigContent), 0o644); err != nil {
-		t.Fatalf("Failed to write main config: %v", err)
-	}
-
-	cfg := GetDefaultConfig()
-	loadProfileDirectories(cfg, configDir)
-	if err := loadConfigFile(cfg, filepath.Join(configDir, "config.toml")); err != nil {
-		t.Fatalf("loadConfigFile() failed: %v", err)
-	}
-
-	p := cfg.GetProfile("myprofile")
-	if p == nil {
-		t.Fatal("Expected profile 'myprofile' to exist")
-	}
-
-	// Inline should win
-	if p.Image != "inline-image" {
-		t.Errorf("Expected inline image 'inline-image', got %q", p.Image)
-	}
-	if p.Persistent == nil || !*p.Persistent {
-		t.Error("Expected persistent=true from inline override")
-	}
-}
-
 func TestProfileDirectoryNoConfigToml(t *testing.T) {
 	tmpDir := t.TempDir()
 	configDir := filepath.Join(tmpDir, ".coi")
@@ -819,30 +772,3 @@ func TestMultipleProfileDirectories(t *testing.T) {
 	}
 }
 
-func TestInlineProfileSourceTag(t *testing.T) {
-	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "config.toml")
-
-	content := `
-[profiles.tagged]
-image = "tag-image"
-`
-	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
-		t.Fatalf("Failed to write config: %v", err)
-	}
-
-	cfg := GetDefaultConfig()
-	if err := loadConfigFile(cfg, configPath); err != nil {
-		t.Fatalf("loadConfigFile() failed: %v", err)
-	}
-
-	p := cfg.GetProfile("tagged")
-	if p == nil {
-		t.Fatal("Expected profile 'tagged'")
-	}
-
-	expectedSource := configPath + " [profiles.tagged]"
-	if p.Source != expectedSource {
-		t.Errorf("Expected source %q, got %q", expectedSource, p.Source)
-	}
-}

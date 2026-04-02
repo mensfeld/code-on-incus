@@ -20,7 +20,7 @@ type Config struct {
 	Monitoring MonitoringConfig         `toml:"monitoring"`
 	Timezone   TimezoneConfig           `toml:"timezone"`
 	Build      BuildConfig              `toml:"build"`
-	Profiles   map[string]ProfileConfig `toml:"profiles"`
+	Profiles   map[string]ProfileConfig `toml:"-"` // Populated by loadProfileDirectories, not from TOML
 }
 
 // BuildConfig defines how to build the project's custom image
@@ -577,10 +577,6 @@ func (c *Config) Merge(other *Config) {
 		c.Build.Commands = other.Build.Commands
 	}
 
-	// Merge profiles
-	for name, profile := range other.Profiles {
-		c.Profiles[name] = profile
-	}
 }
 
 // mergeLimits merges limit configurations (other takes precedence)

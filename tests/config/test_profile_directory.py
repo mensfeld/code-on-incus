@@ -90,61 +90,6 @@ def test_profile_directory_image(coi_binary, cleanup_containers, workspace_dir):
     assert "profile-dir-ok" in combined, f"Expected output from container. Got:\n{combined}"
 
 
-def test_inline_profile_overrides_directory_profile(coi_binary, cleanup_containers, workspace_dir):
-    """
-    Test that inline [profiles.X] overrides directory profile of same name.
-
-    Flow:
-    1. Create .coi/profiles/dupe/config.toml with environment FOO=from-dir
-    2. Create .coi/config.toml with [profiles.dupe] environment FOO=from-inline
-    3. Run coi run --profile dupe -- echo $FOO
-    4. Verify FOO=from-inline (inline wins)
-    """
-    # Directory profile
-    profile_dir = Path(workspace_dir) / ".coi" / "profiles" / "dupe"
-    profile_dir.mkdir(parents=True)
-    (profile_dir / "config.toml").write_text(
-        """
-[environment]
-FOO = "from-dir"
-"""
-    )
-
-    # Inline profile overrides
-    config_dir = Path(workspace_dir) / ".coi"
-    (config_dir / "config.toml").write_text(
-        """
-[profiles.dupe]
-environment = { FOO = "from-inline" }
-"""
-    )
-
-    result = subprocess.run(
-        [
-            coi_binary,
-            "run",
-            "--workspace",
-            workspace_dir,
-            "--profile",
-            "dupe",
-            "--",
-            "sh",
-            "-c",
-            "echo FOO=$FOO",
-        ],
-        capture_output=True,
-        text=True,
-        timeout=180,
-        cwd=workspace_dir,
-    )
-
-    assert result.returncode == 0, f"Run should succeed. stderr: {result.stderr}"
-    combined = result.stdout + result.stderr
-    assert "FOO=from-inline" in combined, (
-        f"Inline profile should override directory profile. Got:\n{combined}"
-    )
-
-
 def test_profile_directory_not_found(coi_binary, cleanup_containers, workspace_dir):
     """
     Test that using a non-existent profile name fails gracefully.

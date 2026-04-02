@@ -70,21 +70,21 @@ def test_cli_flags_override_profile(coi_binary, workspace_dir, cleanup_container
     """Test that CLI flags override profile settings."""
     container_name = f"coi-{Path(workspace_dir).name}-1"
 
-    # Create project config with profile
+    # Create directory profile with limits
     project_config_dir = Path(workspace_dir) / ".coi"
-    project_config_dir.mkdir(exist_ok=True)
-    project_config = project_config_dir / "config.toml"
-    config_content = """
-[profiles.limited]
+    profile_dir = project_config_dir / "profiles" / "limited"
+    profile_dir.mkdir(parents=True)
+    (profile_dir / "config.toml").write_text(
+        """
 image = "coi"
 
-[profiles.limited.limits.cpu]
+[limits.cpu]
 count = "1"
 
-[profiles.limited.limits.memory]
+[limits.memory]
 limit = "512MiB"
 """
-    project_config.write_text(config_content)
+    )
 
     # Launch with profile but override with CLI flags
     result = subprocess.run(
@@ -173,7 +173,7 @@ def test_profile_overrides_config(coi_binary, workspace_dir, cleanup_containers)
     """Test that profile settings override global config."""
     container_name = f"coi-{Path(workspace_dir).name}-1"
 
-    # Create project config with both global and profile limits
+    # Create project config with global limits
     project_config_dir = Path(workspace_dir) / ".coi"
     project_config_dir.mkdir(exist_ok=True)
     project_config = project_config_dir / "config.toml"
@@ -183,17 +183,23 @@ count = "4"
 
 [limits.memory]
 limit = "4GiB"
-
-[profiles.limited]
-image = "coi"
-
-[profiles.limited.limits.cpu]
-count = "1"
-
-[profiles.limited.limits.memory]
-limit = "512MiB"
 """
     project_config.write_text(config_content)
+
+    # Create directory profile with overriding limits
+    profile_dir = project_config_dir / "profiles" / "limited"
+    profile_dir.mkdir(parents=True)
+    (profile_dir / "config.toml").write_text(
+        """
+image = "coi"
+
+[limits.cpu]
+count = "1"
+
+[limits.memory]
+limit = "512MiB"
+"""
+    )
 
     # Launch with profile (no CLI flags)
     result = subprocess.run(

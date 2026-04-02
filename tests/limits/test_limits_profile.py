@@ -16,30 +16,29 @@ def test_profile_with_limits(coi_binary, workspace_dir, cleanup_containers):
     """Test that profile limits are applied when using a profile."""
     container_name = f"coi-{Path(workspace_dir).name}-1"
 
-    # Create config with profile that has limits
-    project_config_dir = Path(workspace_dir) / ".coi"
-    project_config_dir.mkdir(exist_ok=True)
-    project_config = project_config_dir / "config.toml"
-    config_content = """
-[profiles.limited]
+    # Create directory profile with limits
+    profile_dir = Path(workspace_dir) / ".coi" / "profiles" / "limited"
+    profile_dir.mkdir(parents=True)
+    (profile_dir / "config.toml").write_text(
+        """
 image = "coi"
 persistent = false
 
-[profiles.limited.limits.cpu]
+[limits.cpu]
 count = "2"
 allowance = "50%"
 
-[profiles.limited.limits.memory]
+[limits.memory]
 limit = "2GiB"
 enforce = "hard"
 
-[profiles.limited.limits.disk]
+[limits.disk]
 read = "10MiB/s"
 
-[profiles.limited.limits.runtime]
+[limits.runtime]
 max_processes = 50
 """
-    project_config.write_text(config_content)
+    )
 
     # Launch with profile
     result = subprocess.run(
@@ -81,30 +80,21 @@ max_processes = 50
 
 def test_multiple_profiles_different_limits(coi_binary, workspace_dir, cleanup_containers):
     """Test that different profiles can have different limits."""
-    # Create config with two profiles with different limits
-    project_config_dir = Path(workspace_dir) / ".coi"
-    project_config_dir.mkdir(exist_ok=True)
-    project_config = project_config_dir / "config.toml"
-    config_content = """
-[profiles.small]
+    # Create two directory profiles with different limits
+    for name, cpu, memory in [("small", "1", "512MiB"), ("large", "4", "8GiB")]:
+        profile_dir = Path(workspace_dir) / ".coi" / "profiles" / name
+        profile_dir.mkdir(parents=True)
+        (profile_dir / "config.toml").write_text(
+            f"""
 image = "coi"
 
-[profiles.small.limits.cpu]
-count = "1"
+[limits.cpu]
+count = "{cpu}"
 
-[profiles.small.limits.memory]
-limit = "512MiB"
-
-[profiles.large]
-image = "coi"
-
-[profiles.large.limits.cpu]
-count = "4"
-
-[profiles.large.limits.memory]
-limit = "8GiB"
+[limits.memory]
+limit = "{memory}"
 """
-    project_config.write_text(config_content)
+        )
 
     # Test small profile
     container_name_1 = f"coi-{Path(workspace_dir).name}-1"
@@ -183,17 +173,16 @@ def test_profile_partial_limits(coi_binary, workspace_dir, cleanup_containers):
     container_name = f"coi-{Path(workspace_dir).name}-1"
 
     # Create profile with only CPU limit
-    project_config_dir = Path(workspace_dir) / ".coi"
-    project_config_dir.mkdir(exist_ok=True)
-    project_config = project_config_dir / "config.toml"
-    config_content = """
-[profiles.cpu_only]
+    profile_dir = Path(workspace_dir) / ".coi" / "profiles" / "cpu_only"
+    profile_dir.mkdir(parents=True)
+    (profile_dir / "config.toml").write_text(
+        """
 image = "coi"
 
-[profiles.cpu_only.limits.cpu]
+[limits.cpu]
 count = "2"
 """
-    project_config.write_text(config_content)
+    )
 
     # Launch with profile
     result = subprocess.run(
@@ -234,7 +223,7 @@ def test_profile_limits_with_global_config(coi_binary, workspace_dir, cleanup_co
     """Test interaction between global config limits and profile limits."""
     container_name = f"coi-{Path(workspace_dir).name}-1"
 
-    # Create config with both global and profile limits
+    # Create config with global limits
     project_config_dir = Path(workspace_dir) / ".coi"
     project_config_dir.mkdir(exist_ok=True)
     project_config = project_config_dir / "config.toml"
@@ -248,17 +237,22 @@ limit = "8GiB"
 
 [limits.runtime]
 max_processes = 200
+"""
+    project_config.write_text(config_content)
 
-# Profile with partial overrides
-[profiles.override]
+    # Create directory profile with partial overrides
+    profile_dir = project_config_dir / "profiles" / "override"
+    profile_dir.mkdir(parents=True)
+    (profile_dir / "config.toml").write_text(
+        """
 image = "coi"
 
-[profiles.override.limits.cpu]
+[limits.cpu]
 count = "1"
 
 # Profile doesn't override memory or processes, so global should apply
 """
-    project_config.write_text(config_content)
+    )
 
     # Launch with profile
     result = subprocess.run(
@@ -301,21 +295,20 @@ def test_cli_flags_override_profile_limits(coi_binary, workspace_dir, cleanup_co
     """Test that CLI flags can override profile limits."""
     container_name = f"coi-{Path(workspace_dir).name}-1"
 
-    # Create profile with limits
-    project_config_dir = Path(workspace_dir) / ".coi"
-    project_config_dir.mkdir(exist_ok=True)
-    project_config = project_config_dir / "config.toml"
-    config_content = """
-[profiles.base]
+    # Create directory profile with limits
+    profile_dir = Path(workspace_dir) / ".coi" / "profiles" / "base"
+    profile_dir.mkdir(parents=True)
+    (profile_dir / "config.toml").write_text(
+        """
 image = "coi"
 
-[profiles.base.limits.cpu]
+[limits.cpu]
 count = "2"
 
-[profiles.base.limits.memory]
+[limits.memory]
 limit = "2GiB"
 """
-    project_config.write_text(config_content)
+    )
 
     # Launch with profile but override with CLI flags
     result = subprocess.run(
@@ -359,7 +352,7 @@ def test_profile_without_limits_uses_global(coi_binary, workspace_dir, cleanup_c
     """Test that profile without limits falls back to global config."""
     container_name = f"coi-{Path(workspace_dir).name}-1"
 
-    # Create config with global limits and profile without limits
+    # Create config with global limits
     project_config_dir = Path(workspace_dir) / ".coi"
     project_config_dir.mkdir(exist_ok=True)
     project_config = project_config_dir / "config.toml"
@@ -369,13 +362,19 @@ count = "2"
 
 [limits.memory]
 limit = "2GiB"
+"""
+    project_config.write_text(config_content)
 
-[profiles.nolimits]
+    # Create directory profile without limits
+    profile_dir = project_config_dir / "profiles" / "nolimits"
+    profile_dir.mkdir(parents=True)
+    (profile_dir / "config.toml").write_text(
+        """
 image = "coi"
 persistent = false
 # No limits defined in profile
 """
-    project_config.write_text(config_content)
+    )
 
     # Launch with profile that has no limits
     result = subprocess.run(
