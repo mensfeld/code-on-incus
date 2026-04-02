@@ -244,18 +244,7 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 		protectedPaths = cfg.Security.GetEffectiveProtectedPaths()
 	}
 
-	// If writable git hooks are enabled, remove .git/hooks from protected paths
-	if config.BoolVal(cfg.Git.WritableHooks) {
-		gitHooksSuffix := filepath.Join(".git", "hooks")
-		filtered := protectedPaths[:0]
-		for _, p := range protectedPaths {
-			if strings.HasSuffix(p, gitHooksSuffix) {
-				continue
-			}
-			filtered = append(filtered, p)
-		}
-		protectedPaths = filtered
-	}
+	protectedPaths = filterWritableGitHooks(protectedPaths, cfg)
 
 	// Resolve which forwarded env vars are actually set on the host.
 	// This list is passed to the context file so AI tools know what's available.
