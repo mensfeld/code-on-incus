@@ -93,6 +93,9 @@ Examples:
 		if p.Image != "" {
 			fmt.Printf("image = %q\n", p.Image)
 		}
+		if p.Context != "" {
+			fmt.Printf("context = %q\n", p.Context)
+		}
 		if p.Persistent != nil {
 			fmt.Printf("persistent = %v\n", *p.Persistent)
 		}

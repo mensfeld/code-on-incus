@@ -346,6 +346,81 @@ mode = "bogus"
     )
 
 
+def test_profile_validation_missing_context_file(coi_binary, cleanup_containers, workspace_dir):
+    """
+    Test that using a profile with a non-existent context file fails at runtime.
+    """
+    profile_dir = Path(workspace_dir) / ".coi" / "profiles" / "badcontext"
+    profile_dir.mkdir(parents=True)
+    (profile_dir / "config.toml").write_text(
+        """
+image = "coi"
+context = "CONTEXT.md"
+"""
+    )
+    # Note: CONTEXT.md is NOT created, so it should fail validation
+
+    result = subprocess.run(
+        [
+            coi_binary,
+            "run",
+            "--workspace",
+            workspace_dir,
+            "--profile",
+            "badcontext",
+            "echo",
+            "test",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=workspace_dir,
+    )
+
+    assert result.returncode != 0, (
+        f"Should fail when context file doesn't exist. stdout: {result.stdout}"
+    )
+    combined = result.stdout + result.stderr
+    assert "context file" in combined.lower(), (
+        f"Error should mention context file. Got:\n{combined}"
+    )
+
+
+def test_profile_context_file_loads_when_present(coi_binary, cleanup_containers, workspace_dir):
+    """
+    Test that a profile with a valid context file loads and is shown in profile show.
+    """
+    profile_dir = Path(workspace_dir) / ".coi" / "profiles" / "withcontext"
+    profile_dir.mkdir(parents=True)
+    (profile_dir / "config.toml").write_text(
+        """
+image = "coi"
+context = "CONTEXT.md"
+"""
+    )
+    (profile_dir / "CONTEXT.md").write_text("# My Profile Context\nUse pytest.\n")
+
+    result = subprocess.run(
+        [
+            coi_binary,
+            "profile",
+            "show",
+            "withcontext",
+            "--workspace",
+            workspace_dir,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=workspace_dir,
+    )
+
+    assert result.returncode == 0, f"profile show should succeed. stderr: {result.stderr}"
+    output = result.stdout + result.stderr
+    assert "context" in output.lower(), f"Should show context field. Got:\n{output}"
+    assert "CONTEXT.md" in output, f"Should show context file path. Got:\n{output}"
+
+
 def test_profile_validation_incomplete_mount(coi_binary, cleanup_containers, workspace_dir):
     """
     Test that using a profile with an incomplete mount entry fails at runtime.

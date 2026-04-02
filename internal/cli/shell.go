@@ -283,6 +283,7 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 		ForwardSSHAgent:       sshAgent || config.BoolVal(cfg.SSH.ForwardAgent),
 		ForwardedEnvVars:      resolvedForwardedEnvVars,
 		ContextFilePath:       cfg.Tool.ContextFile,
+		ProfileContextFile:    cfg.ProfileContextFile,
 		AutoContext:           cfg.Tool.AutoContext,
 		ContainerName:         containerName,
 		Timezone:              resolvedTimezone,

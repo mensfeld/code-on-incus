@@ -8,20 +8,21 @@ import (
 
 // Config represents the complete configuration
 type Config struct {
-	Defaults   DefaultsConfig           `toml:"defaults"`
-	Paths      PathsConfig              `toml:"paths"`
-	Incus      IncusConfig              `toml:"incus"`
-	Network    NetworkConfig            `toml:"network"`
-	Tool       ToolConfig               `toml:"tool"`
-	Mounts     MountsConfig             `toml:"mounts"`
-	Limits     LimitsConfig             `toml:"limits"`
-	Git        GitConfig                `toml:"git"`
-	SSH        SSHConfig                `toml:"ssh"`
-	Security   SecurityConfig           `toml:"security"`
-	Monitoring MonitoringConfig         `toml:"monitoring"`
-	Timezone   TimezoneConfig           `toml:"timezone"`
-	Build      BuildConfig              `toml:"build"`
-	Profiles   map[string]ProfileConfig `toml:"-"` // Populated by loadProfileDirectories, not from TOML
+	Defaults           DefaultsConfig           `toml:"defaults"`
+	Paths              PathsConfig              `toml:"paths"`
+	Incus              IncusConfig              `toml:"incus"`
+	Network            NetworkConfig            `toml:"network"`
+	Tool               ToolConfig               `toml:"tool"`
+	Mounts             MountsConfig             `toml:"mounts"`
+	Limits             LimitsConfig             `toml:"limits"`
+	Git                GitConfig                `toml:"git"`
+	SSH                SSHConfig                `toml:"ssh"`
+	Security           SecurityConfig           `toml:"security"`
+	Monitoring         MonitoringConfig         `toml:"monitoring"`
+	Timezone           TimezoneConfig           `toml:"timezone"`
+	Build              BuildConfig              `toml:"build"`
+	Profiles           map[string]ProfileConfig `toml:"-"` // Populated by loadProfileDirectories, not from TOML
+	ProfileContextFile string                   `toml:"-"` // Set by ApplyProfile, read by session setup
 }
 
 // BuildConfig defines how to build the project's custom image
@@ -144,6 +145,7 @@ type NetworkLoggingConfig struct {
 // ProfileConfig represents a named profile
 type ProfileConfig struct {
 	Image       string            `toml:"image"`
+	Context     string            `toml:"context"` // Path to context .md file (resolved relative to profile dir)
 	Environment map[string]string `toml:"environment"`
 	Persistent  *bool             `toml:"persistent"`
 	Limits      *LimitsConfig     `toml:"limits"`
@@ -809,12 +811,24 @@ func (c *Config) ApplyProfile(name string) error {
 		c.Defaults.ForwardEnv = MergeStringSliceUnique(c.Defaults.ForwardEnv, profile.ForwardEnv)
 	}
 
+	// Apply profile context file if present
+	if profile.Context != "" {
+		c.ProfileContextFile = profile.Context
+	}
+
 	return nil
 }
 
 // Validate checks that a profile's configuration is valid.
 // Called when the profile is actually used (--profile flag), not at load time.
 func (p *ProfileConfig) Validate(name string) error {
+	// Validate context file exists if specified
+	if p.Context != "" {
+		if _, err := os.Stat(p.Context); err != nil {
+			return fmt.Errorf("profile '%s': context file %q does not exist", name, p.Context)
+		}
+	}
+
 	// Validate build script exists if specified
 	if p.Build != nil && p.Build.Script != "" {
 		if _, err := os.Stat(p.Build.Script); err != nil {

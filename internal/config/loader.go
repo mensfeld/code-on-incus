@@ -107,10 +107,13 @@ func loadProfileDirectories(cfg *Config, configDir string) error {
 			return fmt.Errorf("failed to parse profile %q config at %s: %w", profileName, profileConfigPath, err)
 		}
 
-		// Resolve build script path relative to profile directory
+		// Resolve paths relative to profile directory
 		profileDir := filepath.Join(profilesDir, profileName)
 		if profileCfg.Build != nil && profileCfg.Build.Script != "" {
 			profileCfg.Build.Script = resolveRelativePath(profileDir, profileCfg.Build.Script)
+		}
+		if profileCfg.Context != "" {
+			profileCfg.Context = resolveRelativePath(profileDir, profileCfg.Context)
 		}
 
 		// Tag with source location
@@ -348,6 +351,7 @@ writable_hooks = false
 # Profile directory config.toml example (.coi/profiles/rust-dev/config.toml):
 #   image = "coi-rust"
 #   persistent = true
+#   context = "CONTEXT.md"    # extra context appended to SANDBOX_CONTEXT.md
 #   forward_env = ["RUST_BACKTRACE"]
 #
 #   [environment]

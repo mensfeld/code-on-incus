@@ -892,3 +892,136 @@ func TestMultipleProfileDirectories(t *testing.T) {
 		t.Error("Expected profile 'beta' with image 'img-beta'")
 	}
 }
+
+func TestProfileContextPathResolution(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".coi")
+	profileDir := filepath.Join(configDir, "profiles", "ctx-test")
+	if err := os.MkdirAll(profileDir, 0o755); err != nil {
+		t.Fatalf("Failed to create profile dir: %v", err)
+	}
+
+	profileContent := `
+image = "coi"
+context = "CONTEXT.md"
+`
+	if err := os.WriteFile(filepath.Join(profileDir, "config.toml"), []byte(profileContent), 0o644); err != nil {
+		t.Fatalf("Failed to write profile config: %v", err)
+	}
+
+	cfg := GetDefaultConfig()
+	if err := loadProfileDirectories(cfg, configDir); err != nil {
+		t.Fatalf("loadProfileDirectories() failed: %v", err)
+	}
+
+	p := cfg.GetProfile("ctx-test")
+	if p == nil {
+		t.Fatal("Expected profile 'ctx-test' to be loaded")
+	}
+
+	expectedPath := filepath.Join(profileDir, "CONTEXT.md")
+	if p.Context != expectedPath {
+		t.Errorf("Expected context path %q, got %q", expectedPath, p.Context)
+	}
+}
+
+func TestProfileContextAbsolutePath(t *testing.T) {
+	tmpDir := t.TempDir()
+	configDir := filepath.Join(tmpDir, ".coi")
+	profileDir := filepath.Join(configDir, "profiles", "ctx-abs")
+	if err := os.MkdirAll(profileDir, 0o755); err != nil {
+		t.Fatalf("Failed to create profile dir: %v", err)
+	}
+
+	profileContent := `
+image = "coi"
+context = "/absolute/path/CONTEXT.md"
+`
+	if err := os.WriteFile(filepath.Join(profileDir, "config.toml"), []byte(profileContent), 0o644); err != nil {
+		t.Fatalf("Failed to write profile config: %v", err)
+	}
+
+	cfg := GetDefaultConfig()
+	if err := loadProfileDirectories(cfg, configDir); err != nil {
+		t.Fatalf("loadProfileDirectories() failed: %v", err)
+	}
+
+	p := cfg.GetProfile("ctx-abs")
+	if p == nil {
+		t.Fatal("Expected profile 'ctx-abs' to be loaded")
+	}
+
+	if p.Context != "/absolute/path/CONTEXT.md" {
+		t.Errorf("Expected absolute path preserved, got %q", p.Context)
+	}
+}
+
+func TestProfileContextValidationMissingFile(t *testing.T) {
+	profile := ProfileConfig{
+		Image:   "coi",
+		Context: "/nonexistent/path/CONTEXT.md",
+	}
+
+	err := profile.Validate("test")
+	if err == nil {
+		t.Fatal("Expected error for missing context file, got nil")
+	}
+	if !strings.Contains(err.Error(), "context file") {
+		t.Errorf("Error should mention 'context file', got: %v", err)
+	}
+}
+
+func TestProfileContextValidationExistingFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	contextFile := filepath.Join(tmpDir, "CONTEXT.md")
+	if err := os.WriteFile(contextFile, []byte("# Profile instructions\n"), 0o644); err != nil {
+		t.Fatalf("Failed to create context file: %v", err)
+	}
+
+	profile := ProfileConfig{
+		Image:   "coi",
+		Context: contextFile,
+	}
+
+	err := profile.Validate("test")
+	if err != nil {
+		t.Errorf("Expected no error for existing context file, got: %v", err)
+	}
+}
+
+func TestApplyProfileSetsProfileContextFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	contextFile := filepath.Join(tmpDir, "CONTEXT.md")
+	if err := os.WriteFile(contextFile, []byte("# Profile instructions\n"), 0o644); err != nil {
+		t.Fatalf("Failed to create context file: %v", err)
+	}
+
+	cfg := GetDefaultConfig()
+	cfg.Profiles["ctx-profile"] = ProfileConfig{
+		Image:   "coi",
+		Context: contextFile,
+	}
+
+	if err := cfg.ApplyProfile("ctx-profile"); err != nil {
+		t.Fatalf("ApplyProfile failed: %v", err)
+	}
+
+	if cfg.ProfileContextFile != contextFile {
+		t.Errorf("Expected ProfileContextFile=%q, got %q", contextFile, cfg.ProfileContextFile)
+	}
+}
+
+func TestApplyProfileWithoutContextLeavesEmpty(t *testing.T) {
+	cfg := GetDefaultConfig()
+	cfg.Profiles["no-ctx"] = ProfileConfig{
+		Image: "coi",
+	}
+
+	if err := cfg.ApplyProfile("no-ctx"); err != nil {
+		t.Fatalf("ApplyProfile failed: %v", err)
+	}
+
+	if cfg.ProfileContextFile != "" {
+		t.Errorf("Expected empty ProfileContextFile, got %q", cfg.ProfileContextFile)
+	}
+}

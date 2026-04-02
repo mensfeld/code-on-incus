@@ -41,6 +41,7 @@ type SetupOptions struct {
 	ForwardSSHAgent       bool                 // Forward host SSH agent to container
 	ForwardedEnvVars      []string             // Names of host env vars being forwarded (for context file)
 	ContextFilePath       string               // Path to custom context .md file on host (overrides tool default)
+	ProfileContextFile    string               // Path to profile context .md file (appended to sandbox context)
 	Timezone              string               // Resolved IANA timezone name (e.g., "America/New_York"), empty for UTC
 	AutoContext           *bool                // Auto-inject sandbox context into tool's native system (default: true)
 	Logger                func(string)
@@ -559,8 +560,8 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 			ToolName:           toolName,
 			ContainerName:      result.ContainerName,
 		}
-		contextContent = resolveContextContent(ctxInfo, opts.ContextFilePath, opts.Logger)
-		if err := injectContextFile(result.Manager, ctxInfo, opts.ContextFilePath, result.HomeDir, opts.Logger); err != nil {
+		contextContent = resolveContextContent(ctxInfo, opts.ContextFilePath, opts.ProfileContextFile, opts.Logger)
+		if err := injectContextFile(result.Manager, ctxInfo, opts.ContextFilePath, opts.ProfileContextFile, result.HomeDir, opts.Logger); err != nil {
 			opts.Logger(fmt.Sprintf("Warning: Failed to inject context file: %v", err))
 		}
 	}
