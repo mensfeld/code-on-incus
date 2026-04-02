@@ -442,11 +442,6 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 	return err
 }
 
-// ptrBool returns a pointer to a bool value
-func ptrBool(b bool) *bool {
-	return &b
-}
-
 // getConfiguredTool returns the tool to use based on config
 func getConfiguredTool(cfg *config.Config) (tool.Tool, error) {
 	toolName := cfg.Tool.Name
