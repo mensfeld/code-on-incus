@@ -18,9 +18,12 @@ func setupMounts(mgr *container.Manager, mountConfig *MountConfig, useShift bool
 			// For readonly mounts, skip creating host directory — if the source
 			// doesn't exist, log a warning and skip the mount instead of creating
 			// an empty directory (which defeats the purpose).
-			if _, err := os.Stat(mount.HostPath); os.IsNotExist(err) {
-				logger(fmt.Sprintf("Warning: readonly mount source %s does not exist, skipping", mount.HostPath))
-				continue
+			if _, err := os.Stat(mount.HostPath); err != nil {
+				if os.IsNotExist(err) {
+					logger(fmt.Sprintf("Warning: readonly mount source %s does not exist, skipping", mount.HostPath))
+					continue
+				}
+				return fmt.Errorf("failed to stat readonly mount source '%s': %w", mount.HostPath, err)
 			}
 		} else {
 			// Create host directory if it doesn't exist (writable mounts only)

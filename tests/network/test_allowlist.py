@@ -8,6 +8,7 @@ Network isolation is implemented using firewalld direct rules.
 
 import json
 import os
+import pathlib
 import subprocess
 import sys
 import tempfile
@@ -48,7 +49,6 @@ refresh_interval_minutes = 30
                 "shell",
                 "--workspace",
                 workspace_dir,
-                "--network=allowlist",
                 "--background",
             ],
             capture_output=True,
@@ -142,7 +142,6 @@ refresh_interval_minutes = 30
                 "shell",
                 "--workspace",
                 workspace_dir,
-                "--network=allowlist",
                 "--background",
             ],
             capture_output=True,
@@ -275,7 +274,6 @@ refresh_interval_minutes = 30
                 "shell",
                 "--workspace",
                 workspace_dir,
-                "--network=allowlist",
                 "--background",
             ],
             capture_output=True,
@@ -399,7 +397,6 @@ refresh_interval_minutes = 30
                 "shell",
                 "--workspace",
                 workspace_dir,
-                "--network=allowlist",
                 "--background",
             ],
             capture_output=True,
@@ -491,7 +488,6 @@ refresh_interval_minutes = 30
                 "shell",
                 "--workspace",
                 workspace_dir,
-                "--network=allowlist",
                 "--background",
             ],
             capture_output=True,
@@ -572,6 +568,11 @@ def test_restricted_allows_host_to_access_container_services(
     Verifies that the established connection rule works in both allowlist
     and restricted network modes.
     """
+    # Configure restricted network mode via workspace config file
+    config_dir = pathlib.Path(workspace_dir) / ".coi"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "config.toml").write_text('[network]\nmode = "restricted"\n')
+
     # Start container in background with restricted mode
     result = subprocess.run(
         [
@@ -579,7 +580,6 @@ def test_restricted_allows_host_to_access_container_services(
             "shell",
             "--workspace",
             workspace_dir,
-            "--network=restricted",
             "--background",
         ],
         capture_output=True,

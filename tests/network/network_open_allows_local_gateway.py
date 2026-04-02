@@ -2,7 +2,7 @@
 Test for network isolation - open mode allows local gateway access.
 
 Tests that:
-1. Container with --network=open does not block local gateway
+1. Container with open network mode does not block local gateway
 2. ACL is not applied, so connection attempts are made
 3. Works regardless of what private network range the host uses
 """
@@ -19,7 +19,7 @@ def test_open_allows_local_gateway(coi_binary, workspace_dir, cleanup_containers
     private network range (10.x.x.x, 172.16-31.x.x, 192.168.x.x).
 
     Flow:
-    1. Start shell with --network=open
+    1. Start shell with open network mode (via config file)
     2. Verify open mode is active (check stderr message)
     3. Extract container name
     4. Verify internet access works (sanity check)

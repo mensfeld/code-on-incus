@@ -219,9 +219,12 @@ func runCommand(cmd *cobra.Command, args []string) error {
 				if mount.Readonly {
 					// For readonly mounts, skip creating host directory — if the source
 					// doesn't exist, log a warning and skip the mount
-					if _, err := os.Stat(mount.HostPath); os.IsNotExist(err) {
-						fmt.Fprintf(os.Stderr, "Warning: readonly mount source %s does not exist, skipping\n", mount.HostPath)
-						continue
+					if _, err := os.Stat(mount.HostPath); err != nil {
+						if os.IsNotExist(err) {
+							fmt.Fprintf(os.Stderr, "Warning: readonly mount source %s does not exist, skipping\n", mount.HostPath)
+							continue
+						}
+						return fmt.Errorf("failed to stat readonly mount source '%s': %w", mount.HostPath, err)
 					}
 					fmt.Fprintf(os.Stderr, "Adding mount (read-only): %s -> %s\n", mount.HostPath, mount.ContainerPath)
 				} else {
@@ -241,6 +244,20 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		// Protect security-sensitive paths by mounting read-only (security feature)
 		if !cfg.Security.DisableProtection {
 			protectedPaths := cfg.Security.GetEffectiveProtectedPaths()
+
+			// If writable git hooks are enabled, remove .git/hooks from protected paths
+			if config.BoolVal(cfg.Git.WritableHooks) {
+				gitHooksSuffix := filepath.Join(".git", "hooks")
+				filtered := protectedPaths[:0]
+				for _, p := range protectedPaths {
+					if strings.HasSuffix(p, gitHooksSuffix) {
+						continue
+					}
+					filtered = append(filtered, p)
+				}
+				protectedPaths = filtered
+			}
+
 			if len(protectedPaths) > 0 {
 				if err := session.SetupSecurityMounts(mgr, absWorkspace, containerWorkspacePath, protectedPaths, useShift); err != nil {
 					fmt.Fprintf(os.Stderr, "Warning: Failed to setup security mounts: %v\n", err)

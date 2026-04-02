@@ -8,6 +8,7 @@ Tests that:
 Network isolation is implemented using firewalld direct rules.
 """
 
+import pathlib
 import subprocess
 import time
 
@@ -22,6 +23,11 @@ def test_restricted_blocks_metadata_endpoint(coi_binary, workspace_dir, cleanup_
     3. Verify connection is blocked/rejected
     4. Cleanup container
     """
+    # Configure restricted network mode via workspace config file
+    config_dir = pathlib.Path(workspace_dir) / ".coi"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "config.toml").write_text('[network]\nmode = "restricted"\n')
+
     # Start shell in background with restricted network mode
     result = subprocess.run(
         [
@@ -31,7 +37,6 @@ def test_restricted_blocks_metadata_endpoint(coi_binary, workspace_dir, cleanup_
             workspace_dir,
             "--background",
             "--debug",
-            "--network=restricted",
         ],
         capture_output=True,
         text=True,
