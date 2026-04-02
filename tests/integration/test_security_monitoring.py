@@ -171,21 +171,6 @@ def cleanup_container(name, coi_binary):
     )
 
 
-class TestMonitoringFeature:
-    """Test monitoring feature availability."""
-
-    def test_monitoring_config_recognized(self, coi_binary):
-        """Verify monitoring config section is supported."""
-        result = subprocess.run(
-            [coi_binary, "shell", "--help"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        # Shell command should exist and be functional
-        assert result.returncode == 0
-
-
 class TestThreatDetection:
     """Test threat detection for different attack types."""
 

@@ -56,7 +56,22 @@ readonly = true
     config_dir.mkdir(exist_ok=True)
     (config_dir / "config.toml").write_text(config_content)
 
-    # Attempt to write a new file in the readonly mount
+    # First, verify the mount is present and readable (guards against false-pass
+    # if the mount was never applied)
+    read_result = subprocess.run(
+        [coi_binary, "run", "--", "cat", "/mnt/rodata/existing.txt"],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        cwd=workspace_dir,
+    )
+    assert read_result.returncode == 0, (
+        f"Mount should be present and readable.\n"
+        f"stdout: {read_result.stdout}\nstderr: {read_result.stderr}"
+    )
+    assert "do-not-modify" in read_result.stdout
+
+    # Now attempt to write a new file in the readonly mount
     result = subprocess.run(
         [
             coi_binary,

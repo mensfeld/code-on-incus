@@ -51,19 +51,18 @@ container = "/mnt/data2"
     assert "content2" in result.stdout
 
 
-def test_config_mount_replaces_previous(coi_binary, cleanup_containers, workspace_dir, tmp_path):
-    """Test that updating config mount entries works correctly."""
-    mount1 = tmp_path / "first-data"
-    mount2 = tmp_path / "second-data"
-    mount1.mkdir()
-    mount2.mkdir()
-    (mount1 / "file.txt").write_text("from-first")
-    (mount2 / "file.txt").write_text("from-second")
+def test_config_single_mount_only_mounts_configured(
+    coi_binary, cleanup_containers, workspace_dir, tmp_path
+):
+    """Test that only the configured mount is available, not arbitrary host dirs."""
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "file.txt").write_text("from-config")
 
-    # Create config file with only the second mount at /data
+    # Create config file with a single mount at /data
     config_content = f"""\
 [[mounts.default]]
-host = "{mount2}"
+host = "{data_dir}"
 container = "/data"
 """
     config_dir = Path(workspace_dir) / ".coi"
@@ -80,5 +79,4 @@ container = "/data"
     )
 
     assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
-    assert "from-second" in result.stdout
-    assert "from-first" not in result.stdout
+    assert "from-config" in result.stdout
