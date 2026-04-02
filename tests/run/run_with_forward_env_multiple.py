@@ -31,6 +31,7 @@ forward_env = ["COI_FWD_A", "COI_FWD_B"]
     )
 
     env = os.environ.copy()
+    env["COI_CONFIG"] = str(config_dir / "config.toml")
     env["COI_FWD_A"] = "alpha-val"
     env["COI_FWD_B"] = "beta-val"
 

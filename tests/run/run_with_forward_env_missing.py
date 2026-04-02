@@ -33,6 +33,7 @@ forward_env = ["COI_NONEXISTENT_VAR"]
     )
 
     env = os.environ.copy()
+    env["COI_CONFIG"] = str(config_dir / "config.toml")
     env.pop("COI_NONEXISTENT_VAR", None)
 
     result = subprocess.run(

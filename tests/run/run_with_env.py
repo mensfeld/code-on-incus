@@ -6,6 +6,7 @@ Tests that:
 2. Run command and verify env var is available in container
 """
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -28,6 +29,9 @@ MY_TEST_VAR = "test-value-xyz"
 """
     )
 
+    env = os.environ.copy()
+    env["COI_CONFIG"] = str(config_dir / "config.toml")
+
     result = subprocess.run(
         [
             coi_binary,
@@ -42,6 +46,7 @@ MY_TEST_VAR = "test-value-xyz"
         capture_output=True,
         text=True,
         timeout=180,
+        env=env,
     )
 
     assert result.returncode == 0, f"Run should succeed. stderr: {result.stderr}"

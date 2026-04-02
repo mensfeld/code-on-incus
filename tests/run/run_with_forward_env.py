@@ -31,6 +31,7 @@ forward_env = ["COI_TEST_FORWARD_VAR"]
     )
 
     env = os.environ.copy()
+    env["COI_CONFIG"] = str(config_dir / "config.toml")
     env["COI_TEST_FORWARD_VAR"] = "forwarded-value-42"
 
     result = subprocess.run(

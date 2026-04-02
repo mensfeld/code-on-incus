@@ -6,6 +6,7 @@ Tests that:
 2. Verify all env vars are set
 """
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -29,6 +30,9 @@ VAR2 = "value2"
 """
     )
 
+    env = os.environ.copy()
+    env["COI_CONFIG"] = str(config_dir / "config.toml")
+
     result = subprocess.run(
         [
             coi_binary,
@@ -43,6 +47,7 @@ VAR2 = "value2"
         capture_output=True,
         text=True,
         timeout=180,
+        env=env,
     )
 
     assert result.returncode == 0, f"Run should succeed. stderr: {result.stderr}"

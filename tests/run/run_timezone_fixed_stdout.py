@@ -6,6 +6,7 @@ Tests that:
 2. Verify container reports correct timezone abbreviation (JST) via stdout
 """
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -28,6 +29,9 @@ mode = "fixed"
 name = "Asia/Tokyo"
 """)
 
+    env = os.environ.copy()
+    env["COI_CONFIG"] = str(config_dir / "config.toml")
+
     result = subprocess.run(
         [
             coi_binary,
@@ -40,6 +44,7 @@ name = "Asia/Tokyo"
         capture_output=True,
         text=True,
         timeout=180,
+        env=env,
     )
 
     assert result.returncode == 0, f"Run should succeed. stderr: {result.stderr}"
