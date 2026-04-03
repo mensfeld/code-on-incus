@@ -385,6 +385,19 @@ permission_mode = "bypass"
 count = "4"
 ```
 
+**Profile inheritance:** Profiles can inherit from a parent using `inherits = "parent-name"`, so you only override what differs:
+
+```toml
+# .coi/profiles/rust-dev-nightly/config.toml
+inherits = "rust-dev"
+image = "coi-rust-nightly"
+
+[environment]
+RUST_CHANNEL = "nightly"
+```
+
+Environment maps merge (child keys win, `""` clears a parent key). Arrays (`mounts`, `forward_env`) fully replace if the child defines them. Struct sections (`limits`, `tool`, `network`) deep-merge field by field. Inheritance works across config levels (a project profile can inherit from a user-level profile) and supports chains up to 10 levels with cycle detection.
+
 **Profile context files:** When a profile includes `context = "CONTEXT.md"`, the referenced markdown file is automatically appended to `~/SANDBOX_CONTEXT.md` and tool-native auto-context files (e.g., `~/.claude/CLAUDE.md`) under a `# User-Provided Profile Context` heading. This gives AI agents profile-specific instructions (e.g., "use pytest", "follow PEP 8") without manual setup.
 
 ```bash
