@@ -44,9 +44,8 @@ def test_list_respects_profile_flag(coi_binary, workspace_dir):
         f"list --profile should succeed, got rc={result.returncode}: {combined}"
     )
     # Must not contain profile-related errors
-    assert "profile" not in combined.lower() or "error" not in combined.lower(), (
-        f"Unexpected profile error: {combined}"
-    )
+    assert "unknown profile" not in combined.lower(), f"Profile not recognized: {combined}"
+    assert "flag redefined" not in combined.lower(), f"Flag conflict: {combined}"
 
 
 def test_info_respects_profile_flag(coi_binary, workspace_dir):

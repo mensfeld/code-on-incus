@@ -53,7 +53,12 @@ Examples:
 		var err error
 		cfg, err = config.Load()
 		if err != nil {
-			return fmt.Errorf("failed to load config: %w", err)
+			// Allow health command to run with defaults even if config is broken
+			if cmd.Name() == "health" {
+				cfg = config.GetDefaultConfig()
+			} else {
+				return fmt.Errorf("failed to load config: %w", err)
+			}
 		}
 
 		// Apply profile if specified

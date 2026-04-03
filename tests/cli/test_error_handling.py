@@ -80,4 +80,10 @@ def test_image_exists_nonexistent_returns_exit_code_1(coi_binary):
     )
 
     assert result.returncode != 0, "Should return non-zero for nonexistent image"
-    # The error output should be minimal (just the exit code error or empty)
+    # Silent boolean-check command: no output expected
+    assert result.stdout.strip() == "", (
+        f"Expected no stdout for nonexistent image exists check, got: {result.stdout!r}"
+    )
+    assert result.stderr.strip() == "", (
+        f"Expected no stderr for nonexistent image exists check, got: {result.stderr!r}"
+    )
