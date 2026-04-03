@@ -16,7 +16,7 @@ Run AI coding assistants (Claude Code, opencode, Aider, and more) in isolated, p
 
 **Security First:** Unlike Docker or bare-metal execution, your environment variables, SSH keys, and Git credentials are **never** exposed to AI tools. Containers run in complete isolation with no access to your host credentials unless explicitly mounted.
 
-**Proactive Defense:** COI doesn't just isolate AI tools — it can actively watch them. Enable the built-in security monitoring daemon (`--monitor`) to detect reverse shells, credential scanning, and large data reads in real time, automatically pausing or killing the container before damage can occur. No manual intervention needed.
+**Proactive Defense:** COI doesn't just isolate AI tools — it can actively watch them. Enable the built-in security monitoring daemon (`[monitoring] enabled = true`) to detect reverse shells, credential scanning, and large data reads in real time, automatically pausing or killing the container before damage can occur. No manual intervention needed.
 
 *Think Docker for AI coding tools, but with system containers that actually work like real machines.*
 
@@ -93,9 +93,9 @@ See the [Supported Tools wiki page](https://github.com/mensfeld/code-on-incus/wi
 - Container snapshots - Create checkpoints, rollback changes, and branch experiments with full state preservation
 
 **Host Integration**
-- SSH agent forwarding - Use git-over-SSH inside containers without copying private keys (`--ssh-agent` or `[ssh] forward_agent = true`)
-- Environment variable forwarding - Selectively forward host env vars by name (`--forward-env` or `forward_env` in config)
-- Host timezone inheritance - Containers automatically inherit the host's timezone (configurable via `--timezone` or `[timezone]` config)
+- SSH agent forwarding - Use git-over-SSH inside containers without copying private keys (`[ssh] forward_agent = true`)
+- Environment variable forwarding - Selectively forward host env vars by name (`forward_env` in config)
+- Host timezone inheritance - Containers automatically inherit the host's timezone (configurable via `[timezone]` config)
 - Sandbox context file - Auto-injected `~/SANDBOX_CONTEXT.md` tells AI tools about their environment (network mode, workspace path, persistence, etc.). Automatically loaded into each tool's native context system: Claude Code via `~/.claude/CLAUDE.md`, OpenCode via the `instructions` field in `opencode.json` (opt out with `auto_context = false`)
 
 **Security & Isolation**
@@ -240,9 +240,6 @@ coi shell --persistent
 # Use specific slot for parallel sessions
 coi shell --slot 2
 
-# Enable security monitoring
-coi shell --monitor
-
 # Resume previous session
 coi shell --resume
 
@@ -276,16 +273,9 @@ coi update
 --continue [SESSION_ID] # Alias for --resume
 --profile NAME          # Use named profile
 --image NAME            # Use custom image (default: coi)
---env KEY=VALUE         # Set environment variables (repeatable)
---mount HOST:CONTAINER  # Mount directory into container (repeatable)
---network MODE          # Network mode: restricted (default), allowlist, open
---ssh-agent             # Forward host SSH agent into container (git over SSH without copying keys)
---forward-env VARS      # Forward host environment variables by name (comma-separated)
---monitor               # Enable security monitoring with automatic threat response
---timezone ZONE         # Container timezone: host (default), utc, or IANA name (e.g., Europe/Warsaw)
---compression ALG       # Compression for build/publish: none, gzip, xz (default: gzip)
---writable-git-hooks    # Allow container to write to .git/hooks (disables protection)
 ```
+
+Most container customization (network mode, mounts, environment variables, SSH agent, monitoring, timezone, resource limits, etc.) is configured via config files or profiles. See the [Configuration wiki page](https://github.com/mensfeld/code-on-incus/wiki/Configuration) for the full reference.
 
 ### Advanced Usage
 
@@ -355,7 +345,7 @@ permission_mode = "bypass"
 4. Project config (`./.coi/config.toml`)
 5. `COI_CONFIG` environment variable
 6. Environment variables (`CLAUDE_ON_INCUS_*`, `COI_*`)
-7. CLI flags
+7. Operational CLI flags (`--workspace`, `--slot`, `--persistent`, `--resume`, `--profile`, `--image`)
 
 Place a `.coi/config.toml` in any repository root to auto-configure COI for that project — useful for teams to share container image, environment, and resource limits.
 
@@ -415,9 +405,16 @@ Profile directories are scanned at all config levels (`/etc/coi/profiles/`, `~/.
 See the [Resource and Time Limits guide](https://github.com/mensfeld/code-on-incus/wiki/Resource-and-Time-Limits) for complete documentation on controlling container resource consumption and runtime.
 
 **Quick example:**
-```bash
-# Limit CPU, memory, and runtime
-coi shell --limit-cpu="2" --limit-memory="2GiB" --limit-duration="2h"
+```toml
+# ~/.config/coi/config.toml
+[limits.cpu]
+count = "2"
+
+[limits.memory]
+limit = "2GiB"
+
+[limits.runtime]
+max_duration = "2h"
 ```
 
 **What you can limit:**
@@ -459,22 +456,20 @@ See the [Network Isolation guide](https://github.com/mensfeld/code-on-incus/wiki
 - **Allowlist** - Only specific domains/IPs allowed
 - **Open** - No restrictions (trusted projects only)
 
-```bash
-coi shell                      # Restricted mode (default)
-coi shell --network=allowlist  # Allowlist mode
-coi shell --network=open       # Open mode
+```toml
+# ~/.config/coi/config.toml
+[network]
+mode = "restricted"   # Default — blocks private networks, allows internet
+# mode = "allowlist"  # Only specific domains/IPs allowed
+# mode = "open"       # No restrictions (trusted projects only)
 ```
 
 ## Security Monitoring
 
 COI includes **built-in security monitoring** to detect and respond to malicious behavior in real-time:
 
-```bash
-coi shell --monitor            # Enable via CLI flag
-```
-
 ```toml
-# Or enable permanently in config
+# Enable in config (~/.config/coi/config.toml)
 [monitoring]
 enabled = true
 ```
@@ -501,7 +496,7 @@ See the [Security Best Practices guide](https://github.com/mensfeld/code-on-incu
 COI automatically mounts security-sensitive paths as **read-only** to prevent supply-chain attacks:
 - `.git/hooks`, `.git/config`, `.husky`, `.vscode`
 
-Use `--writable-git-hooks` to opt out, or customize protected paths via config. See the wiki for details.
+Set `[git] writable_hooks = true` in config to opt out, or customize protected paths via config. See the wiki for details.
 
 ## System Health Check
 
