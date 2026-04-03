@@ -3,7 +3,6 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 
@@ -48,15 +47,14 @@ func healthCommand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid format '%s': must be 'text' or 'json'", healthFormat)
 	}
 
-	// Load config
-	cfg, err := config.Load()
-	if err != nil {
-		// Even if config fails to load, we want to run health checks
-		cfg = config.GetDefaultConfig()
+	// Use package-level cfg from PersistentPreRunE, fall back to defaults
+	healthCfg := cfg
+	if healthCfg == nil {
+		healthCfg = config.GetDefaultConfig()
 	}
 
 	// Run all health checks
-	result := health.RunAllChecks(cfg, healthVerbose)
+	result := health.RunAllChecks(healthCfg, healthVerbose)
 
 	// Output based on format
 	if healthFormat == "json" {
@@ -75,8 +73,9 @@ func outputHealthJSON(result *health.HealthResult) error {
 
 	fmt.Println(string(jsonData))
 
-	// Exit with appropriate code
-	os.Exit(result.ExitCode())
+	if result.ExitCode() != 0 {
+		return &ExitCodeError{Code: result.ExitCode()}
+	}
 	return nil
 }
 
@@ -194,8 +193,9 @@ func outputHealthText(result *health.HealthResult) error {
 		fmt.Printf("All %d checks passed\n", result.Summary.Total)
 	}
 
-	// Exit with appropriate code
-	os.Exit(result.ExitCode())
+	if result.ExitCode() != 0 {
+		return &ExitCodeError{Code: result.ExitCode()}
+	}
 	return nil
 }
 

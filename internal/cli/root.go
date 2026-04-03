@@ -80,6 +80,9 @@ func Execute(isCoi bool) error {
 	if !isCoi {
 		rootCmd.Use = "claude-on-incus"
 	}
+	// Prevent cobra from printing errors/usage — main.go handles error output.
+	rootCmd.SilenceErrors = true
+	rootCmd.SilenceUsage = true
 	return rootCmd.Execute()
 }
 

@@ -31,7 +31,7 @@ var containerLaunchCmd = &cobra.Command{
 
 		mgr := container.NewManager(name)
 		if err := mgr.Launch(image, ephemeral); err != nil {
-			return exitError(1, fmt.Sprintf("failed to launch container: %v", err))
+			return fmt.Errorf("failed to launch container: %v", err)
 		}
 
 		fmt.Fprintf(os.Stderr, "Container %s launched from %s\n", name, image)
@@ -49,7 +49,7 @@ var containerStartCmd = &cobra.Command{
 
 		mgr := container.NewManager(name)
 		if err := mgr.Start(); err != nil {
-			return exitError(1, fmt.Sprintf("failed to start container: %v", err))
+			return fmt.Errorf("failed to start container: %v", err)
 		}
 
 		fmt.Fprintf(os.Stderr, "Container %s started\n", name)
@@ -68,7 +68,7 @@ var containerStopCmd = &cobra.Command{
 
 		mgr := container.NewManager(name)
 		if err := mgr.Stop(force); err != nil {
-			return exitError(1, fmt.Sprintf("failed to stop container: %v", err))
+			return fmt.Errorf("failed to stop container: %v", err)
 		}
 
 		fmt.Fprintf(os.Stderr, "Container %s stopped\n", name)
@@ -102,7 +102,7 @@ var containerDeleteCmd = &cobra.Command{
 		}
 
 		if err := mgr.Delete(force); err != nil {
-			return exitError(1, fmt.Sprintf("failed to delete container: %v", err))
+			return fmt.Errorf("failed to delete container: %v", err)
 		}
 
 		fmt.Fprintf(os.Stderr, "Container %s deleted\n", name)
@@ -134,7 +134,7 @@ Examples:
 		commandArgs := args[1:] // Keep as separate arguments
 
 		if len(commandArgs) == 0 {
-			return exitError(2, "no command specified (use -- before command)")
+			return fmt.Errorf("no command specified (use -- before command)")
 		}
 
 		capture, _ := cmd.Flags().GetBool("capture")
@@ -144,17 +144,17 @@ Examples:
 
 		// Validate that --format requires --capture
 		if cmd.Flags().Changed("format") && !capture {
-			return exitError(2, "--format flag requires --capture flag")
+			return fmt.Errorf("--format flag requires --capture flag")
 		}
 
 		// Validate format value
 		if format != "json" && format != "raw" {
-			return exitError(2, fmt.Sprintf("invalid format '%s': must be 'json' or 'raw'", format))
+			return fmt.Errorf("invalid format '%s': must be 'json' or 'raw'", format)
 		}
 
 		// Validate that --tty and --capture are mutually exclusive
 		if tty && capture {
-			return exitError(2, "--tty and --capture flags are mutually exclusive")
+			return fmt.Errorf("--tty and --capture flags are mutually exclusive")
 		}
 
 		if capture {
@@ -202,7 +202,7 @@ Examples:
 					if exitErr, ok := err.(*container.ExitError); ok {
 						exitCode = exitErr.ExitCode
 					}
-					os.Exit(exitCode)
+					return &ExitCodeError{Code: exitCode}
 				}
 				return nil
 			}
@@ -264,7 +264,7 @@ Examples:
 
 		err := mgr.ExecArgs(commandArgs, opts)
 		if err != nil {
-			return exitError(1, fmt.Sprintf("command failed: %v", err))
+			return fmt.Errorf("command failed: %v", err)
 		}
 
 		return nil
@@ -282,11 +282,11 @@ var containerExistsCmd = &cobra.Command{
 		mgr := container.NewManager(name)
 		exists, err := mgr.Exists()
 		if err != nil {
-			return exitError(1, fmt.Sprintf("failed to check container: %v", err))
+			return fmt.Errorf("failed to check container: %v", err)
 		}
 
 		if !exists {
-			return exitError(1, "")
+			return &ExitCodeError{Code: 1}
 		}
 
 		return nil
@@ -304,11 +304,11 @@ var containerRunningCmd = &cobra.Command{
 		mgr := container.NewManager(name)
 		running, err := mgr.Running()
 		if err != nil {
-			return exitError(1, fmt.Sprintf("failed to check container: %v", err))
+			return fmt.Errorf("failed to check container: %v", err)
 		}
 
 		if !running {
-			return exitError(1, "")
+			return &ExitCodeError{Code: 1}
 		}
 
 		return nil
@@ -335,7 +335,7 @@ Example:
 
 		mgr := container.NewManager(name)
 		if err := mgr.MountDisk(deviceName, source, path, shift, readonly); err != nil {
-			return exitError(1, fmt.Sprintf("failed to mount disk: %v", err))
+			return fmt.Errorf("failed to mount disk: %v", err)
 		}
 
 		fmt.Fprintf(os.Stderr, "Disk mounted: %s -> %s:%s\n", source, name, path)
@@ -364,7 +364,7 @@ Examples:
 
 		// Validate format
 		if format != "json" && format != "text" {
-			return exitError(2, fmt.Sprintf("invalid format '%s': must be 'json' or 'text'", format))
+			return fmt.Errorf("invalid format '%s': must be 'json' or 'text'", format)
 		}
 
 		// Get raw incus list output
@@ -378,21 +378,12 @@ Examples:
 		}
 
 		if err != nil {
-			return exitError(1, fmt.Sprintf("failed to list containers: %v", err))
+			return fmt.Errorf("failed to list containers: %v", err)
 		}
 
 		fmt.Print(output)
 		return nil
 	},
-}
-
-// exitError returns an error with a specific exit code
-func exitError(code int, message string) error {
-	if message != "" {
-		fmt.Fprintf(os.Stderr, "Error: %s\n", message)
-	}
-	os.Exit(code)
-	return nil // Never reached, but needed for type
 }
 
 func init() {

@@ -54,12 +54,6 @@ Examples:
 func monitorCommand(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 
-	// Load configuration
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
 	// Determine container name using 3-tier resolution:
 	// 1. Positional argument
 	// 2. COI_CONTAINER environment variable

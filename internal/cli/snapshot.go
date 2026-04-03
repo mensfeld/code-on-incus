@@ -244,7 +244,7 @@ func confirmAction(prompt string) bool {
 func snapshotCreateCommand(cmd *cobra.Command, args []string) error {
 	containerName, err := resolveContainer()
 	if err != nil {
-		return exitError(1, err.Error())
+		return fmt.Errorf("%w", err)
 	}
 
 	// Determine snapshot name
@@ -260,15 +260,15 @@ func snapshotCreateCommand(cmd *cobra.Command, args []string) error {
 	// Check if snapshot already exists
 	exists, err := mgr.SnapshotExists(snapshotName)
 	if err != nil {
-		return exitError(1, fmt.Sprintf("failed to check snapshot: %v", err))
+		return fmt.Errorf("failed to check snapshot: %v", err)
 	}
 	if exists {
-		return exitError(1, fmt.Sprintf("snapshot '%s' already exists for container '%s'", snapshotName, containerName))
+		return fmt.Errorf("snapshot '%s' already exists for container '%s'", snapshotName, containerName)
 	}
 
 	// Create snapshot
 	if err := mgr.CreateSnapshot(snapshotName, snapshotStateful); err != nil {
-		return exitError(1, fmt.Sprintf("failed to create snapshot: %v", err))
+		return fmt.Errorf("failed to create snapshot: %v", err)
 	}
 
 	if snapshotStateful {
@@ -283,7 +283,7 @@ func snapshotCreateCommand(cmd *cobra.Command, args []string) error {
 func snapshotListCommand(cmd *cobra.Command, args []string) error {
 	// Validate format
 	if snapshotFormat != "text" && snapshotFormat != "json" {
-		return exitError(2, fmt.Sprintf("invalid format '%s': must be 'text' or 'json'", snapshotFormat))
+		return fmt.Errorf("invalid format '%s': must be 'text' or 'json'", snapshotFormat)
 	}
 
 	if snapshotAll {
@@ -292,13 +292,13 @@ func snapshotListCommand(cmd *cobra.Command, args []string) error {
 
 	containerName, err := resolveContainer()
 	if err != nil {
-		return exitError(1, err.Error())
+		return fmt.Errorf("%w", err)
 	}
 
 	mgr := container.NewManager(containerName)
 	snapshots, err := mgr.ListSnapshots()
 	if err != nil {
-		return exitError(1, fmt.Sprintf("failed to list snapshots: %v", err))
+		return fmt.Errorf("failed to list snapshots: %v", err)
 	}
 
 	if snapshotFormat == "json" {
@@ -315,7 +315,7 @@ func listAllSnapshots() error {
 
 	containers, err := container.ListContainers(pattern)
 	if err != nil {
-		return exitError(1, fmt.Sprintf("failed to list containers: %v", err))
+		return fmt.Errorf("failed to list containers: %v", err)
 	}
 
 	if len(containers) == 0 {
@@ -337,7 +337,7 @@ func listAllSnapshots() error {
 
 		jsonData, err := json.MarshalIndent(allData, "", "  ")
 		if err != nil {
-			return exitError(1, fmt.Sprintf("failed to marshal JSON: %v", err))
+			return fmt.Errorf("failed to marshal JSON: %v", err)
 		}
 		fmt.Println(string(jsonData))
 		return nil
@@ -382,7 +382,7 @@ func outputSnapshotJSON(containerName string, snapshots []container.SnapshotInfo
 
 	jsonData, err := json.MarshalIndent(output, "", "  ")
 	if err != nil {
-		return exitError(1, fmt.Sprintf("failed to marshal JSON: %v", err))
+		return fmt.Errorf("failed to marshal JSON: %v", err)
 	}
 
 	fmt.Println(string(jsonData))
@@ -423,7 +423,7 @@ func outputSnapshotText(containerName string, snapshots []container.SnapshotInfo
 func snapshotRestoreCommand(cmd *cobra.Command, args []string) error {
 	containerName, err := resolveContainer()
 	if err != nil {
-		return exitError(1, err.Error())
+		return fmt.Errorf("%w", err)
 	}
 
 	snapshotName := args[0]
@@ -432,19 +432,19 @@ func snapshotRestoreCommand(cmd *cobra.Command, args []string) error {
 	// Check if snapshot exists
 	exists, err := mgr.SnapshotExists(snapshotName)
 	if err != nil {
-		return exitError(1, fmt.Sprintf("failed to check snapshot: %v", err))
+		return fmt.Errorf("failed to check snapshot: %v", err)
 	}
 	if !exists {
-		return exitError(1, fmt.Sprintf("snapshot '%s' not found for container '%s'", snapshotName, containerName))
+		return fmt.Errorf("snapshot '%s' not found for container '%s'", snapshotName, containerName)
 	}
 
 	// Check if container is running
 	running, err := mgr.Running()
 	if err != nil {
-		return exitError(1, fmt.Sprintf("failed to check container status: %v", err))
+		return fmt.Errorf("failed to check container status: %v", err)
 	}
 	if running {
-		return exitError(1, fmt.Sprintf("container '%s' must be stopped before restore (use 'coi container stop %s')", containerName, containerName))
+		return fmt.Errorf("container '%s' must be stopped before restore (use 'coi container stop %s')", containerName, containerName)
 	}
 
 	// Confirm unless --force
@@ -459,7 +459,7 @@ func snapshotRestoreCommand(cmd *cobra.Command, args []string) error {
 
 	// Restore snapshot
 	if err := mgr.RestoreSnapshot(snapshotName, snapshotStateful); err != nil {
-		return exitError(1, fmt.Sprintf("failed to restore snapshot: %v", err))
+		return fmt.Errorf("failed to restore snapshot: %v", err)
 	}
 
 	fmt.Fprintf(os.Stderr, "Restored container '%s' from snapshot '%s'\n", containerName, snapshotName)
@@ -469,7 +469,7 @@ func snapshotRestoreCommand(cmd *cobra.Command, args []string) error {
 func snapshotDeleteCommand(cmd *cobra.Command, args []string) error {
 	containerName, err := resolveContainer()
 	if err != nil {
-		return exitError(1, err.Error())
+		return fmt.Errorf("%w", err)
 	}
 
 	mgr := container.NewManager(containerName)
@@ -478,7 +478,7 @@ func snapshotDeleteCommand(cmd *cobra.Command, args []string) error {
 		// Delete all snapshots
 		snapshots, err := mgr.ListSnapshots()
 		if err != nil {
-			return exitError(1, fmt.Sprintf("failed to list snapshots: %v", err))
+			return fmt.Errorf("failed to list snapshots: %v", err)
 		}
 
 		if len(snapshots) == 0 {
@@ -513,7 +513,7 @@ func snapshotDeleteCommand(cmd *cobra.Command, args []string) error {
 
 	// Delete single snapshot
 	if len(args) == 0 {
-		return exitError(2, "snapshot name required (or use --all to delete all snapshots)")
+		return fmt.Errorf("snapshot name required (or use --all to delete all snapshots)")
 	}
 
 	snapshotName := args[0]
@@ -521,15 +521,15 @@ func snapshotDeleteCommand(cmd *cobra.Command, args []string) error {
 	// Check if snapshot exists
 	exists, err := mgr.SnapshotExists(snapshotName)
 	if err != nil {
-		return exitError(1, fmt.Sprintf("failed to check snapshot: %v", err))
+		return fmt.Errorf("failed to check snapshot: %v", err)
 	}
 	if !exists {
-		return exitError(1, fmt.Sprintf("snapshot '%s' not found for container '%s'", snapshotName, containerName))
+		return fmt.Errorf("snapshot '%s' not found for container '%s'", snapshotName, containerName)
 	}
 
 	// Delete snapshot
 	if err := mgr.DeleteSnapshot(snapshotName); err != nil {
-		return exitError(1, fmt.Sprintf("failed to delete snapshot: %v", err))
+		return fmt.Errorf("failed to delete snapshot: %v", err)
 	}
 
 	fmt.Fprintf(os.Stderr, "Deleted snapshot '%s' from container '%s'\n", snapshotName, containerName)
@@ -539,12 +539,12 @@ func snapshotDeleteCommand(cmd *cobra.Command, args []string) error {
 func snapshotInfoCommand(cmd *cobra.Command, args []string) error {
 	// Validate format
 	if snapshotFormat != "text" && snapshotFormat != "json" {
-		return exitError(2, fmt.Sprintf("invalid format '%s': must be 'text' or 'json'", snapshotFormat))
+		return fmt.Errorf("invalid format '%s': must be 'text' or 'json'", snapshotFormat)
 	}
 
 	containerName, err := resolveContainer()
 	if err != nil {
-		return exitError(1, err.Error())
+		return fmt.Errorf("%w", err)
 	}
 
 	snapshotName := args[0]
@@ -553,7 +553,7 @@ func snapshotInfoCommand(cmd *cobra.Command, args []string) error {
 	// Get snapshot info
 	info, err := mgr.GetSnapshotInfo(snapshotName)
 	if err != nil {
-		return exitError(1, err.Error())
+		return fmt.Errorf("%w", err)
 	}
 
 	if snapshotFormat == "json" {
@@ -564,7 +564,7 @@ func snapshotInfoCommand(cmd *cobra.Command, args []string) error {
 
 		jsonData, err := json.MarshalIndent(output, "", "  ")
 		if err != nil {
-			return exitError(1, fmt.Sprintf("failed to marshal JSON: %v", err))
+			return fmt.Errorf("failed to marshal JSON: %v", err)
 		}
 		fmt.Println(string(jsonData))
 		return nil

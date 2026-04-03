@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/session"
 	"github.com/spf13/cobra"
 )
@@ -25,11 +24,6 @@ Examples:
 }
 
 func infoCommand(cmd *cobra.Command, args []string) error {
-	cfg, err := config.Load()
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
 	// Get configured tool to determine tool-specific sessions directory
 	toolInstance, err := getConfiguredTool(cfg)
 	if err != nil {

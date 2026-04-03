@@ -13,9 +13,8 @@ import (
 )
 
 var (
-	attachWithBash  bool
-	attachSlot      int
-	attachWorkspace string
+	attachWithBash bool
+	attachSlot     int
 )
 
 var attachCmd = &cobra.Command{
@@ -38,7 +37,6 @@ Examples:
 func init() {
 	attachCmd.Flags().BoolVar(&attachWithBash, "bash", false, "Attach to bash shell instead of tmux session")
 	attachCmd.Flags().IntVar(&attachSlot, "slot", 0, "Slot number to attach to (requires workspace context)")
-	attachCmd.Flags().StringVarP(&attachWorkspace, "workspace", "w", ".", "Workspace directory (for --slot)")
 	rootCmd.AddCommand(attachCmd)
 }
 
@@ -48,7 +46,7 @@ func attachCommand(cmd *cobra.Command, args []string) error {
 	// If --slot is provided, calculate container name from workspace and slot
 	if attachSlot > 0 {
 		// Resolve workspace path
-		workspacePath, err := filepath.Abs(attachWorkspace)
+		workspacePath, err := filepath.Abs(workspace)
 		if err != nil {
 			return fmt.Errorf("failed to resolve workspace path: %w", err)
 		}

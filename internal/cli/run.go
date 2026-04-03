@@ -288,14 +288,12 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		fmt.Print(output)
 	}
 
-	// Handle exit codes: if command ran but failed, exit with same code
+	// Handle exit codes: if command ran but failed, propagate exit code through cobra
 	if err != nil {
-		// Try to extract exit code from error message
 		if exitErr, ok := err.(*container.ExitError); ok {
 			fmt.Fprintf(os.Stderr, "\nCommand exited with code %d\n", exitErr.ExitCode)
-			os.Exit(exitErr.ExitCode)
+			return &ExitCodeError{Code: exitErr.ExitCode}
 		}
-		// If we can't extract exit code, return error normally
 		return fmt.Errorf("command failed: %w", err)
 	}
 

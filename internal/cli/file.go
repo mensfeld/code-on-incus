@@ -38,7 +38,7 @@ Examples:
 		// Parse destination (container:path)
 		parts := strings.SplitN(destination, ":", 2)
 		if len(parts) != 2 {
-			return exitError(2, "destination must be in format 'container:path'")
+			return fmt.Errorf("destination must be in format 'container:path'")
 		}
 		containerName := parts[0]
 		remotePath := parts[1]
@@ -48,21 +48,21 @@ Examples:
 		// Check if source exists
 		info, err := os.Stat(localPath)
 		if err != nil {
-			return exitError(1, fmt.Sprintf("source does not exist: %v", err))
+			return fmt.Errorf("source does not exist: %v", err)
 		}
 
 		// Push file or directory
 		if info.IsDir() {
 			if !recursive {
-				return exitError(2, "source is a directory, use -r flag")
+				return fmt.Errorf("source is a directory, use -r flag")
 			}
 			if err := mgr.PushDirectory(localPath, remotePath); err != nil {
-				return exitError(1, fmt.Sprintf("failed to push directory: %v", err))
+				return fmt.Errorf("failed to push directory: %v", err)
 			}
 			fmt.Fprintf(os.Stderr, "Pushed directory %s -> %s:%s\n", localPath, containerName, remotePath)
 		} else {
 			if err := mgr.PushFile(localPath, remotePath); err != nil {
-				return exitError(1, fmt.Sprintf("failed to push file: %v", err))
+				return fmt.Errorf("failed to push file: %v", err)
 			}
 			fmt.Fprintf(os.Stderr, "Pushed file %s -> %s:%s\n", localPath, containerName, remotePath)
 		}
@@ -90,7 +90,7 @@ Example:
 		// Parse source (container:path)
 		parts := strings.SplitN(source, ":", 2)
 		if len(parts) != 2 {
-			return exitError(2, "source must be in format 'container:path'")
+			return fmt.Errorf("source must be in format 'container:path'")
 		}
 		containerName := parts[0]
 		remotePath := parts[1]
@@ -100,13 +100,13 @@ Example:
 		// For now, always pull recursively if -r is specified
 		if recursive {
 			if err := mgr.PullDirectory(remotePath, localPath); err != nil {
-				return exitError(1, fmt.Sprintf("failed to pull directory: %v", err))
+				return fmt.Errorf("failed to pull directory: %v", err)
 			}
 			fmt.Fprintf(os.Stderr, "Pulled directory %s:%s -> %s\n", containerName, remotePath, localPath)
 		} else {
 			// Pull single file - use the same PullDirectory but with single file path
 			if err := mgr.PullDirectory(remotePath, localPath); err != nil {
-				return exitError(1, fmt.Sprintf("failed to pull file: %v", err))
+				return fmt.Errorf("failed to pull file: %v", err)
 			}
 			fmt.Fprintf(os.Stderr, "Pulled file %s:%s -> %s\n", containerName, remotePath, localPath)
 		}
