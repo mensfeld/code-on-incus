@@ -910,7 +910,7 @@ func mergeProfiles(parent, child ProfileConfig) ProfileConfig {
 		if result.Build.Script != "" {
 			merged.Script = result.Build.Script
 		}
-		if len(result.Build.Commands) > 0 {
+		if result.Build.Commands != nil {
 			merged.Commands = result.Build.Commands
 		}
 		result.Build = &merged
@@ -932,7 +932,7 @@ func mergeProfiles(parent, child ProfileConfig) ProfileConfig {
 		if result.Network.AllowLocalNetworkAccess != nil {
 			merged.AllowLocalNetworkAccess = result.Network.AllowLocalNetworkAccess
 		}
-		if len(result.Network.AllowedDomains) > 0 {
+		if result.Network.AllowedDomains != nil {
 			merged.AllowedDomains = result.Network.AllowedDomains
 		}
 		if result.Network.RefreshIntervalMinutes != 0 {
@@ -1010,8 +1010,9 @@ func (c *Config) ResolveProfileInheritance() error {
 		parent := c.Profiles[parentName]
 		merged := mergeProfiles(parent, profile)
 
-		// Clear Inherits after resolution — profile is now self-contained
-		merged.Inherits = ""
+		// Preserve the original direct parent name for display/inspection
+		// while still flattening the effective configuration values.
+		merged.Inherits = parentName
 
 		c.Profiles[name] = merged
 		resolved[name] = true

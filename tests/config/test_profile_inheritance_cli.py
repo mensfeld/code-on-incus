@@ -28,15 +28,17 @@ def test_profile_inherits_shown_in_show(coi_binary, cleanup_containers, workspac
         cwd=workspace_dir,
     )
 
-    # After resolution, inherits is cleared, but the profile should work
     assert result.returncode == 0, f"profile show should succeed. stderr: {result.stderr}"
     output = result.stdout + result.stderr
     assert "child" in output
     assert "coi-child" in output
+    assert "inherits" in output.lower() and "parent" in output, (
+        f"profile show should display inherits = parent. Got:\n{output}"
+    )
 
 
 def test_profile_inherits_shown_in_list(coi_binary, cleanup_containers, workspace_dir):
-    """coi profile list shows INHERITS column."""
+    """coi profile list shows INHERITS column with parent name for child."""
     coi_dir = Path(workspace_dir) / ".coi" / "profiles"
 
     parent_dir = coi_dir / "parent"
@@ -58,5 +60,9 @@ def test_profile_inherits_shown_in_list(coi_binary, cleanup_containers, workspac
     assert result.returncode == 0, f"profile list should succeed. stderr: {result.stderr}"
     output = result.stdout + result.stderr
     assert "INHERITS" in output, f"Should show INHERITS column header. Got:\n{output}"
-    assert "child" in output
-    assert "parent" in output
+    # Verify the child row contains the parent name in the INHERITS column
+    child_lines = [line for line in output.splitlines() if "child" in line]
+    assert child_lines, f"Should include a row for child. Got:\n{output}"
+    assert any("parent" in line for line in child_lines), (
+        f"Child row should show parent in the INHERITS column. Got:\n{output}"
+    )

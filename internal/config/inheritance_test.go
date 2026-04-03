@@ -445,7 +445,7 @@ func TestProfileInheritanceSourcePreserved(t *testing.T) {
 	}
 }
 
-func TestProfileInheritanceInheritsCleared(t *testing.T) {
+func TestProfileInheritanceInheritsPreserved(t *testing.T) {
 	cfg := GetDefaultConfig()
 	cfg.Profiles["parent"] = ProfileConfig{Image: "parent-image"}
 	cfg.Profiles["child"] = ProfileConfig{
@@ -457,8 +457,8 @@ func TestProfileInheritanceInheritsCleared(t *testing.T) {
 	}
 
 	child := cfg.Profiles["child"]
-	if child.Inherits != "" {
-		t.Errorf("Expected Inherits cleared after resolution, got %q", child.Inherits)
+	if child.Inherits != "parent" {
+		t.Errorf("Expected Inherits preserved as 'parent' after resolution, got %q", child.Inherits)
 	}
 }
 
