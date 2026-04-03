@@ -207,3 +207,55 @@ readonly = true
         f"stderr: {ro_result.stderr}"
     )
     assert not (skills_dir / "injected.md").exists()
+
+
+def test_writable_mount_allows_writing(
+    coi_binary, cleanup_containers, workspace_dir, tmp_path
+):
+    """Test that a mount without readonly allows writing (control test).
+
+    This is the inverse of the readonly tests above: when a mount does NOT set
+    readonly = true, writes should succeed. Confirms that the readonly flag is
+    what actually blocks writes, not anything else about the mount setup.
+    """
+    skills_dir = tmp_path / "skills"
+    skills_dir.mkdir()
+    (skills_dir / "existing.md").write_text("original-content")
+
+    # Ensure the container user can write
+    os.chmod(skills_dir, 0o777)
+
+    config_content = f"""\
+[[mounts.default]]
+host = "{skills_dir}"
+container = "/home/code/.testskills"
+"""
+    config_dir = Path(workspace_dir) / ".coi"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "config.toml").write_text(config_content)
+
+    # Write to the mount — should succeed since readonly is not set
+    result = subprocess.run(
+        [
+            coi_binary,
+            "run",
+            "--",
+            "sh",
+            "-c",
+            "echo 'written-ok' > /home/code/.testskills/new-file.md && "
+            "cat /home/code/.testskills/new-file.md",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        cwd=workspace_dir,
+    )
+
+    assert result.returncode == 0, (
+        f"Write to writable mount should succeed.\n"
+        f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    )
+    assert "written-ok" in result.stdout
+
+    # Verify the file was created on the host
+    assert (skills_dir / "new-file.md").exists()
