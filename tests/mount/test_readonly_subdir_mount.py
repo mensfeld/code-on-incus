@@ -209,9 +209,7 @@ readonly = true
     assert not (skills_dir / "injected.md").exists()
 
 
-def test_writable_mount_allows_writing(
-    coi_binary, cleanup_containers, workspace_dir, tmp_path
-):
+def test_writable_mount_allows_writing(coi_binary, cleanup_containers, workspace_dir, tmp_path):
     """Test that a mount without readonly allows writing (control test).
 
     This is the inverse of the readonly tests above: when a mount does NOT set
@@ -252,8 +250,7 @@ container = "/home/code/.testskills"
     )
 
     assert result.returncode == 0, (
-        f"Write to writable mount should succeed.\n"
-        f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        f"Write to writable mount should succeed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
     )
     assert "written-ok" in result.stdout
 
