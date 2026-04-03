@@ -16,7 +16,7 @@ func TestCheckNotPrivilegedIntegration(t *testing.T) {
 		t.Skip("incus daemon not running, skipping integration test")
 	}
 
-	exists, err := ImageExists("coi")
+	exists, err := ImageExists("coi-default")
 	if err != nil || !exists {
 		t.Skip("coi image not found, skipping integration test (run 'coi build' first)")
 	}
@@ -27,7 +27,7 @@ func TestCheckNotPrivilegedIntegration(t *testing.T) {
 	_ = IncusExec("delete", containerName, "--force")
 
 	// Init a container (don't start it — we just need it to exist for config checks)
-	if err := IncusExec("init", "coi", containerName); err != nil {
+	if err := IncusExec("init", "coi-default", containerName); err != nil {
 		t.Fatalf("Failed to init container: %v", err)
 	}
 	t.Cleanup(func() {
@@ -71,7 +71,7 @@ func TestCheckNotPrivilegedDefaultProfileIntegration(t *testing.T) {
 		t.Skip("incus daemon not running, skipping integration test")
 	}
 
-	exists, err := ImageExists("coi")
+	exists, err := ImageExists("coi-default")
 	if err != nil || !exists {
 		t.Skip("coi image not found, skipping integration test (run 'coi build' first)")
 	}
@@ -82,7 +82,7 @@ func TestCheckNotPrivilegedDefaultProfileIntegration(t *testing.T) {
 	_ = IncusExec("delete", containerName, "--force")
 
 	// Init a container
-	if err := IncusExec("init", "coi", containerName); err != nil {
+	if err := IncusExec("init", "coi-default", containerName); err != nil {
 		t.Fatalf("Failed to init container: %v", err)
 	}
 	t.Cleanup(func() {

@@ -215,7 +215,8 @@ func TestGetProtectedPathsForLogging(t *testing.T) {
 }
 
 func TestDefaultProtectedPaths(t *testing.T) {
-	paths := config.DefaultProtectedPaths()
+	cfg := config.GetDefaultConfig()
+	paths := cfg.Security.ProtectedPaths
 
 	expected := []string{".git/hooks", ".git/config", ".husky", ".vscode"}
 
@@ -238,7 +239,7 @@ func TestDefaultProtectedPaths(t *testing.T) {
 func TestSecurityConfig_GetEffectiveProtectedPaths(t *testing.T) {
 	t.Run("default paths", func(t *testing.T) {
 		cfg := &config.SecurityConfig{
-			ProtectedPaths:           config.DefaultProtectedPaths(),
+			ProtectedPaths:           []string{".git/hooks", ".git/config", ".husky", ".vscode"},
 			AdditionalProtectedPaths: []string{},
 			DisableProtection:        false,
 		}
@@ -251,7 +252,7 @@ func TestSecurityConfig_GetEffectiveProtectedPaths(t *testing.T) {
 
 	t.Run("with additional paths", func(t *testing.T) {
 		cfg := &config.SecurityConfig{
-			ProtectedPaths:           config.DefaultProtectedPaths(),
+			ProtectedPaths:           []string{".git/hooks", ".git/config", ".husky", ".vscode"},
 			AdditionalProtectedPaths: []string{".idea", "Makefile"},
 			DisableProtection:        false,
 		}
@@ -264,7 +265,7 @@ func TestSecurityConfig_GetEffectiveProtectedPaths(t *testing.T) {
 
 	t.Run("disabled protection", func(t *testing.T) {
 		cfg := &config.SecurityConfig{
-			ProtectedPaths:           config.DefaultProtectedPaths(),
+			ProtectedPaths:           []string{".git/hooks", ".git/config", ".husky", ".vscode"},
 			AdditionalProtectedPaths: []string{".idea"},
 			DisableProtection:        true,
 		}

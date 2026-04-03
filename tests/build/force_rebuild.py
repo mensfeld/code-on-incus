@@ -2,9 +2,8 @@
 Integration tests for custom image building.
 
 Tests:
-- coi build custom with script
-- Custom image with base specified
-- Custom image with privileged base
+- coi build --profile with script
+- Force rebuild with --force
 """
 
 import subprocess
@@ -14,13 +13,6 @@ def test_build_custom_force_rebuild(coi_binary, tmp_path):
     """Test force rebuilding an existing custom image."""
     image_name = "coi-test-custom-force"
 
-    # Create build script
-    build_script = tmp_path / "build_force.sh"
-    build_script.write_text("""#!/bin/bash
-set -e
-echo "Build v1" > /tmp/version.txt
-""")
-
     # Skip if base doesn't exist
     result = subprocess.run(
         [coi_binary, "image", "exists", "coi-sandbox"],
@@ -29,20 +21,39 @@ echo "Build v1" > /tmp/version.txt
     if result.returncode != 0:
         return
 
+    # Create profile directory with config and build script
+    profile_dir = tmp_path / ".coi" / "profiles" / "test-force"
+    profile_dir.mkdir(parents=True)
+
+    (profile_dir / "config.toml").write_text(
+        f'image = "{image_name}"\n'
+        f"\n"
+        f"[build]\n"
+        f'script = "build.sh"\n'
+    )
+
+    build_script = profile_dir / "build.sh"
+    build_script.write_text("""#!/bin/bash
+set -e
+echo "Build v1" > /tmp/version.txt
+""")
+
     # Build first time
     result = subprocess.run(
-        [coi_binary, "build", "custom", image_name, "--script", str(build_script)],
+        [coi_binary, "build", "--profile", "test-force"],
         capture_output=True,
         text=True,
         timeout=300,
+        cwd=str(tmp_path),
     )
     assert result.returncode == 0, "First build should succeed"
 
     # Try to build again without --force (should skip)
     result = subprocess.run(
-        [coi_binary, "build", "custom", image_name, "--script", str(build_script)],
+        [coi_binary, "build", "--profile", "test-force"],
         capture_output=True,
         text=True,
+        cwd=str(tmp_path),
     )
     assert result.returncode == 0, "Build should succeed but skip"
     assert "already exists" in result.stderr.lower()
@@ -55,10 +66,11 @@ echo "Build v2" > /tmp/version.txt
 
     # Build with --force
     result = subprocess.run(
-        [coi_binary, "build", "custom", image_name, "--script", str(build_script), "--force"],
+        [coi_binary, "build", "--profile", "test-force", "--force"],
         capture_output=True,
         text=True,
         timeout=300,
+        cwd=str(tmp_path),
     )
     assert result.returncode == 0, "Force rebuild should succeed"
 

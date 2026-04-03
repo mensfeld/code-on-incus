@@ -30,7 +30,7 @@ def test_snapshot_delete_single(coi_binary, cleanup_containers, workspace_dir):
 
     # === Phase 1: Launch container ===
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container_name],
+        [coi_binary, "container", "launch", "coi-default", container_name],
         capture_output=True,
         text=True,
         timeout=120,
@@ -102,7 +102,7 @@ def test_snapshot_delete_all_with_force(coi_binary, cleanup_containers, workspac
 
     # === Phase 1: Launch container ===
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container_name],
+        [coi_binary, "container", "launch", "coi-default", container_name],
         capture_output=True,
         text=True,
         timeout=120,
@@ -175,7 +175,7 @@ def test_snapshot_delete_all_empty(coi_binary, cleanup_containers, workspace_dir
 
     # === Phase 1: Launch container ===
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container_name],
+        [coi_binary, "container", "launch", "coi-default", container_name],
         capture_output=True,
         text=True,
         timeout=120,
@@ -217,7 +217,7 @@ def test_snapshot_delete_nonexistent_snapshot(coi_binary, cleanup_containers, wo
 
     # === Phase 1: Launch container ===
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container_name],
+        [coi_binary, "container", "launch", "coi-default", container_name],
         capture_output=True,
         text=True,
         timeout=120,
@@ -265,7 +265,7 @@ def test_snapshot_delete_missing_name_without_all(coi_binary, cleanup_containers
 
     # === Phase 1: Launch container ===
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container_name],
+        [coi_binary, "container", "launch", "coi-default", container_name],
         capture_output=True,
         text=True,
         timeout=120,
@@ -308,7 +308,7 @@ def test_snapshot_delete_selective(coi_binary, cleanup_containers, workspace_dir
 
     # === Phase 1: Launch container ===
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container_name],
+        [coi_binary, "container", "launch", "coi-default", container_name],
         capture_output=True,
         text=True,
         timeout=120,

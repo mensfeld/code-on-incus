@@ -18,7 +18,7 @@ import (
 
 const (
 	DefaultImage = "images:ubuntu/22.04"
-	CoiImage     = "coi"
+	CoiImage     = "coi-default"
 )
 
 // SetupOptions contains options for setting up a session

@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 
@@ -17,54 +16,23 @@ var buildCompression string
 var buildCmd = &cobra.Command{
 	Use:   "build",
 	Short: "Build Incus image for AI coding sessions",
-	Long: `Build the coi Incus image for running AI coding tools (Claude Code, Aider, etc.).
+	Long: `Build an Incus image using a profile's build configuration.
 
-The coi image includes:
-  - Base development tools
-  - Node.js LTS
-  - Claude CLI
-  - Docker
-  - GitHub CLI
-  - tmux
-  - dummy (test stub for testing)
+By default, builds the "coi-default" image using the built-in default profile.
+Use --profile to build from a custom profile's [build] section.
 
 Examples:
   coi build
   coi build --force
-  coi build custom my-image --script setup.sh
+  coi build --profile rust-dev
 `,
 	Args: cobra.NoArgs,
 	RunE: buildCommand,
 }
 
-// buildCustomCmd builds a custom image from a script
-var buildCustomCmd = &cobra.Command{
-	Use:   "custom <name>",
-	Short: "Build a custom image from a user script",
-	Long: `Build a custom image from the coi base image using a user-provided build script.
-
-The build script should be a bash script that will be executed as root in the container.
-
-Examples:
-  coi build custom my-rust-image --script build-rust.sh
-  coi build custom my-image --base coi --script setup.sh
-  coi build custom my-image --base images:ubuntu/24.04 --script setup.sh`,
-	Args: cobra.ExactArgs(1),
-	RunE: buildCustomCommand,
-}
-
 func init() {
 	buildCmd.Flags().BoolVar(&buildForce, "force", false, "Force rebuild even if image exists")
 	buildCmd.Flags().StringVar(&buildCompression, "compression", "", "Compression algorithm (e.g., none, gzip, xz; see Incus docs for all options)")
-
-	// Custom build flags
-	buildCustomCmd.Flags().String("script", "", "Path to build script (required)")
-	buildCustomCmd.Flags().String("base", "", "Base image to build from (default: coi)")
-	buildCustomCmd.Flags().BoolVar(&buildForce, "force", false, "Force rebuild even if image exists")
-	buildCustomCmd.Flags().StringVar(&buildCompression, "compression", "", "Compression algorithm (e.g., none, gzip, xz; see Incus docs for all options)")
-	_ = buildCustomCmd.MarkFlagRequired("script") // Always succeeds for valid flag names.
-
-	buildCmd.AddCommand(buildCustomCmd)
 }
 
 func buildCommand(cmd *cobra.Command, args []string) error {
@@ -83,75 +51,73 @@ func buildCommand(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "%s\n", warning)
 	}
 
-	// Check if we should build from config
-	if CanBuildFromConfig(cfg) {
-		result, err := BuildFromConfig(cfg, buildForce, buildCompression)
-		if err != nil {
-			return err
+	// Determine which profile to use
+	profileName := profile // from --profile flag
+	if profileName == "" {
+		profileName = "default"
+	}
+
+	p := cfg.GetProfile(profileName)
+	if p == nil {
+		return fmt.Errorf("profile '%s' not found", profileName)
+	}
+
+	imageName := p.Image
+	if imageName == "" {
+		imageName = image.CoiAlias
+	}
+
+	// For coi-default image: always use the embedded build script
+	if imageName == image.CoiAlias {
+		opts := image.BuildOptions{
+			Force:       buildForce,
+			ImageType:   "coi",
+			BaseImage:   image.BaseImage,
+			AliasName:   image.CoiAlias,
+			Description: "coi image (Docker + build tools + Claude CLI + GitHub CLI)",
+			Compression: buildCompression,
+			Logger: func(msg string) {
+				fmt.Println(msg)
+			},
 		}
+
+		fmt.Printf("Building image '%s' from profile '%s'...\n", imageName, profileName)
+		builder := image.NewBuilder(opts)
+		result := builder.Build()
+
+		if result.Error != nil {
+			return fmt.Errorf("build failed: %w", result.Error)
+		}
+
 		if result.Skipped {
-			fmt.Fprintf(os.Stderr, "\nImage '%s' already exists. Use --force to rebuild.\n", result.ImageName)
+			fmt.Printf("\nImage '%s' already exists. Use --force to rebuild.\n", opts.AliasName)
 			return nil
 		}
-		fmt.Fprintf(os.Stderr, "\nImage '%s' built successfully!\n", result.ImageName)
-		fmt.Fprintf(os.Stderr, "  Fingerprint: %s\n", result.Fingerprint)
+
+		fmt.Printf("\nImage '%s' built successfully!\n", opts.AliasName)
+		fmt.Printf("  Version: %s\n", result.VersionAlias)
+		fmt.Printf("  Fingerprint: %s\n", result.Fingerprint)
 		return nil
 	}
 
-	// Fall back to building the base coi image
-	opts := image.BuildOptions{
-		Force:       buildForce,
-		ImageType:   "coi",
-		BaseImage:   image.BaseImage,
-		AliasName:   image.CoiAlias,
-		Description: "coi image (Docker + build tools + Claude CLI + GitHub CLI)",
-		Compression: buildCompression,
-		Logger: func(msg string) {
-			fmt.Println(msg)
-		},
+	// Custom profile build: requires [build] section
+	if p.Build == nil || !p.Build.HasBuildConfig() {
+		return fmt.Errorf("profile '%s' has no [build] section — add a build script or commands to the profile", profileName)
 	}
 
-	// Build the image
-	fmt.Println("Building coi image...")
-	builder := image.NewBuilder(opts)
-	result := builder.Build()
-
-	if result.Error != nil {
-		return fmt.Errorf("build failed: %w", result.Error)
+	// Resolve build script
+	scriptPath, cleanup, err := resolveBuildScript(p.Build)
+	if err != nil {
+		return err
 	}
+	defer cleanup()
 
-	if result.Skipped {
-		fmt.Printf("\nImage already exists. Use --force to rebuild.\n")
-		return nil
-	}
-
-	fmt.Printf("\n Image '%s' built successfully!\n", opts.AliasName)
-	fmt.Printf("  Version: %s\n", result.VersionAlias)
-	fmt.Printf("  Fingerprint: %s\n", result.Fingerprint)
-	return nil
-}
-
-func buildCustomCommand(cmd *cobra.Command, args []string) error {
-	imageName := args[0]
-	scriptPath, _ := cmd.Flags().GetString("script")
-	baseImage, _ := cmd.Flags().GetString("base")
-
-	// Check if Incus is available
-	if !container.Available() {
-		return fmt.Errorf("incus is not available - please install Incus and ensure you're in the incus-admin group")
-	}
-
-	// Verify script exists
-	if _, err := os.Stat(scriptPath); err != nil {
-		return fmt.Errorf("build script not found: %s", scriptPath)
-	}
-
-	// Default to coi base image
+	// Determine base image
+	baseImage := p.Build.Base
 	if baseImage == "" {
 		baseImage = image.CoiAlias
 	}
 
-	// Configure build options
 	opts := image.BuildOptions{
 		ImageType:   "custom",
 		AliasName:   imageName,
@@ -165,8 +131,7 @@ func buildCustomCommand(cmd *cobra.Command, args []string) error {
 		},
 	}
 
-	// Build the image
-	fmt.Fprintf(os.Stderr, "Building custom image '%s' from '%s'...\n", imageName, baseImage)
+	fmt.Fprintf(os.Stderr, "Building image '%s' from profile '%s' (base: %s)...\n", imageName, profileName, baseImage)
 	builder := image.NewBuilder(opts)
 	result := builder.Build()
 
@@ -174,20 +139,12 @@ func buildCustomCommand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("build failed: %w", result.Error)
 	}
 
-	// Output result as JSON (even if skipped)
-	output := map[string]interface{}{
-		"alias":   imageName,
-		"skipped": result.Skipped,
+	if result.Skipped {
+		fmt.Fprintf(os.Stderr, "\nImage '%s' already exists. Use --force to rebuild.\n", imageName)
+		return nil
 	}
 
-	if !result.Skipped {
-		output["fingerprint"] = result.Fingerprint
-	} else {
-		fmt.Fprintf(os.Stderr, "\nImage already exists. Use --force to rebuild.\n")
-	}
-
-	jsonOutput, _ := json.MarshalIndent(output, "", "  ")
-	fmt.Println(string(jsonOutput))
-
+	fmt.Fprintf(os.Stderr, "\nImage '%s' built successfully!\n", imageName)
+	fmt.Fprintf(os.Stderr, "  Fingerprint: %s\n", result.Fingerprint)
 	return nil
 }

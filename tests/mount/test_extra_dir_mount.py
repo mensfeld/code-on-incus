@@ -71,7 +71,7 @@ def test_extra_dir_mount_bidirectional(coi_binary, cleanup_containers, workspace
 
         # Launch container
         result = subprocess.run(
-            [coi_binary, "container", "launch", "coi", container_name],
+            [coi_binary, "container", "launch", "coi-default", container_name],
             capture_output=True,
             text=True,
             timeout=120,

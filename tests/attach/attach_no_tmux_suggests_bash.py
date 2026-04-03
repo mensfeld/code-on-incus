@@ -32,7 +32,7 @@ def test_attach_no_tmux_suggests_bash(coi_binary, cleanup_containers, workspace_
 
     # Launch container using low-level command
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container_name],
+        [coi_binary, "container", "launch", "coi-default", container_name],
         capture_output=True,
         text=True,
         timeout=120,

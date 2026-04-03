@@ -14,8 +14,8 @@ func TestGetDefaultConfig(t *testing.T) {
 	}
 
 	// Check defaults
-	if cfg.Defaults.Image != "coi" {
-		t.Errorf("Expected default image 'coi', got '%s'", cfg.Defaults.Image)
+	if cfg.Defaults.Image != "coi-default" {
+		t.Errorf("Expected default image 'coi-default', got '%s'", cfg.Defaults.Image)
 	}
 
 	if cfg.Defaults.Model != "claude-sonnet-4-5" {

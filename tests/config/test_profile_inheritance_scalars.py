@@ -64,7 +64,7 @@ def test_profile_inheritance_persistent_from_parent(coi_binary, cleanup_containe
 
     parent_dir = coi_dir / "parent"
     parent_dir.mkdir(parents=True)
-    (parent_dir / "config.toml").write_text('image = "coi"\npersistent = true\n')
+    (parent_dir / "config.toml").write_text('image = "coi-default"\npersistent = true\n')
 
     child_dir = coi_dir / "child"
     child_dir.mkdir(parents=True)

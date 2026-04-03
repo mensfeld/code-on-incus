@@ -23,7 +23,7 @@ def test_coi_toml_deprecation_error(coi_binary, workspace_dir):
     config_path.write_text(
         """
 [defaults]
-image = "coi"
+image = "coi-default"
 """
     )
 
@@ -63,12 +63,12 @@ def test_coi_toml_deprecation_even_with_coi_dir(coi_binary, workspace_dir):
     """
     # Create both files
     config_path = Path(workspace_dir) / ".coi.toml"
-    config_path.write_text('[defaults]\nimage = "coi"\n')
+    config_path.write_text('[defaults]\nimage = "coi-default"\n')
 
     config_dir = Path(workspace_dir) / ".coi"
     config_dir.mkdir(exist_ok=True)
     new_config_path = config_dir / "config.toml"
-    new_config_path.write_text('[defaults]\nimage = "coi"\n')
+    new_config_path.write_text('[defaults]\nimage = "coi-default"\n')
 
     result = subprocess.run(
         [

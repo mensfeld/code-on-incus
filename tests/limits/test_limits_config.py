@@ -31,7 +31,7 @@ def test_config_file_limits_loaded(coi_binary, workspace_dir, cleanup_containers
     try:
         config_content = """
 [defaults]
-image = "coi"
+image = "coi-default"
 
 [incus]
 project = "default"
@@ -99,7 +99,7 @@ limit = "4GiB"
     profile_dir.mkdir(parents=True)
     (profile_dir / "config.toml").write_text(
         """
-image = "coi"
+image = "coi-default"
 
 [limits.cpu]
 count = "1"

@@ -117,7 +117,7 @@ def dummy_path():
 
 
 @pytest.fixture(scope="session")
-def dummy_image(coi_binary):
+def dummy_image(coi_binary, tmp_path_factory):
     """Build and return a test image with dummy pre-installed.
 
     This image includes dummy at /usr/local/bin/dummy, allowing
@@ -136,6 +136,7 @@ def dummy_image(coi_binary):
     # Generate hash of install script AND dummy binary to version the image
     # Both files affect the image content, so changes to either should trigger rebuild
     import hashlib
+    import shutil
 
     hasher = hashlib.sha256()
 
@@ -160,17 +161,35 @@ def dummy_image(coi_binary):
 
     print(f"\nBuilding test image with dummy (script hash: {script_hash})...")
 
+    # Create a temporary workspace with a profile for building
+    tmp_dir = tmp_path_factory.mktemp("dummy-build")
+    profile_dir = tmp_dir / ".coi" / "profiles" / "dummy"
+    profile_dir.mkdir(parents=True)
+
+    # Write profile config.toml
+    config_toml = profile_dir / "config.toml"
+    config_toml.write_text(
+        f'image = "{image_name}"\n'
+        f"\n"
+        f"[build]\n"
+        f'script = "build.sh"\n'
+    )
+
+    # Copy the install script into the profile directory as build.sh
+    shutil.copy2(script_path, str(profile_dir / "build.sh"))
+
     result = subprocess.run(
-        [coi_binary, "build", "custom", image_name, "--script", script_path],
+        [coi_binary, "build", "--profile", "dummy"],
         capture_output=True,
         text=True,
         timeout=300,
+        cwd=str(tmp_dir),
     )
 
     if result.returncode != 0:
         pytest.skip(f"Could not build dummy image: {result.stderr}")
 
-    print(f"✓ Test image '{image_name}' built successfully")
+    print(f"Test image '{image_name}' built successfully")
     return image_name
 
 

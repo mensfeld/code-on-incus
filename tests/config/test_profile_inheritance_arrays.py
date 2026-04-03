@@ -102,7 +102,7 @@ def test_profile_inheritance_forward_env_inherited(coi_binary, cleanup_container
 
     child_dir = coi_dir / "child"
     child_dir.mkdir(parents=True)
-    (child_dir / "config.toml").write_text('inherits = "parent"\nimage = "coi"\n')
+    (child_dir / "config.toml").write_text('inherits = "parent"\nimage = "coi-default"\n')
 
     result = subprocess.run(
         [coi_binary, "profile", "show", "child", "--workspace", workspace_dir],

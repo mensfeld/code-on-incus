@@ -31,7 +31,9 @@ LDFLAGS=-ldflags "-X github.com/mensfeld/code-on-incus/internal/cli.Version=$(VE
 build:
 	@echo "Building $(BINARY_NAME) version $(VERSION)..."
 	@mkdir -p internal/image/embedded
-	@cp scripts/build/coi.sh internal/image/embedded/coi_build.sh
+	@mkdir -p internal/config/embedded
+	@cp profiles/default/build.sh internal/image/embedded/coi_build.sh
+	@cp profiles/default/config.toml internal/config/embedded/default_config.toml
 	@cp testdata/dummy/dummy internal/image/embedded/dummy
 	@$(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/coi
 	@ln -sf $(BINARY_NAME) $(BUILD_DIR)/$(BINARY_FULL)
@@ -49,6 +51,7 @@ clean:
 	@rm -rf $(COVERAGE_DIR)
 	@rm -rf dist
 	@rm -rf internal/image/embedded
+	@rm -rf internal/config/embedded
 	@bash scripts/cleanup-pycache.sh
 
 # Run all tests (unit tests only)
@@ -145,7 +148,9 @@ build-all:
 	@echo "Building $(BINARY_NAME) version $(VERSION) for all platforms..."
 	@mkdir -p dist
 	@mkdir -p internal/image/embedded
-	@cp scripts/build/coi.sh internal/image/embedded/coi_build.sh
+	@mkdir -p internal/config/embedded
+	@cp profiles/default/build.sh internal/image/embedded/coi_build.sh
+	@cp profiles/default/config.toml internal/config/embedded/default_config.toml
 	@cp testdata/dummy/dummy internal/image/embedded/dummy
 	@GOOS=linux GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o dist/$(BINARY_NAME)-linux-amd64 ./cmd/coi
 	@GOOS=linux GOARCH=arm64 $(GOBUILD) $(LDFLAGS) -o dist/$(BINARY_NAME)-linux-arm64 ./cmd/coi

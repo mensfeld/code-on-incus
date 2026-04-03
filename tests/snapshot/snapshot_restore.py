@@ -32,7 +32,7 @@ def test_snapshot_restore_requires_stopped_container(coi_binary, cleanup_contain
 
     # === Phase 1: Launch container ===
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container_name],
+        [coi_binary, "container", "launch", "coi-default", container_name],
         capture_output=True,
         text=True,
         timeout=120,
@@ -85,7 +85,7 @@ def test_snapshot_restore_with_force(coi_binary, cleanup_containers, workspace_d
 
     # === Phase 1: Launch container ===
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container_name],
+        [coi_binary, "container", "launch", "coi-default", container_name],
         capture_output=True,
         text=True,
         timeout=120,
@@ -181,7 +181,7 @@ def test_snapshot_restore_nonexistent_snapshot(coi_binary, cleanup_containers, w
 
     # === Phase 1: Launch container ===
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container_name],
+        [coi_binary, "container", "launch", "coi-default", container_name],
         capture_output=True,
         text=True,
         timeout=120,
@@ -252,7 +252,7 @@ def test_snapshot_restore_recovers_deleted_file(coi_binary, cleanup_containers, 
 
     # === Phase 1: Launch container ===
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container_name],
+        [coi_binary, "container", "launch", "coi-default", container_name],
         capture_output=True,
         text=True,
         timeout=120,
@@ -376,7 +376,7 @@ def test_snapshot_restore_missing_name(coi_binary, cleanup_containers, workspace
 
     # === Phase 1: Launch container ===
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container_name],
+        [coi_binary, "container", "launch", "coi-default", container_name],
         capture_output=True,
         text=True,
         timeout=120,

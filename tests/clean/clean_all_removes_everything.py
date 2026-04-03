@@ -80,7 +80,7 @@ def test_clean_all_removes_everything(coi_binary, cleanup_containers, workspace_
     # === Phase 2: Create a stopped container ===
 
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container_name_2],
+        [coi_binary, "container", "launch", "coi-default", container_name_2],
         capture_output=True,
         text=True,
         timeout=120,

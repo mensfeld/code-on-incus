@@ -1,0 +1,92 @@
+# COI Default Profile — Single Source of Truth for All Defaults
+# This file is embedded into the binary and parsed by GetDefaultConfig().
+# All values here define the system defaults.
+
+[defaults]
+image = "coi-default"
+persistent = false
+model = "claude-sonnet-4-5"
+
+[paths]
+sessions_dir = "~/.coi/sessions"
+storage_dir = "~/.coi/storage"
+logs_dir = "~/.coi/logs"
+
+[incus]
+project = "default"
+group = "incus-admin"
+code_uid = 1000
+code_user = "code"
+
+[network]
+mode = "restricted"
+block_private_networks = true
+block_metadata_endpoint = true
+allowed_domains = [
+    "8.8.8.8",
+    "1.1.1.1",
+    "registry.npmjs.org",
+    "npm.pkg.github.com",
+    "api.anthropic.com",
+    "platform.claude.com",
+]
+allow_local_network_access = false
+refresh_interval_minutes = 30
+
+[network.logging]
+enabled = true
+path = "~/.coi/logs/network.log"
+
+[tool]
+name = "claude"
+auto_context = true
+
+[git]
+writable_hooks = false
+
+[ssh]
+forward_agent = false
+
+[security]
+protected_paths = [".git/hooks", ".git/config", ".husky", ".vscode"]
+
+[limits.cpu]
+count = ""
+allowance = ""
+priority = 0
+
+[limits.memory]
+limit = ""
+enforce = "soft"
+swap = "true"
+
+[limits.disk]
+read = ""
+write = ""
+max = ""
+priority = 0
+tmpfs_size = ""
+
+[limits.runtime]
+max_duration = ""
+max_processes = 0
+auto_stop = true
+stop_graceful = true
+
+[monitoring]
+enabled = false
+auto_pause_on_high = true
+auto_kill_on_critical = true
+poll_interval_sec = 2
+file_read_threshold_mb = 50.0
+file_read_rate_mb_per_sec = 10.0
+audit_log_retention_days = 30
+
+[monitoring.nft]
+enabled = false
+rate_limit_per_second = 100
+dns_query_threshold = 100
+log_dns_queries = true
+
+[timezone]
+mode = "host"

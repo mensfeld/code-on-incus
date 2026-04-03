@@ -60,7 +60,7 @@ def test_persist_all_flag(coi_binary, cleanup_containers, workspace_dir):
     # === Phase 1: Launch 2 containers ===
 
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container_name_1],
+        [coi_binary, "container", "launch", "coi-default", container_name_1],
         capture_output=True,
         text=True,
         timeout=120,
@@ -68,7 +68,7 @@ def test_persist_all_flag(coi_binary, cleanup_containers, workspace_dir):
     assert result.returncode == 0, f"Container 1 launch should succeed. stderr: {result.stderr}"
 
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container_name_2],
+        [coi_binary, "container", "launch", "coi-default", container_name_2],
         capture_output=True,
         text=True,
         timeout=120,

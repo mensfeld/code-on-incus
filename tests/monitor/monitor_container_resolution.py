@@ -31,7 +31,7 @@ def test_monitor_auto_resolve_single_container(coi_binary, cleanup_containers, w
 
     # === Phase 1: Launch container ===
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container_name],
+        [coi_binary, "container", "launch", "coi-default", container_name],
         capture_output=True,
         text=True,
         timeout=120,
@@ -100,7 +100,7 @@ def test_monitor_explicit_container_arg(coi_binary, cleanup_containers, workspac
 
     # === Phase 1: Launch container ===
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container_name],
+        [coi_binary, "container", "launch", "coi-default", container_name],
         capture_output=True,
         text=True,
         timeout=120,
@@ -148,7 +148,7 @@ def test_monitor_env_var_container(coi_binary, cleanup_containers, workspace_dir
 
     # === Phase 1: Launch container ===
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container_name],
+        [coi_binary, "container", "launch", "coi-default", container_name],
         capture_output=True,
         text=True,
         timeout=120,
@@ -199,7 +199,7 @@ def test_monitor_workspace_flag(coi_binary, cleanup_containers, workspace_dir):
 
     # === Phase 1: Launch container ===
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container_name],
+        [coi_binary, "container", "launch", "coi-default", container_name],
         capture_output=True,
         text=True,
         timeout=120,

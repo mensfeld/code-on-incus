@@ -31,7 +31,7 @@ def test_push_directory_without_recursive(coi_binary, cleanup_containers, worksp
     # === Phase 1: Launch container ===
 
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container_name],
+        [coi_binary, "container", "launch", "coi-default", container_name],
         capture_output=True,
         text=True,
         timeout=120,

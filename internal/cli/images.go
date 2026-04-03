@@ -247,7 +247,7 @@ func imageListCommand(cmd *cobra.Command, args []string) error {
 		description string
 		buildCmd    string
 	}{
-		{"coi", "coi image (Claude CLI, Node.js, Docker, GitHub CLI, tmux)", "coi build"},
+		{"coi-default", "coi image (Claude CLI, Node.js, Docker, GitHub CLI, tmux)", "coi build"},
 	}
 
 	fmt.Println("COI Images:")

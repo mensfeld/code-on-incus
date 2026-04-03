@@ -31,7 +31,7 @@ def test_tmux_list_sessions(coi_binary, cleanup_containers, workspace_dir):
     # === Phase 1: Launch first container and create tmux session ===
 
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container1],
+        [coi_binary, "container", "launch", "coi-default", container1],
         capture_output=True,
         text=True,
         timeout=120,
@@ -69,7 +69,7 @@ def test_tmux_list_sessions(coi_binary, cleanup_containers, workspace_dir):
     # === Phase 2: Launch second container and create tmux session ===
 
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container2],
+        [coi_binary, "container", "launch", "coi-default", container2],
         capture_output=True,
         text=True,
         timeout=120,

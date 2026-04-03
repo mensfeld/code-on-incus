@@ -35,7 +35,7 @@ def test_shutdown_no_spurious_errors(coi_binary, cleanup_containers, workspace_d
 
     # Launch a container
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container_name],
+        [coi_binary, "container", "launch", "coi-default", container_name],
         capture_output=True,
         text=True,
         timeout=120,

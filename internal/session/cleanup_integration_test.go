@@ -60,7 +60,7 @@ func TestEndToEndCleanupWithOpenMode(t *testing.T) {
 	}
 
 	// Check if the default 'coi' image exists
-	exists, err := container.ImageExists("coi")
+	exists, err := container.ImageExists("coi-default")
 	if err != nil || !exists {
 		t.Skip("coi image not found, skipping integration test (run 'coi build' first)")
 	}
@@ -85,7 +85,7 @@ func TestEndToEndCleanupWithOpenMode(t *testing.T) {
 	}
 
 	// Launch container (non-ephemeral)
-	if err := mgr.Launch("coi", false); err != nil {
+	if err := mgr.Launch("coi-default", false); err != nil {
 		t.Fatalf("Failed to launch container: %v", err)
 	}
 
@@ -194,7 +194,7 @@ func TestEndToEndCleanupWithRestrictedMode(t *testing.T) {
 	}
 
 	// Check if the default 'coi' image exists
-	exists, err := container.ImageExists("coi")
+	exists, err := container.ImageExists("coi-default")
 	if err != nil || !exists {
 		t.Skip("coi image not found, skipping integration test (run 'coi build' first)")
 	}
@@ -219,7 +219,7 @@ func TestEndToEndCleanupWithRestrictedMode(t *testing.T) {
 	}
 
 	// Launch container (non-ephemeral)
-	if err := mgr.Launch("coi", false); err != nil {
+	if err := mgr.Launch("coi-default", false); err != nil {
 		t.Fatalf("Failed to launch container: %v", err)
 	}
 
@@ -320,7 +320,7 @@ func TestEndToEndCleanupMultipleContainers(t *testing.T) {
 	}
 
 	// Check if the default 'coi' image exists
-	exists, err := container.ImageExists("coi")
+	exists, err := container.ImageExists("coi-default")
 	if err != nil || !exists {
 		t.Skip("coi image not found, skipping integration test (run 'coi build' first)")
 	}
@@ -351,7 +351,7 @@ func TestEndToEndCleanupMultipleContainers(t *testing.T) {
 		}
 
 		// Launch container
-		if err := mgr.Launch("coi", false); err != nil {
+		if err := mgr.Launch("coi-default", false); err != nil {
 			t.Fatalf("Failed to launch container %s: %v", containerName, err)
 		}
 

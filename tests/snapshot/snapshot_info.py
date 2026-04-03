@@ -31,7 +31,7 @@ def test_snapshot_info_text_format(coi_binary, cleanup_containers, workspace_dir
 
     # === Phase 1: Launch container ===
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container_name],
+        [coi_binary, "container", "launch", "coi-default", container_name],
         capture_output=True,
         text=True,
         timeout=120,
@@ -87,7 +87,7 @@ def test_snapshot_info_json_format(coi_binary, cleanup_containers, workspace_dir
 
     # === Phase 1: Launch container ===
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container_name],
+        [coi_binary, "container", "launch", "coi-default", container_name],
         capture_output=True,
         text=True,
         timeout=120,
@@ -145,7 +145,7 @@ def test_snapshot_info_nonexistent_snapshot(coi_binary, cleanup_containers, work
 
     # === Phase 1: Launch container ===
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container_name],
+        [coi_binary, "container", "launch", "coi-default", container_name],
         capture_output=True,
         text=True,
         timeout=120,
@@ -194,7 +194,7 @@ def test_snapshot_info_invalid_format(coi_binary, cleanup_containers, workspace_
 
     # === Phase 1: Launch container ===
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container_name],
+        [coi_binary, "container", "launch", "coi-default", container_name],
         capture_output=True,
         text=True,
         timeout=120,
@@ -246,7 +246,7 @@ def test_snapshot_info_missing_name(coi_binary, cleanup_containers, workspace_di
 
     # === Phase 1: Launch container ===
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container_name],
+        [coi_binary, "container", "launch", "coi-default", container_name],
         capture_output=True,
         text=True,
         timeout=120,

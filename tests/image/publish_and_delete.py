@@ -34,7 +34,7 @@ def test_publish_and_delete_image(coi_binary, cleanup_containers, workspace_dir)
     # === Phase 1: Launch container ===
 
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container_name],
+        [coi_binary, "container", "launch", "coi-default", container_name],
         capture_output=True,
         text=True,
         timeout=120,

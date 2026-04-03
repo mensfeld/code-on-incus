@@ -40,7 +40,7 @@ def test_mount_with_shift_flag(coi_binary, cleanup_containers, workspace_dir):
         # === Phase 2: Launch container ===
 
         result = subprocess.run(
-            [coi_binary, "container", "launch", "coi", container_name],
+            [coi_binary, "container", "launch", "coi-default", container_name],
             capture_output=True,
             text=True,
             timeout=120,

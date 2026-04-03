@@ -4,6 +4,22 @@
 
 ### Breaking Changes
 
+- [Breaking] **Default image renamed from `coi` to `coi-default`** — The default image alias has been renamed from `coi` to `coi-default` for consistency with the new profile system. After updating, run `coi build` to create the `coi-default` image. The old `coi` image can be removed with `coi image delete coi`.
+
+- [Breaking] **Removed `coi build custom` subcommand** — Custom image building is now done exclusively through profiles. Instead of `coi build custom my-image --script setup.sh`, create a profile directory with a `[build]` section:
+  ```
+  mkdir -p .coi/profiles/my-profile
+  cat > .coi/profiles/my-profile/config.toml <<EOF
+  image = "my-image"
+  [build]
+  base = "coi-default"
+  script = "build.sh"
+  EOF
+  coi build --profile my-profile
+  ```
+
+- [Breaking] **Auto-build on missing image removed** — `coi shell` and `coi run` no longer auto-build images when they're missing. Instead, they return a clear error instructing the user to run `coi build` (or `coi build --profile <name>`) first. This makes the build step explicit and avoids unexpected long waits.
+
 - [Breaking] **Removed redundant CLI flags in favor of config/profiles** — The following CLI flags have been removed: `--mount`, `--env`/`-e`, `--forward-env`, `--network`, `--writable-git-hooks`, `--ssh-agent`, `--timezone`, `--monitor`, all `--limit-*` flags (12 total), and the unimplemented `--capture`, `--timeout`, `--format` flags from `coi run`. Use the equivalent settings in `config.toml` or profile directories instead. Retained flags: `--workspace`, `--slot`, `--image`, `--persistent`, `--resume`/`--continue`, `--profile`, `--debug`, `--background`, `--tmux`, `--container`, `--tool`. **Migration guide:**
 
   | Removed flag | Config equivalent |
@@ -41,6 +57,8 @@
 - [Enhancement] **Expanded environment scanning detection patterns** — The monitoring system's env scanning detector now catches significantly more evasion techniques: Python (`os.environ`, `os.getenv`), Node.js (`process.env`), Ruby (`ENV[]`), awk (`ENVIRON[]`), `sed`/`awk` with secret-related keywords (`credential`, `auth` in addition to existing `api`, `key`, `password`, `secret`, `token`), and binary tools reading `/proc/*/environ` (`strings`, `xxd`, `hexdump`, `xargs`). Includes Go unit tests covering all new patterns and negative cases, plus integration tests for Python/Node/grep/awk/sed/strings detection.
 
 ### Features
+
+- [Feature] **Embedded default profile — single source of truth for all defaults** — All default configuration values are now defined in an embedded `profiles/default/config.toml` TOML file instead of being hardcoded in Go. `GetDefaultConfig()` parses this embedded TOML at startup, making defaults discoverable and editable in a single place. A built-in "default" profile is synthesized from the loaded config and appears in `coi profile list` with source `(built-in)`. `coi profile show default` displays all default settings (image, network, tool, git, ssh, security, monitoring, timezone, paths, incus, limits). Custom profiles can inherit from it via `inherits = "default"`. A disk-based `profiles/default/config.toml` overrides the built-in one. `ProfileConfig` now supports all Config fields (model, paths, incus, git, ssh, security, monitoring, timezone) with full merge and inheritance support. The default image build script (`scripts/build/coi.sh`) has been moved to `profiles/default/build.sh`.
 
 - [Feature] **Read-only mount support** — Mount entries in config now support a `readonly = true` option. This enables safely sharing host directories (like `~/.claude/skills`, `~/.claude/commands`) into containers without allowing the container to modify them. Example: `[[mounts.default]]` with `host = "~/.claude/skills"`, `container = "/home/code/.claude/skills"`, `readonly = true`. For readonly mounts, if the host source directory does not exist, COI logs a warning and skips the mount instead of creating an empty directory. Addresses #260.
 

@@ -106,6 +106,9 @@ Examples:
 		if p.Persistent != nil {
 			fmt.Printf("persistent = %v\n", *p.Persistent)
 		}
+		if p.Model != "" {
+			fmt.Printf("model = %q\n", p.Model)
+		}
 		if len(p.ForwardEnv) > 0 {
 			fmt.Printf("forward_env = [%s]\n", formatStringSlice(p.ForwardEnv))
 		}
@@ -184,6 +187,95 @@ Examples:
 
 		if p.Limits != nil {
 			printLimits(p.Limits)
+		}
+
+		if p.Paths != nil {
+			fmt.Println()
+			fmt.Println("[paths]")
+			if p.Paths.SessionsDir != "" {
+				fmt.Printf("sessions_dir = %q\n", p.Paths.SessionsDir)
+			}
+			if p.Paths.StorageDir != "" {
+				fmt.Printf("storage_dir = %q\n", p.Paths.StorageDir)
+			}
+			if p.Paths.LogsDir != "" {
+				fmt.Printf("logs_dir = %q\n", p.Paths.LogsDir)
+			}
+			if p.Paths.PreserveWorkspacePath {
+				fmt.Println("preserve_workspace_path = true")
+			}
+		}
+
+		if p.Incus != nil {
+			fmt.Println()
+			fmt.Println("[incus]")
+			if p.Incus.Project != "" {
+				fmt.Printf("project = %q\n", p.Incus.Project)
+			}
+			if p.Incus.Group != "" {
+				fmt.Printf("group = %q\n", p.Incus.Group)
+			}
+			if p.Incus.CodeUID != 0 {
+				fmt.Printf("code_uid = %d\n", p.Incus.CodeUID)
+			}
+			if p.Incus.CodeUser != "" {
+				fmt.Printf("code_user = %q\n", p.Incus.CodeUser)
+			}
+		}
+
+		if p.Git != nil {
+			fmt.Println()
+			fmt.Println("[git]")
+			if p.Git.WritableHooks != nil {
+				fmt.Printf("writable_hooks = %v\n", *p.Git.WritableHooks)
+			}
+		}
+
+		if p.SSH != nil {
+			fmt.Println()
+			fmt.Println("[ssh]")
+			if p.SSH.ForwardAgent != nil {
+				fmt.Printf("forward_agent = %v\n", *p.SSH.ForwardAgent)
+			}
+		}
+
+		if p.Security != nil {
+			fmt.Println()
+			fmt.Println("[security]")
+			if len(p.Security.ProtectedPaths) > 0 {
+				fmt.Printf("protected_paths = [%s]\n", formatStringSlice(p.Security.ProtectedPaths))
+			}
+			if len(p.Security.AdditionalProtectedPaths) > 0 {
+				fmt.Printf("additional_protected_paths = [%s]\n", formatStringSlice(p.Security.AdditionalProtectedPaths))
+			}
+			if p.Security.DisableProtection {
+				fmt.Println("disable_protection = true")
+			}
+		}
+
+		if p.Monitoring != nil {
+			fmt.Println()
+			fmt.Println("[monitoring]")
+			if p.Monitoring.Enabled != nil {
+				fmt.Printf("enabled = %v\n", *p.Monitoring.Enabled)
+			}
+			if p.Monitoring.AutoPauseOnHigh != nil {
+				fmt.Printf("auto_pause_on_high = %v\n", *p.Monitoring.AutoPauseOnHigh)
+			}
+			if p.Monitoring.AutoKillOnCritical != nil {
+				fmt.Printf("auto_kill_on_critical = %v\n", *p.Monitoring.AutoKillOnCritical)
+			}
+		}
+
+		if p.Timezone != nil {
+			fmt.Println()
+			fmt.Println("[timezone]")
+			if p.Timezone.Mode != "" {
+				fmt.Printf("mode = %q\n", p.Timezone.Mode)
+			}
+			if p.Timezone.Name != "" {
+				fmt.Printf("name = %q\n", p.Timezone.Name)
+			}
 		}
 
 		return nil

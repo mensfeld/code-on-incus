@@ -25,7 +25,7 @@ def test_build_skip_when_image_exists(coi_binary, workspace_dir):
 
     # Skip if base image doesn't exist
     result = subprocess.run(
-        [coi_binary, "image", "exists", "coi"],
+        [coi_binary, "image", "exists", "coi-default"],
         capture_output=True,
     )
     if result.returncode != 0:
@@ -91,7 +91,7 @@ def test_build_force_rebuild(coi_binary, workspace_dir):
 
     # Skip if base image doesn't exist
     result = subprocess.run(
-        [coi_binary, "image", "exists", "coi"],
+        [coi_binary, "image", "exists", "coi-default"],
         capture_output=True,
     )
     if result.returncode != 0:
@@ -193,7 +193,7 @@ def test_build_no_config_fallback(coi_binary, workspace_dir):
     (config_dir / "config.toml").write_text(
         """
 [defaults]
-image = "coi"
+image = "coi-default"
 """
     )
 

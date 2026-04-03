@@ -17,7 +17,7 @@ func TestIncusOutputContext_Cancellation(t *testing.T) {
 	if !Available() {
 		t.Skip("incus daemon not running, skipping integration test")
 	}
-	exists, err := ImageExists("coi")
+	exists, err := ImageExists("coi-default")
 	if err != nil || !exists {
 		t.Skip("coi image not found, skipping integration test (run 'coi build' first)")
 	}
@@ -35,7 +35,7 @@ func TestIncusOutputContext_Cancellation(t *testing.T) {
 		_ = mgr.Delete(true)
 	}
 
-	if err := mgr.Launch("coi", false); err != nil {
+	if err := mgr.Launch("coi-default", false); err != nil {
 		t.Fatalf("Failed to launch container: %v", err)
 	}
 
@@ -66,7 +66,7 @@ func TestIncusExecContext_Cancellation(t *testing.T) {
 	if !Available() {
 		t.Skip("incus daemon not running, skipping integration test")
 	}
-	exists, err := ImageExists("coi")
+	exists, err := ImageExists("coi-default")
 	if err != nil || !exists {
 		t.Skip("coi image not found, skipping integration test (run 'coi build' first)")
 	}
@@ -84,7 +84,7 @@ func TestIncusExecContext_Cancellation(t *testing.T) {
 		_ = mgr.Delete(true)
 	}
 
-	if err := mgr.Launch("coi", false); err != nil {
+	if err := mgr.Launch("coi-default", false); err != nil {
 		t.Fatalf("Failed to launch container: %v", err)
 	}
 
@@ -113,7 +113,7 @@ func TestIncusOutputContext_Success(t *testing.T) {
 	if !Available() {
 		t.Skip("incus daemon not running, skipping integration test")
 	}
-	exists, err := ImageExists("coi")
+	exists, err := ImageExists("coi-default")
 	if err != nil || !exists {
 		t.Skip("coi image not found, skipping integration test (run 'coi build' first)")
 	}
@@ -131,7 +131,7 @@ func TestIncusOutputContext_Success(t *testing.T) {
 		_ = mgr.Delete(true)
 	}
 
-	if err := mgr.Launch("coi", false); err != nil {
+	if err := mgr.Launch("coi-default", false); err != nil {
 		t.Fatalf("Failed to launch container: %v", err)
 	}
 

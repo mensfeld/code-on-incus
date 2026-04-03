@@ -29,7 +29,7 @@ def test_pull_nonexistent_remote_file(coi_binary, cleanup_containers, workspace_
     # === Phase 1: Launch container ===
 
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container_name],
+        [coi_binary, "container", "launch", "coi-default", container_name],
         capture_output=True,
         text=True,
         timeout=120,

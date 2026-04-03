@@ -25,7 +25,7 @@ def test_empty_profile_directory_skipped(coi_binary, cleanup_containers, workspa
     # Also create a valid profile to confirm loading still works
     valid_dir = Path(workspace_dir) / ".coi" / "profiles" / "valid"
     valid_dir.mkdir(parents=True)
-    (valid_dir / "config.toml").write_text('image = "coi"\n')
+    (valid_dir / "config.toml").write_text('image = "coi-default"\n')
 
     result = subprocess.run(
         [
@@ -149,10 +149,10 @@ def test_profile_nonexistent_build_script_still_loads(
     profile_dir.mkdir(parents=True)
     (profile_dir / "config.toml").write_text(
         """
-image = "coi"
+image = "coi-default"
 
 [build]
-base = "coi"
+base = "coi-default"
 script = "this-script-does-not-exist.sh"
 """
     )
@@ -206,7 +206,7 @@ def test_profile_with_only_build_section(coi_binary, cleanup_containers, workspa
     (profile_dir / "config.toml").write_text(
         """
 [build]
-base = "coi"
+base = "coi-default"
 commands = ["apt-get install -y curl"]
 """
     )
@@ -273,10 +273,10 @@ def test_profile_validation_missing_build_script(coi_binary, cleanup_containers,
     profile_dir.mkdir(parents=True)
     (profile_dir / "config.toml").write_text(
         """
-image = "coi"
+image = "coi-default"
 
 [build]
-base = "coi"
+base = "coi-default"
 script = "nonexistent.sh"
 """
     )
@@ -315,7 +315,7 @@ def test_profile_validation_invalid_network_mode(coi_binary, cleanup_containers,
     profile_dir.mkdir(parents=True)
     (profile_dir / "config.toml").write_text(
         """
-image = "coi"
+image = "coi-default"
 
 [network]
 mode = "bogus"
@@ -354,7 +354,7 @@ def test_profile_validation_missing_context_file(coi_binary, cleanup_containers,
     profile_dir.mkdir(parents=True)
     (profile_dir / "config.toml").write_text(
         """
-image = "coi"
+image = "coi-default"
 context = "CONTEXT.md"
 """
     )
@@ -394,7 +394,7 @@ def test_profile_context_file_loads_when_present(coi_binary, cleanup_containers,
     profile_dir.mkdir(parents=True)
     (profile_dir / "config.toml").write_text(
         """
-image = "coi"
+image = "coi-default"
 context = "CONTEXT.md"
 """
     )
@@ -429,7 +429,7 @@ def test_profile_validation_incomplete_mount(coi_binary, cleanup_containers, wor
     profile_dir.mkdir(parents=True)
     (profile_dir / "config.toml").write_text(
         """
-image = "coi"
+image = "coi-default"
 
 [[mounts]]
 host = "~/data"

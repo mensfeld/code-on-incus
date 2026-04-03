@@ -24,7 +24,7 @@ def test_build_from_config_script(coi_binary, workspace_dir):
 
     # Skip if base image doesn't exist
     result = subprocess.run(
-        [coi_binary, "image", "exists", "coi"],
+        [coi_binary, "image", "exists", "coi-default"],
         capture_output=True,
     )
     if result.returncode != 0:
@@ -47,7 +47,7 @@ def test_build_from_config_script(coi_binary, workspace_dir):
 image = "{image_name}"
 
 [build]
-base = "coi"
+base = "coi-default"
 script = "build.sh"
 """
     )
@@ -100,7 +100,7 @@ def test_build_script_takes_precedence(coi_binary, workspace_dir):
 
     # Skip if base image doesn't exist
     result = subprocess.run(
-        [coi_binary, "image", "exists", "coi"],
+        [coi_binary, "image", "exists", "coi-default"],
         capture_output=True,
     )
     if result.returncode != 0:
@@ -123,7 +123,7 @@ def test_build_script_takes_precedence(coi_binary, workspace_dir):
 image = "{image_name}"
 
 [build]
-base = "coi"
+base = "coi-default"
 script = "build.sh"
 commands = ["echo commands-were-used > /tmp/commands_marker.txt"]
 """

@@ -3,10 +3,9 @@ Integration tests for the --compression flag in build commands.
 
 Currently covered:
 - coi build --compression none
-- coi build custom --compression none
+- coi build --profile <name> --compression none
 """
 
-import json
 import subprocess
 import time
 
@@ -28,28 +27,19 @@ def test_build_with_compression_none(coi_binary):
 
     # Verify image exists
     result = subprocess.run(
-        [coi_binary, "image", "exists", "coi"],
+        [coi_binary, "image", "exists", "coi-default"],
         capture_output=True,
     )
     assert result.returncode == 0, "coi image should exist after build"
 
 
 def test_build_custom_with_compression_none(coi_binary, tmp_path):
-    """Test building a custom image with --compression none flag."""
+    """Test building a custom image with --compression none flag via profile."""
     image_name = "coi-test-compression"
-
-    # Create build script
-    build_script = tmp_path / "build.sh"
-    build_script.write_text("""#!/bin/bash
-set -e
-apt-get update
-apt-get install -y curl
-echo "Custom build completed" > /tmp/build_marker.txt
-""")
 
     # Build custom image (skip if coi doesn't exist)
     result = subprocess.run(
-        [coi_binary, "image", "exists", "coi"],
+        [coi_binary, "image", "exists", "coi-default"],
         capture_output=True,
     )
     if result.returncode != 0:
@@ -59,28 +49,33 @@ echo "Custom build completed" > /tmp/build_marker.txt
     # Cleanup any existing image from previous run
     subprocess.run([coi_binary, "image", "delete", image_name], check=False, capture_output=True)
 
+    # Create profile directory with config and build script
+    profile_dir = tmp_path / ".coi" / "profiles" / "test-compression"
+    profile_dir.mkdir(parents=True)
+
+    (profile_dir / "config.toml").write_text(
+        f'image = "{image_name}"\n'
+        f"\n"
+        f"[build]\n"
+        f'script = "build.sh"\n'
+    )
+
+    (profile_dir / "build.sh").write_text("""#!/bin/bash
+set -e
+apt-get update
+apt-get install -y curl
+echo "Custom build completed" > /tmp/build_marker.txt
+""")
+
     # Build custom image with --compression none
     result = subprocess.run(
-        [
-            coi_binary,
-            "build",
-            "custom",
-            image_name,
-            "--script",
-            str(build_script),
-            "--compression",
-            "none",
-        ],
+        [coi_binary, "build", "--profile", "test-compression", "--compression", "none"],
         capture_output=True,
         text=True,
         timeout=300,
+        cwd=str(tmp_path),
     )
     assert result.returncode == 0, f"Build failed: {result.stderr}"
-
-    # Verify JSON output
-    output = json.loads(result.stdout)
-    assert "fingerprint" in output
-    assert output["alias"] == image_name
 
     # Verify image exists
     result = subprocess.run(

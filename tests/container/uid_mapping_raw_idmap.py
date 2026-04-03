@@ -79,7 +79,7 @@ def test_workspace_write_access_raw_idmap(coi_binary, cleanup_containers, worksp
 
         # === Phase 2: Create container without starting ===
 
-        result = _incus_run("init", "coi", container_name)
+        result = _incus_run("init", "coi-default", container_name)
         assert result.returncode == 0, f"incus init should succeed. stderr: {result.stderr}"
 
         # === Phase 3: Configure security flags (same as EnableDockerSupport) ===

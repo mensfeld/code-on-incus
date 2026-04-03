@@ -42,9 +42,10 @@ def test_profile_list_directory(coi_binary, cleanup_containers, workspace_dir):
     assert "coi-rust" in output, f"Should show image for rust profile. Got:\n{output}"
 
 
-def test_profile_list_empty(coi_binary, cleanup_containers, workspace_dir):
+def test_profile_list_shows_default(coi_binary, cleanup_containers, workspace_dir):
     """
-    Test that coi profile list handles no profiles gracefully.
+    Test that coi profile list always shows the built-in default profile,
+    even when no user profiles are defined.
     """
     result = subprocess.run(
         [
@@ -61,11 +62,14 @@ def test_profile_list_empty(coi_binary, cleanup_containers, workspace_dir):
     )
 
     assert result.returncode == 0, (
-        f"profile list should succeed even with no profiles. stderr: {result.stderr}"
+        f"profile list should succeed. stderr: {result.stderr}"
     )
     output = result.stdout + result.stderr
-    assert "no profiles" in output.lower(), (
-        f"Should indicate no profiles configured. Got:\n{output}"
+    assert "default" in output, (
+        f"Should show built-in 'default' profile. Got:\n{output}"
+    )
+    assert "(built-in)" in output, (
+        f"Should show '(built-in)' as source for default profile. Got:\n{output}"
     )
 
 

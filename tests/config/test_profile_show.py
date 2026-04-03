@@ -108,7 +108,7 @@ def test_profile_show_empty_directory_profile(coi_binary, cleanup_containers, wo
     """
     profile_dir = Path(workspace_dir) / ".coi" / "profiles" / "minimal"
     profile_dir.mkdir(parents=True)
-    (profile_dir / "config.toml").write_text('image = "coi"\n')
+    (profile_dir / "config.toml").write_text('image = "coi-default"\n')
 
     result = subprocess.run(
         [

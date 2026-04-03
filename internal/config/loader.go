@@ -44,6 +44,11 @@ func Load() (*Config, error) {
 		}
 	}
 
+	// Inject built-in "default" profile (can be overridden by disk-based profiles)
+	if _, exists := cfg.Profiles["default"]; !exists {
+		cfg.Profiles["default"] = synthesizeDefaultProfile(cfg)
+	}
+
 	// Resolve profile inheritance after all profiles are loaded from all levels
 	if err := cfg.ResolveProfileInheritance(); err != nil {
 		return nil, fmt.Errorf("profile inheritance error: %w", err)
@@ -208,7 +213,7 @@ func WriteExample(path string) error {
 # See: https://github.com/mensfeld/code-on-incus
 
 [defaults]
-image = "coi"
+image = "coi-default"
 # Set persistent=true to reuse containers across sessions (keeps installed tools)
 persistent = false
 model = "claude-sonnet-4-5"

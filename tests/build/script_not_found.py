@@ -2,20 +2,30 @@
 Integration tests for custom image building.
 
 Tests:
-- coi build custom with script
-- Custom image with base specified
-- Custom image with privileged base
+- coi build --profile with nonexistent script fails gracefully
 """
 
 import subprocess
 
 
-def test_build_custom_script_not_found(coi_binary):
-    """Test that build fails with nonexistent script."""
+def test_build_custom_script_not_found(coi_binary, tmp_path):
+    """Test that build fails with nonexistent script referenced in profile."""
+    # Create profile directory with config referencing a nonexistent script
+    profile_dir = tmp_path / ".coi" / "profiles" / "test-missing-script"
+    profile_dir.mkdir(parents=True)
+
+    (profile_dir / "config.toml").write_text(
+        'image = "test-image"\n'
+        "\n"
+        "[build]\n"
+        'script = "/nonexistent/script.sh"\n'
+    )
+
     result = subprocess.run(
-        [coi_binary, "build", "custom", "test-image", "--script", "/nonexistent/script.sh"],
+        [coi_binary, "build", "--profile", "test-missing-script"],
         capture_output=True,
         text=True,
+        cwd=str(tmp_path),
     )
     assert result.returncode != 0, "Build should fail with nonexistent script"
-    assert "not found" in result.stderr.lower()
+    assert "not found" in result.stderr.lower() or "does not exist" in result.stderr.lower()

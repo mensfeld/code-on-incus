@@ -2,7 +2,7 @@
 Test for coi build - no spurious errors during cleanup.
 
 Tests that:
-1. Run coi build custom with a simple script
+1. Run coi build --profile with a simple script
 2. Verify build succeeds
 3. Verify no spurious error messages appear (e.g., "already stopped")
 
@@ -19,38 +19,48 @@ def test_build_no_spurious_errors(coi_binary, tmp_path):
     Test that successful builds don't show spurious error messages.
 
     Flow:
-    1. Create a simple build script
-    2. Build a custom image
+    1. Create a profile with a simple build script
+    2. Build image via profile
     3. Verify exit code is 0
     4. Verify no "Error: The instance is already stopped" message
     5. Cleanup
     """
     image_name = "coi-test-no-errors"
 
-    # Create minimal build script
-    build_script = tmp_path / "build.sh"
-    build_script.write_text(
-        """#!/bin/bash
-set -e
-echo "Test build - no spurious errors"
-"""
-    )
-
     # Skip if base doesn't exist
     result = subprocess.run(
-        [coi_binary, "image", "exists", "coi"],
+        [coi_binary, "image", "exists", "coi-default"],
         capture_output=True,
     )
     if result.returncode != 0:
         # Skip test if coi base image doesn't exist
         return
 
-    # Build custom image
+    # Create profile directory with config and build script
+    profile_dir = tmp_path / ".coi" / "profiles" / "test-no-errors"
+    profile_dir.mkdir(parents=True)
+
+    (profile_dir / "config.toml").write_text(
+        f'image = "{image_name}"\n'
+        f"\n"
+        f"[build]\n"
+        f'script = "build.sh"\n'
+    )
+
+    (profile_dir / "build.sh").write_text(
+        """#!/bin/bash
+set -e
+echo "Test build - no spurious errors"
+"""
+    )
+
+    # Build custom image via profile
     result = subprocess.run(
-        [coi_binary, "build", "custom", image_name, "--script", str(build_script)],
+        [coi_binary, "build", "--profile", "test-no-errors"],
         capture_output=True,
         text=True,
         timeout=300,
+        cwd=str(tmp_path),
     )
 
     # Build should succeed

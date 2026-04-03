@@ -30,7 +30,7 @@ def test_tmux_capture_stopped_container(coi_binary, cleanup_containers, workspac
     # === Phase 1: Launch container ===
 
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container_name],
+        [coi_binary, "container", "launch", "coi-default", container_name],
         capture_output=True,
         text=True,
         timeout=120,

@@ -31,7 +31,7 @@ def test_cleanup_keeps_recent_versions(coi_binary, cleanup_containers, workspace
     # === Phase 1: Launch and stop container ===
 
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container_name],
+        [coi_binary, "container", "launch", "coi-default", container_name],
         capture_output=True,
         text=True,
         timeout=120,

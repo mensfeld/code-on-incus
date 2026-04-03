@@ -31,7 +31,7 @@ def test_snapshot_auto_resolve_single_container(coi_binary, cleanup_containers, 
 
     # === Phase 1: Launch container ===
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container_name],
+        [coi_binary, "container", "launch", "coi-default", container_name],
         capture_output=True,
         text=True,
         timeout=120,
@@ -112,7 +112,7 @@ def test_snapshot_multiple_containers_requires_flag(coi_binary, cleanup_containe
     # === Phase 1: Launch two containers ===
     for container in [container1, container2]:
         result = subprocess.run(
-            [coi_binary, "container", "launch", "coi", container],
+            [coi_binary, "container", "launch", "coi-default", container],
             capture_output=True,
             text=True,
             timeout=120,
@@ -189,7 +189,7 @@ def test_snapshot_explicit_container_flag(coi_binary, cleanup_containers, worksp
 
     # === Phase 1: Launch container ===
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container_name],
+        [coi_binary, "container", "launch", "coi-default", container_name],
         capture_output=True,
         text=True,
         timeout=120,
@@ -240,7 +240,7 @@ def test_snapshot_env_var_container(coi_binary, cleanup_containers, workspace_di
 
     # === Phase 1: Launch container ===
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container_name],
+        [coi_binary, "container", "launch", "coi-default", container_name],
         capture_output=True,
         text=True,
         timeout=120,
@@ -299,7 +299,7 @@ def test_snapshot_container_flag_overrides_env(coi_binary, cleanup_containers, w
     # === Phase 1: Launch two containers ===
     for container in [container1, container2]:
         result = subprocess.run(
-            [coi_binary, "container", "launch", "coi", container],
+            [coi_binary, "container", "launch", "coi-default", container],
             capture_output=True,
             text=True,
             timeout=120,

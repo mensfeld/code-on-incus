@@ -31,7 +31,7 @@ def test_launch_ephemeral_flag(coi_binary, cleanup_containers, workspace_dir):
     # === Phase 1: Launch ephemeral container ===
 
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container_name, "--ephemeral"],
+        [coi_binary, "container", "launch", "coi-default", container_name, "--ephemeral"],
         capture_output=True,
         text=True,
         timeout=120,

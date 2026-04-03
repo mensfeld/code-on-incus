@@ -22,7 +22,7 @@ func TestResumeCommand_FrozenContainer(t *testing.T) {
 	}
 
 	// Check if the coi image exists
-	exists, err := container.ImageExists("coi")
+	exists, err := container.ImageExists("coi-default")
 	if err != nil || !exists {
 		t.Skip("coi image not found, skipping integration test")
 	}
@@ -34,7 +34,7 @@ func TestResumeCommand_FrozenContainer(t *testing.T) {
 	container.IncusOutput("delete", containerName, "--force")
 
 	// Launch container
-	_, err = container.IncusOutput("launch", "coi", containerName)
+	_, err = container.IncusOutput("launch", "coi-default", containerName)
 	if err != nil {
 		t.Fatalf("Failed to launch container: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestResumeCommand_NotFrozen(t *testing.T) {
 	}
 
 	// Check if the coi image exists
-	exists, err := container.ImageExists("coi")
+	exists, err := container.ImageExists("coi-default")
 	if err != nil || !exists {
 		t.Skip("coi image not found, skipping integration test")
 	}
@@ -101,7 +101,7 @@ func TestResumeCommand_NotFrozen(t *testing.T) {
 	container.IncusOutput("delete", containerName, "--force")
 
 	// Launch container
-	_, err = container.IncusOutput("launch", "coi", containerName)
+	_, err = container.IncusOutput("launch", "coi-default", containerName)
 	if err != nil {
 		t.Fatalf("Failed to launch container: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestResumeAllFrozen(t *testing.T) {
 	}
 
 	// Check if the coi image exists
-	exists, err := container.ImageExists("coi")
+	exists, err := container.ImageExists("coi-default")
 	if err != nil || !exists {
 		t.Skip("coi image not found, skipping integration test")
 	}
@@ -176,7 +176,7 @@ func TestResumeAllFrozen(t *testing.T) {
 
 	// Launch containers
 	for _, name := range containers {
-		_, err = container.IncusOutput("launch", "coi", name)
+		_, err = container.IncusOutput("launch", "coi-default", name)
 		if err != nil {
 			t.Fatalf("Failed to launch container %s: %v", name, err)
 		}

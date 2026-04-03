@@ -24,7 +24,7 @@ func TestResponderPauseActualContainer(t *testing.T) {
 	}
 
 	// Check if the coi image exists
-	exists, err := container.ImageExists("coi")
+	exists, err := container.ImageExists("coi-default")
 	if err != nil || !exists {
 		t.Skip("coi image not found, skipping integration test")
 	}
@@ -36,7 +36,7 @@ func TestResponderPauseActualContainer(t *testing.T) {
 	container.IncusOutput("delete", containerName, "--force")
 
 	// Launch container
-	_, err = container.IncusOutput("launch", "coi", containerName)
+	_, err = container.IncusOutput("launch", "coi-default", containerName)
 	if err != nil {
 		t.Fatalf("Failed to launch container: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestResponderHandlesAlreadyFrozen(t *testing.T) {
 	}
 
 	// Check if the coi image exists
-	exists, err := container.ImageExists("coi")
+	exists, err := container.ImageExists("coi-default")
 	if err != nil || !exists {
 		t.Skip("coi image not found, skipping integration test")
 	}
@@ -127,7 +127,7 @@ func TestResponderHandlesAlreadyFrozen(t *testing.T) {
 	container.IncusOutput("delete", containerName, "--force")
 
 	// Launch container
-	_, err = container.IncusOutput("launch", "coi", containerName)
+	_, err = container.IncusOutput("launch", "coi-default", containerName)
 	if err != nil {
 		t.Fatalf("Failed to launch container: %v", err)
 	}

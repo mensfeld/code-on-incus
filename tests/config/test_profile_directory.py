@@ -60,13 +60,13 @@ def test_profile_directory_image(coi_binary, cleanup_containers, workspace_dir):
     Test that a profile directory can set the image.
 
     Flow:
-    1. Create .coi/profiles/imgprof/config.toml with image = "coi"
+    1. Create .coi/profiles/imgprof/config.toml with image = "coi-default"
     2. Run coi run --profile imgprof -- echo ok
     3. Verify it runs successfully (image resolved)
     """
     profile_dir = Path(workspace_dir) / ".coi" / "profiles" / "imgprof"
     profile_dir.mkdir(parents=True)
-    (profile_dir / "config.toml").write_text('image = "coi"\n')
+    (profile_dir / "config.toml").write_text('image = "coi-default"\n')
 
     result = subprocess.run(
         [

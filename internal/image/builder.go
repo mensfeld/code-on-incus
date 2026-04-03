@@ -14,7 +14,7 @@ import (
 
 const (
 	BaseImage      = "images:ubuntu/22.04"
-	CoiAlias       = "coi"
+	CoiAlias       = "coi-default"
 	BuildContainer = "coi-build"
 )
 

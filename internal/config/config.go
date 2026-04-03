@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/BurntSushi/toml"
 )
 
 // Config represents the complete configuration
@@ -77,16 +79,6 @@ func (s *SecurityConfig) GetEffectiveProtectedPaths() []string {
 	return paths
 }
 
-// DefaultProtectedPaths returns the default list of paths to protect
-func DefaultProtectedPaths() []string {
-	return []string{
-		".git/hooks",  // Git hooks - execute on git operations
-		".git/config", // Git config - can set core.hooksPath to bypass hooks protection
-		".husky",      // Husky - popular git hooks manager
-		".vscode",     // VS Code - tasks.json can auto-execute, settings.json can inject shell args
-	}
-}
-
 // DefaultsConfig contains default settings
 type DefaultsConfig struct {
 	Image       string            `toml:"image"`
@@ -156,6 +148,16 @@ type ProfileConfig struct {
 	Network     *NetworkConfig    `toml:"network"`
 	ForwardEnv  []string          `toml:"forward_env"`
 	Source      string            `toml:"-"` // Where this profile was loaded from (not serialized)
+
+	// Extended fields — previously Config-only, now available in profiles
+	Model      string            `toml:"model"`
+	Paths      *PathsConfig      `toml:"paths"`
+	Incus      *IncusConfig      `toml:"incus"`
+	Git        *GitConfig        `toml:"git"`
+	SSH        *SSHConfig        `toml:"ssh"`
+	Security   *SecurityConfig   `toml:"security"`
+	Monitoring *MonitoringConfig `toml:"monitoring"`
+	Timezone   *TimezoneConfig   `toml:"timezone"`
 }
 
 // ToolConfig represents AI coding tool configuration
@@ -245,117 +247,65 @@ type MonitoringConfig struct {
 	NFT                   NFTMonitoringConfig `toml:"nft"`                       // nftables network monitoring
 }
 
-// GetDefaultConfig returns the default configuration
+// GetDefaultConfig returns the default configuration by parsing the embedded default config TOML.
 func GetDefaultConfig() *Config {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		homeDir = "/tmp" // Fallback if home dir cannot be determined
+	cfg := &Config{}
+	if _, err := toml.Decode(string(EmbeddedDefaultConfig), cfg); err != nil {
+		// Fatal: embedded config is broken — programming error
+		panic(fmt.Sprintf("failed to parse embedded default config: %v", err))
 	}
-	baseDir := filepath.Join(homeDir, ".coi")
 
-	return &Config{
-		Defaults: DefaultsConfig{
-			Image:      "coi",
-			Persistent: ptrBool(false),
-			Model:      "claude-sonnet-4-5",
-		},
-		Paths: PathsConfig{
-			SessionsDir: filepath.Join(baseDir, "sessions"),
-			StorageDir:  filepath.Join(baseDir, "storage"),
-			LogsDir:     filepath.Join(baseDir, "logs"),
-		},
-		Incus: IncusConfig{
-			Project:  "default",
-			Group:    "incus-admin",
-			CodeUID:  1000,
-			CodeUser: "code",
-		},
-		Network: NetworkConfig{
-			Mode:                  NetworkModeRestricted,
-			BlockPrivateNetworks:  ptrBool(true),
-			BlockMetadataEndpoint: ptrBool(true),
-			AllowedDomains: []string{
-				// Default allowlist for allowlist mode (--network=allowlist)
-				// Note: Gateway IP is auto-detected and added automatically
-				"8.8.8.8",             // Google DNS (REQUIRED for DNS resolution)
-				"1.1.1.1",             // Cloudflare DNS (REQUIRED for DNS resolution)
-				"registry.npmjs.org",  // npm package registry
-				"npm.pkg.github.com",  // GitHub packages
-				"api.anthropic.com",   // Claude API
-				"platform.claude.com", // Claude Platform (OAuth, Console)
-			},
-			AllowLocalNetworkAccess: ptrBool(false),
-			RefreshIntervalMinutes:  30,
-			Logging: NetworkLoggingConfig{
-				Enabled: ptrBool(true),
-				Path:    filepath.Join(baseDir, "logs", "network.log"),
-			},
-		},
-		Tool: ToolConfig{
-			Name:        "claude",
-			Binary:      "", // Empty means use tool's default binary name
-			AutoContext: ptrBool(true),
-		},
-		Mounts: MountsConfig{
-			Default: []MountEntry{},
-		},
-		Git: GitConfig{
-			WritableHooks: ptrBool(false),
-		},
-		SSH: SSHConfig{
-			ForwardAgent: ptrBool(false),
-		},
-		Security: SecurityConfig{
-			ProtectedPaths:           DefaultProtectedPaths(),
-			AdditionalProtectedPaths: []string{},
-			DisableProtection:        false,
-		},
-		Limits: LimitsConfig{
-			CPU: CPULimits{
-				Count:     "",
-				Allowance: "",
-				Priority:  0,
-			},
-			Memory: MemoryLimits{
-				Limit:   "",
-				Enforce: "soft",
-				Swap:    "true",
-			},
-			Disk: DiskLimits{
-				Read:      "",
-				Write:     "",
-				Max:       "",
-				Priority:  0,
-				TmpfsSize: "", // Default: use container root disk. Set "4GiB" etc. for RAM-backed tmpfs.
-			},
-			Runtime: RuntimeLimits{
-				MaxDuration:  "",
-				MaxProcesses: 0,
-				AutoStop:     ptrBool(true),
-				StopGraceful: ptrBool(true),
-			},
-		},
-		Monitoring: MonitoringConfig{
-			Enabled:               ptrBool(false),
-			AutoPauseOnHigh:       ptrBool(true),
-			AutoKillOnCritical:    ptrBool(true),
-			PollIntervalSec:       2,
-			FileReadThresholdMB:   50.0,
-			FileReadRateMBPerSec:  10.0,
-			AuditLogRetentionDays: 30,
-			NFT: NFTMonitoringConfig{
-				Enabled:            ptrBool(false),
-				RateLimitPerSecond: 100,
-				DNSQueryThreshold:  100,
-				LogDNSQueries:      ptrBool(true),
-				LimaHost:           "", // Empty for native Linux
-			},
-		},
-		Timezone: TimezoneConfig{
-			Mode: "host",
-		},
-		Profiles: make(map[string]ProfileConfig),
+	// Expand ~ in all path fields
+	expandConfigPaths(cfg)
+
+	// Initialize runtime-only fields
+	cfg.Profiles = make(map[string]ProfileConfig)
+
+	// Ensure empty slices are initialized (TOML doesn't set them)
+	if cfg.Security.AdditionalProtectedPaths == nil {
+		cfg.Security.AdditionalProtectedPaths = []string{}
 	}
+	if cfg.Mounts.Default == nil {
+		cfg.Mounts.Default = []MountEntry{}
+	}
+
+	return cfg
+}
+
+// expandConfigPaths expands ~ in all path fields of the config
+func expandConfigPaths(cfg *Config) {
+	cfg.Paths.SessionsDir = ExpandPath(cfg.Paths.SessionsDir)
+	cfg.Paths.StorageDir = ExpandPath(cfg.Paths.StorageDir)
+	cfg.Paths.LogsDir = ExpandPath(cfg.Paths.LogsDir)
+	cfg.Network.Logging.Path = ExpandPath(cfg.Network.Logging.Path)
+}
+
+// synthesizeDefaultProfile creates a ProfileConfig from the loaded Config,
+// representing the "default" built-in profile.
+func synthesizeDefaultProfile(cfg *Config) ProfileConfig {
+	p := ProfileConfig{
+		Image:       cfg.Defaults.Image,
+		Persistent:  cfg.Defaults.Persistent,
+		Model:       cfg.Defaults.Model,
+		Environment: cfg.Defaults.Environment,
+		ForwardEnv:  cfg.Defaults.ForwardEnv,
+		Limits:      &cfg.Limits,
+		Tool:        &cfg.Tool,
+		Network:     &cfg.Network,
+		Mounts:      cfg.Mounts.Default,
+		Paths:       &cfg.Paths,
+		Incus:       &cfg.Incus,
+		Git:         &cfg.Git,
+		SSH:         &cfg.SSH,
+		Security:    &cfg.Security,
+		Monitoring:  &cfg.Monitoring,
+		Timezone:    &cfg.Timezone,
+		Source:      "(built-in)",
+	}
+	if cfg.Build.HasBuildConfig() {
+		p.Build = &cfg.Build
+	}
+	return p
 }
 
 // GetConfigPaths returns the list of config file paths to check (in order)
@@ -818,6 +768,81 @@ func (c *Config) ApplyProfile(name string) error {
 		c.ProfileContextFile = profile.Context
 	}
 
+	// Apply new extended fields
+	if profile.Model != "" {
+		c.Defaults.Model = profile.Model
+	}
+
+	if profile.Paths != nil {
+		if profile.Paths.SessionsDir != "" {
+			c.Paths.SessionsDir = ExpandPath(profile.Paths.SessionsDir)
+		}
+		if profile.Paths.StorageDir != "" {
+			c.Paths.StorageDir = ExpandPath(profile.Paths.StorageDir)
+		}
+		if profile.Paths.LogsDir != "" {
+			c.Paths.LogsDir = ExpandPath(profile.Paths.LogsDir)
+		}
+		if profile.Paths.PreserveWorkspacePath {
+			c.Paths.PreserveWorkspacePath = true
+		}
+	}
+
+	if profile.Incus != nil {
+		if profile.Incus.Project != "" {
+			c.Incus.Project = profile.Incus.Project
+		}
+		if profile.Incus.Group != "" {
+			c.Incus.Group = profile.Incus.Group
+		}
+		if profile.Incus.CodeUID != 0 {
+			c.Incus.CodeUID = profile.Incus.CodeUID
+		}
+		if profile.Incus.CodeUser != "" {
+			c.Incus.CodeUser = profile.Incus.CodeUser
+		}
+		if profile.Incus.DisableShift {
+			c.Incus.DisableShift = true
+		}
+	}
+
+	if profile.Git != nil {
+		if profile.Git.WritableHooks != nil {
+			c.Git.WritableHooks = profile.Git.WritableHooks
+		}
+	}
+
+	if profile.SSH != nil {
+		if profile.SSH.ForwardAgent != nil {
+			c.SSH.ForwardAgent = profile.SSH.ForwardAgent
+		}
+	}
+
+	if profile.Security != nil {
+		if len(profile.Security.ProtectedPaths) > 0 {
+			c.Security.ProtectedPaths = profile.Security.ProtectedPaths
+		}
+		if len(profile.Security.AdditionalProtectedPaths) > 0 {
+			c.Security.AdditionalProtectedPaths = append(c.Security.AdditionalProtectedPaths, profile.Security.AdditionalProtectedPaths...)
+		}
+		if profile.Security.DisableProtection {
+			c.Security.DisableProtection = true
+		}
+	}
+
+	if profile.Monitoring != nil {
+		mergeMonitoring(&c.Monitoring, profile.Monitoring)
+	}
+
+	if profile.Timezone != nil {
+		if profile.Timezone.Mode != "" {
+			c.Timezone.Mode = profile.Timezone.Mode
+		}
+		if profile.Timezone.Name != "" {
+			c.Timezone.Name = profile.Timezone.Name
+		}
+	}
+
 	return nil
 }
 
@@ -945,6 +970,109 @@ func mergeProfiles(parent, child ProfileConfig) ProfileConfig {
 			merged.Logging.Enabled = result.Network.Logging.Enabled
 		}
 		result.Network = &merged
+	}
+
+	// New extended fields: scalar and struct pointer merges
+	if result.Model == "" {
+		result.Model = parent.Model
+	}
+
+	if result.Paths == nil {
+		result.Paths = parent.Paths
+	} else if parent.Paths != nil {
+		merged := *parent.Paths
+		if result.Paths.SessionsDir != "" {
+			merged.SessionsDir = result.Paths.SessionsDir
+		}
+		if result.Paths.StorageDir != "" {
+			merged.StorageDir = result.Paths.StorageDir
+		}
+		if result.Paths.LogsDir != "" {
+			merged.LogsDir = result.Paths.LogsDir
+		}
+		if result.Paths.PreserveWorkspacePath {
+			merged.PreserveWorkspacePath = true
+		}
+		result.Paths = &merged
+	}
+
+	if result.Incus == nil {
+		result.Incus = parent.Incus
+	} else if parent.Incus != nil {
+		merged := *parent.Incus
+		if result.Incus.Project != "" {
+			merged.Project = result.Incus.Project
+		}
+		if result.Incus.Group != "" {
+			merged.Group = result.Incus.Group
+		}
+		if result.Incus.CodeUID != 0 {
+			merged.CodeUID = result.Incus.CodeUID
+		}
+		if result.Incus.CodeUser != "" {
+			merged.CodeUser = result.Incus.CodeUser
+		}
+		if result.Incus.DisableShift {
+			merged.DisableShift = true
+		}
+		result.Incus = &merged
+	}
+
+	if result.Git == nil {
+		result.Git = parent.Git
+	} else if parent.Git != nil {
+		merged := *parent.Git
+		if result.Git.WritableHooks != nil {
+			merged.WritableHooks = result.Git.WritableHooks
+		}
+		result.Git = &merged
+	}
+
+	if result.SSH == nil {
+		result.SSH = parent.SSH
+	} else if parent.SSH != nil {
+		merged := *parent.SSH
+		if result.SSH.ForwardAgent != nil {
+			merged.ForwardAgent = result.SSH.ForwardAgent
+		}
+		result.SSH = &merged
+	}
+
+	if result.Security == nil {
+		result.Security = parent.Security
+	} else if parent.Security != nil {
+		merged := *parent.Security
+		if len(result.Security.ProtectedPaths) > 0 {
+			merged.ProtectedPaths = result.Security.ProtectedPaths
+		}
+		if len(result.Security.AdditionalProtectedPaths) > 0 {
+			merged.AdditionalProtectedPaths = result.Security.AdditionalProtectedPaths
+		}
+		if result.Security.DisableProtection {
+			merged.DisableProtection = true
+		}
+		result.Security = &merged
+	}
+
+	if result.Monitoring == nil {
+		result.Monitoring = parent.Monitoring
+	} else if parent.Monitoring != nil {
+		merged := *parent.Monitoring
+		mergeMonitoring(&merged, result.Monitoring)
+		result.Monitoring = &merged
+	}
+
+	if result.Timezone == nil {
+		result.Timezone = parent.Timezone
+	} else if parent.Timezone != nil {
+		merged := *parent.Timezone
+		if result.Timezone.Mode != "" {
+			merged.Mode = result.Timezone.Mode
+		}
+		if result.Timezone.Name != "" {
+			merged.Name = result.Timezone.Name
+		}
+		result.Timezone = &merged
 	}
 
 	// Source always comes from the child

@@ -22,7 +22,7 @@ def test_exists_coi_image(coi_binary, cleanup_containers):
     # === Phase 1: Check if coi image exists ===
 
     result = subprocess.run(
-        [coi_binary, "image", "exists", "coi"],
+        [coi_binary, "image", "exists", "coi-default"],
         capture_output=True,
         text=True,
         timeout=30,

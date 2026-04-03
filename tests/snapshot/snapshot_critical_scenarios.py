@@ -35,7 +35,7 @@ def test_workspace_files_not_in_snapshot(coi_binary, cleanup_containers, workspa
 
     # === Phase 1: Launch container ===
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container_name],
+        [coi_binary, "container", "launch", "coi-default", container_name],
         capture_output=True,
         text=True,
         timeout=120,
@@ -191,7 +191,7 @@ def test_session_data_restoration(coi_binary, cleanup_containers, workspace_dir)
 
     # === Phase 1: Launch container ===
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container_name],
+        [coi_binary, "container", "launch", "coi-default", container_name],
         capture_output=True,
         text=True,
         timeout=120,
@@ -323,7 +323,7 @@ def test_multiple_snapshot_branching(coi_binary, cleanup_containers, workspace_d
 
     # === Phase 1: Launch container ===
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container_name],
+        [coi_binary, "container", "launch", "coi-default", container_name],
         capture_output=True,
         text=True,
         timeout=120,
@@ -520,7 +520,7 @@ def test_file_permissions_preserved(coi_binary, cleanup_containers, workspace_di
 
     # === Phase 1: Launch container ===
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container_name],
+        [coi_binary, "container", "launch", "coi-default", container_name],
         capture_output=True,
         text=True,
         timeout=120,

@@ -19,7 +19,7 @@ func skipUnlessSSHAgentTestable(t *testing.T) {
 	if !container.Available() {
 		t.Skip("incus daemon not running, skipping integration test")
 	}
-	exists, err := container.ImageExists("coi")
+	exists, err := container.ImageExists("coi-default")
 	if err != nil || !exists {
 		t.Skip("coi image not found, skipping integration test (run 'coi build' first)")
 	}
@@ -85,7 +85,7 @@ func launchTestContainer(t *testing.T, name string) *container.Manager {
 		_ = mgr.Delete(true)
 	}
 
-	if err := mgr.Launch("coi", false); err != nil {
+	if err := mgr.Launch("coi-default", false); err != nil {
 		t.Fatalf("Failed to launch container: %v", err)
 	}
 
@@ -193,7 +193,7 @@ func TestSSHAgentForwarding_NoSocket(t *testing.T) {
 	}
 
 	// Only need init (not start) since we're testing that forwarding is skipped
-	if err := container.IncusExec("init", "coi", containerName); err != nil {
+	if err := container.IncusExec("init", "coi-default", containerName); err != nil {
 		t.Fatalf("Failed to init container: %v", err)
 	}
 
@@ -244,7 +244,7 @@ func TestSSHAgentForwarding_InvalidSocket(t *testing.T) {
 	}
 
 	// Only need init (not start) since we're testing that forwarding is skipped
-	if err := container.IncusExec("init", "coi", containerName); err != nil {
+	if err := container.IncusExec("init", "coi-default", containerName); err != nil {
 		t.Fatalf("Failed to init container: %v", err)
 	}
 

@@ -315,13 +315,13 @@ func TestCheckContainerConnectivity_WithImage(t *testing.T) {
 	}
 
 	// Check if the default 'coi' image exists
-	exists, err := container.ImageExists("coi")
+	exists, err := container.ImageExists("coi-default")
 	if err != nil || !exists {
 		t.Skip("coi image not found, skipping integration test (run 'coi build' first)")
 	}
 
 	// Run the actual connectivity check
-	result := CheckContainerConnectivity("coi")
+	result := CheckContainerConnectivity("coi-default")
 
 	if result.Name != "container_connectivity" {
 		t.Errorf("Expected check name 'container_connectivity', got '%s'", result.Name)
@@ -352,7 +352,7 @@ func TestCheckContainerConnectivity_WithImage(t *testing.T) {
 	}
 }
 
-// CheckContainerConnectivity should default to the "coi" image when called with an empty
+// CheckContainerConnectivity should default to the "coi-default" image when called with an empty
 // image name, skipping with StatusWarning if the default image doesn't exist or running
 // the full check if it does.
 func TestCheckContainerConnectivity_EmptyImageName(t *testing.T) {
@@ -367,7 +367,7 @@ func TestCheckContainerConnectivity_EmptyImageName(t *testing.T) {
 	}
 
 	// Check if the default 'coi' image exists
-	exists, err := container.ImageExists("coi")
+	exists, err := container.ImageExists("coi-default")
 	if err != nil {
 		t.Skip("could not check for coi image, skipping integration test")
 	}
@@ -408,7 +408,7 @@ func TestCheckContainerConnectivity_Cleanup(t *testing.T) {
 	}
 
 	// Check if the default 'coi' image exists
-	exists, err := container.ImageExists("coi")
+	exists, err := container.ImageExists("coi-default")
 	if err != nil || !exists {
 		t.Skip("coi image not found, skipping integration test")
 	}
@@ -418,7 +418,7 @@ func TestCheckContainerConnectivity_Cleanup(t *testing.T) {
 
 	// Run multiple checks to ensure cleanup works
 	for i := 0; i < 3; i++ {
-		_ = CheckContainerConnectivity("coi")
+		_ = CheckContainerConnectivity("coi-default")
 	}
 
 	// Count containers after
@@ -529,7 +529,7 @@ func TestCheckNetworkRestriction_NoFirewall(t *testing.T) {
 		t.Skip("firewalld is available, cannot test no-firewall scenario")
 	}
 
-	result := CheckNetworkRestriction("coi")
+	result := CheckNetworkRestriction("coi-default")
 
 	if result.Name != "network_restriction" {
 		t.Errorf("Expected check name 'network_restriction', got '%s'", result.Name)
@@ -602,13 +602,13 @@ func TestCheckNetworkRestriction_WithImage(t *testing.T) {
 	}
 
 	// Check if the default 'coi' image exists
-	exists, err := container.ImageExists("coi")
+	exists, err := container.ImageExists("coi-default")
 	if err != nil || !exists {
 		t.Skip("coi image not found, skipping integration test (run 'coi build' first)")
 	}
 
 	// Run the network restriction check
-	result := CheckNetworkRestriction("coi")
+	result := CheckNetworkRestriction("coi-default")
 
 	if result.Name != "network_restriction" {
 		t.Errorf("Expected check name 'network_restriction', got '%s'", result.Name)
@@ -662,7 +662,7 @@ func TestCheckNetworkRestriction_Cleanup(t *testing.T) {
 	}
 
 	// Check if the default 'coi' image exists
-	exists, err := container.ImageExists("coi")
+	exists, err := container.ImageExists("coi-default")
 	if err != nil || !exists {
 		t.Skip("coi image not found, skipping integration test")
 	}
@@ -671,7 +671,7 @@ func TestCheckNetworkRestriction_Cleanup(t *testing.T) {
 	containersBefore, _ := container.ListContainers("^coi-restriction-check-")
 
 	// Run the check
-	_ = CheckNetworkRestriction("coi")
+	_ = CheckNetworkRestriction("coi-default")
 
 	// Count containers after
 	containersAfter, err := container.ListContainers("^coi-restriction-check-")

@@ -59,7 +59,7 @@ def test_persist_basic(coi_binary, cleanup_containers, workspace_dir):
     # === Phase 1: Launch ephemeral container ===
 
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container_name],
+        [coi_binary, "container", "launch", "coi-default", container_name],
         capture_output=True,
         text=True,
         timeout=120,

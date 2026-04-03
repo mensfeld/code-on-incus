@@ -243,7 +243,7 @@ func CheckPermissions() HealthCheck {
 // CheckImage verifies that the default image exists
 func CheckImage(imageName string) HealthCheck {
 	if imageName == "" {
-		imageName = "coi"
+		imageName = "coi-default"
 	}
 
 	exists, err := container.ImageExists(imageName)
@@ -747,7 +747,7 @@ func CheckDNS() HealthCheck {
 func CheckContainerConnectivity(imageName string) HealthCheck {
 	// Skip if no image available
 	if imageName == "" {
-		imageName = "coi"
+		imageName = "coi-default"
 	}
 
 	exists, err := container.ImageExists(imageName)
@@ -949,7 +949,7 @@ func CheckNetworkRestriction(imageName string) HealthCheck {
 
 	// Skip if no image available
 	if imageName == "" {
-		imageName = "coi"
+		imageName = "coi-default"
 	}
 
 	exists, err := container.ImageExists(imageName)
@@ -1423,7 +1423,7 @@ func CheckSavedSessions(cfg *config.Config) HealthCheck {
 // CheckImageAge checks if the COI image is outdated
 func CheckImageAge(imageName string) HealthCheck {
 	if imageName == "" {
-		imageName = "coi"
+		imageName = "coi-default"
 	}
 
 	// Get image info

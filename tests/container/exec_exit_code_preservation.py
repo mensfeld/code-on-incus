@@ -11,7 +11,7 @@ def test_exec_exit_code_preservation_raw(coi_binary, cleanup_containers, workspa
 
     # Launch container
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container_name],
+        [coi_binary, "container", "launch", "coi-default", container_name],
         capture_output=True,
         text=True,
         timeout=120,
@@ -92,7 +92,7 @@ def test_exec_exit_code_preservation_json(coi_binary, cleanup_containers, worksp
 
     # Launch container
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container_name],
+        [coi_binary, "container", "launch", "coi-default", container_name],
         capture_output=True,
         text=True,
         timeout=120,

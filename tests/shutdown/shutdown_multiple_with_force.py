@@ -27,7 +27,7 @@ def test_shutdown_multiple_with_force(coi_binary, cleanup_containers, workspace_
 
     # Launch first container
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container1],
+        [coi_binary, "container", "launch", "coi-default", container1],
         capture_output=True,
         text=True,
         timeout=120,
@@ -36,7 +36,7 @@ def test_shutdown_multiple_with_force(coi_binary, cleanup_containers, workspace_
 
     # Launch second container
     result = subprocess.run(
-        [coi_binary, "container", "launch", "coi", container2],
+        [coi_binary, "container", "launch", "coi-default", container2],
         capture_output=True,
         text=True,
         timeout=120,
