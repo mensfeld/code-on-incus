@@ -858,7 +858,13 @@ print("Task completed")
         time.sleep(5)
 
         # Container should still be running (WARNING doesn't kill)
-        state = get_container_state(container_name)
+        # Retry a few times to handle transient incus list hiccups
+        state = "Unknown"
+        for _ in range(10):
+            state = get_container_state(container_name)
+            if state == "Running":
+                break
+            time.sleep(1)
         assert state == "Running", f"Container should stay running on WARNING, got {state}"
 
         # Verify WARNING in audit log
