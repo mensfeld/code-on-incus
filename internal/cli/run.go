@@ -64,7 +64,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	// Generate container name
 	containerName := session.ContainerName(absWorkspace, slotNum)
 
-	// Determine image: CLI --image flag > config defaults.image > "coi"
+	// Determine image: CLI --image flag > config defaults.image > "coi-default"
 	img := ResolveImageName(imageName, cfg)
 
 	// Check if image exists, auto-build from config if possible
@@ -329,7 +329,7 @@ func waitForContainer(mgr *container.Manager, maxRetries int) error {
 // image default (1000) to the configured container.CodeUID. Only runs for fresh
 // COI containers when the configured UID differs from the image default.
 func remapContainerUserIfNeeded(mgr *container.Manager, img string, wasRestarted bool) error {
-	if wasRestarted || img != "coi" || container.CodeUID == 1000 {
+	if wasRestarted || img != session.CoiImage || container.CodeUID == 1000 {
 		return nil
 	}
 	fmt.Fprintf(os.Stderr, "Remapping user %s from UID 1000 to %d...\n", container.CodeUser, container.CodeUID)

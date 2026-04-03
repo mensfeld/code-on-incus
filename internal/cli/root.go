@@ -87,7 +87,7 @@ func init() {
 	// Global flags available to all commands
 	rootCmd.PersistentFlags().StringVarP(&workspace, "workspace", "w", ".", "Workspace directory to mount")
 	rootCmd.PersistentFlags().IntVar(&slot, "slot", 0, "Slot number for parallel sessions (0 = auto-allocate)")
-	rootCmd.PersistentFlags().StringVar(&imageName, "image", "", "Custom image to use (default: coi)")
+	rootCmd.PersistentFlags().StringVar(&imageName, "image", "", "Custom image to use (default: coi-default)")
 	rootCmd.PersistentFlags().BoolVar(&persistent, "persistent", false, "Reuse container across sessions")
 	rootCmd.PersistentFlags().StringVar(&resume, "resume", "", "Resume from session ID (omit value to auto-detect)")
 	rootCmd.PersistentFlags().Lookup("resume").NoOptDefVal = "auto"

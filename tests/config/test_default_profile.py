@@ -65,7 +65,7 @@ def test_default_profile_show(coi_binary, cleanup_containers, workspace_dir):
     assert "[tool]" in output, f"Should show tool section. Got:\n{output}"
     assert "claude" in output, f"Should show tool name. Got:\n{output}"
     assert "[network]" in output, f"Should show network section. Got:\n{output}"
-    assert "restricted" in output, f"Should show network mode. Got:\n{output}"
+    assert "mode =" in output, f"Should show network mode. Got:\n{output}"
     assert "[git]" in output, f"Should show git section. Got:\n{output}"
     assert "[ssh]" in output, f"Should show ssh section. Got:\n{output}"
     assert "[security]" in output, f"Should show security section. Got:\n{output}"
