@@ -8,9 +8,7 @@ import subprocess
 from pathlib import Path
 
 
-def test_profile_inheritance_limits_merged(
-    coi_binary, cleanup_containers, workspace_dir
-):
+def test_profile_inheritance_limits_merged(coi_binary, cleanup_containers, workspace_dir):
     """Child overrides one limit, parent's other limits kept."""
     coi_dir = Path(workspace_dir) / ".coi" / "profiles"
 
@@ -40,23 +38,17 @@ def test_profile_inheritance_limits_merged(
     assert "4GiB" in output, f"Should have memory limit from child. Got:\n{output}"
 
 
-def test_profile_inheritance_tool_merged(
-    coi_binary, cleanup_containers, workspace_dir
-):
+def test_profile_inheritance_tool_merged(coi_binary, cleanup_containers, workspace_dir):
     """Child overrides tool name, parent's permission_mode kept."""
     coi_dir = Path(workspace_dir) / ".coi" / "profiles"
 
     parent_dir = coi_dir / "parent"
     parent_dir.mkdir(parents=True)
-    (parent_dir / "config.toml").write_text(
-        '[tool]\nname = "claude"\npermission_mode = "bypass"\n'
-    )
+    (parent_dir / "config.toml").write_text('[tool]\nname = "claude"\npermission_mode = "bypass"\n')
 
     child_dir = coi_dir / "child"
     child_dir.mkdir(parents=True)
-    (child_dir / "config.toml").write_text(
-        'inherits = "parent"\n\n[tool]\nname = "aider"\n'
-    )
+    (child_dir / "config.toml").write_text('inherits = "parent"\n\n[tool]\nname = "aider"\n')
 
     result = subprocess.run(
         [coi_binary, "profile", "show", "child", "--workspace", workspace_dir],
@@ -72,23 +64,17 @@ def test_profile_inheritance_tool_merged(
     assert "bypass" in output, f"Should inherit parent permission_mode. Got:\n{output}"
 
 
-def test_profile_inheritance_network_inherited(
-    coi_binary, cleanup_containers, workspace_dir
-):
+def test_profile_inheritance_network_inherited(coi_binary, cleanup_containers, workspace_dir):
     """Child without [network] gets parent's network."""
     coi_dir = Path(workspace_dir) / ".coi" / "profiles"
 
     parent_dir = coi_dir / "parent"
     parent_dir.mkdir(parents=True)
-    (parent_dir / "config.toml").write_text(
-        '[network]\nmode = "restricted"\n'
-    )
+    (parent_dir / "config.toml").write_text('[network]\nmode = "restricted"\n')
 
     child_dir = coi_dir / "child"
     child_dir.mkdir(parents=True)
-    (child_dir / "config.toml").write_text(
-        'inherits = "parent"\nimage = "coi"\n'
-    )
+    (child_dir / "config.toml").write_text('inherits = "parent"\nimage = "coi"\n')
 
     result = subprocess.run(
         [coi_binary, "profile", "show", "child", "--workspace", workspace_dir],

@@ -9,17 +9,13 @@ import subprocess
 from pathlib import Path
 
 
-def test_profile_inheritance_env_merged(
-    coi_binary, cleanup_containers, workspace_dir
-):
+def test_profile_inheritance_env_merged(coi_binary, cleanup_containers, workspace_dir):
     """Child env key added alongside parent's keys."""
     coi_dir = Path(workspace_dir) / ".coi" / "profiles"
 
     parent_dir = coi_dir / "parent"
     parent_dir.mkdir(parents=True)
-    (parent_dir / "config.toml").write_text(
-        '[environment]\nEDITOR = "vim"\n'
-    )
+    (parent_dir / "config.toml").write_text('[environment]\nEDITOR = "vim"\n')
 
     child_dir = coi_dir / "child"
     child_dir.mkdir(parents=True)
@@ -41,17 +37,13 @@ def test_profile_inheritance_env_merged(
     assert "NEW_VAR" in output, f"Should have child env var NEW_VAR. Got:\n{output}"
 
 
-def test_profile_inheritance_env_override(
-    coi_binary, cleanup_containers, workspace_dir
-):
+def test_profile_inheritance_env_override(coi_binary, cleanup_containers, workspace_dir):
     """Child env key overrides same parent key."""
     coi_dir = Path(workspace_dir) / ".coi" / "profiles"
 
     parent_dir = coi_dir / "parent"
     parent_dir.mkdir(parents=True)
-    (parent_dir / "config.toml").write_text(
-        '[environment]\nRUST_BACKTRACE = "1"\n'
-    )
+    (parent_dir / "config.toml").write_text('[environment]\nRUST_BACKTRACE = "1"\n')
 
     child_dir = coi_dir / "child"
     child_dir.mkdir(parents=True)
@@ -72,23 +64,17 @@ def test_profile_inheritance_env_override(
     assert "full" in output, f"Child should override parent RUST_BACKTRACE. Got:\n{output}"
 
 
-def test_profile_inheritance_env_clear_with_empty(
-    coi_binary, cleanup_containers, workspace_dir
-):
+def test_profile_inheritance_env_clear_with_empty(coi_binary, cleanup_containers, workspace_dir):
     """Child sets parent key to empty string to clear it."""
     coi_dir = Path(workspace_dir) / ".coi" / "profiles"
 
     parent_dir = coi_dir / "parent"
     parent_dir.mkdir(parents=True)
-    (parent_dir / "config.toml").write_text(
-        '[environment]\nSECRET = "abc"\nKEEP = "yes"\n'
-    )
+    (parent_dir / "config.toml").write_text('[environment]\nSECRET = "abc"\nKEEP = "yes"\n')
 
     child_dir = coi_dir / "child"
     child_dir.mkdir(parents=True)
-    (child_dir / "config.toml").write_text(
-        'inherits = "parent"\n\n[environment]\nSECRET = ""\n'
-    )
+    (child_dir / "config.toml").write_text('inherits = "parent"\n\n[environment]\nSECRET = ""\n')
 
     result = subprocess.run(
         [coi_binary, "profile", "show", "child", "--workspace", workspace_dir],
@@ -104,17 +90,13 @@ def test_profile_inheritance_env_clear_with_empty(
     assert "KEEP" in output, f"KEEP should be inherited. Got:\n{output}"
 
 
-def test_profile_inheritance_env_parent_only(
-    coi_binary, cleanup_containers, workspace_dir
-):
+def test_profile_inheritance_env_parent_only(coi_binary, cleanup_containers, workspace_dir):
     """Child without [environment] gets all parent env vars."""
     coi_dir = Path(workspace_dir) / ".coi" / "profiles"
 
     parent_dir = coi_dir / "parent"
     parent_dir.mkdir(parents=True)
-    (parent_dir / "config.toml").write_text(
-        '[environment]\nPARENT_VAR = "hello"\n'
-    )
+    (parent_dir / "config.toml").write_text('[environment]\nPARENT_VAR = "hello"\n')
 
     child_dir = coi_dir / "child"
     child_dir.mkdir(parents=True)

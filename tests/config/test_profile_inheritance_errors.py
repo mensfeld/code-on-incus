@@ -45,9 +45,7 @@ def test_profile_inheritance_chain(coi_binary, cleanup_containers, workspace_dir
     assert "GP_ONLY" in output, f"GP_ONLY from grandparent. Got:\n{output}"
 
 
-def test_profile_inheritance_missing_parent_fails(
-    coi_binary, cleanup_containers, workspace_dir
-):
+def test_profile_inheritance_missing_parent_fails(coi_binary, cleanup_containers, workspace_dir):
     """Error when parent profile doesn't exist."""
     coi_dir = Path(workspace_dir) / ".coi" / "profiles"
 
@@ -68,9 +66,7 @@ def test_profile_inheritance_missing_parent_fails(
     assert "not found" in combined.lower(), f"Should mention not found. Got:\n{combined}"
 
 
-def test_profile_inheritance_cycle_fails(
-    coi_binary, cleanup_containers, workspace_dir
-):
+def test_profile_inheritance_cycle_fails(coi_binary, cleanup_containers, workspace_dir):
     """A -> B -> A produces clear error."""
     coi_dir = Path(workspace_dir) / ".coi" / "profiles"
 
@@ -95,9 +91,7 @@ def test_profile_inheritance_cycle_fails(
     assert "cycle" in combined.lower(), f"Should mention cycle. Got:\n{combined}"
 
 
-def test_profile_inheritance_self_cycle_fails(
-    coi_binary, cleanup_containers, workspace_dir
-):
+def test_profile_inheritance_self_cycle_fails(coi_binary, cleanup_containers, workspace_dir):
     """A -> A produces clear error."""
     coi_dir = Path(workspace_dir) / ".coi" / "profiles"
 
@@ -118,9 +112,7 @@ def test_profile_inheritance_self_cycle_fails(
     assert "cycle" in combined.lower(), f"Should mention cycle. Got:\n{combined}"
 
 
-def test_profile_inheritance_cross_level(
-    coi_binary, cleanup_containers, workspace_dir, tmp_path
-):
+def test_profile_inheritance_cross_level(coi_binary, cleanup_containers, workspace_dir, tmp_path):
     """Project-level profile inherits from user-level profile."""
     # Create a user-level config dir with a parent profile
     user_config_dir = tmp_path / "user_config"

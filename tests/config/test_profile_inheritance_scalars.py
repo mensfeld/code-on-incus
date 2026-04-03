@@ -8,9 +8,7 @@ import subprocess
 from pathlib import Path
 
 
-def test_profile_inheritance_image_from_parent(
-    coi_binary, cleanup_containers, workspace_dir
-):
+def test_profile_inheritance_image_from_parent(coi_binary, cleanup_containers, workspace_dir):
     """Child without image gets parent's image."""
     coi_dir = Path(workspace_dir) / ".coi" / "profiles"
 
@@ -35,9 +33,7 @@ def test_profile_inheritance_image_from_parent(
     assert "coi-parent" in output, f"Should inherit parent image. Got:\n{output}"
 
 
-def test_profile_inheritance_image_overridden(
-    coi_binary, cleanup_containers, workspace_dir
-):
+def test_profile_inheritance_image_overridden(coi_binary, cleanup_containers, workspace_dir):
     """Child with image overrides parent's image."""
     coi_dir = Path(workspace_dir) / ".coi" / "profiles"
 
@@ -47,9 +43,7 @@ def test_profile_inheritance_image_overridden(
 
     child_dir = coi_dir / "child"
     child_dir.mkdir(parents=True)
-    (child_dir / "config.toml").write_text(
-        'inherits = "parent"\nimage = "coi-child"\n'
-    )
+    (child_dir / "config.toml").write_text('inherits = "parent"\nimage = "coi-child"\n')
 
     result = subprocess.run(
         [coi_binary, "profile", "show", "child", "--workspace", workspace_dir],
@@ -64,9 +58,7 @@ def test_profile_inheritance_image_overridden(
     assert "coi-child" in output, f"Should show child's overridden image. Got:\n{output}"
 
 
-def test_profile_inheritance_persistent_from_parent(
-    coi_binary, cleanup_containers, workspace_dir
-):
+def test_profile_inheritance_persistent_from_parent(coi_binary, cleanup_containers, workspace_dir):
     """Child inherits parent's persistent flag."""
     coi_dir = Path(workspace_dir) / ".coi" / "profiles"
 

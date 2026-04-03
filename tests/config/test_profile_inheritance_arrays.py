@@ -9,9 +9,7 @@ import subprocess
 from pathlib import Path
 
 
-def test_profile_inheritance_mounts_replaced(
-    coi_binary, cleanup_containers, workspace_dir
-):
+def test_profile_inheritance_mounts_replaced(coi_binary, cleanup_containers, workspace_dir):
     """Child defines mounts - parent's mounts gone."""
     coi_dir = Path(workspace_dir) / ".coi" / "profiles"
 
@@ -41,9 +39,7 @@ def test_profile_inheritance_mounts_replaced(
     assert "~/.ssh" not in output, f"Parent mount should be replaced. Got:\n{output}"
 
 
-def test_profile_inheritance_mounts_inherited(
-    coi_binary, cleanup_containers, workspace_dir
-):
+def test_profile_inheritance_mounts_inherited(coi_binary, cleanup_containers, workspace_dir):
     """Child without mounts gets parent's mounts."""
     coi_dir = Path(workspace_dir) / ".coi" / "profiles"
 
@@ -55,9 +51,7 @@ def test_profile_inheritance_mounts_inherited(
 
     child_dir = coi_dir / "child"
     child_dir.mkdir(parents=True)
-    (child_dir / "config.toml").write_text(
-        'inherits = "parent"\nimage = "coi-child"\n'
-    )
+    (child_dir / "config.toml").write_text('inherits = "parent"\nimage = "coi-child"\n')
 
     result = subprocess.run(
         [coi_binary, "profile", "show", "child", "--workspace", workspace_dir],
@@ -72,23 +66,17 @@ def test_profile_inheritance_mounts_inherited(
     assert "~/.ssh" in output, f"Should inherit parent mounts. Got:\n{output}"
 
 
-def test_profile_inheritance_forward_env_replaced(
-    coi_binary, cleanup_containers, workspace_dir
-):
+def test_profile_inheritance_forward_env_replaced(coi_binary, cleanup_containers, workspace_dir):
     """Child defines forward_env - replaces parent's."""
     coi_dir = Path(workspace_dir) / ".coi" / "profiles"
 
     parent_dir = coi_dir / "parent"
     parent_dir.mkdir(parents=True)
-    (parent_dir / "config.toml").write_text(
-        'forward_env = ["SSH_AUTH_SOCK"]\n'
-    )
+    (parent_dir / "config.toml").write_text('forward_env = ["SSH_AUTH_SOCK"]\n')
 
     child_dir = coi_dir / "child"
     child_dir.mkdir(parents=True)
-    (child_dir / "config.toml").write_text(
-        'inherits = "parent"\nforward_env = ["API_KEY"]\n'
-    )
+    (child_dir / "config.toml").write_text('inherits = "parent"\nforward_env = ["API_KEY"]\n')
 
     result = subprocess.run(
         [coi_binary, "profile", "show", "child", "--workspace", workspace_dir],
@@ -104,23 +92,17 @@ def test_profile_inheritance_forward_env_replaced(
     assert "SSH_AUTH_SOCK" not in output, f"Parent forward_env replaced. Got:\n{output}"
 
 
-def test_profile_inheritance_forward_env_inherited(
-    coi_binary, cleanup_containers, workspace_dir
-):
+def test_profile_inheritance_forward_env_inherited(coi_binary, cleanup_containers, workspace_dir):
     """Child without forward_env gets parent's."""
     coi_dir = Path(workspace_dir) / ".coi" / "profiles"
 
     parent_dir = coi_dir / "parent"
     parent_dir.mkdir(parents=True)
-    (parent_dir / "config.toml").write_text(
-        'forward_env = ["SSH_AUTH_SOCK"]\n'
-    )
+    (parent_dir / "config.toml").write_text('forward_env = ["SSH_AUTH_SOCK"]\n')
 
     child_dir = coi_dir / "child"
     child_dir.mkdir(parents=True)
-    (child_dir / "config.toml").write_text(
-        'inherits = "parent"\nimage = "coi"\n'
-    )
+    (child_dir / "config.toml").write_text('inherits = "parent"\nimage = "coi"\n')
 
     result = subprocess.run(
         [coi_binary, "profile", "show", "child", "--workspace", workspace_dir],
