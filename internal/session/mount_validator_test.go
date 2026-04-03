@@ -36,7 +36,91 @@ func TestValidateMounts_DetectsNesting(t *testing.T) {
 
 			config := &MountConfig{Mounts: mounts}
 			if err := ValidateMounts(config); err == nil {
-				t.Errorf("Expected error for nested paths %v", tt.paths)
+				t.Errorf("Expected error for nested writable paths %v", tt.paths)
+			}
+		})
+	}
+}
+
+func TestValidateMounts_AllowsReadonlyChildNesting(t *testing.T) {
+	tests := []struct {
+		name   string
+		mounts []MountEntry
+	}{
+		{
+			"readonly-child-under-writable-parent",
+			[]MountEntry{
+				{ContainerPath: "/home/code/.claude"},
+				{ContainerPath: "/home/code/.claude/skills", Readonly: true},
+			},
+		},
+		{
+			"readonly-child-listed-first",
+			[]MountEntry{
+				{ContainerPath: "/home/code/.claude/skills", Readonly: true},
+				{ContainerPath: "/home/code/.claude"},
+			},
+		},
+		{
+			"multiple-readonly-children",
+			[]MountEntry{
+				{ContainerPath: "/home/code/.claude"},
+				{ContainerPath: "/home/code/.claude/skills", Readonly: true},
+				{ContainerPath: "/home/code/.claude/commands", Readonly: true},
+			},
+		},
+		{
+			"deep-readonly-nesting",
+			[]MountEntry{
+				{ContainerPath: "/a/b"},
+				{ContainerPath: "/a/b/c/d", Readonly: true},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := &MountConfig{Mounts: tt.mounts}
+			if err := ValidateMounts(config); err != nil {
+				t.Errorf("Expected no error for readonly child nesting, got: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateMounts_RejectsWritableChildNesting(t *testing.T) {
+	tests := []struct {
+		name   string
+		mounts []MountEntry
+	}{
+		{
+			"writable-child-under-writable-parent",
+			[]MountEntry{
+				{ContainerPath: "/data"},
+				{ContainerPath: "/data/subdir"},
+			},
+		},
+		{
+			"readonly-parent-writable-child",
+			[]MountEntry{
+				{ContainerPath: "/data", Readonly: true},
+				{ContainerPath: "/data/subdir"},
+			},
+		},
+		{
+			"exact-duplicate-one-readonly",
+			[]MountEntry{
+				{ContainerPath: "/data", Readonly: true},
+				{ContainerPath: "/data"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			config := &MountConfig{Mounts: tt.mounts}
+			if err := ValidateMounts(config); err == nil {
+				t.Errorf("Expected error for writable child nesting")
 			}
 		})
 	}
