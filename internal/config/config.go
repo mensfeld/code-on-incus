@@ -144,7 +144,7 @@ type NetworkLoggingConfig struct {
 
 // ProfileConfig represents a named profile
 type ProfileConfig struct {
-	Inherits    string            `toml:"inherits"`    // Parent profile name for inheritance
+	Inherits    string            `toml:"inherits"` // Parent profile name for inheritance
 	Image       string            `toml:"image"`
 	Context     string            `toml:"context"` // Path to context .md file (resolved relative to profile dir)
 	Environment map[string]string `toml:"environment"`
