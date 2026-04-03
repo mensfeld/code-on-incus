@@ -6,6 +6,7 @@ subdirectory mount must overlay the parent writable mount correctly — reads sh
 work, writes should fail on the subdir, and the parent should remain writable.
 """
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -141,6 +142,9 @@ def test_readonly_subdir_parent_still_writable(
     skills_dir = claude_dir / "skills"
     skills_dir.mkdir()
     (skills_dir / "skill.md").write_text("read-only-skill")
+
+    # Ensure the container user can write to the parent mount directory
+    os.chmod(claude_dir, 0o777)
 
     config_content = f"""\
 [[mounts.default]]
