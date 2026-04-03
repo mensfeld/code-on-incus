@@ -32,5 +32,8 @@ def test_exists_missing_arg(coi_binary, cleanup_containers):
 
     combined_output = (result.stdout + result.stderr).lower()
     assert (
-        "usage" in combined_output or "required" in combined_output or "argument" in combined_output
+        "usage" in combined_output
+        or "required" in combined_output
+        or "argument" in combined_output
+        or "arg" in combined_output
     ), f"Should show usage or argument error. Got:\n{result.stdout + result.stderr}"

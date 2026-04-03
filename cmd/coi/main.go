@@ -22,7 +22,7 @@ func main() {
 			}
 			os.Exit(exitErr.Code)
 		}
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, "Error:", err)
 		os.Exit(1)
 	}
 }

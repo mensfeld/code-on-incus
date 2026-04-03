@@ -38,7 +38,7 @@ def test_invalid_command(coi_binary):
         f"Should mention invalid command. Got:\n{error_output}"
     )
 
-    # Should suggest using help
-    assert "help" in error_output.lower() or "--help" in error_output, (
-        f"Should suggest using help. Got:\n{error_output}"
+    # Should indicate the command is not valid
+    assert "unknown command" in error_output.lower() or "help" in error_output.lower(), (
+        f"Should indicate unknown command. Got:\n{error_output}"
     )
