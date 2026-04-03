@@ -15,7 +15,6 @@ DNS misconfigurations that occur on various systems:
 
 import subprocess
 import time
-from pathlib import Path
 
 import pytest
 
@@ -67,7 +66,9 @@ def restore_dns_config(network_name):
     )
 
 
-def _create_profile(tmp_path, profile_name, image_name, build_script_content, base="images:ubuntu/22.04"):
+def _create_profile(
+    tmp_path, profile_name, image_name, build_script_content, base="images:ubuntu/22.04"
+):
     """Helper to create a profile directory with config and build script.
 
     Args:
@@ -84,11 +85,7 @@ def _create_profile(tmp_path, profile_name, image_name, build_script_content, ba
     profile_dir.mkdir(parents=True, exist_ok=True)
 
     (profile_dir / "config.toml").write_text(
-        f'image = "{image_name}"\n'
-        f"\n"
-        f"[build]\n"
-        f'base = "{base}"\n'
-        f'script = "build.sh"\n'
+        f'image = "{image_name}"\n\n[build]\nbase = "{base}"\nscript = "build.sh"\n'
     )
 
     (profile_dir / "build.sh").write_text(build_script_content)
@@ -198,7 +195,7 @@ def test_dns_works_in_container_from_fixed_image(coi_binary, tmp_path):
     """
     Test that containers started from a DNS-fixed image have working DNS.
 
-    This verifies that the permanent DNS fix in scripts/build/coi.sh correctly
+    This verifies that the permanent DNS fix in profiles/default/build.sh correctly
     persists static DNS configuration into the built image.
 
     Flow:

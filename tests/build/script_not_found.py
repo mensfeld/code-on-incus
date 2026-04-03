@@ -15,10 +15,7 @@ def test_build_custom_script_not_found(coi_binary, tmp_path):
     profile_dir.mkdir(parents=True)
 
     (profile_dir / "config.toml").write_text(
-        'image = "test-image"\n'
-        "\n"
-        "[build]\n"
-        'script = "/nonexistent/script.sh"\n'
+        'image = "test-image"\n\n[build]\nscript = "/nonexistent/script.sh"\n'
     )
 
     result = subprocess.run(

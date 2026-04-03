@@ -27,9 +27,9 @@ __pycache__/
 # Build artifacts
 dist/
 build/
-!scripts/build
 !tests/build
 internal/image/embedded/
+internal/config/embedded/
 
 # Test artifacts
 tmp/

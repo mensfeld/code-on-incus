@@ -61,13 +61,9 @@ def test_profile_list_shows_default(coi_binary, cleanup_containers, workspace_di
         cwd=workspace_dir,
     )
 
-    assert result.returncode == 0, (
-        f"profile list should succeed. stderr: {result.stderr}"
-    )
+    assert result.returncode == 0, f"profile list should succeed. stderr: {result.stderr}"
     output = result.stdout + result.stderr
-    assert "default" in output, (
-        f"Should show built-in 'default' profile. Got:\n{output}"
-    )
+    assert "default" in output, f"Should show built-in 'default' profile. Got:\n{output}"
     assert "(built-in)" in output, (
         f"Should show '(built-in)' as source for default profile. Got:\n{output}"
     )

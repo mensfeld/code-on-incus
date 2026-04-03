@@ -54,10 +54,7 @@ def test_build_custom_with_compression_none(coi_binary, tmp_path):
     profile_dir.mkdir(parents=True)
 
     (profile_dir / "config.toml").write_text(
-        f'image = "{image_name}"\n'
-        f"\n"
-        f"[build]\n"
-        f'script = "build.sh"\n'
+        f'image = "{image_name}"\n\n[build]\nscript = "build.sh"\n'
     )
 
     (profile_dir / "build.sh").write_text("""#!/bin/bash

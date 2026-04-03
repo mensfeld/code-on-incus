@@ -35,7 +35,9 @@ jobs:
       - name: Prepare embedded build assets
         run: |
           mkdir -p internal/image/embedded
-          cp scripts/build/coi.sh internal/image/embedded/coi_build.sh
+          mkdir -p internal/config/embedded
+          cp profiles/default/build.sh internal/image/embedded/coi_build.sh
+          cp profiles/default/config.toml internal/config/embedded/default_config.toml
           cp testdata/dummy/dummy internal/image/embedded/dummy
 
       - name: Run golangci-lint
@@ -70,7 +72,9 @@ jobs:
       - name: Prepare embedded build assets
         run: |
           mkdir -p internal/image/embedded
-          cp scripts/build/coi.sh internal/image/embedded/coi_build.sh
+          mkdir -p internal/config/embedded
+          cp profiles/default/build.sh internal/image/embedded/coi_build.sh
+          cp profiles/default/config.toml internal/config/embedded/default_config.toml
           cp testdata/dummy/dummy internal/image/embedded/dummy
 
       - name: Run unit tests with coverage and race detector
@@ -353,7 +357,9 @@ jobs:
       - name: Prepare embedded build assets
         run: |
           mkdir -p internal/image/embedded
-          cp scripts/build/coi.sh internal/image/embedded/coi_build.sh
+          mkdir -p internal/config/embedded
+          cp profiles/default/build.sh internal/image/embedded/coi_build.sh
+          cp profiles/default/config.toml internal/config/embedded/default_config.toml
           cp testdata/dummy/dummy internal/image/embedded/dummy
 
       - name: Build COI binary
@@ -424,13 +430,13 @@ jobs:
         uses: actions/cache/restore@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
           path: /tmp/coi-image.tar.gz
-          key: ${{ runner.os }}-coi-image-${{ hashFiles('internal/image/**', 'testdata/dummy/**', 'scripts/build/**') }}
+          key: ${{ runner.os }}-coi-image-${{ hashFiles('internal/image/**', 'testdata/dummy/**', 'profiles/default/**') }}
 
       - name: Import COI image from cache
         if: steps.cache-coi-image.outputs.cache-hit == 'true'
         run: |
           echo "Restoring COI image from cache..."
-          incus image import /tmp/coi-image.tar.gz --alias coi
+          incus image import /tmp/coi-image.tar.gz --alias coi-default
           ./coi images
 
       - name: Build COI image
@@ -452,14 +458,14 @@ jobs:
           done
           ./coi images
           # Export image for caching
-          incus image export coi /tmp/coi-image
+          incus image export coi-default /tmp/coi-image
 
       - name: Save COI image to cache
         if: steps.cache-coi-image.outputs.cache-hit != 'true'
         uses: actions/cache/save@668228422ae6a00e4ad889ee87cd7109ec5666a7 # v5.0.4
         with:
           path: /tmp/coi-image.tar.gz
-          key: ${{ runner.os }}-coi-image-${{ hashFiles('internal/image/**', 'testdata/dummy/**', 'scripts/build/**') }}
+          key: ${{ runner.os }}-coi-image-${{ hashFiles('internal/image/**', 'testdata/dummy/**', 'profiles/default/**') }}
 
       - name: Debug iptables state before tests
         run: |

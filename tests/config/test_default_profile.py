@@ -33,12 +33,8 @@ def test_default_profile_in_list(coi_binary, cleanup_containers, workspace_dir):
     assert result.returncode == 0, f"profile list should succeed. stderr: {result.stderr}"
     output = result.stdout + result.stderr
     assert "default" in output, f"Should show 'default' profile. Got:\n{output}"
-    assert "(built-in)" in output, (
-        f"Should show '(built-in)' source. Got:\n{output}"
-    )
-    assert "coi-default" in output, (
-        f"Should show 'coi-default' image. Got:\n{output}"
-    )
+    assert "(built-in)" in output, f"Should show '(built-in)' source. Got:\n{output}"
+    assert "coi-default" in output, f"Should show 'coi-default' image. Got:\n{output}"
 
 
 def test_default_profile_show(coi_binary, cleanup_containers, workspace_dir):
@@ -60,9 +56,7 @@ def test_default_profile_show(coi_binary, cleanup_containers, workspace_dir):
         cwd=workspace_dir,
     )
 
-    assert result.returncode == 0, (
-        f"profile show default should succeed. stderr: {result.stderr}"
-    )
+    assert result.returncode == 0, f"profile show default should succeed. stderr: {result.stderr}"
     output = result.stdout + result.stderr
 
     # Should show key settings
@@ -87,9 +81,7 @@ def test_inherit_from_default(coi_binary, cleanup_containers, workspace_dir):
     """
     profile_dir = Path(workspace_dir) / ".coi" / "profiles" / "custom"
     profile_dir.mkdir(parents=True)
-    (profile_dir / "config.toml").write_text(
-        'inherits = "default"\nimage = "my-custom-image"\n'
-    )
+    (profile_dir / "config.toml").write_text('inherits = "default"\nimage = "my-custom-image"\n')
 
     result = subprocess.run(
         [
@@ -106,20 +98,12 @@ def test_inherit_from_default(coi_binary, cleanup_containers, workspace_dir):
         cwd=workspace_dir,
     )
 
-    assert result.returncode == 0, (
-        f"profile show custom should succeed. stderr: {result.stderr}"
-    )
+    assert result.returncode == 0, f"profile show custom should succeed. stderr: {result.stderr}"
     output = result.stdout + result.stderr
-    assert "my-custom-image" in output, (
-        f"Should show custom image. Got:\n{output}"
-    )
-    assert "default" in output, (
-        f"Should show inherits from default. Got:\n{output}"
-    )
+    assert "my-custom-image" in output, f"Should show custom image. Got:\n{output}"
+    assert "default" in output, f"Should show inherits from default. Got:\n{output}"
     # Should inherit tool from default
-    assert "[tool]" in output, (
-        f"Should inherit tool section from default. Got:\n{output}"
-    )
+    assert "[tool]" in output, f"Should inherit tool section from default. Got:\n{output}"
 
 
 def test_disk_default_overrides_builtin(coi_binary, cleanup_containers, workspace_dir):
@@ -145,10 +129,6 @@ def test_disk_default_overrides_builtin(coi_binary, cleanup_containers, workspac
         cwd=workspace_dir,
     )
 
-    assert result.returncode == 0, (
-        f"profile show default should succeed. stderr: {result.stderr}"
-    )
+    assert result.returncode == 0, f"profile show default should succeed. stderr: {result.stderr}"
     output = result.stdout + result.stderr
-    assert "my-disk-default" in output, (
-        f"Should show disk-based image. Got:\n{output}"
-    )
+    assert "my-disk-default" in output, f"Should show disk-based image. Got:\n{output}"

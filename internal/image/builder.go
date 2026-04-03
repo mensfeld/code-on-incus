@@ -340,7 +340,7 @@ func (b *Builder) runBuildSteps() error {
 
 // buildCoi implements coi image build steps using external script
 func (b *Builder) buildCoi() error {
-	return b.runBuildScript("scripts/build/coi.sh")
+	return b.runBuildScript("profiles/default/build.sh")
 }
 
 // resolveAsset locates an asset file on disk or falls back to embedded content.
