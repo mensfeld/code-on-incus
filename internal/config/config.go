@@ -144,6 +144,7 @@ type NetworkLoggingConfig struct {
 
 // ProfileConfig represents a named profile
 type ProfileConfig struct {
+	Inherits    string            `toml:"inherits"`    // Parent profile name for inheritance
 	Image       string            `toml:"image"`
 	Context     string            `toml:"context"` // Path to context .md file (resolved relative to profile dir)
 	Environment map[string]string `toml:"environment"`
@@ -815,6 +816,212 @@ func (c *Config) ApplyProfile(name string) error {
 	// Apply profile context file if present
 	if profile.Context != "" {
 		c.ProfileContextFile = profile.Context
+	}
+
+	return nil
+}
+
+// maxInheritanceDepth is the maximum allowed inheritance chain depth
+const maxInheritanceDepth = 10
+
+// mergeProfiles merges a parent profile into a child profile.
+// Maps merge (child wins), arrays replace if child defines them, scalars child wins if set.
+// Struct pointers deep-merge field by field if child defines the section.
+func mergeProfiles(parent, child ProfileConfig) ProfileConfig {
+	result := child
+
+	// Scalars: child overrides parent if set
+	if result.Image == "" {
+		result.Image = parent.Image
+	}
+	if result.Context == "" {
+		result.Context = parent.Context
+	}
+	if result.Persistent == nil {
+		result.Persistent = parent.Persistent
+	}
+
+	// Maps: deep merge — parent keys preserved, child keys override
+	if len(parent.Environment) > 0 {
+		merged := make(map[string]string, len(parent.Environment)+len(result.Environment))
+		for k, v := range parent.Environment {
+			merged[k] = v
+		}
+		for k, v := range result.Environment {
+			if v == "" {
+				// Empty string clears inherited key
+				delete(merged, k)
+			} else {
+				merged[k] = v
+			}
+		}
+		result.Environment = merged
+	}
+
+	// Arrays: if child defines them, they fully replace parent's. If not, inherit.
+	if result.Mounts == nil {
+		result.Mounts = parent.Mounts
+	}
+	if result.ForwardEnv == nil {
+		result.ForwardEnv = parent.ForwardEnv
+	}
+
+	// Struct pointers: deep field-by-field merge if child defines section
+	if result.Limits == nil {
+		result.Limits = parent.Limits
+	} else if parent.Limits != nil {
+		merged := *parent.Limits
+		mergeLimits(&merged, result.Limits)
+		result.Limits = &merged
+	}
+
+	if result.Tool == nil {
+		result.Tool = parent.Tool
+	} else if parent.Tool != nil {
+		merged := *parent.Tool
+		if result.Tool.Name != "" {
+			merged.Name = result.Tool.Name
+		}
+		if result.Tool.Binary != "" {
+			merged.Binary = result.Tool.Binary
+		}
+		if result.Tool.PermissionMode != "" {
+			merged.PermissionMode = result.Tool.PermissionMode
+		}
+		if result.Tool.ContextFile != "" {
+			merged.ContextFile = result.Tool.ContextFile
+		}
+		if result.Tool.AutoContext != nil {
+			merged.AutoContext = result.Tool.AutoContext
+		}
+		if result.Tool.Claude.EffortLevel != "" {
+			merged.Claude.EffortLevel = result.Tool.Claude.EffortLevel
+		}
+		result.Tool = &merged
+	}
+
+	if result.Build == nil {
+		result.Build = parent.Build
+	} else if parent.Build != nil {
+		merged := *parent.Build
+		if result.Build.Base != "" {
+			merged.Base = result.Build.Base
+		}
+		if result.Build.Script != "" {
+			merged.Script = result.Build.Script
+		}
+		if len(result.Build.Commands) > 0 {
+			merged.Commands = result.Build.Commands
+		}
+		result.Build = &merged
+	}
+
+	if result.Network == nil {
+		result.Network = parent.Network
+	} else if parent.Network != nil {
+		merged := *parent.Network
+		if result.Network.Mode != "" {
+			merged.Mode = result.Network.Mode
+		}
+		if result.Network.BlockPrivateNetworks != nil {
+			merged.BlockPrivateNetworks = result.Network.BlockPrivateNetworks
+		}
+		if result.Network.BlockMetadataEndpoint != nil {
+			merged.BlockMetadataEndpoint = result.Network.BlockMetadataEndpoint
+		}
+		if result.Network.AllowLocalNetworkAccess != nil {
+			merged.AllowLocalNetworkAccess = result.Network.AllowLocalNetworkAccess
+		}
+		if len(result.Network.AllowedDomains) > 0 {
+			merged.AllowedDomains = result.Network.AllowedDomains
+		}
+		if result.Network.RefreshIntervalMinutes != 0 {
+			merged.RefreshIntervalMinutes = result.Network.RefreshIntervalMinutes
+		}
+		if result.Network.Logging.Path != "" {
+			merged.Logging.Path = result.Network.Logging.Path
+		}
+		if result.Network.Logging.Enabled != nil {
+			merged.Logging.Enabled = result.Network.Logging.Enabled
+		}
+		result.Network = &merged
+	}
+
+	// Source always comes from the child
+	// (already set in result since result = child)
+
+	return result
+}
+
+// ResolveProfileInheritance resolves all inheritance chains in loaded profiles.
+// It flattens each profile so that after resolution, profiles are self-contained.
+// Detects cycles and enforces a maximum inheritance depth.
+func (c *Config) ResolveProfileInheritance() error {
+	// First pass: validate chain lengths and detect cycles before any resolution.
+	// This ensures max depth is checked against the full chain, not just recursion depth.
+	for name := range c.Profiles {
+		if c.Profiles[name].Inherits == "" {
+			continue
+		}
+		visited := map[string]bool{name: true}
+		current := name
+		for {
+			parent := c.Profiles[current].Inherits
+			if parent == "" {
+				break
+			}
+			if visited[parent] {
+				return fmt.Errorf("profile inheritance cycle detected involving %q", parent)
+			}
+			if _, exists := c.Profiles[parent]; !exists {
+				return fmt.Errorf("profile %q inherits from %q, but parent profile not found", current, parent)
+			}
+			if len(visited) > maxInheritanceDepth {
+				return fmt.Errorf("profile inheritance chain exceeds maximum depth of %d", maxInheritanceDepth)
+			}
+			visited[parent] = true
+			current = parent
+		}
+	}
+
+	// Second pass: resolve inheritance by merging parent into child.
+	resolved := make(map[string]bool, len(c.Profiles))
+
+	var resolve func(name string) error
+	resolve = func(name string) error {
+		if resolved[name] {
+			return nil
+		}
+
+		profile := c.Profiles[name]
+		if profile.Inherits == "" {
+			resolved[name] = true
+			return nil
+		}
+
+		parentName := profile.Inherits
+
+		// Resolve parent first
+		if err := resolve(parentName); err != nil {
+			return err
+		}
+
+		// Parent is now resolved — merge
+		parent := c.Profiles[parentName]
+		merged := mergeProfiles(parent, profile)
+
+		// Clear Inherits after resolution — profile is now self-contained
+		merged.Inherits = ""
+
+		c.Profiles[name] = merged
+		resolved[name] = true
+		return nil
+	}
+
+	for name := range c.Profiles {
+		if err := resolve(name); err != nil {
+			return err
+		}
 	}
 
 	return nil

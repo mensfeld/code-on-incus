@@ -42,7 +42,7 @@ Examples:
 		sort.Strings(names)
 
 		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-		fmt.Fprintln(w, "NAME\tIMAGE\tPERSISTENT\tSOURCE")
+		fmt.Fprintln(w, "NAME\tIMAGE\tPERSISTENT\tINHERITS\tSOURCE")
 		for _, name := range names {
 			p := cfg.Profiles[name]
 			image := p.Image
@@ -57,11 +57,15 @@ Examples:
 					persistent = "false"
 				}
 			}
+			inherits := "-"
+			if p.Inherits != "" {
+				inherits = p.Inherits
+			}
 			source := p.Source
 			if source == "" {
 				source = "(unknown)"
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", name, image, persistent, source)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", name, image, persistent, inherits, source)
 		}
 		w.Flush()
 		return nil
@@ -90,6 +94,9 @@ Examples:
 		}
 		fmt.Println()
 
+		if p.Inherits != "" {
+			fmt.Printf("inherits = %q\n", p.Inherits)
+		}
 		if p.Image != "" {
 			fmt.Printf("image = %q\n", p.Image)
 		}

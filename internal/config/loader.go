@@ -44,6 +44,11 @@ func Load() (*Config, error) {
 		}
 	}
 
+	// Resolve profile inheritance after all profiles are loaded from all levels
+	if err := cfg.ResolveProfileInheritance(); err != nil {
+		return nil, fmt.Errorf("profile inheritance error: %w", err)
+	}
+
 	// Load from environment variables
 	loadFromEnv(cfg)
 
