@@ -674,6 +674,12 @@ func (c *Config) ApplyProfile(name string) error {
 	if profile.Persistent != nil {
 		c.Defaults.Persistent = profile.Persistent
 	}
+	if profile.Model != "" {
+		c.Defaults.Model = profile.Model
+	}
+	if profile.Context != "" {
+		c.ProfileContextFile = profile.Context
+	}
 
 	// Apply profile environment if present
 	if len(profile.Environment) > 0 {
@@ -684,166 +690,184 @@ func (c *Config) ApplyProfile(name string) error {
 			c.Defaults.Environment[k] = v
 		}
 	}
-
-	// Apply profile limits if present
-	if profile.Limits != nil {
-		mergeLimits(&c.Limits, profile.Limits)
+	if len(profile.ForwardEnv) > 0 {
+		c.Defaults.ForwardEnv = MergeStringSliceUnique(c.Defaults.ForwardEnv, profile.ForwardEnv)
 	}
-
-	// Apply profile tool settings if present
-	if profile.Tool != nil {
-		if profile.Tool.Name != "" {
-			c.Tool.Name = profile.Tool.Name
-		}
-		if profile.Tool.Binary != "" {
-			c.Tool.Binary = profile.Tool.Binary
-		}
-		if profile.Tool.PermissionMode != "" {
-			c.Tool.PermissionMode = profile.Tool.PermissionMode
-		}
-		if profile.Tool.ContextFile != "" {
-			c.Tool.ContextFile = ExpandPath(profile.Tool.ContextFile)
-		}
-		if profile.Tool.AutoContext != nil {
-			c.Tool.AutoContext = profile.Tool.AutoContext
-		}
-		if profile.Tool.Claude.EffortLevel != "" {
-			c.Tool.Claude.EffortLevel = profile.Tool.Claude.EffortLevel
-		}
-	}
-
-	// Apply profile build config if present
-	if profile.Build != nil {
-		if profile.Build.Base != "" {
-			c.Build.Base = profile.Build.Base
-		}
-		if profile.Build.Script != "" {
-			c.Build.Script = profile.Build.Script
-		}
-		if len(profile.Build.Commands) > 0 {
-			c.Build.Commands = profile.Build.Commands
-		}
-	}
-
-	// Apply profile mounts if present (append to defaults)
 	if len(profile.Mounts) > 0 {
 		c.Mounts.Default = append(c.Mounts.Default, profile.Mounts...)
 	}
 
-	// Apply profile network settings if present
-	if profile.Network != nil {
-		if profile.Network.Mode != "" {
-			c.Network.Mode = profile.Network.Mode
-		}
-		if profile.Network.BlockPrivateNetworks != nil {
-			c.Network.BlockPrivateNetworks = profile.Network.BlockPrivateNetworks
-		}
-		if profile.Network.BlockMetadataEndpoint != nil {
-			c.Network.BlockMetadataEndpoint = profile.Network.BlockMetadataEndpoint
-		}
-		if profile.Network.AllowLocalNetworkAccess != nil {
-			c.Network.AllowLocalNetworkAccess = profile.Network.AllowLocalNetworkAccess
-		}
-		if len(profile.Network.AllowedDomains) > 0 {
-			c.Network.AllowedDomains = profile.Network.AllowedDomains
-		}
-		if profile.Network.RefreshIntervalMinutes != 0 {
-			c.Network.RefreshIntervalMinutes = profile.Network.RefreshIntervalMinutes
-		}
-		if profile.Network.Logging.Path != "" {
-			c.Network.Logging.Path = ExpandPath(profile.Network.Logging.Path)
-		}
-		if profile.Network.Logging.Enabled != nil {
-			c.Network.Logging.Enabled = profile.Network.Logging.Enabled
-		}
+	// Apply struct sections
+	if profile.Limits != nil {
+		mergeLimits(&c.Limits, profile.Limits)
 	}
-
-	// Apply profile forward_env if present
-	if len(profile.ForwardEnv) > 0 {
-		c.Defaults.ForwardEnv = MergeStringSliceUnique(c.Defaults.ForwardEnv, profile.ForwardEnv)
-	}
-
-	// Apply profile context file if present
-	if profile.Context != "" {
-		c.ProfileContextFile = profile.Context
-	}
-
-	// Apply new extended fields
-	if profile.Model != "" {
-		c.Defaults.Model = profile.Model
-	}
-
-	if profile.Paths != nil {
-		if profile.Paths.SessionsDir != "" {
-			c.Paths.SessionsDir = ExpandPath(profile.Paths.SessionsDir)
-		}
-		if profile.Paths.StorageDir != "" {
-			c.Paths.StorageDir = ExpandPath(profile.Paths.StorageDir)
-		}
-		if profile.Paths.LogsDir != "" {
-			c.Paths.LogsDir = ExpandPath(profile.Paths.LogsDir)
-		}
-		if profile.Paths.PreserveWorkspacePath {
-			c.Paths.PreserveWorkspacePath = true
-		}
-	}
-
-	if profile.Incus != nil {
-		if profile.Incus.Project != "" {
-			c.Incus.Project = profile.Incus.Project
-		}
-		if profile.Incus.Group != "" {
-			c.Incus.Group = profile.Incus.Group
-		}
-		if profile.Incus.CodeUID != 0 {
-			c.Incus.CodeUID = profile.Incus.CodeUID
-		}
-		if profile.Incus.CodeUser != "" {
-			c.Incus.CodeUser = profile.Incus.CodeUser
-		}
-		if profile.Incus.DisableShift {
-			c.Incus.DisableShift = true
-		}
-	}
-
-	if profile.Git != nil {
-		if profile.Git.WritableHooks != nil {
-			c.Git.WritableHooks = profile.Git.WritableHooks
-		}
-	}
-
-	if profile.SSH != nil {
-		if profile.SSH.ForwardAgent != nil {
-			c.SSH.ForwardAgent = profile.SSH.ForwardAgent
-		}
-	}
-
-	if profile.Security != nil {
-		if len(profile.Security.ProtectedPaths) > 0 {
-			c.Security.ProtectedPaths = profile.Security.ProtectedPaths
-		}
-		if len(profile.Security.AdditionalProtectedPaths) > 0 {
-			c.Security.AdditionalProtectedPaths = append(c.Security.AdditionalProtectedPaths, profile.Security.AdditionalProtectedPaths...)
-		}
-		if profile.Security.DisableProtection {
-			c.Security.DisableProtection = true
-		}
-	}
-
 	if profile.Monitoring != nil {
 		mergeMonitoring(&c.Monitoring, profile.Monitoring)
 	}
-
-	if profile.Timezone != nil {
-		if profile.Timezone.Mode != "" {
-			c.Timezone.Mode = profile.Timezone.Mode
-		}
-		if profile.Timezone.Name != "" {
-			c.Timezone.Name = profile.Timezone.Name
-		}
-	}
+	applyToolConfig(&c.Tool, profile.Tool)
+	applyBuildConfig(&c.Build, profile.Build)
+	applyNetworkConfig(&c.Network, profile.Network)
+	applyPathsConfig(&c.Paths, profile.Paths)
+	applyIncusConfig(&c.Incus, profile.Incus)
+	applyGitConfig(&c.Git, profile.Git)
+	applySSHConfig(&c.SSH, profile.SSH)
+	applySecurityConfig(&c.Security, profile.Security)
+	applyTimezoneConfig(&c.Timezone, profile.Timezone)
 
 	return nil
+}
+
+func applyToolConfig(dst *ToolConfig, src *ToolConfig) {
+	if src == nil {
+		return
+	}
+	if src.Name != "" {
+		dst.Name = src.Name
+	}
+	if src.Binary != "" {
+		dst.Binary = src.Binary
+	}
+	if src.PermissionMode != "" {
+		dst.PermissionMode = src.PermissionMode
+	}
+	if src.ContextFile != "" {
+		dst.ContextFile = ExpandPath(src.ContextFile)
+	}
+	if src.AutoContext != nil {
+		dst.AutoContext = src.AutoContext
+	}
+	if src.Claude.EffortLevel != "" {
+		dst.Claude.EffortLevel = src.Claude.EffortLevel
+	}
+}
+
+func applyBuildConfig(dst *BuildConfig, src *BuildConfig) {
+	if src == nil {
+		return
+	}
+	if src.Base != "" {
+		dst.Base = src.Base
+	}
+	if src.Script != "" {
+		dst.Script = src.Script
+	}
+	if len(src.Commands) > 0 {
+		dst.Commands = src.Commands
+	}
+}
+
+func applyNetworkConfig(dst *NetworkConfig, src *NetworkConfig) {
+	if src == nil {
+		return
+	}
+	if src.Mode != "" {
+		dst.Mode = src.Mode
+	}
+	if src.BlockPrivateNetworks != nil {
+		dst.BlockPrivateNetworks = src.BlockPrivateNetworks
+	}
+	if src.BlockMetadataEndpoint != nil {
+		dst.BlockMetadataEndpoint = src.BlockMetadataEndpoint
+	}
+	if src.AllowLocalNetworkAccess != nil {
+		dst.AllowLocalNetworkAccess = src.AllowLocalNetworkAccess
+	}
+	if len(src.AllowedDomains) > 0 {
+		dst.AllowedDomains = src.AllowedDomains
+	}
+	if src.RefreshIntervalMinutes != 0 {
+		dst.RefreshIntervalMinutes = src.RefreshIntervalMinutes
+	}
+	if src.Logging.Path != "" {
+		dst.Logging.Path = ExpandPath(src.Logging.Path)
+	}
+	if src.Logging.Enabled != nil {
+		dst.Logging.Enabled = src.Logging.Enabled
+	}
+}
+
+func applyPathsConfig(dst *PathsConfig, src *PathsConfig) {
+	if src == nil {
+		return
+	}
+	if src.SessionsDir != "" {
+		dst.SessionsDir = ExpandPath(src.SessionsDir)
+	}
+	if src.StorageDir != "" {
+		dst.StorageDir = ExpandPath(src.StorageDir)
+	}
+	if src.LogsDir != "" {
+		dst.LogsDir = ExpandPath(src.LogsDir)
+	}
+	if src.PreserveWorkspacePath {
+		dst.PreserveWorkspacePath = true
+	}
+}
+
+func applyIncusConfig(dst *IncusConfig, src *IncusConfig) {
+	if src == nil {
+		return
+	}
+	if src.Project != "" {
+		dst.Project = src.Project
+	}
+	if src.Group != "" {
+		dst.Group = src.Group
+	}
+	if src.CodeUID != 0 {
+		dst.CodeUID = src.CodeUID
+	}
+	if src.CodeUser != "" {
+		dst.CodeUser = src.CodeUser
+	}
+	if src.DisableShift {
+		dst.DisableShift = true
+	}
+}
+
+func applyGitConfig(dst *GitConfig, src *GitConfig) {
+	if src == nil {
+		return
+	}
+	if src.WritableHooks != nil {
+		dst.WritableHooks = src.WritableHooks
+	}
+}
+
+func applySSHConfig(dst *SSHConfig, src *SSHConfig) {
+	if src == nil {
+		return
+	}
+	if src.ForwardAgent != nil {
+		dst.ForwardAgent = src.ForwardAgent
+	}
+}
+
+func applySecurityConfig(dst *SecurityConfig, src *SecurityConfig) {
+	if src == nil {
+		return
+	}
+	if len(src.ProtectedPaths) > 0 {
+		dst.ProtectedPaths = src.ProtectedPaths
+	}
+	if len(src.AdditionalProtectedPaths) > 0 {
+		dst.AdditionalProtectedPaths = append(dst.AdditionalProtectedPaths, src.AdditionalProtectedPaths...)
+	}
+	if src.DisableProtection {
+		dst.DisableProtection = true
+	}
+}
+
+func applyTimezoneConfig(dst *TimezoneConfig, src *TimezoneConfig) {
+	if src == nil {
+		return
+	}
+	if src.Mode != "" {
+		dst.Mode = src.Mode
+	}
+	if src.Name != "" {
+		dst.Name = src.Name
+	}
 }
 
 // maxInheritanceDepth is the maximum allowed inheritance chain depth
@@ -892,193 +916,172 @@ func mergeProfiles(parent, child ProfileConfig) ProfileConfig {
 	}
 
 	// Struct pointers: deep field-by-field merge if child defines section
-	if result.Limits == nil {
-		result.Limits = parent.Limits
-	} else if parent.Limits != nil {
-		merged := *parent.Limits
-		mergeLimits(&merged, result.Limits)
-		result.Limits = &merged
-	}
-
-	if result.Tool == nil {
-		result.Tool = parent.Tool
-	} else if parent.Tool != nil {
-		merged := *parent.Tool
-		if result.Tool.Name != "" {
-			merged.Name = result.Tool.Name
-		}
-		if result.Tool.Binary != "" {
-			merged.Binary = result.Tool.Binary
-		}
-		if result.Tool.PermissionMode != "" {
-			merged.PermissionMode = result.Tool.PermissionMode
-		}
-		if result.Tool.ContextFile != "" {
-			merged.ContextFile = result.Tool.ContextFile
-		}
-		if result.Tool.AutoContext != nil {
-			merged.AutoContext = result.Tool.AutoContext
-		}
-		if result.Tool.Claude.EffortLevel != "" {
-			merged.Claude.EffortLevel = result.Tool.Claude.EffortLevel
-		}
-		result.Tool = &merged
-	}
-
-	if result.Build == nil {
-		result.Build = parent.Build
-	} else if parent.Build != nil {
-		merged := *parent.Build
-		if result.Build.Base != "" {
-			merged.Base = result.Build.Base
-		}
-		if result.Build.Script != "" {
-			merged.Script = result.Build.Script
-		}
-		if result.Build.Commands != nil {
-			merged.Commands = result.Build.Commands
-		}
-		result.Build = &merged
-	}
-
-	if result.Network == nil {
-		result.Network = parent.Network
-	} else if parent.Network != nil {
-		merged := *parent.Network
-		if result.Network.Mode != "" {
-			merged.Mode = result.Network.Mode
-		}
-		if result.Network.BlockPrivateNetworks != nil {
-			merged.BlockPrivateNetworks = result.Network.BlockPrivateNetworks
-		}
-		if result.Network.BlockMetadataEndpoint != nil {
-			merged.BlockMetadataEndpoint = result.Network.BlockMetadataEndpoint
-		}
-		if result.Network.AllowLocalNetworkAccess != nil {
-			merged.AllowLocalNetworkAccess = result.Network.AllowLocalNetworkAccess
-		}
-		if result.Network.AllowedDomains != nil {
-			merged.AllowedDomains = result.Network.AllowedDomains
-		}
-		if result.Network.RefreshIntervalMinutes != 0 {
-			merged.RefreshIntervalMinutes = result.Network.RefreshIntervalMinutes
-		}
-		if result.Network.Logging.Path != "" {
-			merged.Logging.Path = result.Network.Logging.Path
-		}
-		if result.Network.Logging.Enabled != nil {
-			merged.Logging.Enabled = result.Network.Logging.Enabled
-		}
-		result.Network = &merged
-	}
+	result.Limits = mergeStructPtr(parent.Limits, result.Limits, mergeLimitsInto)
+	result.Tool = mergeStructPtr(parent.Tool, result.Tool, mergeToolInto)
+	result.Build = mergeStructPtr(parent.Build, result.Build, mergeBuildInto)
+	result.Network = mergeStructPtr(parent.Network, result.Network, mergeNetworkInto)
+	result.Monitoring = mergeStructPtr(parent.Monitoring, result.Monitoring, mergeMonitoringInto)
 
 	// New extended fields: scalar and struct pointer merges
 	if result.Model == "" {
 		result.Model = parent.Model
 	}
-
-	if result.Paths == nil {
-		result.Paths = parent.Paths
-	} else if parent.Paths != nil {
-		merged := *parent.Paths
-		if result.Paths.SessionsDir != "" {
-			merged.SessionsDir = result.Paths.SessionsDir
-		}
-		if result.Paths.StorageDir != "" {
-			merged.StorageDir = result.Paths.StorageDir
-		}
-		if result.Paths.LogsDir != "" {
-			merged.LogsDir = result.Paths.LogsDir
-		}
-		if result.Paths.PreserveWorkspacePath {
-			merged.PreserveWorkspacePath = true
-		}
-		result.Paths = &merged
-	}
-
-	if result.Incus == nil {
-		result.Incus = parent.Incus
-	} else if parent.Incus != nil {
-		merged := *parent.Incus
-		if result.Incus.Project != "" {
-			merged.Project = result.Incus.Project
-		}
-		if result.Incus.Group != "" {
-			merged.Group = result.Incus.Group
-		}
-		if result.Incus.CodeUID != 0 {
-			merged.CodeUID = result.Incus.CodeUID
-		}
-		if result.Incus.CodeUser != "" {
-			merged.CodeUser = result.Incus.CodeUser
-		}
-		if result.Incus.DisableShift {
-			merged.DisableShift = true
-		}
-		result.Incus = &merged
-	}
-
-	if result.Git == nil {
-		result.Git = parent.Git
-	} else if parent.Git != nil {
-		merged := *parent.Git
-		if result.Git.WritableHooks != nil {
-			merged.WritableHooks = result.Git.WritableHooks
-		}
-		result.Git = &merged
-	}
-
-	if result.SSH == nil {
-		result.SSH = parent.SSH
-	} else if parent.SSH != nil {
-		merged := *parent.SSH
-		if result.SSH.ForwardAgent != nil {
-			merged.ForwardAgent = result.SSH.ForwardAgent
-		}
-		result.SSH = &merged
-	}
-
-	if result.Security == nil {
-		result.Security = parent.Security
-	} else if parent.Security != nil {
-		merged := *parent.Security
-		if len(result.Security.ProtectedPaths) > 0 {
-			merged.ProtectedPaths = result.Security.ProtectedPaths
-		}
-		if len(result.Security.AdditionalProtectedPaths) > 0 {
-			merged.AdditionalProtectedPaths = result.Security.AdditionalProtectedPaths
-		}
-		if result.Security.DisableProtection {
-			merged.DisableProtection = true
-		}
-		result.Security = &merged
-	}
-
-	if result.Monitoring == nil {
-		result.Monitoring = parent.Monitoring
-	} else if parent.Monitoring != nil {
-		merged := *parent.Monitoring
-		mergeMonitoring(&merged, result.Monitoring)
-		result.Monitoring = &merged
-	}
-
-	if result.Timezone == nil {
-		result.Timezone = parent.Timezone
-	} else if parent.Timezone != nil {
-		merged := *parent.Timezone
-		if result.Timezone.Mode != "" {
-			merged.Mode = result.Timezone.Mode
-		}
-		if result.Timezone.Name != "" {
-			merged.Name = result.Timezone.Name
-		}
-		result.Timezone = &merged
-	}
-
-	// Source always comes from the child
-	// (already set in result since result = child)
+	result.Paths = mergeStructPtr(parent.Paths, result.Paths, mergePathsInto)
+	result.Incus = mergeStructPtr(parent.Incus, result.Incus, mergeIncusInto)
+	result.Git = mergeStructPtr(parent.Git, result.Git, mergeGitInto)
+	result.SSH = mergeStructPtr(parent.SSH, result.SSH, mergeSSHInto)
+	result.Security = mergeStructPtr(parent.Security, result.Security, mergeSecurityInto)
+	result.Timezone = mergeStructPtr(parent.Timezone, result.Timezone, mergeTimezoneInto)
 
 	return result
+}
+
+// mergeStructPtr merges two struct pointers: if child is nil, inherit parent;
+// if both set, deep-merge child fields into a copy of parent.
+func mergeStructPtr[T any](parent, child *T, mergeFn func(dst *T, src *T)) *T {
+	if child == nil {
+		return parent
+	}
+	if parent == nil {
+		return child
+	}
+	merged := *parent
+	mergeFn(&merged, child)
+	return &merged
+}
+
+func mergeLimitsInto(dst *LimitsConfig, src *LimitsConfig) {
+	mergeLimits(dst, src)
+}
+
+func mergeToolInto(dst *ToolConfig, src *ToolConfig) {
+	if src.Name != "" {
+		dst.Name = src.Name
+	}
+	if src.Binary != "" {
+		dst.Binary = src.Binary
+	}
+	if src.PermissionMode != "" {
+		dst.PermissionMode = src.PermissionMode
+	}
+	if src.ContextFile != "" {
+		dst.ContextFile = src.ContextFile
+	}
+	if src.AutoContext != nil {
+		dst.AutoContext = src.AutoContext
+	}
+	if src.Claude.EffortLevel != "" {
+		dst.Claude.EffortLevel = src.Claude.EffortLevel
+	}
+}
+
+func mergeBuildInto(dst *BuildConfig, src *BuildConfig) {
+	if src.Base != "" {
+		dst.Base = src.Base
+	}
+	if src.Script != "" {
+		dst.Script = src.Script
+	}
+	if src.Commands != nil {
+		dst.Commands = src.Commands
+	}
+}
+
+func mergeNetworkInto(dst *NetworkConfig, src *NetworkConfig) {
+	if src.Mode != "" {
+		dst.Mode = src.Mode
+	}
+	if src.BlockPrivateNetworks != nil {
+		dst.BlockPrivateNetworks = src.BlockPrivateNetworks
+	}
+	if src.BlockMetadataEndpoint != nil {
+		dst.BlockMetadataEndpoint = src.BlockMetadataEndpoint
+	}
+	if src.AllowLocalNetworkAccess != nil {
+		dst.AllowLocalNetworkAccess = src.AllowLocalNetworkAccess
+	}
+	if src.AllowedDomains != nil {
+		dst.AllowedDomains = src.AllowedDomains
+	}
+	if src.RefreshIntervalMinutes != 0 {
+		dst.RefreshIntervalMinutes = src.RefreshIntervalMinutes
+	}
+	if src.Logging.Path != "" {
+		dst.Logging.Path = src.Logging.Path
+	}
+	if src.Logging.Enabled != nil {
+		dst.Logging.Enabled = src.Logging.Enabled
+	}
+}
+
+func mergeMonitoringInto(dst *MonitoringConfig, src *MonitoringConfig) {
+	mergeMonitoring(dst, src)
+}
+
+func mergePathsInto(dst *PathsConfig, src *PathsConfig) {
+	if src.SessionsDir != "" {
+		dst.SessionsDir = src.SessionsDir
+	}
+	if src.StorageDir != "" {
+		dst.StorageDir = src.StorageDir
+	}
+	if src.LogsDir != "" {
+		dst.LogsDir = src.LogsDir
+	}
+	if src.PreserveWorkspacePath {
+		dst.PreserveWorkspacePath = true
+	}
+}
+
+func mergeIncusInto(dst *IncusConfig, src *IncusConfig) {
+	if src.Project != "" {
+		dst.Project = src.Project
+	}
+	if src.Group != "" {
+		dst.Group = src.Group
+	}
+	if src.CodeUID != 0 {
+		dst.CodeUID = src.CodeUID
+	}
+	if src.CodeUser != "" {
+		dst.CodeUser = src.CodeUser
+	}
+	if src.DisableShift {
+		dst.DisableShift = true
+	}
+}
+
+func mergeGitInto(dst *GitConfig, src *GitConfig) {
+	if src.WritableHooks != nil {
+		dst.WritableHooks = src.WritableHooks
+	}
+}
+
+func mergeSSHInto(dst *SSHConfig, src *SSHConfig) {
+	if src.ForwardAgent != nil {
+		dst.ForwardAgent = src.ForwardAgent
+	}
+}
+
+func mergeSecurityInto(dst *SecurityConfig, src *SecurityConfig) {
+	if len(src.ProtectedPaths) > 0 {
+		dst.ProtectedPaths = src.ProtectedPaths
+	}
+	if len(src.AdditionalProtectedPaths) > 0 {
+		dst.AdditionalProtectedPaths = src.AdditionalProtectedPaths
+	}
+	if src.DisableProtection {
+		dst.DisableProtection = true
+	}
+}
+
+func mergeTimezoneInto(dst *TimezoneConfig, src *TimezoneConfig) {
+	if src.Mode != "" {
+		dst.Mode = src.Mode
+	}
+	if src.Name != "" {
+		dst.Name = src.Name
+	}
 }
 
 // ResolveProfileInheritance resolves all inheritance chains in loaded profiles.
