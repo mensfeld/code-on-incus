@@ -139,7 +139,7 @@ Example:
 		keepCount, _ := cmd.Flags().GetInt("keep")
 
 		if keepCount <= 0 {
-			return fmt.Errorf("--keep must be > 0")
+			return &ExitCodeError{Code: 2, Message: "--keep must be > 0"}
 		}
 
 		deleted, kept, err := image.Cleanup(prefix, keepCount)

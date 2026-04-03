@@ -283,7 +283,7 @@ func snapshotCreateCommand(cmd *cobra.Command, args []string) error {
 func snapshotListCommand(cmd *cobra.Command, args []string) error {
 	// Validate format
 	if snapshotFormat != "text" && snapshotFormat != "json" {
-		return fmt.Errorf("invalid format '%s': must be 'text' or 'json'", snapshotFormat)
+		return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid format '%s': must be 'text' or 'json'", snapshotFormat)}
 	}
 
 	if snapshotAll {
@@ -513,7 +513,7 @@ func snapshotDeleteCommand(cmd *cobra.Command, args []string) error {
 
 	// Delete single snapshot
 	if len(args) == 0 {
-		return fmt.Errorf("snapshot name required (or use --all to delete all snapshots)")
+		return &ExitCodeError{Code: 2, Message: "snapshot name required (or use --all to delete all snapshots)"}
 	}
 
 	snapshotName := args[0]
@@ -539,7 +539,7 @@ func snapshotDeleteCommand(cmd *cobra.Command, args []string) error {
 func snapshotInfoCommand(cmd *cobra.Command, args []string) error {
 	// Validate format
 	if snapshotFormat != "text" && snapshotFormat != "json" {
-		return fmt.Errorf("invalid format '%s': must be 'text' or 'json'", snapshotFormat)
+		return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid format '%s': must be 'text' or 'json'", snapshotFormat)}
 	}
 
 	containerName, err := resolveContainer()

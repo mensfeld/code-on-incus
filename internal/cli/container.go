@@ -134,7 +134,7 @@ Examples:
 		commandArgs := args[1:] // Keep as separate arguments
 
 		if len(commandArgs) == 0 {
-			return fmt.Errorf("no command specified (use -- before command)")
+			return &ExitCodeError{Code: 2, Message: "no command specified (use -- before command)"}
 		}
 
 		capture, _ := cmd.Flags().GetBool("capture")
@@ -144,17 +144,17 @@ Examples:
 
 		// Validate that --format requires --capture
 		if cmd.Flags().Changed("format") && !capture {
-			return fmt.Errorf("--format flag requires --capture flag")
+			return &ExitCodeError{Code: 2, Message: "--format flag requires --capture flag"}
 		}
 
 		// Validate format value
 		if format != "json" && format != "raw" {
-			return fmt.Errorf("invalid format '%s': must be 'json' or 'raw'", format)
+			return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid format '%s': must be 'json' or 'raw'", format)}
 		}
 
 		// Validate that --tty and --capture are mutually exclusive
 		if tty && capture {
-			return fmt.Errorf("--tty and --capture flags are mutually exclusive")
+			return &ExitCodeError{Code: 2, Message: "--tty and --capture flags are mutually exclusive"}
 		}
 
 		if capture {
@@ -364,7 +364,7 @@ Examples:
 
 		// Validate format
 		if format != "json" && format != "text" {
-			return fmt.Errorf("invalid format '%s': must be 'json' or 'text'", format)
+			return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid format '%s': must be 'json' or 'text'", format)}
 		}
 
 		// Get raw incus list output

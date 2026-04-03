@@ -8,9 +8,13 @@ import "fmt"
 // deferred cleanup (container deletion, firewall teardown) runs before the
 // process exits.
 type ExitCodeError struct {
-	Code int
+	Code    int
+	Message string
 }
 
 func (e *ExitCodeError) Error() string {
+	if e.Message != "" {
+		return e.Message
+	}
 	return fmt.Sprintf("exit code %d", e.Code)
 }

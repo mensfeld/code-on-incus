@@ -40,7 +40,7 @@ func init() {
 func listCommand(cmd *cobra.Command, args []string) error {
 	// Validate format value
 	if listFormat != "text" && listFormat != "json" {
-		return fmt.Errorf("invalid format '%s': must be 'text' or 'json'", listFormat)
+		return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid format '%s': must be 'text' or 'json'", listFormat)}
 	}
 
 	// Get configured tool to determine tool-specific sessions directory

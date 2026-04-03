@@ -38,7 +38,7 @@ Examples:
 		// Parse destination (container:path)
 		parts := strings.SplitN(destination, ":", 2)
 		if len(parts) != 2 {
-			return fmt.Errorf("destination must be in format 'container:path'")
+			return &ExitCodeError{Code: 2, Message: "destination must be in format 'container:path'"}
 		}
 		containerName := parts[0]
 		remotePath := parts[1]
@@ -54,7 +54,7 @@ Examples:
 		// Push file or directory
 		if info.IsDir() {
 			if !recursive {
-				return fmt.Errorf("source is a directory, use -r flag")
+				return &ExitCodeError{Code: 2, Message: "source is a directory, use -r flag"}
 			}
 			if err := mgr.PushDirectory(localPath, remotePath); err != nil {
 				return fmt.Errorf("failed to push directory: %v", err)
@@ -90,7 +90,7 @@ Example:
 		// Parse source (container:path)
 		parts := strings.SplitN(source, ":", 2)
 		if len(parts) != 2 {
-			return fmt.Errorf("source must be in format 'container:path'")
+			return &ExitCodeError{Code: 2, Message: "source must be in format 'container:path'"}
 		}
 		containerName := parts[0]
 		remotePath := parts[1]

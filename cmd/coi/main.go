@@ -17,6 +17,9 @@ func main() {
 	if err := cli.Execute(isCoi); err != nil {
 		var exitErr *cli.ExitCodeError
 		if errors.As(err, &exitErr) {
+			if exitErr.Message != "" {
+				fmt.Fprintln(os.Stderr, exitErr.Message)
+			}
 			os.Exit(exitErr.Code)
 		}
 		fmt.Fprintln(os.Stderr, err)
