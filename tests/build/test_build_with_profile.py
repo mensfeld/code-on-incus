@@ -35,6 +35,4 @@ def test_build_profile_not_found(coi_binary, workspace_dir):
     assert "not found" in combined.lower(), (
         f"Error should mention profile not found. Got:\n{combined}"
     )
-    assert "nonexistent" in combined, (
-        f"Error should mention the profile name. Got:\n{combined}"
-    )
+    assert "nonexistent" in combined, f"Error should mention the profile name. Got:\n{combined}"

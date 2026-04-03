@@ -189,9 +189,7 @@ name = "Pacific/Auckland"
         cwd=workspace_dir,
     )
 
-    assert result.returncode == 0, (
-        f"profile show default should succeed. stderr: {result.stderr}"
-    )
+    assert result.returncode == 0, f"profile show default should succeed. stderr: {result.stderr}"
     output = result.stdout + result.stderr
 
     # Network mode should reflect the project override
