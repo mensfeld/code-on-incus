@@ -280,30 +280,66 @@ func expandConfigPaths(cfg *Config) {
 	cfg.Network.Logging.Path = ExpandPath(cfg.Network.Logging.Path)
 }
 
+// cloneSlice returns a shallow copy of a slice (nil-safe).
+func cloneSlice[S ~[]E, E any](in S) S {
+	if in == nil {
+		return nil
+	}
+	out := make(S, len(in))
+	copy(out, in)
+	return out
+}
+
+// cloneMap returns a shallow copy of a map (nil-safe).
+func cloneMap[M ~map[K]V, K comparable, V any](in M) M {
+	if in == nil {
+		return nil
+	}
+	out := make(M, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
 // synthesizeDefaultProfile creates a ProfileConfig from the loaded Config,
 // representing the "default" built-in profile.
+// All struct fields are copied by value (not aliased) so that applying
+// or merging the default profile cannot mutate the original Config.
 func synthesizeDefaultProfile(cfg *Config) ProfileConfig {
+	limits := cfg.Limits
+	tool := cfg.Tool
+	network := cfg.Network
+	paths := cfg.Paths
+	incus := cfg.Incus
+	git := cfg.Git
+	ssh := cfg.SSH
+	security := cfg.Security
+	monitoring := cfg.Monitoring
+	timezone := cfg.Timezone
+
 	p := ProfileConfig{
 		Image:       cfg.Defaults.Image,
 		Persistent:  cfg.Defaults.Persistent,
 		Model:       cfg.Defaults.Model,
-		Environment: cfg.Defaults.Environment,
-		ForwardEnv:  cfg.Defaults.ForwardEnv,
-		Limits:      &cfg.Limits,
-		Tool:        &cfg.Tool,
-		Network:     &cfg.Network,
-		Mounts:      cfg.Mounts.Default,
-		Paths:       &cfg.Paths,
-		Incus:       &cfg.Incus,
-		Git:         &cfg.Git,
-		SSH:         &cfg.SSH,
-		Security:    &cfg.Security,
-		Monitoring:  &cfg.Monitoring,
-		Timezone:    &cfg.Timezone,
+		Environment: cloneMap(cfg.Defaults.Environment),
+		ForwardEnv:  cloneSlice(cfg.Defaults.ForwardEnv),
+		Limits:      &limits,
+		Tool:        &tool,
+		Network:     &network,
+		Mounts:      cloneSlice(cfg.Mounts.Default),
+		Paths:       &paths,
+		Incus:       &incus,
+		Git:         &git,
+		SSH:         &ssh,
+		Security:    &security,
+		Monitoring:  &monitoring,
+		Timezone:    &timezone,
 		Source:      "(built-in)",
 	}
 	if cfg.Build.HasBuildConfig() {
-		p.Build = &cfg.Build
+		build := cfg.Build
+		p.Build = &build
 	}
 	return p
 }
@@ -1068,11 +1104,33 @@ func mergeSecurityInto(dst *SecurityConfig, src *SecurityConfig) {
 		dst.ProtectedPaths = src.ProtectedPaths
 	}
 	if len(src.AdditionalProtectedPaths) > 0 {
-		dst.AdditionalProtectedPaths = src.AdditionalProtectedPaths
+		dst.AdditionalProtectedPaths = mergeUniqueStrings(dst.AdditionalProtectedPaths, src.AdditionalProtectedPaths)
 	}
 	if src.DisableProtection {
 		dst.DisableProtection = true
 	}
+}
+
+// mergeUniqueStrings appends src strings to dst, skipping duplicates.
+func mergeUniqueStrings(dst, src []string) []string {
+	if len(src) == 0 {
+		return dst
+	}
+	seen := make(map[string]struct{}, len(dst)+len(src))
+	merged := make([]string, 0, len(dst)+len(src))
+	for _, s := range dst {
+		if _, ok := seen[s]; !ok {
+			seen[s] = struct{}{}
+			merged = append(merged, s)
+		}
+	}
+	for _, s := range src {
+		if _, ok := seen[s]; !ok {
+			seen[s] = struct{}{}
+			merged = append(merged, s)
+		}
+	}
+	return merged
 }
 
 func mergeTimezoneInto(dst *TimezoneConfig, src *TimezoneConfig) {

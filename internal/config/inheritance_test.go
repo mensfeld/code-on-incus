@@ -507,6 +507,134 @@ func TestProfileInheritanceNoInherits(t *testing.T) {
 	}
 }
 
+func TestProfileInheritanceSecurityPathsMerge(t *testing.T) {
+	cfg := GetDefaultConfig()
+	cfg.Profiles["parent"] = ProfileConfig{
+		Security: &SecurityConfig{
+			AdditionalProtectedPaths: []string{"/parent/secret"},
+		},
+	}
+	cfg.Profiles["child"] = ProfileConfig{
+		Inherits: "parent",
+		Security: &SecurityConfig{
+			AdditionalProtectedPaths: []string{"/child/secret"},
+		},
+	}
+
+	if err := cfg.ResolveProfileInheritance(); err != nil {
+		t.Fatalf("ResolveProfileInheritance() failed: %v", err)
+	}
+
+	child := cfg.Profiles["child"]
+	paths := child.Security.AdditionalProtectedPaths
+	// Should contain BOTH parent and child paths (additive merge)
+	hasParent, hasChild := false, false
+	for _, p := range paths {
+		if p == "/parent/secret" {
+			hasParent = true
+		}
+		if p == "/child/secret" {
+			hasChild = true
+		}
+	}
+	if !hasParent || !hasChild {
+		t.Errorf("Expected both /parent/secret and /child/secret, got %v", paths)
+	}
+}
+
+func TestProfileInheritanceSecurityPathsDedup(t *testing.T) {
+	cfg := GetDefaultConfig()
+	cfg.Profiles["parent"] = ProfileConfig{
+		Security: &SecurityConfig{
+			AdditionalProtectedPaths: []string{"/shared/path", "/parent/only"},
+		},
+	}
+	cfg.Profiles["child"] = ProfileConfig{
+		Inherits: "parent",
+		Security: &SecurityConfig{
+			AdditionalProtectedPaths: []string{"/shared/path", "/child/only"},
+		},
+	}
+
+	if err := cfg.ResolveProfileInheritance(); err != nil {
+		t.Fatalf("ResolveProfileInheritance() failed: %v", err)
+	}
+
+	child := cfg.Profiles["child"]
+	paths := child.Security.AdditionalProtectedPaths
+	// /shared/path should appear only once
+	count := 0
+	for _, p := range paths {
+		if p == "/shared/path" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("Expected /shared/path exactly once, got %d times in %v", count, paths)
+	}
+	if len(paths) != 3 {
+		t.Errorf("Expected 3 unique paths, got %d: %v", len(paths), paths)
+	}
+}
+
+func TestSynthesizeDefaultProfileIsolation(t *testing.T) {
+	cfg := GetDefaultConfig()
+
+	// Record original values
+	origCPUCount := cfg.Limits.CPU.Count
+	origToolName := cfg.Tool.Name
+	origNetMode := cfg.Network.Mode
+	origSecurityDisable := cfg.Security.DisableProtection
+
+	// Synthesize default profile
+	profile := synthesizeDefaultProfile(cfg)
+
+	// Mutate the profile's struct pointers
+	profile.Limits.CPU.Count = "99"
+	profile.Tool.Name = "mutated-tool"
+	profile.Network.Mode = "mutated-mode"
+	profile.Security.DisableProtection = true
+
+	// Original config must NOT be affected
+	if cfg.Limits.CPU.Count != origCPUCount {
+		t.Errorf("Config.Limits.CPU.Count mutated: expected %q, got %q", origCPUCount, cfg.Limits.CPU.Count)
+	}
+	if cfg.Tool.Name != origToolName {
+		t.Errorf("Config.Tool.Name mutated: expected %q, got %q", origToolName, cfg.Tool.Name)
+	}
+	if cfg.Network.Mode != origNetMode {
+		t.Errorf("Config.Network.Mode mutated: expected %q, got %q", origNetMode, cfg.Network.Mode)
+	}
+	if cfg.Security.DisableProtection != origSecurityDisable {
+		t.Errorf("Config.Security.DisableProtection mutated: expected %v, got %v", origSecurityDisable, cfg.Security.DisableProtection)
+	}
+}
+
+func TestSynthesizeDefaultProfileSliceIsolation(t *testing.T) {
+	cfg := GetDefaultConfig()
+	cfg.Defaults.ForwardEnv = []string{"FOO", "BAR"}
+	cfg.Mounts.Default = []MountEntry{{Host: "/src", Container: "/dst"}}
+	cfg.Security.AdditionalProtectedPaths = []string{"/secret"}
+
+	profile := synthesizeDefaultProfile(cfg)
+
+	// Append to profile slices
+	profile.ForwardEnv = append(profile.ForwardEnv, "MUTATED")
+	profile.Mounts = append(profile.Mounts, MountEntry{Host: "/new", Container: "/new"})
+	profile.Security.AdditionalProtectedPaths = append(profile.Security.AdditionalProtectedPaths, "/evil")
+
+	// Original config slices must NOT be affected
+	if len(cfg.Defaults.ForwardEnv) != 2 {
+		t.Errorf("Config.Defaults.ForwardEnv mutated: expected 2 items, got %d", len(cfg.Defaults.ForwardEnv))
+	}
+	if len(cfg.Mounts.Default) != 1 {
+		t.Errorf("Config.Mounts.Default mutated: expected 1 item, got %d", len(cfg.Mounts.Default))
+	}
+	if len(cfg.Security.AdditionalProtectedPaths) != 1 {
+		t.Errorf("Config.Security.AdditionalProtectedPaths mutated: expected 1 item, got %d", len(cfg.Security.AdditionalProtectedPaths))
+	}
+}
+
 func TestProfileInheritanceParentUnchanged(t *testing.T) {
 	cfg := GetDefaultConfig()
 	cfg.Profiles["parent"] = ProfileConfig{

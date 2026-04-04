@@ -43,6 +43,8 @@
 
 ### Bug Fixes
 
+- [Bug Fix] **`synthesizeDefaultProfile` pointer aliasing allows profile operations to mutate global config** — The built-in default profile held direct pointers into the `Config` struct fields (Limits, Tool, Network, Security, etc.). Applying or merging the default profile could silently mutate the original configuration. Fixed by copying all struct fields by value and cloning slices/maps before taking addresses.
+- [Bug Fix] **Profile inheritance replaces `additional_protected_paths` instead of merging** — `mergeSecurityInto()` (used during profile inheritance) replaced the parent's `additional_protected_paths` with the child's, dropping inherited security paths. This was inconsistent with `applySecurityConfig()` which correctly appends. Fixed by merging with deduplication so child profiles add to inherited paths rather than replacing them.
 - [Bug Fix] **Standardize `--format` flag values** — `image list` now uses `text|json` instead of `table|json` for consistency with all other commands. Added format validation to `image list` (previously accepted any value silently).
 - [Bug Fix] **Add `--format text|json` flag to `monitor` command** — The `monitor` command now uses the standard `--format text|json` flag. The boolean `--json` flag is kept as a backward-compatible alias.
 - [Bug Fix] **`attach` command ignoring global `--workspace` flag** — The `attach` command defined its own local `--workspace`/`-w` flag that shadowed the global one from `rootCmd.PersistentFlags()`. This meant `coi attach --workspace /path --slot 1` silently ignored the global workspace flag and always used the local default (`.`). Fixed by removing the local flag and using the global `workspace` variable.
