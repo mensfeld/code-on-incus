@@ -20,23 +20,6 @@ var imageCmd = &cobra.Command{
 	Long:  `Operations for listing, publishing, deleting, and managing container images.`,
 }
 
-// Legacy imagesCmd for backwards compatibility (coi images)
-var imagesCmd = &cobra.Command{
-	Use:        "images",
-	Short:      "List available Incus images (alias for 'image list')",
-	Hidden:     true,
-	Deprecated: "use 'coi image list' instead",
-	Long: `List available Incus images for use with --image flag.
-
-Shows both built COI images and available remote images.
-
-Examples:
-  coi images              # List COI images only
-  coi images --all        # List all local images
-`,
-	RunE: imageListCommand,
-}
-
 // imageListCmd lists available images
 var imageListCmd = &cobra.Command{
 	Use:   "list",
@@ -205,10 +188,6 @@ func init() {
 	imageListCmd.Flags().BoolVarP(&showAll, "all", "a", false, "Show all local images, not just COI images")
 	imageListCmd.Flags().String("prefix", "", "Filter images by alias prefix")
 	imageListCmd.Flags().String("format", "text", "Output format: text or json")
-
-	// Add flags to legacy images command
-	imagesCmd.Flags().BoolVarP(&showAll, "all", "a", false, "Show all local images, not just COI images")
-	imagesCmd.Flags().String("format", "text", "Output format: text or json")
 
 	// Add flags to publish command
 	imagePublishCmd.Flags().String("description", "", "Image description")

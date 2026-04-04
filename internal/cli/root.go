@@ -39,7 +39,7 @@ Examples:
   coi shell --slot 2           # Use specific slot
   coi run "npm test"           # Run command in container
   coi build                    # Build coi image
-  coi images                   # List available images
+  coi image list               # List available images
   coi list                     # List active sessions
 `,
 	Version: Version,
@@ -108,8 +108,7 @@ func init() {
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(infoCmd)
 	rootCmd.AddCommand(buildCmd)
-	rootCmd.AddCommand(imagesCmd)    // Deprecated: use 'coi image list'
-	rootCmd.AddCommand(imageCmd)     // New: coi image <subcommand>
+	rootCmd.AddCommand(imageCmd)     // coi image <subcommand>
 	rootCmd.AddCommand(containerCmd) // New: coi container <subcommand>
 	rootCmd.AddCommand(fileCmd)      // New: coi file <subcommand>
 	rootCmd.AddCommand(cleanCmd)
