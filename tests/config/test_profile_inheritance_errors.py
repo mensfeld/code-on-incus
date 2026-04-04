@@ -32,7 +32,7 @@ def test_profile_inheritance_chain(coi_binary, cleanup_containers, workspace_dir
     )
 
     result = subprocess.run(
-        [coi_binary, "profile", "show", "child", "--workspace", workspace_dir],
+        [coi_binary, "profile", "info", "child", "--workspace", workspace_dir],
         capture_output=True,
         text=True,
         timeout=60,
@@ -134,7 +134,7 @@ def test_profile_inheritance_cross_level(coi_binary, cleanup_containers, workspa
 
     # Use COI_CONFIG to load user config dir
     result = subprocess.run(
-        [coi_binary, "profile", "show", "my-rust", "--workspace", workspace_dir],
+        [coi_binary, "profile", "info", "my-rust", "--workspace", workspace_dir],
         capture_output=True,
         text=True,
         timeout=60,

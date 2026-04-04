@@ -21,7 +21,7 @@ def test_profile_inheritance_image_from_parent(coi_binary, cleanup_containers, w
     (child_dir / "config.toml").write_text('inherits = "parent"\n')
 
     result = subprocess.run(
-        [coi_binary, "profile", "show", "child", "--workspace", workspace_dir],
+        [coi_binary, "profile", "info", "child", "--workspace", workspace_dir],
         capture_output=True,
         text=True,
         timeout=60,
@@ -46,7 +46,7 @@ def test_profile_inheritance_image_overridden(coi_binary, cleanup_containers, wo
     (child_dir / "config.toml").write_text('inherits = "parent"\nimage = "coi-child"\n')
 
     result = subprocess.run(
-        [coi_binary, "profile", "show", "child", "--workspace", workspace_dir],
+        [coi_binary, "profile", "info", "child", "--workspace", workspace_dir],
         capture_output=True,
         text=True,
         timeout=60,
@@ -71,7 +71,7 @@ def test_profile_inheritance_persistent_from_parent(coi_binary, cleanup_containe
     (child_dir / "config.toml").write_text('inherits = "parent"\n')
 
     result = subprocess.run(
-        [coi_binary, "profile", "show", "child", "--workspace", workspace_dir],
+        [coi_binary, "profile", "info", "child", "--workspace", workspace_dir],
         capture_output=True,
         text=True,
         timeout=60,

@@ -183,7 +183,7 @@ script = "this-script-does-not-exist.sh"
         [
             coi_binary,
             "profile",
-            "show",
+            "info",
             "missingscript",
             "--workspace",
             workspace_dir,
@@ -215,7 +215,7 @@ commands = ["apt-get install -y curl"]
         [
             coi_binary,
             "profile",
-            "show",
+            "info",
             "buildonly",
             "--workspace",
             workspace_dir,
@@ -404,7 +404,7 @@ context = "CONTEXT.md"
         [
             coi_binary,
             "profile",
-            "show",
+            "info",
             "withcontext",
             "--workspace",
             workspace_dir,

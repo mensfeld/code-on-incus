@@ -24,7 +24,7 @@ def test_profile_inheritance_env_merged(coi_binary, cleanup_containers, workspac
     )
 
     result = subprocess.run(
-        [coi_binary, "profile", "show", "child", "--workspace", workspace_dir],
+        [coi_binary, "profile", "info", "child", "--workspace", workspace_dir],
         capture_output=True,
         text=True,
         timeout=60,
@@ -52,7 +52,7 @@ def test_profile_inheritance_env_override(coi_binary, cleanup_containers, worksp
     )
 
     result = subprocess.run(
-        [coi_binary, "profile", "show", "child", "--workspace", workspace_dir],
+        [coi_binary, "profile", "info", "child", "--workspace", workspace_dir],
         capture_output=True,
         text=True,
         timeout=60,
@@ -77,7 +77,7 @@ def test_profile_inheritance_env_clear_with_empty(coi_binary, cleanup_containers
     (child_dir / "config.toml").write_text('inherits = "parent"\n\n[environment]\nSECRET = ""\n')
 
     result = subprocess.run(
-        [coi_binary, "profile", "show", "child", "--workspace", workspace_dir],
+        [coi_binary, "profile", "info", "child", "--workspace", workspace_dir],
         capture_output=True,
         text=True,
         timeout=60,
@@ -103,7 +103,7 @@ def test_profile_inheritance_env_parent_only(coi_binary, cleanup_containers, wor
     (child_dir / "config.toml").write_text('inherits = "parent"\nimage = "coi-default"\n')
 
     result = subprocess.run(
-        [coi_binary, "profile", "show", "child", "--workspace", workspace_dir],
+        [coi_binary, "profile", "info", "child", "--workspace", workspace_dir],
         capture_output=True,
         text=True,
         timeout=60,

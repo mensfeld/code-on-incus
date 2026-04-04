@@ -26,7 +26,7 @@ def test_profile_inheritance_mounts_replaced(coi_binary, cleanup_containers, wor
     )
 
     result = subprocess.run(
-        [coi_binary, "profile", "show", "child", "--workspace", workspace_dir],
+        [coi_binary, "profile", "info", "child", "--workspace", workspace_dir],
         capture_output=True,
         text=True,
         timeout=60,
@@ -54,7 +54,7 @@ def test_profile_inheritance_mounts_inherited(coi_binary, cleanup_containers, wo
     (child_dir / "config.toml").write_text('inherits = "parent"\nimage = "coi-child"\n')
 
     result = subprocess.run(
-        [coi_binary, "profile", "show", "child", "--workspace", workspace_dir],
+        [coi_binary, "profile", "info", "child", "--workspace", workspace_dir],
         capture_output=True,
         text=True,
         timeout=60,
@@ -79,7 +79,7 @@ def test_profile_inheritance_forward_env_replaced(coi_binary, cleanup_containers
     (child_dir / "config.toml").write_text('inherits = "parent"\nforward_env = ["API_KEY"]\n')
 
     result = subprocess.run(
-        [coi_binary, "profile", "show", "child", "--workspace", workspace_dir],
+        [coi_binary, "profile", "info", "child", "--workspace", workspace_dir],
         capture_output=True,
         text=True,
         timeout=60,
@@ -105,7 +105,7 @@ def test_profile_inheritance_forward_env_inherited(coi_binary, cleanup_container
     (child_dir / "config.toml").write_text('inherits = "parent"\nimage = "coi-default"\n')
 
     result = subprocess.run(
-        [coi_binary, "profile", "show", "child", "--workspace", workspace_dir],
+        [coi_binary, "profile", "info", "child", "--workspace", workspace_dir],
         capture_output=True,
         text=True,
         timeout=60,

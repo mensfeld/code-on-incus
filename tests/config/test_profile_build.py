@@ -36,7 +36,7 @@ script = "build.sh"
         [
             coi_binary,
             "profile",
-            "show",
+            "info",
             "buildtest",
             "--workspace",
             workspace_dir,
@@ -80,7 +80,7 @@ script = "does-not-exist.sh"
         [
             coi_binary,
             "profile",
-            "show",
+            "info",
             "badscript",
             "--workspace",
             workspace_dir,
@@ -138,7 +138,7 @@ commands = ["echo hello", "echo world"]
         [
             coi_binary,
             "profile",
-            "show",
+            "info",
             "cmdprofile",
             "--workspace",
             workspace_dir,

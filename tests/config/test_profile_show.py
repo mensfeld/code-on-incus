@@ -49,7 +49,7 @@ mode = "restricted"
         [
             coi_binary,
             "profile",
-            "show",
+            "info",
             "fullprof",
             "--workspace",
             workspace_dir,
@@ -84,7 +84,7 @@ def test_profile_show_not_found(coi_binary, cleanup_containers, workspace_dir):
         [
             coi_binary,
             "profile",
-            "show",
+            "info",
             "nonexistent",
             "--workspace",
             workspace_dir,
@@ -114,7 +114,7 @@ def test_profile_show_empty_directory_profile(coi_binary, cleanup_containers, wo
         [
             coi_binary,
             "profile",
-            "show",
+            "info",
             "minimal",
             "--workspace",
             workspace_dir,

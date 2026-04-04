@@ -25,7 +25,7 @@ def test_profile_inheritance_limits_merged(coi_binary, cleanup_containers, works
     )
 
     result = subprocess.run(
-        [coi_binary, "profile", "show", "child", "--workspace", workspace_dir],
+        [coi_binary, "profile", "info", "child", "--workspace", workspace_dir],
         capture_output=True,
         text=True,
         timeout=60,
@@ -51,7 +51,7 @@ def test_profile_inheritance_tool_merged(coi_binary, cleanup_containers, workspa
     (child_dir / "config.toml").write_text('inherits = "parent"\n\n[tool]\nname = "aider"\n')
 
     result = subprocess.run(
-        [coi_binary, "profile", "show", "child", "--workspace", workspace_dir],
+        [coi_binary, "profile", "info", "child", "--workspace", workspace_dir],
         capture_output=True,
         text=True,
         timeout=60,
@@ -77,7 +77,7 @@ def test_profile_inheritance_network_inherited(coi_binary, cleanup_containers, w
     (child_dir / "config.toml").write_text('inherits = "parent"\nimage = "coi-default"\n')
 
     result = subprocess.run(
-        [coi_binary, "profile", "show", "child", "--workspace", workspace_dir],
+        [coi_binary, "profile", "info", "child", "--workspace", workspace_dir],
         capture_output=True,
         text=True,
         timeout=60,

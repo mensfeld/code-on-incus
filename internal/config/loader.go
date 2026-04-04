@@ -401,7 +401,7 @@ writable_hooks = false
 #   2. ~/.config/coi/profiles/NAME/config.toml
 #   3. .coi/profiles/NAME/config.toml
 #
-# Use 'coi profile list' and 'coi profile show <name>' to inspect loaded profiles.
+# Use 'coi profile list' and 'coi profile info <name>' to inspect loaded profiles.
 `
 
 	// Create directory if it doesn't exist

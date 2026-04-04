@@ -21,7 +21,7 @@ def test_profile_inherits_shown_in_show(coi_binary, cleanup_containers, workspac
     (child_dir / "config.toml").write_text('inherits = "parent"\nimage = "coi-child"\n')
 
     result = subprocess.run(
-        [coi_binary, "profile", "show", "child", "--workspace", workspace_dir],
+        [coi_binary, "profile", "info", "child", "--workspace", workspace_dir],
         capture_output=True,
         text=True,
         timeout=60,

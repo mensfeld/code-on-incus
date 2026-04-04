@@ -45,7 +45,7 @@ def test_default_profile_show(coi_binary, cleanup_containers, workspace_dir):
         [
             coi_binary,
             "profile",
-            "show",
+            "info",
             "default",
             "--workspace",
             workspace_dir,
@@ -87,7 +87,7 @@ def test_inherit_from_default(coi_binary, cleanup_containers, workspace_dir):
         [
             coi_binary,
             "profile",
-            "show",
+            "info",
             "custom",
             "--workspace",
             workspace_dir,
@@ -118,7 +118,7 @@ def test_disk_default_overrides_builtin(coi_binary, cleanup_containers, workspac
         [
             coi_binary,
             "profile",
-            "show",
+            "info",
             "default",
             "--workspace",
             workspace_dir,

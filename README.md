@@ -408,7 +408,7 @@ coi shell --profile rust-dev
 coi profile list
 
 # Show profile details
-coi profile show rust-dev
+coi profile info rust-dev
 ```
 
 Profile directories are scanned at all config levels (`/etc/coi/profiles/`, `~/.config/coi/profiles/`, `.coi/profiles/`). See the [Profiles wiki page](https://github.com/mensfeld/code-on-incus/wiki/Profiles) for complete documentation.

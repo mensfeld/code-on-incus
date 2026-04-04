@@ -47,7 +47,7 @@ project = "myproject"
         [
             coi_binary,
             "profile",
-            "show",
+            "info",
             "extprof",
             "--workspace",
             workspace_dir,
@@ -125,7 +125,7 @@ name = "Asia/Tokyo"
         [
             coi_binary,
             "profile",
-            "show",
+            "info",
             "child",
             "--workspace",
             workspace_dir,
@@ -178,7 +178,7 @@ name = "Pacific/Auckland"
         [
             coi_binary,
             "profile",
-            "show",
+            "info",
             "default",
             "--workspace",
             workspace_dir,

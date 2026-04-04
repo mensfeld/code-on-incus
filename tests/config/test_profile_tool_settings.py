@@ -31,7 +31,7 @@ effort_level = "high"
         [
             coi_binary,
             "profile",
-            "show",
+            "info",
             "tooltest",
             "--workspace",
             workspace_dir,
