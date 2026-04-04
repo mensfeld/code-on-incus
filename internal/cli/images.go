@@ -174,6 +174,7 @@ func init() {
 
 	// Add flags to legacy images command
 	imagesCmd.Flags().BoolVarP(&showAll, "all", "a", false, "Show all local images, not just COI images")
+	imagesCmd.Flags().String("format", "text", "Output format: text or json")
 
 	// Add flags to publish command
 	imagePublishCmd.Flags().String("description", "", "Image description")
