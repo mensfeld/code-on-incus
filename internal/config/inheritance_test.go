@@ -618,20 +618,35 @@ func TestSynthesizeDefaultProfileSliceIsolation(t *testing.T) {
 
 	profile := synthesizeDefaultProfile(cfg)
 
-	// Append to profile slices
-	profile.ForwardEnv = append(profile.ForwardEnv, "MUTATED")
-	profile.Mounts = append(profile.Mounts, MountEntry{Host: "/new", Container: "/new"})
-	profile.Security.AdditionalProtectedPaths = append(profile.Security.AdditionalProtectedPaths, "/evil")
+	// Mutate existing elements to detect shared backing arrays
+	profile.ForwardEnv[0] = "MUTATED"
+	profile.Mounts[0].Host = "/mutated"
+	profile.Security.AdditionalProtectedPaths[0] = "/evil"
 
-	// Original config slices must NOT be affected
+	// Original config elements must NOT be affected
+	if cfg.Defaults.ForwardEnv[0] != "FOO" {
+		t.Errorf("Config.Defaults.ForwardEnv[0] mutated: expected %q, got %q", "FOO", cfg.Defaults.ForwardEnv[0])
+	}
+	if cfg.Mounts.Default[0].Host != "/src" {
+		t.Errorf("Config.Mounts.Default[0].Host mutated: expected %q, got %q", "/src", cfg.Mounts.Default[0].Host)
+	}
+	if cfg.Security.AdditionalProtectedPaths[0] != "/secret" {
+		t.Errorf("Config.Security.AdditionalProtectedPaths[0] mutated: expected %q, got %q", "/secret", cfg.Security.AdditionalProtectedPaths[0])
+	}
+
+	// Appending should also not affect the original slices
+	profile.ForwardEnv = append(profile.ForwardEnv, "EXTRA")
+	profile.Mounts = append(profile.Mounts, MountEntry{Host: "/new", Container: "/new"})
+	profile.Security.AdditionalProtectedPaths = append(profile.Security.AdditionalProtectedPaths, "/extra")
+
 	if len(cfg.Defaults.ForwardEnv) != 2 {
-		t.Errorf("Config.Defaults.ForwardEnv mutated: expected 2 items, got %d", len(cfg.Defaults.ForwardEnv))
+		t.Errorf("Config.Defaults.ForwardEnv length mutated: expected 2 items, got %d", len(cfg.Defaults.ForwardEnv))
 	}
 	if len(cfg.Mounts.Default) != 1 {
-		t.Errorf("Config.Mounts.Default mutated: expected 1 item, got %d", len(cfg.Mounts.Default))
+		t.Errorf("Config.Mounts.Default length mutated: expected 1 item, got %d", len(cfg.Mounts.Default))
 	}
 	if len(cfg.Security.AdditionalProtectedPaths) != 1 {
-		t.Errorf("Config.Security.AdditionalProtectedPaths mutated: expected 1 item, got %d", len(cfg.Security.AdditionalProtectedPaths))
+		t.Errorf("Config.Security.AdditionalProtectedPaths length mutated: expected 1 item, got %d", len(cfg.Security.AdditionalProtectedPaths))
 	}
 }
 

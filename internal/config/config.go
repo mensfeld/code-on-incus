@@ -310,11 +310,14 @@ func synthesizeDefaultProfile(cfg *Config) ProfileConfig {
 	limits := cfg.Limits
 	tool := cfg.Tool
 	network := cfg.Network
+	network.AllowedDomains = cloneSlice(cfg.Network.AllowedDomains)
 	paths := cfg.Paths
 	incus := cfg.Incus
 	git := cfg.Git
 	ssh := cfg.SSH
 	security := cfg.Security
+	security.ProtectedPaths = cloneSlice(cfg.Security.ProtectedPaths)
+	security.AdditionalProtectedPaths = cloneSlice(cfg.Security.AdditionalProtectedPaths)
 	monitoring := cfg.Monitoring
 	timezone := cfg.Timezone
 
@@ -339,6 +342,7 @@ func synthesizeDefaultProfile(cfg *Config) ProfileConfig {
 	}
 	if cfg.Build.HasBuildConfig() {
 		build := cfg.Build
+		build.Commands = cloneSlice(cfg.Build.Commands)
 		p.Build = &build
 	}
 	return p
