@@ -437,7 +437,7 @@ jobs:
         run: |
           echo "Restoring COI image from cache..."
           incus image import /tmp/coi-image.tar.gz --alias coi-default
-          ./coi images
+          ./coi image list
 
       - name: Build COI image
         if: steps.cache-coi-image.outputs.cache-hit != 'true'
@@ -456,7 +456,7 @@ jobs:
             echo "Build failed, retrying in 10s..."
             sleep 10
           done
-          ./coi images
+          ./coi image list
           # Export image for caching
           incus image export coi-default /tmp/coi-image
 

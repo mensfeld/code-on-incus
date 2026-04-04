@@ -158,13 +158,13 @@ jobs:
           coi build
 
           # Verify image was created
-          coi images
+          coi image list
 
       - name: Test coi commands
         run: |
           coi --help
           coi version
-          coi images
+          coi image list
           coi list
 
       - name: Test exotic terminal types (issue #53)
@@ -335,7 +335,7 @@ jobs:
             # Run with timeout to prevent hangs
             if timeout $build_timeout coi build 2>&1 | tee /tmp/build-output.log; then
               echo "Build succeeded on attempt $attempt"
-              coi images
+              coi image list
               exit 0
             fi
 
@@ -371,7 +371,7 @@ jobs:
         run: |
           coi --help
           coi version
-          coi images
+          coi image list
           coi list
 
       - name: Test Colima/Lima auto-detection

@@ -216,7 +216,7 @@ def test_full_installation_process(meta_container, coi_binary):
         container_name,
         """
         cd /root/code-on-incus
-        ./coi images --help
+        ./coi image list --help
         ./coi list --help
         ./coi shell --help
         echo "Basic commands work"
