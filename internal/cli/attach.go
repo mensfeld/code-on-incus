@@ -37,7 +37,6 @@ Examples:
 func init() {
 	attachCmd.Flags().BoolVar(&attachWithBash, "bash", false, "Attach to bash shell instead of tmux session")
 	attachCmd.Flags().IntVar(&attachSlot, "slot", 0, "Slot number to attach to (requires workspace context)")
-	rootCmd.AddCommand(attachCmd)
 }
 
 func attachCommand(cmd *cobra.Command, args []string) error {

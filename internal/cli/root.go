@@ -108,7 +108,7 @@ func init() {
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(infoCmd)
 	rootCmd.AddCommand(buildCmd)
-	rootCmd.AddCommand(imagesCmd)    // Legacy: coi images
+	rootCmd.AddCommand(imagesCmd)    // Deprecated: use 'coi image list'
 	rootCmd.AddCommand(imageCmd)     // New: coi image <subcommand>
 	rootCmd.AddCommand(containerCmd) // New: coi container <subcommand>
 	rootCmd.AddCommand(fileCmd)      // New: coi file <subcommand>
@@ -122,6 +122,9 @@ func init() {
 	rootCmd.AddCommand(resumeCmd)
 	rootCmd.AddCommand(updateCmd)
 	rootCmd.AddCommand(profileCmd)
+	rootCmd.AddCommand(attachCmd)
+	rootCmd.AddCommand(shutdownCmd)
+	rootCmd.AddCommand(monitorCmd)
 }
 
 var versionCmd = &cobra.Command{

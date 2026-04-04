@@ -26,8 +26,6 @@ func init() {
 	monitorCmd.Flags().StringVar(&monitorFormat, "format", "text", "Output format: text or json")
 	monitorCmd.Flags().BoolVar(&monitorJSON, "json", false, "Output in JSON format (alias for --format json)")
 	monitorCmd.Flags().IntVar(&monitorWatch, "watch", 0, "Watch mode: update every N seconds (0 = one-shot)")
-
-	rootCmd.AddCommand(monitorCmd)
 }
 
 var monitorCmd = &cobra.Command{

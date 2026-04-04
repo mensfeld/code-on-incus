@@ -65,6 +65,9 @@
 - [Improvement] **Add `-f` short flag for `--force`** — Added `-f` short form on: `kill`, `shutdown`, `clean`, `persist`, `build`, `update`, `container stop`, `container delete` (already existed on `snapshot restore` and `snapshot delete`).
 - [Improvement] **Standardize CLI `Use` strings** — All positional argument placeholders now follow a consistent `<required>` / `[optional]` lowercase-kebab-case convention. Affected commands: `tmux send`, `tmux capture`, `info`, `run`.
 - [Improvement] **Rename `profile show` to `profile info`** — For consistency with `coi info` and `snapshot info`, the `profile show` subcommand has been renamed to `profile info`. The old `show` verb is kept as a hidden backward-compatible alias.
+- [Improvement] **Add `container info` and `image info` subcommands** — New info subcommands for viewing detailed resource information, wrapping `incus info` and `incus image info` respectively. Both support `--format text|json`.
+- [Improvement] **Deprecate `coi images` command** — The plural `coi images` command is now hidden from help and shows a deprecation notice pointing to `coi image list`. It remains functional for backward compatibility.
+- [Improvement] **Centralize command registration in `root.go`** — `attach`, `shutdown`, and `monitor` commands no longer self-register via `rootCmd.AddCommand()` in their own `init()` functions. All command registration is now centralized in `root.go` for consistency.
 
 ### Enhancements
 

@@ -388,6 +388,38 @@ Examples:
 	},
 }
 
+// containerInfoCmd shows detailed information about a container
+var containerInfoCmd = &cobra.Command{
+	Use:   "info <name>",
+	Short: "Show detailed container information",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		name := args[0]
+		format, _ := cmd.Flags().GetString("format")
+
+		// Validate format
+		if format != "text" && format != "json" {
+			return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid format '%s': must be 'text' or 'json'", format)}
+		}
+
+		var output string
+		var err error
+
+		if format == "json" {
+			output, err = container.IncusOutput("info", name, "--format=json")
+		} else {
+			output, err = container.IncusOutput("info", name)
+		}
+
+		if err != nil {
+			return fmt.Errorf("failed to get container info: %v", err)
+		}
+
+		fmt.Print(output)
+		return nil
+	},
+}
+
 func init() {
 	// Add flags to launch command
 	containerLaunchCmd.Flags().Bool("ephemeral", false, "Create ephemeral container")
@@ -411,6 +443,9 @@ func init() {
 	containerMountCmd.Flags().Bool("shift", true, "Enable UID/GID shifting")
 	containerMountCmd.Flags().Bool("readonly", false, "Mount as read-only")
 
+	// Add flags to info command
+	containerInfoCmd.Flags().String("format", "text", "Output format: text or json")
+
 	// Add flags to list command
 	containerListCmd.Flags().String("format", "text", "Output format: text or json")
 
@@ -424,4 +459,5 @@ func init() {
 	containerCmd.AddCommand(containerRunningCmd)
 	containerCmd.AddCommand(containerMountCmd)
 	containerCmd.AddCommand(containerListCmd)
+	containerCmd.AddCommand(containerInfoCmd)
 }
