@@ -43,6 +43,16 @@
 
 ### Bug Fixes
 
+- [Bug Fix] **Standardize `--format` flag values** — `image list` now uses `text|json` instead of `table|json` for consistency with all other commands. Added format validation to `image list` (previously accepted any value silently).
+- [Bug Fix] **Add `--format text|json` flag to `monitor` command** — The `monitor` command now uses the standard `--format text|json` flag. The boolean `--json` flag is kept as a backward-compatible alias.
+
+### Improvements
+
+- [Improvement] **Add `-a` short flag for `--all`** — Added `-a` short form on: `list`, `clean`, `kill`, `shutdown`, `persist`, `snapshot list`, `snapshot delete` (already existed on `image list` and `images`).
+- [Improvement] **Add `-f` short flag for `--force`** — Added `-f` short form on: `kill`, `shutdown`, `clean`, `persist`, `build`, `update`, `container stop`, `container delete` (already existed on `snapshot restore` and `snapshot delete`).
+
+### Bug Fixes
+
 - [Bug Fix] **`attach` command ignoring global `--workspace` flag** — The `attach` command defined its own local `--workspace`/`-w` flag that shadowed the global one from `rootCmd.PersistentFlags()`. This meant `coi attach --workspace /path --slot 1` silently ignored the global workspace flag and always used the local default (`.`). Fixed by removing the local flag and using the global `workspace` variable.
 - [Bug Fix] **6 commands ignoring `--profile` flag by reloading config independently** — The `list`, `info`, `clean`, `persist`, `monitor`, and `health` commands each called `config.Load()` locally, discarding the profile-merged config already prepared by `PersistentPreRunE`. This meant `coi list --profile custom` would silently ignore the profile. Fixed by removing local `config.Load()` calls and using the package-level `cfg` set by `PersistentPreRunE`.
 - [Bug Fix] **`coi run` not cleaning up containers when commands exit with non-zero codes** — `run.go` called `os.Exit()` directly when a command failed, which skipped the deferred container cleanup function. Ephemeral containers and firewall rules would leak on any non-zero exit. Fixed by replacing `os.Exit()` with `ExitCodeError` return through cobra, ensuring defers run before the process exits.

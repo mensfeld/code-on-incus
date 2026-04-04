@@ -31,7 +31,7 @@ Examples:
 }
 
 func init() {
-	buildCmd.Flags().BoolVar(&buildForce, "force", false, "Force rebuild even if image exists")
+	buildCmd.Flags().BoolVarP(&buildForce, "force", "f", false, "Force rebuild even if image exists")
 	buildCmd.Flags().StringVar(&buildCompression, "compression", "", "Compression algorithm (e.g., none, gzip, xz; see Incus docs for all options)")
 }
 

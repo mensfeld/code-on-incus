@@ -44,8 +44,8 @@ Examples:
 }
 
 func init() {
-	cleanCmd.Flags().BoolVar(&cleanAll, "all", false, "Clean all containers, sessions, and orphaned resources")
-	cleanCmd.Flags().BoolVar(&cleanForce, "force", false, "Skip confirmation prompts")
+	cleanCmd.Flags().BoolVarP(&cleanAll, "all", "a", false, "Clean all containers, sessions, and orphaned resources")
+	cleanCmd.Flags().BoolVarP(&cleanForce, "force", "f", false, "Skip confirmation prompts")
 	cleanCmd.Flags().BoolVar(&cleanSessions, "sessions", false, "Clean saved session data")
 	cleanCmd.Flags().BoolVar(&cleanOrphans, "orphans", false, "Clean orphaned veths and firewall rules")
 	cleanCmd.Flags().BoolVar(&cleanDryRun, "dry-run", false, "Show what would be cleaned without making changes")

@@ -37,8 +37,8 @@ Examples:
 
 func init() {
 	shutdownCmd.Flags().IntVar(&shutdownTimeout, "timeout", 60, "Timeout in seconds to wait for graceful shutdown before force-killing")
-	shutdownCmd.Flags().BoolVar(&shutdownForce, "force", false, "Skip confirmation prompts")
-	shutdownCmd.Flags().BoolVar(&shutdownAll, "all", false, "Shutdown all containers")
+	shutdownCmd.Flags().BoolVarP(&shutdownForce, "force", "f", false, "Skip confirmation prompts")
+	shutdownCmd.Flags().BoolVarP(&shutdownAll, "all", "a", false, "Shutdown all containers")
 	rootCmd.AddCommand(shutdownCmd)
 }
 

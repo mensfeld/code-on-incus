@@ -136,7 +136,7 @@ func init() {
 	// Add flags to list command
 	snapshotListCmd.Flags().StringVarP(&snapshotContainer, "container", "c", "", "Container name (default: auto-detect from workspace)")
 	snapshotListCmd.Flags().StringVar(&snapshotFormat, "format", "text", "Output format: text or json")
-	snapshotListCmd.Flags().BoolVar(&snapshotAll, "all", false, "List snapshots for all COI containers")
+	snapshotListCmd.Flags().BoolVarP(&snapshotAll, "all", "a", false, "List snapshots for all COI containers")
 
 	// Add flags to restore command
 	snapshotRestoreCmd.Flags().StringVarP(&snapshotContainer, "container", "c", "", "Container name (default: auto-detect from workspace)")
@@ -146,7 +146,7 @@ func init() {
 	// Add flags to delete command
 	snapshotDeleteCmd.Flags().StringVarP(&snapshotContainer, "container", "c", "", "Container name (default: auto-detect from workspace)")
 	snapshotDeleteCmd.Flags().BoolVarP(&snapshotForce, "force", "f", false, "Skip confirmation prompt")
-	snapshotDeleteCmd.Flags().BoolVar(&snapshotAll, "all", false, "Delete all snapshots")
+	snapshotDeleteCmd.Flags().BoolVarP(&snapshotAll, "all", "a", false, "Delete all snapshots")
 
 	// Add flags to info command
 	snapshotInfoCmd.Flags().StringVarP(&snapshotContainer, "container", "c", "", "Container name (default: auto-detect from workspace)")

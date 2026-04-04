@@ -393,10 +393,10 @@ func init() {
 	containerLaunchCmd.Flags().Bool("ephemeral", false, "Create ephemeral container")
 
 	// Add flags to stop command
-	containerStopCmd.Flags().Bool("force", false, "Force stop")
+	containerStopCmd.Flags().BoolP("force", "f", false, "Force stop")
 
 	// Add flags to delete command
-	containerDeleteCmd.Flags().Bool("force", false, "Force delete even if running")
+	containerDeleteCmd.Flags().BoolP("force", "f", false, "Force delete even if running")
 
 	// Add flags to exec command
 	containerExecCmd.Flags().Int("user", 0, "User ID to run as")

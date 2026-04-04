@@ -35,8 +35,8 @@ Examples:
 }
 
 func init() {
-	persistCmd.Flags().BoolVar(&persistForce, "force", false, "Skip confirmation prompts")
-	persistCmd.Flags().BoolVar(&persistAll, "all", false, "Persist all containers")
+	persistCmd.Flags().BoolVarP(&persistForce, "force", "f", false, "Skip confirmation prompts")
+	persistCmd.Flags().BoolVarP(&persistAll, "all", "a", false, "Persist all containers")
 }
 
 func persistCommand(cmd *cobra.Command, args []string) error {

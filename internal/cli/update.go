@@ -42,7 +42,7 @@ Examples:
 
 func init() {
 	updateCmd.Flags().BoolVar(&updateCheck, "check", false, "Only check for updates, don't install")
-	updateCmd.Flags().BoolVar(&updateForce, "force", false, "Skip confirmation prompt")
+	updateCmd.Flags().BoolVarP(&updateForce, "force", "f", false, "Skip confirmation prompt")
 	updateCmd.Flags().StringVar(&updateVersion, "version", "", "Install specific version (skips GitHub query)")
 	_ = updateCmd.Flags().MarkHidden("version")
 }

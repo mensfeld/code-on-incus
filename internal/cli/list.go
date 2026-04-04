@@ -33,7 +33,7 @@ Examples:
 }
 
 func init() {
-	listCmd.Flags().BoolVar(&listAll, "all", false, "Show saved sessions in addition to active containers")
+	listCmd.Flags().BoolVarP(&listAll, "all", "a", false, "Show saved sessions in addition to active containers")
 	listCmd.Flags().StringVar(&listFormat, "format", "text", "Output format: text or json")
 }
 

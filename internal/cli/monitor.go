@@ -17,12 +17,14 @@ import (
 )
 
 var (
-	monitorJSON  bool
-	monitorWatch int
+	monitorJSON   bool
+	monitorFormat string
+	monitorWatch  int
 )
 
 func init() {
-	monitorCmd.Flags().BoolVar(&monitorJSON, "json", false, "Output in JSON format")
+	monitorCmd.Flags().StringVar(&monitorFormat, "format", "text", "Output format: text or json")
+	monitorCmd.Flags().BoolVar(&monitorJSON, "json", false, "Output in JSON format (alias for --format json)")
 	monitorCmd.Flags().IntVar(&monitorWatch, "watch", 0, "Watch mode: update every N seconds (0 = one-shot)")
 
 	rootCmd.AddCommand(monitorCmd)
@@ -46,12 +48,28 @@ from the current workspace.
 Examples:
   coi monitor                    # Auto-detect container, one-shot
   coi monitor coi-abc-1          # Monitor specific container
-  coi monitor --json             # JSON output
+  coi monitor --format json      # JSON output
+  coi monitor --json             # JSON output (backward-compatible alias)
   coi monitor --watch 2          # Update every 2 seconds`,
 	RunE: monitorCommand,
 }
 
 func monitorCommand(cmd *cobra.Command, args []string) error {
+	// Reconcile --json flag with --format flag (backward compatibility)
+	if monitorJSON {
+		monitorFormat = "json"
+	}
+
+	// Validate format value
+	if monitorFormat != "text" && monitorFormat != "json" {
+		return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid format '%s': must be 'text' or 'json'", monitorFormat)}
+	}
+
+	// Watch mode doesn't support JSON output
+	if monitorFormat == "json" && monitorWatch > 0 {
+		return &ExitCodeError{Code: 2, Message: "--format json is not supported with --watch"}
+	}
+
 	ctx := cmd.Context()
 
 	// Determine container name using 3-tier resolution:
@@ -91,7 +109,7 @@ func monitorCommand(cmd *cobra.Command, args []string) error {
 	snapshot.Threats = detector.Analyze(snapshot)
 
 	// Output
-	if monitorJSON {
+	if monitorFormat == "json" {
 		data, err := json.MarshalIndent(snapshot, "", "  ")
 		if err != nil {
 			return fmt.Errorf("failed to marshal JSON: %w", err)

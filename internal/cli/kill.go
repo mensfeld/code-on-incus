@@ -34,8 +34,8 @@ Examples:
 }
 
 func init() {
-	killCmd.Flags().BoolVar(&killForce, "force", false, "Skip confirmation prompts")
-	killCmd.Flags().BoolVar(&killAll, "all", false, "Kill all containers")
+	killCmd.Flags().BoolVarP(&killForce, "force", "f", false, "Skip confirmation prompts")
+	killCmd.Flags().BoolVarP(&killAll, "all", "a", false, "Kill all containers")
 }
 
 func killCommand(cmd *cobra.Command, args []string) error {
