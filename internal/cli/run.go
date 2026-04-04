@@ -14,7 +14,7 @@ import (
 )
 
 var runCmd = &cobra.Command{
-	Use:   "run COMMAND",
+	Use:   "run <command>",
 	Short: "Run a command in an ephemeral container",
 	Long: `Execute a command in an ephemeral Incus container.
 

@@ -15,7 +15,7 @@ This is primarily for automated workflows.`,
 }
 
 var tmuxSendCmd = &cobra.Command{
-	Use:   "send SESSION_NAME COMMAND",
+	Use:   "send <session-name> <command>",
 	Short: "Send a command to a tmux session",
 	Long: `Send a command to a running tmux session in a container.
 The session name should be the container name (e.g., coi-abc123-1).`,
@@ -24,7 +24,7 @@ The session name should be the container name (e.g., coi-abc123-1).`,
 }
 
 var tmuxCaptureCmd = &cobra.Command{
-	Use:   "capture SESSION_NAME",
+	Use:   "capture <session-name>",
 	Short: "Capture output from a tmux session",
 	Long: `Capture the current pane output from a tmux session.
 The session name should be the container name (e.g., coi-abc123-1).`,

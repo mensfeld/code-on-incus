@@ -63,6 +63,8 @@
 
 - [Improvement] **Add `-a` short flag for `--all`** — Added `-a` short form on: `list`, `clean`, `kill`, `shutdown`, `persist`, `snapshot list`, `snapshot delete` (already existed on `image list` and `images`).
 - [Improvement] **Add `-f` short flag for `--force`** — Added `-f` short form on: `kill`, `shutdown`, `clean`, `persist`, `build`, `update`, `container stop`, `container delete` (already existed on `snapshot restore` and `snapshot delete`).
+- [Improvement] **Standardize CLI `Use` strings** — All positional argument placeholders now follow a consistent `<required>` / `[optional]` lowercase-kebab-case convention. Affected commands: `tmux send`, `tmux capture`, `info`, `run`.
+- [Improvement] **Rename `profile show` to `profile info`** — For consistency with `coi info` and `snapshot info`, the `profile show` subcommand has been renamed to `profile info`. The old `show` verb is kept as a hidden backward-compatible alias.
 
 ### Enhancements
 

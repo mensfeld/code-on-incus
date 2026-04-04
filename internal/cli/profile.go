@@ -72,14 +72,14 @@ Examples:
 	},
 }
 
-// profileShowCmd shows details of a specific profile
-var profileShowCmd = &cobra.Command{
-	Use:   "show <name>",
-	Short: "Show profile details",
+// profileInfoCmd shows details of a specific profile
+var profileInfoCmd = &cobra.Command{
+	Use:   "info <name>",
+	Short: "Show detailed information about a profile",
 	Long: `Display the full configuration of a named profile.
 
 Examples:
-  coi profile show rust-dev`,
+  coi profile info rust-dev`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
@@ -342,7 +342,18 @@ func printLimits(l *config.LimitsConfig) {
 	}
 }
 
+// profileShowCmd is a hidden backward-compatible alias for profileInfoCmd
+var profileShowCmd = &cobra.Command{
+	Use:    "show <name>",
+	Short:  profileInfoCmd.Short,
+	Long:   profileInfoCmd.Long,
+	Args:   profileInfoCmd.Args,
+	RunE:   profileInfoCmd.RunE,
+	Hidden: true,
+}
+
 func init() {
 	profileCmd.AddCommand(profileListCmd)
+	profileCmd.AddCommand(profileInfoCmd)
 	profileCmd.AddCommand(profileShowCmd)
 }

@@ -11,7 +11,7 @@ import (
 )
 
 var infoCmd = &cobra.Command{
-	Use:   "info [SESSION_ID]",
+	Use:   "info [session-id]",
 	Short: "Show detailed information about a session",
 	Long: `Show detailed information about a saved session.
 
