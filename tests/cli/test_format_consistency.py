@@ -36,9 +36,7 @@ def test_image_list_format_table_rejected(coi_binary):
         f"Expected exit code 2 for --format table, got {result.returncode}"
     )
     combined = result.stdout + result.stderr
-    assert "invalid format" in combined.lower(), (
-        f"Expected 'invalid format' error, got: {combined}"
-    )
+    assert "invalid format" in combined.lower(), f"Expected 'invalid format' error, got: {combined}"
 
 
 def test_image_list_format_invalid_rejected(coi_binary):
@@ -50,13 +48,9 @@ def test_image_list_format_invalid_rejected(coi_binary):
         timeout=30,
     )
 
-    assert result.returncode == 2, (
-        f"Expected exit code 2 for --format xml, got {result.returncode}"
-    )
+    assert result.returncode == 2, f"Expected exit code 2 for --format xml, got {result.returncode}"
     combined = result.stdout + result.stderr
-    assert "invalid format" in combined.lower(), (
-        f"Expected 'invalid format' error, got: {combined}"
-    )
+    assert "invalid format" in combined.lower(), f"Expected 'invalid format' error, got: {combined}"
 
 
 def test_monitor_format_flag_accepted(coi_binary):
@@ -104,10 +98,6 @@ def test_monitor_format_invalid_rejected(coi_binary):
         timeout=30,
     )
 
-    assert result.returncode == 2, (
-        f"Expected exit code 2 for --format xml, got {result.returncode}"
-    )
+    assert result.returncode == 2, f"Expected exit code 2 for --format xml, got {result.returncode}"
     combined = result.stdout + result.stderr
-    assert "invalid format" in combined.lower(), (
-        f"Expected 'invalid format' error, got: {combined}"
-    )
+    assert "invalid format" in combined.lower(), f"Expected 'invalid format' error, got: {combined}"
