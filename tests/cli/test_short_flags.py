@@ -85,17 +85,19 @@ def test_persist_short_flags(coi_binary):
 
 def test_build_short_force(coi_binary):
     """coi build -f --help should recognize -f as --force."""
-    # Use --help to avoid actually building; we just check flag recognition
     result = subprocess.run(
-        [coi_binary, "build", "--help"],
+        [coi_binary, "build", "-f", "--help"],
         capture_output=True,
         text=True,
         timeout=30,
     )
 
-    # Check that -f appears in the help output
-    assert "-f, --force" in result.stdout, (
-        f"Expected '-f, --force' in help output, got: {result.stdout}"
+    combined = result.stdout + result.stderr
+    assert result.returncode == 0, (
+        f"Expected exit 0 for 'build -f --help', got {result.returncode}: {combined}"
+    )
+    assert "unknown shorthand flag" not in combined.lower(), (
+        f"-f should be recognized on build, got: {combined}"
     )
 
 

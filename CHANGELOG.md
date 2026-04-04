@@ -45,14 +45,6 @@
 
 - [Bug Fix] **Standardize `--format` flag values** — `image list` now uses `text|json` instead of `table|json` for consistency with all other commands. Added format validation to `image list` (previously accepted any value silently).
 - [Bug Fix] **Add `--format text|json` flag to `monitor` command** — The `monitor` command now uses the standard `--format text|json` flag. The boolean `--json` flag is kept as a backward-compatible alias.
-
-### Improvements
-
-- [Improvement] **Add `-a` short flag for `--all`** — Added `-a` short form on: `list`, `clean`, `kill`, `shutdown`, `persist`, `snapshot list`, `snapshot delete` (already existed on `image list` and `images`).
-- [Improvement] **Add `-f` short flag for `--force`** — Added `-f` short form on: `kill`, `shutdown`, `clean`, `persist`, `build`, `update`, `container stop`, `container delete` (already existed on `snapshot restore` and `snapshot delete`).
-
-### Bug Fixes
-
 - [Bug Fix] **`attach` command ignoring global `--workspace` flag** — The `attach` command defined its own local `--workspace`/`-w` flag that shadowed the global one from `rootCmd.PersistentFlags()`. This meant `coi attach --workspace /path --slot 1` silently ignored the global workspace flag and always used the local default (`.`). Fixed by removing the local flag and using the global `workspace` variable.
 - [Bug Fix] **6 commands ignoring `--profile` flag by reloading config independently** — The `list`, `info`, `clean`, `persist`, `monitor`, and `health` commands each called `config.Load()` locally, discarding the profile-merged config already prepared by `PersistentPreRunE`. This meant `coi list --profile custom` would silently ignore the profile. Fixed by removing local `config.Load()` calls and using the package-level `cfg` set by `PersistentPreRunE`.
 - [Bug Fix] **`coi run` not cleaning up containers when commands exit with non-zero codes** — `run.go` called `os.Exit()` directly when a command failed, which skipped the deferred container cleanup function. Ephemeral containers and firewall rules would leak on any non-zero exit. Fixed by replacing `os.Exit()` with `ExitCodeError` return through cobra, ensuring defers run before the process exits.
@@ -64,6 +56,11 @@
 - [Bug Fix] **Detect Incus bridge not in firewalld trusted zone** — When firewalld is active but the Incus bridge (e.g. `incusbr0`) is not in the `trusted` zone, containers fail to get IP addresses, causing "Waiting for network..." timeouts during `coi build` and `coi shell`. Added a new `bridge_firewalld_zone` health check to `coi health` that warns with an actionable fix command, an automatic bridge zone setup in `install.sh` for all firewalld paths (fresh install, start existing, already running), and a diagnostic hint in `coi build` when container IP detection fails. Fixes #220.
 - [Bug Fix] **Prefer IPv4 for Claude CLI installation in containers** — The native Claude Code installer uses Bun/Node which resolves AAAA (IPv6) records first. In containers and some network configurations the IPv6 path is non-functional, causing downloads to either time out or return 403. Two mitigations applied: (1) Set IPv4 precedence in `/etc/gai.conf` so `getaddrinfo()` returns A records first. (2) Use `curl -4` flag to force IPv4 for the initial `install.sh` fetch. Ref: anthropics/claude-code#13498. Fixes #224.
 - [Bug Fix] **Raw iptables fallback for Docker FORWARD DROP without firewalld** — Users with Docker installed but no firewalld would get stuck on "Waiting for network..." during `coi build` and `coi shell` because Docker sets the iptables FORWARD chain policy to DROP, blocking all container traffic. COI now auto-detects this scenario (`ForwardPolicyIsDrop()` + no firewalld + iptables available) and applies bridge-level ACCEPT rules as a fallback (`iptables -I FORWARD -i <bridge> -j ACCEPT`). The rules are tagged with `--comment coi-bridge-forward` for identification and cleaned up on teardown. Includes a new `docker_forward_policy` health check in `coi health` that proactively warns about the Docker/firewalld interaction, orphan detection/cleanup for stale bridge rules via `coi clean --orphans`, and diagnostic hints in `waitForNetwork` at the 30-second checkpoint. Also refactored duplicate bridge name parsing into shared `GetIncusBridgeName()`. Fixes #83.
+
+### Improvements
+
+- [Improvement] **Add `-a` short flag for `--all`** — Added `-a` short form on: `list`, `clean`, `kill`, `shutdown`, `persist`, `snapshot list`, `snapshot delete` (already existed on `image list` and `images`).
+- [Improvement] **Add `-f` short flag for `--force`** — Added `-f` short form on: `kill`, `shutdown`, `clean`, `persist`, `build`, `update`, `container stop`, `container delete` (already existed on `snapshot restore` and `snapshot delete`).
 
 ### Enhancements
 
