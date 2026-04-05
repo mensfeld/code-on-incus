@@ -192,6 +192,86 @@ func TestGetConfigPaths(t *testing.T) {
 	}
 }
 
+func TestGetProfileParentDirs(t *testing.T) {
+	// Ensure COI_CONFIG doesn't leak in
+	oldEnv := os.Getenv("COI_CONFIG")
+	os.Unsetenv("COI_CONFIG")
+	defer func() {
+		if oldEnv != "" {
+			os.Setenv("COI_CONFIG", oldEnv)
+		}
+	}()
+
+	dirs := GetProfileParentDirs()
+
+	if len(dirs) < 4 {
+		t.Fatalf("Expected at least 4 profile parent dirs, got %d: %v", len(dirs), dirs)
+	}
+
+	homeDir, _ := os.UserHomeDir()
+	workDir, _ := os.Getwd()
+
+	expected := []string{
+		"/etc/coi",
+		filepath.Join(homeDir, ".config", "coi"),
+		filepath.Join(homeDir, ".coi"),
+		filepath.Join(workDir, ".coi"),
+	}
+
+	for i, want := range expected {
+		if dirs[i] != want {
+			t.Errorf("dirs[%d] = %q, want %q", i, dirs[i], want)
+		}
+	}
+}
+
+func TestGetProfileParentDirsWithCoiConfig(t *testing.T) {
+	oldEnv := os.Getenv("COI_CONFIG")
+	os.Setenv("COI_CONFIG", "/custom/path/config.toml")
+	defer func() {
+		if oldEnv == "" {
+			os.Unsetenv("COI_CONFIG")
+		} else {
+			os.Setenv("COI_CONFIG", oldEnv)
+		}
+	}()
+
+	dirs := GetProfileParentDirs()
+
+	// Last entry should be the COI_CONFIG parent dir
+	last := dirs[len(dirs)-1]
+	if last != "/custom/path" {
+		t.Errorf("Expected last dir to be /custom/path, got %q", last)
+	}
+}
+
+func TestGetProfileParentDirsIncludesHomeCoi(t *testing.T) {
+	// Regression test: ~/.coi/ must be scanned for profiles so users can
+	// place profiles alongside sessions/storage/logs (which live under ~/.coi).
+	oldEnv := os.Getenv("COI_CONFIG")
+	os.Unsetenv("COI_CONFIG")
+	defer func() {
+		if oldEnv != "" {
+			os.Setenv("COI_CONFIG", oldEnv)
+		}
+	}()
+
+	dirs := GetProfileParentDirs()
+	homeDir, _ := os.UserHomeDir()
+	wantDir := filepath.Join(homeDir, ".coi")
+
+	found := false
+	for _, d := range dirs {
+		if d == wantDir {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Expected %q in profile parent dirs, got: %v", wantDir, dirs)
+	}
+}
+
 func TestGitConfigDefaults(t *testing.T) {
 	cfg := GetDefaultConfig()
 

@@ -68,6 +68,7 @@
 - [Improvement] **Add `container info` and `image info` subcommands** — New info subcommands for viewing detailed resource information, wrapping `incus info` and `incus image info` respectively. Both support `--format text|json`.
 - [Improvement] **Remove `coi images` command** — The plural `coi images` shortcut has been removed. Use `coi image list` instead.
 - [Improvement] **Centralize command registration in `root.go`** — `attach`, `shutdown`, and `monitor` commands no longer self-register via `rootCmd.AddCommand()` in their own `init()` functions. All command registration is now centralized in `root.go` for consistency.
+- [Improvement] **Load profiles from `~/.coi/profiles/` in addition to `~/.config/coi/profiles/`** — Profile directories are now scanned under both `~/.config/coi/profiles/` (XDG config) and `~/.coi/profiles/` (co-located with sessions/storage/logs). This lets users keep profiles alongside runtime data in `~/.coi/` instead of forcing them into the XDG config dir. Profiles from all scan locations (`/etc/coi/profiles/`, `~/.config/coi/profiles/`, `~/.coi/profiles/`, `./.coi/profiles/`) are merged into a single namespace. If the same profile name is defined in more than one location, COI refuses to start and points to both files, asking the user to rename one — this keeps it unambiguous which profile is being applied.
 
 ### Enhancements
 

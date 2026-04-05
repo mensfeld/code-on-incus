@@ -374,6 +374,46 @@ func GetConfigPaths() []string {
 	return paths
 }
 
+// GetProfileParentDirs returns directories to scan for the "profiles/"
+// subdirectory. Profiles found under any of these locations are merged into
+// a single namespace; the loader rejects duplicate profile names across
+// locations so it is always unambiguous which profile is in use.
+//
+// Scanned locations:
+//  1. /etc/coi                  (system)
+//  2. ~/.config/coi             (user XDG config)
+//  3. ~/.coi                    (user home; co-located with sessions/storage/logs)
+//  4. ./.coi                    (current project)
+//  5. dirname($COI_CONFIG)      (if COI_CONFIG is set)
+//
+// Both ~/.config/coi/profiles/ and ~/.coi/profiles/ are supported so users
+// can place profiles alongside their config (~/.config/coi) or alongside
+// their runtime data (~/.coi).
+func GetProfileParentDirs() []string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		homeDir = "/tmp"
+	}
+	workDir, err := os.Getwd()
+	if err != nil {
+		workDir = "."
+	}
+
+	dirs := []string{
+		"/etc/coi",                               // 1. System
+		filepath.Join(homeDir, ".config", "coi"), // 2. User XDG config
+		filepath.Join(homeDir, ".coi"),           // 3. User home
+		filepath.Join(workDir, ".coi"),           // 4. Project
+	}
+
+	// COI_CONFIG environment variable: scan its parent dir for profiles too
+	if envConfig := os.Getenv("COI_CONFIG"); envConfig != "" {
+		dirs = append(dirs, filepath.Dir(envConfig))
+	}
+
+	return dirs
+}
+
 // ptrBool returns a pointer to a bool value
 func ptrBool(b bool) *bool {
 	return &b

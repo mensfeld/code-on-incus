@@ -411,7 +411,7 @@ coi profile list
 coi profile info rust-dev
 ```
 
-Profile directories are scanned at all config levels (`/etc/coi/profiles/`, `~/.config/coi/profiles/`, `.coi/profiles/`). See the [Profiles wiki page](https://github.com/mensfeld/code-on-incus/wiki/Profiles) for complete documentation.
+Profile directories are scanned at all known locations: `/etc/coi/profiles/`, `~/.config/coi/profiles/`, `~/.coi/profiles/`, and `.coi/profiles/`. Profiles from every location are merged into a single namespace, so you can keep profiles alongside your XDG config (`~/.config/coi/`) or alongside runtime data (`~/.coi/` — same parent as sessions/storage/logs). If the same profile name is defined in more than one location, COI refuses to start and asks you to rename one — this keeps it unambiguous which profile is actually being applied. See the [Profiles wiki page](https://github.com/mensfeld/code-on-incus/wiki/Profiles) for complete documentation.
 
 ## Resource and Time Limits
 
