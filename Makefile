@@ -36,7 +36,7 @@ check-deps:
 		if ! command -v pkg-config >/dev/null 2>&1; then \
 			missing="pkg-config"; \
 		elif ! pkg-config --exists libsystemd 2>/dev/null; then \
-			missing="libsystemd-dev"; \
+			missing="libsystemd development headers"; \
 		fi; \
 		if [ -n "$$missing" ]; then \
 			echo ""; \
