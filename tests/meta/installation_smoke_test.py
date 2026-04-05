@@ -118,8 +118,10 @@ def test_full_installation_process(meta_container, coi_binary):
             apt-get update -qq || sleep 5 && apt-get update -qq
 
             # Install packages
+            # pkg-config is required by the Makefile's check-deps preflight
+            # (coi links libsystemd via cgo, which needs pkg-config + libsystemd-dev).
             DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-                curl wget git ca-certificates gnupg build-essential libsystemd-dev
+                curl wget git ca-certificates gnupg build-essential pkg-config libsystemd-dev
 
             echo "System dependencies installed"
             """,
