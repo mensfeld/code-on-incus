@@ -1,4 +1,4 @@
-.PHONY: build install clean test test-coverage test-unit integrations-setup integrations integrations-debug integrations-cli lint lint-python fmt tidy help
+.PHONY: build install clean test test-coverage test-unit integrations-setup integrations integrations-debug integrations-cli lint lint-python fmt tidy help check-deps
 
 # Binary name
 BINARY_NAME=coi
@@ -27,8 +27,40 @@ GOVET=$(GOCMD) vet
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS=-ldflags "-X github.com/mensfeld/code-on-incus/internal/cli.Version=$(VERSION)"
 
+# Check required system build dependencies.
+# On Linux, coi links libsystemd via cgo (internal/nftmonitor/journalctl.go) for
+# NFT monitoring, so pkg-config and libsystemd headers must be present.
+check-deps:
+	@if [ "$$(uname -s)" = "Linux" ]; then \
+		missing=""; \
+		if ! command -v pkg-config >/dev/null 2>&1; then \
+			missing="pkg-config"; \
+		elif ! pkg-config --exists libsystemd 2>/dev/null; then \
+			missing="libsystemd-dev"; \
+		fi; \
+		if [ -n "$$missing" ]; then \
+			echo ""; \
+			echo "Error: missing build dependency ($$missing)"; \
+			echo ""; \
+			echo "  coi uses cgo to read the systemd journal for NFT monitoring,"; \
+			echo "  so building from source requires pkg-config and the libsystemd"; \
+			echo "  development headers."; \
+			echo ""; \
+			echo "  Ubuntu/Debian:"; \
+			echo "    sudo apt install -y pkg-config libsystemd-dev"; \
+			echo ""; \
+			echo "  Fedora/RHEL:"; \
+			echo "    sudo dnf install -y pkgconf-pkg-config systemd-devel"; \
+			echo ""; \
+			echo "  Arch:"; \
+			echo "    sudo pacman -S --needed pkgconf systemd-libs"; \
+			echo ""; \
+			exit 1; \
+		fi; \
+	fi
+
 # Build the project
-build:
+build: check-deps
 	@echo "Building $(BINARY_NAME) version $(VERSION)..."
 	@mkdir -p internal/image/embedded
 	@mkdir -p internal/config/embedded
@@ -144,7 +176,7 @@ check: fmt-check vet lint test
 check-all: check doc-coverage
 
 # Build for multiple platforms
-build-all:
+build-all: check-deps
 	@echo "Building $(BINARY_NAME) version $(VERSION) for all platforms..."
 	@mkdir -p dist
 	@mkdir -p internal/image/embedded
