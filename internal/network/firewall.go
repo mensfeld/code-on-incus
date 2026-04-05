@@ -418,6 +418,52 @@ func BridgeInTrustedZone() (bool, string, error) {
 	return true, bridgeName, nil
 }
 
+// EnsureBridgeInTrustedZone makes sure the Incus bridge is a member of the
+// firewalld trusted zone, adding it if necessary. It is safe to call at the
+// start of any command path that needs container networking to work.
+//
+// Return values:
+//   - changed: true only when the bridge was added to the zone by this call.
+//     false when firewalld is unavailable, when the bridge was already in the
+//     zone, or when the add attempt failed (see err).
+//   - bridgeName: the detected Incus bridge name (empty string when firewalld
+//     is unavailable or the bridge name could not be determined).
+//   - err: non-nil only on real failures (bridge detection error or
+//     firewall-cmd failure while adding/reloading). firewalld not being
+//     available is explicitly NOT an error — callers that require firewalld
+//     should check that separately via FirewallAvailable().
+//
+// The function is idempotent: calling it repeatedly is safe, and a no-op on
+// already-healthy systems.
+func EnsureBridgeInTrustedZone() (changed bool, bridgeName string, err error) {
+	// firewalld not available → nothing to do. Not an error.
+	if !FirewallAvailable() {
+		return false, "", nil
+	}
+
+	inZone, name, err := BridgeInTrustedZone()
+	if err != nil {
+		return false, name, err
+	}
+	if inZone {
+		return false, name, nil
+	}
+
+	// Add the bridge to the trusted zone, persistently, and reload firewalld
+	// so the running config picks up the change.
+	addCmd := exec.Command("sudo", "-n", "firewall-cmd", "--zone=trusted", "--add-interface="+name, "--permanent")
+	if output, err := addCmd.CombinedOutput(); err != nil {
+		return false, name, fmt.Errorf("firewall-cmd --add-interface failed: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+
+	reloadCmd := exec.Command("sudo", "-n", "firewall-cmd", "--reload")
+	if output, err := reloadCmd.CombinedOutput(); err != nil {
+		return false, name, fmt.Errorf("firewall-cmd --reload failed: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+
+	return true, name, nil
+}
+
 // IptablesAvailable checks if the iptables binary is installed
 func IptablesAvailable() bool {
 	_, err := exec.LookPath("iptables")

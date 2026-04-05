@@ -139,14 +139,19 @@ func (b *Builder) launchBuildContainer() error {
 	// Setup open mode firewall rules for build container
 	// This is needed when FORWARD chain policy is DROP (common with Docker/firewalld)
 	if network.FirewallAvailable() {
+		// Autofix: make sure the Incus bridge is in the firewalld trusted zone
+		// *before* we wait on the container IP lookup. A bridge outside the
+		// trusted zone causes the container to never receive an IP, so without
+		// this the next call would block for 30s and then fail.
+		if changed, bridgeName, zoneErr := network.EnsureBridgeInTrustedZone(); zoneErr != nil {
+			b.opts.Logger(fmt.Sprintf("Warning: could not ensure bridge in firewalld trusted zone: %v", zoneErr))
+		} else if changed {
+			b.opts.Logger(fmt.Sprintf("Added %s to firewalld trusted zone (was missing — containers could not get IPs)", bridgeName))
+		}
+
 		containerIP, err := network.GetContainerIP(b.mgr.ContainerName)
 		if err != nil {
 			b.opts.Logger(fmt.Sprintf("Warning: could not get container IP for firewall rules: %v", err))
-			// Check if bridge is not in trusted zone — this is the most common cause
-			if inZone, bridgeName, zoneErr := network.BridgeInTrustedZone(); zoneErr == nil && !inZone {
-				b.opts.Logger(fmt.Sprintf("Hint: Bridge %s is not in firewalld trusted zone. This is likely the cause.", bridgeName))
-				b.opts.Logger(fmt.Sprintf("      Fix: sudo firewall-cmd --zone=trusted --add-interface=%s --permanent && sudo firewall-cmd --reload", bridgeName))
-			}
 		} else {
 			if err := network.EnsureOpenModeRules(containerIP); err != nil {
 				b.opts.Logger(fmt.Sprintf("Warning: could not add firewall rules: %v", err))

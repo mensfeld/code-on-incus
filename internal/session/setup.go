@@ -129,6 +129,18 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 		}
 	}
 
+	// Autofix: make sure the Incus bridge is in the firewalld trusted zone
+	// *before* any container is started. A bridge outside the trusted zone
+	// prevents containers from getting IP addresses via DHCP (firewalld drops
+	// the response), so without this the container start would succeed but
+	// waitForReady would time out and the whole flow would fail with an
+	// opaque error. No-op when firewalld is not available.
+	if changed, bridgeName, err := network.EnsureBridgeInTrustedZone(); err != nil {
+		opts.Logger(fmt.Sprintf("Warning: could not ensure bridge in firewalld trusted zone: %v", err))
+	} else if changed {
+		opts.Logger(fmt.Sprintf("Added %s to firewalld trusted zone (was missing — containers could not get IPs)", bridgeName))
+	}
+
 	// 2. Determine image
 	image := opts.Image
 	if image == "" {
