@@ -28,7 +28,6 @@ import time
 
 import pytest
 
-
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 MAKEFILE_PATH = os.path.join(REPO_ROOT, "Makefile")
 
