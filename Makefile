@@ -28,9 +28,31 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev
 LDFLAGS=-ldflags "-X github.com/mensfeld/code-on-incus/internal/cli.Version=$(VERSION)"
 
 # Check required system build dependencies.
-# On Linux, coi links libsystemd via cgo (internal/nftmonitor/journalctl.go) for
-# NFT monitoring, so pkg-config and libsystemd headers must be present.
+# - Go toolchain (coi is written in Go).
+# - On Linux: pkg-config and libsystemd headers, because coi links libsystemd
+#   via cgo (internal/nftmonitor/journalctl.go) for NFT monitoring.
 check-deps:
+	@if ! command -v go >/dev/null 2>&1; then \
+		echo ""; \
+		echo "Error: Go toolchain not found"; \
+		echo ""; \
+		echo "  coi is written in Go and requires the Go compiler to build."; \
+		echo ""; \
+		echo "  Install options:"; \
+		echo "    Official tarball:  https://go.dev/doc/install"; \
+		echo "    Ubuntu/Debian:     sudo apt install -y golang-go"; \
+		echo "    Fedora/RHEL:       sudo dnf install -y golang"; \
+		echo "    Arch:              sudo pacman -S --needed go"; \
+		echo "    mise:              mise use -g go@latest"; \
+		echo ""; \
+		echo "  Note: if Go is installed for your user (e.g. via mise, asdf, or"; \
+		echo "  \$$HOME/go/bin) but you are seeing this error, you probably ran"; \
+		echo "  'sudo make ...'. sudo strips PATH by default. Run 'make build'"; \
+		echo "  as your user instead — the install target copies with sudo only"; \
+		echo "  where needed, so rebuilding under sudo is not required."; \
+		echo ""; \
+		exit 1; \
+	fi
 	@if [ "$$(uname -s)" = "Linux" ]; then \
 		missing=""; \
 		if ! command -v pkg-config >/dev/null 2>&1; then \

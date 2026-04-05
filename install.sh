@@ -366,17 +366,25 @@ build_from_source() {
     echo -e "${BLUE}→ Cloning repository...${NC}"
     git clone --depth 1 "https://github.com/${REPO}.git" "$tmp_dir"
 
-    # Build
+    # Build (as the current user — never under sudo, because sudo strips PATH
+    # and user-scoped Go toolchains like mise/asdf/$HOME/go/bin would disappear).
     cd "$tmp_dir"
     echo -e "${BLUE}→ Building binary...${NC}"
     make build
 
-    # Install
+    # Install the freshly-built binary. We intentionally do NOT run
+    # `sudo make install` here: that would re-invoke the `build` prerequisite
+    # under sudo, strip PATH, and crash on systems where Go is user-scoped.
+    # Mirror download_binary and copy the binary directly, only sudo-ing when
+    # $INSTALL_DIR is not writable.
     echo -e "${BLUE}→ Installing to ${INSTALL_DIR}...${NC}"
+    local built_binary="${tmp_dir}/${BINARY_NAME}"
     if [ -w "$INSTALL_DIR" ]; then
-        make install
+        cp "$built_binary" "${INSTALL_DIR}/${BINARY_NAME}"
+        ln -sf "${INSTALL_DIR}/${BINARY_NAME}" "${INSTALL_DIR}/claude-on-incus"
     else
-        sudo make install
+        sudo cp "$built_binary" "${INSTALL_DIR}/${BINARY_NAME}"
+        sudo ln -sf "${INSTALL_DIR}/${BINARY_NAME}" "${INSTALL_DIR}/claude-on-incus"
     fi
 
     echo -e "${GREEN}✓ Built and installed${NC}"
