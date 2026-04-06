@@ -419,13 +419,16 @@ writable_hooks = false
 #   [network]
 #   mode = "restricted"
 #
-# Profile directory scan locations:
+# Default profile directory scan locations:
 #   1. ~/.coi/profiles/NAME/config.toml
 #   2. .coi/profiles/NAME/config.toml
 #
-# Profiles from both locations are merged into a single namespace — if the
-# same name is defined in both, COI will refuse to start and ask you to
-# rename one.
+# Additional scan location when COI_CONFIG is set:
+#   3. dirname($COI_CONFIG)/profiles/NAME/config.toml
+#
+# Profiles from all scanned locations are merged into a single namespace — if
+# the same name is defined in more than one location, COI will refuse to start
+# and ask you to rename one.
 #
 # Use 'coi profile list' and 'coi profile info <name>' to inspect loaded profiles.
 `

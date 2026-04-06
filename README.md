@@ -410,7 +410,7 @@ coi profile list
 coi profile info rust-dev
 ```
 
-Profile directories are scanned under `~/.coi/profiles/` (user) and `./.coi/profiles/` (project). Profiles from both locations are merged into a single namespace — if the same profile name is defined in both, COI refuses to start and asks you to rename one so it's always unambiguous which profile is being applied. See the [Profiles wiki page](https://github.com/mensfeld/code-on-incus/wiki/Profiles) for complete documentation.
+Profile directories are scanned under `~/.coi/profiles/` (user) and `./.coi/profiles/` (project). When `COI_CONFIG` is set, its parent directory is also scanned. Profiles from all discovered locations are merged into a single namespace — if the same profile name is defined in more than one location, COI refuses to start and asks you to rename one so it's always unambiguous which profile is being applied. See the [Profiles wiki page](https://github.com/mensfeld/code-on-incus/wiki/Profiles) for complete documentation.
 
 ## Resource and Time Limits
 

@@ -3,12 +3,13 @@ Test that profiles are loaded from ~/.coi/profiles/ and project .coi/profiles/
 and merged into a single namespace, with duplicate names across locations
 rejected as errors.
 
-Profiles can live under either of:
+Profile scan locations (also dirname($COI_CONFIG) when set, but not tested here):
   - ~/.coi/profiles/
   - ./.coi/profiles/  (project-local)
 
-Profiles from both locations are merged together. If the same profile name is
-defined in both, COI refuses to start and asks the user to rename one.
+Profiles from all discovered locations are merged together. If the same profile
+name is defined in more than one location, COI refuses to start and asks the
+user to rename one.
 
 Tests verify:
 1. A profile placed in ~/.coi/profiles/ is picked up by `coi profile list`.
