@@ -348,8 +348,12 @@ func synthesizeDefaultProfile(cfg *Config) ProfileConfig {
 	return p
 }
 
-// GetConfigPaths returns the list of config file paths to check (in order)
-// If COI_CONFIG environment variable is set, it is added as highest priority
+// GetConfigPaths returns the list of config file paths to check (in order).
+// COI looks for configuration in two places:
+//  1. ~/.coi/config.toml        (user, co-located with sessions/storage/logs)
+//  2. ./.coi/config.toml        (current project)
+//
+// If COI_CONFIG environment variable is set, it is added as highest priority.
 func GetConfigPaths() []string {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -361,9 +365,8 @@ func GetConfigPaths() []string {
 	}
 
 	paths := []string{
-		"/etc/coi/config.toml",                            // System config
-		filepath.Join(homeDir, ".config/coi/config.toml"), // User config
-		filepath.Join(workDir, ".coi", "config.toml"),     // Project config (.coi/config.toml)
+		filepath.Join(homeDir, ".coi", "config.toml"), // User config
+		filepath.Join(workDir, ".coi", "config.toml"), // Project config
 	}
 
 	// COI_CONFIG environment variable has highest priority
@@ -380,15 +383,9 @@ func GetConfigPaths() []string {
 // locations so it is always unambiguous which profile is in use.
 //
 // Scanned locations:
-//  1. /etc/coi                  (system)
-//  2. ~/.config/coi             (user XDG config)
-//  3. ~/.coi                    (user home; co-located with sessions/storage/logs)
-//  4. ./.coi                    (current project)
-//  5. dirname($COI_CONFIG)      (if COI_CONFIG is set)
-//
-// Both ~/.config/coi/profiles/ and ~/.coi/profiles/ are supported so users
-// can place profiles alongside their config (~/.config/coi) or alongside
-// their runtime data (~/.coi).
+//  1. ~/.coi                    (user home; co-located with sessions/storage/logs)
+//  2. ./.coi                    (current project)
+//  3. dirname($COI_CONFIG)      (if COI_CONFIG is set)
 func GetProfileParentDirs() []string {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -400,10 +397,8 @@ func GetProfileParentDirs() []string {
 	}
 
 	dirs := []string{
-		"/etc/coi",                               // 1. System
-		filepath.Join(homeDir, ".config", "coi"), // 2. User XDG config
-		filepath.Join(homeDir, ".coi"),           // 3. User home
-		filepath.Join(workDir, ".coi"),           // 4. Project
+		filepath.Join(homeDir, ".coi"), // 1. User home
+		filepath.Join(workDir, ".coi"), // 2. Project
 	}
 
 	// COI_CONFIG environment variable: scan its parent dir for profiles too

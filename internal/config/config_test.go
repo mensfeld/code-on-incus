@@ -167,28 +167,33 @@ func TestApplyProfile(t *testing.T) {
 }
 
 func TestGetConfigPaths(t *testing.T) {
+	// Ensure COI_CONFIG doesn't leak in
+	oldEnv := os.Getenv("COI_CONFIG")
+	os.Unsetenv("COI_CONFIG")
+	defer func() {
+		if oldEnv != "" {
+			os.Setenv("COI_CONFIG", oldEnv)
+		}
+	}()
+
 	paths := GetConfigPaths()
 
-	if len(paths) < 3 {
-		t.Errorf("Expected at least 3 config paths, got %d", len(paths))
+	if len(paths) != 2 {
+		t.Fatalf("Expected exactly 2 config paths (user + project), got %d: %v", len(paths), paths)
 	}
 
-	// Check that paths are in expected order
-	expectedPaths := []string{
-		"/etc/coi/config.toml",
-	}
-
-	for i, expected := range expectedPaths {
-		if paths[i] != expected {
-			t.Errorf("Path[%d]: expected %q, got %q", i, expected, paths[i])
-		}
-	}
-
-	// Check that user config path contains .config
 	homeDir, _ := os.UserHomeDir()
-	expectedUserPath := filepath.Join(homeDir, ".config/coi/config.toml")
-	if paths[1] != expectedUserPath {
-		t.Errorf("User config path: expected %q, got %q", expectedUserPath, paths[1])
+	workDir, _ := os.Getwd()
+
+	expected := []string{
+		filepath.Join(homeDir, ".coi", "config.toml"),
+		filepath.Join(workDir, ".coi", "config.toml"),
+	}
+
+	for i, want := range expected {
+		if paths[i] != want {
+			t.Errorf("paths[%d] = %q, want %q", i, paths[i], want)
+		}
 	}
 }
 
@@ -204,16 +209,14 @@ func TestGetProfileParentDirs(t *testing.T) {
 
 	dirs := GetProfileParentDirs()
 
-	if len(dirs) < 4 {
-		t.Fatalf("Expected at least 4 profile parent dirs, got %d: %v", len(dirs), dirs)
+	if len(dirs) != 2 {
+		t.Fatalf("Expected exactly 2 profile parent dirs (user + project), got %d: %v", len(dirs), dirs)
 	}
 
 	homeDir, _ := os.UserHomeDir()
 	workDir, _ := os.Getwd()
 
 	expected := []string{
-		"/etc/coi",
-		filepath.Join(homeDir, ".config", "coi"),
 		filepath.Join(homeDir, ".coi"),
 		filepath.Join(workDir, ".coi"),
 	}
@@ -675,7 +678,7 @@ func TestMergeBoolZeroValueBug(t *testing.T) {
 	// This test demonstrates a bug where merging a zero-value Config (simulating
 	// a TOML file that only sets string fields) overwrites security-critical
 	// boolean defaults with false. For example, a user config at
-	// ~/.config/coi/config.toml that only sets image = "my-image" should NOT
+	// ~/.coi/config.toml that only sets image = "my-image" should NOT
 	// reset block_private_networks from true to false.
 
 	base := GetDefaultConfig()

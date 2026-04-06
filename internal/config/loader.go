@@ -12,10 +12,9 @@ import (
 // Load loads configuration from all available sources
 // Hierarchy (lowest to highest precedence):
 // 1. Built-in defaults
-// 2. System config (/etc/coi/config.toml)
-// 3. User config (~/.config/coi/config.toml)
-// 4. Project config (./.coi/config.toml)
-// 5. Environment variables (CLAUDE_ON_INCUS_* or COI_*)
+// 2. User config (~/.coi/config.toml)
+// 3. Project config (./.coi/config.toml)
+// 4. Environment variables (CLAUDE_ON_INCUS_* or COI_*)
 //
 // Profile directories are scanned independently from config files.
 // See GetProfileParentDirs() for the full list of scanned locations.
@@ -104,9 +103,9 @@ func loadConfigFile(cfg *Config, path string) error {
 //
 // If a profile with the same name is already loaded from a different source
 // location, loadProfileDirectories returns an error. Profiles from different
-// scan locations (e.g. ~/.config/coi/profiles/ and ~/.coi/profiles/) are
-// merged together, and users are expected to use unique names across
-// locations so it's always clear which profile is being used.
+// scan locations (e.g. ~/.coi/profiles/ and ./.coi/profiles/) are merged
+// together, and users are expected to use unique names across locations so
+// it's always clear which profile is being used.
 func loadProfileDirectories(cfg *Config, configDir string) error {
 	profilesDir := filepath.Join(configDir, "profiles")
 	entries, err := os.ReadDir(profilesDir)
@@ -421,16 +420,12 @@ writable_hooks = false
 #   mode = "restricted"
 #
 # Profile directory scan locations:
-#   1. /etc/coi/profiles/NAME/config.toml
-#   2. ~/.config/coi/profiles/NAME/config.toml
-#   3. ~/.coi/profiles/NAME/config.toml
-#   4. .coi/profiles/NAME/config.toml
+#   1. ~/.coi/profiles/NAME/config.toml
+#   2. .coi/profiles/NAME/config.toml
 #
-# Both ~/.config/coi/profiles/ and ~/.coi/profiles/ are supported so you can
-# keep profiles alongside your XDG config or alongside runtime data
-# (sessions/storage/logs under ~/.coi/). Profiles from all locations are
-# merged into a single namespace — if the same name is defined in more than
-# one location, COI will refuse to start and ask you to rename one.
+# Profiles from both locations are merged into a single namespace — if the
+# same name is defined in both, COI will refuse to start and ask you to
+# rename one.
 #
 # Use 'coi profile list' and 'coi profile info <name>' to inspect loaded profiles.
 `

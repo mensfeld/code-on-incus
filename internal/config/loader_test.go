@@ -957,9 +957,9 @@ func TestProfileValidation(t *testing.T) {
 }
 
 func TestLoadProfilesFromHomeCoi(t *testing.T) {
-	// Verify that profiles placed in ~/.coi/profiles/ are picked up by Load(),
-	// in addition to ~/.config/coi/profiles/. This lets users place profiles
-	// alongside their sessions/storage/logs (which live under ~/.coi).
+	// Verify that profiles placed in ~/.coi/profiles/ are picked up by Load().
+	// This lets users place profiles alongside their sessions/storage/logs
+	// (which live under ~/.coi).
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 
@@ -998,112 +998,9 @@ func TestLoadProfilesFromHomeCoi(t *testing.T) {
 	}
 }
 
-func TestLoadMergesProfilesFromBothHomeLocations(t *testing.T) {
-	// Both ~/.config/coi/profiles/ and ~/.coi/profiles/ should be scanned
-	// and profiles from both merged into a single namespace (as long as
-	// names are unique).
-	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
-
-	tmpWork := t.TempDir()
-	oldWd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd failed: %v", err)
-	}
-	defer os.Chdir(oldWd) //nolint:errcheck
-	if err := os.Chdir(tmpWork); err != nil {
-		t.Fatalf("Chdir failed: %v", err)
-	}
-
-	// Profile A: only in ~/.config/coi/profiles/
-	xdgProfA := filepath.Join(tmpHome, ".config", "coi", "profiles", "xdg-only")
-	if err := os.MkdirAll(xdgProfA, 0o755); err != nil {
-		t.Fatalf("MkdirAll failed: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(xdgProfA, "config.toml"), []byte(`image = "xdg-image"`), 0o644); err != nil {
-		t.Fatalf("WriteFile failed: %v", err)
-	}
-
-	// Profile B: only in ~/.coi/profiles/
-	homeProfB := filepath.Join(tmpHome, ".coi", "profiles", "home-only")
-	if err := os.MkdirAll(homeProfB, 0o755); err != nil {
-		t.Fatalf("MkdirAll failed: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(homeProfB, "config.toml"), []byte(`image = "home-image"`), 0o644); err != nil {
-		t.Fatalf("WriteFile failed: %v", err)
-	}
-
-	cfg, loadErr := Load()
-	if loadErr != nil {
-		t.Fatalf("Load() failed: %v", loadErr)
-	}
-
-	if p := cfg.GetProfile("xdg-only"); p == nil || p.Image != "xdg-image" {
-		t.Errorf("Expected xdg-only profile with image 'xdg-image', got %+v", p)
-	}
-	if p := cfg.GetProfile("home-only"); p == nil || p.Image != "home-image" {
-		t.Errorf("Expected home-only profile with image 'home-image', got %+v", p)
-	}
-}
-
-func TestLoadDuplicateProfileAcrossLocationsFails(t *testing.T) {
-	// When the same profile name is defined in multiple scan locations,
-	// Load() should return an error pointing to both files so the user can
-	// rename one. This prevents silent ambiguity about which profile wins.
-	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
-
-	tmpWork := t.TempDir()
-	oldWd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd failed: %v", err)
-	}
-	defer os.Chdir(oldWd) //nolint:errcheck
-	if err := os.Chdir(tmpWork); err != nil {
-		t.Fatalf("Chdir failed: %v", err)
-	}
-
-	// Same profile name in both ~/.config/coi/profiles/ and ~/.coi/profiles/
-	xdgProf := filepath.Join(tmpHome, ".config", "coi", "profiles", "dup")
-	if err := os.MkdirAll(xdgProf, 0o755); err != nil {
-		t.Fatalf("MkdirAll failed: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(xdgProf, "config.toml"), []byte(`image = "from-xdg"`), 0o644); err != nil {
-		t.Fatalf("WriteFile failed: %v", err)
-	}
-
-	homeProf := filepath.Join(tmpHome, ".coi", "profiles", "dup")
-	if err := os.MkdirAll(homeProf, 0o755); err != nil {
-		t.Fatalf("MkdirAll failed: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(homeProf, "config.toml"), []byte(`image = "from-home"`), 0o644); err != nil {
-		t.Fatalf("WriteFile failed: %v", err)
-	}
-
-	_, loadErr := Load()
-	if loadErr == nil {
-		t.Fatal("Expected Load() to fail on duplicate profile name across locations")
-	}
-
-	msg := loadErr.Error()
-	if !strings.Contains(msg, "dup") {
-		t.Errorf("Error should mention profile name 'dup', got: %v", loadErr)
-	}
-	if !strings.Contains(msg, "multiple locations") {
-		t.Errorf("Error should mention 'multiple locations', got: %v", loadErr)
-	}
-	// Both source paths should be referenced
-	if !strings.Contains(msg, filepath.Join(xdgProf, "config.toml")) {
-		t.Errorf("Error should reference XDG path, got: %v", loadErr)
-	}
-	if !strings.Contains(msg, filepath.Join(homeProf, "config.toml")) {
-		t.Errorf("Error should reference ~/.coi path, got: %v", loadErr)
-	}
-}
-
 func TestLoadMergesProjectAndHomeProfiles(t *testing.T) {
-	// Project-local .coi/profiles/ should be merged alongside ~/.config/coi/profiles/
-	// and ~/.coi/profiles/ when profile names are unique.
+	// Project-local .coi/profiles/ should be merged alongside ~/.coi/profiles/
+	// when profile names are unique.
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 
@@ -1115,15 +1012,6 @@ func TestLoadMergesProjectAndHomeProfiles(t *testing.T) {
 	defer os.Chdir(oldWd) //nolint:errcheck
 	if err := os.Chdir(tmpWork); err != nil {
 		t.Fatalf("Chdir failed: %v", err)
-	}
-
-	// Profile in ~/.config/coi/profiles/
-	xdgProf := filepath.Join(tmpHome, ".config", "coi", "profiles", "from-xdg")
-	if err := os.MkdirAll(xdgProf, 0o755); err != nil {
-		t.Fatalf("MkdirAll failed: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(xdgProf, "config.toml"), []byte(`image = "xdg-image"`), 0o644); err != nil {
-		t.Fatalf("WriteFile failed: %v", err)
 	}
 
 	// Profile in ~/.coi/profiles/
@@ -1149,9 +1037,6 @@ func TestLoadMergesProjectAndHomeProfiles(t *testing.T) {
 		t.Fatalf("Load() failed: %v", loadErr)
 	}
 
-	if p := cfg.GetProfile("from-xdg"); p == nil || p.Image != "xdg-image" {
-		t.Errorf("Expected from-xdg profile merged, got %+v", p)
-	}
 	if p := cfg.GetProfile("from-home"); p == nil || p.Image != "home-image" {
 		t.Errorf("Expected from-home profile merged, got %+v", p)
 	}

@@ -91,7 +91,7 @@ sudo -n nft list ruleset
 ### Enable/Disable NFT Monitoring
 
 ```toml
-# ~/.config/coi/config.toml
+# ~/.coi/config.toml
 
 [monitoring]
 enabled = true                    # Master switch for all monitoring
