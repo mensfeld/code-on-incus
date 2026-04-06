@@ -87,3 +87,48 @@ def test_image_exists_nonexistent_returns_exit_code_1(coi_binary):
     assert result.stderr.strip() == "", (
         f"Expected no stderr for nonexistent image exists check, got: {result.stderr!r}"
     )
+
+
+def test_exit_code_error_no_usage_dump(coi_binary):
+    """Commands returning ExitCodeError should NOT print cobra usage/help block.
+
+    Regression test for #287: commands like `coi health` and `coi container
+    exists` that use non-zero exit codes for status were dumping the full
+    usage/help text after their own output.
+    """
+    # container exists with a nonexistent name returns ExitCodeError(1)
+    result = subprocess.run(
+        [coi_binary, "container", "exists", "nonexistent-container-xyz-999"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert result.returncode != 0, "Should return non-zero for nonexistent container"
+    combined = result.stdout + result.stderr
+    assert "Usage:" not in combined, (
+        f"ExitCodeError should not trigger usage dump. Got:\n{combined}"
+    )
+    assert "Examples:" not in combined, (
+        f"ExitCodeError should not trigger examples dump. Got:\n{combined}"
+    )
+
+
+def test_arg_validation_error_shows_usage(coi_binary):
+    """Commands with wrong number of args should still show usage hint.
+
+    Ensures SilenceUsage doesn't suppress usage for genuine user mistakes
+    (as opposed to ExitCodeError status codes).
+    """
+    result = subprocess.run(
+        [coi_binary, "container", "exists"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert result.returncode != 0, "Should fail with missing args"
+    combined = result.stdout + result.stderr
+    assert "usage:" in combined.lower() or "accepts 1 arg" in combined.lower(), (
+        f"Missing args should show usage or arg count error. Got:\n{combined}"
+    )

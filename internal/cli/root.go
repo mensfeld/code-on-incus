@@ -76,6 +76,12 @@ Examples:
 			persistent = config.BoolVal(cfg.Defaults.Persistent)
 		}
 
+		// Silence usage output for RunE errors. Setting this here (in
+		// PersistentPreRunE) rather than globally means cobra still prints
+		// usage for arg/flag validation errors (which fire before this hook),
+		// but won't dump usage for RunE errors like ExitCodeError.
+		cmd.SilenceUsage = true
+
 		return nil
 	},
 }
@@ -86,12 +92,7 @@ func Execute(isCoi bool) error {
 		rootCmd.Use = "claude-on-incus"
 	}
 	// Prevent cobra from double-printing errors — main.go handles error output.
-	// SilenceUsage prevents cobra from printing usage/help when RunE returns an
-	// error (e.g. ExitCodeError for non-zero exit codes). Without this, commands
-	// like `coi health` that use exit codes for status would dump the full usage
-	// block after their own output.
 	rootCmd.SilenceErrors = true
-	rootCmd.SilenceUsage = true
 	return rootCmd.Execute()
 }
 
