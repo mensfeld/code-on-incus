@@ -129,6 +129,18 @@ func (b *Builder) Build() *BuildResult {
 func (b *Builder) launchBuildContainer() error {
 	b.opts.Logger(fmt.Sprintf("Launching build container from %s...", b.opts.BaseImage))
 
+	// Autofix: make sure the Incus bridge is in the firewalld trusted zone
+	// *before* we start the container. A bridge outside the trusted zone
+	// causes firewalld to drop DHCP replies, so the container would never
+	// receive an IP and the GetContainerIP call below would block for 30s
+	// and then fail. Running this before Launch() guarantees DHCP works on
+	// the very first attempt.
+	if changed, bridgeName, zoneErr := network.EnsureBridgeInTrustedZone(); zoneErr != nil {
+		b.opts.Logger(fmt.Sprintf("Warning: could not ensure bridge in firewalld trusted zone: %v", zoneErr))
+	} else if changed {
+		b.opts.Logger(fmt.Sprintf("Added %s to firewalld trusted zone (was missing — containers could not get IPs)", bridgeName))
+	}
+
 	if err := b.mgr.Launch(b.opts.BaseImage, false); err != nil {
 		return fmt.Errorf("failed to launch build container: %w", err)
 	}
@@ -142,11 +154,6 @@ func (b *Builder) launchBuildContainer() error {
 		containerIP, err := network.GetContainerIP(b.mgr.ContainerName)
 		if err != nil {
 			b.opts.Logger(fmt.Sprintf("Warning: could not get container IP for firewall rules: %v", err))
-			// Check if bridge is not in trusted zone — this is the most common cause
-			if inZone, bridgeName, zoneErr := network.BridgeInTrustedZone(); zoneErr == nil && !inZone {
-				b.opts.Logger(fmt.Sprintf("Hint: Bridge %s is not in firewalld trusted zone. This is likely the cause.", bridgeName))
-				b.opts.Logger(fmt.Sprintf("      Fix: sudo firewall-cmd --zone=trusted --add-interface=%s --permanent && sudo firewall-cmd --reload", bridgeName))
-			}
 		} else {
 			if err := network.EnsureOpenModeRules(containerIP); err != nil {
 				b.opts.Logger(fmt.Sprintf("Warning: could not add firewall rules: %v", err))

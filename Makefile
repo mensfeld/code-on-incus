@@ -1,4 +1,4 @@
-.PHONY: build install clean test test-coverage test-unit integrations-setup integrations integrations-debug integrations-cli lint lint-python fmt tidy help
+.PHONY: build install clean test test-coverage test-unit integrations-setup integrations integrations-debug integrations-cli lint lint-python fmt tidy help check-deps
 
 # Binary name
 BINARY_NAME=coi
@@ -27,8 +27,62 @@ GOVET=$(GOCMD) vet
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS=-ldflags "-X github.com/mensfeld/code-on-incus/internal/cli.Version=$(VERSION)"
 
+# Check required system build dependencies.
+# - Go toolchain (coi is written in Go).
+# - On Linux: pkg-config and libsystemd headers, because coi links libsystemd
+#   via cgo (internal/nftmonitor/journalctl.go) for NFT monitoring.
+check-deps:
+	@if ! command -v go >/dev/null 2>&1; then \
+		echo ""; \
+		echo "Error: Go toolchain not found"; \
+		echo ""; \
+		echo "  coi is written in Go and requires the Go compiler to build."; \
+		echo ""; \
+		echo "  Install options:"; \
+		echo "    Official tarball:  https://go.dev/doc/install"; \
+		echo "    Ubuntu/Debian:     sudo apt install -y golang-go"; \
+		echo "    Fedora/RHEL:       sudo dnf install -y golang"; \
+		echo "    Arch:              sudo pacman -S --needed go"; \
+		echo "    mise:              mise use -g go@latest"; \
+		echo ""; \
+		echo "  Note: if Go is installed for your user (e.g. via mise, asdf, or"; \
+		echo "  \$$HOME/go/bin) but you are seeing this error, you probably ran"; \
+		echo "  'sudo make ...'. sudo strips PATH by default. Run 'make build'"; \
+		echo "  as your user instead — the install target copies with sudo only"; \
+		echo "  where needed, so rebuilding under sudo is not required."; \
+		echo ""; \
+		exit 1; \
+	fi
+	@if [ "$$(uname -s)" = "Linux" ]; then \
+		missing=""; \
+		if ! command -v pkg-config >/dev/null 2>&1; then \
+			missing="pkg-config"; \
+		elif ! pkg-config --exists libsystemd 2>/dev/null; then \
+			missing="libsystemd development headers"; \
+		fi; \
+		if [ -n "$$missing" ]; then \
+			echo ""; \
+			echo "Error: missing build dependency ($$missing)"; \
+			echo ""; \
+			echo "  coi uses cgo to read the systemd journal for NFT monitoring,"; \
+			echo "  so building from source requires pkg-config and the libsystemd"; \
+			echo "  development headers."; \
+			echo ""; \
+			echo "  Ubuntu/Debian:"; \
+			echo "    sudo apt install -y pkg-config libsystemd-dev"; \
+			echo ""; \
+			echo "  Fedora/RHEL:"; \
+			echo "    sudo dnf install -y pkgconf-pkg-config systemd-devel"; \
+			echo ""; \
+			echo "  Arch:"; \
+			echo "    sudo pacman -S --needed pkgconf systemd-libs"; \
+			echo ""; \
+			exit 1; \
+		fi; \
+	fi
+
 # Build the project
-build:
+build: check-deps
 	@echo "Building $(BINARY_NAME) version $(VERSION)..."
 	@mkdir -p internal/image/embedded
 	@mkdir -p internal/config/embedded
@@ -144,7 +198,7 @@ check: fmt-check vet lint test
 check-all: check doc-coverage
 
 # Build for multiple platforms
-build-all:
+build-all: check-deps
 	@echo "Building $(BINARY_NAME) version $(VERSION) for all platforms..."
 	@mkdir -p dist
 	@mkdir -p internal/image/embedded
