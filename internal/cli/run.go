@@ -73,14 +73,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Autofix: ensure the Incus bridge is in the firewalld trusted zone
-	// *before* launching the container. Without this, DHCP replies are
-	// dropped and the container never gets an IP.
-	if changed, bridgeName, err := network.EnsureBridgeInTrustedZone(); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not ensure bridge in firewalld trusted zone: %v\n", err)
-	} else if changed {
-		fmt.Fprintf(os.Stderr, "Added %s to firewalld trusted zone (was missing — containers could not get IPs)\n", bridgeName)
-	}
+	ensureBridgeTrustedZone()
 
 	fmt.Fprintf(os.Stderr, "Launching container %s from image %s...\n", containerName, img)
 
@@ -331,6 +324,17 @@ func waitForContainer(mgr *container.Manager, maxRetries int) error {
 		}
 	}
 	return fmt.Errorf("container failed to become ready")
+}
+
+// ensureBridgeTrustedZone ensures the Incus bridge is in the firewalld trusted
+// zone before launching a container. Without this, DHCP replies are dropped and
+// the container never gets an IP.
+func ensureBridgeTrustedZone() {
+	if changed, bridgeName, err := network.EnsureBridgeInTrustedZone(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not ensure bridge in firewalld trusted zone: %v\n", err)
+	} else if changed {
+		fmt.Fprintf(os.Stderr, "Added %s to firewalld trusted zone (was missing — containers could not get IPs)\n", bridgeName)
+	}
 }
 
 // remapContainerUserIfNeeded remaps the container's 'code' user UID/GID from the
