@@ -1328,7 +1328,7 @@ func parseStorageValueGiB(s string) float64 {
 	unit := strings.TrimSpace(s[i:])
 	switch strings.ToLower(unit) {
 	case "eib":
-		return val * 1024 * 1024
+		return val * 1024 * 1024 * 1024
 	case "tib":
 		return val * 1024
 	case "gib", "":

@@ -792,9 +792,18 @@ func TestCheckIncusStoragePool_SaneValues(t *testing.T) {
 		}
 	}
 
-	totalGiB, _ := result.Details["total_gib"].(float64)
-	freeGiB, _ := result.Details["free_gib"].(float64)
-	usedPct, _ := result.Details["used_pct"].(float64)
+	totalGiB, ok := result.Details["total_gib"].(float64)
+	if !ok {
+		t.Fatalf("Expected details[\"total_gib\"] to be float64, got %T", result.Details["total_gib"])
+	}
+	freeGiB, ok := result.Details["free_gib"].(float64)
+	if !ok {
+		t.Fatalf("Expected details[\"free_gib\"] to be float64, got %T", result.Details["free_gib"])
+	}
+	usedPct, ok := result.Details["used_pct"].(float64)
+	if !ok {
+		t.Fatalf("Expected details[\"used_pct\"] to be float64, got %T", result.Details["used_pct"])
+	}
 
 	// The core regression assertions: these failed before the unit-normalisation fix
 	if totalGiB <= 0 {
