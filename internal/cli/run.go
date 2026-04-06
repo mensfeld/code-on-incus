@@ -9,6 +9,7 @@ import (
 	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/limits"
+	"github.com/mensfeld/code-on-incus/internal/network"
 	"github.com/mensfeld/code-on-incus/internal/session"
 	"github.com/spf13/cobra"
 )
@@ -70,6 +71,15 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	// Check if image exists, auto-build from config if possible
 	if err := AutoBuildIfNeeded(cfg, img); err != nil {
 		return err
+	}
+
+	// Autofix: ensure the Incus bridge is in the firewalld trusted zone
+	// *before* launching the container. Without this, DHCP replies are
+	// dropped and the container never gets an IP.
+	if changed, bridgeName, err := network.EnsureBridgeInTrustedZone(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not ensure bridge in firewalld trusted zone: %v\n", err)
+	} else if changed {
+		fmt.Fprintf(os.Stderr, "Added %s to firewalld trusted zone (was missing — containers could not get IPs)\n", bridgeName)
 	}
 
 	fmt.Fprintf(os.Stderr, "Launching container %s from image %s...\n", containerName, img)

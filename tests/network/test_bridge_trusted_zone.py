@@ -241,9 +241,10 @@ def test_coi_run_autofixes_missing_bridge_trusted_zone(
     2. Remove the Incus bridge from the trusted zone (simulating the broken
        state users hit when they install firewalld after Incus, install COI
        before Incus, etc.).
-    3. Run `coi run echo hello` — this exercises session.Setup() and must
-       autofix the bridge zone membership *before* the container is started,
-       otherwise DHCP would fail and the container would never get an IP.
+    3. Run `coi run echo hello` — this exercises the bridge autofix in the
+       run command path, which must fix zone membership *before* the
+       container is launched, otherwise DHCP would fail and the container
+       would never get an IP.
     4. Assert the command succeeded (proving the autofix actually worked).
     5. Assert the one-line "Added ... to firewalld trusted zone" message
        appears in output, confirming the code path ran.
