@@ -86,7 +86,12 @@ func Execute(isCoi bool) error {
 		rootCmd.Use = "claude-on-incus"
 	}
 	// Prevent cobra from double-printing errors — main.go handles error output.
+	// SilenceUsage prevents cobra from printing usage/help when RunE returns an
+	// error (e.g. ExitCodeError for non-zero exit codes). Without this, commands
+	// like `coi health` that use exit codes for status would dump the full usage
+	// block after their own output.
 	rootCmd.SilenceErrors = true
+	rootCmd.SilenceUsage = true
 	return rootCmd.Execute()
 }
 

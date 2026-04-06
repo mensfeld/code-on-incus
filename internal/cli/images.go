@@ -88,10 +88,9 @@ var imageDeleteCmd = &cobra.Command{
 
 // imageExistsCmd checks if an image exists
 var imageExistsCmd = &cobra.Command{
-	Use:          "exists <alias>",
-	Short:        "Check if an image exists",
-	Args:         cobra.ExactArgs(1),
-	SilenceUsage: true,
+	Use:   "exists <alias>",
+	Short: "Check if an image exists",
+	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		aliasName := args[0]
 

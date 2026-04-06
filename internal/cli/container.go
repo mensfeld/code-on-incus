@@ -273,10 +273,9 @@ Examples:
 
 // containerExistsCmd checks if a container exists
 var containerExistsCmd = &cobra.Command{
-	Use:          "exists <name>",
-	Short:        "Check if a container exists",
-	Args:         cobra.ExactArgs(1),
-	SilenceUsage: true,
+	Use:   "exists <name>",
+	Short: "Check if a container exists",
+	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 
@@ -296,10 +295,9 @@ var containerExistsCmd = &cobra.Command{
 
 // containerRunningCmd checks if a container is running
 var containerRunningCmd = &cobra.Command{
-	Use:          "running <name>",
-	Short:        "Check if a container is running",
-	Args:         cobra.ExactArgs(1),
-	SilenceUsage: true,
+	Use:   "running <name>",
+	Short: "Check if a container is running",
+	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 
