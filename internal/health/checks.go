@@ -1248,13 +1248,15 @@ func CheckIncusStoragePool() HealthCheck {
 	}
 
 	// Parse "space used: X.XXGiB" and "total space: Y.YYGiB"
+	// Incus may report in different units (KiB, MiB, GiB, TiB, EiB) depending
+	// on magnitude, so we normalise everything to GiB.
 	var usedGiB, totalGiB float64
 	for _, line := range strings.Split(string(out), "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "space used:") {
-			_, _ = fmt.Sscanf(strings.TrimPrefix(line, "space used:"), "%f", &usedGiB)
+			usedGiB = parseStorageValueGiB(strings.TrimPrefix(line, "space used:"))
 		} else if strings.HasPrefix(line, "total space:") {
-			_, _ = fmt.Sscanf(strings.TrimPrefix(line, "total space:"), "%f", &totalGiB)
+			totalGiB = parseStorageValueGiB(strings.TrimPrefix(line, "total space:"))
 		}
 	}
 
@@ -1299,6 +1301,46 @@ func CheckIncusStoragePool() HealthCheck {
 			Message: fmt.Sprintf("Pool '%s': %.1f GiB free of %.1f GiB (%.0f%% used)", poolName, freeGiB, totalGiB, usedPct),
 			Details: details,
 		}
+	}
+}
+
+// parseStorageValueGiB parses a value like "277.69MiB" or "28.57GiB" and
+// returns the equivalent in GiB. Returns 0 on parse failure.
+func parseStorageValueGiB(s string) float64 {
+	s = strings.TrimSpace(s)
+
+	// Find where the numeric part ends and the unit suffix begins.
+	// We cannot use fmt.Sscanf("%f%s") because it interprets "1.00EiB"
+	// as scientific notation (the 'E') and fails.
+	i := 0
+	for i < len(s) && (s[i] == '.' || s[i] == '-' || (s[i] >= '0' && s[i] <= '9')) {
+		i++
+	}
+	if i == 0 {
+		return 0
+	}
+
+	var val float64
+	if _, err := fmt.Sscanf(s[:i], "%f", &val); err != nil {
+		return 0
+	}
+
+	unit := strings.TrimSpace(s[i:])
+	switch strings.ToLower(unit) {
+	case "eib":
+		return val * 1024 * 1024 * 1024
+	case "tib":
+		return val * 1024
+	case "gib", "":
+		return val
+	case "mib":
+		return val / 1024
+	case "kib":
+		return val / (1024 * 1024)
+	case "bytes", "b":
+		return val / (1024 * 1024 * 1024)
+	default:
+		return val // unknown unit, assume GiB
 	}
 }
 
