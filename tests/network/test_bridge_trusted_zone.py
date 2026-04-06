@@ -27,19 +27,36 @@ def firewalld_available():
 
 
 def get_bridge_name():
-    """Get the Incus bridge name."""
+    """Get the Incus bridge name.
+
+    Mirrors the Go helper network.GetIncusBridgeName(): reads the eth0
+    device from the default profile and returns its "network:" value.
+    This matches what the production code actually adds to the trusted
+    zone, which is important when the host also has other bridges
+    managed by Incus (e.g. docker0 when Docker is installed).
+    """
     try:
         result = subprocess.run(
-            ["incus", "network", "list", "-f", "csv"],
+            ["incus", "profile", "device", "show", "default"],
             capture_output=True,
             text=True,
             timeout=10,
         )
         if result.returncode == 0:
-            for line in result.stdout.strip().split("\n"):
-                parts = line.split(",")
-                if len(parts) >= 2 and "bridge" in parts[1]:
-                    return parts[0]
+            lines = result.stdout.split("\n")
+            in_eth0 = False
+            for line in lines:
+                if line.strip() == "eth0:":
+                    in_eth0 = True
+                    continue
+                if in_eth0:
+                    stripped = line.strip()
+                    # Next top-level key ends the eth0 block
+                    if line and not line.startswith(" ") and not line.startswith("\t"):
+                        in_eth0 = False
+                        continue
+                    if stripped.startswith("network:"):
+                        return stripped.split(":", 1)[1].strip()
     except (subprocess.TimeoutExpired, FileNotFoundError):
         pass
     return "incusbr0"

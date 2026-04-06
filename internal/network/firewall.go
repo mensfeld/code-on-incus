@@ -423,9 +423,11 @@ func BridgeInTrustedZone() (bool, string, error) {
 // start of any command path that needs container networking to work.
 //
 // Return values:
-//   - changed: true only when the bridge was added to the zone by this call.
-//     false when firewalld is unavailable, when the bridge was already in the
-//     zone, or when the add attempt failed (see err).
+//   - changed: true whenever the permanent add step succeeded in this call,
+//     regardless of whether the subsequent reload succeeded. This way a
+//     reload failure does not hide the fact that the host state was
+//     mutated. false when firewalld is unavailable or when the bridge was
+//     already in the zone.
 //   - bridgeName: the detected Incus bridge name (empty string when firewalld
 //     is unavailable or the bridge name could not be determined).
 //   - err: non-nil only on real failures (bridge detection error or
@@ -456,9 +458,14 @@ func EnsureBridgeInTrustedZone() (changed bool, bridgeName string, err error) {
 		return false, name, fmt.Errorf("firewall-cmd --add-interface failed: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 
+	// The permanent add already mutated the host state, so from here on
+	// changed=true regardless of whether reload succeeds. Returning
+	// changed=false on a reload failure would hide a real change from the
+	// caller (and suppress the "Added …" log), while the bridge is already
+	// listed in the permanent config.
 	reloadCmd := exec.Command("sudo", "-n", "firewall-cmd", "--reload")
 	if output, err := reloadCmd.CombinedOutput(); err != nil {
-		return false, name, fmt.Errorf("firewall-cmd --reload failed: %w: %s", err, strings.TrimSpace(string(output)))
+		return true, name, fmt.Errorf("firewall-cmd --reload failed: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 
 	return true, name, nil
