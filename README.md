@@ -73,7 +73,7 @@ coi shell --tool opencode    # Use opencode instead
 
 **Permission mode** - Control whether AI tools run autonomously or ask before each action:
 ```toml
-# ~/.config/coi/config.toml or .coi/config.toml
+# ~/.coi/config.toml or .coi/config.toml
 [tool]
 name = "claude"              # Default AI tool
 permission_mode = "bypass"   # "bypass" (default) or "interactive"
@@ -312,7 +312,7 @@ coi shell --persistent
 ```
 
 ```toml
-# Or via config (~/.config/coi/config.toml)
+# Or via config (~/.coi/config.toml)
 [defaults]
 persistent = true
 ```
@@ -325,7 +325,7 @@ See the [Container Lifecycle and Sessions guide](https://github.com/mensfeld/cod
 
 ## Configuration
 
-Config file: `~/.config/coi/config.toml`
+Config file: `~/.coi/config.toml`
 
 ```toml
 [defaults]
@@ -340,12 +340,11 @@ permission_mode = "bypass"
 
 **Configuration hierarchy** (highest precedence last):
 1. Built-in defaults
-2. System config (`/etc/coi/config.toml`)
-3. User config (`~/.config/coi/config.toml`)
-4. Project config (`./.coi/config.toml`)
-5. `COI_CONFIG` environment variable
-6. Environment variables (`CLAUDE_ON_INCUS_*`, `COI_*`)
-7. Operational CLI flags (`--workspace`, `--slot`, `--persistent`, `--resume`, `--profile`, `--image`)
+2. User config (`~/.coi/config.toml`)
+3. Project config (`./.coi/config.toml`)
+4. `COI_CONFIG` environment variable
+5. Environment variables (`CLAUDE_ON_INCUS_*`, `COI_*`)
+6. Operational CLI flags (`--workspace`, `--slot`, `--persistent`, `--resume`, `--profile`, `--image`)
 
 Place a `.coi/config.toml` in any repository root to auto-configure COI for that project — useful for teams to share container image, environment, and resource limits.
 
@@ -411,7 +410,7 @@ coi profile list
 coi profile info rust-dev
 ```
 
-Profile directories are scanned at all config levels (`/etc/coi/profiles/`, `~/.config/coi/profiles/`, `.coi/profiles/`). See the [Profiles wiki page](https://github.com/mensfeld/code-on-incus/wiki/Profiles) for complete documentation.
+Profile directories are scanned under `~/.coi/profiles/` (user) and `./.coi/profiles/` (project). When `COI_CONFIG` is set, its parent directory is also scanned. Profiles from all discovered locations are merged into a single namespace — if the same profile name is defined in more than one location, COI refuses to start and asks you to rename one so it's always unambiguous which profile is being applied. See the [Profiles wiki page](https://github.com/mensfeld/code-on-incus/wiki/Profiles) for complete documentation.
 
 ## Resource and Time Limits
 
@@ -419,7 +418,7 @@ See the [Resource and Time Limits guide](https://github.com/mensfeld/code-on-inc
 
 **Quick example:**
 ```toml
-# ~/.config/coi/config.toml
+# ~/.coi/config.toml
 [limits.cpu]
 count = "2"
 
@@ -470,7 +469,7 @@ See the [Network Isolation guide](https://github.com/mensfeld/code-on-incus/wiki
 - **Open** - No restrictions (trusted projects only)
 
 ```toml
-# ~/.config/coi/config.toml
+# ~/.coi/config.toml
 [network]
 mode = "restricted"   # Default — blocks private networks, allows internet
 # mode = "allowlist"  # Only specific domains/IPs allowed
@@ -482,7 +481,7 @@ mode = "restricted"   # Default — blocks private networks, allows internet
 COI includes **built-in security monitoring** to detect and respond to malicious behavior in real-time:
 
 ```toml
-# Enable in config (~/.config/coi/config.toml)
+# Enable in config (~/.coi/config.toml)
 [monitoring]
 enabled = true
 ```

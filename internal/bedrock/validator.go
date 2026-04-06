@@ -242,6 +242,6 @@ func CheckMountConfiguration(mounts []string) *ValidationIssue {
 	return &ValidationIssue{
 		Severity: "error",
 		Message:  "~/.aws not mounted to container",
-		Fix:      fmt.Sprintf("Add to your ~/.config/coi/config.toml:\n\n   [[mounts.default]]\n   host = \"%s/.aws\"\n   container = \"/home/code/.aws\"", homeDir),
+		Fix:      fmt.Sprintf("Add to your ~/.coi/config.toml:\n\n   [[mounts.default]]\n   host = \"%s/.aws\"\n   container = \"/home/code/.aws\"", homeDir),
 	}
 }

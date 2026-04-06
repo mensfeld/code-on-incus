@@ -428,7 +428,7 @@ func TestProfileInheritanceSourcePreserved(t *testing.T) {
 	cfg := GetDefaultConfig()
 	cfg.Profiles["parent"] = ProfileConfig{
 		Image:  "parent-image",
-		Source: "/etc/coi/profiles/parent/config.toml",
+		Source: "/home/user/.coi/profiles/parent/config.toml",
 	}
 	cfg.Profiles["child"] = ProfileConfig{
 		Inherits: "parent",

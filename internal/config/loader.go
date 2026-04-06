@@ -12,10 +12,15 @@ import (
 // Load loads configuration from all available sources
 // Hierarchy (lowest to highest precedence):
 // 1. Built-in defaults
-// 2. System config (/etc/coi/config.toml)
-// 3. User config (~/.config/coi/config.toml)
-// 4. Project config (./.coi/config.toml)
-// 5. Environment variables (CLAUDE_ON_INCUS_* or COI_*)
+// 2. User config (~/.coi/config.toml)
+// 3. Project config (./.coi/config.toml)
+// 4. Environment variables (CLAUDE_ON_INCUS_* or COI_*)
+//
+// Profile directories are scanned independently from config files.
+// See GetProfileParentDirs() for the full list of scanned locations.
+// Profiles from all scan locations are merged into a single namespace; if the
+// same profile name is defined in more than one location Load() returns an
+// error asking the user to resolve the conflict.
 func Load() (*Config, error) {
 	// Check for deprecated .coi.toml in project root
 	if err := checkDeprecatedConfig(); err != nil {
@@ -25,16 +30,18 @@ func Load() (*Config, error) {
 	// Start with defaults
 	cfg := GetDefaultConfig()
 
+	// Scan profile directories from all known locations. Profiles are merged
+	// into a single namespace; duplicate names across locations are rejected
+	// by loadProfileDirectories so it's always clear which profile is used.
+	for _, dir := range GetProfileParentDirs() {
+		if err := loadProfileDirectories(cfg, dir); err != nil {
+			return nil, err
+		}
+	}
+
 	// Load from config files (in order)
 	paths := GetConfigPaths()
 	for _, path := range paths {
-		// Always scan for profile directories at this config level,
-		// even if the config file itself doesn't exist.
-		configDir := filepath.Dir(path)
-		if err := loadProfileDirectories(cfg, configDir); err != nil {
-			return nil, err
-		}
-
 		if err := loadConfigFile(cfg, path); err != nil {
 			// Only return error if file exists but can't be parsed
 			if !os.IsNotExist(err) {
@@ -93,6 +100,12 @@ func loadConfigFile(cfg *Config, path string) error {
 
 // loadProfileDirectories scans configDir/profiles/ for subdirectories containing config.toml
 // and adds them to cfg.Profiles. Each subdirectory name becomes the profile name.
+//
+// If a profile with the same name is already loaded from a different source
+// location, loadProfileDirectories returns an error. Profiles from different
+// scan locations (e.g. ~/.coi/profiles/ and ./.coi/profiles/) are merged
+// together, and users are expected to use unique names across locations so
+// it's always clear which profile is being used.
 func loadProfileDirectories(cfg *Config, configDir string) error {
 	profilesDir := filepath.Join(configDir, "profiles")
 	entries, err := os.ReadDir(profilesDir)
@@ -110,6 +123,16 @@ func loadProfileDirectories(cfg *Config, configDir string) error {
 
 		if _, err := os.Stat(profileConfigPath); err != nil {
 			continue // No config.toml in this subdirectory
+		}
+
+		// Detect duplicate profile name across scan locations. The same path
+		// loaded twice is fine (idempotent), but two different paths for the
+		// same name is ambiguous — error out and tell the user to rename one.
+		if existing, ok := cfg.Profiles[profileName]; ok && existing.Source != "" && existing.Source != profileConfigPath {
+			return fmt.Errorf(
+				"profile %q defined in multiple locations:\n  %s\n  %s\n"+
+					"Rename one of them or delete the duplicate so it's clear which profile is being used",
+				profileName, existing.Source, profileConfigPath)
 		}
 
 		var profileCfg ProfileConfig
@@ -396,10 +419,16 @@ writable_hooks = false
 #   [network]
 #   mode = "restricted"
 #
-# Profile directory scan locations (lowest to highest precedence):
-#   1. /etc/coi/profiles/NAME/config.toml
-#   2. ~/.config/coi/profiles/NAME/config.toml
-#   3. .coi/profiles/NAME/config.toml
+# Default profile directory scan locations:
+#   1. ~/.coi/profiles/NAME/config.toml
+#   2. .coi/profiles/NAME/config.toml
+#
+# Additional scan location when COI_CONFIG is set:
+#   3. dirname($COI_CONFIG)/profiles/NAME/config.toml
+#
+# Profiles from all scanned locations are merged into a single namespace — if
+# the same name is defined in more than one location, COI will refuse to start
+# and ask you to rename one.
 #
 # Use 'coi profile list' and 'coi profile info <name>' to inspect loaded profiles.
 `

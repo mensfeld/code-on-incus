@@ -956,6 +956,176 @@ func TestProfileValidation(t *testing.T) {
 	}
 }
 
+func TestLoadProfilesFromHomeCoi(t *testing.T) {
+	// Verify that profiles placed in ~/.coi/profiles/ are picked up by Load().
+	// This lets users place profiles alongside their sessions/storage/logs
+	// (which live under ~/.coi).
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	// Also change to a temp workdir so the project ./.coi doesn't interfere
+	tmpWork := t.TempDir()
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd failed: %v", err)
+	}
+	defer os.Chdir(oldWd) //nolint:errcheck
+	if err := os.Chdir(tmpWork); err != nil {
+		t.Fatalf("Chdir failed: %v", err)
+	}
+
+	// Create a profile under ~/.coi/profiles/home-coi-prof/config.toml
+	profDir := filepath.Join(tmpHome, ".coi", "profiles", "home-coi-prof")
+	if err := os.MkdirAll(profDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+	content := `image = "home-coi-image"`
+	if err := os.WriteFile(filepath.Join(profDir, "config.toml"), []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	cfg, loadErr := Load()
+	if loadErr != nil {
+		t.Fatalf("Load() failed: %v", loadErr)
+	}
+
+	p := cfg.GetProfile("home-coi-prof")
+	if p == nil {
+		t.Fatal("Expected profile 'home-coi-prof' to be loaded from ~/.coi/profiles/")
+	}
+	if p.Image != "home-coi-image" {
+		t.Errorf("Expected image 'home-coi-image', got %q", p.Image)
+	}
+}
+
+func TestLoadMergesProjectAndHomeProfiles(t *testing.T) {
+	// Project-local .coi/profiles/ should be merged alongside ~/.coi/profiles/
+	// when profile names are unique.
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	tmpWork := t.TempDir()
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd failed: %v", err)
+	}
+	defer os.Chdir(oldWd) //nolint:errcheck
+	if err := os.Chdir(tmpWork); err != nil {
+		t.Fatalf("Chdir failed: %v", err)
+	}
+
+	// Profile in ~/.coi/profiles/
+	homeProf := filepath.Join(tmpHome, ".coi", "profiles", "from-home")
+	if err := os.MkdirAll(homeProf, 0o755); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(homeProf, "config.toml"), []byte(`image = "home-image"`), 0o644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	// Profile in project .coi/profiles/
+	projProf := filepath.Join(tmpWork, ".coi", "profiles", "from-project")
+	if err := os.MkdirAll(projProf, 0o755); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projProf, "config.toml"), []byte(`image = "project-image"`), 0o644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	cfg, loadErr := Load()
+	if loadErr != nil {
+		t.Fatalf("Load() failed: %v", loadErr)
+	}
+
+	if p := cfg.GetProfile("from-home"); p == nil || p.Image != "home-image" {
+		t.Errorf("Expected from-home profile merged, got %+v", p)
+	}
+	if p := cfg.GetProfile("from-project"); p == nil || p.Image != "project-image" {
+		t.Errorf("Expected from-project profile merged, got %+v", p)
+	}
+}
+
+func TestLoadDuplicateProfileProjectVsHomeFails(t *testing.T) {
+	// Duplicate profile name between project .coi/profiles/ and ~/.coi/profiles/
+	// should also error — project and home locations are merged into the same
+	// namespace just like the two home locations.
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	tmpWork := t.TempDir()
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd failed: %v", err)
+	}
+	defer os.Chdir(oldWd) //nolint:errcheck
+	if err := os.Chdir(tmpWork); err != nil {
+		t.Fatalf("Chdir failed: %v", err)
+	}
+
+	homeProf := filepath.Join(tmpHome, ".coi", "profiles", "dup")
+	if err := os.MkdirAll(homeProf, 0o755); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(homeProf, "config.toml"), []byte(`image = "from-home"`), 0o644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	projProf := filepath.Join(tmpWork, ".coi", "profiles", "dup")
+	if err := os.MkdirAll(projProf, 0o755); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projProf, "config.toml"), []byte(`image = "from-project"`), 0o644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	_, loadErr := Load()
+	if loadErr == nil {
+		t.Fatal("Expected Load() to fail on duplicate across home and project")
+	}
+	msg := loadErr.Error()
+	if !strings.Contains(msg, "dup") || !strings.Contains(msg, "multiple locations") {
+		t.Errorf("Error should mention 'dup' and 'multiple locations', got: %v", loadErr)
+	}
+	if !strings.Contains(msg, filepath.Join(homeProf, "config.toml")) {
+		t.Errorf("Error should reference ~/.coi path, got: %v", loadErr)
+	}
+	if !strings.Contains(msg, filepath.Join(projProf, "config.toml")) {
+		t.Errorf("Error should reference project .coi path, got: %v", loadErr)
+	}
+}
+
+func TestLoadProfileDirectoriesDuplicateNameError(t *testing.T) {
+	// Unit test for loadProfileDirectories itself: calling it twice with
+	// different parent dirs containing the same profile name should error.
+	tmpDir := t.TempDir()
+	dir1 := filepath.Join(tmpDir, "loc1")
+	dir2 := filepath.Join(tmpDir, "loc2")
+	for _, d := range []string{dir1, dir2} {
+		prof := filepath.Join(d, "profiles", "conflict")
+		if err := os.MkdirAll(prof, 0o755); err != nil {
+			t.Fatalf("MkdirAll failed: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(prof, "config.toml"), []byte(`image = "x"`), 0o644); err != nil {
+			t.Fatalf("WriteFile failed: %v", err)
+		}
+	}
+
+	cfg := GetDefaultConfig()
+	if err := loadProfileDirectories(cfg, dir1); err != nil {
+		t.Fatalf("First loadProfileDirectories should succeed, got: %v", err)
+	}
+	err := loadProfileDirectories(cfg, dir2)
+	if err == nil {
+		t.Fatal("Expected error on second load with conflicting profile name")
+	}
+	if !strings.Contains(err.Error(), "conflict") {
+		t.Errorf("Error should mention profile name 'conflict', got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "multiple locations") {
+		t.Errorf("Error should mention 'multiple locations', got: %v", err)
+	}
+}
+
 func TestMultipleProfileDirectories(t *testing.T) {
 	tmpDir := t.TempDir()
 	configDir := filepath.Join(tmpDir, ".coi")

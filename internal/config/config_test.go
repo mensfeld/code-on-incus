@@ -167,28 +167,111 @@ func TestApplyProfile(t *testing.T) {
 }
 
 func TestGetConfigPaths(t *testing.T) {
+	// Ensure COI_CONFIG doesn't leak in
+	oldEnv := os.Getenv("COI_CONFIG")
+	os.Unsetenv("COI_CONFIG")
+	defer func() {
+		if oldEnv != "" {
+			os.Setenv("COI_CONFIG", oldEnv)
+		}
+	}()
+
 	paths := GetConfigPaths()
 
-	if len(paths) < 3 {
-		t.Errorf("Expected at least 3 config paths, got %d", len(paths))
+	if len(paths) != 2 {
+		t.Fatalf("Expected exactly 2 config paths (user + project), got %d: %v", len(paths), paths)
 	}
 
-	// Check that paths are in expected order
-	expectedPaths := []string{
-		"/etc/coi/config.toml",
+	homeDir, _ := os.UserHomeDir()
+	workDir, _ := os.Getwd()
+
+	expected := []string{
+		filepath.Join(homeDir, ".coi", "config.toml"),
+		filepath.Join(workDir, ".coi", "config.toml"),
 	}
 
-	for i, expected := range expectedPaths {
-		if paths[i] != expected {
-			t.Errorf("Path[%d]: expected %q, got %q", i, expected, paths[i])
+	for i, want := range expected {
+		if paths[i] != want {
+			t.Errorf("paths[%d] = %q, want %q", i, paths[i], want)
 		}
 	}
+}
 
-	// Check that user config path contains .config
+func TestGetProfileParentDirs(t *testing.T) {
+	// Ensure COI_CONFIG doesn't leak in
+	oldEnv := os.Getenv("COI_CONFIG")
+	os.Unsetenv("COI_CONFIG")
+	defer func() {
+		if oldEnv != "" {
+			os.Setenv("COI_CONFIG", oldEnv)
+		}
+	}()
+
+	dirs := GetProfileParentDirs()
+
+	if len(dirs) != 2 {
+		t.Fatalf("Expected exactly 2 profile parent dirs (user + project), got %d: %v", len(dirs), dirs)
+	}
+
 	homeDir, _ := os.UserHomeDir()
-	expectedUserPath := filepath.Join(homeDir, ".config/coi/config.toml")
-	if paths[1] != expectedUserPath {
-		t.Errorf("User config path: expected %q, got %q", expectedUserPath, paths[1])
+	workDir, _ := os.Getwd()
+
+	expected := []string{
+		filepath.Join(homeDir, ".coi"),
+		filepath.Join(workDir, ".coi"),
+	}
+
+	for i, want := range expected {
+		if dirs[i] != want {
+			t.Errorf("dirs[%d] = %q, want %q", i, dirs[i], want)
+		}
+	}
+}
+
+func TestGetProfileParentDirsWithCoiConfig(t *testing.T) {
+	oldEnv := os.Getenv("COI_CONFIG")
+	os.Setenv("COI_CONFIG", "/custom/path/config.toml")
+	defer func() {
+		if oldEnv == "" {
+			os.Unsetenv("COI_CONFIG")
+		} else {
+			os.Setenv("COI_CONFIG", oldEnv)
+		}
+	}()
+
+	dirs := GetProfileParentDirs()
+
+	// Last entry should be the COI_CONFIG parent dir
+	last := dirs[len(dirs)-1]
+	if last != "/custom/path" {
+		t.Errorf("Expected last dir to be /custom/path, got %q", last)
+	}
+}
+
+func TestGetProfileParentDirsIncludesHomeCoi(t *testing.T) {
+	// Regression test: ~/.coi/ must be scanned for profiles so users can
+	// place profiles alongside sessions/storage/logs (which live under ~/.coi).
+	oldEnv := os.Getenv("COI_CONFIG")
+	os.Unsetenv("COI_CONFIG")
+	defer func() {
+		if oldEnv != "" {
+			os.Setenv("COI_CONFIG", oldEnv)
+		}
+	}()
+
+	dirs := GetProfileParentDirs()
+	homeDir, _ := os.UserHomeDir()
+	wantDir := filepath.Join(homeDir, ".coi")
+
+	found := false
+	for _, d := range dirs {
+		if d == wantDir {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Expected %q in profile parent dirs, got: %v", wantDir, dirs)
 	}
 }
 
@@ -595,7 +678,7 @@ func TestMergeBoolZeroValueBug(t *testing.T) {
 	// This test demonstrates a bug where merging a zero-value Config (simulating
 	// a TOML file that only sets string fields) overwrites security-critical
 	// boolean defaults with false. For example, a user config at
-	// ~/.config/coi/config.toml that only sets image = "my-image" should NOT
+	// ~/.coi/config.toml that only sets image = "my-image" should NOT
 	// reset block_private_networks from true to false.
 
 	base := GetDefaultConfig()

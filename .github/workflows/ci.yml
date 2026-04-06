@@ -372,8 +372,8 @@ jobs:
           # Use open mode by default so image builds can access internet
           # Tests will explicitly use restricted/allowlist modes when testing network isolation
           # Monitoring is NOT enabled globally - monitoring tests use their own enable_monitoring fixture
-          mkdir -p ~/.config/coi
-          cat > ~/.config/coi/config.toml << 'EOF'
+          mkdir -p ~/.coi
+          cat > ~/.coi/config.toml << 'EOF'
           [network]
           mode = "open"
           EOF

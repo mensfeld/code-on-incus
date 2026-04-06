@@ -348,8 +348,12 @@ func synthesizeDefaultProfile(cfg *Config) ProfileConfig {
 	return p
 }
 
-// GetConfigPaths returns the list of config file paths to check (in order)
-// If COI_CONFIG environment variable is set, it is added as highest priority
+// GetConfigPaths returns the list of config file paths to check (in order).
+// COI looks for configuration in two places:
+//  1. ~/.coi/config.toml        (user, co-located with sessions/storage/logs)
+//  2. ./.coi/config.toml        (current project)
+//
+// If COI_CONFIG environment variable is set, it is added as highest priority.
 func GetConfigPaths() []string {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -361,9 +365,8 @@ func GetConfigPaths() []string {
 	}
 
 	paths := []string{
-		"/etc/coi/config.toml",                            // System config
-		filepath.Join(homeDir, ".config/coi/config.toml"), // User config
-		filepath.Join(workDir, ".coi", "config.toml"),     // Project config (.coi/config.toml)
+		filepath.Join(homeDir, ".coi", "config.toml"), // User config
+		filepath.Join(workDir, ".coi", "config.toml"), // Project config
 	}
 
 	// COI_CONFIG environment variable has highest priority
@@ -372,6 +375,38 @@ func GetConfigPaths() []string {
 	}
 
 	return paths
+}
+
+// GetProfileParentDirs returns directories to scan for the "profiles/"
+// subdirectory. Profiles found under any of these locations are merged into
+// a single namespace; the loader rejects duplicate profile names across
+// locations so it is always unambiguous which profile is in use.
+//
+// Scanned locations:
+//  1. ~/.coi                    (user home; co-located with sessions/storage/logs)
+//  2. ./.coi                    (current project)
+//  3. dirname($COI_CONFIG)      (if COI_CONFIG is set)
+func GetProfileParentDirs() []string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		homeDir = "/tmp"
+	}
+	workDir, err := os.Getwd()
+	if err != nil {
+		workDir = "."
+	}
+
+	dirs := []string{
+		filepath.Join(homeDir, ".coi"), // 1. User home
+		filepath.Join(workDir, ".coi"), // 2. Project
+	}
+
+	// COI_CONFIG environment variable: scan its parent dir for profiles too
+	if envConfig := os.Getenv("COI_CONFIG"); envConfig != "" {
+		dirs = append(dirs, filepath.Dir(envConfig))
+	}
+
+	return dirs
 }
 
 // ptrBool returns a pointer to a bool value

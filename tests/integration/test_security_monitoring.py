@@ -36,7 +36,7 @@ def enable_monitoring():
     IMPORTANT: Includes [network] mode = "open" to prevent false positive
     network threats in CI environment.
     """
-    config_path = Path.home() / ".config" / "coi" / "config.toml"
+    config_path = Path.home() / ".coi" / "config.toml"
     backup = config_path.read_text() if config_path.exists() else None
 
     config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -72,7 +72,7 @@ def enable_monitoring_low_thresholds():
     IMPORTANT: Includes [network] mode = "open" to prevent false positive
     network threats in CI environment.
     """
-    config_path = Path.home() / ".config" / "coi" / "config.toml"
+    config_path = Path.home() / ".coi" / "config.toml"
     backup = config_path.read_text() if config_path.exists() else None
 
     config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -981,7 +981,7 @@ class TestHighLevelThreats:
         # IMPORTANT: Must include file_read_threshold_mb to avoid spurious HIGH threats
         # from container startup activity, and network mode = open to prevent false
         # positive network threats in CI
-        config_path = Path.home() / ".config" / "coi" / "config.toml"
+        config_path = Path.home() / ".coi" / "config.toml"
         config_path.write_text(
             """
 [network]
@@ -1770,7 +1770,7 @@ class TestMonitoringConfiguration:
         """Test that threats are NOT detected when monitoring is disabled."""
         # Create config with monitoring disabled
         # Include network mode = open to prevent network-related issues in CI
-        config_path = Path.home() / ".config" / "coi" / "config.toml"
+        config_path = Path.home() / ".coi" / "config.toml"
         backup = config_path.read_text() if config_path.exists() else None
 
         config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1844,7 +1844,7 @@ enabled = false
     def test_monitoring_enabled_via_config_only(self, test_workspace, coi_binary):
         """Test monitoring enabled via config file."""
         # Create config with monitoring enabled - include network section for completeness
-        config_path = Path.home() / ".config" / "coi" / "config.toml"
+        config_path = Path.home() / ".coi" / "config.toml"
         backup = config_path.read_text() if config_path.exists() else None
 
         config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1960,7 +1960,7 @@ mode = "restricted"
 
     def test_config_auto_kill_enabled_kills_on_critical(self, test_workspace, coi_binary):
         """Test that auto_kill_on_critical=true in config kills container on critical threat."""
-        config_path = Path.home() / ".config" / "coi" / "config.toml"
+        config_path = Path.home() / ".coi" / "config.toml"
         backup = config_path.read_text() if config_path.exists() else None
 
         config_path.parent.mkdir(parents=True, exist_ok=True)
