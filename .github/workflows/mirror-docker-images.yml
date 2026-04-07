@@ -1,0 +1,37 @@
+name: Mirror Docker Hub images to GHCR
+
+on:
+  schedule:
+    # Weekly on Monday at 3 AM UTC
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  packages: write
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        image:
+          - source: alpine:latest
+            target: ghcr.io/mensfeld/alpine:latest
+          - source: nginx:alpine
+            target: ghcr.io/mensfeld/nginx:alpine
+    steps:
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull from Docker Hub
+        run: docker pull ${{ matrix.image.source }}
+
+      - name: Tag for GHCR
+        run: docker tag ${{ matrix.image.source }} ${{ matrix.image.target }}
+
+      - name: Push to GHCR
+        run: docker push ${{ matrix.image.target }}

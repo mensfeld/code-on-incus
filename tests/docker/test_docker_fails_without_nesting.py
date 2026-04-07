@@ -213,7 +213,7 @@ def test_docker_fails_without_nesting(coi_binary, cleanup_containers, workspace_
             "docker",
             "run",
             "--rm",
-            "alpine:latest",
+            "ghcr.io/mensfeld/alpine:latest",
             "echo",
             "Should not work!",
         ],
