@@ -389,6 +389,21 @@ func FirewallAvailable() bool {
 	return err == nil
 }
 
+// UfwInstalled checks if the ufw binary is installed
+func UfwInstalled() bool {
+	_, err := exec.LookPath("ufw")
+	return err == nil
+}
+
+// UfwActive checks if ufw is active by parsing 'sudo -n ufw status' output
+func UfwActive() bool {
+	out, err := exec.Command("sudo", "-n", "ufw", "status").CombinedOutput()
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(out), "Status: active")
+}
+
 // MasqueradeEnabled checks if masquerade is enabled in the default firewalld zone
 func MasqueradeEnabled() bool {
 	cmd := exec.Command("sudo", "-n", "firewall-cmd", "--query-masquerade")

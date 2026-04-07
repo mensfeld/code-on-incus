@@ -203,6 +203,59 @@ ensure_bridge_trusted_zone() {
     fi
 }
 
+# Check for ufw conflict before installing firewalld
+check_ufw() {
+    echo -e "${BLUE}→ Checking for ufw...${NC}"
+
+    if ! command -v ufw &> /dev/null; then
+        # ufw not installed, nothing to do
+        return
+    fi
+
+    # Check if ufw is active
+    if ! sudo -n ufw status 2>/dev/null | grep -q "Status: active"; then
+        echo -e "${GREEN}✓ ufw is installed but inactive (no conflict)${NC}"
+        return
+    fi
+
+    # ufw is active — this conflicts with firewalld
+    echo -e "${YELLOW}⚠ ufw is active${NC}"
+    echo ""
+    echo "  ufw and firewalld both manage netfilter rules. Running both at the"
+    echo "  same time will silently break container networking."
+    echo ""
+    echo "  Options:"
+    echo "    1) Disable ufw and continue with firewalld setup (recommended)"
+    echo "    2) Keep ufw and skip firewalld (only --network=open will work)"
+    echo ""
+
+    if [ "$NONINTERACTIVE" = "1" ]; then
+        echo -e "${RED}✗ Cannot proceed: ufw is active and conflicts with firewalld.${NC}"
+        echo "  Disable ufw first: sudo ufw disable && sudo systemctl disable --now ufw"
+        echo "  Then re-run this installer."
+        exit 1
+    fi
+
+    read -p "  Choose [1/2] (default: 1): " -n 1 -r </dev/tty
+    echo ""
+    if [ -z "$REPLY" ]; then
+        REPLY="1"
+    fi
+
+    case "$REPLY" in
+        2)
+            echo -e "${BLUE}→ Keeping ufw, skipping firewalld setup${NC}"
+            SKIP_FIREWALLD=1
+            ;;
+        *)
+            echo -e "${BLUE}→ Disabling ufw...${NC}"
+            sudo ufw disable
+            sudo systemctl disable --now ufw
+            echo -e "${GREEN}✓ ufw disabled${NC}"
+            ;;
+    esac
+}
+
 # Check firewalld for network isolation
 check_firewalld() {
     echo -e "${BLUE}→ Checking firewalld (for network isolation)...${NC}"
@@ -507,7 +560,13 @@ post_install() {
         echo ""
     fi
 
-    if ! command -v firewall-cmd &> /dev/null; then
+    if [ "${SKIP_FIREWALLD:-0}" = "1" ]; then
+        echo -e "${YELLOW}⚠ Firewalld was skipped (ufw is active) — only --network=open will work.${NC}"
+        echo "   To enable network isolation later, disable ufw and install firewalld:"
+        echo "   ${BLUE}sudo ufw disable && sudo systemctl disable --now ufw${NC}"
+        echo "   ${BLUE}sudo apt install firewalld && sudo systemctl enable --now firewalld${NC}"
+        echo ""
+    elif ! command -v firewall-cmd &> /dev/null; then
         echo -e "${YELLOW}⚠ Firewalld is not installed — network isolation (restricted/allowlist modes) will not work.${NC}"
         echo "   Re-run this installer or set up manually: ${BLUE}sudo apt install firewalld && sudo systemctl enable --now firewalld && sudo firewall-cmd --permanent --add-masquerade && sudo firewall-cmd --reload${NC}"
         echo ""
@@ -532,7 +591,10 @@ main() {
     detect_platform
     check_incus
     check_group
-    check_firewalld
+    check_ufw
+    if [ "${SKIP_FIREWALLD:-0}" != "1" ]; then
+        check_firewalld
+    fi
 
     echo ""
     echo "Installation method:"

@@ -461,6 +461,45 @@ func CheckFirewall(mode config.NetworkMode) HealthCheck {
 	}
 }
 
+// CheckUFWConflict checks if ufw is active, which conflicts with firewalld.
+// When both are active, netfilter chains conflict and container networking breaks.
+func CheckUFWConflict() HealthCheck {
+	ufwInstalled := network.UfwInstalled()
+	ufwActive := ufwInstalled && network.UfwActive()
+	firewallActive := network.FirewallAvailable()
+
+	details := map[string]interface{}{
+		"ufw_installed":   ufwInstalled,
+		"ufw_active":      ufwActive,
+		"firewalld_active": firewallActive,
+	}
+
+	if !ufwActive {
+		return HealthCheck{
+			Name:    "ufw_conflict",
+			Status:  StatusOK,
+			Message: "ufw is not active (no conflict)",
+			Details: details,
+		}
+	}
+
+	if firewallActive {
+		return HealthCheck{
+			Name:    "ufw_conflict",
+			Status:  StatusFailed,
+			Message: "Both ufw and firewalld are active — netfilter conflict will break container networking. Disable one: sudo ufw disable && sudo systemctl disable --now ufw",
+			Details: details,
+		}
+	}
+
+	return HealthCheck{
+		Name:    "ufw_conflict",
+		Status:  StatusWarning,
+		Message: "ufw is active — only --network=open will work. Disable ufw to use firewalld: sudo ufw disable && sudo systemctl disable --now ufw",
+		Details: details,
+	}
+}
+
 // CheckBridgeFirewalldZone checks if the Incus bridge is in the firewalld trusted zone.
 // When the bridge is not in the trusted zone, containers may fail to obtain IP addresses.
 func CheckBridgeFirewalldZone() HealthCheck {

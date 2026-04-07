@@ -67,6 +67,7 @@
 
 ### Improvements
 
+- [Improvement] **Detect active ufw before installing firewalld** — On Ubuntu, `ufw` is often pre-installed and active. If both ufw and firewalld manage netfilter chains simultaneously, container networking silently breaks. The installer (`install.sh`) now runs a `check_ufw()` step before `check_firewalld()` that detects ufw in three states: absent (no-op), installed but inactive (info message), or active (blocks firewalld install with a prompt to disable ufw or skip firewalld). Non-interactive mode exits with a clear error when ufw is active. Added `UfwInstalled()` and `UfwActive()` helpers in `internal/network/firewall.go`, a new `ufw_conflict` health check in `coi health` with three-tier severity (ok / warning when only ufw active / failed when both active), and improved the `errFirewallNotAvailable` error message to mention the ufw conflict. (#281)
 - [Improvement] **Add `-a` short flag for `--all`** — Added `-a` short form on: `list`, `clean`, `kill`, `shutdown`, `persist`, `snapshot list`, `snapshot delete` (already existed on `image list` and `images`).
 - [Improvement] **Add `-f` short flag for `--force`** — Added `-f` short form on: `kill`, `shutdown`, `clean`, `persist`, `build`, `update`, `container stop`, `container delete` (already existed on `snapshot restore` and `snapshot delete`).
 - [Improvement] **Standardize CLI `Use` strings** — All positional argument placeholders now follow a consistent `<required>` / `[optional]` lowercase-kebab-case convention. Affected commands: `tmux send`, `tmux capture`, `info`, `run`.

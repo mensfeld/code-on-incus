@@ -20,9 +20,11 @@ const errFirewallNotAvailable = `firewalld is not available or not running
 Network isolation in restricted/allowlist modes requires firewalld.
 
 To fix this:
-  1. Install firewalld: sudo apt install firewalld
-  2. Start firewalld: sudo systemctl enable --now firewalld
-  3. Configure passwordless sudo for firewall-cmd (see README)
+  1. Check for ufw: if 'sudo ufw status' shows active, disable it first —
+     ufw and firewalld conflict: sudo ufw disable && sudo systemctl disable --now ufw
+  2. Install firewalld: sudo apt install firewalld
+  3. Start firewalld: sudo systemctl enable --now firewalld
+  4. Configure passwordless sudo for firewall-cmd (see README)
 
 Alternatively, run with unrestricted network access:
   coi shell --network=open`
