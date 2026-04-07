@@ -32,9 +32,7 @@ def test_health_ufw_conflict_check_exists(coi_binary):
 
     check = checks["ufw_conflict"]
     assert check["name"] == "ufw_conflict", "Check name should be 'ufw_conflict'"
-    assert check["status"] in ["ok", "warning", "failed"], (
-        f"Invalid status: {check['status']}"
-    )
+    assert check["status"] in ["ok", "warning", "failed"], f"Invalid status: {check['status']}"
 
 
 def test_health_ufw_conflict_status_ok_when_ufw_inactive(coi_binary):
@@ -56,6 +54,7 @@ def test_health_ufw_conflict_status_ok_when_ufw_inactive(coi_binary):
     if ufw_active:
         # If ufw IS active on this system, we can't assert OK — skip
         import pytest
+
         pytest.skip("ufw is active on this system, cannot test OK status")
 
     result = subprocess.run(
