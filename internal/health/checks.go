@@ -469,8 +469,8 @@ func CheckUFWConflict() HealthCheck {
 	firewallActive := network.FirewallAvailable()
 
 	details := map[string]interface{}{
-		"ufw_installed":   ufwInstalled,
-		"ufw_active":      ufwActive,
+		"ufw_installed":    ufwInstalled,
+		"ufw_active":       ufwActive,
 		"firewalld_active": firewallActive,
 	}
 
