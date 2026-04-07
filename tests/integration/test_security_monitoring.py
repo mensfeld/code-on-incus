@@ -2752,17 +2752,19 @@ class TestThresholdBoundaries:
     def test_file_read_at_threshold_triggers(
         self, test_workspace, enable_monitoring_low_thresholds, coi_binary
     ):
-        """Test that reading slightly above 50MB threshold triggers HIGH threat."""
-        # Create 55MB file (slightly above 50MB threshold).
-        # Using 55MB instead of exactly 50MB because boundary-exact reads are
-        # fragile: monitoring polls at intervals, and I/O that straddles a poll
-        # boundary can split the read into two deltas each below threshold.
-        # 55MB provides a small margin while still testing "near threshold" behavior.
-        large_file = Path(test_workspace) / "data55mb.bin"
-        large_file.write_bytes(b"B" * (55 * 1024 * 1024))
+        """Test that reading above 50MB threshold triggers HIGH threat."""
+        # Create 75MB file (above 50MB threshold).
+        # Using 75MB instead of 55MB because at typical CI disk speeds (~60 MB/s),
+        # smaller files can be read in ~1 second and straddle two monitoring poll
+        # intervals, causing each per-poll delta to land below the 50MB threshold.
+        # 75MB ensures the first monitoring poll captures ≥50MB delta regardless
+        # of when the poll fires, while still being a "near threshold" test
+        # (vs the 100MB "well above threshold" test).
+        large_file = Path(test_workspace) / "data75mb.bin"
+        large_file.write_bytes(b"B" * (75 * 1024 * 1024))
 
         # Capture stderr for debugging
-        stderr_file = Path("/tmp") / "coi-test-55mb-debug.log"
+        stderr_file = Path("/tmp") / "coi-test-75mb-debug.log"
         stderr_fd = open(stderr_file, "w")  # noqa: SIM115
 
         proc = subprocess.Popen(
@@ -2793,7 +2795,7 @@ class TestThresholdBoundaries:
         # Container startup I/O can take 10-15 seconds to settle
         time.sleep(10)
 
-        # Read the 55MB file using dd with direct I/O to bypass cache
+        # Read the 75MB file using dd with direct I/O to bypass cache
         subprocess.Popen(
             [
                 "incus",
@@ -2801,7 +2803,7 @@ class TestThresholdBoundaries:
                 container_name,
                 "--",
                 "dd",
-                "if=/workspace/data55mb.bin",
+                "if=/workspace/data75mb.bin",
                 "of=/dev/null",
                 "bs=1M",
                 "iflag=direct",  # Bypass cache to ensure actual I/O
@@ -2827,19 +2829,19 @@ class TestThresholdBoundaries:
         proc.terminate()
         stderr_fd.close()
 
-        print("\n=== COI 55MB Read Debug Log ===")
+        print("\n=== COI 75MB Read Debug Log ===")
         if stderr_file.exists():
             print(stderr_file.read_text())
         print("=== End Debug Log ===\n")
 
-        assert paused, "Container should be paused on 55MB read (above threshold)"
+        assert paused, "Container should be paused on 75MB read (above threshold)"
 
         # Verify HIGH threat logged
         events = get_threat_events(container_name)
         high_fs = [
             e for e in events if e.get("level") == "high" and e.get("category") == "filesystem"
         ]
-        assert len(high_fs) > 0, "55MB read should trigger HIGH filesystem threat"
+        assert len(high_fs) > 0, "75MB read should trigger HIGH filesystem threat"
 
         cleanup_container(container_name, coi_binary)
 
