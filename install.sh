@@ -399,8 +399,14 @@ ensure_incus_initialized() {
 
     # Check if Incus has been initialized by looking for any networks.
     # `incus admin init` creates incusbr0; an empty list means never initialized.
+    # If the query itself fails (daemon down, no permissions), warn and bail out
+    # rather than incorrectly triggering init.
     local networks
-    networks="$(incus network list --format=csv 2>/dev/null || true)"
+    if ! networks="$(incus network list --format=csv 2>/dev/null)"; then
+        echo -e "${YELLOW}⚠ Unable to determine whether Incus has been initialized${NC}"
+        echo "  Could not query Incus networks. Ensure the Incus daemon is running and your user has access."
+        return 1
+    fi
     if [ -n "$networks" ]; then
         return
     fi
@@ -412,8 +418,9 @@ ensure_incus_initialized() {
     else
         echo -e "${YELLOW}⚠ Incus initialization failed${NC}"
         if [ -n "$output" ]; then
-            echo "  $output"
+            printf "  %s\n" "$output"
         fi
+        return 1
     fi
 }
 
@@ -456,7 +463,7 @@ setup_zfs_storage() {
         else
             echo -e "${YELLOW}⚠ Failed to configure default profile${NC}"
             if [ -n "$profile_output" ]; then
-                echo -e "${YELLOW}  $profile_output${NC}"
+                printf "${YELLOW}  %s${NC}\n" "$profile_output"
             fi
             echo -e "${YELLOW}  You can manually configure it later with:${NC}"
             echo -e "  ${BLUE}incus profile device set default root pool=zfs-pool${NC}"
@@ -464,7 +471,7 @@ setup_zfs_storage() {
     else
         echo -e "${YELLOW}⚠ ZFS storage pool creation failed${NC}"
         if [ -n "$storage_output" ]; then
-            echo -e "${YELLOW}  $storage_output${NC}"
+            printf "${YELLOW}  %s${NC}\n" "$storage_output"
         fi
         echo -e "${YELLOW}  Containers will use default storage (slower but functional)${NC}"
         return 1
@@ -473,10 +480,10 @@ setup_zfs_storage() {
 
 # Post-install setup
 post_install() {
-    ensure_incus_initialized
+    ensure_incus_initialized || true
 
-    # Try to set up ZFS storage
-    setup_zfs_storage
+    # Try to set up ZFS storage (best-effort, don't abort installer on failure)
+    setup_zfs_storage || true
 
     echo ""
     echo -e "${GREEN}✓ Installation complete!${NC}"

@@ -307,7 +307,7 @@ STUB
 }
 
 // When `sudo incus admin init --auto` fails, ensure_incus_initialized should
-// print a warning with the error output instead of crashing.
+// print a warning with the error output and return non-zero.
 func TestInstallSh_EnsureIncusInitialized_HandlesInitFailure(t *testing.T) {
 	script := installShPath(t)
 
@@ -338,20 +338,62 @@ STUB
 		export NONINTERACTIVE=1
 		source <(sed '/^main "\$@"/d; /^trap error_handler ERR/d' "` + script + `")
 		ensure_incus_initialized
-		echo "COMPLETED"
+		echo "SHOULD_NOT_REACH"
 	`
 	stdout, _, exitCode := runBashSnippet(t, snippet, "NONINTERACTIVE=1")
-	if exitCode != 0 {
-		t.Fatalf("expected exit 0 (non-fatal warning), got %d; stdout: %s", exitCode, stdout)
+	if exitCode == 0 {
+		t.Errorf("expected non-zero exit from init failure, got 0; stdout: %s", stdout)
 	}
-	if !strings.Contains(stdout, "COMPLETED") {
-		t.Errorf("function did not complete; stdout: %s", stdout)
+	if strings.Contains(stdout, "SHOULD_NOT_REACH") {
+		t.Errorf("function should have returned non-zero; stdout: %s", stdout)
 	}
 	if !strings.Contains(stdout, "initialization failed") {
 		t.Errorf("expected failure warning, got: %s", stdout)
 	}
 	if !strings.Contains(stdout, "something went wrong") {
 		t.Errorf("expected error output to be shown, got: %s", stdout)
+	}
+}
+
+// When `incus network list` itself fails (daemon down, permission denied),
+// ensure_incus_initialized should warn and return non-zero instead of
+// incorrectly triggering init.
+func TestInstallSh_EnsureIncusInitialized_WarnsOnQueryFailure(t *testing.T) {
+	script := installShPath(t)
+
+	snippet := `
+		tmpdir=$(mktemp -d)
+		trap "rm -rf $tmpdir" EXIT
+
+		cat > "$tmpdir/incus" <<'STUB'
+#!/bin/bash
+if [[ "$*" == *"network list"* ]]; then
+	echo "Error: not authorized" >&2
+	exit 1
+fi
+exit 0
+STUB
+		chmod +x "$tmpdir/incus"
+		export PATH="$tmpdir:$PATH"
+
+		export NONINTERACTIVE=1
+		source <(sed '/^main "\$@"/d; /^trap error_handler ERR/d' "` + script + `")
+		ensure_incus_initialized
+		echo "SHOULD_NOT_REACH"
+	`
+	stdout, _, exitCode := runBashSnippet(t, snippet, "NONINTERACTIVE=1")
+	if exitCode == 0 {
+		t.Errorf("expected non-zero exit on query failure, got 0; stdout: %s", stdout)
+	}
+	if strings.Contains(stdout, "SHOULD_NOT_REACH") {
+		t.Errorf("function should have returned non-zero; stdout: %s", stdout)
+	}
+	// Should warn about inability to query, NOT attempt init
+	if !strings.Contains(stdout, "Unable to determine") {
+		t.Errorf("expected query failure warning, got: %s", stdout)
+	}
+	if strings.Contains(stdout, "has not been initialized") {
+		t.Errorf("should NOT attempt init when query fails; stdout: %s", stdout)
 	}
 }
 
