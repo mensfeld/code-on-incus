@@ -172,3 +172,250 @@ func TestInstallSh_PromptChoiceCustomDefault(t *testing.T) {
 		t.Errorf("expected REPLY=2, got: %s", strings.TrimSpace(stdout))
 	}
 }
+
+// When incus is not installed, ensure_incus_initialized should be a silent no-op.
+func TestInstallSh_EnsureIncusInitialized_SkipsWhenIncusMissing(t *testing.T) {
+	script := installShPath(t)
+
+	// Use a PATH that definitely does not contain incus
+	snippet := `
+		export NONINTERACTIVE=1
+		export PATH=/usr/bin:/bin
+		source <(sed '/^main "\$@"/d; /^trap error_handler ERR/d' "` + script + `")
+		ensure_incus_initialized
+		echo "EXIT=$?"
+	`
+	stdout, _, exitCode := runBashSnippet(t, snippet, "NONINTERACTIVE=1", "PATH=/usr/bin:/bin")
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0, got %d; stdout: %s", exitCode, stdout)
+	}
+	if !strings.Contains(stdout, "EXIT=0") {
+		t.Errorf("expected clean exit, got: %s", strings.TrimSpace(stdout))
+	}
+	// Should produce no output (silent skip)
+	if strings.Contains(stdout, "Incus") {
+		t.Errorf("expected no Incus messages when incus is missing, got: %s", stdout)
+	}
+}
+
+// When incus reports networks exist, ensure_incus_initialized should be a silent no-op
+// (Incus is already initialized).
+func TestInstallSh_EnsureIncusInitialized_SkipsWhenAlreadyInitialized(t *testing.T) {
+	if _, err := exec.LookPath("incus"); err != nil {
+		t.Skip("incus not found, skipping")
+	}
+
+	script := installShPath(t)
+
+	// Stub incus: when called with "network list", return a fake network line.
+	// This simulates an already-initialized Incus without needing a real one.
+	snippet := `
+		tmpdir=$(mktemp -d)
+		trap "rm -rf $tmpdir" EXIT
+
+		cat > "$tmpdir/incus" <<'STUB'
+#!/bin/bash
+if [[ "$*" == *"network list"* ]]; then
+	echo "incusbr0,bridge,,"
+	exit 0
+fi
+exit 0
+STUB
+		chmod +x "$tmpdir/incus"
+		export PATH="$tmpdir:$PATH"
+
+		export NONINTERACTIVE=1
+		source <(sed '/^main "\$@"/d; /^trap error_handler ERR/d' "` + script + `")
+		ensure_incus_initialized
+		echo "COMPLETED"
+	`
+	stdout, _, exitCode := runBashSnippet(t, snippet, "NONINTERACTIVE=1")
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0, got %d; stdout: %s", exitCode, stdout)
+	}
+	if !strings.Contains(stdout, "COMPLETED") {
+		t.Errorf("function did not complete; stdout: %s", stdout)
+	}
+	// Should NOT attempt initialization
+	if strings.Contains(stdout, "has not been initialized") {
+		t.Errorf("should skip when networks exist, got: %s", stdout)
+	}
+}
+
+// When incus reports no networks, ensure_incus_initialized should run
+// `sudo incus admin init --auto` and print a styled success message.
+func TestInstallSh_EnsureIncusInitialized_RunsInitWhenNoNetworks(t *testing.T) {
+	script := installShPath(t)
+
+	// Stub both incus and sudo:
+	// - incus network list returns empty (no networks → not initialized)
+	// - sudo incus admin init --auto succeeds
+	snippet := `
+		tmpdir=$(mktemp -d)
+		trap "rm -rf $tmpdir" EXIT
+
+		cat > "$tmpdir/incus" <<'STUB'
+#!/bin/bash
+if [[ "$*" == *"network list"* ]]; then
+	# Empty output = no networks
+	exit 0
+fi
+exit 0
+STUB
+		chmod +x "$tmpdir/incus"
+
+		export COI_TEST_MARKER="$tmpdir/init_called"
+		cat > "$tmpdir/sudo" <<'STUB'
+#!/bin/bash
+if [[ "$*" == *"incus admin init --auto"* ]]; then
+	touch "$COI_TEST_MARKER"
+	exit 0
+fi
+# Pass through other sudo calls
+exec /usr/bin/sudo "$@"
+STUB
+		chmod +x "$tmpdir/sudo"
+		export PATH="$tmpdir:$PATH"
+
+		export NONINTERACTIVE=1
+		source <(sed '/^main "\$@"/d; /^trap error_handler ERR/d' "` + script + `")
+		ensure_incus_initialized
+		# Check the marker file
+		if [ -f "$COI_TEST_MARKER" ]; then
+			echo "INIT_WAS_CALLED"
+		fi
+		echo "COMPLETED"
+	`
+	stdout, _, exitCode := runBashSnippet(t, snippet, "NONINTERACTIVE=1")
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0, got %d; stdout: %s", exitCode, stdout)
+	}
+	if !strings.Contains(stdout, "COMPLETED") {
+		t.Errorf("function did not complete; stdout: %s", stdout)
+	}
+	// Should print the initialization message
+	if !strings.Contains(stdout, "has not been initialized") {
+		t.Errorf("expected 'has not been initialized' message, got: %s", stdout)
+	}
+	if !strings.Contains(stdout, "Incus initialized") {
+		t.Errorf("expected success message, got: %s", stdout)
+	}
+	// Verify sudo was called with the right command
+	if !strings.Contains(stdout, "INIT_WAS_CALLED") {
+		t.Errorf("expected sudo incus admin init --auto to be called; stdout: %s", stdout)
+	}
+}
+
+// When `sudo incus admin init --auto` fails, ensure_incus_initialized should
+// print a warning with the error output instead of crashing.
+func TestInstallSh_EnsureIncusInitialized_HandlesInitFailure(t *testing.T) {
+	script := installShPath(t)
+
+	snippet := `
+		tmpdir=$(mktemp -d)
+		trap "rm -rf $tmpdir" EXIT
+
+		cat > "$tmpdir/incus" <<'STUB'
+#!/bin/bash
+if [[ "$*" == *"network list"* ]]; then
+	exit 0
+fi
+exit 0
+STUB
+		chmod +x "$tmpdir/incus"
+
+		cat > "$tmpdir/sudo" <<'STUB'
+#!/bin/bash
+if [[ "$*" == *"incus admin init --auto"* ]]; then
+	echo "Error: something went wrong"
+	exit 1
+fi
+exec /usr/bin/sudo "$@"
+STUB
+		chmod +x "$tmpdir/sudo"
+		export PATH="$tmpdir:$PATH"
+
+		export NONINTERACTIVE=1
+		source <(sed '/^main "\$@"/d; /^trap error_handler ERR/d' "` + script + `")
+		ensure_incus_initialized
+		echo "COMPLETED"
+	`
+	stdout, _, exitCode := runBashSnippet(t, snippet, "NONINTERACTIVE=1")
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0 (non-fatal warning), got %d; stdout: %s", exitCode, stdout)
+	}
+	if !strings.Contains(stdout, "COMPLETED") {
+		t.Errorf("function did not complete; stdout: %s", stdout)
+	}
+	if !strings.Contains(stdout, "initialization failed") {
+		t.Errorf("expected failure warning, got: %s", stdout)
+	}
+	if !strings.Contains(stdout, "something went wrong") {
+		t.Errorf("expected error output to be shown, got: %s", stdout)
+	}
+}
+
+// Verify that `incus storage create` output is captured (not printed to terminal)
+// on success.
+func TestInstallSh_SetupZfsStorage_SuppressesOutputOnSuccess(t *testing.T) {
+	script := installShPath(t)
+
+	// Stub incus and sudo to simulate successful storage + profile setup.
+	// The key test: sudo incus storage create prints a hint that should NOT
+	// appear in output.
+	snippet := `
+		tmpdir=$(mktemp -d)
+		trap "rm -rf $tmpdir" EXIT
+
+		cat > "$tmpdir/incus" <<'STUB'
+#!/bin/bash
+if [[ "$*" == *"storage list"* ]]; then
+	# No zfs-pool exists yet
+	echo ""
+	exit 0
+fi
+if [[ "$*" == *"profile device set"* ]]; then
+	exit 0
+fi
+exit 0
+STUB
+		chmod +x "$tmpdir/incus"
+
+		cat > "$tmpdir/sudo" <<'STUB'
+#!/bin/bash
+if [[ "$*" == *"storage create"* ]]; then
+	echo "If this is your first time running Incus, you should also run: incus admin init"
+	exit 0
+fi
+exec /usr/bin/sudo "$@"
+STUB
+		chmod +x "$tmpdir/sudo"
+
+		cat > "$tmpdir/zfs" <<'STUB'
+#!/bin/bash
+exit 0
+STUB
+		chmod +x "$tmpdir/zfs"
+
+		export PATH="$tmpdir:$PATH"
+		export NONINTERACTIVE=1
+		source <(sed '/^main "\$@"/d; /^trap error_handler ERR/d' "` + script + `")
+		setup_zfs_storage
+		echo "COMPLETED"
+	`
+	stdout, _, exitCode := runBashSnippet(t, snippet, "NONINTERACTIVE=1")
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0, got %d; stdout: %s", exitCode, stdout)
+	}
+	if !strings.Contains(stdout, "COMPLETED") {
+		t.Errorf("function did not complete; stdout: %s", stdout)
+	}
+	// The raw Incus hint should NOT appear in output
+	if strings.Contains(stdout, "first time running Incus") {
+		t.Errorf("raw Incus hint should be suppressed on success, got: %s", stdout)
+	}
+	// Success messages should appear
+	if !strings.Contains(stdout, "ZFS storage pool created") {
+		t.Errorf("expected success message, got: %s", stdout)
+	}
+}
