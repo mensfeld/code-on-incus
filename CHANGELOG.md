@@ -73,6 +73,7 @@
 - [Improvement] **Rename `profile show` to `profile info`** — For consistency with `coi info` and `snapshot info`, the `profile show` subcommand has been renamed to `profile info`. The old `show` verb is kept as a hidden backward-compatible alias.
 - [Improvement] **Add `container info` and `image info` subcommands** — New info subcommands for viewing detailed resource information, wrapping `incus info` and `incus image info` respectively. Both support `--format text|json`.
 - [Improvement] **Remove `coi images` command** — The plural `coi images` shortcut has been removed. Use `coi image list` instead.
+- [Improvement] **Remove Falco PoC code** — Removed the unused `poc-falco/` directory containing an early Falco integration proof-of-concept. COI's security monitoring uses its own nftables-based approach instead.
 - [Improvement] **Centralize command registration in `root.go`** — `attach`, `shutdown`, and `monitor` commands no longer self-register via `rootCmd.AddCommand()` in their own `init()` functions. All command registration is now centralized in `root.go` for consistency.
 - [Improvement] **Load profiles from `~/.coi/profiles/` and project `.coi/profiles/`** — Profile directories are scanned under `~/.coi/profiles/` (user, co-located with sessions/storage/logs) and `./.coi/profiles/` (project). Profiles from both locations are merged into a single namespace. If the same profile name is defined in both, COI refuses to start and points to both files, asking the user to rename one — this keeps it unambiguous which profile is being applied.
 
