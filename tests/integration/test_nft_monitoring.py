@@ -1218,7 +1218,8 @@ class TestHealthChecks:
         # Accept 0 (healthy), 1 (degraded), or 2 (unhealthy) — these tests verify
         # health output content, not that the CI runner's system is fully healthy.
         assert result.returncode in (0, 1, 2), f"Health check crashed: {result.stderr}"
-        assert "checks passed" in result.stdout.lower(), (
+        output_lower = result.stdout.lower()
+        assert "checks passed" in output_lower or "checks failed" in output_lower, (
             f"Expected health check summary in output:\n{result.stdout}"
         )
 
