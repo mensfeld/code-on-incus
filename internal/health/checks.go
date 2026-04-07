@@ -487,7 +487,7 @@ func CheckUFWConflict() HealthCheck {
 		return HealthCheck{
 			Name:    "ufw_conflict",
 			Status:  StatusFailed,
-			Message: "Both ufw and firewalld are active — netfilter conflict will break container networking. Disable one: sudo ufw disable && sudo systemctl disable --now ufw",
+			Message: "Both ufw and firewalld are active — netfilter conflict will break container networking. Disable ufw (recommended): sudo ufw disable && sudo systemctl disable --now ufw — or disable firewalld: sudo systemctl disable --now firewalld",
 			Details: details,
 		}
 	}

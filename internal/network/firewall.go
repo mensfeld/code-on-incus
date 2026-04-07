@@ -395,8 +395,15 @@ func UfwInstalled() bool {
 	return err == nil
 }
 
-// UfwActive checks if ufw is active by parsing 'sudo -n ufw status' output
+// UfwActive checks if ufw is active. It first tries systemctl (no sudo needed),
+// then falls back to parsing 'sudo -n ufw status' output.
 func UfwActive() bool {
+	// Prefer systemctl — works without sudo
+	if err := exec.Command("systemctl", "is-active", "--quiet", "ufw").Run(); err == nil {
+		return true
+	}
+
+	// Fallback: try ufw status directly (requires passwordless sudo)
 	out, err := exec.Command("sudo", "-n", "ufw", "status").CombinedOutput()
 	if err != nil {
 		return false

@@ -505,18 +505,15 @@ exit 0
 STUB
 		chmod +x "$tmpdir/ufw"
 
-		# Stub sudo to pass through to our ufw stub
-		cat > "$tmpdir/sudo" <<'STUB'
+		# Stub systemctl to report ufw as inactive
+		cat > "$tmpdir/systemctl" <<'STUB'
 #!/bin/bash
-if [[ "$*" == *"ufw status"* ]]; then
-	# Find ufw in the same directory as this stub
-	dir="$(dirname "$0")"
-	"$dir/ufw" status
-	exit $?
+if [[ "$1" == "is-active" && "$*" == *"ufw"* ]]; then
+	exit 1
 fi
-exec /usr/bin/sudo "$@"
+exec /usr/bin/systemctl "$@"
 STUB
-		chmod +x "$tmpdir/sudo"
+		chmod +x "$tmpdir/systemctl"
 		export PATH="$tmpdir:$PATH"
 
 		export NONINTERACTIVE=1
@@ -555,16 +552,15 @@ exit 0
 STUB
 		chmod +x "$tmpdir/ufw"
 
-		cat > "$tmpdir/sudo" <<'STUB'
+		# Stub systemctl to report ufw as active
+		cat > "$tmpdir/systemctl" <<'STUB'
 #!/bin/bash
-if [[ "$*" == *"ufw status"* ]]; then
-	dir="$(dirname "$0")"
-	"$dir/ufw" status
-	exit $?
+if [[ "$1" == "is-active" && "$*" == *"ufw"* ]]; then
+	exit 0
 fi
-exec /usr/bin/sudo "$@"
+exec /usr/bin/systemctl "$@"
 STUB
-		chmod +x "$tmpdir/sudo"
+		chmod +x "$tmpdir/systemctl"
 		export PATH="$tmpdir:$PATH"
 
 		export NONINTERACTIVE=1
@@ -585,13 +581,11 @@ STUB
 }
 
 // When the user picks option 2 (skip firewalld), SKIP_FIREWALLD should be set to 1.
-// We simulate this by stubbing /dev/tty reads via an interactive-mode workaround.
+// We test the real check_ufw by running in NONINTERACTIVE=1 mode and overriding
+// prompt_choice to return "2" instead of exiting.
 func TestInstallSh_CheckUfw_Option2SkipsFirewalld(t *testing.T) {
 	script := installShPath(t)
 
-	// We can't easily simulate interactive input in tests, so we test the
-	// non-interactive path and verify the SKIP_FIREWALLD variable is set
-	// by directly calling the option-2 branch logic.
 	snippet := `
 		tmpdir=$(mktemp -d)
 		trap "rm -rf $tmpdir" EXIT
@@ -603,17 +597,22 @@ exit 0
 STUB
 		chmod +x "$tmpdir/ufw"
 
-		cat > "$tmpdir/sudo" <<'STUB'
+		# Stub systemctl to report ufw as active
+		cat > "$tmpdir/systemctl" <<'STUB'
 #!/bin/bash
-if [[ "$*" == *"ufw status"* ]]; then
-	dir="$(dirname "$0")"
-	"$dir/ufw" status
-	exit $?
-fi
-if [[ "$*" == *"ufw disable"* ]]; then
+if [[ "$1" == "is-active" && "$*" == *"ufw"* ]]; then
 	exit 0
 fi
-if [[ "$*" == *"systemctl disable"* ]]; then
+if [[ "$1" == "disable" ]]; then
+	exit 0
+fi
+exec /usr/bin/systemctl "$@"
+STUB
+		chmod +x "$tmpdir/systemctl"
+
+		cat > "$tmpdir/sudo" <<'STUB'
+#!/bin/bash
+if [[ "$*" == *"ufw disable"* ]]; then
 	exit 0
 fi
 exec /usr/bin/sudo "$@"
@@ -621,33 +620,18 @@ STUB
 		chmod +x "$tmpdir/sudo"
 		export PATH="$tmpdir:$PATH"
 
-		# Override NONINTERACTIVE=0 and provide input "2" via heredoc
-		export NONINTERACTIVE=0
+		export NONINTERACTIVE=1
 		source <(sed '/^main "\$@"/d; /^trap error_handler ERR/d' "` + script + `")
 
-		# Redirect read from a file descriptor instead of /dev/tty
-		exec 3<<<'2'
-		# Monkey-patch: override the read to use our fd
-		check_ufw_test() {
-			echo -e "${BLUE}→ Checking for ufw...${NC}"
-			if ! command -v ufw &> /dev/null; then return; fi
-			if ! sudo -n ufw status 2>/dev/null | grep -q "Status: active"; then
-				echo -e "${GREEN}✓ ufw is installed but inactive (no conflict)${NC}"
-				return
-			fi
+		# Override NONINTERACTIVE after sourcing so check_ufw reaches prompt_choice
+		NONINTERACTIVE=0
+
+		# Override prompt_choice to simulate user picking option 2
+		prompt_choice() {
 			REPLY="2"
-			case "$REPLY" in
-				2)
-					echo -e "${BLUE}→ Keeping ufw, skipping firewalld setup${NC}"
-					SKIP_FIREWALLD=1
-					;;
-				*)
-					sudo ufw disable
-					sudo systemctl disable --now ufw
-					;;
-			esac
 		}
-		check_ufw_test
+
+		check_ufw
 		echo "SKIP_FIREWALLD=${SKIP_FIREWALLD:-0}"
 	`
 	stdout, _, exitCode := runBashSnippet(t, snippet, "NONINTERACTIVE=0")

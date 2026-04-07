@@ -212,8 +212,8 @@ check_ufw() {
         return
     fi
 
-    # Check if ufw is active
-    if ! sudo -n ufw status 2>/dev/null | grep -q "Status: active"; then
+    # Check if ufw is active (systemctl doesn't require sudo)
+    if ! systemctl is-active --quiet ufw 2>/dev/null; then
         echo -e "${GREEN}✓ ufw is installed but inactive (no conflict)${NC}"
         return
     fi
@@ -236,11 +236,7 @@ check_ufw() {
         exit 1
     fi
 
-    read -p "  Choose [1/2] (default: 1): " -n 1 -r </dev/tty
-    echo ""
-    if [ -z "$REPLY" ]; then
-        REPLY="1"
-    fi
+    prompt_choice "  Choose [1/2] (default: 1): " "1"
 
     case "$REPLY" in
         2)

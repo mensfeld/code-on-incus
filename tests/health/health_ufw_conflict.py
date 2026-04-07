@@ -42,14 +42,13 @@ def test_health_ufw_conflict_status_ok_when_ufw_inactive(coi_binary):
     On most CI and dev systems ufw is either not installed or inactive,
     so this check should return OK.
     """
-    # First check if ufw is actually active on this system
+    # First check if ufw is actually active on this system (no sudo needed)
     ufw_result = subprocess.run(
-        ["sudo", "-n", "ufw", "status"],
+        ["systemctl", "is-active", "--quiet", "ufw"],
         capture_output=True,
-        text=True,
         timeout=10,
     )
-    ufw_active = ufw_result.returncode == 0 and "Status: active" in ufw_result.stdout
+    ufw_active = ufw_result.returncode == 0
 
     if ufw_active:
         # If ufw IS active on this system, we can't assert OK — skip
