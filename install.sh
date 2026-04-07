@@ -390,6 +390,33 @@ build_from_source() {
     echo -e "${GREEN}✓ Built and installed${NC}"
 }
 
+# Ensure Incus has been initialized (creates default network, profile devices, etc.)
+ensure_incus_initialized() {
+    # Skip if Incus is not installed
+    if ! command -v incus &> /dev/null; then
+        return
+    fi
+
+    # Check if Incus has been initialized by looking for any networks.
+    # `incus admin init` creates incusbr0; an empty list means never initialized.
+    local networks
+    networks="$(incus network list --format=csv 2>/dev/null || true)"
+    if [ -n "$networks" ]; then
+        return
+    fi
+
+    echo -e "${BLUE}→ Incus has not been initialized, running incus admin init --auto...${NC}"
+    local output
+    if output="$(sudo incus admin init --auto 2>&1)"; then
+        echo -e "${GREEN}✓ Incus initialized${NC}"
+    else
+        echo -e "${YELLOW}⚠ Incus initialization failed${NC}"
+        if [ -n "$output" ]; then
+            echo "  $output"
+        fi
+    fi
+}
+
 # Set up ZFS storage (for instant container creation)
 setup_zfs_storage() {
     echo ""
@@ -416,21 +443,29 @@ setup_zfs_storage() {
 
     # Create ZFS storage pool
     echo -e "${BLUE}→ Creating ZFS storage pool (50GiB)...${NC}"
-    if sudo incus storage create zfs-pool zfs size=50GiB 2>&1; then
+    local storage_output
+    if storage_output="$(sudo incus storage create zfs-pool zfs size=50GiB 2>&1)"; then
         echo -e "${GREEN}✓ ZFS storage pool created${NC}"
 
         # Configure default profile to use ZFS
         echo -e "${BLUE}→ Configuring default profile to use ZFS...${NC}"
-        if incus profile device set default root pool=zfs-pool 2>&1; then
+        local profile_output
+        if profile_output="$(incus profile device set default root pool=zfs-pool 2>&1)"; then
             echo -e "${GREEN}✓ Default profile configured for ZFS${NC}"
             echo -e "${GREEN}✓ Containers will now start instantly (~50ms vs 5-10s)${NC}"
         else
             echo -e "${YELLOW}⚠ Failed to configure default profile${NC}"
+            if [ -n "$profile_output" ]; then
+                echo -e "${YELLOW}  $profile_output${NC}"
+            fi
             echo -e "${YELLOW}  You can manually configure it later with:${NC}"
             echo -e "  ${BLUE}incus profile device set default root pool=zfs-pool${NC}"
         fi
     else
         echo -e "${YELLOW}⚠ ZFS storage pool creation failed${NC}"
+        if [ -n "$storage_output" ]; then
+            echo -e "${YELLOW}  $storage_output${NC}"
+        fi
         echo -e "${YELLOW}  Containers will use default storage (slower but functional)${NC}"
         return 1
     fi
@@ -438,6 +473,8 @@ setup_zfs_storage() {
 
 # Post-install setup
 post_install() {
+    ensure_incus_initialized
+
     # Try to set up ZFS storage
     setup_zfs_storage
 
