@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 
+	"github.com/BurntSushi/toml"
 	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/spf13/cobra"
 )
@@ -389,10 +392,234 @@ var profileShowCmd = &cobra.Command{
 	Hidden: true,
 }
 
+// resolveProfileDir determines the target directory for a new profile.
+func resolveProfileDir(name string, forceUser, forceProject bool) (string, error) {
+	if forceUser {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("cannot determine home directory: %w", err)
+		}
+		return filepath.Join(homeDir, ".coi", "profiles", name), nil
+	}
+
+	if forceProject {
+		absWorkspace, err := filepath.Abs(workspace)
+		if err != nil {
+			return "", fmt.Errorf("cannot resolve workspace: %w", err)
+		}
+		return filepath.Join(absWorkspace, ".coi", "profiles", name), nil
+	}
+
+	// Default: project if .coi/ exists, otherwise user home
+	absWorkspace, err := filepath.Abs(workspace)
+	if err != nil {
+		return "", fmt.Errorf("cannot resolve workspace: %w", err)
+	}
+	coiDir := filepath.Join(absWorkspace, ".coi")
+	if info, err := os.Stat(coiDir); err == nil && info.IsDir() {
+		return filepath.Join(coiDir, "profiles", name), nil
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("cannot determine home directory: %w", err)
+	}
+	return filepath.Join(homeDir, ".coi", "profiles", name), nil
+}
+
+// profileCreateCmd creates a new profile
+var profileCreateCmd = &cobra.Command{
+	Use:   "create <name>",
+	Short: "Create a new profile",
+	Long: `Create a new profile directory with a minimal config.toml.
+
+By default, creates in .coi/profiles/ if inside a project with .coi/ directory,
+otherwise creates in ~/.coi/profiles/. Use --user or --project to override.
+
+Examples:
+  coi profile create rust-dev --image coi-rust --inherits default
+  coi profile create my-profile --persistent --project`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		name := args[0]
+
+		// Validate name
+		if name == "" {
+			return fmt.Errorf("profile name cannot be empty")
+		}
+		if strings.Contains(name, "/") || strings.Contains(name, "\\") {
+			return fmt.Errorf("profile name cannot contain slashes")
+		}
+		if name == "default" {
+			return fmt.Errorf("cannot create a profile named 'default' (reserved for built-in profile)")
+		}
+
+		forceUser, _ := cmd.Flags().GetBool("user")
+		forceProject, _ := cmd.Flags().GetBool("project")
+		if forceUser && forceProject {
+			return fmt.Errorf("--user and --project are mutually exclusive")
+		}
+
+		profileDir, err := resolveProfileDir(name, forceUser, forceProject)
+		if err != nil {
+			return err
+		}
+
+		// Check directory doesn't already exist
+		if _, err := os.Stat(profileDir); err == nil {
+			return fmt.Errorf("profile directory already exists: %s", profileDir)
+		}
+
+		// Build TOML content from flags
+		var lines []string
+		if image, _ := cmd.Flags().GetString("image"); image != "" {
+			lines = append(lines, fmt.Sprintf("image = %q", image))
+		}
+		if inherits, _ := cmd.Flags().GetString("inherits"); inherits != "" {
+			lines = append(lines, fmt.Sprintf("inherits = %q", inherits))
+		}
+		if persistent, _ := cmd.Flags().GetBool("persistent"); persistent {
+			lines = append(lines, "persistent = true")
+		}
+
+		content := strings.Join(lines, "\n")
+		if content != "" {
+			content += "\n"
+		}
+
+		// Create directory and write config
+		if err := os.MkdirAll(profileDir, 0o755); err != nil {
+			return fmt.Errorf("failed to create profile directory: %w", err)
+		}
+
+		configPath := filepath.Join(profileDir, "config.toml")
+		if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+			// Clean up directory on write failure
+			os.RemoveAll(profileDir)
+			return fmt.Errorf("failed to write config.toml: %w", err)
+		}
+
+		fmt.Fprintf(os.Stderr, "Created profile '%s' at %s\n", name, configPath)
+		return nil
+	},
+}
+
+// profileEditCmd opens a profile's config in an editor
+var profileEditCmd = &cobra.Command{
+	Use:   "edit <name>",
+	Short: "Edit a profile's config.toml in your editor",
+	Long: `Open a profile's config.toml in $VISUAL, $EDITOR, or vi.
+
+After the editor exits, the file is re-parsed and validated.
+A warning is printed if the TOML is invalid, but the file is not deleted.
+
+Examples:
+  coi profile edit rust-dev
+  EDITOR=nano coi profile edit my-profile`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		name := args[0]
+
+		p := cfg.GetProfile(name)
+		if p == nil {
+			return fmt.Errorf("profile '%s' not found", name)
+		}
+		if p.Source == "(built-in)" {
+			return fmt.Errorf("cannot edit built-in profile 'default'")
+		}
+
+		sourcePath := p.Source
+
+		// Determine editor
+		editor := os.Getenv("VISUAL")
+		if editor == "" {
+			editor = os.Getenv("EDITOR")
+		}
+		if editor == "" {
+			editor = "vi"
+		}
+
+		editorCmd := exec.Command(editor, sourcePath)
+		editorCmd.Stdin = os.Stdin
+		editorCmd.Stdout = os.Stdout
+		editorCmd.Stderr = os.Stderr
+
+		if err := editorCmd.Run(); err != nil {
+			return fmt.Errorf("editor exited with error: %w", err)
+		}
+
+		// Re-parse and validate
+		var profileCfg config.ProfileConfig
+		if _, err := toml.DecodeFile(sourcePath, &profileCfg); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: %s contains invalid TOML: %v\n", sourcePath, err)
+			return nil
+		}
+		if err := profileCfg.Validate(name); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: profile validation failed: %v\n", err)
+		}
+
+		return nil
+	},
+}
+
+// profileDeleteCmd deletes a profile directory
+var profileDeleteCmd = &cobra.Command{
+	Use:   "delete <name>",
+	Short: "Delete a profile",
+	Long: `Delete a profile directory and its config.toml.
+
+Without --force, prompts for confirmation before deleting.
+
+Examples:
+  coi profile delete rust-dev
+  coi profile delete old-profile --force`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		name := args[0]
+
+		p := cfg.GetProfile(name)
+		if p == nil {
+			return fmt.Errorf("profile '%s' not found", name)
+		}
+		if p.Source == "(built-in)" {
+			return fmt.Errorf("cannot delete built-in profile 'default'")
+		}
+
+		profileDir := filepath.Dir(p.Source)
+		force, _ := cmd.Flags().GetBool("force")
+
+		if !force {
+			fmt.Fprintf(os.Stderr, "This will delete profile '%s' at %s\n", name, profileDir)
+			if !confirmAction("Continue?") {
+				fmt.Fprintln(os.Stderr, "Aborted.")
+				return nil
+			}
+		}
+
+		if err := os.RemoveAll(profileDir); err != nil {
+			return fmt.Errorf("failed to delete profile directory: %w", err)
+		}
+
+		fmt.Fprintf(os.Stderr, "Deleted profile '%s' (%s)\n", name, profileDir)
+		return nil
+	},
+}
+
 func init() {
 	profileListCmd.Flags().StringVar(&profileFormat, "format", "text", "Output format: text or json")
+
+	profileCreateCmd.Flags().String("image", "", "Set the image alias")
+	profileCreateCmd.Flags().String("inherits", "", "Set the parent profile to inherit from")
+	profileCreateCmd.Flags().Bool("persistent", false, "Set persistent = true")
+	profileCreateCmd.Flags().Bool("user", false, "Force creation in ~/.coi/profiles/")
+	profileCreateCmd.Flags().Bool("project", false, "Force creation in ./.coi/profiles/")
+
+	profileDeleteCmd.Flags().BoolP("force", "f", false, "Skip confirmation prompt")
 
 	profileCmd.AddCommand(profileListCmd)
 	profileCmd.AddCommand(profileInfoCmd)
 	profileCmd.AddCommand(profileShowCmd)
+	profileCmd.AddCommand(profileCreateCmd)
+	profileCmd.AddCommand(profileEditCmd)
+	profileCmd.AddCommand(profileDeleteCmd)
 }
