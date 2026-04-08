@@ -193,6 +193,8 @@ create_code_user() {
     mkdir -p "/home/$CODE_USER/.claude"
     mkdir -p "/home/$CODE_USER/.ssh"
     chmod 700 "/home/$CODE_USER/.ssh"
+    ssh-keyscan -t ed25519,rsa,ecdsa github.com gitlab.com bitbucket.org >> "/home/$CODE_USER/.ssh/known_hosts" 2>/dev/null
+    chmod 644 "/home/$CODE_USER/.ssh/known_hosts"
     chown -R "$CODE_USER:$CODE_USER" "/home/$CODE_USER"
 
     # Setup passwordless sudo for all commands
