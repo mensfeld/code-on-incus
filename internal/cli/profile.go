@@ -1,15 +1,17 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
 	"strings"
-	"text/tabwriter"
 
 	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/spf13/cobra"
 )
+
+var profileFormat string
 
 // profileCmd is the parent command for profile operations
 var profileCmd = &cobra.Command{
@@ -27,9 +29,18 @@ var profileListCmd = &cobra.Command{
 Profiles are defined as directories under profiles/, each containing a config.toml.
 
 Examples:
-  coi profile list`,
+  coi profile list
+  coi profile list --format json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if profileFormat != "text" && profileFormat != "json" {
+			return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid format '%s': must be 'text' or 'json'", profileFormat)}
+		}
+
 		if len(cfg.Profiles) == 0 {
+			if profileFormat == "json" {
+				fmt.Println("[]")
+				return nil
+			}
 			fmt.Fprintln(os.Stderr, "No profiles configured.")
 			return nil
 		}
@@ -41,8 +52,34 @@ Examples:
 		}
 		sort.Strings(names)
 
-		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-		fmt.Fprintln(w, "NAME\tIMAGE\tPERSISTENT\tINHERITS\tSOURCE")
+		if profileFormat == "json" {
+			type profileEntry struct {
+				Name       string `json:"name"`
+				Image      string `json:"image"`
+				Persistent *bool  `json:"persistent"`
+				Inherits   string `json:"inherits,omitempty"`
+				Source     string `json:"source,omitempty"`
+			}
+			entries := make([]profileEntry, 0, len(names))
+			for _, name := range names {
+				p := cfg.Profiles[name]
+				entries = append(entries, profileEntry{
+					Name:       name,
+					Image:      p.Image,
+					Persistent: p.Persistent,
+					Inherits:   p.Inherits,
+					Source:     p.Source,
+				})
+			}
+			jsonData, err := json.MarshalIndent(entries, "", "  ")
+			if err != nil {
+				return fmt.Errorf("failed to marshal JSON: %v", err)
+			}
+			fmt.Println(string(jsonData))
+			return nil
+		}
+
+		tbl := NewTable("NAME", "IMAGE", "PERSISTENT", "INHERITS", "SOURCE")
 		for _, name := range names {
 			p := cfg.Profiles[name]
 			image := p.Image
@@ -65,9 +102,9 @@ Examples:
 			if source == "" {
 				source = "(unknown)"
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", name, image, persistent, inherits, source)
+			tbl.AddRow(name, image, persistent, inherits, source)
 		}
-		w.Flush()
+		tbl.Render()
 		return nil
 	},
 }
@@ -353,6 +390,8 @@ var profileShowCmd = &cobra.Command{
 }
 
 func init() {
+	profileListCmd.Flags().StringVar(&profileFormat, "format", "text", "Output format: text or json")
+
 	profileCmd.AddCommand(profileListCmd)
 	profileCmd.AddCommand(profileInfoCmd)
 	profileCmd.AddCommand(profileShowCmd)

@@ -356,18 +356,15 @@ func listAllSnapshots() error {
 		if len(snapshots) == 0 {
 			fmt.Println("  (none)")
 		} else {
-			fmt.Printf("%-20s %-24s %-8s\n", "NAME", "CREATED", "STATEFUL")
+			tbl := NewTable("NAME", "CREATED", "STATEFUL")
 			for _, s := range snapshots {
 				stateful := "no"
 				if s.Stateful {
 					stateful = "yes"
 				}
-				fmt.Printf("%-20s %-24s %-8s\n",
-					s.Name,
-					s.CreatedAt.Format("2006-01-02 15:04:05"),
-					stateful,
-				)
+				tbl.AddRow(s.Name, s.CreatedAt.Format("2006-01-02 15:04:05"), stateful)
 			}
+			tbl.Render()
 		}
 	}
 
@@ -398,18 +395,15 @@ func outputSnapshotText(containerName string, snapshots []container.SnapshotInfo
 		return nil
 	}
 
-	fmt.Printf("%-20s %-24s %-8s\n", "NAME", "CREATED", "STATEFUL")
+	tbl := NewTable("NAME", "CREATED", "STATEFUL")
 	for _, s := range snapshots {
 		stateful := "no"
 		if s.Stateful {
 			stateful = "yes"
 		}
-		fmt.Printf("%-20s %-24s %-8s\n",
-			s.Name,
-			s.CreatedAt.Format("2006-01-02 15:04:05"),
-			stateful,
-		)
+		tbl.AddRow(s.Name, s.CreatedAt.Format("2006-01-02 15:04:05"), stateful)
 	}
+	tbl.Render()
 
 	fmt.Printf("\nTotal: %d snapshot", len(snapshots))
 	if len(snapshots) != 1 {

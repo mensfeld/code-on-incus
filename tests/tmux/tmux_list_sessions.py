@@ -116,8 +116,11 @@ def test_tmux_list_sessions(coi_binary, cleanup_containers, workspace_dir):
     )
 
     assert result.returncode == 0, f"Tmux list should succeed. stderr: {result.stderr}"
-    assert "Active sessions:" in result.stdout, (
-        f"Should show sessions header. Got:\n{result.stdout}"
+    assert "CONTAINER" in result.stdout, (
+        f"Should show CONTAINER column header. Got:\n{result.stdout}"
+    )
+    assert "TMUX SESSION" in result.stdout, (
+        f"Should show TMUX SESSION column header. Got:\n{result.stdout}"
     )
 
     # Both containers should be listed

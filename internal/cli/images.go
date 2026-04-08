@@ -248,15 +248,15 @@ func imageListCommand(cmd *cobra.Command, args []string) error {
 		}
 
 		fmt.Printf("Images with prefix '%s':\n\n", prefix)
-		fmt.Printf("%-40s %-20s %s\n", "ALIAS", "SIZE", "CREATED")
-		fmt.Println(strings.Repeat("-", 80))
+		tbl := NewTable("ALIAS", "SIZE", "CREATED")
 		for _, img := range images {
 			for _, alias := range img.Aliases {
 				sizeFormatted := formatSize(fmt.Sprintf("%d", img.Size))
 				createdFormatted := img.CreatedAt.Format("2006-01-02 15:04")
-				fmt.Printf("%-40s %-20s %s\n", alias, sizeFormatted, createdFormatted)
+				tbl.AddRow(alias, sizeFormatted, createdFormatted)
 			}
 		}
+		tbl.Render()
 		return nil
 	}
 
@@ -333,9 +333,7 @@ func listAllImages() error {
 		return nil
 	}
 
-	fmt.Printf("  %-30s %-15s %s\n", "ALIAS", "SIZE", "UPLOAD DATE")
-	fmt.Println("  " + strings.Repeat("-", 70))
-
+	tbl := NewTable("ALIAS", "SIZE", "UPLOAD DATE")
 	for _, line := range lines {
 		if line == "" {
 			continue
@@ -353,8 +351,9 @@ func listAllImages() error {
 		// Format size (convert bytes to human readable)
 		sizeFormatted := formatSize(size)
 
-		fmt.Printf("  %-30s %-15s %s\n", alias, sizeFormatted, uploadDate)
+		tbl.AddRow(alias, sizeFormatted, uploadDate)
 	}
+	tbl.Render()
 
 	return nil
 }

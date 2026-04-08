@@ -53,6 +53,76 @@ def test_image_list_format_invalid_rejected(coi_binary):
     assert "invalid format" in combined.lower(), f"Expected 'invalid format' error, got: {combined}"
 
 
+def test_profile_list_format_flag_accepted(coi_binary, workspace_dir):
+    """coi profile list --format json should be a recognized flag."""
+    result = subprocess.run(
+        [coi_binary, "profile", "list", "--format", "json", "--workspace", workspace_dir],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        cwd=workspace_dir,
+    )
+
+    combined = result.stdout + result.stderr
+    assert "unknown flag" not in combined.lower(), (
+        f"--format flag should be recognized, got: {combined}"
+    )
+    assert result.returncode == 0, (
+        f"Expected exit 0 for --format json, got {result.returncode}: {result.stderr}"
+    )
+
+
+def test_profile_list_format_invalid_rejected(coi_binary, workspace_dir):
+    """coi profile list --format xml should fail with exit code 2."""
+    result = subprocess.run(
+        [coi_binary, "profile", "list", "--format", "xml", "--workspace", workspace_dir],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        cwd=workspace_dir,
+    )
+
+    assert result.returncode == 2, (
+        f"Expected exit code 2 for --format xml, got {result.returncode}"
+    )
+    combined = result.stdout + result.stderr
+    assert "invalid format" in combined.lower(), f"Expected 'invalid format' error, got: {combined}"
+
+
+def test_tmux_list_format_flag_accepted(coi_binary):
+    """coi tmux list --format json should be a recognized flag."""
+    result = subprocess.run(
+        [coi_binary, "tmux", "list", "--format", "json"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    combined = result.stdout + result.stderr
+    assert "unknown flag" not in combined.lower(), (
+        f"--format flag should be recognized, got: {combined}"
+    )
+    assert result.returncode == 0, (
+        f"Expected exit 0 for --format json, got {result.returncode}: {result.stderr}"
+    )
+
+
+def test_tmux_list_format_invalid_rejected(coi_binary):
+    """coi tmux list --format xml should fail with exit code 2."""
+    result = subprocess.run(
+        [coi_binary, "tmux", "list", "--format", "xml"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert result.returncode == 2, (
+        f"Expected exit code 2 for --format xml, got {result.returncode}"
+    )
+    combined = result.stdout + result.stderr
+    assert "invalid format" in combined.lower(), f"Expected 'invalid format' error, got: {combined}"
+
+
 def test_monitor_format_flag_accepted(coi_binary):
     """coi monitor --format json should be a recognized flag.
 

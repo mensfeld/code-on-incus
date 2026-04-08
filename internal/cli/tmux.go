@@ -1,11 +1,14 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/spf13/cobra"
 )
+
+var tmuxFormat string
 
 var tmuxCmd = &cobra.Command{
 	Use:   "tmux",
@@ -35,11 +38,17 @@ The session name should be the container name (e.g., coi-abc123-1).`,
 var tmuxListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List active tmux sessions",
-	Long:  `List all active tmux sessions across all containers.`,
-	RunE:  tmuxListCommand,
+	Long: `List all active tmux sessions across all containers.
+
+Examples:
+  coi tmux list
+  coi tmux list --format json`,
+	RunE: tmuxListCommand,
 }
 
 func init() {
+	tmuxListCmd.Flags().StringVar(&tmuxFormat, "format", "text", "Output format: text or json")
+
 	tmuxCmd.AddCommand(tmuxSendCmd)
 	tmuxCmd.AddCommand(tmuxCaptureCmd)
 	tmuxCmd.AddCommand(tmuxListCmd)
@@ -111,18 +120,23 @@ func tmuxCaptureCommand(cmd *cobra.Command, args []string) error {
 }
 
 func tmuxListCommand(cmd *cobra.Command, args []string) error {
+	if tmuxFormat != "text" && tmuxFormat != "json" {
+		return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid format '%s': must be 'text' or 'json'", tmuxFormat)}
+	}
+
 	// List all running containers with configured prefix
 	containers, err := container.ListContainers("coi-.*")
 	if err != nil {
 		return fmt.Errorf("failed to list containers: %w", err)
 	}
 
-	if len(containers) == 0 {
-		fmt.Println("No active sessions")
-		return nil
+	// Collect sessions first
+	type tmuxEntry struct {
+		Container string `json:"container"`
+		Session   string `json:"session"`
 	}
 
-	fmt.Println("Active sessions:")
+	var sessions []tmuxEntry
 	for _, c := range containers {
 		mgr := container.NewManager(c)
 
@@ -134,18 +148,41 @@ func tmuxListCommand(cmd *cobra.Command, args []string) error {
 
 		// Check if tmux session exists
 		tmuxSession := fmt.Sprintf("coi-%s", c)
-		tmuxCmd := fmt.Sprintf("tmux has-session -t %s 2>/dev/null", tmuxSession)
+		checkCmd := fmt.Sprintf("tmux has-session -t %s 2>/dev/null", tmuxSession)
 
 		opts := container.ExecCommandOptions{
 			Interactive: false,
 			Capture:     false,
 		}
 
-		_, err = mgr.ExecCommand(tmuxCmd, opts)
+		_, err = mgr.ExecCommand(checkCmd, opts)
 		if err == nil {
-			fmt.Printf("  - %s (tmux session: %s)\n", c, tmuxSession)
+			sessions = append(sessions, tmuxEntry{Container: c, Session: tmuxSession})
 		}
 	}
 
+	if tmuxFormat == "json" {
+		// Ensure [] not null for empty slice
+		if sessions == nil {
+			sessions = []tmuxEntry{}
+		}
+		jsonData, err := json.MarshalIndent(sessions, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to marshal JSON: %v", err)
+		}
+		fmt.Println(string(jsonData))
+		return nil
+	}
+
+	if len(sessions) == 0 {
+		fmt.Println("No active sessions")
+		return nil
+	}
+
+	tbl := NewTable("CONTAINER", "TMUX SESSION")
+	for _, s := range sessions {
+		tbl.AddRow(s.Container, s.Session)
+	}
+	tbl.Render()
 	return nil
 }
