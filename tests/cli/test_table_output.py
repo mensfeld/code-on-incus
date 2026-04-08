@@ -27,7 +27,9 @@ def test_profile_list_format_json(coi_binary, workspace_dir):
         cwd=workspace_dir,
     )
 
-    assert result.returncode == 0, f"profile list --format json should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, (
+        f"profile list --format json should succeed. stderr: {result.stderr}"
+    )
     data = json.loads(result.stdout)
     assert isinstance(data, list), f"JSON output should be an array, got: {type(data)}"
     # Should contain the built-in default profile
@@ -53,7 +55,9 @@ def test_profile_list_format_json_with_custom_profile(coi_binary, workspace_dir)
         cwd=workspace_dir,
     )
 
-    assert result.returncode == 0, f"profile list --format json should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, (
+        f"profile list --format json should succeed. stderr: {result.stderr}"
+    )
     data = json.loads(result.stdout)
     names = [entry["name"] for entry in data]
     assert "test-json" in names, f"Should include custom profile. Got: {names}"
@@ -89,9 +93,7 @@ def test_profile_list_format_invalid_rejected(coi_binary, workspace_dir):
         cwd=workspace_dir,
     )
 
-    assert result.returncode == 2, (
-        f"Expected exit code 2 for --format xml, got {result.returncode}"
-    )
+    assert result.returncode == 2, f"Expected exit code 2 for --format xml, got {result.returncode}"
     combined = result.stdout + result.stderr
     assert "invalid format" in combined.lower(), f"Expected 'invalid format' error, got: {combined}"
 
@@ -105,7 +107,9 @@ def test_tmux_list_format_json_empty(coi_binary):
         timeout=30,
     )
 
-    assert result.returncode == 0, f"tmux list --format json should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, (
+        f"tmux list --format json should succeed. stderr: {result.stderr}"
+    )
     data = json.loads(result.stdout)
     assert isinstance(data, list), f"JSON output should be an array, got: {type(data)}"
     assert len(data) == 0, f"Should be empty when no sessions. Got: {data}"
@@ -135,8 +139,6 @@ def test_tmux_list_format_invalid_rejected(coi_binary):
         timeout=30,
     )
 
-    assert result.returncode == 2, (
-        f"Expected exit code 2 for --format xml, got {result.returncode}"
-    )
+    assert result.returncode == 2, f"Expected exit code 2 for --format xml, got {result.returncode}"
     combined = result.stdout + result.stderr
     assert "invalid format" in combined.lower(), f"Expected 'invalid format' error, got: {combined}"

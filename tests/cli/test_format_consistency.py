@@ -82,9 +82,7 @@ def test_profile_list_format_invalid_rejected(coi_binary, workspace_dir):
         cwd=workspace_dir,
     )
 
-    assert result.returncode == 2, (
-        f"Expected exit code 2 for --format xml, got {result.returncode}"
-    )
+    assert result.returncode == 2, f"Expected exit code 2 for --format xml, got {result.returncode}"
     combined = result.stdout + result.stderr
     assert "invalid format" in combined.lower(), f"Expected 'invalid format' error, got: {combined}"
 
@@ -116,9 +114,7 @@ def test_tmux_list_format_invalid_rejected(coi_binary):
         timeout=30,
     )
 
-    assert result.returncode == 2, (
-        f"Expected exit code 2 for --format xml, got {result.returncode}"
-    )
+    assert result.returncode == 2, f"Expected exit code 2 for --format xml, got {result.returncode}"
     combined = result.stdout + result.stderr
     assert "invalid format" in combined.lower(), f"Expected 'invalid format' error, got: {combined}"
 
