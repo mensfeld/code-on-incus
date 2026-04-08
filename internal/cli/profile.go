@@ -322,6 +322,11 @@ Examples:
 	},
 }
 
+// shellQuote wraps a string in single quotes for safe shell interpolation.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
+}
+
 func formatStringSlice(ss []string) string {
 	quoted := make([]string, len(ss))
 	for i, s := range ss {
@@ -416,8 +421,13 @@ func resolveProfileDir(name string, forceUser, forceProject bool) (string, error
 		return "", fmt.Errorf("cannot resolve workspace: %w", err)
 	}
 	coiDir := filepath.Join(absWorkspace, ".coi")
-	if info, err := os.Stat(coiDir); err == nil && info.IsDir() {
-		return filepath.Join(coiDir, "profiles", name), nil
+	info, statErr := os.Stat(coiDir)
+	if statErr == nil {
+		if info.IsDir() {
+			return filepath.Join(coiDir, "profiles", name), nil
+		}
+	} else if !os.IsNotExist(statErr) {
+		return "", fmt.Errorf("cannot stat project .coi directory %q: %w", coiDir, statErr)
 	}
 
 	homeDir, err := os.UserHomeDir()
@@ -450,6 +460,9 @@ Examples:
 		if strings.Contains(name, "/") || strings.Contains(name, "\\") {
 			return fmt.Errorf("profile name cannot contain slashes")
 		}
+		if strings.Trim(name, ".") == "" {
+			return fmt.Errorf("profile name cannot be '.', '..', or consist only of dots")
+		}
 		if name == "default" {
 			return fmt.Errorf("cannot create a profile named 'default' (reserved for built-in profile)")
 		}
@@ -460,25 +473,33 @@ Examples:
 			return fmt.Errorf("--user and --project are mutually exclusive")
 		}
 
+		// Check if a profile with this name already exists in any config source
+		if existing := cfg.GetProfile(name); existing != nil {
+			return fmt.Errorf("profile '%s' already exists (source: %s)", name, existing.Source)
+		}
+
 		profileDir, err := resolveProfileDir(name, forceUser, forceProject)
 		if err != nil {
 			return err
 		}
 
-		// Check directory doesn't already exist
-		if _, err := os.Stat(profileDir); err == nil {
+		// Check directory doesn't already exist on disk
+		if _, statErr := os.Stat(profileDir); statErr == nil {
 			return fmt.Errorf("profile directory already exists: %s", profileDir)
+		} else if !os.IsNotExist(statErr) {
+			return fmt.Errorf("failed to check profile directory %s: %w", profileDir, statErr)
 		}
 
 		// Build TOML content from flags
+		// Note: --image and --persistent are inherited from root PersistentFlags
 		var lines []string
-		if image, _ := cmd.Flags().GetString("image"); image != "" {
-			lines = append(lines, fmt.Sprintf("image = %q", image))
+		if cmd.Flags().Changed("image") {
+			lines = append(lines, fmt.Sprintf("image = %q", imageName))
 		}
 		if inherits, _ := cmd.Flags().GetString("inherits"); inherits != "" {
 			lines = append(lines, fmt.Sprintf("inherits = %q", inherits))
 		}
-		if persistent, _ := cmd.Flags().GetBool("persistent"); persistent {
+		if cmd.Flags().Changed("persistent") {
 			lines = append(lines, "persistent = true")
 		}
 
@@ -539,7 +560,8 @@ Examples:
 			editor = "vi"
 		}
 
-		editorCmd := exec.Command(editor, sourcePath)
+		// Use sh -c to support multi-word editor values like "code --wait"
+		editorCmd := exec.Command("sh", "-c", editor+" "+shellQuote(sourcePath))
 		editorCmd.Stdin = os.Stdin
 		editorCmd.Stdout = os.Stdout
 		editorCmd.Stderr = os.Stderr
@@ -608,9 +630,7 @@ Examples:
 func init() {
 	profileListCmd.Flags().StringVar(&profileFormat, "format", "text", "Output format: text or json")
 
-	profileCreateCmd.Flags().String("image", "", "Set the image alias")
 	profileCreateCmd.Flags().String("inherits", "", "Set the parent profile to inherit from")
-	profileCreateCmd.Flags().Bool("persistent", false, "Set persistent = true")
 	profileCreateCmd.Flags().Bool("user", false, "Force creation in ~/.coi/profiles/")
 	profileCreateCmd.Flags().Bool("project", false, "Force creation in ./.coi/profiles/")
 
