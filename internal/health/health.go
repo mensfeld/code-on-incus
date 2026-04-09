@@ -171,8 +171,12 @@ func determineStatus(checks map[string]HealthCheck) OverallStatus {
 
 // collectReferencedPools returns the de-duped list of storage pools that the
 // loaded configuration cares about: the global [container] storage_pool plus
-// every loaded profile's pool. Empty entries are preserved here so the health
-// check can resolve them to the actual Incus default pool name.
+// every loaded profile's pool that is explicitly set. Profiles that leave
+// storage_pool empty inherit the global value at ApplyProfile time and are
+// therefore already covered by the global entry — adding "" again here would
+// mislead the check into inspecting the Incus default pool. An empty global
+// entry is still preserved so the check resolves it to the actual default
+// pool name.
 func collectReferencedPools(cfg *config.Config) []string {
 	seen := map[string]bool{}
 	var pools []string
@@ -186,7 +190,9 @@ func collectReferencedPools(cfg *config.Config) []string {
 
 	add(cfg.Container.StoragePool)
 	for _, profile := range cfg.Profiles {
-		add(profile.Container.StoragePool)
+		if profile.Container.StoragePool != "" {
+			add(profile.Container.StoragePool)
+		}
 	}
 
 	return pools

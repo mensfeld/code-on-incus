@@ -67,10 +67,15 @@ func buildCommand(cmd *cobra.Command, args []string) error {
 		imageName = image.CoiAlias
 	}
 
-	// Resolve build container's storage pool from the profile (default profile
-	// already mirrors cfg.Container, so this also covers the global case).
-	// Validate before any container work so a missing pool fails loud and early.
-	buildPool := p.Container.StoragePool
+	// Resolve the effective build container storage pool using the same
+	// precedence as ApplyProfile: start with the global container storage
+	// pool and let the selected profile override it only when it sets a
+	// non-empty storage_pool value. Validate before any container work so a
+	// missing pool fails loud and early.
+	buildPool := cfg.Container.StoragePool
+	if p.Container.StoragePool != "" {
+		buildPool = p.Container.StoragePool
+	}
 	if err := container.ValidateStoragePool(buildPool); err != nil {
 		return err
 	}

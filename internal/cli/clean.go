@@ -496,8 +496,12 @@ func cleanUnreferencedPools() (int, bool, error) {
 
 // referencedPoolSet returns the set of storage pool names referenced by the
 // loaded global [container] section and any loaded profile's [container]
-// section. The empty string ("") is included if any reference resolves to
-// "use Incus default pool".
+// section. Profiles that leave storage_pool empty inherit the global value
+// at ApplyProfile time and are already covered by the global entry —
+// including "" for them would make clean --pools treat the Incus default
+// pool as referenced even when the effective pool is a non-empty global
+// cfg.Container.StoragePool. The empty string ("") is only present when
+// the global entry itself is empty (meaning "use Incus default pool").
 func referencedPoolSet() map[string]bool {
 	set := map[string]bool{}
 	if cfg == nil {
@@ -505,7 +509,9 @@ func referencedPoolSet() map[string]bool {
 	}
 	set[cfg.Container.StoragePool] = true
 	for _, profile := range cfg.Profiles {
-		set[profile.Container.StoragePool] = true
+		if profile.Container.StoragePool != "" {
+			set[profile.Container.StoragePool] = true
+		}
 	}
 	return set
 }

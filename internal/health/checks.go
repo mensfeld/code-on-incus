@@ -1264,13 +1264,14 @@ func CheckDiskSpace() HealthCheck {
 
 // defaultIncusPool returns the storage pool name used by Incus's "default"
 // profile. Used as a fallback when no profile/global config asks for a
-// specific pool, so we still check something useful.
+// specific pool, so we still check something useful. Goes through
+// container.IncusOutput so the configured Incus project is respected.
 func defaultIncusPool() string {
-	profileOut, err := exec.Command("incus", "profile", "show", "default").Output()
+	profileOut, err := container.IncusOutput("profile", "show", "default")
 	if err != nil {
 		return "default"
 	}
-	for _, line := range strings.Split(string(profileOut), "\n") {
+	for _, line := range strings.Split(profileOut, "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "pool:") {
 			return strings.TrimSpace(strings.TrimPrefix(line, "pool:"))
@@ -1289,15 +1290,16 @@ type poolUsage struct {
 
 // gatherPoolUsage queries `incus storage info <pool>` and parses out the
 // space-used / total-space lines. Returns an error if the pool is missing or
-// the output cannot be parsed.
+// the output cannot be parsed. Goes through container.IncusOutput so the
+// configured Incus project is respected.
 func gatherPoolUsage(pool string) poolUsage {
-	out, err := exec.Command("incus", "storage", "info", pool).Output()
+	out, err := container.IncusOutput("storage", "info", pool)
 	if err != nil {
 		return poolUsage{err: err}
 	}
 
 	var u poolUsage
-	for _, line := range strings.Split(string(out), "\n") {
+	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
 		switch {
 		case strings.HasPrefix(line, "space used:"):
