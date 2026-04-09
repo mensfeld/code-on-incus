@@ -809,21 +809,6 @@ func applyToolConfig(dst *ToolConfig, src *ToolConfig) {
 	}
 }
 
-func applyBuildConfig(dst *BuildConfig, src *BuildConfig) {
-	if src == nil {
-		return
-	}
-	if src.Base != "" {
-		dst.Base = src.Base
-	}
-	if src.Script != "" {
-		dst.Script = src.Script
-	}
-	if len(src.Commands) > 0 {
-		dst.Commands = src.Commands
-	}
-}
-
 // applyContainerConfig merges src into dst for the container-shape section.
 // Used by ApplyProfile and the inheritance resolver.
 func applyContainerConfig(dst *ContainerConfig, src *ContainerConfig) {

@@ -93,29 +93,8 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to check if container exists: %w", err)
 	}
 
-	if containerExists && persistent {
-		// Restart existing persistent container
-		fmt.Fprintf(os.Stderr, "Restarting existing persistent container...\n")
-		if err := mgr.Start(); err != nil {
-			return fmt.Errorf("failed to start container: %w", err)
-		}
-	} else if containerExists {
-		// Ephemeral container with same name exists - delete and recreate
-		fmt.Fprintf(os.Stderr, "Removing existing container...\n")
-		if err := mgr.Delete(true); err != nil {
-			return fmt.Errorf("failed to delete existing container: %w", err)
-		}
-		// Launch new container
-		ephemeral := !persistent
-		if err := mgr.Launch(img, ephemeral, cfg.Container.StoragePool); err != nil {
-			return fmt.Errorf("failed to launch container: %w", err)
-		}
-	} else {
-		// Launch new container
-		ephemeral := !persistent
-		if err := mgr.Launch(img, ephemeral, cfg.Container.StoragePool); err != nil {
-			return fmt.Errorf("failed to launch container: %w", err)
-		}
+	if err := launchOrReuseContainer(mgr, img, cfg.Container.StoragePool, containerExists, persistent); err != nil {
+		return err
 	}
 
 	// Cleanup container on exit (only if ephemeral)
@@ -308,6 +287,29 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Fprintf(os.Stderr, "\nCommand completed successfully\n")
+	return nil
+}
+
+// launchOrReuseContainer restarts an existing persistent container, or
+// recreates / creates a fresh one on the given storage pool.
+func launchOrReuseContainer(mgr *container.Manager, img, pool string, containerExists, persistent bool) error {
+	if containerExists && persistent {
+		fmt.Fprintf(os.Stderr, "Restarting existing persistent container...\n")
+		if err := mgr.Start(); err != nil {
+			return fmt.Errorf("failed to start container: %w", err)
+		}
+		return nil
+	}
+	if containerExists {
+		fmt.Fprintf(os.Stderr, "Removing existing container...\n")
+		if err := mgr.Delete(true); err != nil {
+			return fmt.Errorf("failed to delete existing container: %w", err)
+		}
+	}
+	ephemeral := !persistent
+	if err := mgr.Launch(img, ephemeral, pool); err != nil {
+		return fmt.Errorf("failed to launch container: %w", err)
+	}
 	return nil
 }
 
