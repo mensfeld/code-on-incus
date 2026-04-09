@@ -195,18 +195,19 @@ curl -fsSL https://raw.githubusercontent.com/mensfeld/code-on-incus/master/insta
 ### Build Images
 
 ```bash
-# Build the unified coi image (5-10 minutes)
+# Build the default coi-default image (5-10 minutes)
 coi build
 
 # Build without compression (faster iteration)
 coi build --compression none
 
-# Custom image from your own build script
-coi build custom my-rust-image --script build-rust.sh
-coi build custom my-image --base coi --script setup.sh
+# Build a custom image via a profile
+coi profile create my-image --image my-image
+# Edit .coi/profiles/my-image/config.toml to add a [build] section
+coi build --profile my-image
 ```
 
-**What's included in the `coi` image:**
+**What's included in the `coi-default` image:**
 - Ubuntu 22.04 base with Docker (full Docker-in-container support)
 - **mise** (polyglot runtime manager) — Python 3, pnpm, TypeScript, tsx pre-installed; add more with `mise use go@latest`, `mise use ruby@3`, etc.
 - Node.js 20 LTS (system, for Claude CLI) + npm
@@ -217,7 +218,7 @@ coi build custom my-image --base coi --script setup.sh
 - Database clients: sqlite3, postgresql-client, redis-tools
 - imagemagick for image processing
 
-**Custom images:** Build your own specialized images using build scripts that run on top of the base `coi` image.
+**Custom images:** Build your own specialized images using profile-based build scripts that run on top of the base `coi-default` image. See the [Image Management wiki page](https://github.com/mensfeld/code-on-incus/wiki/Image-Management) for complete profile-based build workflows.
 
 ## macOS Support
 
@@ -272,7 +273,7 @@ coi update
 --resume [SESSION_ID]   # Resume from session (omit ID to auto-detect latest for workspace)
 --continue [SESSION_ID] # Alias for --resume
 --profile NAME          # Use named profile
---image NAME            # Use custom image (default: coi)
+--image NAME            # Use custom image (default: coi-default)
 ```
 
 Most container customization (network mode, mounts, environment variables, SSH agent, monitoring, timezone, resource limits, etc.) is configured via config files or profiles. See the [Configuration wiki page](https://github.com/mensfeld/code-on-incus/wiki/Configuration) for the full reference.
@@ -329,7 +330,7 @@ Config file: `~/.coi/config.toml`
 
 ```toml
 [defaults]
-image = "coi"
+image = "coi-default"
 persistent = true
 
 [tool]
@@ -400,6 +401,15 @@ Environment maps merge (child keys win, `""` clears a parent key). Arrays (`moun
 **Profile context files:** When a profile includes `context = "CONTEXT.md"`, the referenced markdown file is automatically appended to `~/SANDBOX_CONTEXT.md` and tool-native auto-context files (e.g., `~/.claude/CLAUDE.md`) under a `# User-Provided Profile Context` heading. This gives AI agents profile-specific instructions (e.g., "use pytest", "follow PEP 8") without manual setup.
 
 ```bash
+# Create a new profile
+coi profile create rust-dev --image coi-rust --inherits default
+
+# Edit a profile's config.toml in $EDITOR
+coi profile edit rust-dev
+
+# Delete a profile
+coi profile delete rust-dev --force
+
 # Use a profile
 coi shell --profile rust-dev
 
