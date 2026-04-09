@@ -15,10 +15,7 @@ def test_migration_error_defaults_persistent(coi_binary, tmp_path):
     fake_home.mkdir()
     cfg_dir = fake_home / ".coi"
     cfg_dir.mkdir()
-    (cfg_dir / "config.toml").write_text(
-        '[defaults]\n'
-        'persistent = true\n'
-    )
+    (cfg_dir / "config.toml").write_text("[defaults]\npersistent = true\n")
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()

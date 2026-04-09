@@ -77,9 +77,7 @@ def test_clean_pools_warning_text(coi_binary, workspace_dir):
             )
 
             combined = result.stdout + result.stderr
-            assert "WARNING" in combined, (
-                f"Output should include WARNING text. Got:\n{combined}"
-            )
+            assert "WARNING" in combined, f"Output should include WARNING text. Got:\n{combined}"
             assert "other" in combined.lower() and "projects" in combined.lower(), (
                 f"Warning should mention other projects. Got:\n{combined}"
             )

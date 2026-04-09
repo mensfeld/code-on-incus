@@ -14,9 +14,7 @@ def test_health_storage_pools_missing(coi_binary, workspace_dir):
     profile_dir = Path(workspace_dir) / ".coi" / "profiles" / "missingpool"
     profile_dir.mkdir(parents=True)
     (profile_dir / "config.toml").write_text(
-        f'[container]\n'
-        f'image = "coi-default"\n'
-        f'storage_pool = "{missing_pool}"\n'
+        f'[container]\nimage = "coi-default"\nstorage_pool = "{missing_pool}"\n'
     )
 
     result = subprocess.run(
@@ -33,8 +31,7 @@ def test_health_storage_pools_missing(coi_binary, workspace_dir):
     details = data["checks"]["incus_storage_pools"]["details"]
 
     assert missing_pool in details, (
-        f"Missing pool {missing_pool} should appear in details. "
-        f"Got: {list(details.keys())}"
+        f"Missing pool {missing_pool} should appear in details. Got: {list(details.keys())}"
     )
     entry = details[missing_pool]
     assert entry.get("status") == "failed", (

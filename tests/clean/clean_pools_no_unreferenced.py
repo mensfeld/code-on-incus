@@ -16,13 +16,10 @@ def test_clean_pools_no_unreferenced(coi_binary):
         text=True,
         timeout=60,
     )
-    assert result.returncode == 0, (
-        f"clean --pools should succeed. stderr: {result.stderr}"
-    )
+    assert result.returncode == 0, f"clean --pools should succeed. stderr: {result.stderr}"
     combined = result.stdout + result.stderr
     # When no unreferenced pools are found, the command should print a clear
     # marker and not delete anything.
-    assert (
-        "no unreferenced pools" in combined.lower()
-        or "nothing to clean" in combined.lower()
-    ), f"Should print no-op message. Got:\n{combined}"
+    assert "no unreferenced pools" in combined.lower() or "nothing to clean" in combined.lower(), (
+        f"Should print no-op message. Got:\n{combined}"
+    )

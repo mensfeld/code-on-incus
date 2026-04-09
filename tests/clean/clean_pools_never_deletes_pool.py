@@ -61,13 +61,9 @@ def test_clean_pools_never_deletes_pool(coi_binary, workspace_dir):
             timeout=60,
             cwd=workspace_dir,
         )
-        assert result.returncode == 0, (
-            f"clean should succeed. stderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"clean should succeed. stderr: {result.stderr}"
 
         # Pool itself must still exist
-        assert _pool_exists(pool_name), (
-            f"Pool {pool_name} should still exist after clean --pools."
-        )
+        assert _pool_exists(pool_name), f"Pool {pool_name} should still exist after clean --pools."
     finally:
         _delete_temp_pool(pool_name)

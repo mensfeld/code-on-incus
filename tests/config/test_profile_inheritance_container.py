@@ -19,9 +19,7 @@ def test_inheritance_container_image_from_parent(coi_binary, workspace_dir):
     parent = coi_dir / "parent"
     parent.mkdir(parents=True)
     (parent / "config.toml").write_text(
-        '[container]\n'
-        'image = "coi-parent-img"\n'
-        'storage_pool = "parent-pool"\n'
+        '[container]\nimage = "coi-parent-img"\nstorage_pool = "parent-pool"\n'
     )
 
     child = coi_dir / "child"
@@ -49,17 +47,13 @@ def test_inheritance_container_storage_pool_overridden(coi_binary, workspace_dir
     parent = coi_dir / "parent"
     parent.mkdir(parents=True)
     (parent / "config.toml").write_text(
-        '[container]\n'
-        'image = "coi-parent-img"\n'
-        'storage_pool = "parent-pool"\n'
+        '[container]\nimage = "coi-parent-img"\nstorage_pool = "parent-pool"\n'
     )
 
     child = coi_dir / "child"
     child.mkdir(parents=True)
     (child / "config.toml").write_text(
-        'inherits = "parent"\n\n'
-        '[container]\n'
-        'storage_pool = "child-pool"\n'
+        'inherits = "parent"\n\n[container]\nstorage_pool = "child-pool"\n'
     )
 
     result = subprocess.run(
@@ -74,9 +68,7 @@ def test_inheritance_container_storage_pool_overridden(coi_binary, workspace_dir
     output = result.stdout + result.stderr
     assert "coi-parent-img" in output, f"Should keep parent image. Got:\n{output}"
     assert "child-pool" in output, f"Should show child storage_pool. Got:\n{output}"
-    assert "parent-pool" not in output, (
-        f"Parent storage_pool should be overridden. Got:\n{output}"
-    )
+    assert "parent-pool" not in output, f"Parent storage_pool should be overridden. Got:\n{output}"
 
 
 def test_inheritance_container_persistent_from_parent(coi_binary, workspace_dir):
@@ -85,11 +77,7 @@ def test_inheritance_container_persistent_from_parent(coi_binary, workspace_dir)
 
     parent = coi_dir / "parent"
     parent.mkdir(parents=True)
-    (parent / "config.toml").write_text(
-        '[container]\n'
-        'image = "coi-default"\n'
-        'persistent = true\n'
-    )
+    (parent / "config.toml").write_text('[container]\nimage = "coi-default"\npersistent = true\n')
 
     child = coi_dir / "child"
     child.mkdir(parents=True)
@@ -115,9 +103,9 @@ def test_inheritance_container_build_field_by_field(coi_binary, workspace_dir):
     parent = coi_dir / "parent"
     parent.mkdir(parents=True)
     (parent / "config.toml").write_text(
-        '[container]\n'
+        "[container]\n"
         'image = "coi-parent"\n\n'
-        '[container.build]\n'
+        "[container.build]\n"
         'base = "coi-default"\n'
         'script = "parent.sh"\n'
     )
@@ -126,9 +114,7 @@ def test_inheritance_container_build_field_by_field(coi_binary, workspace_dir):
     child = coi_dir / "child"
     child.mkdir(parents=True)
     (child / "config.toml").write_text(
-        'inherits = "parent"\n\n'
-        '[container.build]\n'
-        'script = "child.sh"\n'
+        'inherits = "parent"\n\n[container.build]\nscript = "child.sh"\n'
     )
     (child / "child.sh").write_text("#!/bin/bash\necho child\n")
 
@@ -144,6 +130,4 @@ def test_inheritance_container_build_field_by_field(coi_binary, workspace_dir):
     output = result.stdout + result.stderr
     assert "coi-default" in output, f"Should inherit build base. Got:\n{output}"
     assert "child.sh" in output, f"Should override build script. Got:\n{output}"
-    assert "parent.sh" not in output, (
-        f"Child script should replace parent's. Got:\n{output}"
-    )
+    assert "parent.sh" not in output, f"Child script should replace parent's. Got:\n{output}"

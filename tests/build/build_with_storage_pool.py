@@ -57,10 +57,10 @@ def test_build_with_storage_pool(coi_binary, tmp_path):
         profile_dir = tmp_path / ".coi" / "profiles" / "poolbuild"
         profile_dir.mkdir(parents=True)
         (profile_dir / "config.toml").write_text(
-            f'[container]\n'
+            f"[container]\n"
             f'image = "{image_name}"\n'
             f'storage_pool = "{pool_name}"\n\n'
-            f'[container.build]\n'
+            f"[container.build]\n"
             f'script = "build.sh"\n'
         )
         (profile_dir / "build.sh").write_text(

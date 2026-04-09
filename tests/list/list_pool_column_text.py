@@ -33,9 +33,7 @@ def test_list_pool_column_text(coi_binary, cleanup_containers, workspace_dir):
 
     output = result.stdout
     assert container_name in output, f"Container should appear. Got:\n{output}"
-    assert "Pool:" in output, (
-        f"List text output should include Pool field. Got:\n{output}"
-    )
+    assert "Pool:" in output, f"List text output should include Pool field. Got:\n{output}"
 
     # Cleanup
     subprocess.run(

@@ -42,9 +42,7 @@ def test_list_pool_column_json(coi_binary, cleanup_containers, workspace_dir):
             container = c
             break
 
-    assert container is not None, (
-        f"Container {container_name} not found in JSON output"
-    )
+    assert container is not None, f"Container {container_name} not found in JSON output"
     assert "pool" in container, (
         f"Container entry should include 'pool' field. Got keys: {list(container.keys())}"
     )

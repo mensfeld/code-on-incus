@@ -14,9 +14,9 @@ def test_container_build_nested_parses(coi_binary, workspace_dir):
     profile_dir = Path(workspace_dir) / ".coi" / "profiles" / "buildtest"
     profile_dir.mkdir(parents=True)
     (profile_dir / "config.toml").write_text(
-        '[container]\n'
+        "[container]\n"
         'image = "coi-build-nested"\n\n'
-        '[container.build]\n'
+        "[container.build]\n"
         'base = "coi-default"\n'
         'script = "build.sh"\n'
     )
@@ -42,10 +42,7 @@ def test_container_build_script_resolved_relative(coi_binary, workspace_dir):
     profile_dir = Path(workspace_dir) / ".coi" / "profiles" / "relbuild"
     profile_dir.mkdir(parents=True)
     (profile_dir / "config.toml").write_text(
-        '[container]\n'
-        'image = "coi-relbuild"\n\n'
-        '[container.build]\n'
-        'script = "build.sh"\n'
+        '[container]\nimage = "coi-relbuild"\n\n[container.build]\nscript = "build.sh"\n'
     )
     (profile_dir / "build.sh").write_text("#!/bin/bash\necho hi\n")
 
@@ -73,9 +70,9 @@ def test_container_build_commands_inline(coi_binary, workspace_dir):
     profile_dir = Path(workspace_dir) / ".coi" / "profiles" / "cmdbuild"
     profile_dir.mkdir(parents=True)
     (profile_dir / "config.toml").write_text(
-        '[container]\n'
+        "[container]\n"
         'image = "coi-cmdbuild"\n\n'
-        '[container.build]\n'
+        "[container.build]\n"
         'commands = ["echo step1", "echo step2"]\n'
     )
 

@@ -110,9 +110,7 @@ def test_clean_pools_removes_unreferenced(coi_binary, workspace_dir):
             )
 
             # The pool itself should NOT be deleted
-            assert _pool_exists(pool_name), (
-                f"Pool {pool_name} should still exist after cleanup."
-            )
+            assert _pool_exists(pool_name), f"Pool {pool_name} should still exist after cleanup."
         finally:
             _delete_container(container_name)
     finally:

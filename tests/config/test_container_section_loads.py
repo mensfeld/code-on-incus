@@ -16,9 +16,7 @@ def test_container_section_loads_image_persistent(coi_binary, tmp_path):
     cfg_dir = fake_home / ".coi"
     cfg_dir.mkdir()
     (cfg_dir / "config.toml").write_text(
-        '[container]\n'
-        'image = "coi-section-test"\n'
-        'persistent = true\n'
+        '[container]\nimage = "coi-section-test"\npersistent = true\n'
     )
 
     workspace = tmp_path / "workspace"
@@ -54,9 +52,7 @@ def test_container_section_loads_storage_pool(coi_binary, tmp_path):
     cfg_dir = fake_home / ".coi"
     cfg_dir.mkdir()
     (cfg_dir / "config.toml").write_text(
-        '[container]\n'
-        'image = "coi-default"\n'
-        'storage_pool = "custom-pool-name-xyz"\n'
+        '[container]\nimage = "coi-default"\nstorage_pool = "custom-pool-name-xyz"\n'
     )
 
     workspace = tmp_path / "workspace"

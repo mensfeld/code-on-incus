@@ -16,9 +16,7 @@ def test_container_section_in_profile_image_persistent(
     profile_dir = Path(workspace_dir) / ".coi" / "profiles" / "myprof"
     profile_dir.mkdir(parents=True)
     (profile_dir / "config.toml").write_text(
-        '[container]\n'
-        'image = "coi-prof-image"\n'
-        'persistent = true\n'
+        '[container]\nimage = "coi-prof-image"\npersistent = true\n'
     )
 
     result = subprocess.run(
@@ -35,16 +33,12 @@ def test_container_section_in_profile_image_persistent(
     assert "true" in output.lower(), f"Should show persistent=true. Got:\n{output}"
 
 
-def test_container_section_in_profile_storage_pool(
-    coi_binary, cleanup_containers, workspace_dir
-):
+def test_container_section_in_profile_storage_pool(coi_binary, cleanup_containers, workspace_dir):
     """[container] storage_pool field parses from profile config."""
     profile_dir = Path(workspace_dir) / ".coi" / "profiles" / "poolprof"
     profile_dir.mkdir(parents=True)
     (profile_dir / "config.toml").write_text(
-        '[container]\n'
-        'image = "coi-default"\n'
-        'storage_pool = "fast-nvme"\n'
+        '[container]\nimage = "coi-default"\nstorage_pool = "fast-nvme"\n'
     )
 
     # profile list should succeed even though pool doesn't exist (validation

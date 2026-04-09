@@ -14,9 +14,7 @@ def test_missing_storage_pool_fails_with_actionable_error(coi_binary, workspace_
     profile_dir = Path(workspace_dir) / ".coi" / "profiles" / "missingpool"
     profile_dir.mkdir(parents=True)
     (profile_dir / "config.toml").write_text(
-        '[container]\n'
-        'image = "coi-default"\n'
-        'storage_pool = "this-pool-does-not-exist-xyz123"\n'
+        '[container]\nimage = "coi-default"\nstorage_pool = "this-pool-does-not-exist-xyz123"\n'
     )
 
     result = subprocess.run(
@@ -37,9 +35,7 @@ def test_missing_storage_pool_fails_with_actionable_error(coi_binary, workspace_
         cwd=workspace_dir,
     )
 
-    assert result.returncode != 0, (
-        f"Should fail with non-existent pool. stdout: {result.stdout}"
-    )
+    assert result.returncode != 0, f"Should fail with non-existent pool. stdout: {result.stdout}"
     combined = result.stdout + result.stderr
     assert "this-pool-does-not-exist-xyz123" in combined, (
         f"Error should reference the missing pool name. Got:\n{combined}"

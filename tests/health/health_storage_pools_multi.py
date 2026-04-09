@@ -44,9 +44,7 @@ def test_health_storage_pools_multi(coi_binary, workspace_dir):
         profile_dir = Path(workspace_dir) / ".coi" / "profiles" / "multipool"
         profile_dir.mkdir(parents=True)
         (profile_dir / "config.toml").write_text(
-            f'[container]\n'
-            f'image = "coi-default"\n'
-            f'storage_pool = "{pool_name}"\n'
+            f'[container]\nimage = "coi-default"\nstorage_pool = "{pool_name}"\n'
         )
 
         result = subprocess.run(
@@ -56,15 +54,12 @@ def test_health_storage_pools_multi(coi_binary, workspace_dir):
             timeout=60,
             cwd=workspace_dir,
         )
-        assert result.returncode in (0, 1), (
-            f"health should exit 0 or 1. stderr: {result.stderr}"
-        )
+        assert result.returncode in (0, 1), f"health should exit 0 or 1. stderr: {result.stderr}"
 
         data = json.loads(result.stdout)
         details = data["checks"]["incus_storage_pools"]["details"]
         assert pool_name in details, (
-            f"Temp pool {pool_name} should appear in pool details. "
-            f"Got: {list(details.keys())}"
+            f"Temp pool {pool_name} should appear in pool details. Got: {list(details.keys())}"
         )
     finally:
         _delete_temp_pool(pool_name)

@@ -14,9 +14,7 @@ def test_health_storage_pools_default(coi_binary):
         text=True,
         timeout=60,
     )
-    assert result.returncode in (0, 1), (
-        f"health should return 0 or 1. stderr: {result.stderr}"
-    )
+    assert result.returncode in (0, 1), f"health should return 0 or 1. stderr: {result.stderr}"
 
     data = json.loads(result.stdout)
     checks = data.get("checks", {})
@@ -30,12 +28,8 @@ def test_health_storage_pools_default(coi_binary):
     )
 
     details = pool_check.get("details", {})
-    assert isinstance(details, dict), (
-        f"Details should be a dict. Got: {type(details)}"
-    )
-    assert len(details) >= 1, (
-        f"Should have at least one pool entry. Got: {details}"
-    )
+    assert isinstance(details, dict), f"Details should be a dict. Got: {type(details)}"
+    assert len(details) >= 1, f"Should have at least one pool entry. Got: {details}"
 
     # Each entry must be a per-pool dict
     for pool_name, entry in details.items():

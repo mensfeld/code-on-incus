@@ -73,9 +73,7 @@ def test_clean_pools_dry_run(coi_binary, workspace_dir):
                 timeout=60,
                 cwd=workspace_dir,
             )
-            assert result.returncode == 0, (
-                f"dry-run should succeed. stderr: {result.stderr}"
-            )
+            assert result.returncode == 0, f"dry-run should succeed. stderr: {result.stderr}"
 
             combined = result.stdout + result.stderr
             assert container_name in combined, (

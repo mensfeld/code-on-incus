@@ -15,10 +15,7 @@ def test_migration_error_defaults_image(coi_binary, tmp_path):
     fake_home.mkdir()
     cfg_dir = fake_home / ".coi"
     cfg_dir.mkdir()
-    (cfg_dir / "config.toml").write_text(
-        '[defaults]\n'
-        'image = "coi-legacy"\n'
-    )
+    (cfg_dir / "config.toml").write_text('[defaults]\nimage = "coi-legacy"\n')
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -46,6 +43,4 @@ def test_migration_error_defaults_image(coi_binary, tmp_path):
     assert "[container]" in combined, (
         f"Error should suggest the [container] section. Got:\n{combined}"
     )
-    assert "0.8.0" in combined, (
-        f"Error should reference 0.8.0 migration. Got:\n{combined}"
-    )
+    assert "0.8.0" in combined, f"Error should reference 0.8.0 migration. Got:\n{combined}"

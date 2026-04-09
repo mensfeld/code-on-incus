@@ -15,11 +15,7 @@ def test_migration_error_root_build(coi_binary, tmp_path):
     fake_home.mkdir()
     cfg_dir = fake_home / ".coi"
     cfg_dir.mkdir()
-    (cfg_dir / "config.toml").write_text(
-        '[build]\n'
-        'base = "coi-default"\n'
-        'script = "build.sh"\n'
-    )
+    (cfg_dir / "config.toml").write_text('[build]\nbase = "coi-default"\nscript = "build.sh"\n')
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -41,9 +37,7 @@ def test_migration_error_root_build(coi_binary, tmp_path):
         f"Should fail when top-level [build] is set. stdout: {result.stdout}"
     )
     combined = result.stdout + result.stderr
-    assert "[build]" in combined, (
-        f"Error should mention [build]. Got:\n{combined}"
-    )
+    assert "[build]" in combined, f"Error should mention [build]. Got:\n{combined}"
     assert "[container.build]" in combined, (
         f"Error should suggest [container.build]. Got:\n{combined}"
     )

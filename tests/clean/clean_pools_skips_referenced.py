@@ -37,9 +37,7 @@ def test_clean_pools_skips_referenced(coi_binary, workspace_dir):
         profile_dir = Path(workspace_dir) / ".coi" / "profiles" / "skipref"
         profile_dir.mkdir(parents=True)
         (profile_dir / "config.toml").write_text(
-            f'[container]\n'
-            f'image = "coi-default"\n'
-            f'storage_pool = "{pool_name}"\n'
+            f'[container]\nimage = "coi-default"\nstorage_pool = "{pool_name}"\n'
         )
 
         # Run clean --pools --dry-run; pool should NOT appear in output.
