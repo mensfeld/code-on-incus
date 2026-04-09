@@ -4,7 +4,6 @@ listing pools to delete.
 """
 
 import subprocess
-from pathlib import Path
 
 import pytest
 

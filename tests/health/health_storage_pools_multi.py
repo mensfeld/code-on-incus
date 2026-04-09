@@ -6,7 +6,6 @@ and verifies the health check details map contains both pools.
 """
 
 import json
-import os
 import subprocess
 from pathlib import Path
 

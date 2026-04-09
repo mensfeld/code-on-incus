@@ -5,7 +5,6 @@ When the configured pool actually exists, validation passes and the
 container launches normally.
 """
 
-import json
 import subprocess
 from pathlib import Path
 

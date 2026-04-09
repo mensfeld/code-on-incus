@@ -5,7 +5,6 @@ Tests that base, script, and commands fields under [container.build] load
 and that script paths are resolved relative to the config file.
 """
 
-import os
 import subprocess
 from pathlib import Path
 

@@ -7,7 +7,6 @@ parse and become visible via `coi profile info default`.
 
 import os
 import subprocess
-from pathlib import Path
 
 
 def test_container_section_loads_image_persistent(coi_binary, tmp_path):

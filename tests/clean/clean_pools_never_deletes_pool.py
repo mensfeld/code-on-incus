@@ -35,10 +35,7 @@ def _pool_exists(name):
     )
     if result.returncode != 0:
         return False
-    for line in result.stdout.splitlines():
-        if line.startswith(name + ","):
-            return True
-    return False
+    return any(line.startswith(name + ",") for line in result.stdout.splitlines())
 
 
 def test_clean_pools_never_deletes_pool(coi_binary, workspace_dir):

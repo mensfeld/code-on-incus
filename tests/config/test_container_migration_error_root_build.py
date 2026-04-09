@@ -7,7 +7,6 @@ produce a hard error pointing to the new [container.build] location.
 
 import os
 import subprocess
-from pathlib import Path
 
 
 def test_migration_error_root_build(coi_binary, tmp_path):
