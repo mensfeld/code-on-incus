@@ -73,7 +73,7 @@ Examples:
 
 		// Apply config defaults to flags that weren't explicitly set
 		if !cmd.Flags().Changed("persistent") {
-			persistent = config.BoolVal(cfg.Defaults.Persistent)
+			persistent = config.BoolVal(cfg.Container.Persistent)
 		}
 
 		// Silence usage output for RunE errors. Setting this here (in

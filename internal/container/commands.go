@@ -244,10 +244,14 @@ func IncusFilePush(source, destination string) error {
 	return IncusFilePushContext(context.Background(), source, destination)
 }
 
-// LaunchContainer launches an ephemeral container.
+// LaunchContainer launches an ephemeral container on the given storage pool.
+// An empty pool means "use Incus's default pool".
 // Uses init+configure+start (not launch) so security flags are set before first boot.
-func LaunchContainer(imageAlias, containerName string) error {
+func LaunchContainer(imageAlias, containerName, pool string) error {
 	args := []string{"init", imageAlias, containerName, "--ephemeral"}
+	if pool != "" {
+		args = append(args, "-s", pool)
+	}
 	if err := IncusExec(args...); err != nil {
 		return err
 	}
@@ -260,10 +264,14 @@ func LaunchContainer(imageAlias, containerName string) error {
 	return IncusExec("start", containerName)
 }
 
-// LaunchContainerPersistent launches a non-ephemeral container.
+// LaunchContainerPersistent launches a non-ephemeral container on the given
+// storage pool. An empty pool means "use Incus's default pool".
 // Uses init+configure+start (not launch) so security flags are set before first boot.
-func LaunchContainerPersistent(imageAlias, containerName string) error {
+func LaunchContainerPersistent(imageAlias, containerName, pool string) error {
 	args := []string{"init", imageAlias, containerName}
+	if pool != "" {
+		args = append(args, "-s", pool)
+	}
 	if err := IncusExec(args...); err != nil {
 		return err
 	}

@@ -19,7 +19,7 @@ var buildCmd = &cobra.Command{
 	Long: `Build an Incus image using a profile's build configuration.
 
 By default, builds the "coi-default" image using the built-in default profile.
-Use --profile to build from a custom profile's [build] section.
+Use --profile to build from a custom profile's [container.build] section.
 
 Examples:
   coi build
@@ -62,9 +62,17 @@ func buildCommand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("profile '%s' not found", profileName)
 	}
 
-	imageName := p.Image
+	imageName := p.Container.Image
 	if imageName == "" {
 		imageName = image.CoiAlias
+	}
+
+	// Resolve build container's storage pool from the profile (default profile
+	// already mirrors cfg.Container, so this also covers the global case).
+	// Validate before any container work so a missing pool fails loud and early.
+	buildPool := p.Container.StoragePool
+	if err := container.ValidateStoragePool(buildPool); err != nil {
+		return err
 	}
 
 	// For coi-default image: always use the embedded build script
@@ -76,6 +84,7 @@ func buildCommand(cmd *cobra.Command, args []string) error {
 			AliasName:   image.CoiAlias,
 			Description: "coi image (Docker + build tools + Claude CLI + GitHub CLI)",
 			Compression: buildCompression,
+			StoragePool: buildPool,
 			Logger: func(msg string) {
 				fmt.Println(msg)
 			},
@@ -100,20 +109,20 @@ func buildCommand(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Custom profile build: requires [build] section
-	if p.Build == nil || !p.Build.HasBuildConfig() {
-		return fmt.Errorf("profile '%s' has no [build] section — add a build script or commands to the profile", profileName)
+	// Custom profile build: requires [container.build] section
+	if !p.Container.Build.HasBuildConfig() {
+		return fmt.Errorf("profile '%s' has no [container.build] section — add a build script or commands to the profile", profileName)
 	}
 
 	// Resolve build script
-	scriptPath, cleanup, err := resolveBuildScript(p.Build)
+	scriptPath, cleanup, err := resolveBuildScript(&p.Container.Build)
 	if err != nil {
 		return err
 	}
 	defer cleanup()
 
 	// Determine base image
-	baseImage := p.Build.Base
+	baseImage := p.Container.Build.Base
 	if baseImage == "" {
 		baseImage = image.CoiAlias
 	}
@@ -126,6 +135,7 @@ func buildCommand(cmd *cobra.Command, args []string) error {
 		BuildScript: scriptPath,
 		Force:       buildForce,
 		Compression: buildCompression,
+		StoragePool: buildPool,
 		Logger: func(msg string) {
 			fmt.Fprintf(os.Stderr, "%s\n", msg)
 		},

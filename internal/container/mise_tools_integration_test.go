@@ -34,7 +34,7 @@ func TestMiseTools_AvailableInImage(t *testing.T) {
 		_ = mgr.Delete(true)
 	}
 
-	if err := mgr.Launch("coi-default", false); err != nil {
+	if err := mgr.Launch("coi-default", false, ""); err != nil {
 		t.Fatalf("Failed to launch container: %v", err)
 	}
 

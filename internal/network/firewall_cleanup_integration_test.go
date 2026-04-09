@@ -83,7 +83,7 @@ func TestOpenModeFirewallCleanup(t *testing.T) {
 	}
 
 	// Launch container (non-ephemeral)
-	if err := mgr.Launch("coi-default", false); err != nil {
+	if err := mgr.Launch("coi-default", false, ""); err != nil {
 		t.Fatalf("Failed to launch container: %v", err)
 	}
 
@@ -177,7 +177,7 @@ func TestRestrictedModeFirewallCleanup(t *testing.T) {
 	}
 
 	// Launch container (non-ephemeral)
-	if err := mgr.Launch("coi-default", false); err != nil {
+	if err := mgr.Launch("coi-default", false, ""); err != nil {
 		t.Fatalf("Failed to launch container: %v", err)
 	}
 
@@ -272,7 +272,7 @@ func TestFirewallCleanupBeforeContainerDeletion(t *testing.T) {
 	}
 
 	// Launch container (non-ephemeral)
-	if err := mgr.Launch("coi-default", false); err != nil {
+	if err := mgr.Launch("coi-default", false, ""); err != nil {
 		t.Fatalf("Failed to launch container: %v", err)
 	}
 
@@ -378,7 +378,7 @@ func TestFirewallCleanupCorrectOrder(t *testing.T) {
 	}
 
 	// Launch container (non-ephemeral)
-	if err := mgr.Launch("coi-default", false); err != nil {
+	if err := mgr.Launch("coi-default", false, ""); err != nil {
 		t.Fatalf("Failed to launch container: %v", err)
 	}
 

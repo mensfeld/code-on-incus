@@ -801,8 +801,9 @@ func CheckContainerConnectivity(imageName string) HealthCheck {
 	// Create temporary container name
 	containerName := fmt.Sprintf("coi-health-check-%d", time.Now().UnixNano())
 
-	// Launch ephemeral container
-	if err := container.LaunchContainer(imageName, containerName); err != nil {
+	// Launch ephemeral container on the Incus default pool — this probe is
+	// one-shot and pool routing isn't relevant to what we're checking.
+	if err := container.LaunchContainer(imageName, containerName, ""); err != nil {
 		return HealthCheck{
 			Name:    "container_connectivity",
 			Status:  StatusFailed,
@@ -1003,8 +1004,9 @@ func CheckNetworkRestriction(imageName string) HealthCheck {
 	// Create temporary container name
 	containerName := fmt.Sprintf("coi-restriction-check-%d", time.Now().UnixNano())
 
-	// Launch ephemeral container
-	if err := container.LaunchContainer(imageName, containerName); err != nil {
+	// Launch ephemeral container on the Incus default pool — this probe is
+	// one-shot and pool routing isn't relevant to what we're checking.
+	if err := container.LaunchContainer(imageName, containerName, ""); err != nil {
 		return HealthCheck{
 			Name:    "network_restriction",
 			Status:  StatusFailed,
@@ -1260,86 +1262,134 @@ func CheckDiskSpace() HealthCheck {
 	}
 }
 
-// CheckIncusStoragePool checks the Incus storage pool usage.
-// It queries `incus storage info <pool>` for the default pool and warns
-// when free space is critically low (< 3 GiB free or > 90% used).
-func CheckIncusStoragePool() HealthCheck {
-	// Find the default storage pool from the default profile
-	poolName := "default"
+// defaultIncusPool returns the storage pool name used by Incus's "default"
+// profile. Used as a fallback when no profile/global config asks for a
+// specific pool, so we still check something useful.
+func defaultIncusPool() string {
 	profileOut, err := exec.Command("incus", "profile", "show", "default").Output()
-	if err == nil {
-		for _, line := range strings.Split(string(profileOut), "\n") {
-			line = strings.TrimSpace(line)
-			if strings.HasPrefix(line, "pool:") {
-				poolName = strings.TrimSpace(strings.TrimPrefix(line, "pool:"))
-				break
-			}
-		}
-	}
-
-	out, err := exec.Command("incus", "storage", "info", poolName).Output()
 	if err != nil {
-		return HealthCheck{
-			Name:    "incus_storage_pool",
-			Status:  StatusWarning,
-			Message: fmt.Sprintf("Could not query storage pool '%s': %v", poolName, err),
+		return "default"
+	}
+	for _, line := range strings.Split(string(profileOut), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "pool:") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "pool:"))
 		}
 	}
+	return "default"
+}
 
-	// Parse "space used: X.XXGiB" and "total space: Y.YYGiB"
-	// Incus may report in different units (KiB, MiB, GiB, TiB, EiB) depending
-	// on magnitude, so we normalise everything to GiB.
-	var usedGiB, totalGiB float64
+// poolUsage holds parsed `incus storage info` numbers for a single pool plus
+// any error encountered while gathering them.
+type poolUsage struct {
+	usedGiB  float64
+	totalGiB float64
+	err      error
+}
+
+// gatherPoolUsage queries `incus storage info <pool>` and parses out the
+// space-used / total-space lines. Returns an error if the pool is missing or
+// the output cannot be parsed.
+func gatherPoolUsage(pool string) poolUsage {
+	out, err := exec.Command("incus", "storage", "info", pool).Output()
+	if err != nil {
+		return poolUsage{err: err}
+	}
+
+	var u poolUsage
 	for _, line := range strings.Split(string(out), "\n") {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "space used:") {
-			usedGiB = parseStorageValueGiB(strings.TrimPrefix(line, "space used:"))
-		} else if strings.HasPrefix(line, "total space:") {
-			totalGiB = parseStorageValueGiB(strings.TrimPrefix(line, "total space:"))
+		switch {
+		case strings.HasPrefix(line, "space used:"):
+			u.usedGiB = parseStorageValueGiB(strings.TrimPrefix(line, "space used:"))
+		case strings.HasPrefix(line, "total space:"):
+			u.totalGiB = parseStorageValueGiB(strings.TrimPrefix(line, "total space:"))
 		}
 	}
 
-	if totalGiB == 0 {
-		return HealthCheck{
-			Name:    "incus_storage_pool",
-			Status:  StatusWarning,
-			Message: fmt.Sprintf("Could not parse storage pool '%s' usage", poolName),
+	if u.totalGiB == 0 {
+		u.err = fmt.Errorf("could not parse usage")
+	}
+	return u
+}
+
+// CheckIncusStoragePools checks Incus storage pool usage for all pools the
+// loaded config references (global + every profile), de-duplicated. An empty
+// pool name in config falls back to the Incus default profile's pool so we
+// always check at least one real pool.
+//
+// One HealthCheck is returned with per-pool entries in Details. The overall
+// status is the worst status across the inspected pools (failed > warning > ok).
+func CheckIncusStoragePools(pools []string) HealthCheck {
+	// De-dupe + replace empty entries with the actual default pool name.
+	seen := map[string]bool{}
+	var unique []string
+	for _, p := range pools {
+		if p == "" {
+			p = defaultIncusPool()
+		}
+		if seen[p] {
+			continue
+		}
+		seen[p] = true
+		unique = append(unique, p)
+	}
+	if len(unique) == 0 {
+		unique = []string{defaultIncusPool()}
+	}
+
+	details := map[string]interface{}{}
+	overall := StatusOK
+	var messages []string
+	worsen := func(s CheckStatus) {
+		if s == StatusFailed {
+			overall = StatusFailed
+		} else if s == StatusWarning && overall == StatusOK {
+			overall = StatusWarning
 		}
 	}
 
-	freeGiB := totalGiB - usedGiB
-	usedPct := (usedGiB / totalGiB) * 100
+	for _, pool := range unique {
+		u := gatherPoolUsage(pool)
+		if u.err != nil {
+			details[pool] = map[string]interface{}{
+				"status": string(StatusFailed),
+				"error":  u.err.Error(),
+			}
+			messages = append(messages, fmt.Sprintf("%s: missing", pool))
+			worsen(StatusFailed)
+			continue
+		}
 
-	details := map[string]interface{}{
-		"pool":      poolName,
-		"used_gib":  usedGiB,
-		"total_gib": totalGiB,
-		"free_gib":  freeGiB,
-		"used_pct":  usedPct,
+		freeGiB := u.totalGiB - u.usedGiB
+		usedPct := (u.usedGiB / u.totalGiB) * 100
+
+		var poolStatus CheckStatus
+		switch {
+		case freeGiB < 2 || usedPct > 90:
+			poolStatus = StatusFailed
+		case freeGiB < 5 || usedPct > 80:
+			poolStatus = StatusWarning
+		default:
+			poolStatus = StatusOK
+		}
+		worsen(poolStatus)
+
+		details[pool] = map[string]interface{}{
+			"used_gib":  u.usedGiB,
+			"total_gib": u.totalGiB,
+			"free_gib":  freeGiB,
+			"used_pct":  usedPct,
+			"status":    string(poolStatus),
+		}
+		messages = append(messages, fmt.Sprintf("%s: %.1f GiB free of %.1f GiB (%.0f%% used)", pool, freeGiB, u.totalGiB, usedPct))
 	}
 
-	switch {
-	case freeGiB < 2 || usedPct > 90:
-		return HealthCheck{
-			Name:    "incus_storage_pool",
-			Status:  StatusFailed,
-			Message: fmt.Sprintf("Pool '%s' critically low: %.1f GiB free of %.1f GiB (%.0f%% used)", poolName, freeGiB, totalGiB, usedPct),
-			Details: details,
-		}
-	case freeGiB < 5 || usedPct > 80:
-		return HealthCheck{
-			Name:    "incus_storage_pool",
-			Status:  StatusWarning,
-			Message: fmt.Sprintf("Pool '%s' low: %.1f GiB free of %.1f GiB (%.0f%% used)", poolName, freeGiB, totalGiB, usedPct),
-			Details: details,
-		}
-	default:
-		return HealthCheck{
-			Name:    "incus_storage_pool",
-			Status:  StatusOK,
-			Message: fmt.Sprintf("Pool '%s': %.1f GiB free of %.1f GiB (%.0f%% used)", poolName, freeGiB, totalGiB, usedPct),
-			Details: details,
-		}
+	return HealthCheck{
+		Name:    "incus_storage_pools",
+		Status:  overall,
+		Message: strings.Join(messages, "; "),
+		Details: details,
 	}
 }
 

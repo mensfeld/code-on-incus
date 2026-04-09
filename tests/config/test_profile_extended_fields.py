@@ -20,6 +20,7 @@ def test_profile_show_extended_sections(coi_binary, cleanup_containers, workspac
     profile_dir.mkdir(parents=True)
     (profile_dir / "config.toml").write_text(
         """
+[container]
 image = "coi-default"
 
 [git]
@@ -93,6 +94,7 @@ def test_profile_inheritance_extended_fields(coi_binary, cleanup_containers, wor
     parent_dir.mkdir(parents=True)
     (parent_dir / "config.toml").write_text(
         """
+[container]
 image = "coi-default"
 
 [git]

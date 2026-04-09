@@ -168,7 +168,9 @@ def dummy_image(coi_binary, tmp_path_factory):
 
     # Write profile config.toml
     config_toml = profile_dir / "config.toml"
-    config_toml.write_text(f'image = "{image_name}"\n\n[build]\nscript = "build.sh"\n')
+    config_toml.write_text(
+        f'[container]\nimage = "{image_name}"\n\n[container.build]\nscript = "build.sh"\n'
+    )
 
     # Copy the install script into the profile directory as build.sh
     shutil.copy2(script_path, str(profile_dir / "build.sh"))

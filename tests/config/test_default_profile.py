@@ -81,7 +81,9 @@ def test_inherit_from_default(coi_binary, cleanup_containers, workspace_dir):
     """
     profile_dir = Path(workspace_dir) / ".coi" / "profiles" / "custom"
     profile_dir.mkdir(parents=True)
-    (profile_dir / "config.toml").write_text('inherits = "default"\nimage = "my-custom-image"\n')
+    (profile_dir / "config.toml").write_text(
+        'inherits = "default"\n[container]\nimage = "my-custom-image"\n'
+    )
 
     result = subprocess.run(
         [
@@ -112,7 +114,7 @@ def test_disk_default_overrides_builtin(coi_binary, cleanup_containers, workspac
     """
     profile_dir = Path(workspace_dir) / ".coi" / "profiles" / "default"
     profile_dir.mkdir(parents=True)
-    (profile_dir / "config.toml").write_text('image = "my-disk-default"\n')
+    (profile_dir / "config.toml").write_text('[container]\nimage = "my-disk-default"\n')
 
     result = subprocess.run(
         [

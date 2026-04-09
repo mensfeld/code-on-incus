@@ -28,9 +28,14 @@ var containerLaunchCmd = &cobra.Command{
 		name := args[1]
 
 		ephemeral, _ := cmd.Flags().GetBool("ephemeral")
+		pool, _ := cmd.Flags().GetString("storage")
+
+		if err := container.ValidateStoragePool(pool); err != nil {
+			return err
+		}
 
 		mgr := container.NewManager(name)
-		if err := mgr.Launch(image, ephemeral); err != nil {
+		if err := mgr.Launch(image, ephemeral, pool); err != nil {
 			return fmt.Errorf("failed to launch container: %v", err)
 		}
 
@@ -421,6 +426,7 @@ var containerInfoCmd = &cobra.Command{
 func init() {
 	// Add flags to launch command
 	containerLaunchCmd.Flags().Bool("ephemeral", false, "Create ephemeral container")
+	containerLaunchCmd.Flags().StringP("storage", "s", "", "Incus storage pool name (empty = default pool)")
 
 	// Add flags to stop command
 	containerStopCmd.Flags().BoolP("force", "f", false, "Force stop")

@@ -17,7 +17,7 @@ def test_build_custom_with_base(coi_binary, tmp_path):
     profile_dir.mkdir(parents=True)
 
     (profile_dir / "config.toml").write_text(
-        f'image = "{image_name}"\n\n[build]\nbase = "images:ubuntu/22.04"\nscript = "build.sh"\n'
+        f'[container]\nimage = "{image_name}"\n\n[container.build]\nbase = "images:ubuntu/22.04"\nscript = "build.sh"\n'
     )
 
     (profile_dir / "build.sh").write_text("""#!/bin/bash

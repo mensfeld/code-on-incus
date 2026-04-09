@@ -21,6 +21,7 @@ def test_profile_with_limits(coi_binary, workspace_dir, cleanup_containers):
     profile_dir.mkdir(parents=True)
     (profile_dir / "config.toml").write_text(
         """
+[container]
 image = "coi-default"
 persistent = false
 
@@ -86,6 +87,7 @@ def test_multiple_profiles_different_limits(coi_binary, workspace_dir, cleanup_c
         profile_dir.mkdir(parents=True)
         (profile_dir / "config.toml").write_text(
             f"""
+[container]
 image = "coi-default"
 
 [limits.cpu]
@@ -177,6 +179,7 @@ def test_profile_partial_limits(coi_binary, workspace_dir, cleanup_containers):
     profile_dir.mkdir(parents=True)
     (profile_dir / "config.toml").write_text(
         """
+[container]
 image = "coi-default"
 
 [limits.cpu]
@@ -245,6 +248,7 @@ max_processes = 200
     profile_dir.mkdir(parents=True)
     (profile_dir / "config.toml").write_text(
         """
+[container]
 image = "coi-default"
 
 [limits.cpu]
@@ -313,6 +317,7 @@ limit = "2GiB"
     profile_dir.mkdir(parents=True)
     (profile_dir / "config.toml").write_text(
         """
+[container]
 image = "coi-default"
 
 [limits.cpu]
@@ -381,6 +386,7 @@ limit = "2GiB"
     profile_dir.mkdir(parents=True)
     (profile_dir / "config.toml").write_text(
         """
+[container]
 image = "coi-default"
 persistent = false
 # No limits defined in profile

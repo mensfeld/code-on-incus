@@ -39,7 +39,7 @@ def test_profile_list_from_home_coi_dir(coi_binary, tmp_path):
 
     prof_dir = fake_home / ".coi" / "profiles" / "home-coi-prof"
     prof_dir.mkdir(parents=True)
-    (prof_dir / "config.toml").write_text('image = "home-coi-image"\n')
+    (prof_dir / "config.toml").write_text('[container]\nimage = "home-coi-image"\n')
 
     # Run from a clean workspace so project .coi doesn't interfere
     workspace = tmp_path / "workspace"
@@ -69,7 +69,7 @@ def test_profile_info_from_home_coi_dir(coi_binary, tmp_path):
 
     prof_dir = fake_home / ".coi" / "profiles" / "home-info-prof"
     prof_dir.mkdir(parents=True)
-    (prof_dir / "config.toml").write_text('image = "home-info-image"\n')
+    (prof_dir / "config.toml").write_text('[container]\nimage = "home-info-image"\n')
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -109,14 +109,14 @@ def test_profile_merges_home_and_project_locations(coi_binary, tmp_path):
     # Profile in ~/.coi/profiles/
     home_prof = fake_home / ".coi" / "profiles" / "from-home"
     home_prof.mkdir(parents=True)
-    (home_prof / "config.toml").write_text('image = "home-image"\n')
+    (home_prof / "config.toml").write_text('[container]\nimage = "home-image"\n')
 
     # Project-local workspace with .coi/profiles/
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     proj_prof = workspace / ".coi" / "profiles" / "from-project"
     proj_prof.mkdir(parents=True)
-    (proj_prof / "config.toml").write_text('image = "project-image"\n')
+    (proj_prof / "config.toml").write_text('[container]\nimage = "project-image"\n')
 
     list_result = subprocess.run(
         [coi_binary, "profile", "list", "--workspace", str(workspace)],
@@ -172,13 +172,13 @@ def test_profile_duplicate_name_project_vs_home_fails(coi_binary, tmp_path):
 
     home_prof = fake_home / ".coi" / "profiles" / "dup-proj"
     home_prof.mkdir(parents=True)
-    (home_prof / "config.toml").write_text('image = "from-home"\n')
+    (home_prof / "config.toml").write_text('[container]\nimage = "from-home"\n')
 
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     proj_prof = workspace / ".coi" / "profiles" / "dup-proj"
     proj_prof.mkdir(parents=True)
-    (proj_prof / "config.toml").write_text('image = "from-project"\n')
+    (proj_prof / "config.toml").write_text('[container]\nimage = "from-project"\n')
 
     result = subprocess.run(
         [coi_binary, "profile", "list", "--workspace", str(workspace)],

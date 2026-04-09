@@ -7,7 +7,7 @@ instructing the user to run 'coi build' first.
 Tests:
 - coi run with missing image → error with build instructions
 - coi shell with missing image → error with build instructions
-- --image flag overrides config defaults.image for image check
+- --image flag overrides config container.image for image check
 """
 
 import subprocess
@@ -80,10 +80,10 @@ def test_missing_custom_image_on_run(coi_binary, cleanup_containers, workspace_d
     config_dir.mkdir(exist_ok=True)
     (config_dir / "config.toml").write_text(
         f"""
-[defaults]
+[container]
 image = "{image_name}"
 
-[build]
+[container.build]
 commands = ["echo hello"]
 """
     )
@@ -124,10 +124,10 @@ def test_missing_custom_image_on_shell(coi_binary, workspace_dir):
     config_dir.mkdir(exist_ok=True)
     (config_dir / "config.toml").write_text(
         f"""
-[defaults]
+[container]
 image = "{image_name}"
 
-[build]
+[container.build]
 commands = ["echo hello"]
 """
     )
@@ -158,7 +158,7 @@ commands = ["echo hello"]
 
 def test_image_flag_overrides_config(coi_binary, cleanup_containers, workspace_dir):
     """
-    --image flag should override defaults.image from config.
+    --image flag should override container.image from config.
 
     If config says image = "coi-custom" but user passes --image coi-default,
     the image check should use coi-default.
@@ -167,10 +167,10 @@ def test_image_flag_overrides_config(coi_binary, cleanup_containers, workspace_d
     config_dir.mkdir(exist_ok=True)
     (config_dir / "config.toml").write_text(
         """
-[defaults]
+[container]
 image = "coi-should-not-be-used"
 
-[build]
+[container.build]
 commands = ["echo this-should-not-run"]
 """
     )
@@ -203,5 +203,5 @@ commands = ["echo this-should-not-run"]
         # coi-default image might not exist in this environment — that's fine,
         # just make sure it didn't try to use "coi-should-not-be-used"
         assert "coi-should-not-be-used" not in combined, (
-            f"Should use --image flag, not config defaults.image. Got:\n{combined}"
+            f"Should use --image flag, not config container.image. Got:\n{combined}"
         )

@@ -60,8 +60,8 @@ func RunAllChecks(cfg *config.Config, verbose bool) *HealthResult {
 	// Critical checks
 	checks["incus"] = CheckIncus()
 	checks["permissions"] = CheckPermissions()
-	checks["image"] = CheckImage(cfg.Defaults.Image)
-	checks["image_age"] = CheckImageAge(cfg.Defaults.Image)
+	checks["image"] = CheckImage(cfg.Container.Image)
+	checks["image_age"] = CheckImageAge(cfg.Container.Image)
 	checks["privileged_profile"] = CheckPrivilegedProfile()
 	checks["security_posture"] = CheckSecurityPosture()
 
@@ -77,7 +77,7 @@ func RunAllChecks(cfg *config.Config, verbose bool) *HealthResult {
 	checks["coi_directory"] = CheckCOIDirectory()
 	checks["sessions_directory"] = CheckSessionsDirectory(cfg)
 	checks["disk_space"] = CheckDiskSpace()
-	checks["incus_storage_pool"] = CheckIncusStoragePool()
+	checks["incus_storage_pools"] = CheckIncusStoragePools(collectReferencedPools(cfg))
 
 	// Configuration checks
 	checks["config"] = CheckConfiguration(cfg)
@@ -90,8 +90,8 @@ func RunAllChecks(cfg *config.Config, verbose bool) *HealthResult {
 	checks["orphaned_resources"] = CheckOrphanedResources()
 
 	// Container networking checks (critical for detecting real networking issues)
-	checks["container_connectivity"] = CheckContainerConnectivity(cfg.Defaults.Image)
-	checks["network_restriction"] = CheckNetworkRestriction(cfg.Defaults.Image)
+	checks["container_connectivity"] = CheckContainerConnectivity(cfg.Container.Image)
+	checks["network_restriction"] = CheckNetworkRestriction(cfg.Container.Image)
 
 	// NFT monitoring checks (only if enabled in config)
 	if config.BoolVal(cfg.Monitoring.NFT.Enabled) {
@@ -109,7 +109,7 @@ func RunAllChecks(cfg *config.Config, verbose bool) *HealthResult {
 	if verbose {
 		checks["dns_resolution"] = CheckDNS()
 		checks["passwordless_sudo"] = CheckPasswordlessSudo()
-		checks["process_monitoring"] = CheckProcessMonitoringCapability(cfg.Defaults.Image)
+		checks["process_monitoring"] = CheckProcessMonitoringCapability(cfg.Container.Image)
 	}
 
 	// Calculate summary
@@ -167,6 +167,29 @@ func determineStatus(checks map[string]HealthCheck) OverallStatus {
 		return OverallDegraded
 	}
 	return OverallHealthy
+}
+
+// collectReferencedPools returns the de-duped list of storage pools that the
+// loaded configuration cares about: the global [container] storage_pool plus
+// every loaded profile's pool. Empty entries are preserved here so the health
+// check can resolve them to the actual Incus default pool name.
+func collectReferencedPools(cfg *config.Config) []string {
+	seen := map[string]bool{}
+	var pools []string
+	add := func(p string) {
+		if seen[p] {
+			return
+		}
+		seen[p] = true
+		pools = append(pools, p)
+	}
+
+	add(cfg.Container.StoragePool)
+	for _, profile := range cfg.Profiles {
+		add(profile.Container.StoragePool)
+	}
+
+	return pools
 }
 
 // ExitCode returns the appropriate exit code for the health result

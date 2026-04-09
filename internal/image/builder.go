@@ -27,6 +27,7 @@ type BuildOptions struct {
 	Force       bool
 	BuildScript string // For custom images
 	Compression string // Compression algorithm (e.g., "none", "gzip", "xz")
+	StoragePool string // Storage pool for the build container ("" = Incus default)
 	Logger      func(string)
 }
 
@@ -141,7 +142,7 @@ func (b *Builder) launchBuildContainer() error {
 		b.opts.Logger(fmt.Sprintf("Added %s to firewalld trusted zone (was missing — containers could not get IPs)", bridgeName))
 	}
 
-	if err := b.mgr.Launch(b.opts.BaseImage, false); err != nil {
+	if err := b.mgr.Launch(b.opts.BaseImage, false, b.opts.StoragePool); err != nil {
 		return fmt.Errorf("failed to launch build container: %w", err)
 	}
 

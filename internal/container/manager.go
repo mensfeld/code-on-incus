@@ -36,12 +36,13 @@ func NewManager(containerName string) *Manager {
 	}
 }
 
-// Launch creates a new container from an image
-func (m *Manager) Launch(image string, ephemeral bool) error {
+// Launch creates a new container from an image on the given storage pool.
+// An empty pool falls back to Incus's default pool.
+func (m *Manager) Launch(image string, ephemeral bool, pool string) error {
 	if ephemeral {
-		return LaunchContainer(image, m.ContainerName)
+		return LaunchContainer(image, m.ContainerName, pool)
 	}
-	return LaunchContainerPersistent(image, m.ContainerName)
+	return LaunchContainerPersistent(image, m.ContainerName, pool)
 }
 
 // Stop stops the container

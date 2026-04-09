@@ -6,12 +6,14 @@
 
 - [Breaking] **Default image renamed from `coi` to `coi-default`** — The default image alias has been renamed from `coi` to `coi-default` for consistency with the new profile system. After updating, run `coi build` to create the `coi-default` image. The old `coi` image can be removed with `coi image delete coi`.
 
-- [Breaking] **Removed `coi build custom` subcommand** — Custom image building is now done exclusively through profiles. Instead of `coi build custom my-image --script setup.sh`, create a profile directory with a `[build]` section:
+- [Breaking] **Removed `coi build custom` subcommand** — Custom image building is now done exclusively through profiles. Instead of `coi build custom my-image --script setup.sh`, create a profile directory with a `[container]` section:
   ```
   mkdir -p .coi/profiles/my-profile
   cat > .coi/profiles/my-profile/config.toml <<EOF
+  [container]
   image = "my-image"
-  [build]
+
+  [container.build]
   base = "coi-default"
   script = "build.sh"
   EOF
@@ -42,6 +44,31 @@
 - [Breaking] **Project config moved from `.coi.toml` to `.coi/config.toml`** — Project-level configuration must now be placed in `.coi/config.toml` instead of `.coi.toml` in the project root. This enables co-locating build scripts and other project assets alongside config in the `.coi/` directory. COI will refuse to start if a `.coi.toml` file is detected, displaying a migration command: `mkdir -p .coi && mv .coi.toml .coi/config.toml`. (#251)
 
 - [Breaking] **Dropped `/etc/coi/` and `~/.config/coi/` config locations** — COI now only loads configuration and profiles from `~/.coi/` (user) and `./.coi/` (project). The previous system-wide (`/etc/coi/`) and XDG (`~/.config/coi/`) locations are no longer scanned. Users with config or profiles under `~/.config/coi/` must move them to `~/.coi/`: `mv ~/.config/coi/config.toml ~/.coi/config.toml && mv ~/.config/coi/profiles ~/.coi/profiles`. This simplifies the config hierarchy to a single user location (co-located with sessions/storage/logs) plus project overrides.
+
+- [Breaking] **New `[container]` config section consolidates image, persistence, storage pool, and build settings** — The fields describing container shape are now grouped under a single `[container]` block in both the global config and every profile config:
+  ```toml
+  [container]
+  image = "coi-default"
+  persistent = false
+  storage_pool = ""              # empty = Incus default pool
+
+  [container.build]
+  base = "coi-default"
+  script = "build.sh"
+  ```
+  The old `[defaults] image`, `[defaults] persistent`, top-level `[build]`, and the equivalent root-level `image`/`persistent`/`[build]` keys inside profile configs are no longer accepted. COI refuses to start if any of these legacy fields are detected and prints an actionable migration error pointing to the new layout. Profile and global config now share an identical shape for these fields. Environment variables `CLAUDE_ON_INCUS_IMAGE` and `CLAUDE_ON_INCUS_PERSISTENT` continue to work and now write into `[container]`. (#302)
+
+- [Breaking] **Health check `incus_storage_pool` renamed to `incus_storage_pools`** — The single-pool storage health check is now multi-pool aware. The check name in `coi health --format json` is now `incus_storage_pools` (plural) and `details` is a per-pool map (`{ "default": { "used_gib": ..., "total_gib": ..., "free_gib": ..., "used_pct": ..., "status": "ok" }, "fast-nvme": { ... } }`) instead of flat top-level keys. External scripts that consume the JSON output need to be updated.
+
+### Features
+
+- [Feature] **Per-profile storage pool support** — Containers can now be routed to a specific Incus storage pool via `[container] storage_pool = "pool-name"` in the global config or any profile. The profile pool overrides the global pool, which falls back to the Incus default pool when empty. This lets users put project A on fast NVMe and project B on bulk spinning storage. Pool existence is validated up front by `coi shell`, `coi run`, `coi container launch`, and `coi build`, with a clear `incus storage create <name> dir|zfs|btrfs` example on failure. Build containers always use the same pool as the resolved profile, so build artefacts land alongside the runtime container. (#302)
+
+- [Feature] **`coi list` shows POOL** — Both text and JSON output of `coi list` now include the storage pool of each container's root device, parsed from `expanded_devices.root.pool` (no extra Incus calls). The value reflects the actual pool the container was created in, not the configured one.
+
+- [Feature] **Multi-pool health check** — `coi health` now inspects every storage pool referenced by the loaded global config and any loaded profile, reporting per-pool used/free/total stats and rolling up to the worst status across all inspected pools. Empty references resolve to the Incus default pool.
+
+- [Feature] **`coi clean --pools`** — New flag detects COI containers (matched by container name prefix) sitting in storage pools that no profile loaded in the current directory references, and offers to remove them. **The pool itself is never deleted.** A prominent warning explains that COI can only see profiles in `~/.coi/` and `./.coi/`, so pools may still be in use by profiles in other projects on this machine that are invisible to the current `coi` invocation. Honours `--dry-run` and `--force`; included in `--all`.
 
 ### Bug Fixes
 

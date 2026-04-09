@@ -45,7 +45,7 @@ def test_profile_list_format_json_with_custom_profile(coi_binary, workspace_dir)
     """coi profile list --format json should include custom profiles."""
     profile_dir = Path(workspace_dir) / ".coi" / "profiles" / "test-json"
     profile_dir.mkdir(parents=True)
-    (profile_dir / "config.toml").write_text('image = "my-test-image"\n')
+    (profile_dir / "config.toml").write_text('[container]\nimage = "my-test-image"\n')
 
     result = subprocess.run(
         [coi_binary, "profile", "list", "--format", "json", "--workspace", workspace_dir],

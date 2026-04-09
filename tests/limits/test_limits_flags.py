@@ -75,6 +75,7 @@ limit = "4GiB"
     profile_dir.mkdir(parents=True)
     (profile_dir / "config.toml").write_text(
         """
+[container]
 image = "coi-default"
 
 [limits.cpu]
@@ -271,6 +272,7 @@ max_processes = 100
     profile_dir.mkdir(parents=True)
     (profile_dir / "config.toml").write_text(
         """
+[container]
 image = "coi-default"
 
 [limits.cpu]

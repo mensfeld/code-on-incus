@@ -1,9 +1,11 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/mensfeld/code-on-incus/internal/cleanup"
 	"github.com/mensfeld/code-on-incus/internal/container"
@@ -16,6 +18,7 @@ var (
 	cleanForce    bool
 	cleanSessions bool
 	cleanOrphans  bool
+	cleanPools    bool
 	cleanDryRun   bool
 )
 
@@ -32,10 +35,17 @@ Orphaned resources include:
 - Orphaned firewalld zone bindings (stale veth entries in firewalld zones)
 - Orphaned iptables bridge rules (coi-bridge-forward rules with no containers running)
 
+The --pools flag detects COI containers in storage pools that are not
+referenced by any profile loaded in the current directory and offers to
+remove them. The pool itself is never deleted. Note that COI can only see
+profiles in ~/.coi/ and the current ./.coi/ — pools may still be in use by
+other projects on this machine.
+
 Examples:
   coi clean                    # Clean stopped containers
   coi clean --sessions         # Clean saved session data
   coi clean --orphans          # Clean orphaned veths and firewall rules
+  coi clean --pools            # Clean COI containers in unreferenced pools
   coi clean --all              # Clean everything
   coi clean --all --force      # Clean without confirmation
   coi clean --orphans --dry-run # Show what orphans would be cleaned
@@ -48,6 +58,7 @@ func init() {
 	cleanCmd.Flags().BoolVarP(&cleanForce, "force", "f", false, "Skip confirmation prompts")
 	cleanCmd.Flags().BoolVar(&cleanSessions, "sessions", false, "Clean saved session data")
 	cleanCmd.Flags().BoolVar(&cleanOrphans, "orphans", false, "Clean orphaned veths and firewall rules")
+	cleanCmd.Flags().BoolVar(&cleanPools, "pools", false, "Clean COI containers in unreferenced storage pools")
 	cleanCmd.Flags().BoolVar(&cleanDryRun, "dry-run", false, "Show what would be cleaned without making changes")
 }
 
@@ -95,6 +106,18 @@ func cleanCommand(cmd *cobra.Command, args []string) error {
 	// Clean orphaned resources (veths and firewall rules)
 	if cleanAll || cleanOrphans {
 		count, cancelled := cleanOrphanedResources()
+		if cancelled {
+			return nil
+		}
+		cleaned += count
+	}
+
+	// Clean COI containers in unreferenced storage pools
+	if cleanAll || cleanPools {
+		count, cancelled, err := cleanUnreferencedPools()
+		if err != nil {
+			return err
+		}
 		if cancelled {
 			return nil
 		}
@@ -350,4 +373,188 @@ func doCleanOrphanedResources(orphans *cleanup.OrphanedResources) int {
 	}
 
 	return cleaned
+}
+
+// cleanUnreferencedPools detects COI containers in storage pools that are not
+// referenced by any profile loaded in the current context, and offers to remove
+// the containers. The pool itself is never deleted.
+//
+// "COI containers" are identified by name prefix (the configured container
+// prefix, default "coi-") AND verified via the container's expanded_devices
+// root pool.
+//
+// Returns (count cleaned, was cancelled, error).
+func cleanUnreferencedPools() (int, bool, error) {
+	fmt.Println("\nScanning storage pools for unreferenced COI containers...")
+
+	// Build referenced pool set from the loaded config + profiles.
+	referenced := referencedPoolSet()
+
+	// List all pools known to Incus.
+	pools, err := container.ListStoragePools()
+	if err != nil {
+		return 0, false, fmt.Errorf("failed to list storage pools: %w", err)
+	}
+
+	// Resolve the Incus default pool name so an empty referenced entry
+	// (meaning "use Incus default") matches the right pool.
+	defaultPool := incusDefaultPool()
+
+	// List all containers across all pools — one Incus call.
+	allContainers, err := listAllContainersWithPool()
+	if err != nil {
+		return 0, false, fmt.Errorf("failed to list containers: %w", err)
+	}
+
+	prefix := session.GetContainerPrefix()
+
+	type poolPlan struct {
+		pool       string
+		containers []string
+	}
+	var plans []poolPlan
+
+	for _, p := range pools {
+		// Skip pools the user's loaded config references.
+		if referenced[p.Name] {
+			continue
+		}
+		if p.Name == defaultPool && referenced[""] {
+			// "use Incus default" referenced — skip the actual default pool.
+			continue
+		}
+
+		var coiContainers []string
+		for _, c := range allContainers {
+			if c.Pool != p.Name {
+				continue
+			}
+			if !strings.HasPrefix(c.Name, prefix) {
+				continue
+			}
+			coiContainers = append(coiContainers, c.Name)
+		}
+
+		if len(coiContainers) == 0 {
+			continue
+		}
+		plans = append(plans, poolPlan{pool: p.Name, containers: coiContainers})
+	}
+
+	if len(plans) == 0 {
+		fmt.Println("  (no unreferenced pools contain COI containers)")
+		return 0, false, nil
+	}
+
+	// Print the loud cross-project warning once, then per-pool details.
+	fmt.Println()
+	fmt.Println("WARNING: these pools may still be referenced by profiles in other")
+	fmt.Println("projects on this machine that COI cannot see right now. Cleaning")
+	fmt.Println("them will affect any project whose profile points here.")
+	fmt.Println()
+
+	for _, plan := range plans {
+		fmt.Printf("Pool %q is not referenced by any profile loaded in this directory.\n", plan.pool)
+		fmt.Printf("  COI containers in %q (%d):\n", plan.pool, len(plan.containers))
+		for _, name := range plan.containers {
+			fmt.Printf("    - %s\n", name)
+		}
+		fmt.Println()
+	}
+
+	if cleanDryRun {
+		return 0, false, nil
+	}
+
+	if !cleanForce {
+		fmt.Print("Delete these containers? [y/N]: ")
+		var response string
+		_, _ = fmt.Scanln(&response)
+		if response != "y" && response != "Y" {
+			fmt.Println("Cancelled.")
+			return 0, true, nil
+		}
+	}
+
+	cleaned := 0
+	for _, plan := range plans {
+		for _, name := range plan.containers {
+			fmt.Printf("Deleting container %s (pool %s)...\n", name, plan.pool)
+			mgr := container.NewManager(name)
+			// Best-effort stop; ignore errors (container may already be stopped).
+			_ = mgr.Stop(true)
+			if err := mgr.Delete(true); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: Failed to delete %s: %v\n", name, err)
+				continue
+			}
+			cleaned++
+		}
+	}
+
+	return cleaned, false, nil
+}
+
+// referencedPoolSet returns the set of storage pool names referenced by the
+// loaded global [container] section and any loaded profile's [container]
+// section. The empty string ("") is included if any reference resolves to
+// "use Incus default pool".
+func referencedPoolSet() map[string]bool {
+	set := map[string]bool{}
+	if cfg == nil {
+		return set
+	}
+	set[cfg.Container.StoragePool] = true
+	for _, profile := range cfg.Profiles {
+		set[profile.Container.StoragePool] = true
+	}
+	return set
+}
+
+// incusDefaultPool returns the name of the storage pool used by the Incus
+// "default" profile's root device, or "" if it cannot be determined.
+func incusDefaultPool() string {
+	out, err := container.IncusOutput("profile", "show", "default")
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "pool:") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "pool:"))
+		}
+	}
+	return ""
+}
+
+// containerWithPool is a minimal projection of an Incus container used for
+// pool-aware cleanup planning.
+type containerWithPool struct {
+	Name string
+	Pool string
+}
+
+// listAllContainersWithPool lists every container known to Incus along with
+// the storage pool of its root device. Uses a single `incus list --format=json`
+// call.
+func listAllContainersWithPool() ([]containerWithPool, error) {
+	out, err := container.IncusOutput("list", "--format=json")
+	if err != nil {
+		return nil, err
+	}
+	var raw []map[string]interface{}
+	if err := json.Unmarshal([]byte(out), &raw); err != nil {
+		return nil, fmt.Errorf("failed to parse container list: %w", err)
+	}
+	result := make([]containerWithPool, 0, len(raw))
+	for _, c := range raw {
+		name, _ := c["name"].(string)
+		if name == "" {
+			continue
+		}
+		result = append(result, containerWithPool{
+			Name: name,
+			Pool: extractRootPool(c),
+		})
+	}
+	return result, nil
 }

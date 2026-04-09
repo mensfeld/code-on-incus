@@ -34,7 +34,7 @@ func TestGetWorkspacePath_DefaultMount(t *testing.T) {
 		_ = mgr.Delete(true)
 	}
 
-	if err := mgr.Launch("coi-default", false); err != nil {
+	if err := mgr.Launch("coi-default", false, ""); err != nil {
 		t.Fatalf("Failed to launch container: %v", err)
 	}
 
@@ -90,7 +90,7 @@ func TestGetWorkspacePath_CustomMount(t *testing.T) {
 		_ = mgr.Delete(true)
 	}
 
-	if err := mgr.Launch("coi-default", false); err != nil {
+	if err := mgr.Launch("coi-default", false, ""); err != nil {
 		t.Fatalf("Failed to launch container: %v", err)
 	}
 
@@ -153,7 +153,7 @@ func TestGetWorkspacePath_NoWorkspaceDevice(t *testing.T) {
 		_ = mgr.Delete(true)
 	}
 
-	if err := mgr.Launch("coi-default", false); err != nil {
+	if err := mgr.Launch("coi-default", false, ""); err != nil {
 		t.Fatalf("Failed to launch container: %v", err)
 	}
 
@@ -193,7 +193,7 @@ func TestExecWithAutoDetectedWorkspace(t *testing.T) {
 		_ = mgr.Delete(true)
 	}
 
-	if err := mgr.Launch("coi-default", false); err != nil {
+	if err := mgr.Launch("coi-default", false, ""); err != nil {
 		t.Fatalf("Failed to launch container: %v", err)
 	}
 

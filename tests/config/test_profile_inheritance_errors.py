@@ -16,13 +16,13 @@ def test_profile_inheritance_chain(coi_binary, cleanup_containers, workspace_dir
     gp_dir = coi_dir / "grandparent"
     gp_dir.mkdir(parents=True)
     (gp_dir / "config.toml").write_text(
-        'image = "coi-gp"\n\n[environment]\nLEVEL = "gp"\nGP_ONLY = "yes"\n'
+        '[environment]\nLEVEL = "gp"\nGP_ONLY = "yes"\n\n[container]\nimage = "coi-gp"\n'
     )
 
     parent_dir = coi_dir / "parent"
     parent_dir.mkdir(parents=True)
     (parent_dir / "config.toml").write_text(
-        'inherits = "grandparent"\nimage = "coi-parent"\n\n[environment]\nLEVEL = "parent"\n'
+        'inherits = "grandparent"\n\n[environment]\nLEVEL = "parent"\n\n[container]\nimage = "coi-parent"\n'
     )
 
     child_dir = coi_dir / "child"
@@ -119,14 +119,14 @@ def test_profile_inheritance_cross_level(coi_binary, cleanup_containers, workspa
     user_profile_dir = user_config_dir / "profiles" / "base-rust"
     user_profile_dir.mkdir(parents=True)
     (user_profile_dir / "config.toml").write_text(
-        'image = "coi-rust"\nforward_env = ["RUST_BACKTRACE"]\n\n[environment]\nEDITOR = "vim"\n'
+        'forward_env = ["RUST_BACKTRACE"]\n\n[environment]\nEDITOR = "vim"\n\n[container]\nimage = "coi-rust"\n'
     )
 
     # Create a project-level child profile
     proj_profile_dir = Path(workspace_dir) / ".coi" / "profiles" / "my-rust"
     proj_profile_dir.mkdir(parents=True)
     (proj_profile_dir / "config.toml").write_text(
-        'inherits = "base-rust"\nimage = "coi-rust-custom"\n\n[environment]\nMY_VAR = "hello"\n'
+        'inherits = "base-rust"\n\n[environment]\nMY_VAR = "hello"\n\n[container]\nimage = "coi-rust-custom"\n'
     )
 
     # Create user config.toml (needed for config loading)

@@ -11,12 +11,16 @@ import (
 func TestProfileInheritanceScalarOverride(t *testing.T) {
 	cfg := GetDefaultConfig()
 	cfg.Profiles["parent"] = ProfileConfig{
-		Image:      "parent-image",
-		Persistent: ptrBool(true),
+		Container: ContainerConfig{
+			Image:      "parent-image",
+			Persistent: ptrBool(true),
+		},
 	}
 	cfg.Profiles["child"] = ProfileConfig{
 		Inherits: "parent",
-		Image:    "child-image",
+		Container: ContainerConfig{
+			Image: "child-image",
+		},
 	}
 
 	if err := cfg.ResolveProfileInheritance(); err != nil {
@@ -24,11 +28,11 @@ func TestProfileInheritanceScalarOverride(t *testing.T) {
 	}
 
 	child := cfg.Profiles["child"]
-	if child.Image != "child-image" {
-		t.Errorf("Expected child image 'child-image', got %q", child.Image)
+	if child.Container.Image != "child-image" {
+		t.Errorf("Expected child image 'child-image', got %q", child.Container.Image)
 	}
 	// Persistent should be inherited from parent
-	if child.Persistent == nil || !*child.Persistent {
+	if child.Container.Persistent == nil || !*child.Container.Persistent {
 		t.Error("Expected persistent=true inherited from parent")
 	}
 }
@@ -130,7 +134,9 @@ func TestProfileInheritanceMountsInherited(t *testing.T) {
 	}
 	cfg.Profiles["child"] = ProfileConfig{
 		Inherits: "parent",
-		Image:    "child-image",
+		Container: ContainerConfig{
+			Image: "child-image",
+		},
 		// No mounts defined — should inherit parent's
 	}
 
@@ -174,7 +180,9 @@ func TestProfileInheritanceForwardEnvInherited(t *testing.T) {
 	}
 	cfg.Profiles["child"] = ProfileConfig{
 		Inherits: "parent",
-		Image:    "child-image",
+		Container: ContainerConfig{
+			Image: "child-image",
+		},
 		// No forward_env — should inherit parent's
 	}
 
@@ -251,7 +259,9 @@ func TestProfileInheritanceStructMerge(t *testing.T) {
 func TestProfileInheritanceChain(t *testing.T) {
 	cfg := GetDefaultConfig()
 	cfg.Profiles["grandparent"] = ProfileConfig{
-		Image:      "base-image",
+		Container: ContainerConfig{
+			Image: "base-image",
+		},
 		ForwardEnv: []string{"SSH_AUTH_SOCK"},
 		Environment: map[string]string{
 			"LEVEL": "grandparent",
@@ -260,7 +270,9 @@ func TestProfileInheritanceChain(t *testing.T) {
 	}
 	cfg.Profiles["parent"] = ProfileConfig{
 		Inherits: "grandparent",
-		Image:    "parent-image",
+		Container: ContainerConfig{
+			Image: "parent-image",
+		},
 		Environment: map[string]string{
 			"LEVEL": "parent",
 		},
@@ -278,8 +290,8 @@ func TestProfileInheritanceChain(t *testing.T) {
 
 	child := cfg.Profiles["child"]
 	// Image from parent (not grandparent), since parent overrode it
-	if child.Image != "parent-image" {
-		t.Errorf("Expected image 'parent-image', got %q", child.Image)
+	if child.Container.Image != "parent-image" {
+		t.Errorf("Expected image 'parent-image', got %q", child.Container.Image)
 	}
 	// LEVEL from child
 	if child.Environment["LEVEL"] != "child" {
@@ -346,8 +358,10 @@ func TestProfileInheritanceCrossLevel(t *testing.T) {
 		t.Fatalf("Failed to create user profile dir: %v", err)
 	}
 	userProfileContent := `
-image = "coi-rust"
 forward_env = ["RUST_BACKTRACE"]
+
+[container]
+image = "coi-rust"
 
 [environment]
 EDITOR = "vim"
@@ -364,6 +378,8 @@ EDITOR = "vim"
 	}
 	projProfileContent := `
 inherits = "base-rust"
+
+[container]
 image = "coi-rust-custom"
 
 [environment]
@@ -388,8 +404,8 @@ MY_VAR = "hello"
 	}
 
 	child := cfg.Profiles["my-rust"]
-	if child.Image != "coi-rust-custom" {
-		t.Errorf("Expected image 'coi-rust-custom', got %q", child.Image)
+	if child.Container.Image != "coi-rust-custom" {
+		t.Errorf("Expected image 'coi-rust-custom', got %q", child.Container.Image)
 	}
 	if child.Environment["EDITOR"] != "vim" {
 		t.Errorf("Expected EDITOR=vim from parent, got %q", child.Environment["EDITOR"])
@@ -408,7 +424,7 @@ func TestProfileInheritanceMaxDepth(t *testing.T) {
 	// Create a chain of 12 profiles: p0 → p1 → ... → p11
 	for i := 0; i <= 11; i++ {
 		name := fmt.Sprintf("p%d", i)
-		p := ProfileConfig{Image: fmt.Sprintf("img-%d", i)}
+		p := ProfileConfig{Container: ContainerConfig{Image: fmt.Sprintf("img-%d", i)}}
 		if i > 0 {
 			p.Inherits = fmt.Sprintf("p%d", i-1)
 		}
@@ -427,8 +443,8 @@ func TestProfileInheritanceMaxDepth(t *testing.T) {
 func TestProfileInheritanceSourcePreserved(t *testing.T) {
 	cfg := GetDefaultConfig()
 	cfg.Profiles["parent"] = ProfileConfig{
-		Image:  "parent-image",
-		Source: "/home/user/.coi/profiles/parent/config.toml",
+		Container: ContainerConfig{Image: "parent-image"},
+		Source:    "/home/user/.coi/profiles/parent/config.toml",
 	}
 	cfg.Profiles["child"] = ProfileConfig{
 		Inherits: "parent",
@@ -447,7 +463,7 @@ func TestProfileInheritanceSourcePreserved(t *testing.T) {
 
 func TestProfileInheritanceInheritsPreserved(t *testing.T) {
 	cfg := GetDefaultConfig()
-	cfg.Profiles["parent"] = ProfileConfig{Image: "parent-image"}
+	cfg.Profiles["parent"] = ProfileConfig{Container: ContainerConfig{Image: "parent-image"}}
 	cfg.Profiles["child"] = ProfileConfig{
 		Inherits: "parent",
 	}
@@ -465,15 +481,19 @@ func TestProfileInheritanceInheritsPreserved(t *testing.T) {
 func TestProfileInheritanceBuildMerge(t *testing.T) {
 	cfg := GetDefaultConfig()
 	cfg.Profiles["parent"] = ProfileConfig{
-		Build: &BuildConfig{
-			Base:   "coi",
-			Script: "/path/to/build.sh",
+		Container: ContainerConfig{
+			Build: BuildConfig{
+				Base:   "coi",
+				Script: "/path/to/build.sh",
+			},
 		},
 	}
 	cfg.Profiles["child"] = ProfileConfig{
 		Inherits: "parent",
-		Build: &BuildConfig{
-			Script: "/path/to/child-build.sh",
+		Container: ContainerConfig{
+			Build: BuildConfig{
+				Script: "/path/to/child-build.sh",
+			},
 		},
 	}
 
@@ -482,11 +502,11 @@ func TestProfileInheritanceBuildMerge(t *testing.T) {
 	}
 
 	child := cfg.Profiles["child"]
-	if child.Build.Base != "coi" {
-		t.Errorf("Expected build base 'coi' from parent, got %q", child.Build.Base)
+	if child.Container.Build.Base != "coi" {
+		t.Errorf("Expected build base 'coi' from parent, got %q", child.Container.Build.Base)
 	}
-	if child.Build.Script != "/path/to/child-build.sh" {
-		t.Errorf("Expected build script from child, got %q", child.Build.Script)
+	if child.Container.Build.Script != "/path/to/child-build.sh" {
+		t.Errorf("Expected build script from child, got %q", child.Container.Build.Script)
 	}
 }
 
@@ -494,7 +514,7 @@ func TestProfileInheritanceNoInherits(t *testing.T) {
 	// Profiles without inherits should not be affected
 	cfg := GetDefaultConfig()
 	cfg.Profiles["standalone"] = ProfileConfig{
-		Image: "my-image",
+		Container: ContainerConfig{Image: "my-image"},
 	}
 
 	if err := cfg.ResolveProfileInheritance(); err != nil {
@@ -502,8 +522,8 @@ func TestProfileInheritanceNoInherits(t *testing.T) {
 	}
 
 	p := cfg.Profiles["standalone"]
-	if p.Image != "my-image" {
-		t.Errorf("Expected image 'my-image', got %q", p.Image)
+	if p.Container.Image != "my-image" {
+		t.Errorf("Expected image 'my-image', got %q", p.Container.Image)
 	}
 }
 
@@ -653,14 +673,14 @@ func TestSynthesizeDefaultProfileSliceIsolation(t *testing.T) {
 func TestProfileInheritanceParentUnchanged(t *testing.T) {
 	cfg := GetDefaultConfig()
 	cfg.Profiles["parent"] = ProfileConfig{
-		Image: "parent-image",
+		Container: ContainerConfig{Image: "parent-image"},
 		Environment: map[string]string{
 			"PARENT_VAR": "value",
 		},
 	}
 	cfg.Profiles["child"] = ProfileConfig{
-		Inherits: "parent",
-		Image:    "child-image",
+		Inherits:  "parent",
+		Container: ContainerConfig{Image: "child-image"},
 		Environment: map[string]string{
 			"CHILD_VAR": "value",
 		},
@@ -671,8 +691,8 @@ func TestProfileInheritanceParentUnchanged(t *testing.T) {
 	}
 
 	parent := cfg.Profiles["parent"]
-	if parent.Image != "parent-image" {
-		t.Errorf("Expected parent image unchanged, got %q", parent.Image)
+	if parent.Container.Image != "parent-image" {
+		t.Errorf("Expected parent image unchanged, got %q", parent.Container.Image)
 	}
 	if _, exists := parent.Environment["CHILD_VAR"]; exists {
 		t.Error("Parent should not have child's environment variable")

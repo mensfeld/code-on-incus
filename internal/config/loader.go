@@ -85,11 +85,16 @@ func loadConfigFile(cfg *Config, path string) error {
 		return err
 	}
 
+	// Detect pre-0.8.0 layouts and refuse to load with an actionable error.
+	if err := checkDeprecatedConfigFields(path); err != nil {
+		return err
+	}
+
 	configDir := filepath.Dir(path)
 
 	// Resolve build script path relative to config file location
-	if fileCfg.Build.Script != "" {
-		fileCfg.Build.Script = resolveRelativePath(configDir, fileCfg.Build.Script)
+	if fileCfg.Container.Build.Script != "" {
+		fileCfg.Container.Build.Script = resolveRelativePath(configDir, fileCfg.Container.Build.Script)
 	}
 
 	// Merge into main config
@@ -140,10 +145,15 @@ func loadProfileDirectories(cfg *Config, configDir string) error {
 			return fmt.Errorf("failed to parse profile %q config at %s: %w", profileName, profileConfigPath, err)
 		}
 
+		// Detect pre-0.8.0 profile layouts and refuse to load.
+		if err := checkDeprecatedProfileFields(profileConfigPath); err != nil {
+			return err
+		}
+
 		// Resolve paths relative to profile directory
 		profileDir := filepath.Join(profilesDir, profileName)
-		if profileCfg.Build != nil && profileCfg.Build.Script != "" {
-			profileCfg.Build.Script = resolveRelativePath(profileDir, profileCfg.Build.Script)
+		if profileCfg.Container.Build.Script != "" {
+			profileCfg.Container.Build.Script = resolveRelativePath(profileDir, profileCfg.Container.Build.Script)
 		}
 		if profileCfg.Context != "" {
 			profileCfg.Context = resolveRelativePath(profileDir, profileCfg.Context)
@@ -164,7 +174,7 @@ func loadProfileDirectories(cfg *Config, configDir string) error {
 func loadFromEnv(cfg *Config) {
 	// CLAUDE_ON_INCUS_IMAGE
 	if env := os.Getenv("CLAUDE_ON_INCUS_IMAGE"); env != "" {
-		cfg.Defaults.Image = env
+		cfg.Container.Image = env
 	}
 
 	// CLAUDE_ON_INCUS_SESSIONS_DIR
@@ -179,7 +189,7 @@ func loadFromEnv(cfg *Config) {
 
 	// CLAUDE_ON_INCUS_PERSISTENT
 	if env := os.Getenv("CLAUDE_ON_INCUS_PERSISTENT"); env == "true" || env == "1" {
-		cfg.Defaults.Persistent = ptrBool(true)
+		cfg.Container.Persistent = ptrBool(true)
 	}
 
 	// Limit environment variables (using COI_ prefix for brevity)
@@ -235,10 +245,16 @@ func WriteExample(path string) error {
 	example := `# Claude on Incus Configuration
 # See: https://github.com/mensfeld/code-on-incus
 
-[defaults]
+[container]
 image = "coi-default"
 # Set persistent=true to reuse containers across sessions (keeps installed tools)
 persistent = false
+# storage_pool selects which Incus storage pool to launch containers in.
+# Empty string ("") uses Incus's default pool.
+# Create new pools with: incus storage create <name> dir|zfs|btrfs
+storage_pool = ""
+
+[defaults]
 model = "claude-sonnet-4-5"
 # Forward host environment variables into the container by name
 # Values are read from the host at session start — never stored in config
@@ -367,9 +383,9 @@ writable_hooks = false
 # To disable protection entirely (not recommended):
 # disable_protection = true
 
-[build]
+[container.build]
 # Build configuration for custom images
-# When defaults.image is set to a custom name, 'coi build' uses this config.
+# When [container] image is set to a custom name, 'coi build' uses this config.
 # base = "coi"                    # Base image to build from (default: "coi")
 # script = "build.sh"             # Path to build script (relative to config file)
 # commands = ["mise install ruby@3.3", "gem install bundler"]  # Or inline commands
@@ -390,10 +406,17 @@ writable_hooks = false
 #           └── setup.sh
 #
 # Profile directory config.toml example (.coi/profiles/rust-dev/config.toml):
-#   image = "coi-rust"
-#   persistent = true
 #   context = "CONTEXT.md"    # extra context appended to SANDBOX_CONTEXT.md
 #   forward_env = ["RUST_BACKTRACE"]
+#
+#   [container]
+#   image = "coi-rust"
+#   persistent = true
+#   storage_pool = ""        # empty = inherit from global, or use Incus default
+#
+#   [container.build]
+#   base = "coi"
+#   script = "build.sh"      # resolved relative to this config.toml
 #
 #   [environment]
 #   RUST_BACKTRACE = "1"
@@ -404,10 +427,6 @@ writable_hooks = false
 #
 #   [tool.claude]
 #   effort_level = "high"
-#
-#   [build]
-#   base = "coi"
-#   script = "build.sh"    # resolved relative to this config.toml
 #
 #   [[mounts]]
 #   host = "~/.cargo"

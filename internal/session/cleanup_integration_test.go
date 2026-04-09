@@ -85,7 +85,7 @@ func TestEndToEndCleanupWithOpenMode(t *testing.T) {
 	}
 
 	// Launch container (non-ephemeral)
-	if err := mgr.Launch("coi-default", false); err != nil {
+	if err := mgr.Launch("coi-default", false, ""); err != nil {
 		t.Fatalf("Failed to launch container: %v", err)
 	}
 
@@ -219,7 +219,7 @@ func TestEndToEndCleanupWithRestrictedMode(t *testing.T) {
 	}
 
 	// Launch container (non-ephemeral)
-	if err := mgr.Launch("coi-default", false); err != nil {
+	if err := mgr.Launch("coi-default", false, ""); err != nil {
 		t.Fatalf("Failed to launch container: %v", err)
 	}
 
@@ -351,7 +351,7 @@ func TestEndToEndCleanupMultipleContainers(t *testing.T) {
 		}
 
 		// Launch container
-		if err := mgr.Launch("coi-default", false); err != nil {
+		if err := mgr.Launch("coi-default", false, ""); err != nil {
 			t.Fatalf("Failed to launch container %s: %v", containerName, err)
 		}
 

@@ -108,6 +108,11 @@ type ContainerInfo struct {
 	CreatedAt string
 	Image     string
 	IPv4      string
+	// Pool is the storage pool the container's root device lives in.
+	// Sourced from expanded_devices.root.pool in `incus list --format=json`,
+	// which already reflects profile defaults — so this is the actual pool
+	// being used, not the configured one.
+	Pool string
 }
 
 // SessionInfo holds information about a saved session
@@ -152,12 +157,18 @@ func listActiveContainers() ([]ContainerInfo, error) {
 		// Extract IPv4 address from eth0 interface
 		ipv4 := extractEth0IPv4(c)
 
+		// Extract storage pool from expanded_devices.root.pool — this is the
+		// actual pool the container's root disk lives in, after profile
+		// expansion. No extra Incus call needed.
+		pool := extractRootPool(c)
+
 		result = append(result, ContainerInfo{
 			Name:      name,
 			Status:    status,
 			CreatedAt: createdTime,
 			Image:     image,
 			IPv4:      ipv4,
+			Pool:      pool,
 		})
 	}
 
@@ -230,6 +241,23 @@ func listSavedSessions(sessionsDir string, toolInstance tool.Tool) ([]SessionInf
 	return result, nil
 }
 
+// extractRootPool returns the storage pool name of the container's root disk
+// device, as reported in expanded_devices.root.pool. Returns "" if the field
+// is missing (e.g., the container has no root device override and Incus is
+// using a profile default that the JSON projection doesn't include).
+func extractRootPool(c map[string]interface{}) string {
+	expanded, ok := c["expanded_devices"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	root, ok := expanded["root"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	pool, _ := root["pool"].(string)
+	return pool
+}
+
 // extractEth0IPv4 extracts the IPv4 address from the eth0 interface
 func extractEth0IPv4(container map[string]interface{}) string {
 	// Get state object
@@ -287,6 +315,7 @@ func outputJSON(containers []ContainerInfo, sessions []SessionInfo,
 			"image":      c.Image,
 			"persistent": persistent[c.Name],
 			"ipv4":       c.IPv4,
+			"pool":       c.Pool,
 		}
 		if ws, ok := workspaces[c.Name]; ok {
 			item["workspace"] = ws
@@ -339,6 +368,9 @@ func outputText(containers []ContainerInfo, sessions []SessionInfo,
 			fmt.Printf("    Created: %s\n", c.CreatedAt)
 			if c.Image != "" {
 				fmt.Printf("    Image: %s\n", c.Image)
+			}
+			if c.Pool != "" {
+				fmt.Printf("    Pool: %s\n", c.Pool)
 			}
 			// Show workspace if we have it from session metadata
 			if workspace, ok := workspaces[c.Name]; ok && workspace != "" {

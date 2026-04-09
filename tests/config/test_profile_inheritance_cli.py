@@ -14,11 +14,13 @@ def test_profile_inherits_shown_in_show(coi_binary, cleanup_containers, workspac
 
     parent_dir = coi_dir / "parent"
     parent_dir.mkdir(parents=True)
-    (parent_dir / "config.toml").write_text('image = "coi-parent"\n')
+    (parent_dir / "config.toml").write_text('[container]\nimage = "coi-parent"\n')
 
     child_dir = coi_dir / "child"
     child_dir.mkdir(parents=True)
-    (child_dir / "config.toml").write_text('inherits = "parent"\nimage = "coi-child"\n')
+    (child_dir / "config.toml").write_text(
+        'inherits = "parent"\n[container]\nimage = "coi-child"\n'
+    )
 
     result = subprocess.run(
         [coi_binary, "profile", "info", "child", "--workspace", workspace_dir],
@@ -43,11 +45,13 @@ def test_profile_inherits_shown_in_list(coi_binary, cleanup_containers, workspac
 
     parent_dir = coi_dir / "parent"
     parent_dir.mkdir(parents=True)
-    (parent_dir / "config.toml").write_text('image = "coi-parent"\n')
+    (parent_dir / "config.toml").write_text('[container]\nimage = "coi-parent"\n')
 
     child_dir = coi_dir / "child"
     child_dir.mkdir(parents=True)
-    (child_dir / "config.toml").write_text('inherits = "parent"\nimage = "coi-child"\n')
+    (child_dir / "config.toml").write_text(
+        'inherits = "parent"\n[container]\nimage = "coi-child"\n'
+    )
 
     result = subprocess.run(
         [coi_binary, "profile", "list", "--workspace", workspace_dir],

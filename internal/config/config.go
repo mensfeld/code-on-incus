@@ -10,6 +10,7 @@ import (
 
 // Config represents the complete configuration
 type Config struct {
+	Container          ContainerConfig          `toml:"container"`
 	Defaults           DefaultsConfig           `toml:"defaults"`
 	Paths              PathsConfig              `toml:"paths"`
 	Incus              IncusConfig              `toml:"incus"`
@@ -22,7 +23,6 @@ type Config struct {
 	Security           SecurityConfig           `toml:"security"`
 	Monitoring         MonitoringConfig         `toml:"monitoring"`
 	Timezone           TimezoneConfig           `toml:"timezone"`
-	Build              BuildConfig              `toml:"build"`
 	Profiles           map[string]ProfileConfig `toml:"-"` // Populated by loadProfileDirectories, not from TOML
 	ProfileContextFile string                   `toml:"-"` // Set by ApplyProfile, read by session setup
 }
@@ -37,6 +37,26 @@ type BuildConfig struct {
 // HasBuildConfig returns true if a build configuration is defined (script or commands)
 func (b *BuildConfig) HasBuildConfig() bool {
 	return b.Script != "" || len(b.Commands) > 0
+}
+
+// ContainerConfig consolidates container-shape settings introduced in 0.8.0:
+// image, persistence, storage pool, and build configuration.
+// Replaces the legacy split of [defaults] image, [defaults] persistent,
+// and top-level [build]. The same struct is embedded in both Config and
+// ProfileConfig so global and profile configs are symmetric.
+type ContainerConfig struct {
+	Image       string      `toml:"image"`
+	Persistent  *bool       `toml:"persistent"`
+	StoragePool string      `toml:"storage_pool"`
+	Build       BuildConfig `toml:"build"`
+}
+
+// HasContainerConfig reports whether any field is set.
+func (c *ContainerConfig) HasContainerConfig() bool {
+	return c.Image != "" ||
+		c.Persistent != nil ||
+		c.StoragePool != "" ||
+		c.Build.HasBuildConfig()
 }
 
 // TimezoneConfig contains timezone settings for containers
@@ -81,8 +101,6 @@ func (s *SecurityConfig) GetEffectiveProtectedPaths() []string {
 
 // DefaultsConfig contains default settings
 type DefaultsConfig struct {
-	Image       string            `toml:"image"`
-	Persistent  *bool             `toml:"persistent"`
 	Model       string            `toml:"model"`
 	ForwardEnv  []string          `toml:"forward_env"`
 	Environment map[string]string `toml:"environment"`
@@ -137,13 +155,11 @@ type NetworkLoggingConfig struct {
 // ProfileConfig represents a named profile
 type ProfileConfig struct {
 	Inherits    string            `toml:"inherits"` // Parent profile name for inheritance
-	Image       string            `toml:"image"`
+	Container   ContainerConfig   `toml:"container"`
 	Context     string            `toml:"context"` // Path to context .md file (resolved relative to profile dir)
 	Environment map[string]string `toml:"environment"`
-	Persistent  *bool             `toml:"persistent"`
 	Limits      *LimitsConfig     `toml:"limits"`
 	Tool        *ToolConfig       `toml:"tool"`
-	Build       *BuildConfig      `toml:"build"`
 	Mounts      []MountEntry      `toml:"mounts"`
 	Network     *NetworkConfig    `toml:"network"`
 	ForwardEnv  []string          `toml:"forward_env"`
@@ -321,9 +337,11 @@ func synthesizeDefaultProfile(cfg *Config) ProfileConfig {
 	monitoring := cfg.Monitoring
 	timezone := cfg.Timezone
 
+	container := cfg.Container
+	container.Build.Commands = cloneSlice(cfg.Container.Build.Commands)
+
 	p := ProfileConfig{
-		Image:       cfg.Defaults.Image,
-		Persistent:  cfg.Defaults.Persistent,
+		Container:   container,
 		Model:       cfg.Defaults.Model,
 		Environment: cloneMap(cfg.Defaults.Environment),
 		ForwardEnv:  cloneSlice(cfg.Defaults.ForwardEnv),
@@ -339,11 +357,6 @@ func synthesizeDefaultProfile(cfg *Config) ProfileConfig {
 		Monitoring:  &monitoring,
 		Timezone:    &timezone,
 		Source:      "(built-in)",
-	}
-	if cfg.Build.HasBuildConfig() {
-		build := cfg.Build
-		build.Commands = cloneSlice(cfg.Build.Commands)
-		p.Build = &build
 	}
 	return p
 }
@@ -442,15 +455,12 @@ func ExpandPath(path string) string {
 
 // Merge merges another config into this one (other takes precedence)
 func (c *Config) Merge(other *Config) {
+	// Merge container settings
+	applyContainerConfig(&c.Container, &other.Container)
+
 	// Merge defaults
-	if other.Defaults.Image != "" {
-		c.Defaults.Image = other.Defaults.Image
-	}
 	if other.Defaults.Model != "" {
 		c.Defaults.Model = other.Defaults.Model
-	}
-	if other.Defaults.Persistent != nil {
-		c.Defaults.Persistent = other.Defaults.Persistent
 	}
 
 	// Merge forward_env (append without duplicates)
@@ -595,17 +605,6 @@ func (c *Config) Merge(other *Config) {
 	if other.Timezone.Name != "" {
 		c.Timezone.Name = other.Timezone.Name
 	}
-
-	// Merge build config
-	if other.Build.Base != "" {
-		c.Build.Base = other.Build.Base
-	}
-	if other.Build.Script != "" {
-		c.Build.Script = other.Build.Script
-	}
-	if len(other.Build.Commands) > 0 {
-		c.Build.Commands = other.Build.Commands
-	}
 }
 
 // mergeLimits merges limit configurations (other takes precedence)
@@ -743,12 +742,7 @@ func (c *Config) ApplyProfile(name string) error {
 		return err
 	}
 
-	if profile.Image != "" {
-		c.Defaults.Image = profile.Image
-	}
-	if profile.Persistent != nil {
-		c.Defaults.Persistent = profile.Persistent
-	}
+	applyContainerConfig(&c.Container, &profile.Container)
 	if profile.Model != "" {
 		c.Defaults.Model = profile.Model
 	}
@@ -780,7 +774,6 @@ func (c *Config) ApplyProfile(name string) error {
 		mergeMonitoring(&c.Monitoring, profile.Monitoring)
 	}
 	applyToolConfig(&c.Tool, profile.Tool)
-	applyBuildConfig(&c.Build, profile.Build)
 	applyNetworkConfig(&c.Network, profile.Network)
 	applyPathsConfig(&c.Paths, profile.Paths)
 	applyIncusConfig(&c.Incus, profile.Incus)
@@ -829,6 +822,24 @@ func applyBuildConfig(dst *BuildConfig, src *BuildConfig) {
 	if len(src.Commands) > 0 {
 		dst.Commands = src.Commands
 	}
+}
+
+// applyContainerConfig merges src into dst for the container-shape section.
+// Used by ApplyProfile and the inheritance resolver.
+func applyContainerConfig(dst *ContainerConfig, src *ContainerConfig) {
+	if src == nil {
+		return
+	}
+	if src.Image != "" {
+		dst.Image = src.Image
+	}
+	if src.Persistent != nil {
+		dst.Persistent = src.Persistent
+	}
+	if src.StoragePool != "" {
+		dst.StoragePool = src.StoragePool
+	}
+	mergeBuildInto(&dst.Build, &src.Build)
 }
 
 func applyNetworkConfig(dst *NetworkConfig, src *NetworkConfig) {
@@ -954,15 +965,14 @@ const maxInheritanceDepth = 10
 func mergeProfiles(parent, child ProfileConfig) ProfileConfig {
 	result := child
 
+	// Container section: deep field-by-field merge starting from parent
+	mergedContainer := parent.Container
+	applyContainerConfig(&mergedContainer, &child.Container)
+	result.Container = mergedContainer
+
 	// Scalars: child overrides parent if set
-	if result.Image == "" {
-		result.Image = parent.Image
-	}
 	if result.Context == "" {
 		result.Context = parent.Context
-	}
-	if result.Persistent == nil {
-		result.Persistent = parent.Persistent
 	}
 
 	// Maps: deep merge — parent keys preserved, child keys override
@@ -993,7 +1003,6 @@ func mergeProfiles(parent, child ProfileConfig) ProfileConfig {
 	// Struct pointers: deep field-by-field merge if child defines section
 	result.Limits = mergeStructPtr(parent.Limits, result.Limits, mergeLimitsInto)
 	result.Tool = mergeStructPtr(parent.Tool, result.Tool, mergeToolInto)
-	result.Build = mergeStructPtr(parent.Build, result.Build, mergeBuildInto)
 	result.Network = mergeStructPtr(parent.Network, result.Network, mergeNetworkInto)
 	result.Monitoring = mergeStructPtr(parent.Monitoring, result.Monitoring, mergeMonitoringInto)
 
@@ -1267,9 +1276,9 @@ func (p *ProfileConfig) Validate(name string) error {
 	}
 
 	// Validate build script exists if specified
-	if p.Build != nil && p.Build.Script != "" {
-		if _, err := os.Stat(p.Build.Script); err != nil {
-			return fmt.Errorf("profile '%s': build script %q does not exist", name, p.Build.Script)
+	if p.Container.Build.Script != "" {
+		if _, err := os.Stat(p.Container.Build.Script); err != nil {
+			return fmt.Errorf("profile '%s': build script %q does not exist", name, p.Container.Build.Script)
 		}
 	}
 

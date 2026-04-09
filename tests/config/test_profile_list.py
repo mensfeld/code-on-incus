@@ -19,7 +19,7 @@ def test_profile_list_directory(coi_binary, cleanup_containers, workspace_dir):
     for name, image in [("rust", "coi-rust"), ("python", "coi-python")]:
         profile_dir = Path(workspace_dir) / ".coi" / "profiles" / name
         profile_dir.mkdir(parents=True)
-        (profile_dir / "config.toml").write_text(f'image = "{image}"\n')
+        (profile_dir / "config.toml").write_text(f'[container]\nimage = "{image}"\n')
 
     result = subprocess.run(
         [
@@ -76,7 +76,7 @@ def test_profile_list_multiple_directories(coi_binary, cleanup_containers, works
     for name, image in [("from-dir-a", "dir-img-a"), ("from-dir-b", "dir-img-b")]:
         profile_dir = Path(workspace_dir) / ".coi" / "profiles" / name
         profile_dir.mkdir(parents=True)
-        (profile_dir / "config.toml").write_text(f'image = "{image}"\n')
+        (profile_dir / "config.toml").write_text(f'[container]\nimage = "{image}"\n')
 
     result = subprocess.run(
         [

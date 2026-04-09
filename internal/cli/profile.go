@@ -57,21 +57,23 @@ Examples:
 
 		if profileFormat == "json" {
 			type profileEntry struct {
-				Name       string `json:"name"`
-				Image      string `json:"image"`
-				Persistent *bool  `json:"persistent"`
-				Inherits   string `json:"inherits,omitempty"`
-				Source     string `json:"source,omitempty"`
+				Name        string `json:"name"`
+				Image       string `json:"image"`
+				Persistent  *bool  `json:"persistent"`
+				StoragePool string `json:"storage_pool,omitempty"`
+				Inherits    string `json:"inherits,omitempty"`
+				Source      string `json:"source,omitempty"`
 			}
 			entries := make([]profileEntry, 0, len(names))
 			for _, name := range names {
 				p := cfg.Profiles[name]
 				entries = append(entries, profileEntry{
-					Name:       name,
-					Image:      p.Image,
-					Persistent: p.Persistent,
-					Inherits:   p.Inherits,
-					Source:     p.Source,
+					Name:        name,
+					Image:       p.Container.Image,
+					Persistent:  p.Container.Persistent,
+					StoragePool: p.Container.StoragePool,
+					Inherits:    p.Inherits,
+					Source:      p.Source,
 				})
 			}
 			jsonData, err := json.MarshalIndent(entries, "", "  ")
@@ -85,13 +87,13 @@ Examples:
 		tbl := NewTable("NAME", "IMAGE", "PERSISTENT", "INHERITS", "SOURCE")
 		for _, name := range names {
 			p := cfg.Profiles[name]
-			image := p.Image
+			image := p.Container.Image
 			if image == "" {
 				image = "(default)"
 			}
 			persistent := "-"
-			if p.Persistent != nil {
-				if *p.Persistent {
+			if p.Container.Persistent != nil {
+				if *p.Container.Persistent {
 					persistent = "true"
 				} else {
 					persistent = "false"
@@ -137,20 +139,28 @@ Examples:
 		if p.Inherits != "" {
 			fmt.Printf("inherits = %q\n", p.Inherits)
 		}
-		if p.Image != "" {
-			fmt.Printf("image = %q\n", p.Image)
-		}
 		if p.Context != "" {
 			fmt.Printf("context = %q\n", p.Context)
-		}
-		if p.Persistent != nil {
-			fmt.Printf("persistent = %v\n", *p.Persistent)
 		}
 		if p.Model != "" {
 			fmt.Printf("model = %q\n", p.Model)
 		}
 		if len(p.ForwardEnv) > 0 {
 			fmt.Printf("forward_env = [%s]\n", formatStringSlice(p.ForwardEnv))
+		}
+
+		if p.Container.HasContainerConfig() {
+			fmt.Println()
+			fmt.Println("[container]")
+			if p.Container.Image != "" {
+				fmt.Printf("image = %q\n", p.Container.Image)
+			}
+			if p.Container.Persistent != nil {
+				fmt.Printf("persistent = %v\n", *p.Container.Persistent)
+			}
+			if p.Container.StoragePool != "" {
+				fmt.Printf("storage_pool = %q\n", p.Container.StoragePool)
+			}
 		}
 
 		if len(p.Environment) > 0 {
@@ -191,17 +201,17 @@ Examples:
 			}
 		}
 
-		if p.Build != nil {
+		if p.Container.Build.HasBuildConfig() {
 			fmt.Println()
-			fmt.Println("[build]")
-			if p.Build.Base != "" {
-				fmt.Printf("base = %q\n", p.Build.Base)
+			fmt.Println("[container.build]")
+			if p.Container.Build.Base != "" {
+				fmt.Printf("base = %q\n", p.Container.Build.Base)
 			}
-			if p.Build.Script != "" {
-				fmt.Printf("script = %q\n", p.Build.Script)
+			if p.Container.Build.Script != "" {
+				fmt.Printf("script = %q\n", p.Container.Build.Script)
 			}
-			if len(p.Build.Commands) > 0 {
-				fmt.Printf("commands = [%s]\n", formatStringSlice(p.Build.Commands))
+			if len(p.Container.Build.Commands) > 0 {
+				fmt.Printf("commands = [%s]\n", formatStringSlice(p.Container.Build.Commands))
 			}
 		}
 
@@ -492,20 +502,27 @@ Examples:
 
 		// Build TOML content from flags
 		// Note: --image and --persistent are inherited from root PersistentFlags
-		var lines []string
-		if cmd.Flags().Changed("image") {
-			lines = append(lines, fmt.Sprintf("image = %q", imageName))
-		}
+		var topLines []string
+		var containerLines []string
 		if inherits, _ := cmd.Flags().GetString("inherits"); inherits != "" {
-			lines = append(lines, fmt.Sprintf("inherits = %q", inherits))
+			topLines = append(topLines, fmt.Sprintf("inherits = %q", inherits))
+		}
+		if cmd.Flags().Changed("image") {
+			containerLines = append(containerLines, fmt.Sprintf("image = %q", imageName))
 		}
 		if cmd.Flags().Changed("persistent") {
-			lines = append(lines, "persistent = true")
+			containerLines = append(containerLines, "persistent = true")
 		}
 
-		content := strings.Join(lines, "\n")
-		if content != "" {
-			content += "\n"
+		var content string
+		if len(topLines) > 0 {
+			content += strings.Join(topLines, "\n") + "\n"
+		}
+		if len(containerLines) > 0 {
+			if content != "" {
+				content += "\n"
+			}
+			content += "[container]\n" + strings.Join(containerLines, "\n") + "\n"
 		}
 
 		// Create directory and write config

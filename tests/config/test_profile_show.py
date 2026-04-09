@@ -19,9 +19,11 @@ def test_profile_show_full(coi_binary, cleanup_containers, workspace_dir):
     profile_dir.mkdir(parents=True)
     (profile_dir / "config.toml").write_text(
         """
+forward_env = ["MY_KEY"]
+
+[container]
 image = "coi-full"
 persistent = true
-forward_env = ["MY_KEY"]
 
 [environment]
 MY_VAR = "hello"
@@ -108,7 +110,7 @@ def test_profile_show_empty_directory_profile(coi_binary, cleanup_containers, wo
     """
     profile_dir = Path(workspace_dir) / ".coi" / "profiles" / "minimal"
     profile_dir.mkdir(parents=True)
-    (profile_dir / "config.toml").write_text('image = "coi-default"\n')
+    (profile_dir / "config.toml").write_text('[container]\nimage = "coi-default"\n')
 
     result = subprocess.run(
         [

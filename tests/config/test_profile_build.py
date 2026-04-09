@@ -2,7 +2,7 @@
 Test profile-specific build configuration.
 
 Tests that:
-1. Profile [build] section with script is resolved relative to profile directory
+1. Profile [container.build] section with script is resolved relative to profile directory
 2. Non-existent build script in profile produces a clear error
 3. Profile build commands work as alternative to script
 """
@@ -22,7 +22,7 @@ def test_profile_build_script_relative_resolution(coi_binary, cleanup_containers
     profile_dir.mkdir(parents=True)
     (profile_dir / "config.toml").write_text(
         """
-[build]
+[container.build]
 base = "coi-default"
 script = "build.sh"
 """
@@ -67,9 +67,10 @@ def test_profile_nonexistent_build_script(coi_binary, cleanup_containers, worksp
     profile_dir.mkdir(parents=True)
     (profile_dir / "config.toml").write_text(
         """
+[container]
 image = "coi-nonexistent-image-xyz"
 
-[build]
+[container.build]
 base = "coi-default"
 script = "does-not-exist.sh"
 """
@@ -128,7 +129,7 @@ def test_profile_build_commands(coi_binary, cleanup_containers, workspace_dir):
     profile_dir.mkdir(parents=True)
     (profile_dir / "config.toml").write_text(
         """
-[build]
+[container.build]
 base = "coi-default"
 commands = ["echo hello", "echo world"]
 """

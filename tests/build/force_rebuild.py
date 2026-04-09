@@ -26,7 +26,7 @@ def test_build_custom_force_rebuild(coi_binary, tmp_path):
     profile_dir.mkdir(parents=True)
 
     (profile_dir / "config.toml").write_text(
-        f'image = "{image_name}"\n\n[build]\nscript = "build.sh"\n'
+        f'[container]\nimage = "{image_name}"\n\n[container.build]\nscript = "build.sh"\n'
     )
 
     build_script = profile_dir / "build.sh"

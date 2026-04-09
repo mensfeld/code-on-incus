@@ -756,11 +756,12 @@ func TestCheckMonitoringConfiguration(t *testing.T) {
 		result.Message, result.Details["enabled"])
 }
 
-// CheckIncusStoragePool should return sane values: non-negative free space, used percentage
-// between 0 and 100, and positive total space. This guards against the unit-mismatch bug where
-// Incus reports "space used" in MiB and "total space" in GiB on fresh pools, which previously
+// CheckIncusStoragePools should return sane values for every inspected pool:
+// non-negative free space, used percentage between 0 and 100, and positive
+// total space. This guards against the unit-mismatch bug where Incus reports
+// "space used" in MiB and "total space" in GiB on fresh pools, which previously
 // caused negative free space and >100% usage.
-func TestCheckIncusStoragePool_SaneValues(t *testing.T) {
+func TestCheckIncusStoragePools_SaneValues(t *testing.T) {
 	if _, err := exec.LookPath("incus"); err != nil {
 		t.Skip("incus not found, skipping integration test")
 	}
@@ -769,10 +770,11 @@ func TestCheckIncusStoragePool_SaneValues(t *testing.T) {
 		t.Skip("incus daemon not running, skipping integration test")
 	}
 
-	result := CheckIncusStoragePool()
+	// Pass nil to exercise the default-pool fallback path.
+	result := CheckIncusStoragePools(nil)
 
-	if result.Name != "incus_storage_pool" {
-		t.Errorf("Expected check name 'incus_storage_pool', got %q", result.Name)
+	if result.Name != "incus_storage_pools" {
+		t.Errorf("Expected check name 'incus_storage_pools', got %q", result.Name)
 	}
 
 	// The check must return a valid status
@@ -780,44 +782,56 @@ func TestCheckIncusStoragePool_SaneValues(t *testing.T) {
 		t.Errorf("Unexpected status: %s", result.Status)
 	}
 
-	// If we got a warning about parsing or querying, the pool may not exist — skip
-	if result.Details == nil {
-		t.Skipf("No details returned (pool may not exist): %s", result.Message)
+	if len(result.Details) == 0 {
+		t.Skipf("No per-pool details returned (no pools resolvable): %s", result.Message)
 	}
 
-	// Verify expected detail keys exist and have the right types
-	for _, key := range []string{"pool", "used_gib", "total_gib", "free_gib", "used_pct"} {
-		if _, ok := result.Details[key]; !ok {
-			t.Errorf("Expected %q key in details", key)
+	for poolName, raw := range result.Details {
+		entry, ok := raw.(map[string]interface{})
+		if !ok {
+			t.Errorf("Expected details[%q] to be map[string]interface{}, got %T", poolName, raw)
+			continue
 		}
-	}
 
-	totalGiB, ok := result.Details["total_gib"].(float64)
-	if !ok {
-		t.Fatalf("Expected details[\"total_gib\"] to be float64, got %T", result.Details["total_gib"])
-	}
-	freeGiB, ok := result.Details["free_gib"].(float64)
-	if !ok {
-		t.Fatalf("Expected details[\"free_gib\"] to be float64, got %T", result.Details["free_gib"])
-	}
-	usedPct, ok := result.Details["used_pct"].(float64)
-	if !ok {
-		t.Fatalf("Expected details[\"used_pct\"] to be float64, got %T", result.Details["used_pct"])
-	}
+		// Pools that failed to query won't have usage stats — skip them with a log.
+		if statusStr, _ := entry["status"].(string); statusStr == string(StatusFailed) {
+			t.Logf("Pool %q reported failed status: %v", poolName, entry)
+			continue
+		}
 
-	// The core regression assertions: these failed before the unit-normalisation fix
-	if totalGiB <= 0 {
-		t.Errorf("total_gib should be positive, got %f", totalGiB)
-	}
-	if freeGiB < 0 {
-		t.Errorf("free_gib should be non-negative, got %f (was negative before the MiB/GiB fix)", freeGiB)
-	}
-	if usedPct < 0 || usedPct > 100 {
-		t.Errorf("used_pct should be 0-100, got %f (was >100%% before the MiB/GiB fix)", usedPct)
-	}
+		for _, key := range []string{"used_gib", "total_gib", "free_gib", "used_pct"} {
+			if _, ok := entry[key]; !ok {
+				t.Errorf("Expected %q key in details[%q]", key, poolName)
+			}
+		}
 
-	t.Logf("CheckIncusStoragePool: status=%s pool=%v total=%.2f GiB free=%.2f GiB used=%.0f%%",
-		result.Status, result.Details["pool"], totalGiB, freeGiB, usedPct)
+		totalGiB, ok := entry["total_gib"].(float64)
+		if !ok {
+			t.Fatalf("Expected details[%q][\"total_gib\"] to be float64, got %T", poolName, entry["total_gib"])
+		}
+		freeGiB, ok := entry["free_gib"].(float64)
+		if !ok {
+			t.Fatalf("Expected details[%q][\"free_gib\"] to be float64, got %T", poolName, entry["free_gib"])
+		}
+		usedPct, ok := entry["used_pct"].(float64)
+		if !ok {
+			t.Fatalf("Expected details[%q][\"used_pct\"] to be float64, got %T", poolName, entry["used_pct"])
+		}
+
+		// The core regression assertions: these failed before the unit-normalisation fix
+		if totalGiB <= 0 {
+			t.Errorf("pool %q total_gib should be positive, got %f", poolName, totalGiB)
+		}
+		if freeGiB < 0 {
+			t.Errorf("pool %q free_gib should be non-negative, got %f (was negative before the MiB/GiB fix)", poolName, freeGiB)
+		}
+		if usedPct < 0 || usedPct > 100 {
+			t.Errorf("pool %q used_pct should be 0-100, got %f (was >100%% before the MiB/GiB fix)", poolName, usedPct)
+		}
+
+		t.Logf("CheckIncusStoragePools[%s]: total=%.2f GiB free=%.2f GiB used=%.0f%%",
+			poolName, totalGiB, freeGiB, usedPct)
+	}
 }
 
 // CheckProcessMonitoringCapability should complete with a definitive status (OK/Warning/Failed)
@@ -836,7 +850,7 @@ func TestCheckProcessMonitoringCapability(t *testing.T) {
 	// Get default image
 	cfg := config.GetDefaultConfig()
 
-	result := CheckProcessMonitoringCapability(cfg.Defaults.Image)
+	result := CheckProcessMonitoringCapability(cfg.Container.Image)
 
 	if result.Name != "process_monitoring" {
 		t.Errorf("Expected check name 'process_monitoring', got '%s'", result.Name)

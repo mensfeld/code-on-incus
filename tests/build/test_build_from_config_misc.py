@@ -5,7 +5,7 @@ Tests:
 - Build skip when image exists (no rebuild)
 - Build --force when image exists (rebuild)
 - Missing script → clear error
-- No [build] section → builds base coi image (fallback)
+- No [container.build] section → builds base coi image (fallback)
 """
 
 import subprocess
@@ -43,10 +43,10 @@ def test_build_skip_when_image_exists(coi_binary, workspace_dir):
     config_dir.mkdir(exist_ok=True)
     (config_dir / "config.toml").write_text(
         f"""
-[defaults]
+[container]
 image = "{image_name}"
 
-[build]
+[container.build]
 commands = ["echo built"]
 """
     )
@@ -109,10 +109,10 @@ def test_build_force_rebuild(coi_binary, workspace_dir):
     config_dir.mkdir(exist_ok=True)
     (config_dir / "config.toml").write_text(
         f"""
-[defaults]
+[container]
 image = "{image_name}"
 
-[build]
+[container.build]
 commands = ["echo rebuilt"]
 """
     )
@@ -158,10 +158,10 @@ def test_build_missing_script_error(coi_binary, workspace_dir):
     config_dir.mkdir(exist_ok=True)
     (config_dir / "config.toml").write_text(
         f"""
-[defaults]
+[container]
 image = "{image_name}"
 
-[build]
+[container.build]
 script = "nonexistent-build.sh"
 """
     )
@@ -183,16 +183,16 @@ script = "nonexistent-build.sh"
 
 def test_build_no_config_fallback(coi_binary, workspace_dir):
     """
-    Test that 'coi build' without [build] section falls back to building base coi image.
+    Test that 'coi build' without [container.build] section falls back to building base coi image.
 
     We just verify it doesn't crash and attempts to build the coi image.
     """
-    # Create .coi/config.toml without [build] section
+    # Create .coi/config.toml without [container.build] section
     config_dir = Path(workspace_dir) / ".coi"
     config_dir.mkdir(exist_ok=True)
     (config_dir / "config.toml").write_text(
         """
-[defaults]
+[container]
 image = "coi-default"
 """
     )

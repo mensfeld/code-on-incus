@@ -37,7 +37,7 @@ func TestSetTmpfsSize(t *testing.T) {
 		_ = mgr.Delete(true)
 	}
 
-	if err := mgr.Launch("coi-default", false); err != nil {
+	if err := mgr.Launch("coi-default", false, ""); err != nil {
 		t.Fatalf("Failed to launch container: %v", err)
 	}
 
@@ -111,7 +111,7 @@ func TestTmpDefaultUsesDisk(t *testing.T) {
 	}
 
 	// Launch with no SetTmpfsSize call — this is the default code path.
-	if err := mgr.Launch("coi-default", false); err != nil {
+	if err := mgr.Launch("coi-default", false, ""); err != nil {
 		t.Fatalf("Failed to launch container: %v", err)
 	}
 

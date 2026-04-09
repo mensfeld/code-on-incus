@@ -71,7 +71,7 @@ def test_health_json_output(coi_binary):
         "security_posture",
         "network_bridge",
         "disk_space",
-        "incus_storage_pool",
+        "incus_storage_pools",
     ]
     for check_name in expected_checks:
         assert check_name in checks, f"Should have '{check_name}' check"

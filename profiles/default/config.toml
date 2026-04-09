@@ -2,9 +2,12 @@
 # This file is embedded into the binary and parsed by GetDefaultConfig().
 # All values here define the system defaults.
 
-[defaults]
+[container]
 image = "coi-default"
 persistent = false
+storage_pool = ""
+
+[defaults]
 model = "claude-sonnet-4-5"
 
 [paths]

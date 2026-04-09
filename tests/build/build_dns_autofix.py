@@ -85,7 +85,7 @@ def _create_profile(
     profile_dir.mkdir(parents=True, exist_ok=True)
 
     (profile_dir / "config.toml").write_text(
-        f'image = "{image_name}"\n\n[build]\nbase = "{base}"\nscript = "build.sh"\n'
+        f'[container]\nimage = "{image_name}"\n\n[container.build]\nbase = "{base}"\nscript = "build.sh"\n'
     )
 
     (profile_dir / "build.sh").write_text(build_script_content)

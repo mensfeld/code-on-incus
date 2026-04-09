@@ -2,11 +2,11 @@
 Test error and edge cases for build-from-config.
 
 Tests:
-- [build] with defaults.image = "coi-default" → falls back to base build (no config build)
-- [build] with no defaults.image set → falls back to base build
-- [build] with base image that doesn't exist → clear error
-- [build] with empty commands array → falls back to base build
-- [build] with only base= set (no script/commands) → falls back to base build
+- [container.build] with container.image = "coi-default" → falls back to base build (no config build)
+- [container.build] with no container.image set → falls back to base build
+- [container.build] with base image that doesn't exist → clear error
+- [container.build] with empty commands array → falls back to base build
+- [container.build] with only base= set (no script/commands) → falls back to base build
 - Missing script via explicit 'coi build' → clear error
 - Commands that fail during build → build error propagated
 """
@@ -28,17 +28,17 @@ def skip_without_coi(coi_binary):
 
 def test_build_config_image_is_coi_falls_back(coi_binary, workspace_dir):
     """
-    [build] with defaults.image = "coi-default" should NOT trigger config build.
+    [container.build] with container.image = "coi-default" should NOT trigger config build.
     Falls back to building the base coi image.
     """
     config_dir = Path(workspace_dir) / ".coi"
     config_dir.mkdir(exist_ok=True)
     (config_dir / "config.toml").write_text(
         """
-[defaults]
+[container]
 image = "coi-default"
 
-[build]
+[container.build]
 commands = ["echo should-not-be-used-as-custom-build"]
 """
     )
@@ -62,13 +62,13 @@ commands = ["echo should-not-be-used-as-custom-build"]
 
 def test_build_config_no_image_set_falls_back(coi_binary, workspace_dir):
     """
-    [build] without defaults.image set → falls back to base coi build.
+    [container.build] without container.image set → falls back to base coi build.
     """
     config_dir = Path(workspace_dir) / ".coi"
     config_dir.mkdir(exist_ok=True)
     (config_dir / "config.toml").write_text(
         """
-[build]
+[container.build]
 commands = ["echo orphan-build-config"]
 """
     )
@@ -87,7 +87,7 @@ commands = ["echo orphan-build-config"]
 
 def test_build_config_nonexistent_base_image(coi_binary, workspace_dir):
     """
-    [build] with base image that doesn't exist → clear error.
+    [container.build] with base image that doesn't exist → clear error.
     """
     image_name = "coi-test-bad-base-explicit"
 
@@ -95,10 +95,10 @@ def test_build_config_nonexistent_base_image(coi_binary, workspace_dir):
     config_dir.mkdir(exist_ok=True)
     (config_dir / "config.toml").write_text(
         f"""
-[defaults]
+[container]
 image = "{image_name}"
 
-[build]
+[container.build]
 base = "coi-nonexistent-base-99999"
 commands = ["echo hello"]
 """
@@ -123,17 +123,17 @@ commands = ["echo hello"]
 
 def test_build_config_empty_commands_errors(coi_binary, workspace_dir):
     """
-    [build] with commands = [] (empty array) → no valid build config,
+    [container.build] with commands = [] (empty array) → no valid build config,
     errors because custom image has no build script or commands.
     """
     config_dir = Path(workspace_dir) / ".coi"
     config_dir.mkdir(exist_ok=True)
     (config_dir / "config.toml").write_text(
         """
-[defaults]
+[container]
 image = "coi-test-empty-cmds"
 
-[build]
+[container.build]
 commands = []
 """
     )
@@ -156,17 +156,17 @@ commands = []
 
 def test_build_config_only_base_no_script_or_commands(coi_binary, workspace_dir):
     """
-    [build] with only base= set (no script or commands) → errors.
+    [container.build] with only base= set (no script or commands) → errors.
     base= alone is not enough to constitute a build config for a custom image.
     """
     config_dir = Path(workspace_dir) / ".coi"
     config_dir.mkdir(exist_ok=True)
     (config_dir / "config.toml").write_text(
         """
-[defaults]
+[container]
 image = "coi-test-base-only"
 
-[build]
+[container.build]
 base = "coi-default"
 """
     )
@@ -197,10 +197,10 @@ def test_build_missing_script_explicit_build(coi_binary, workspace_dir):
     config_dir.mkdir(exist_ok=True)
     (config_dir / "config.toml").write_text(
         f"""
-[defaults]
+[container]
 image = "{image_name}"
 
-[build]
+[container.build]
 script = "nonexistent-build.sh"
 """
     )
@@ -237,10 +237,10 @@ def test_build_script_that_fails(coi_binary, workspace_dir):
     config_dir.mkdir(exist_ok=True)
     (config_dir / "config.toml").write_text(
         f"""
-[defaults]
+[container]
 image = "{image_name}"
 
-[build]
+[container.build]
 script = "failing-build.sh"
 """
     )
@@ -286,10 +286,10 @@ def test_build_commands_that_fail(coi_binary, workspace_dir):
     config_dir.mkdir(exist_ok=True)
     (config_dir / "config.toml").write_text(
         f"""
-[defaults]
+[container]
 image = "{image_name}"
 
-[build]
+[container.build]
 commands = ["echo starting", "false", "echo should-not-reach"]
 """
     )
@@ -309,13 +309,13 @@ commands = ["echo starting", "false", "echo should-not-reach"]
 
 def test_build_no_config_no_build_section(coi_binary, workspace_dir):
     """
-    'coi build' with .coi/config.toml but no [build] section → builds base coi image.
+    'coi build' with .coi/config.toml but no [container.build] section → builds base coi image.
     """
     config_dir = Path(workspace_dir) / ".coi"
     config_dir.mkdir(exist_ok=True)
     (config_dir / "config.toml").write_text(
         """
-[defaults]
+[container]
 image = "coi-default"
 persistent = true
 """

@@ -1,5 +1,5 @@
 """
-Test building a custom image using [build] config with inline commands.
+Test building a custom image using [container.build] config with inline commands.
 
 Tests that:
 1. .coi/config.toml with commands = [...] → coi build creates custom image
@@ -12,10 +12,10 @@ from pathlib import Path
 
 def test_build_from_config_commands(coi_binary, workspace_dir):
     """
-    Test that 'coi build' uses [build] config with inline commands.
+    Test that 'coi build' uses [container.build] config with inline commands.
 
     Flow:
-    1. Create .coi/config.toml with [build] commands
+    1. Create .coi/config.toml with [container.build] commands
     2. Run 'coi build'
     3. Verify custom image was created
     """
@@ -42,10 +42,10 @@ def test_build_from_config_commands(coi_binary, workspace_dir):
     config_path = config_dir / "config.toml"
     config_path.write_text(
         f"""
-[defaults]
+[container]
 image = "{image_name}"
 
-[build]
+[container.build]
 base = "coi-default"
 commands = ["echo 'commands-build-marker' > /tmp/commands_marker.txt"]
 """

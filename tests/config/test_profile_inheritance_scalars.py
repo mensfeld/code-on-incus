@@ -14,7 +14,7 @@ def test_profile_inheritance_image_from_parent(coi_binary, cleanup_containers, w
 
     parent_dir = coi_dir / "parent"
     parent_dir.mkdir(parents=True)
-    (parent_dir / "config.toml").write_text('image = "coi-parent"\n')
+    (parent_dir / "config.toml").write_text('[container]\nimage = "coi-parent"\n')
 
     child_dir = coi_dir / "child"
     child_dir.mkdir(parents=True)
@@ -39,11 +39,13 @@ def test_profile_inheritance_image_overridden(coi_binary, cleanup_containers, wo
 
     parent_dir = coi_dir / "parent"
     parent_dir.mkdir(parents=True)
-    (parent_dir / "config.toml").write_text('image = "coi-parent"\n')
+    (parent_dir / "config.toml").write_text('[container]\nimage = "coi-parent"\n')
 
     child_dir = coi_dir / "child"
     child_dir.mkdir(parents=True)
-    (child_dir / "config.toml").write_text('inherits = "parent"\nimage = "coi-child"\n')
+    (child_dir / "config.toml").write_text(
+        'inherits = "parent"\n[container]\nimage = "coi-child"\n'
+    )
 
     result = subprocess.run(
         [coi_binary, "profile", "info", "child", "--workspace", workspace_dir],
@@ -64,7 +66,9 @@ def test_profile_inheritance_persistent_from_parent(coi_binary, cleanup_containe
 
     parent_dir = coi_dir / "parent"
     parent_dir.mkdir(parents=True)
-    (parent_dir / "config.toml").write_text('image = "coi-default"\npersistent = true\n')
+    (parent_dir / "config.toml").write_text(
+        '[container]\nimage = "coi-default"\npersistent = true\n'
+    )
 
     child_dir = coi_dir / "child"
     child_dir.mkdir(parents=True)

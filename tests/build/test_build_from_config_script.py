@@ -1,8 +1,8 @@
 """
-Test building a custom image using [build] config with a script.
+Test building a custom image using [container.build] config with a script.
 
 Tests that:
-1. .coi/config.toml with [build] script = "build.sh" → coi build creates custom image
+1. .coi/config.toml with [container.build] script = "build.sh" → coi build creates custom image
 2. The build script path is resolved relative to config file (so .coi/build.sh)
 """
 
@@ -12,10 +12,10 @@ from pathlib import Path
 
 def test_build_from_config_script(coi_binary, workspace_dir):
     """
-    Test that 'coi build' uses [build] config with script.
+    Test that 'coi build' uses [container.build] config with script.
 
     Flow:
-    1. Create .coi/config.toml with [build] and defaults.image
+    1. Create .coi/config.toml with [container.build] and container.image
     2. Create .coi/build.sh
     3. Run 'coi build'
     4. Verify custom image was created
@@ -43,10 +43,10 @@ def test_build_from_config_script(coi_binary, workspace_dir):
     config_path = config_dir / "config.toml"
     config_path.write_text(
         f"""
-[defaults]
+[container]
 image = "{image_name}"
 
-[build]
+[container.build]
 base = "coi-default"
 script = "build.sh"
 """
@@ -119,10 +119,10 @@ def test_build_script_takes_precedence(coi_binary, workspace_dir):
     config_path = config_dir / "config.toml"
     config_path.write_text(
         f"""
-[defaults]
+[container]
 image = "{image_name}"
 
-[build]
+[container.build]
 base = "coi-default"
 script = "build.sh"
 commands = ["echo commands-were-used > /tmp/commands_marker.txt"]

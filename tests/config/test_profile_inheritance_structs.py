@@ -74,7 +74,9 @@ def test_profile_inheritance_network_inherited(coi_binary, cleanup_containers, w
 
     child_dir = coi_dir / "child"
     child_dir.mkdir(parents=True)
-    (child_dir / "config.toml").write_text('inherits = "parent"\nimage = "coi-default"\n')
+    (child_dir / "config.toml").write_text(
+        'inherits = "parent"\n[container]\nimage = "coi-default"\n'
+    )
 
     result = subprocess.run(
         [coi_binary, "profile", "info", "child", "--workspace", workspace_dir],

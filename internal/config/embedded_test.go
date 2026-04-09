@@ -18,13 +18,13 @@ func TestEmbeddedDefaultConfigParses(t *testing.T) {
 func TestEmbeddedDefaultConfigValues(t *testing.T) {
 	cfg := GetDefaultConfig()
 
-	if cfg.Defaults.Image != "coi-default" {
-		t.Errorf("Expected image 'coi-default', got %q", cfg.Defaults.Image)
+	if cfg.Container.Image != "coi-default" {
+		t.Errorf("Expected image 'coi-default', got %q", cfg.Container.Image)
 	}
 	if cfg.Defaults.Model != "claude-sonnet-4-5" {
 		t.Errorf("Expected model 'claude-sonnet-4-5', got %q", cfg.Defaults.Model)
 	}
-	if cfg.Defaults.Persistent == nil || *cfg.Defaults.Persistent {
+	if cfg.Container.Persistent == nil || *cfg.Container.Persistent {
 		t.Error("Expected persistent=false")
 	}
 	if cfg.Network.Mode != NetworkModeRestricted {
@@ -106,8 +106,8 @@ func TestSynthesizeDefaultProfile(t *testing.T) {
 	cfg := GetDefaultConfig()
 	profile := synthesizeDefaultProfile(cfg)
 
-	if profile.Image != "coi-default" {
-		t.Errorf("Expected image 'coi-default', got %q", profile.Image)
+	if profile.Container.Image != "coi-default" {
+		t.Errorf("Expected image 'coi-default', got %q", profile.Container.Image)
 	}
 	if profile.Source != "(built-in)" {
 		t.Errorf("Expected source '(built-in)', got %q", profile.Source)
@@ -160,8 +160,8 @@ func TestDefaultProfileInList(t *testing.T) {
 	if p.Source != "(built-in)" {
 		t.Errorf("Expected source '(built-in)', got %q", p.Source)
 	}
-	if p.Image != "coi-default" {
-		t.Errorf("Expected image 'coi-default', got %q", p.Image)
+	if p.Container.Image != "coi-default" {
+		t.Errorf("Expected image 'coi-default', got %q", p.Container.Image)
 	}
 }
 
@@ -170,7 +170,9 @@ func TestDefaultProfileOverriddenByDisk(t *testing.T) {
 
 	// Simulate a disk-based "default" profile already loaded
 	cfg.Profiles["default"] = ProfileConfig{
-		Image:  "my-custom-default",
+		Container: ContainerConfig{
+			Image: "my-custom-default",
+		},
 		Source: "/home/user/.coi/profiles/default/config.toml",
 	}
 
@@ -183,8 +185,8 @@ func TestDefaultProfileOverriddenByDisk(t *testing.T) {
 	if p == nil {
 		t.Fatal("Expected 'default' profile to exist")
 	}
-	if p.Image != "my-custom-default" {
-		t.Errorf("Expected disk-based image 'my-custom-default', got %q", p.Image)
+	if p.Container.Image != "my-custom-default" {
+		t.Errorf("Expected disk-based image 'my-custom-default', got %q", p.Container.Image)
 	}
 	if p.Source != "/home/user/.coi/profiles/default/config.toml" {
 		t.Errorf("Expected disk-based source, got %q", p.Source)
@@ -200,7 +202,9 @@ func TestInheritFromDefault(t *testing.T) {
 	// Add a child profile that inherits from default
 	cfg.Profiles["custom"] = ProfileConfig{
 		Inherits: "default",
-		Image:    "my-custom-image",
+		Container: ContainerConfig{
+			Image: "my-custom-image",
+		},
 	}
 
 	if err := cfg.ResolveProfileInheritance(); err != nil {
@@ -208,8 +212,8 @@ func TestInheritFromDefault(t *testing.T) {
 	}
 
 	child := cfg.Profiles["custom"]
-	if child.Image != "my-custom-image" {
-		t.Errorf("Expected child image 'my-custom-image', got %q", child.Image)
+	if child.Container.Image != "my-custom-image" {
+		t.Errorf("Expected child image 'my-custom-image', got %q", child.Container.Image)
 	}
 	// Should inherit network from default
 	if child.Network == nil || child.Network.Mode != NetworkModeRestricted {

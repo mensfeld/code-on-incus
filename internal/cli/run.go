@@ -73,6 +73,13 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Validate the storage pool exists before doing any container work so the
+	// user gets an actionable "create with `incus storage create`" error
+	// instead of a cryptic Incus failure midway through launch.
+	if err := container.ValidateStoragePool(cfg.Container.StoragePool); err != nil {
+		return err
+	}
+
 	ensureBridgeTrustedZone()
 
 	fmt.Fprintf(os.Stderr, "Launching container %s from image %s...\n", containerName, img)
@@ -100,13 +107,13 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		}
 		// Launch new container
 		ephemeral := !persistent
-		if err := mgr.Launch(img, ephemeral); err != nil {
+		if err := mgr.Launch(img, ephemeral, cfg.Container.StoragePool); err != nil {
 			return fmt.Errorf("failed to launch container: %w", err)
 		}
 	} else {
 		// Launch new container
 		ephemeral := !persistent
-		if err := mgr.Launch(img, ephemeral); err != nil {
+		if err := mgr.Launch(img, ephemeral, cfg.Container.StoragePool); err != nil {
 			return fmt.Errorf("failed to launch container: %w", err)
 		}
 	}

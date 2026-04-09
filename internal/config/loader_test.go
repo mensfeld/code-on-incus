@@ -26,7 +26,7 @@ func TestLoad(t *testing.T) {
 	}
 
 	// Should have defaults
-	if cfg.Defaults.Image == "" {
+	if cfg.Container.Image == "" {
 		t.Error("Expected default image to be set")
 	}
 }
@@ -43,11 +43,11 @@ func TestLoadFromEnv(t *testing.T) {
 	cfg := GetDefaultConfig()
 	loadFromEnv(cfg)
 
-	if cfg.Defaults.Image != "env-image" {
-		t.Errorf("Expected image 'env-image', got '%s'", cfg.Defaults.Image)
+	if cfg.Container.Image != "env-image" {
+		t.Errorf("Expected image 'env-image', got '%s'", cfg.Container.Image)
 	}
 
-	if cfg.Defaults.Persistent == nil || !*cfg.Defaults.Persistent {
+	if cfg.Container.Persistent == nil || !*cfg.Container.Persistent {
 		t.Error("Expected persistent to be true from env")
 	}
 }
@@ -58,8 +58,10 @@ func TestLoadConfigFile(t *testing.T) {
 	configPath := filepath.Join(tmpDir, "config.toml")
 
 	configContent := `
-[defaults]
+[container]
 image = "test-image"
+
+[defaults]
 model = "test-model"
 
 [incus]
@@ -77,8 +79,8 @@ code_uid = 2000
 	}
 
 	// Verify values
-	if cfg.Defaults.Image != "test-image" {
-		t.Errorf("Expected image 'test-image', got '%s'", cfg.Defaults.Image)
+	if cfg.Container.Image != "test-image" {
+		t.Errorf("Expected image 'test-image', got '%s'", cfg.Container.Image)
 	}
 
 	if cfg.Defaults.Model != "test-model" {
@@ -155,7 +157,7 @@ func TestBuildScriptPathResolution(t *testing.T) {
 
 	configPath := filepath.Join(configDir, "config.toml")
 	configContent := `
-[build]
+[container.build]
 script = "build.sh"
 `
 	if err := os.WriteFile(configPath, []byte(configContent), 0o644); err != nil {
@@ -169,8 +171,8 @@ script = "build.sh"
 
 	// Script should be resolved relative to config file directory (.coi/build.sh)
 	expectedPath := filepath.Join(configDir, "build.sh")
-	if cfg.Build.Script != expectedPath {
-		t.Errorf("Expected script path %q, got %q", expectedPath, cfg.Build.Script)
+	if cfg.Container.Build.Script != expectedPath {
+		t.Errorf("Expected script path %q, got %q", expectedPath, cfg.Container.Build.Script)
 	}
 }
 
@@ -179,7 +181,7 @@ func TestBuildScriptAbsolutePath(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.toml")
 	configContent := `
-[build]
+[container.build]
 script = "/absolute/path/to/build.sh"
 `
 	if err := os.WriteFile(configPath, []byte(configContent), 0o644); err != nil {
@@ -191,8 +193,8 @@ script = "/absolute/path/to/build.sh"
 		t.Fatalf("loadConfigFile() failed: %v", err)
 	}
 
-	if cfg.Build.Script != "/absolute/path/to/build.sh" {
-		t.Errorf("Expected absolute path to be preserved, got %q", cfg.Build.Script)
+	if cfg.Container.Build.Script != "/absolute/path/to/build.sh" {
+		t.Errorf("Expected absolute path to be preserved, got %q", cfg.Container.Build.Script)
 	}
 }
 
@@ -201,7 +203,7 @@ func TestBuildScriptTildePath(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.toml")
 	configContent := `
-[build]
+[container.build]
 script = "~/build-scripts/build.sh"
 `
 	if err := os.WriteFile(configPath, []byte(configContent), 0o644); err != nil {
@@ -215,8 +217,8 @@ script = "~/build-scripts/build.sh"
 
 	homeDir, _ := os.UserHomeDir()
 	expectedPath := filepath.Join(homeDir, "build-scripts/build.sh")
-	if cfg.Build.Script != expectedPath {
-		t.Errorf("Expected tilde-expanded path %q, got %q", expectedPath, cfg.Build.Script)
+	if cfg.Container.Build.Script != expectedPath {
+		t.Errorf("Expected tilde-expanded path %q, got %q", expectedPath, cfg.Container.Build.Script)
 	}
 }
 
@@ -275,7 +277,7 @@ func TestDotCoiDirConfigLoads(t *testing.T) {
 		t.Fatalf("Failed to create .coi dir: %v", err)
 	}
 	configContent := `
-[defaults]
+[container]
 image = "coi-test-project"
 `
 	if err := os.WriteFile(filepath.Join(coiDir, "config.toml"), []byte(configContent), 0o644); err != nil {
@@ -287,8 +289,8 @@ image = "coi-test-project"
 		t.Fatalf("Load() failed: %v", loadErr)
 	}
 
-	if cfg.Defaults.Image != "coi-test-project" {
-		t.Errorf("Expected image 'coi-test-project', got %q", cfg.Defaults.Image)
+	if cfg.Container.Image != "coi-test-project" {
+		t.Errorf("Expected image 'coi-test-project', got %q", cfg.Container.Image)
 	}
 }
 
@@ -373,9 +375,15 @@ func TestLoadProfileFromDirectory(t *testing.T) {
 
 	// Create profile config.toml
 	profileContent := `
+forward_env = ["RUST_BACKTRACE"]
+
+[container]
 image = "coi-rust"
 persistent = true
-forward_env = ["RUST_BACKTRACE"]
+
+[container.build]
+base = "coi"
+script = "build.sh"
 
 [environment]
 RUST_BACKTRACE = "1"
@@ -386,10 +394,6 @@ permission_mode = "bypass"
 
 [tool.claude]
 effort_level = "high"
-
-[build]
-base = "coi"
-script = "build.sh"
 
 [[mounts]]
 host = "~/.cargo"
@@ -424,10 +428,10 @@ mode = "restricted"
 		t.Fatal("Expected profile 'rust-dev' to be loaded from directory")
 	}
 
-	if p.Image != "coi-rust" {
-		t.Errorf("Expected image 'coi-rust', got %q", p.Image)
+	if p.Container.Image != "coi-rust" {
+		t.Errorf("Expected image 'coi-rust', got %q", p.Container.Image)
 	}
-	if p.Persistent == nil || !*p.Persistent {
+	if p.Container.Persistent == nil || !*p.Container.Persistent {
 		t.Error("Expected persistent=true")
 	}
 	if len(p.ForwardEnv) != 1 || p.ForwardEnv[0] != "RUST_BACKTRACE" {
@@ -445,7 +449,7 @@ mode = "restricted"
 	if p.Tool.Claude.EffortLevel != "high" {
 		t.Errorf("Expected effort_level=high, got %q", p.Tool.Claude.EffortLevel)
 	}
-	if p.Build == nil || p.Build.Base != "coi" {
+	if p.Container.Build.Base != "coi" {
 		t.Error("Expected build.base=coi")
 	}
 	if len(p.Mounts) != 1 || p.Mounts[0].Host != "~/.cargo" {
@@ -468,7 +472,7 @@ func TestProfileDirectoryBuildScriptResolution(t *testing.T) {
 	}
 
 	profileContent := `
-[build]
+[container.build]
 script = "build.sh"
 `
 	if err := os.WriteFile(filepath.Join(profileDir, "config.toml"), []byte(profileContent), 0o644); err != nil {
@@ -492,8 +496,8 @@ script = "build.sh"
 	}
 
 	expectedScript := filepath.Join(profileDir, "build.sh")
-	if p.Build.Script != expectedScript {
-		t.Errorf("Expected build script %q, got %q", expectedScript, p.Build.Script)
+	if p.Container.Build.Script != expectedScript {
+		t.Errorf("Expected build script %q, got %q", expectedScript, p.Container.Build.Script)
 	}
 }
 
@@ -506,7 +510,7 @@ func TestProfileDirectoryAbsoluteScriptPath(t *testing.T) {
 	}
 
 	profileContent := `
-[build]
+[container.build]
 script = "/absolute/path/build.sh"
 `
 	if err := os.WriteFile(filepath.Join(profileDir, "config.toml"), []byte(profileContent), 0o644); err != nil {
@@ -528,8 +532,8 @@ script = "/absolute/path/build.sh"
 	if p == nil {
 		t.Fatal("Expected profile 'test' to be loaded")
 	}
-	if p.Build.Script != "/absolute/path/build.sh" {
-		t.Errorf("Expected absolute path preserved, got %q", p.Build.Script)
+	if p.Container.Build.Script != "/absolute/path/build.sh" {
+		t.Errorf("Expected absolute path preserved, got %q", p.Container.Build.Script)
 	}
 }
 
@@ -623,7 +627,9 @@ func TestProfileDirectorySource(t *testing.T) {
 		t.Fatalf("Failed to create profile dir: %v", err)
 	}
 
-	profileContent := `image = "test-image"`
+	profileContent := `[container]
+image = "test-image"
+`
 	if err := os.WriteFile(filepath.Join(profileDir, "config.toml"), []byte(profileContent), 0o644); err != nil {
 		t.Fatalf("Failed to write profile config: %v", err)
 	}
@@ -660,8 +666,14 @@ func TestApplyProfileWithNewFields(t *testing.T) {
 
 	cfg := GetDefaultConfig()
 	cfg.Profiles["full"] = ProfileConfig{
-		Image:      "test-image",
-		Persistent: ptrBool(true),
+		Container: ContainerConfig{
+			Image:      "test-image",
+			Persistent: ptrBool(true),
+			Build: BuildConfig{
+				Base:   "coi",
+				Script: buildScript,
+			},
+		},
 		Environment: map[string]string{
 			"MY_VAR": "val",
 		},
@@ -671,10 +683,6 @@ func TestApplyProfileWithNewFields(t *testing.T) {
 			Claude: ClaudeToolConfig{
 				EffortLevel: "high",
 			},
-		},
-		Build: &BuildConfig{
-			Base:   "coi",
-			Script: buildScript,
 		},
 		Mounts: []MountEntry{
 			{Host: "~/.cargo", Container: "/home/code/.cargo"},
@@ -690,11 +698,11 @@ func TestApplyProfileWithNewFields(t *testing.T) {
 		t.Fatalf("ApplyProfile failed: %v", err)
 	}
 
-	// Verify defaults were applied
-	if cfg.Defaults.Image != "test-image" {
-		t.Errorf("Expected image 'test-image', got %q", cfg.Defaults.Image)
+	// Verify container settings were applied
+	if cfg.Container.Image != "test-image" {
+		t.Errorf("Expected image 'test-image', got %q", cfg.Container.Image)
 	}
-	if !*cfg.Defaults.Persistent {
+	if !*cfg.Container.Persistent {
 		t.Error("Expected persistent=true")
 	}
 	if cfg.Defaults.Environment["MY_VAR"] != "val" {
@@ -713,11 +721,11 @@ func TestApplyProfileWithNewFields(t *testing.T) {
 	}
 
 	// Build
-	if cfg.Build.Base != "coi" {
-		t.Errorf("Expected build base 'coi', got %q", cfg.Build.Base)
+	if cfg.Container.Build.Base != "coi" {
+		t.Errorf("Expected build base 'coi', got %q", cfg.Container.Build.Base)
 	}
-	if cfg.Build.Script != buildScript {
-		t.Errorf("Expected build script %q, got %q", buildScript, cfg.Build.Script)
+	if cfg.Container.Build.Script != buildScript {
+		t.Errorf("Expected build script %q, got %q", buildScript, cfg.Container.Build.Script)
 	}
 
 	// Mounts (appended)
@@ -767,7 +775,7 @@ func TestLoadConfigFileWithReadonlyMount(t *testing.T) {
 	configPath := filepath.Join(tmpDir, "config.toml")
 
 	configContent := `
-[defaults]
+[container]
 image = "coi"
 
 [[mounts.default]]
@@ -819,6 +827,7 @@ func TestLoadProfileWithReadonlyMount(t *testing.T) {
 	}
 
 	profileContent := `
+[container]
 image = "coi"
 
 [[mounts]]
@@ -889,13 +898,15 @@ func TestProfileValidation(t *testing.T) {
 	}{
 		{
 			name:    "valid empty profile",
-			profile: ProfileConfig{Image: "coi"},
+			profile: ProfileConfig{Container: ContainerConfig{Image: "coi"}},
 			wantErr: false,
 		},
 		{
 			name: "missing build script",
 			profile: ProfileConfig{
-				Build: &BuildConfig{Script: "/nonexistent/build.sh"},
+				Container: ContainerConfig{
+					Build: BuildConfig{Script: "/nonexistent/build.sh"},
+				},
 			},
 			wantErr:   true,
 			errSubstr: "build script",
@@ -979,7 +990,7 @@ func TestLoadProfilesFromHomeCoi(t *testing.T) {
 	if err := os.MkdirAll(profDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll failed: %v", err)
 	}
-	content := `image = "home-coi-image"`
+	content := "[container]\nimage = \"home-coi-image\"\n"
 	if err := os.WriteFile(filepath.Join(profDir, "config.toml"), []byte(content), 0o644); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
@@ -993,8 +1004,8 @@ func TestLoadProfilesFromHomeCoi(t *testing.T) {
 	if p == nil {
 		t.Fatal("Expected profile 'home-coi-prof' to be loaded from ~/.coi/profiles/")
 	}
-	if p.Image != "home-coi-image" {
-		t.Errorf("Expected image 'home-coi-image', got %q", p.Image)
+	if p.Container.Image != "home-coi-image" {
+		t.Errorf("Expected image 'home-coi-image', got %q", p.Container.Image)
 	}
 }
 
@@ -1019,7 +1030,7 @@ func TestLoadMergesProjectAndHomeProfiles(t *testing.T) {
 	if err := os.MkdirAll(homeProf, 0o755); err != nil {
 		t.Fatalf("MkdirAll failed: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(homeProf, "config.toml"), []byte(`image = "home-image"`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(homeProf, "config.toml"), []byte("[container]\nimage = \"home-image\"\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
 
@@ -1028,7 +1039,7 @@ func TestLoadMergesProjectAndHomeProfiles(t *testing.T) {
 	if err := os.MkdirAll(projProf, 0o755); err != nil {
 		t.Fatalf("MkdirAll failed: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(projProf, "config.toml"), []byte(`image = "project-image"`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(projProf, "config.toml"), []byte("[container]\nimage = \"project-image\"\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
 
@@ -1037,10 +1048,10 @@ func TestLoadMergesProjectAndHomeProfiles(t *testing.T) {
 		t.Fatalf("Load() failed: %v", loadErr)
 	}
 
-	if p := cfg.GetProfile("from-home"); p == nil || p.Image != "home-image" {
+	if p := cfg.GetProfile("from-home"); p == nil || p.Container.Image != "home-image" {
 		t.Errorf("Expected from-home profile merged, got %+v", p)
 	}
-	if p := cfg.GetProfile("from-project"); p == nil || p.Image != "project-image" {
+	if p := cfg.GetProfile("from-project"); p == nil || p.Container.Image != "project-image" {
 		t.Errorf("Expected from-project profile merged, got %+v", p)
 	}
 }
@@ -1066,7 +1077,7 @@ func TestLoadDuplicateProfileProjectVsHomeFails(t *testing.T) {
 	if err := os.MkdirAll(homeProf, 0o755); err != nil {
 		t.Fatalf("MkdirAll failed: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(homeProf, "config.toml"), []byte(`image = "from-home"`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(homeProf, "config.toml"), []byte("[container]\nimage = \"from-home\"\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
 
@@ -1074,7 +1085,7 @@ func TestLoadDuplicateProfileProjectVsHomeFails(t *testing.T) {
 	if err := os.MkdirAll(projProf, 0o755); err != nil {
 		t.Fatalf("MkdirAll failed: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(projProf, "config.toml"), []byte(`image = "from-project"`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(projProf, "config.toml"), []byte("[container]\nimage = \"from-project\"\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
 
@@ -1105,7 +1116,7 @@ func TestLoadProfileDirectoriesDuplicateNameError(t *testing.T) {
 		if err := os.MkdirAll(prof, 0o755); err != nil {
 			t.Fatalf("MkdirAll failed: %v", err)
 		}
-		if err := os.WriteFile(filepath.Join(prof, "config.toml"), []byte(`image = "x"`), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(prof, "config.toml"), []byte("[container]\nimage = \"x\"\n"), 0o644); err != nil {
 			t.Fatalf("WriteFile failed: %v", err)
 		}
 	}
@@ -1136,7 +1147,7 @@ func TestMultipleProfileDirectories(t *testing.T) {
 		if err := os.MkdirAll(profileDir, 0o755); err != nil {
 			t.Fatalf("Failed to create profile dir: %v", err)
 		}
-		content := fmt.Sprintf("image = \"img-%s\"\n", name)
+		content := fmt.Sprintf("[container]\nimage = \"img-%s\"\n", name)
 		if err := os.WriteFile(filepath.Join(profileDir, "config.toml"), []byte(content), 0o644); err != nil {
 			t.Fatalf("Failed to write profile config: %v", err)
 		}
@@ -1155,11 +1166,11 @@ func TestMultipleProfileDirectories(t *testing.T) {
 	}
 
 	a := cfg.GetProfile("alpha")
-	if a == nil || a.Image != "img-alpha" {
+	if a == nil || a.Container.Image != "img-alpha" {
 		t.Error("Expected profile 'alpha' with image 'img-alpha'")
 	}
 	b := cfg.GetProfile("beta")
-	if b == nil || b.Image != "img-beta" {
+	if b == nil || b.Container.Image != "img-beta" {
 		t.Error("Expected profile 'beta' with image 'img-beta'")
 	}
 }
@@ -1173,8 +1184,10 @@ func TestProfileContextPathResolution(t *testing.T) {
 	}
 
 	profileContent := `
-image = "coi"
 context = "CONTEXT.md"
+
+[container]
+image = "coi"
 `
 	if err := os.WriteFile(filepath.Join(profileDir, "config.toml"), []byte(profileContent), 0o644); err != nil {
 		t.Fatalf("Failed to write profile config: %v", err)
@@ -1205,8 +1218,10 @@ func TestProfileContextAbsolutePath(t *testing.T) {
 	}
 
 	profileContent := `
-image = "coi"
 context = "/absolute/path/CONTEXT.md"
+
+[container]
+image = "coi"
 `
 	if err := os.WriteFile(filepath.Join(profileDir, "config.toml"), []byte(profileContent), 0o644); err != nil {
 		t.Fatalf("Failed to write profile config: %v", err)
@@ -1229,8 +1244,8 @@ context = "/absolute/path/CONTEXT.md"
 
 func TestProfileContextValidationMissingFile(t *testing.T) {
 	profile := ProfileConfig{
-		Image:   "coi",
-		Context: "/nonexistent/path/CONTEXT.md",
+		Container: ContainerConfig{Image: "coi"},
+		Context:   "/nonexistent/path/CONTEXT.md",
 	}
 
 	err := profile.Validate("test")
@@ -1250,8 +1265,8 @@ func TestProfileContextValidationExistingFile(t *testing.T) {
 	}
 
 	profile := ProfileConfig{
-		Image:   "coi",
-		Context: contextFile,
+		Container: ContainerConfig{Image: "coi"},
+		Context:   contextFile,
 	}
 
 	err := profile.Validate("test")
@@ -1269,8 +1284,8 @@ func TestApplyProfileSetsProfileContextFile(t *testing.T) {
 
 	cfg := GetDefaultConfig()
 	cfg.Profiles["ctx-profile"] = ProfileConfig{
-		Image:   "coi",
-		Context: contextFile,
+		Container: ContainerConfig{Image: "coi"},
+		Context:   contextFile,
 	}
 
 	if err := cfg.ApplyProfile("ctx-profile"); err != nil {
@@ -1285,7 +1300,7 @@ func TestApplyProfileSetsProfileContextFile(t *testing.T) {
 func TestApplyProfileWithoutContextLeavesEmpty(t *testing.T) {
 	cfg := GetDefaultConfig()
 	cfg.Profiles["no-ctx"] = ProfileConfig{
-		Image: "coi",
+		Container: ContainerConfig{Image: "coi"},
 	}
 
 	if err := cfg.ApplyProfile("no-ctx"); err != nil {

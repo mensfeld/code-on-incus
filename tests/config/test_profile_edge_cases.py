@@ -25,7 +25,7 @@ def test_empty_profile_directory_skipped(coi_binary, cleanup_containers, workspa
     # Also create a valid profile to confirm loading still works
     valid_dir = Path(workspace_dir) / ".coi" / "profiles" / "valid"
     valid_dir.mkdir(parents=True)
-    (valid_dir / "config.toml").write_text('image = "coi-default"\n')
+    (valid_dir / "config.toml").write_text('[container]\nimage = "coi-default"\n')
 
     result = subprocess.run(
         [
@@ -115,7 +115,7 @@ def test_multiple_directory_profiles(coi_binary, cleanup_containers, workspace_d
     for name in ["alpha", "beta", "gamma"]:
         profile_dir = Path(workspace_dir) / ".coi" / "profiles" / name
         profile_dir.mkdir(parents=True)
-        (profile_dir / "config.toml").write_text(f'image = "img-{name}"\n')
+        (profile_dir / "config.toml").write_text(f'[container]\nimage = "img-{name}"\n')
 
     result = subprocess.run(
         [
@@ -149,9 +149,10 @@ def test_profile_nonexistent_build_script_still_loads(
     profile_dir.mkdir(parents=True)
     (profile_dir / "config.toml").write_text(
         """
+[container]
 image = "coi-default"
 
-[build]
+[container.build]
 base = "coi-default"
 script = "this-script-does-not-exist.sh"
 """
@@ -199,13 +200,13 @@ script = "this-script-does-not-exist.sh"
 
 def test_profile_with_only_build_section(coi_binary, cleanup_containers, workspace_dir):
     """
-    Test that a profile with only a [build] section (no image, no env) works.
+    Test that a profile with only a [container.build] section (no image, no env) works.
     """
     profile_dir = Path(workspace_dir) / ".coi" / "profiles" / "buildonly"
     profile_dir.mkdir(parents=True)
     (profile_dir / "config.toml").write_text(
         """
-[build]
+[container.build]
 base = "coi-default"
 commands = ["apt-get install -y curl"]
 """
@@ -273,9 +274,10 @@ def test_profile_validation_missing_build_script(coi_binary, cleanup_containers,
     profile_dir.mkdir(parents=True)
     (profile_dir / "config.toml").write_text(
         """
+[container]
 image = "coi-default"
 
-[build]
+[container.build]
 base = "coi-default"
 script = "nonexistent.sh"
 """
@@ -315,6 +317,7 @@ def test_profile_validation_invalid_network_mode(coi_binary, cleanup_containers,
     profile_dir.mkdir(parents=True)
     (profile_dir / "config.toml").write_text(
         """
+[container]
 image = "coi-default"
 
 [network]
@@ -354,8 +357,10 @@ def test_profile_validation_missing_context_file(coi_binary, cleanup_containers,
     profile_dir.mkdir(parents=True)
     (profile_dir / "config.toml").write_text(
         """
-image = "coi-default"
 context = "CONTEXT.md"
+
+[container]
+image = "coi-default"
 """
     )
     # Note: CONTEXT.md is NOT created, so it should fail validation
@@ -394,8 +399,10 @@ def test_profile_context_file_loads_when_present(coi_binary, cleanup_containers,
     profile_dir.mkdir(parents=True)
     (profile_dir / "config.toml").write_text(
         """
-image = "coi-default"
 context = "CONTEXT.md"
+
+[container]
+image = "coi-default"
 """
     )
     (profile_dir / "CONTEXT.md").write_text("# My Profile Context\nUse pytest.\n")
@@ -429,6 +436,7 @@ def test_profile_validation_incomplete_mount(coi_binary, cleanup_containers, wor
     profile_dir.mkdir(parents=True)
     (profile_dir / "config.toml").write_text(
         """
+[container]
 image = "coi-default"
 
 [[mounts]]

@@ -14,8 +14,8 @@ func TestGetDefaultConfig(t *testing.T) {
 	}
 
 	// Check defaults
-	if cfg.Defaults.Image != "coi-default" {
-		t.Errorf("Expected default image 'coi-default', got '%s'", cfg.Defaults.Image)
+	if cfg.Container.Image != "coi-default" {
+		t.Errorf("Expected default image 'coi-default', got '%s'", cfg.Container.Image)
 	}
 
 	if cfg.Defaults.Model != "claude-sonnet-4-5" {
@@ -79,14 +79,14 @@ func TestExpandPath(t *testing.T) {
 
 func TestConfigMerge(t *testing.T) {
 	base := GetDefaultConfig()
-	base.Defaults.Image = "base-image"
+	base.Container.Image = "base-image"
 	base.Defaults.Model = "base-model"
 
 	other := &Config{
-		Defaults: DefaultsConfig{
+		Container: ContainerConfig{
 			Image: "other-image",
-			// Model not set - should not override
 		},
+		// Model not set - should not override
 		Incus: IncusConfig{
 			CodeUID: 2000, // Override
 		},
@@ -95,8 +95,8 @@ func TestConfigMerge(t *testing.T) {
 	base.Merge(other)
 
 	// Check that other.Image overrode base.Image
-	if base.Defaults.Image != "other-image" {
-		t.Errorf("Expected image 'other-image', got '%s'", base.Defaults.Image)
+	if base.Container.Image != "other-image" {
+		t.Errorf("Expected image 'other-image', got '%s'", base.Container.Image)
 	}
 
 	// Check that base.Model remained because other.Model was empty
@@ -115,8 +115,10 @@ func TestGetProfile(t *testing.T) {
 
 	// Add a test profile
 	cfg.Profiles["test"] = ProfileConfig{
-		Image:      "test-image",
-		Persistent: ptrBool(true),
+		Container: ContainerConfig{
+			Image:      "test-image",
+			Persistent: ptrBool(true),
+		},
 	}
 
 	// Test getting existing profile
@@ -125,8 +127,8 @@ func TestGetProfile(t *testing.T) {
 		t.Fatal("Expected profile, got nil")
 	}
 
-	if profile.Image != "test-image" {
-		t.Errorf("Expected image 'test-image', got '%s'", profile.Image)
+	if profile.Container.Image != "test-image" {
+		t.Errorf("Expected image 'test-image', got '%s'", profile.Container.Image)
 	}
 
 	// Test getting non-existent profile
@@ -138,12 +140,14 @@ func TestGetProfile(t *testing.T) {
 
 func TestApplyProfile(t *testing.T) {
 	cfg := GetDefaultConfig()
-	cfg.Defaults.Image = "original-image"
+	cfg.Container.Image = "original-image"
 
 	// Add a test profile
 	cfg.Profiles["rust"] = ProfileConfig{
-		Image:      "rust-image",
-		Persistent: ptrBool(true),
+		Container: ContainerConfig{
+			Image:      "rust-image",
+			Persistent: ptrBool(true),
+		},
 	}
 
 	// Apply the profile
@@ -151,12 +155,12 @@ func TestApplyProfile(t *testing.T) {
 		t.Errorf("Expected ApplyProfile to succeed, got: %v", err)
 	}
 
-	// Check that defaults were updated
-	if cfg.Defaults.Image != "rust-image" {
-		t.Errorf("Expected image 'rust-image', got '%s'", cfg.Defaults.Image)
+	// Check that container settings were updated
+	if cfg.Container.Image != "rust-image" {
+		t.Errorf("Expected image 'rust-image', got '%s'", cfg.Container.Image)
 	}
 
-	if cfg.Defaults.Persistent == nil || !*cfg.Defaults.Persistent {
+	if cfg.Container.Persistent == nil || !*cfg.Container.Persistent {
 		t.Error("Expected persistent to be true")
 	}
 
@@ -712,7 +716,7 @@ func TestMergeBoolZeroValueBug(t *testing.T) {
 	// Create a zero-value config, simulating a TOML file that only sets
 	// image = "my-image" (all booleans remain nil / zero-value).
 	other := &Config{
-		Defaults: DefaultsConfig{
+		Container: ContainerConfig{
 			Image: "my-image",
 		},
 	}
@@ -746,8 +750,8 @@ func TestMergeBoolZeroValueBug(t *testing.T) {
 	}
 
 	// Verify the image WAS overridden (merge still works for string fields).
-	if base.Defaults.Image != "my-image" {
-		t.Errorf("Expected image 'my-image', got '%s'", base.Defaults.Image)
+	if base.Container.Image != "my-image" {
+		t.Errorf("Expected image 'my-image', got '%s'", base.Container.Image)
 	}
 }
 
@@ -974,32 +978,34 @@ func TestBuildConfigMerge(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			base := GetDefaultConfig()
-			base.Build.Base = tt.baseBase
-			base.Build.Script = tt.baseScript
-			base.Build.Commands = tt.baseCommands
+			base.Container.Build.Base = tt.baseBase
+			base.Container.Build.Script = tt.baseScript
+			base.Container.Build.Commands = tt.baseCommands
 
 			other := &Config{
-				Build: BuildConfig{
-					Base:     tt.otherBase,
-					Script:   tt.otherScript,
-					Commands: tt.otherCommands,
+				Container: ContainerConfig{
+					Build: BuildConfig{
+						Base:     tt.otherBase,
+						Script:   tt.otherScript,
+						Commands: tt.otherCommands,
+					},
 				},
 			}
 
 			base.Merge(other)
 
-			if base.Build.Base != tt.expectedBase {
-				t.Errorf("Build.Base: expected %q, got %q", tt.expectedBase, base.Build.Base)
+			if base.Container.Build.Base != tt.expectedBase {
+				t.Errorf("Build.Base: expected %q, got %q", tt.expectedBase, base.Container.Build.Base)
 			}
-			if base.Build.Script != tt.expectedScript {
-				t.Errorf("Build.Script: expected %q, got %q", tt.expectedScript, base.Build.Script)
+			if base.Container.Build.Script != tt.expectedScript {
+				t.Errorf("Build.Script: expected %q, got %q", tt.expectedScript, base.Container.Build.Script)
 			}
-			if len(base.Build.Commands) != len(tt.expectedCommands) {
-				t.Fatalf("Build.Commands length: expected %d, got %d (%v)", len(tt.expectedCommands), len(base.Build.Commands), base.Build.Commands)
+			if len(base.Container.Build.Commands) != len(tt.expectedCommands) {
+				t.Fatalf("Build.Commands length: expected %d, got %d (%v)", len(tt.expectedCommands), len(base.Container.Build.Commands), base.Container.Build.Commands)
 			}
 			for i, v := range tt.expectedCommands {
-				if base.Build.Commands[i] != v {
-					t.Errorf("Build.Commands[%d]: expected %q, got %q", i, v, base.Build.Commands[i])
+				if base.Container.Build.Commands[i] != v {
+					t.Errorf("Build.Commands[%d]: expected %q, got %q", i, v, base.Container.Build.Commands[i])
 				}
 			}
 		})
@@ -1073,22 +1079,24 @@ func TestBuildConfigEdgeCases(t *testing.T) {
 
 	t.Run("merge does not mix script and commands across configs", func(t *testing.T) {
 		base := GetDefaultConfig()
-		base.Build.Script = "/path/to/build.sh"
+		base.Container.Build.Script = "/path/to/build.sh"
 
 		other := &Config{
-			Build: BuildConfig{
-				Commands: []string{"echo hello"},
+			Container: ContainerConfig{
+				Build: BuildConfig{
+					Commands: []string{"echo hello"},
+				},
 			},
 		}
 
 		base.Merge(other)
 
 		// Both should be set after merge (script from base, commands from other)
-		if base.Build.Script != "/path/to/build.sh" {
-			t.Errorf("Script should be preserved from base, got %q", base.Build.Script)
+		if base.Container.Build.Script != "/path/to/build.sh" {
+			t.Errorf("Script should be preserved from base, got %q", base.Container.Build.Script)
 		}
-		if len(base.Build.Commands) != 1 || base.Build.Commands[0] != "echo hello" {
-			t.Errorf("Commands should be set from other, got %v", base.Build.Commands)
+		if len(base.Container.Build.Commands) != 1 || base.Container.Build.Commands[0] != "echo hello" {
+			t.Errorf("Commands should be set from other, got %v", base.Container.Build.Commands)
 		}
 	})
 }

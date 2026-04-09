@@ -20,7 +20,7 @@ def test_list_respects_profile_flag(coi_binary, workspace_dir):
     # Create a minimal profile
     profile_dir = Path(workspace_dir) / ".coi" / "profiles" / "testprofile"
     profile_dir.mkdir(parents=True)
-    (profile_dir / "config.toml").write_text('image = "coi-test"\n')
+    (profile_dir / "config.toml").write_text('[container]\nimage = "coi-test"\n')
 
     result = subprocess.run(
         [
@@ -53,7 +53,7 @@ def test_info_respects_profile_flag(coi_binary, workspace_dir):
     # Create a minimal profile
     profile_dir = Path(workspace_dir) / ".coi" / "profiles" / "testprofile"
     profile_dir.mkdir(parents=True)
-    (profile_dir / "config.toml").write_text('image = "coi-test"\n')
+    (profile_dir / "config.toml").write_text('[container]\nimage = "coi-test"\n')
 
     result = subprocess.run(
         [
