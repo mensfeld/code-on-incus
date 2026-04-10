@@ -1,6 +1,7 @@
 package session
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -47,22 +48,24 @@ func TestPathToDeviceName(t *testing.T) {
 	}
 }
 
-func TestShouldCreateIfMissing(t *testing.T) {
+func TestIsFileTypeProtected(t *testing.T) {
 	tests := []struct {
 		path     string
 		expected bool
 	}{
-		{".git/hooks", true},
-		{".git/config", false},
+		{".git/config", true},
+		{".git/hooks", false},
 		{".husky", false},
 		{".vscode", false},
+		{".idea", false},
+		{"", false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
-			result := shouldCreateIfMissing(tt.path)
+			result := isFileTypeProtected(tt.path)
 			if result != tt.expected {
-				t.Errorf("shouldCreateIfMissing(%q) = %v, expected %v", tt.path, result, tt.expected)
+				t.Errorf("isFileTypeProtected(%q) = %v, expected %v", tt.path, result, tt.expected)
 			}
 		})
 	}
@@ -94,10 +97,18 @@ func TestSetupSecurityMounts_NonExistentPaths(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// Non-existent paths should be silently skipped (except .git/hooks which is created)
-	err = SetupSecurityMounts(nil, tmpDir, "/workspace", []string{".vscode", ".husky"}, false)
+	// In a non-git workspace, .git/hooks and .git/config are silently
+	// skipped by the .git guard, so SetupSecurityMounts returns nil
+	// even with a nil manager (MountDisk is never reached).
+	err = SetupSecurityMounts(nil, tmpDir, "/workspace",
+		[]string{".git/hooks", ".git/config"}, false)
 	if err != nil {
-		t.Errorf("Expected nil error for non-existent paths, got: %v", err)
+		t.Errorf("Expected nil error when .git is missing, got: %v", err)
+	}
+
+	// Confirm the .git guard did NOT synthesize a .git/ directory.
+	if _, statErr := os.Lstat(filepath.Join(tmpDir, ".git")); !os.IsNotExist(statErr) {
+		t.Errorf(".git/ should not have been created in a non-git workspace, stat err=%v", statErr)
 	}
 }
 
@@ -362,5 +373,200 @@ func TestSetupGitHooksMount_PreservesExistingHooks(t *testing.T) {
 
 	if string(content) != hookContent {
 		t.Errorf("Hook content was modified. Expected %q, got %q", hookContent, string(content))
+	}
+}
+
+func TestEnsureProtectedExists_CreatesMissingDir(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "ensure-exists-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	vscodePath := filepath.Join(tmpDir, ".vscode")
+	if err := ensureProtectedExists(vscodePath, ".vscode"); err != nil {
+		t.Fatalf("ensureProtectedExists returned error: %v", err)
+	}
+
+	info, err := os.Stat(vscodePath)
+	if err != nil {
+		t.Fatalf("Expected .vscode to exist, got err: %v", err)
+	}
+	if !info.IsDir() {
+		t.Errorf("Expected .vscode to be a directory")
+	}
+	if info.Mode().Perm() != 0o755 {
+		t.Errorf("Expected mode 0755, got %o", info.Mode().Perm())
+	}
+}
+
+func TestEnsureProtectedExists_CreatesMissingHuskyDir(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "ensure-exists-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	huskyPath := filepath.Join(tmpDir, ".husky")
+	if err := ensureProtectedExists(huskyPath, ".husky"); err != nil {
+		t.Fatalf("ensureProtectedExists returned error: %v", err)
+	}
+
+	info, err := os.Stat(huskyPath)
+	if err != nil {
+		t.Fatalf("Expected .husky to exist, got err: %v", err)
+	}
+	if !info.IsDir() {
+		t.Errorf("Expected .husky to be a directory")
+	}
+	if info.Mode().Perm() != 0o755 {
+		t.Errorf("Expected mode 0755, got %o", info.Mode().Perm())
+	}
+}
+
+func TestEnsureProtectedExists_PreservesExistingDir(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "ensure-exists-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	vscodePath := filepath.Join(tmpDir, ".vscode")
+	if err := os.MkdirAll(vscodePath, 0o755); err != nil {
+		t.Fatalf("Failed to pre-create .vscode: %v", err)
+	}
+
+	tasksPath := filepath.Join(vscodePath, "tasks.json")
+	original := []byte(`{"version": "2.0.0", "tasks": []}` + "\n")
+	if err := os.WriteFile(tasksPath, original, 0o644); err != nil {
+		t.Fatalf("Failed to write tasks.json: %v", err)
+	}
+
+	if err := ensureProtectedExists(vscodePath, ".vscode"); err != nil {
+		t.Fatalf("ensureProtectedExists returned error: %v", err)
+	}
+
+	after, err := os.ReadFile(tasksPath)
+	if err != nil {
+		t.Fatalf("Failed to read tasks.json after call: %v", err)
+	}
+	if string(after) != string(original) {
+		t.Errorf("tasks.json content changed: got %q, want %q", after, original)
+	}
+}
+
+func TestEnsureProtectedExists_PreservesExistingFile(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "ensure-exists-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	gitDir := filepath.Join(tmpDir, ".git")
+	if err := os.Mkdir(gitDir, 0o755); err != nil {
+		t.Fatalf("Failed to create .git: %v", err)
+	}
+
+	configPath := filepath.Join(gitDir, "config")
+	original := []byte("[core]\n\trepositoryformatversion = 0\n")
+	if err := os.WriteFile(configPath, original, 0o644); err != nil {
+		t.Fatalf("Failed to write .git/config: %v", err)
+	}
+
+	if err := ensureProtectedExists(configPath, ".git/config"); err != nil {
+		t.Fatalf("ensureProtectedExists returned error: %v", err)
+	}
+
+	after, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("Failed to read .git/config after call: %v", err)
+	}
+	if string(after) != string(original) {
+		t.Errorf(".git/config content changed: got %q, want %q", after, original)
+	}
+}
+
+func TestEnsureProtectedExists_CreatesFilePlaceholderWhenParentExists(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "ensure-exists-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	gitDir := filepath.Join(tmpDir, ".git")
+	if err := os.Mkdir(gitDir, 0o755); err != nil {
+		t.Fatalf("Failed to create .git: %v", err)
+	}
+
+	configPath := filepath.Join(gitDir, "config")
+	if err := ensureProtectedExists(configPath, ".git/config"); err != nil {
+		t.Fatalf("ensureProtectedExists returned error: %v", err)
+	}
+
+	info, err := os.Lstat(configPath)
+	if err != nil {
+		t.Fatalf("Expected .git/config placeholder to exist, got err: %v", err)
+	}
+	if !info.Mode().IsRegular() {
+		t.Errorf("Expected regular file, got mode %v", info.Mode())
+	}
+	if info.Size() != 0 {
+		t.Errorf("Expected empty placeholder, got size %d", info.Size())
+	}
+	if info.Mode().Perm() != 0o644 {
+		t.Errorf("Expected mode 0644, got %o", info.Mode().Perm())
+	}
+}
+
+func TestEnsureProtectedExists_FilePlaceholderParentMissing(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "ensure-exists-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// .git/ does NOT exist
+	configPath := filepath.Join(tmpDir, ".git", "config")
+	err = ensureProtectedExists(configPath, ".git/config")
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("Expected os.ErrNotExist, got %v", err)
+	}
+
+	// .git/ must not have been created.
+	if _, statErr := os.Lstat(filepath.Join(tmpDir, ".git")); !os.IsNotExist(statErr) {
+		t.Errorf(".git/ should not be created when parent is missing, stat err=%v", statErr)
+	}
+}
+
+func TestEnsureProtectedExists_SymlinkNotFollowed(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "ensure-exists-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Create a real sibling target directory
+	targetDir := filepath.Join(tmpDir, "target")
+	if err := os.Mkdir(targetDir, 0o755); err != nil {
+		t.Fatalf("Failed to create target dir: %v", err)
+	}
+
+	// Create .vscode as a symlink to the target
+	vscodePath := filepath.Join(tmpDir, ".vscode")
+	if err := os.Symlink(targetDir, vscodePath); err != nil {
+		t.Fatalf("Failed to create symlink: %v", err)
+	}
+
+	if err := ensureProtectedExists(vscodePath, ".vscode"); err != nil {
+		t.Errorf("ensureProtectedExists returned error for existing symlink: %v", err)
+	}
+
+	// Verify the symlink itself is unchanged (still a symlink).
+	info, err := os.Lstat(vscodePath)
+	if err != nil {
+		t.Fatalf("Failed to Lstat .vscode: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("Expected .vscode to remain a symlink, got mode %v", info.Mode())
 	}
 }

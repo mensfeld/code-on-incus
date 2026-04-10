@@ -22,8 +22,11 @@ func SetupSecurityMounts(mgr *container.Manager, workspacePath, containerWorkspa
 
 	for _, relPath := range protectedPaths {
 		if err := setupProtectedPath(mgr, workspacePath, containerWorkspacePath, relPath, useShift); err != nil {
-			// Log warning but continue with other paths
-			// Some paths may not exist and that's OK
+			// Paths that legitimately cannot be protected (non-git workspace,
+			// or a file-type entry whose parent directory is missing) surface
+			// as os.ErrNotExist and are skipped silently. Any other failure
+			// (MkdirAll/stat/mount errors) is propagated and surfaces as a
+			// warning at the caller in setup.go.
 			if !os.IsNotExist(err) {
 				return fmt.Errorf("failed to protect %s: %w", relPath, err)
 			}
@@ -59,25 +62,14 @@ func setupProtectedPath(mgr *container.Manager, workspacePath, containerWorkspac
 		}
 	}
 
+	if err := ensureProtectedExists(hostPath, relPath); err != nil {
+		return err // os.ErrNotExist surfaces for file-type with missing parent
+	}
+
 	// Use Lstat to avoid following symlinks (security measure)
 	info, err := os.Lstat(hostPath)
-	if os.IsNotExist(err) {
-		// Path doesn't exist - check if we should create it
-		// Only create directories for specific security-critical paths
-		if shouldCreateIfMissing(relPath) {
-			if err := os.MkdirAll(hostPath, 0o755); err != nil {
-				return fmt.Errorf("failed to create %s: %w", relPath, err)
-			}
-			// Re-stat after creation
-			info, err = os.Lstat(hostPath)
-			if err != nil {
-				return err
-			}
-		} else {
-			return os.ErrNotExist // Path doesn't exist and shouldn't be created
-		}
-	} else if err != nil {
-		return fmt.Errorf("failed to stat %s: %w", relPath, err)
+	if err != nil {
+		return fmt.Errorf("failed to stat %s after materialization: %w", relPath, err)
 	}
 
 	// Security check: reject symlinks to prevent mounting arbitrary host paths
@@ -92,10 +84,60 @@ func setupProtectedPath(mgr *container.Manager, workspacePath, containerWorkspac
 	return mgr.MountDisk(deviceName, hostPath, containerPath, useShift, true)
 }
 
-// shouldCreateIfMissing returns true if a path should be created if it doesn't exist
-// We only auto-create .git/hooks to ensure it can't be created by the container
-func shouldCreateIfMissing(relPath string) bool {
-	return relPath == ".git/hooks"
+// fileTypeProtectedPaths lists entries that should be protected as
+// single files (empty placeholder) rather than as directories. Every
+// other entry in protected_paths is treated as a directory and
+// created with MkdirAll if missing. Extend this set in lockstep with
+// internal/config/embedded/default_config.toml when adding new
+// file-type defaults.
+var fileTypeProtectedPaths = map[string]bool{
+	".git/config": true,
+}
+
+func isFileTypeProtected(relPath string) bool {
+	return fileTypeProtectedPaths[relPath]
+}
+
+// ensureProtectedExists materializes hostPath so it has a real inode
+// to read-only-mount over. For directory-type entries, creates an
+// empty dir. For file-type entries, creates an empty placeholder
+// only if the parent dir already exists — we NEVER synthesize an
+// entire parent tree. Existing files/dirs are left untouched.
+func ensureProtectedExists(hostPath, relPath string) error {
+	if _, err := os.Lstat(hostPath); err == nil {
+		return nil // already exists, don't clobber
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("failed to stat %s: %w", relPath, err)
+	}
+
+	if !isFileTypeProtected(relPath) {
+		if err := os.MkdirAll(hostPath, 0o755); err != nil {
+			return fmt.Errorf("failed to create protected directory %s: %w", relPath, err)
+		}
+		return nil
+	}
+
+	// File-type: only create when parent exists.
+	parent := filepath.Dir(hostPath)
+	parentInfo, err := os.Lstat(parent)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return os.ErrNotExist
+		}
+		return fmt.Errorf("failed to stat parent of %s: %w", relPath, err)
+	}
+	if !parentInfo.IsDir() {
+		return os.ErrNotExist
+	}
+
+	f, err := os.OpenFile(hostPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		if os.IsExist(err) {
+			return nil // lost a harmless race
+		}
+		return fmt.Errorf("failed to create protected file placeholder %s: %w", relPath, err)
+	}
+	return f.Close()
 }
 
 // pathToDeviceName converts a path to a valid Incus device name
