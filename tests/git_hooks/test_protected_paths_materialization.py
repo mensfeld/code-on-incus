@@ -223,13 +223,18 @@ class TestGitConfigMaterialization:
         )
 
 
-class TestAdditionalProtectedPathsMaterialized:
-    """Materialization must cover user-declared additional_protected_paths too."""
+class TestAdditionalProtectedPathsSemantics:
+    """User-added additional_protected_paths must be protected when they exist
+    on disk, and must NOT be blindly materialized when missing (the user
+    might have declared a file path like "Makefile" that should not become a
+    directory).
+    """
 
-    def test_idea_materialized_via_additional_paths(
+    def test_idea_pre_created_by_user_is_protected(
         self, coi_binary, workspace_dir, cleanup_containers
     ):
-        """Adding .idea via additional_protected_paths must protect it even when missing."""
+        """When the user pre-creates .idea, adding it to
+        additional_protected_paths must make it read-only in the container."""
         config_content = """
 [security]
 additional_protected_paths = [".idea"]
@@ -238,7 +243,9 @@ additional_protected_paths = [".idea"]
         config_dir.mkdir()
         (config_dir / "config.toml").write_text(config_content)
 
-        assert not (Path(workspace_dir) / ".idea").exists()
+        idea_dir = Path(workspace_dir) / ".idea"
+        idea_dir.mkdir()
+        (idea_dir / "workspace.xml").write_text("<project></project>")
 
         result = subprocess.run(
             [
@@ -263,7 +270,45 @@ additional_protected_paths = [".idea"]
             or "permission denied" in combined.lower()
         ), f"Expected read-only error, got: {combined}"
 
-        idea_dir = Path(workspace_dir) / ".idea"
-        assert idea_dir.exists(), ".idea must be materialized on the host"
-        assert idea_dir.is_dir()
-        assert list(idea_dir.iterdir()) == [], ".idea must be empty"
+        # Original content preserved.
+        assert (idea_dir / "workspace.xml").read_text() == "<project></project>"
+
+    def test_missing_makefile_not_created_as_directory(
+        self, coi_binary, workspace_dir, cleanup_containers
+    ):
+        """A user-added file-shaped path like "Makefile" that does not yet
+        exist must NOT be auto-created as a directory on the host. Copilot
+        flagged this regression during review — materializing every missing
+        entry as a dir would break the user's build."""
+        config_content = """
+[security]
+additional_protected_paths = ["Makefile"]
+"""
+        config_dir = Path(workspace_dir) / ".coi"
+        config_dir.mkdir()
+        (config_dir / "config.toml").write_text(config_content)
+
+        makefile = Path(workspace_dir) / "Makefile"
+        assert not makefile.exists()
+
+        result = subprocess.run(
+            [
+                coi_binary,
+                "run",
+                "--",
+                "echo",
+                "ok",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            cwd=workspace_dir,
+        )
+
+        assert result.returncode == 0, f"coi run failed: {result.stderr}"
+        # The critical assertion: Makefile must not exist as anything on the
+        # host (definitely not as a directory).
+        assert not makefile.exists(), (
+            f"Makefile must not be auto-created on the host, but it exists: "
+            f"is_dir={makefile.is_dir()}"
+        )

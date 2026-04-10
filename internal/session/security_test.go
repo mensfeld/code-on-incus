@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/mensfeld/code-on-incus/internal/config"
@@ -58,6 +59,7 @@ func TestIsFileTypeProtected(t *testing.T) {
 		{".husky", false},
 		{".vscode", false},
 		{".idea", false},
+		{"Makefile", false},
 		{"", false},
 	}
 
@@ -66,6 +68,30 @@ func TestIsFileTypeProtected(t *testing.T) {
 			result := isFileTypeProtected(tt.path)
 			if result != tt.expected {
 				t.Errorf("isFileTypeProtected(%q) = %v, expected %v", tt.path, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestIsDirTypeProtected(t *testing.T) {
+	tests := []struct {
+		path     string
+		expected bool
+	}{
+		{".git/hooks", true},
+		{".husky", true},
+		{".vscode", true},
+		{".git/config", false},
+		{".idea", false},
+		{"Makefile", false},
+		{"", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			result := isDirTypeProtected(tt.path)
+			if result != tt.expected {
+				t.Errorf("isDirTypeProtected(%q) = %v, expected %v", tt.path, result, tt.expected)
 			}
 		})
 	}
@@ -384,7 +410,7 @@ func TestEnsureProtectedExists_CreatesMissingDir(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	vscodePath := filepath.Join(tmpDir, ".vscode")
-	if err := ensureProtectedExists(vscodePath, ".vscode"); err != nil {
+	if err := ensureProtectedExists(tmpDir, vscodePath, ".vscode"); err != nil {
 		t.Fatalf("ensureProtectedExists returned error: %v", err)
 	}
 
@@ -408,7 +434,7 @@ func TestEnsureProtectedExists_CreatesMissingHuskyDir(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	huskyPath := filepath.Join(tmpDir, ".husky")
-	if err := ensureProtectedExists(huskyPath, ".husky"); err != nil {
+	if err := ensureProtectedExists(tmpDir, huskyPath, ".husky"); err != nil {
 		t.Fatalf("ensureProtectedExists returned error: %v", err)
 	}
 
@@ -442,7 +468,7 @@ func TestEnsureProtectedExists_PreservesExistingDir(t *testing.T) {
 		t.Fatalf("Failed to write tasks.json: %v", err)
 	}
 
-	if err := ensureProtectedExists(vscodePath, ".vscode"); err != nil {
+	if err := ensureProtectedExists(tmpDir, vscodePath, ".vscode"); err != nil {
 		t.Fatalf("ensureProtectedExists returned error: %v", err)
 	}
 
@@ -473,7 +499,7 @@ func TestEnsureProtectedExists_PreservesExistingFile(t *testing.T) {
 		t.Fatalf("Failed to write .git/config: %v", err)
 	}
 
-	if err := ensureProtectedExists(configPath, ".git/config"); err != nil {
+	if err := ensureProtectedExists(tmpDir, configPath, ".git/config"); err != nil {
 		t.Fatalf("ensureProtectedExists returned error: %v", err)
 	}
 
@@ -499,7 +525,7 @@ func TestEnsureProtectedExists_CreatesFilePlaceholderWhenParentExists(t *testing
 	}
 
 	configPath := filepath.Join(gitDir, "config")
-	if err := ensureProtectedExists(configPath, ".git/config"); err != nil {
+	if err := ensureProtectedExists(tmpDir, configPath, ".git/config"); err != nil {
 		t.Fatalf("ensureProtectedExists returned error: %v", err)
 	}
 
@@ -527,7 +553,7 @@ func TestEnsureProtectedExists_FilePlaceholderParentMissing(t *testing.T) {
 
 	// .git/ does NOT exist
 	configPath := filepath.Join(tmpDir, ".git", "config")
-	err = ensureProtectedExists(configPath, ".git/config")
+	err = ensureProtectedExists(tmpDir, configPath, ".git/config")
 	if !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("Expected os.ErrNotExist, got %v", err)
 	}
@@ -557,7 +583,7 @@ func TestEnsureProtectedExists_SymlinkNotFollowed(t *testing.T) {
 		t.Fatalf("Failed to create symlink: %v", err)
 	}
 
-	if err := ensureProtectedExists(vscodePath, ".vscode"); err != nil {
+	if err := ensureProtectedExists(tmpDir, vscodePath, ".vscode"); err != nil {
 		t.Errorf("ensureProtectedExists returned error for existing symlink: %v", err)
 	}
 
@@ -568,5 +594,174 @@ func TestEnsureProtectedExists_SymlinkNotFollowed(t *testing.T) {
 	}
 	if info.Mode()&os.ModeSymlink == 0 {
 		t.Errorf("Expected .vscode to remain a symlink, got mode %v", info.Mode())
+	}
+}
+
+func TestEnsureProtectedExists_UserAddedMissingDirNotCreated(t *testing.T) {
+	// A user-added missing directory-type path (e.g. ".idea") must NOT be
+	// auto-materialized. Returns os.ErrNotExist so the caller skips silently.
+	tmpDir, err := os.MkdirTemp("", "ensure-exists-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	ideaPath := filepath.Join(tmpDir, ".idea")
+	err = ensureProtectedExists(tmpDir, ideaPath, ".idea")
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("Expected os.ErrNotExist for user-added missing path, got %v", err)
+	}
+	if _, statErr := os.Lstat(ideaPath); !os.IsNotExist(statErr) {
+		t.Errorf(".idea must not be created for user-added missing path, stat err=%v", statErr)
+	}
+}
+
+func TestEnsureProtectedExists_UserAddedMissingMakefileNotCreatedAsDir(t *testing.T) {
+	// The copilot-flagged regression: a user-added "Makefile" must NOT be
+	// created as a directory (which would break the user's build).
+	tmpDir, err := os.MkdirTemp("", "ensure-exists-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	makefilePath := filepath.Join(tmpDir, "Makefile")
+	err = ensureProtectedExists(tmpDir, makefilePath, "Makefile")
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("Expected os.ErrNotExist for missing Makefile, got %v", err)
+	}
+	if _, statErr := os.Lstat(makefilePath); !os.IsNotExist(statErr) {
+		t.Errorf("Makefile must not be created, stat err=%v", statErr)
+	}
+}
+
+func TestEnsureProtectedExists_PreservesExistingUserAddedDir(t *testing.T) {
+	// A user-added directory that DOES already exist must be left alone
+	// (returns nil, doesn't clobber) so the caller can mount it RO.
+	tmpDir, err := os.MkdirTemp("", "ensure-exists-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	ideaPath := filepath.Join(tmpDir, ".idea")
+	if err := os.Mkdir(ideaPath, 0o755); err != nil {
+		t.Fatalf("Failed to pre-create .idea: %v", err)
+	}
+	marker := filepath.Join(ideaPath, "workspace.xml")
+	if err := os.WriteFile(marker, []byte("<project/>"), 0o644); err != nil {
+		t.Fatalf("Failed to write marker: %v", err)
+	}
+
+	if err := ensureProtectedExists(tmpDir, ideaPath, ".idea"); err != nil {
+		t.Errorf("Expected nil for existing user-added path, got %v", err)
+	}
+
+	content, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatalf("marker file disappeared: %v", err)
+	}
+	if string(content) != "<project/>" {
+		t.Errorf("marker content changed: got %q", string(content))
+	}
+}
+
+func TestValidateRelPath(t *testing.T) {
+	tests := []struct {
+		name    string
+		relPath string
+		wantErr bool
+	}{
+		{"valid simple", ".vscode", false},
+		{"valid nested", ".git/hooks", false},
+		{"empty", "", true},
+		{"absolute", "/etc/passwd", true},
+		{"dotdot", "..", true},
+		{"dot", ".", true},
+		{"leading dotdot", "../etc", true},
+		{"inner dotdot", "foo/../bar", true},
+		{"trailing dotdot", "foo/..", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateRelPath(tt.relPath)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateRelPath(%q) err=%v, wantErr=%v", tt.relPath, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestSafeMkdirAll_RejectsSymlinkedParent(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "safe-mkdir-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Create a sibling target directory outside the "workspace".
+	outsideDir, err := os.MkdirTemp("", "outside-*")
+	if err != nil {
+		t.Fatalf("Failed to create outside dir: %v", err)
+	}
+	defer os.RemoveAll(outsideDir)
+
+	// Create a symlink inside the workspace pointing outside.
+	linkPath := filepath.Join(tmpDir, "evil")
+	if err := os.Symlink(outsideDir, linkPath); err != nil {
+		t.Fatalf("Failed to create symlink: %v", err)
+	}
+
+	// Attempting to create a child under the symlinked parent must be rejected.
+	target := filepath.Join(tmpDir, "evil", "child")
+	err = safeMkdirAll(tmpDir, target, "evil/child")
+	if err == nil {
+		t.Fatal("safeMkdirAll should have rejected symlinked parent, got nil")
+	}
+	if !strings.Contains(err.Error(), "symlink") {
+		t.Errorf("Expected symlink-related error, got: %v", err)
+	}
+
+	// The target must not exist under the symlink target either.
+	if _, statErr := os.Lstat(filepath.Join(outsideDir, "child")); !os.IsNotExist(statErr) {
+		t.Errorf("target must not be created outside workspace, stat err=%v", statErr)
+	}
+}
+
+func TestSetupProtectedPath_RejectsAbsolutePath(t *testing.T) {
+	// Absolute path in protected_paths must be rejected (non-ErrNotExist,
+	// so the caller surfaces the error rather than skipping silently).
+	tmpDir, err := os.MkdirTemp("", "setup-protected-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	err = SetupSecurityMounts(nil, tmpDir, "/workspace", []string{"/etc/passwd"}, false)
+	if err == nil {
+		t.Fatal("Expected error for absolute protected path, got nil")
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		t.Errorf("Expected validation error, got ErrNotExist: %v", err)
+	}
+	// Sanity: nothing was created on the host.
+	if _, statErr := os.Lstat("/etc/passwd.coi"); !os.IsNotExist(statErr) {
+		t.Errorf("unexpected state: %v", statErr)
+	}
+}
+
+func TestSetupProtectedPath_RejectsTraversal(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "setup-protected-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	err = SetupSecurityMounts(nil, tmpDir, "/workspace", []string{"../outside"}, false)
+	if err == nil {
+		t.Fatal("Expected error for traversal protected path, got nil")
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		t.Errorf("Expected validation error, got ErrNotExist: %v", err)
 	}
 }
