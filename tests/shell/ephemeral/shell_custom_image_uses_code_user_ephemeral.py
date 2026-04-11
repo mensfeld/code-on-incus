@@ -22,28 +22,39 @@ in internal/cli/run.go:262, so it also bypasses the bug. Only `coi
 shell` — which goes through session.SetupSession → RunAsRoot →
 buildContainerEnv:520 — exhibits the issue.
 
-This test:
+This test uses the same pexpect-driven pattern as the rest of the
+shell/ephemeral suite (see e.g. uid_mapping_correct_ephemeral.py):
 
 1. Writes `.coi/config.toml` with a unique custom image alias and a
    minimal `[container.build]` section that defaults to coi-default
    as its base.
 2. Runs `coi build` to materialize the custom image.
-3. Runs `coi shell --debug --background` — the debug flag replaces the
-   AI tool with plain bash, and --background creates a detached tmux
-   session and returns without needing a TTY.
-4. Sends `whoami > /tmp/coi_user_probe` to the tmux session.
-5. Reads the probe file via `coi container exec`.
-6. Asserts the output contains `code` and not `root`. On master before
-   the fix this assertion fails — the probe file contains `root`.
-7. Cleans up the container and the image alias.
+3. Spawns `coi shell` interactively with COI_USE_DUMMY=1 so the inner
+   CLI is a scripted dummy.
+4. Waits for the container to come up and the dummy prompt to appear.
+5. Exits the dummy CLI to drop to the inner bash shell.
+6. Sends a marker-wrapped `whoami` (`echo USER_$(whoami)_PROBE`) and
+   asserts that `USER_code_PROBE` appears on the terminal screen and
+   `USER_root_PROBE` does not. On master before the fix this assertion
+   fails — the bash in the tmux session is running as root, so the
+   probe prints `USER_root_PROBE`.
+7. Powers off and cleans up the container and image alias.
 """
 
-import os
 import subprocess
 import time
 from pathlib import Path
 
-from support.helpers import calculate_container_name
+from pexpect import EOF, TIMEOUT
+
+from support.helpers import (
+    calculate_container_name,
+    spawn_coi,
+    wait_for_container_ready,
+    wait_for_prompt,
+    wait_for_text_in_monitor,
+    with_live_screen,
+)
 
 
 def test_custom_image_from_coi_default_shell_runs_as_code(
@@ -104,100 +115,75 @@ commands = ["echo custom-image-marker > /tmp/custom_image_marker"]
         )
         assert result.returncode == 0, f"Custom image '{image_name}' should exist after build"
 
-        # === Phase 3: start a detached tmux shell against the custom image ===
-        #
-        # `coi shell --debug --background`:
-        #   - --debug runs bash instead of the configured AI tool
-        #   - --background creates a detached tmux session and returns
-        #     (no TTY required, safe for subprocess.run)
-        #   - COI_USE_DUMMY=1 is harmless here but keeps parity with the
-        #     rest of the shell test suite
+        # === Phase 3: spawn coi shell interactively ===
         #
         # This is the exact code path that exhibits the bug: shell.go ->
         # session.Setup -> RunAsRoot decision -> buildContainerEnv ->
         # ExecCommand(tmux new-session, User=userPtr). With the bug
         # present, userPtr == 0 (root) for any non-"coi-default" image.
-        env = {**os.environ, "COI_USE_DUMMY": "1"}
-        result = subprocess.run(
-            [coi_binary, "shell", "--debug", "--background"],
-            capture_output=True,
-            text=True,
-            timeout=180,
+        env = {"COI_USE_DUMMY": "1"}
+        child = spawn_coi(
+            coi_binary,
+            ["shell"],
             cwd=workspace_dir,
             env=env,
-        )
-        assert result.returncode == 0, (
-            f"coi shell --debug --background should succeed. "
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+            timeout=180,
         )
 
-        # === Phase 4: probe the tmux session's user ===
+        wait_for_container_ready(child, timeout=90)
+        wait_for_prompt(child, timeout=120)
+
+        # === Phase 4: drop from dummy CLI to bash and probe whoami ===
         #
-        # Give tmux a moment to finish initializing its prompt before
-        # sending keys — otherwise the send-keys can race the bash
-        # startup and the command gets swallowed.
-        time.sleep(2)
+        # The dummy CLI accepts `exit` to terminate; tmux's trap+exec-bash
+        # wrapper then lands us in a bash shell running as the session
+        # user. From there, `echo USER_$(whoami)_PROBE` gives us a
+        # marker-wrapped user name that cannot be mistaken for any other
+        # text on screen (e.g. the word "code" appearing in "opencode").
+        child.send("exit")
+        time.sleep(0.3)
+        child.send("\x0d")
+        time.sleep(3)
 
-        marker = "COI_WHOAMI_MARKER"
-        # Send a shell command to the detached tmux session that writes
-        # `whoami` output plus a marker to a probe file. The marker lets
-        # us distinguish "bug present / probe really ran" from "probe
-        # never ran and the file is whatever was there before."
-        probe_cmd = f'whoami > /tmp/coi_user_probe && echo "{marker}" >> /tmp/coi_user_probe'
-        result = subprocess.run(
-            [coi_binary, "tmux", "send", container_name, probe_cmd],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        assert result.returncode == 0, f"coi tmux send should succeed. stderr: {result.stderr}"
+        marker_found_code = False
+        marker_found_root = False
+        with with_live_screen(child) as monitor:
+            time.sleep(1)
+            child.send("echo USER_$(whoami)_PROBE")
+            time.sleep(0.3)
+            child.send("\x0d")
+            marker_found_code = wait_for_text_in_monitor(monitor, "USER_code_PROBE", timeout=20)
+            # Only bother to check for root if the code marker was not
+            # found — wait_for_text_in_monitor on a miss just burns the
+            # full timeout, and we only need one or the other to decide.
+            if not marker_found_code:
+                display = monitor.last_display if hasattr(monitor, "last_display") else ""
+                marker_found_root = "USER_root_PROBE" in (display or "")
 
-        # Give the in-tmux command a moment to actually execute.
-        time.sleep(2)
-
-        # Read the probe file via `coi container exec` (reads as root so
-        # it can read a probe file owned by anyone).
-        result = subprocess.run(
-            [
-                coi_binary,
-                "container",
-                "exec",
-                container_name,
-                "--",
-                "cat",
-                "/tmp/coi_user_probe",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        assert result.returncode == 0, f"Reading probe file should succeed. stderr: {result.stderr}"
-
-        # `coi container exec` may route the command's stdout through
-        # its own stderr when no TTY is attached — check both streams.
-        combined = result.stdout + result.stderr
-
-        assert marker in combined, (
-            f"Probe command never ran in the tmux session — marker not "
-            f"found in probe file. Output:\n--- stdout ---\n{result.stdout}\n"
-            f"--- stderr ---\n{result.stderr}"
+        assert marker_found_code, (
+            "Custom image inheriting from coi-default must run `coi shell` "
+            "sessions as `code`, not root. `whoami` probe did not show "
+            "`USER_code_PROBE` on screen."
+            + (" Probe showed `USER_root_PROBE` instead." if marker_found_root else "")
         )
 
-        # The CRITICAL assertions. Before the fix, the probe file contains
-        # "root". After the fix, it contains "code".
-        assert "code" in combined.splitlines() or "code\n" in combined, (
-            f"Custom image inheriting from coi-default must run `coi shell` "
-            f"sessions as `code`, not root. Probe file output:\n"
-            f"--- stdout ---\n{result.stdout}\n--- stderr ---\n{result.stderr}"
-        )
-        assert "root" not in combined.splitlines() and "root\n" not in combined, (
-            f"Custom image inheriting from coi-default must NOT run `coi shell` "
-            f"sessions as root. Probe file output:\n"
-            f"--- stdout ---\n{result.stdout}\n--- stderr ---\n{result.stderr}"
-        )
+        # === Phase 5: clean shutdown ===
+        child.send("sudo poweroff")
+        time.sleep(0.3)
+        child.send("\x0d")
+
+        try:
+            child.expect(EOF, timeout=60)
+        except TIMEOUT:
+            pass
+
+        try:
+            child.close(force=False)
+        except Exception:
+            child.close(force=True)
 
     finally:
-        # === Phase 5: cleanup ===
+        # === Phase 6: cleanup ===
         subprocess.run(
             [coi_binary, "container", "delete", container_name, "--force"],
             check=False,
