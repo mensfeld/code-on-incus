@@ -59,8 +59,11 @@ def test_tmux_history_limit_default(coi_binary, cleanup_containers, workspace_di
     assert result.returncode == 0, (
         f"/etc/tmux.conf must exist in the default image. stderr: {result.stderr}"
     )
-    assert "set -g history-limit 50000" in result.stdout, (
-        f"/etc/tmux.conf must set history-limit to 50000. Got:\n{result.stdout}"
+    # `coi container exec` routes the command's stdout through its own
+    # stderr when not running with a TTY, so check both streams.
+    combined_cat = result.stdout + result.stderr
+    assert "set -g history-limit 50000" in combined_cat, (
+        f"/etc/tmux.conf must set history-limit to 50000. Got:\n{combined_cat}"
     )
 
     # === Phase 3: A fresh tmux session honours the configured value ===
@@ -106,8 +109,12 @@ def test_tmux_history_limit_default(coi_binary, cleanup_containers, workspace_di
         timeout=30,
     )
     assert result.returncode == 0, f"tmux show-options should succeed. stderr: {result.stderr}"
-    assert result.stdout.strip() == "50000", (
-        f"tmux history-limit must be 50000 in a default-image session. Got: {result.stdout!r}"
+    # `coi container exec` may route command stdout through its stderr
+    # when no TTY is attached — check both.
+    combined_show = (result.stdout + result.stderr).strip()
+    assert "50000" in combined_show, (
+        f"tmux history-limit must be 50000 in a default-image session. "
+        f"Got: stdout={result.stdout!r} stderr={result.stderr!r}"
     )
 
     # === Phase 4: Cleanup ===
