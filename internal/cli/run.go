@@ -153,7 +153,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// Remap container user UID/GID if configured UID differs from image default (1000)
-	if err := remapContainerUserIfNeeded(mgr, img, wasRestarted); err != nil {
+	if err := remapContainerUserIfNeeded(mgr, wasRestarted); err != nil {
 		return err
 	}
 
@@ -348,9 +348,15 @@ func ensureBridgeTrustedZone() {
 
 // remapContainerUserIfNeeded remaps the container's 'code' user UID/GID from the
 // image default (1000) to the configured container.CodeUID. Only runs for fresh
-// COI containers when the configured UID differs from the image default.
-func remapContainerUserIfNeeded(mgr *container.Manager, img string, wasRestarted bool) error {
-	if wasRestarted || img != session.CoiImage || container.CodeUID == 1000 {
+// containers that actually have the code user (probed at runtime, since
+// custom images built FROM coi-default also inherit it) when the
+// configured UID differs from the image default.
+func remapContainerUserIfNeeded(mgr *container.Manager, wasRestarted bool) error {
+	if wasRestarted || container.CodeUID == 1000 {
+		return nil
+	}
+	hasCodeUser, err := session.DetectCodeUser(mgr, container.CodeUser)
+	if err != nil || !hasCodeUser {
 		return nil
 	}
 	fmt.Fprintf(os.Stderr, "Remapping user %s from UID 1000 to %d...\n", container.CodeUser, container.CodeUID)
