@@ -489,6 +489,33 @@ EOF
 }
 
 #######################################
+# Configure tmux scrollback history
+#
+# `coi shell` runs the interactive session inside a tmux session so
+# that an exit of the inner CLI (e.g. Ctrl-C out of opencode) does not
+# tear down the shell. Tmux's default `history-limit` is 2000 lines,
+# which silently truncates the beginning of long command outputs
+# (e.g. `bin/setup` in a Rails app) so the user cannot scroll back to
+# the start. Bump the default high enough to cover realistic build
+# logs. Users who want a different value can override this by writing
+# their own `~/.tmux.conf` — tmux loads it after `/etc/tmux.conf` so
+# per-user settings always win.
+#######################################
+configure_tmux() {
+    log "Configuring tmux scrollback history..."
+
+    cat > /etc/tmux.conf << 'EOF'
+# COI default: large scrollback so long build outputs (bin/setup, npm ci,
+# cargo build, etc.) are fully retrievable. Override in ~/.tmux.conf —
+# tmux loads the per-user file after this one, so your value wins.
+set -g history-limit 50000
+EOF
+    chmod 644 /etc/tmux.conf
+
+    log "tmux history-limit set to 50000 in /etc/tmux.conf"
+}
+
+#######################################
 # Cleanup
 #######################################
 cleanup() {
@@ -512,6 +539,7 @@ main() {
     configure_mise_tools
     configure_power_wrappers
     configure_tmp_cleanup
+    configure_tmux
     install_claude_cli
     install_opencode
     install_dummy
