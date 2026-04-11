@@ -154,10 +154,15 @@ func saveSessionData(mgr *container.Manager, sessionID string, persistent bool, 
 
 	// Pull config directory from container
 	// Note: incus file pull works on stopped containers, so we don't need to check if running
-	// If config dir doesn't exist, PullDirectory will fail and we handle it gracefully
+	// If config dir doesn't exist, PullDirectory will fail and we handle it gracefully.
+	// Incus reports missing paths as one of several message variants
+	// ("file does not exist", "not found", "No such file or directory"),
+	// so match all of them case-insensitively.
 	if err := mgr.PullDirectory(stateDir, localConfigDir); err != nil {
-		// Check if it's a "not found" error - this is expected if config dir doesn't exist
-		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "No such file") {
+		msg := strings.ToLower(err.Error())
+		if strings.Contains(msg, "does not exist") ||
+			strings.Contains(msg, "not found") ||
+			strings.Contains(msg, "no such file") {
 			logger(fmt.Sprintf("No %s directory found in container", configDirName))
 			return nil
 		}
