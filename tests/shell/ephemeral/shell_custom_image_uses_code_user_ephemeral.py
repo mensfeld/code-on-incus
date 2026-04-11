@@ -45,6 +45,7 @@ import subprocess
 import time
 from pathlib import Path
 
+import pytest
 from pexpect import EOF, TIMEOUT
 
 from support.helpers import (
@@ -70,7 +71,7 @@ def test_custom_image_from_coi_default_shell_runs_as_code(
         capture_output=True,
     )
     if result.returncode != 0:
-        return
+        pytest.skip("coi-default image not built; cannot exercise custom-from-default path")
 
     # Best-effort cleanup of any leftover image from a prior failed run.
     subprocess.run(

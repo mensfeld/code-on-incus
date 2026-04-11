@@ -25,6 +25,8 @@ with `root` and this run test passes unchanged.
 import subprocess
 from pathlib import Path
 
+import pytest
+
 
 def test_custom_image_coi_run_still_runs_as_code(coi_binary, workspace_dir, cleanup_containers):
     """`coi run` against a custom-from-default image must still succeed as `code`."""
@@ -36,7 +38,7 @@ def test_custom_image_coi_run_still_runs_as_code(coi_binary, workspace_dir, clea
         capture_output=True,
     )
     if result.returncode != 0:
-        return
+        pytest.skip("coi-default image not built; cannot exercise custom-from-default path")
 
     # Best-effort cleanup of any leftover image from a prior failed run.
     subprocess.run(

@@ -356,7 +356,17 @@ func remapContainerUserIfNeeded(mgr *container.Manager, wasRestarted bool) error
 		return nil
 	}
 	hasCodeUser, err := session.DetectCodeUser(mgr, container.CodeUser)
-	if err != nil || !hasCodeUser {
+	if err != nil {
+		// Surface connectivity / exec failures to stderr so an unexpectedly
+		// skipped remap doesn't look like a silent success. We still proceed
+		// without remapping — the alternative would be to abort `coi run`
+		// on a transient probe failure, which is worse UX.
+		fmt.Fprintf(os.Stderr,
+			"Warning: could not probe container for %s user, skipping UID/GID remap: %v\n",
+			container.CodeUser, err)
+		return nil
+	}
+	if !hasCodeUser {
 		return nil
 	}
 	fmt.Fprintf(os.Stderr, "Remapping user %s from UID 1000 to %d...\n", container.CodeUser, container.CodeUID)

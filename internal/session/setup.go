@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -653,22 +654,28 @@ func waitForReady(mgr *container.Manager, maxRetries int, logger func(string)) e
 // that matched the image alias literally against "coi-default" and
 // misclassified every custom image built from it as a root image.
 //
-// The probe uses `id -u <user>`, which exits 0 only if the user exists
-// in /etc/passwd (or via NSS). Any exec error (exit != 0, or the bash
-// invocation itself failing) is treated as "user not present".
+// The probe runs `id -u <user>` via ExecArgsCapture, which passes
+// codeUser as a raw argv entry to `id` rather than interpolating it
+// into a shell string. That is defence-in-depth against a maliciously
+// crafted [incus] code_user value in config.toml: even if a user set
+// `code_user = "code; rm -rf /"`, `id` would just receive that as a
+// single argv and report "no such user" — the shell never sees it.
+//
+// A *container.ExitError (non-zero exit of `id`) is treated as "user
+// not present" and returns (false, nil). Any other error (e.g. incus
+// connectivity failure) is surfaced to the caller so it can decide
+// whether to warn or fall back.
 func DetectCodeUser(mgr *container.Manager, codeUser string) (bool, error) {
-	cmd := fmt.Sprintf("id -u %s >/dev/null 2>&1", codeUser)
-	_, err := mgr.ExecCommand(cmd, container.ExecCommandOptions{Capture: true})
-	if err != nil {
-		// Distinguish "user not found" (exit != 0, expected) from a
-		// real exec failure (couldn't talk to the container at all).
-		// ExecCommand wraps the underlying error; inspect the message
-		// to avoid coupling to a specific error type.
-		msg := err.Error()
-		if strings.Contains(msg, "exit status") {
-			return false, nil
-		}
-		return false, err
+	_, err := mgr.ExecArgsCapture(
+		[]string{"id", "-u", codeUser},
+		container.ExecCommandOptions{Capture: true},
+	)
+	if err == nil {
+		return true, nil
 	}
-	return true, nil
+	var exitErr *container.ExitError
+	if errors.As(err, &exitErr) {
+		return false, nil
+	}
+	return false, err
 }
