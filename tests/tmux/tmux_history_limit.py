@@ -67,6 +67,11 @@ def test_tmux_history_limit_default(coi_binary, cleanup_containers, workspace_di
     )
 
     # === Phase 3: A fresh tmux session honours the configured value ===
+    #
+    # Run as the `code` user (UID 1000) — that's who actually launches
+    # tmux when a real `coi shell` session starts. Running as root would
+    # miss regressions where /etc/tmux.conf is unreadable to non-root,
+    # or where a user-level config silently overrides the system setting.
 
     tmux_session = f"coi-{container_name}-histlimit"
 
@@ -76,6 +81,8 @@ def test_tmux_history_limit_default(coi_binary, cleanup_containers, workspace_di
             "container",
             "exec",
             container_name,
+            "--user",
+            "1000",
             "--",
             "tmux",
             "new-session",
@@ -98,6 +105,8 @@ def test_tmux_history_limit_default(coi_binary, cleanup_containers, workspace_di
             "container",
             "exec",
             container_name,
+            "--user",
+            "1000",
             "--",
             "tmux",
             "show-options",
@@ -110,10 +119,12 @@ def test_tmux_history_limit_default(coi_binary, cleanup_containers, workspace_di
     )
     assert result.returncode == 0, f"tmux show-options should succeed. stderr: {result.stderr}"
     # `coi container exec` may route command stdout through its stderr
-    # when no TTY is attached — check both.
+    # when no TTY is attached — check both. `tmux show-options -gv`
+    # prints just the value, so we assert exact equality (a substring
+    # match would happily accept "150000" or "500000").
     combined_show = (result.stdout + result.stderr).strip()
-    assert "50000" in combined_show, (
-        f"tmux history-limit must be 50000 in a default-image session. "
+    assert combined_show == "50000", (
+        f"tmux history-limit must be exactly 50000 in a default-image session. "
         f"Got: stdout={result.stdout!r} stderr={result.stderr!r}"
     )
 
