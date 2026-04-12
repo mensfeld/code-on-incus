@@ -415,10 +415,10 @@ func TestIsImmutableFSUnsupported(t *testing.T) {
 		expected bool
 	}{
 		{"nil", nil, false},
-		{"EPERM", unix.EPERM, false},            // EPERM is NOT fs-unsupported
-		{"EACCES", unix.EACCES, false},           // EACCES is NOT fs-unsupported
-		{"ENOTTY", unix.ENOTTY, true},            // unsupported filesystem
-		{"EOPNOTSUPP", unix.EOPNOTSUPP, true},    // unsupported filesystem
+		{"EPERM", unix.EPERM, false},          // EPERM is NOT fs-unsupported
+		{"EACCES", unix.EACCES, false},        // EACCES is NOT fs-unsupported
+		{"ENOTTY", unix.ENOTTY, true},         // unsupported filesystem
+		{"EOPNOTSUPP", unix.EOPNOTSUPP, true}, // unsupported filesystem
 		{"wrapped ENOTTY", fmt.Errorf("ioctl: %w", unix.ENOTTY), true},
 		{"random error", os.ErrNotExist, false},
 	}
