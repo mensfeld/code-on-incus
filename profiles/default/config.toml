@@ -52,6 +52,7 @@ forward_agent = false
 
 [security]
 protected_paths = [".git/hooks", ".git/config", ".husky", ".vscode"]
+host_immutable = true
 
 [limits.cpu]
 count = ""

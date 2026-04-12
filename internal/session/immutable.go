@@ -2,9 +2,11 @@ package session
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 	"unsafe"
@@ -30,14 +32,48 @@ type ImmutableManifest struct {
 	AppliedAt     string   `json:"applied_at"`
 }
 
+// hasSymlinkParent checks if any parent directory segment of hostPath
+// (up to but not including root) is a symlink. This prevents applying
+// immutable flags outside the workspace through symlink indirection.
+func hasSymlinkParent(hostPath, workspaceRoot string) bool {
+	dir := filepath.Dir(hostPath)
+	for dir != workspaceRoot && dir != "/" && dir != "." {
+		info, err := os.Lstat(dir)
+		if err != nil {
+			return true // err on the side of caution
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return true
+		}
+		dir = filepath.Dir(dir)
+	}
+	return false
+}
+
 // ApplyImmutable sets FS_IMMUTABLE_FL on each protected path (host-side).
 // For directories, applies recursively. Writes a manifest for crash recovery.
 // Returns the list of paths that were made immutable (empty if degraded).
+// On non-Linux platforms, returns nil silently (immutable is Linux-only).
 func ApplyImmutable(workspacePath string, protectedPaths []string, containerName string, logger func(string)) []string {
+	if runtime.GOOS != "linux" {
+		return nil
+	}
+
 	var applied []string
 
 	for _, relPath := range protectedPaths {
+		if err := validateRelPath(relPath); err != nil {
+			logger(fmt.Sprintf("Warning: Skipping invalid protected path %q: %v", relPath, err))
+			continue
+		}
+
 		hostPath := filepath.Join(workspacePath, filepath.Clean(relPath))
+
+		// Check for symlink parents that could redirect outside workspace
+		if hasSymlinkParent(hostPath, workspacePath) {
+			logger(fmt.Sprintf("Warning: Skipping %s (symlink in parent path)", relPath))
+			continue
+		}
 
 		info, err := os.Lstat(hostPath)
 		if err != nil {
@@ -56,13 +92,16 @@ func ApplyImmutable(workspacePath string, protectedPaths []string, containerName
 		}
 
 		if err != nil {
-			// Graceful degradation: EPERM (no capability), ENOTTY/EOPNOTSUPP
-			// (unsupported filesystem like virtiofs/9p/sshfs on macOS)
+			// Graceful degradation: missing capability or unsupported filesystem
 			if isImmutableUnsupported(err) {
 				logger(fmt.Sprintf("Warning: Cannot set immutable attribute on protected paths: %v", err))
 				logger("  Protected paths rely on read-only bind mounts only (bypassable with root in container).")
 				logger("  To enable host-side immutable protection, run:")
 				logger("    sudo setcap cap_linux_immutable=ep $(which coi)")
+				// Save manifest for any paths already applied before this failure
+				if len(applied) > 0 {
+					saveManifestForApplied(applied, workspacePath, containerName, logger)
+				}
 				return nil
 			}
 			logger(fmt.Sprintf("Warning: Failed to set immutable on %s: %v", relPath, err))
@@ -74,23 +113,35 @@ func ApplyImmutable(workspacePath string, protectedPaths []string, containerName
 
 	// Save manifest for crash recovery
 	if len(applied) > 0 {
-		manifest := &ImmutableManifest{
-			ContainerName: containerName,
-			Workspace:     workspacePath,
-			Paths:         applied,
-			AppliedAt:     time.Now().Format(time.RFC3339),
-		}
-		if err := saveImmutableManifest(manifest); err != nil {
-			logger(fmt.Sprintf("Warning: Failed to save immutable manifest: %v", err))
-		}
+		saveManifestForApplied(applied, workspacePath, containerName, logger)
 	}
 
 	return applied
 }
 
+// saveManifestForApplied persists a manifest for the given applied paths.
+func saveManifestForApplied(applied []string, workspacePath, containerName string, logger func(string)) {
+	manifest := &ImmutableManifest{
+		ContainerName: containerName,
+		Workspace:     workspacePath,
+		Paths:         applied,
+		AppliedAt:     time.Now().Format(time.RFC3339),
+	}
+	if err := saveImmutableManifest(manifest); err != nil {
+		logger(fmt.Sprintf("Warning: Failed to save immutable manifest: %v", err))
+	}
+}
+
 // RemoveImmutable clears FS_IMMUTABLE_FL from paths listed in the manifest.
-// Safe to call multiple times. Removes the manifest on success.
+// Safe to call multiple times. Removes the manifest only if all paths were
+// successfully cleared. Treats EPERM as a hard failure (to avoid stranding
+// immutable files with no recovery record).
 func RemoveImmutable(containerName string, logger func(string)) {
+	if runtime.GOOS != "linux" {
+		removeImmutableManifest(containerName)
+		return
+	}
+
 	manifest := loadImmutableManifest(containerName)
 	if manifest == nil {
 		return
@@ -98,6 +149,10 @@ func RemoveImmutable(containerName string, logger func(string)) {
 
 	var failures int
 	for _, relPath := range manifest.Paths {
+		if err := validateRelPath(relPath); err != nil {
+			continue
+		}
+
 		hostPath := filepath.Join(manifest.Workspace, filepath.Clean(relPath))
 
 		info, err := os.Lstat(hostPath)
@@ -114,7 +169,13 @@ func RemoveImmutable(containerName string, logger func(string)) {
 			err = clearImmutable(hostPath)
 		}
 
-		if err != nil && !isImmutableUnsupported(err) {
+		if err != nil {
+			// Only treat truly unsupported filesystems (ENOTTY/EOPNOTSUPP) as
+			// non-failures. EPERM means we lack the capability and the bits are
+			// still set — we must NOT delete the manifest.
+			if isImmutableFSUnsupported(err) {
+				continue
+			}
 			logger(fmt.Sprintf("Warning: Failed to clear immutable on %s: %v", relPath, err))
 			failures++
 		}
@@ -127,7 +188,7 @@ func RemoveImmutable(containerName string, logger func(string)) {
 
 // CleanStaleImmutableLocks scans ~/.coi/immutable-locks/ for manifests
 // whose container no longer exists and clears their immutable bits.
-// Returns the number of cleaned locks.
+// Returns the number of successfully cleaned locks.
 func CleanStaleImmutableLocks(logger func(string)) int {
 	dir := immutableManifestDir()
 	entries, err := os.ReadDir(dir)
@@ -151,7 +212,12 @@ func CleanStaleImmutableLocks(logger func(string)) int {
 		// Container is gone — clear immutable bits and remove manifest
 		logger(fmt.Sprintf("Cleaning stale immutable lock for %s", containerName))
 		RemoveImmutable(containerName, logger)
-		cleaned++
+
+		// Only count as cleaned if manifest was actually removed
+		manifestPath := filepath.Join(dir, entry.Name())
+		if _, err := os.Stat(manifestPath); os.IsNotExist(err) {
+			cleaned++
+		}
 	}
 
 	return cleaned
@@ -306,21 +372,32 @@ func ioctlSetFlags(f *os.File, flags int) error {
 }
 
 // isImmutableUnsupported returns true for errors that indicate the
-// immutable attribute is not available (missing capability, unsupported
-// filesystem). These trigger graceful degradation rather than hard errors.
+// immutable attribute is not available — either missing capability (EPERM)
+// or unsupported filesystem (ENOTTY/EOPNOTSUPP). Used during Apply to
+// trigger graceful degradation.
 func isImmutableUnsupported(err error) bool {
 	if err == nil {
 		return false
 	}
-	if os.IsPermission(err) {
+	// Check concrete errno values via errors.Is
+	if errors.Is(err, unix.EPERM) || errors.Is(err, unix.EACCES) {
 		return true
 	}
-	// Check for specific errno values wrapped inside ioctl error messages
-	errStr := err.Error()
-	return strings.Contains(errStr, "operation not permitted") ||
-		strings.Contains(errStr, "inappropriate ioctl") ||
-		strings.Contains(errStr, "not supported") ||
-		strings.Contains(errStr, "operation not supported")
+	return isImmutableFSUnsupported(err)
+}
+
+// isImmutableFSUnsupported returns true only for errors that indicate the
+// filesystem does not support the immutable attribute (ENOTTY/EOPNOTSUPP).
+// Does NOT match EPERM/EACCES. Used during Remove to distinguish between
+// "filesystem doesn't support this" (safe to ignore) and "missing capability"
+// (hard failure — bits still set).
+func isImmutableFSUnsupported(err error) bool {
+	if err == nil {
+		return false
+	}
+	return errors.Is(err, unix.ENOTTY) ||
+		errors.Is(err, unix.EOPNOTSUPP) ||
+		errors.Is(err, unix.ENOTSUP)
 }
 
 // immutableManifestDir returns the directory for immutable lock manifests.
@@ -335,10 +412,10 @@ func defaultImmutableManifestDir() string {
 	return filepath.Join(homeDir, ".coi", "immutable-locks")
 }
 
-// saveImmutableManifest writes the manifest to disk.
+// saveImmutableManifest writes the manifest to disk with user-only permissions.
 func saveImmutableManifest(manifest *ImmutableManifest) error {
 	dir := immutableManifestDir()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create manifest dir: %w", err)
 	}
 
@@ -348,7 +425,7 @@ func saveImmutableManifest(manifest *ImmutableManifest) error {
 	}
 
 	path := filepath.Join(dir, manifest.ContainerName+".json")
-	return os.WriteFile(path, data, 0o644)
+	return os.WriteFile(path, data, 0o600)
 }
 
 // loadImmutableManifest reads the manifest for a container.

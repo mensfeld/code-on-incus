@@ -79,7 +79,17 @@ jobs:
 
       - name: Run unit tests with coverage and race detector
         run: |
-          go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+          # Run all tests except session package (immutable tests need CAP_LINUX_IMMUTABLE)
+          go test -v -race -coverprofile=coverage-main.out -covermode=atomic $(go list ./... | grep -v /internal/session)
+
+          # Build session test binary separately and grant CAP_LINUX_IMMUTABLE
+          go test -c -race -cover -covermode=atomic -o /tmp/session.test ./internal/session/
+          sudo setcap cap_linux_immutable=ep /tmp/session.test
+          /tmp/session.test -test.v -test.coverprofile=coverage-session.out
+
+          # Merge coverage profiles
+          cat coverage-main.out > coverage.out
+          tail -n +2 coverage-session.out >> coverage.out 2>/dev/null || true
           go tool cover -func=coverage.out | tail -1  # Show total coverage
 
   # Integration tests run in parallel with unit tests (after build passes)
@@ -126,6 +136,9 @@ jobs:
           - name: uid-mapping
             path: tests/container/uid_mapping_shift_true.py tests/container/uid_mapping_raw_idmap.py
             description: "UID mapping integration tests (2 tests)"
+          - name: git-hooks
+            path: tests/git_hooks
+            description: "Git hooks and security protection tests (29 tests)"
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -365,6 +378,8 @@ jobs:
       - name: Build COI binary
         run: |
           go build -o coi ./cmd/coi
+          # Grant CAP_LINUX_IMMUTABLE for host-side immutable protection tests
+          sudo setcap cap_linux_immutable=ep ./coi
           ./coi version
 
       - name: Configure COI for CI (use open network mode for builds)

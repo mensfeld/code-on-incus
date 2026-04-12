@@ -16,6 +16,8 @@ Configuration options:
 import subprocess
 from pathlib import Path
 
+import pytest
+
 
 class TestGitConfigProtection:
     """Tests for .git/config protection (prevents core.hooksPath bypass)."""
@@ -728,3 +730,167 @@ writable_hooks = true
         # Both files should be created
         assert (hooks_dir / "test").exists()
         assert (husky_dir / "test").exists()
+
+
+class TestImmutableProtection:
+    """Tests for host-side immutable attribute protection (P0-2a).
+
+    The immutable attribute (FS_IMMUTABLE_FL / chattr +i) is applied on the host
+    before the container starts. This prevents the unshare+umount bypass of
+    read-only bind mounts: even after unmounting the overlay, the underlying
+    inode is immutable and writes fail with EPERM.
+
+    These tests require the coi binary to have CAP_LINUX_IMMUTABLE
+    (granted by: sudo setcap cap_linux_immutable=ep <coi-binary>).
+    Without the capability, immutable protection is not applied and
+    the tests are skipped.
+    """
+
+    @staticmethod
+    def _has_immutable_capability(coi_binary):
+        """Check if the coi binary has CAP_LINUX_IMMUTABLE via getcap."""
+        try:
+            result = subprocess.run(
+                ["getcap", coi_binary],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            return "cap_linux_immutable" in result.stdout
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return False
+
+    def test_unshare_umount_bypass_blocked(self, coi_binary, workspace_dir, cleanup_containers):
+        """Test that unshare+umount cannot bypass protected path protection.
+
+        This is the core P0-2a security test. Without immutable protection,
+        a process with CAP_SYS_ADMIN (root) inside the container can:
+          1. Create a new mount namespace (unshare -m)
+          2. Unmount the read-only bind mount
+          3. Write directly to the underlying file
+
+        With immutable protection, step 3 fails because FS_IMMUTABLE_FL is
+        enforced at the inode level, independent of mount namespace.
+        """
+        if not self._has_immutable_capability(coi_binary):
+            pytest.skip(
+                "coi binary lacks CAP_LINUX_IMMUTABLE "
+                "(grant with: sudo setcap cap_linux_immutable=ep <coi-binary>)"
+            )
+
+        # Initialize a git repository with a hook file
+        subprocess.run(["git", "init"], cwd=workspace_dir, check=True, capture_output=True)
+
+        hooks_dir = Path(workspace_dir) / ".git" / "hooks"
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        pre_commit = hooks_dir / "pre-commit"
+        pre_commit.write_text("#!/bin/sh\necho safe\n")
+
+        # Attempt the unshare+umount attack from inside the container.
+        # sudo unshare -m creates a new mount namespace where we can umount
+        # the read-only overlay, exposing the underlying filesystem.
+        subprocess.run(
+            [
+                coi_binary,
+                "run",
+                "--workspace",
+                workspace_dir,
+                "--",
+                "sudo",
+                "unshare",
+                "-m",
+                "sh",
+                "-c",
+                "umount /workspace/.git/hooks 2>/dev/null; "
+                "echo pwned > /workspace/.git/hooks/pre-commit 2>&1 || echo ATTACK_BLOCKED",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
+        # Verify original content is preserved on host
+        content = pre_commit.read_text()
+        assert "safe" in content, f"Hook file was modified by attack! Content: {content}"
+        assert "pwned" not in content, f"Attack bypassed immutable protection! Content: {content}"
+
+    def test_unshare_umount_file_creation_blocked(
+        self, coi_binary, workspace_dir, cleanup_containers
+    ):
+        """Test that creating new files via unshare+umount is blocked."""
+        if not self._has_immutable_capability(coi_binary):
+            pytest.skip(
+                "coi binary lacks CAP_LINUX_IMMUTABLE "
+                "(grant with: sudo setcap cap_linux_immutable=ep <coi-binary>)"
+            )
+
+        subprocess.run(["git", "init"], cwd=workspace_dir, check=True, capture_output=True)
+
+        hooks_dir = Path(workspace_dir) / ".git" / "hooks"
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+
+        # Attempt to create a new hook file after umounting the read-only overlay
+        subprocess.run(
+            [
+                coi_binary,
+                "run",
+                "--workspace",
+                workspace_dir,
+                "--",
+                "sudo",
+                "unshare",
+                "-m",
+                "sh",
+                "-c",
+                "umount /workspace/.git/hooks 2>/dev/null; "
+                "touch /workspace/.git/hooks/evil-hook 2>&1 || echo CREATION_BLOCKED",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
+        # The evil hook should not exist on host
+        evil_hook = hooks_dir / "evil-hook"
+        assert not evil_hook.exists(), "New file was created despite immutable protection!"
+
+    def test_immutable_cleaned_after_session(self, coi_binary, workspace_dir, cleanup_containers):
+        """Test that immutable bits are cleared after the session ends.
+
+        After coi run completes, the workspace files should be writable again
+        on the host. This ensures immutable doesn't interfere with normal
+        developer workflow between sessions.
+        """
+        if not self._has_immutable_capability(coi_binary):
+            pytest.skip(
+                "coi binary lacks CAP_LINUX_IMMUTABLE "
+                "(grant with: sudo setcap cap_linux_immutable=ep <coi-binary>)"
+            )
+
+        subprocess.run(["git", "init"], cwd=workspace_dir, check=True, capture_output=True)
+
+        hooks_dir = Path(workspace_dir) / ".git" / "hooks"
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        pre_commit = hooks_dir / "pre-commit"
+        pre_commit.write_text("#!/bin/sh\necho original\n")
+
+        # Run a simple command (this applies + removes immutable)
+        result = subprocess.run(
+            [
+                coi_binary,
+                "run",
+                "--workspace",
+                workspace_dir,
+                "--",
+                "echo",
+                "done",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert result.returncode == 0, f"coi run failed: {result.stderr}"
+
+        # After session ends, files should be writable again on host
+        pre_commit.write_text("#!/bin/sh\necho modified\n")
+        assert "modified" in pre_commit.read_text()

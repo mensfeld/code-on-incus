@@ -45,7 +45,7 @@ type SetupOptions struct {
 	ProfileContextFile    string               // Path to profile context .md file (appended to sandbox context)
 	Timezone              string               // Resolved IANA timezone name (e.g., "America/New_York"), empty for UTC
 	AutoContext           *bool                // Auto-inject sandbox context into tool's native system (default: true)
-	HostImmutable         bool                 // Apply chattr +i on host-side protected paths (default: true)
+	HostImmutable         bool                 // Apply chattr +i on host-side protected paths (set by CLI from config)
 	Logger                func(string)
 	ContainerName         string // Use existing container (for testing) - skips container creation
 }
