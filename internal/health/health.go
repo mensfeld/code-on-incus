@@ -64,6 +64,7 @@ func RunAllChecks(cfg *config.Config, verbose bool) *HealthResult {
 	checks["image_age"] = CheckImageAge(cfg.Container.Image)
 	checks["privileged_profile"] = CheckPrivilegedProfile()
 	checks["security_posture"] = CheckSecurityPosture()
+	checks["immutable_capability"] = CheckImmutableCapability()
 
 	// Networking checks
 	checks["network_bridge"] = CheckNetworkBridge()

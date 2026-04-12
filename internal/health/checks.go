@@ -2478,6 +2478,77 @@ func CheckSecurityPosture() HealthCheck {
 	}
 }
 
+// CheckImmutableCapability checks whether the COI binary has CAP_LINUX_IMMUTABLE,
+// which is needed to apply chattr +i on protected paths as defense-in-depth against
+// the unshare+umount bypass of read-only bind mounts.
+func CheckImmutableCapability() HealthCheck {
+	if runtime.GOOS != "linux" {
+		return HealthCheck{
+			Name:    "immutable_capability",
+			Status:  StatusOK,
+			Message: "Skipped (not applicable on " + runtime.GOOS + ")",
+		}
+	}
+
+	// Read effective capabilities from /proc/self/status
+	data, err := os.ReadFile("/proc/self/status")
+	if err != nil {
+		return HealthCheck{
+			Name:    "immutable_capability",
+			Status:  StatusWarning,
+			Message: "Cannot read process capabilities",
+			Details: map[string]interface{}{
+				"error": err.Error(),
+			},
+		}
+	}
+
+	// Parse CapEff line
+	var capEff uint64
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "CapEff:") {
+			hexVal := strings.TrimSpace(strings.TrimPrefix(line, "CapEff:"))
+			_, err := fmt.Sscanf(hexVal, "%x", &capEff)
+			if err != nil {
+				return HealthCheck{
+					Name:    "immutable_capability",
+					Status:  StatusWarning,
+					Message: "Cannot parse effective capabilities",
+					Details: map[string]interface{}{
+						"raw": hexVal,
+					},
+				}
+			}
+			break
+		}
+	}
+
+	// CAP_LINUX_IMMUTABLE is bit 9
+	const capLinuxImmutable = uint64(1) << 9
+
+	if capEff&capLinuxImmutable != 0 {
+		return HealthCheck{
+			Name:    "immutable_capability",
+			Status:  StatusOK,
+			Message: "Host-side immutable protection available (CAP_LINUX_IMMUTABLE present)",
+			Details: map[string]interface{}{
+				"category": "SECURITY",
+			},
+		}
+	}
+
+	return HealthCheck{
+		Name:   "immutable_capability",
+		Status: StatusWarning,
+		Message: "Host-side immutable protection unavailable — protected paths rely on bind-mount " +
+			"read-only only (bypassable with root in container). Fix: sudo setcap cap_linux_immutable=ep $(which coi)",
+		Details: map[string]interface{}{
+			"category":   "SECURITY",
+			"mitigation": "sudo setcap cap_linux_immutable=ep $(which coi)",
+		},
+	}
+}
+
 // CheckTimezone reports whether the host timezone can be detected
 func CheckTimezone() HealthCheck {
 	tz, err := container.DetectHostTimezone()

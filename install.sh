@@ -391,6 +391,9 @@ download_binary() {
     fi
 
     echo -e "${GREEN}✓ Installed to ${INSTALL_DIR}/${BINARY_NAME}${NC}"
+
+    # Grant immutable-attribute capability for host-side protected path hardening
+    grant_immutable_capability
 }
 
 # Build from source
@@ -437,6 +440,27 @@ build_from_source() {
     fi
 
     echo -e "${GREEN}✓ Built and installed${NC}"
+
+    # Grant immutable-attribute capability for host-side protected path hardening
+    grant_immutable_capability
+}
+
+# Grant CAP_LINUX_IMMUTABLE on the installed binary so COI can apply
+# chattr +i on host-side protected paths (defense-in-depth against
+# unshare+umount bypass of read-only bind mounts).
+grant_immutable_capability() {
+    if command -v setcap &> /dev/null; then
+        if sudo setcap cap_linux_immutable=ep "${INSTALL_DIR}/${BINARY_NAME}" 2>/dev/null; then
+            echo -e "${GREEN}✓ Granted cap_linux_immutable capability (host-side path protection)${NC}"
+        else
+            echo -e "${YELLOW}⚠ Could not set cap_linux_immutable on binary${NC}"
+            echo "  Host-side immutable protection will be unavailable."
+            echo "  To enable: sudo setcap cap_linux_immutable=ep ${INSTALL_DIR}/${BINARY_NAME}"
+        fi
+    else
+        echo -e "${YELLOW}⚠ setcap not found (install libcap2-bin)${NC}"
+        echo "  Host-side immutable protection will be unavailable."
+    fi
 }
 
 # Ensure Incus has been initialized (creates default network, profile devices, etc.)

@@ -4,6 +4,16 @@
 
 ### Breaking Changes
 
+- [Breaking] **Host-side immutable protection for protected paths** — COI now applies the Linux immutable attribute (`chattr +i`) on protected paths (`.git/hooks`, `.git/config`, etc.) on the host before starting the container. This prevents the `unshare -m` + `umount` bypass of read-only bind mounts (FLAWS Finding 1).
+
+  **Impact:** Protected paths on the host become immutable during the COI session. Host-side `git config` writes and hook modifications will fail while a session is active. Immutable bits are cleared on session stop/cleanup.
+
+  **Capability requirement:** The `coi` binary needs `CAP_LINUX_IMMUTABLE`. The installer (`install.sh`) grants this automatically. Manual installs: `sudo setcap cap_linux_immutable=ep $(which coi)`.
+
+  **macOS/Colima/Lima:** Graceful degradation — shared filesystems (virtiofs, 9p, sshfs) do not support the immutable attribute. COI logs a warning and falls back to read-only bind mounts only. Consider this a known limitation of VM-based setups.
+
+  **Opt out:** Set `host_immutable = false` in `[security]` config to disable.
+
 - [Breaking] **Default image renamed from `coi` to `coi-default`** — The default image alias has been renamed from `coi` to `coi-default` for consistency with the new profile system. After updating, run `coi build` to create the `coi-default` image. The old `coi` image can be removed with `coi image delete coi`.
 
 - [Breaking] **Removed `coi build custom` subcommand** — Custom image building is now done exclusively through profiles. Instead of `coi build custom my-image --script setup.sh`, create a profile directory with a `[container]` section:

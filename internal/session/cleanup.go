@@ -35,6 +35,14 @@ func Cleanup(opts CleanupOptions) error {
 		}
 	}
 
+	// Clear host-side immutable bits early, before any container operations.
+	// This ensures immutable bits are cleared even if the container is already
+	// stopped/deleted, and must happen before container deletion so the host
+	// files are writable again.
+	if opts.ContainerName != "" {
+		RemoveImmutable(opts.ContainerName, opts.Logger)
+	}
+
 	if opts.ContainerName == "" {
 		opts.Logger("No container to clean up")
 		return nil

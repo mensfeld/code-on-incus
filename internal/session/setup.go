@@ -45,6 +45,7 @@ type SetupOptions struct {
 	ProfileContextFile    string               // Path to profile context .md file (appended to sandbox context)
 	Timezone              string               // Resolved IANA timezone name (e.g., "America/New_York"), empty for UTC
 	AutoContext           *bool                // Auto-inject sandbox context into tool's native system (default: true)
+	HostImmutable         bool                 // Apply chattr +i on host-side protected paths (default: true)
 	Logger                func(string)
 	ContainerName         string // Use existing container (for testing) - skips container creation
 }
@@ -61,6 +62,7 @@ type SetupResult struct {
 	ContainerWorkspacePath string // Path where workspace is mounted inside container (default: /workspace)
 	SSHAgentSocketPath     string // Path to SSH agent socket inside container (empty if not forwarded)
 	Timezone               string // Resolved timezone applied to the container (empty = UTC)
+	HasImmutableProtection bool   // True if host-side immutable attribute was applied to protected paths
 }
 
 // Setup initializes a container for a Claude session
@@ -323,6 +325,15 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 				protectedPaths := GetProtectedPathsForLogging(opts.WorkspacePath, opts.ProtectedPaths)
 				if len(protectedPaths) > 0 {
 					opts.Logger(fmt.Sprintf("Protected paths (mounted read-only): %s", strings.Join(protectedPaths, ", ")))
+				}
+			}
+
+			// Apply host-side immutable attribute for defense-in-depth
+			if opts.HostImmutable {
+				immutablePaths := ApplyImmutable(opts.WorkspacePath, opts.ProtectedPaths, containerName, opts.Logger)
+				if len(immutablePaths) > 0 {
+					result.HasImmutableProtection = true
+					opts.Logger(fmt.Sprintf("Host-side immutable protection applied: %s", strings.Join(immutablePaths, ", ")))
 				}
 			}
 		}

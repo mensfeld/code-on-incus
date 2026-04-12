@@ -274,6 +274,7 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 		LimitsConfig:          limitsConfig,
 		IncusProject:          cfg.Incus.Project,
 		ProtectedPaths:        protectedPaths,
+		HostImmutable:         cfg.Security.IsHostImmutableEnabled(),
 		PreserveWorkspacePath: cfg.Paths.PreserveWorkspacePath,
 		ForwardSSHAgent:       config.BoolVal(cfg.SSH.ForwardAgent),
 		ForwardedEnvVars:      resolvedForwardedEnvVars,
