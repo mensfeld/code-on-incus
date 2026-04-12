@@ -99,6 +99,10 @@ func runCommand(cmd *cobra.Command, args []string) error {
 
 	// Cleanup container on exit (only if ephemeral)
 	defer func() {
+		// Clear immutable bits before container deletion (must happen first)
+		logger := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
+		session.RemoveImmutable(containerName, logger)
+
 		if !persistent {
 			fmt.Fprintf(os.Stderr, "Cleaning up container %s...\n", containerName)
 			_ = mgr.Delete(true) // Best effort cleanup
@@ -241,6 +245,15 @@ func runCommand(cmd *cobra.Command, args []string) error {
 					actualPaths := session.GetProtectedPathsForLogging(absWorkspace, protectedPaths)
 					if len(actualPaths) > 0 {
 						fmt.Fprintf(os.Stderr, "Protected paths (mounted read-only): %s\n", strings.Join(actualPaths, ", "))
+					}
+				}
+
+				// Apply host-side immutable attribute for defense-in-depth
+				if cfg.Security.IsHostImmutableEnabled() {
+					logger := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
+					immutablePaths := session.ApplyImmutable(absWorkspace, protectedPaths, containerName, logger)
+					if len(immutablePaths) > 0 {
+						fmt.Fprintf(os.Stderr, "Host-side immutable protection applied: %s\n", strings.Join(immutablePaths, ", "))
 					}
 				}
 			}
