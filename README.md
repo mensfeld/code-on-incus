@@ -7,6 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/mensfeld/code-on-incus)](https://golang.org/)
 [![Latest Release](https://img.shields.io/github/v/release/mensfeld/code-on-incus)](https://github.com/mensfeld/code-on-incus/releases)
+[![Join the chat at https://slack.karafka.io](https://raw.githubusercontent.com/karafka/misc/master/slack.svg)](https://slack.karafka.io)
 
 **Security-Hardened Container Runtime for AI Coding Agents with Real-Time Threat Detection**
 
@@ -554,3 +555,9 @@ See the [FAQ](https://github.com/mensfeld/code-on-incus/wiki/FAQ) for answers to
 - Security model and prompt injection protection
 - API key security and trust model
 - What is Incus? (vs tmux)
+
+## Getting Help
+
+- **Slack**: [Join the COI community on Slack](https://slack.karafka.io) — ask questions, report issues, share feedback
+- **GitHub Issues**: [Open an issue](https://github.com/mensfeld/code-on-incus/issues) for bug reports and feature requests
+- **Wiki**: Browse the [documentation wiki](https://github.com/mensfeld/code-on-incus/wiki) for guides and reference
