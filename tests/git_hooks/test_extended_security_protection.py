@@ -832,8 +832,12 @@ class TestImmutableProtection:
 
         # Verify original content is preserved on host
         content = pre_commit.read_text()
-        assert "safe" in content, f"Hook file was modified by attack! Content: {content}"
-        assert "pwned" not in content, f"Attack bypassed immutable protection! Content: {content}"
+        assert "safe" in content, (
+            f"Hook file was modified by attack! Content: {content} (see FLAWS.md Finding 1)"
+        )
+        assert "pwned" not in content, (
+            f"Attack bypassed immutable protection! Content: {content} (see FLAWS.md Finding 1)"
+        )
 
     def test_unshare_umount_file_creation_blocked(
         self, coi_binary, workspace_dir, cleanup_containers
@@ -873,7 +877,9 @@ class TestImmutableProtection:
 
         # The evil hook should not exist on host
         evil_hook = hooks_dir / "evil-hook"
-        assert not evil_hook.exists(), "New file was created despite immutable protection!"
+        assert not evil_hook.exists(), (
+            "New file was created despite immutable protection! (see FLAWS.md Finding 1)"
+        )
 
     def test_immutable_cleaned_after_session(self, coi_binary, workspace_dir, cleanup_containers):
         """Test that immutable bits are cleared after the session ends.
@@ -915,3 +921,219 @@ class TestImmutableProtection:
         # After session ends, files should be writable again on host
         pre_commit.write_text("#!/bin/sh\necho modified\n")
         assert "modified" in pre_commit.read_text()
+
+    def test_unshare_umount_git_config_blocked(self, coi_binary, workspace_dir, cleanup_containers):
+        """Test that unshare+umount cannot bypass .git/config protection.
+
+        .git/config is a file-level protected path. An attacker who can
+        modify it can set core.hooksPath to a directory they control,
+        bypassing hooks protection entirely (see FLAWS.md Finding 1).
+        """
+        if not self._has_immutable_capability(coi_binary):
+            pytest.skip(
+                "coi binary lacks CAP_LINUX_IMMUTABLE "
+                "(grant with: sudo setcap cap_linux_immutable=ep <coi-binary>)"
+            )
+
+        subprocess.run(["git", "init"], cwd=workspace_dir, check=True, capture_output=True)
+
+        git_config = Path(workspace_dir) / ".git" / "config"
+        original_content = git_config.read_text()
+
+        # Attempt to overwrite .git/config with a malicious hooksPath
+        subprocess.run(
+            [
+                coi_binary,
+                "run",
+                "--workspace",
+                workspace_dir,
+                "--",
+                "sudo",
+                "unshare",
+                "-m",
+                "sh",
+                "-c",
+                "umount /workspace/.git/config 2>/dev/null; "
+                "echo '[core]\nhookspath=/tmp/evil' > /workspace/.git/config 2>&1 "
+                "|| echo ATTACK_BLOCKED",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
+        # Verify original content is preserved on host
+        content = git_config.read_text()
+        assert content == original_content, (
+            f".git/config was modified by attack! "
+            f"Expected: {original_content!r}, Got: {content!r} "
+            f"(see FLAWS.md Finding 1)"
+        )
+        assert "hookspath" not in content.lower(), (
+            f"Attack injected core.hooksPath into .git/config! Content: {content} "
+            f"(see FLAWS.md Finding 1)"
+        )
+
+    def test_unshare_umount_husky_blocked(self, coi_binary, workspace_dir, cleanup_containers):
+        """Test that unshare+umount cannot bypass .husky protection.
+
+        .husky is a directory-level protected path. Husky hooks execute
+        automatically on git operations, so an attacker who can write here
+        gains host-side code execution (see FLAWS.md Finding 1).
+        """
+        if not self._has_immutable_capability(coi_binary):
+            pytest.skip(
+                "coi binary lacks CAP_LINUX_IMMUTABLE "
+                "(grant with: sudo setcap cap_linux_immutable=ep <coi-binary>)"
+            )
+
+        husky_dir = Path(workspace_dir) / ".husky"
+        husky_dir.mkdir(parents=True, exist_ok=True)
+        pre_commit = husky_dir / "pre-commit"
+        pre_commit.write_text("#!/bin/sh\necho safe\n")
+
+        # Attempt the unshare+umount attack on .husky
+        subprocess.run(
+            [
+                coi_binary,
+                "run",
+                "--workspace",
+                workspace_dir,
+                "--",
+                "sudo",
+                "unshare",
+                "-m",
+                "sh",
+                "-c",
+                "umount /workspace/.husky 2>/dev/null; "
+                "echo pwned > /workspace/.husky/pre-commit 2>&1 "
+                "|| echo ATTACK_BLOCKED",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
+        # Verify original content is preserved on host
+        content = pre_commit.read_text()
+        assert "safe" in content, (
+            f".husky/pre-commit was modified by attack! Content: {content} (see FLAWS.md Finding 1)"
+        )
+        assert "pwned" not in content, (
+            f"Attack bypassed immutable protection on .husky! Content: {content} "
+            f"(see FLAWS.md Finding 1)"
+        )
+
+    def test_unshare_umount_vscode_blocked(self, coi_binary, workspace_dir, cleanup_containers):
+        """Test that unshare+umount cannot bypass .vscode protection.
+
+        .vscode is a directory-level protected path. tasks.json can
+        auto-execute commands and settings.json can inject shell arguments,
+        so an attacker who can write here gains host-side code execution
+        (see FLAWS.md Finding 1).
+        """
+        if not self._has_immutable_capability(coi_binary):
+            pytest.skip(
+                "coi binary lacks CAP_LINUX_IMMUTABLE "
+                "(grant with: sudo setcap cap_linux_immutable=ep <coi-binary>)"
+            )
+
+        vscode_dir = Path(workspace_dir) / ".vscode"
+        vscode_dir.mkdir(parents=True, exist_ok=True)
+        tasks_json = vscode_dir / "tasks.json"
+        tasks_json.write_text('{"version": "2.0.0", "tasks": []}\n')
+
+        # Attempt the unshare+umount attack on .vscode
+        subprocess.run(
+            [
+                coi_binary,
+                "run",
+                "--workspace",
+                workspace_dir,
+                "--",
+                "sudo",
+                "unshare",
+                "-m",
+                "sh",
+                "-c",
+                "umount /workspace/.vscode 2>/dev/null; "
+                "echo '{\"malicious\": true}' > /workspace/.vscode/tasks.json 2>&1 "
+                "|| echo ATTACK_BLOCKED",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
+        # Verify original content is preserved on host
+        content = tasks_json.read_text()
+        assert "2.0.0" in content, (
+            f".vscode/tasks.json was modified by attack! Content: {content} "
+            f"(see FLAWS.md Finding 1)"
+        )
+        assert "malicious" not in content, (
+            f"Attack bypassed immutable protection on .vscode! Content: {content} "
+            f"(see FLAWS.md Finding 1)"
+        )
+
+    def test_bypass_succeeds_without_immutable(self, coi_binary, workspace_dir, cleanup_containers):
+        """Negative test: unshare+umount SUCCEEDS when immutable is disabled.
+
+        This test proves the attack vector is real and that the immutable
+        attribute is what blocks it. Without this test, the other immutable
+        tests could vacuously pass (e.g. if unshare is broken, or the
+        container lacks CAP_SYS_ADMIN).
+
+        With host_immutable=false, the only protection is the read-only
+        bind mount, which is defeated by unshare+umount.
+        """
+        if not self._has_immutable_capability(coi_binary):
+            pytest.skip(
+                "coi binary lacks CAP_LINUX_IMMUTABLE "
+                "(grant with: sudo setcap cap_linux_immutable=ep <coi-binary>)"
+            )
+
+        # Disable immutable protection via config
+        config_dir = Path(workspace_dir) / ".coi"
+        config_dir.mkdir(exist_ok=True)
+        (config_dir / "config.toml").write_text("[security]\nhost_immutable = false\n")
+
+        # Initialize git repo with a hook file
+        subprocess.run(["git", "init"], cwd=workspace_dir, check=True, capture_output=True)
+        hooks_dir = Path(workspace_dir) / ".git" / "hooks"
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        pre_commit = hooks_dir / "pre-commit"
+        pre_commit.write_text("#!/bin/sh\necho safe\n")
+
+        # Make workspace writable so the container user can write after umount
+        _make_workspace_writable(workspace_dir)
+
+        # Run the attack with immutable disabled — should succeed
+        subprocess.run(
+            [
+                coi_binary,
+                "run",
+                "--",
+                "sudo",
+                "unshare",
+                "-m",
+                "sh",
+                "-c",
+                "umount /workspace/.git/hooks 2>/dev/null; "
+                "echo pwned > /workspace/.git/hooks/pre-commit",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            cwd=workspace_dir,
+        )
+
+        # The attack SHOULD succeed — this validates the test isn't vacuous
+        content = pre_commit.read_text()
+        assert "pwned" in content, (
+            f"Expected attack to succeed with host_immutable=false, "
+            f"but hook was NOT modified. Content: {content}. "
+            f"This means the test is vacuous — the attack vector may not "
+            f"be working, making the immutable protection tests meaningless "
+            f"(see FLAWS.md Finding 1)"
+        )

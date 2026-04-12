@@ -80,6 +80,8 @@
 
 - [Feature] **`coi clean --pools`** — New flag detects COI containers (matched by container name prefix) sitting in storage pools that no profile loaded in the current directory references, and offers to remove them. **The pool itself is never deleted.** A prominent warning explains that COI can only see profiles in `~/.coi/` and `./.coi/`, so pools may still be in use by profiles in other projects on this machine that are invisible to the current `coi` invocation. Honours `--dry-run` and `--force`; included in `--all`.
 
+- [Feature] **Mount namespace bypass regression tests (P1-2)** — Added defense-in-depth integration tests covering the `unshare -m` + `umount` attack across all default protected paths (`.git/hooks`, `.git/config`, `.husky`, `.vscode`). Includes a negative test proving the bypass works when immutable protection is disabled, validating the tests aren't vacuous. All immutable protection assertion messages now reference FLAWS.md Finding 1 for traceability.
+
 ### Bug Fixes
 
 - [Bug Fix] **Strengthened sandbox context prompt to reduce unnecessary permission requests** — Despite `--permission-mode bypassPermissions` and equivalent OpenCode settings, the AI tools would sometimes still ask "shall I proceed?" or request confirmation before running commands. Strengthened the sandbox context instructions (injected into `~/.claude/CLAUDE.md` for Claude Code and `~/SANDBOX_CONTEXT.md` for OpenCode) with an explicit "Autonomous Operation" section that unambiguously tells the AI it has full autonomy and should never ask for permission in its dedicated sandbox container. (#308)
