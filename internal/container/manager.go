@@ -1,6 +1,7 @@
 package container
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -327,10 +328,23 @@ func (m *Manager) PullDirectory(containerPath, localPath string) error {
 	}
 	defer os.RemoveAll(tempDir)
 
-	// Pull to temp directory (creates tempDir/dirname/)
+	// Pull to temp directory (creates tempDir/dirname/). Capture stderr into
+	// the returned error — otherwise a missing source path surfaces as a
+	// bare "exit status 1" and callers like session.saveSessionData cannot
+	// tell "no config yet" apart from a real failure, turning benign
+	// first-run cleanups into "Warning: Failed to save session data" noise.
 	source := m.ContainerName + containerPath
-	if err := IncusExec("file", "pull", "-r", source, tempDir); err != nil {
-		return err
+	cmdArgs := buildIncusCommand("file", "pull", "-r", source, tempDir)
+	cmd := execIncusCommand(cmdArgs)
+	var stderr bytes.Buffer
+	cmd.Stdout = nil
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		stderrMsg := strings.TrimSpace(stderr.String())
+		if stderrMsg == "" {
+			return err
+		}
+		return fmt.Errorf("%s: %w", stderrMsg, err)
 	}
 
 	// Find the pulled directory (it will be the only item in tempDir)
