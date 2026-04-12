@@ -531,6 +531,7 @@ func TestRenderContextFileContent(t *testing.T) {
 		{"container name", "coi-test-1"},
 		{"autonomous operation section", "Autonomous Operation"},
 		{"never ask confirmation", "Never ask for confirmation"},
+		{"act autonomously guidance", "Act autonomously"},
 	}
 
 	for _, check := range checks {
