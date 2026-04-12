@@ -97,7 +97,14 @@ func ApplyImmutable(workspacePath string, protectedPaths []string, containerName
 				logger(fmt.Sprintf("Warning: Cannot set immutable attribute on protected paths: %v", err))
 				logger("  Protected paths rely on read-only bind mounts only (bypassable with root in container).")
 				logger("  To enable host-side immutable protection, run:")
-				logger("    sudo setcap cap_linux_immutable=ep $(which coi)")
+				if exe, exeErr := os.Executable(); exeErr == nil {
+					if resolved, linkErr := filepath.EvalSymlinks(exe); linkErr == nil {
+						exe = resolved
+					}
+					logger(fmt.Sprintf("    sudo setcap cap_linux_immutable=ep %s", exe))
+				} else {
+					logger("    sudo setcap cap_linux_immutable=ep /path/to/coi")
+				}
 				// Save manifest for any paths already applied before this failure
 				if len(applied) > 0 {
 					saveManifestForApplied(applied, workspacePath, containerName, logger)

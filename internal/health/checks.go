@@ -2537,14 +2537,23 @@ func CheckImmutableCapability() HealthCheck {
 		}
 	}
 
+	// Resolve the real binary path (setcap doesn't work on symlinks)
+	fixCmd := "sudo setcap cap_linux_immutable=ep /path/to/coi"
+	if exe, err := os.Executable(); err == nil {
+		if resolved, linkErr := filepath.EvalSymlinks(exe); linkErr == nil {
+			exe = resolved
+		}
+		fixCmd = fmt.Sprintf("sudo setcap cap_linux_immutable=ep %s", exe)
+	}
+
 	return HealthCheck{
 		Name:   "immutable_capability",
 		Status: StatusWarning,
 		Message: "Host-side immutable protection unavailable — protected paths rely on bind-mount " +
-			"read-only only (bypassable with root in container). Fix: sudo setcap cap_linux_immutable=ep $(which coi)",
+			"read-only only (bypassable with root in container). Fix: " + fixCmd,
 		Details: map[string]interface{}{
 			"category":   "SECURITY",
-			"mitigation": "sudo setcap cap_linux_immutable=ep $(which coi)",
+			"mitigation": fixCmd,
 		},
 	}
 }

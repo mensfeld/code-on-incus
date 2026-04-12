@@ -836,6 +836,35 @@ func TestCheckIncusStoragePools_SaneValues(t *testing.T) {
 
 // CheckProcessMonitoringCapability should complete with a definitive status (OK/Warning/Failed)
 // depending on whether the environment supports process monitoring (cgroups, image availability).
+func TestCheckImmutableCapability(t *testing.T) {
+	result := CheckImmutableCapability()
+
+	if result.Name != "immutable_capability" {
+		t.Errorf("Expected check name 'immutable_capability', got '%s'", result.Name)
+	}
+
+	// Must be OK (cap granted) or Warning (cap missing) — never Failed
+	if result.Status != StatusOK && result.Status != StatusWarning {
+		t.Errorf("Unexpected status: %s (message: %s)", result.Status, result.Message)
+	}
+
+	// When the capability is missing, the fix command must contain a resolved
+	// binary path — never $(which coi) which breaks when coi is a symlink.
+	if result.Status == StatusWarning {
+		if strings.Contains(result.Message, "$(which") {
+			t.Error("Fix command must not contain $(which ...) — setcap requires a resolved path, not a symlink")
+		}
+		mitigation, ok := result.Details["mitigation"].(string)
+		if !ok {
+			t.Error("Warning result should include a 'mitigation' detail")
+		} else if strings.Contains(mitigation, "$(which") {
+			t.Error("Mitigation must not contain $(which ...) — setcap requires a resolved path")
+		}
+	}
+
+	t.Logf("Immutable capability check: status=%s message=%s", result.Status, result.Message)
+}
+
 func TestCheckProcessMonitoringCapability(t *testing.T) {
 	// Skip if incus is not available
 	if _, err := exec.LookPath("incus"); err != nil {

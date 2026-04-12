@@ -8,7 +8,7 @@
 
   **Impact:** Protected paths on the host become immutable during the COI session. Host-side `git config` writes and hook modifications will fail while a session is active. Immutable bits are cleared on session stop/cleanup.
 
-  **Capability requirement:** The `coi` binary needs `CAP_LINUX_IMMUTABLE`. The installer (`install.sh`) grants this automatically. Manual installs: `sudo setcap cap_linux_immutable=ep $(which coi)`.
+  **Capability requirement:** The `coi` binary needs `CAP_LINUX_IMMUTABLE`. The installer (`install.sh`) grants this automatically. Manual installs: `sudo setcap cap_linux_immutable=ep "$(readlink -f "$(which coi)")"` (note: `setcap` requires the real binary path, not a symlink).
 
   **macOS/Colima/Lima:** Graceful degradation — shared filesystems (virtiofs, 9p, sshfs) do not support the immutable attribute. COI logs a warning and falls back to read-only bind mounts only. Consider this a known limitation of VM-based setups.
 
