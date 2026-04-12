@@ -8,6 +8,20 @@ import subprocess
 from pathlib import Path
 
 
+def _make_workspace_writable(workspace_dir):
+    """Make workspace world-writable so container user (UID 1000) can write.
+
+    In CI, the test runner UID (1001) differs from the container user UID (1000).
+    With shift=true on the Incus disk device, host UIDs map directly — so the
+    container user can only write to files with 'other' write permission.
+    """
+    subprocess.run(
+        ["chmod", "-R", "a+rwX", workspace_dir],
+        check=True,
+        capture_output=True,
+    )
+
+
 def test_git_hooks_readonly_by_default(coi_binary, workspace_dir, cleanup_containers):
     """Test that .git/hooks is mounted read-only by default in git repositories."""
     # Initialize a git repository in the workspace
@@ -172,13 +186,14 @@ writable_hooks = true
     hooks_dir = Path(workspace_dir) / ".git" / "hooks"
     hooks_dir.mkdir(parents=True, exist_ok=True)
 
-    # Run with writable hooks enabled via config
+    # Make workspace writable by container user (CI UID mismatch workaround)
+    _make_workspace_writable(workspace_dir)
+
+    # Run with writable hooks enabled via config (cwd needed for config pickup)
     result = subprocess.run(
         [
             coi_binary,
             "run",
-            "--workspace",
-            workspace_dir,
             "--",
             "sh",
             "-c",
@@ -187,6 +202,7 @@ writable_hooks = true
         capture_output=True,
         text=True,
         timeout=120,
+        cwd=workspace_dir,
     )
 
     # Should succeed
@@ -216,6 +232,9 @@ writable_hooks = true
     # Ensure hooks dir exists
     hooks_dir = Path(workspace_dir) / ".git" / "hooks"
     hooks_dir.mkdir(parents=True, exist_ok=True)
+
+    # Make workspace writable by container user (CI UID mismatch workaround)
+    _make_workspace_writable(workspace_dir)
 
     # Run command - protection should be disabled via config
     result = subprocess.run(
@@ -345,6 +364,9 @@ def test_git_hooks_rest_of_git_dir_writable(coi_binary, workspace_dir, cleanup_c
     # Ensure hooks dir exists (for the protection to be applied)
     hooks_dir = Path(workspace_dir) / ".git" / "hooks"
     hooks_dir.mkdir(parents=True, exist_ok=True)
+
+    # Make workspace writable by container user (CI UID mismatch workaround)
+    _make_workspace_writable(workspace_dir)
 
     # Create a file in .git (not in hooks)
     result = subprocess.run(

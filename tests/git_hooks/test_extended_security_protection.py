@@ -19,6 +19,20 @@ from pathlib import Path
 import pytest
 
 
+def _make_workspace_writable(workspace_dir):
+    """Make workspace world-writable so container user (UID 1000) can write.
+
+    In CI, the test runner UID (1001) differs from the container user UID (1000).
+    With shift=true on the Incus disk device, host UIDs map directly — so the
+    container user can only write to files with 'other' write permission.
+    """
+    subprocess.run(
+        ["chmod", "-R", "a+rwX", workspace_dir],
+        check=True,
+        capture_output=True,
+    )
+
+
 class TestGitConfigProtection:
     """Tests for .git/config protection (prevents core.hooksPath bypass)."""
 
@@ -439,6 +453,9 @@ protected_paths = [".git/hooks"]
         vscode_dir = Path(workspace_dir) / ".vscode"
         vscode_dir.mkdir(parents=True, exist_ok=True)
 
+        # Make workspace writable by container user (CI UID mismatch workaround)
+        _make_workspace_writable(workspace_dir)
+
         # Try to write to .vscode - should succeed since it's not in custom list
         result = subprocess.run(
             [
@@ -483,6 +500,9 @@ disable_protection = true
         # Ensure hooks dir exists
         hooks_dir = Path(workspace_dir) / ".git" / "hooks"
         hooks_dir.mkdir(parents=True, exist_ok=True)
+
+        # Make workspace writable by container user (CI UID mismatch workaround)
+        _make_workspace_writable(workspace_dir)
 
         # Run command - should be able to write to hooks
         result = subprocess.run(
@@ -638,10 +658,14 @@ class TestSymlinkSecurity:
 class TestWritableGitHooksConfigCompat:
     """Tests for [git] writable_hooks config compatibility."""
 
-    def test_writable_git_hooks_config_disables_all_protection(
+    def test_writable_git_hooks_config_makes_hooks_writable(
         self, coi_binary, workspace_dir, cleanup_containers
     ):
-        """Test that writable_hooks config disables all path protection."""
+        """Test that writable_hooks config makes .git/hooks writable.
+
+        Note: writable_hooks = true only removes .git/hooks from protected
+        paths. Other paths (.vscode, .husky, .git/config) remain protected.
+        """
         # Initialize git repo
         subprocess.run(["git", "init"], cwd=workspace_dir, check=True, capture_output=True)
 
@@ -653,41 +677,40 @@ class TestWritableGitHooksConfigCompat:
 writable_hooks = true
 """)
 
-        # Create protected paths
+        # Create hooks dir
         hooks_dir = Path(workspace_dir) / ".git" / "hooks"
         hooks_dir.mkdir(parents=True, exist_ok=True)
 
-        vscode_dir = Path(workspace_dir) / ".vscode"
-        vscode_dir.mkdir(parents=True, exist_ok=True)
+        # Make workspace writable by container user (CI UID mismatch workaround)
+        _make_workspace_writable(workspace_dir)
 
-        # Run with writable hooks enabled via config - should disable all protection
+        # Run with writable hooks enabled — only .git/hooks should be writable
         result = subprocess.run(
             [
                 coi_binary,
                 "run",
-                "--workspace",
-                workspace_dir,
                 "--",
-                "sh",
-                "-c",
-                "touch /workspace/.git/hooks/test && touch /workspace/.vscode/test",
+                "touch",
+                "/workspace/.git/hooks/test",
             ],
             capture_output=True,
             text=True,
             timeout=120,
+            cwd=workspace_dir,
         )
 
-        # Should succeed
+        # Should succeed — .git/hooks is writable
         assert result.returncode == 0, f"Command failed: {result.stderr}"
-
-        # Both files should be created
         assert (hooks_dir / "test").exists()
-        assert (vscode_dir / "test").exists()
 
-    def test_config_writable_hooks_disables_all_protection(
+    def test_config_writable_hooks_keeps_other_paths_protected(
         self, coi_binary, workspace_dir, cleanup_containers
     ):
-        """Test that [git] writable_hooks=true disables all protection."""
+        """Test that [git] writable_hooks=true still protects non-hooks paths.
+
+        writable_hooks only removes .git/hooks from the protected list.
+        Other paths like .husky remain read-only.
+        """
         # Create config with writable_hooks
         config_content = """
 [git]
@@ -701,10 +724,7 @@ writable_hooks = true
         # Initialize git repo
         subprocess.run(["git", "init"], cwd=workspace_dir, check=True, capture_output=True)
 
-        # Create protected paths
-        hooks_dir = Path(workspace_dir) / ".git" / "hooks"
-        hooks_dir.mkdir(parents=True, exist_ok=True)
-
+        # Create .husky (should still be protected)
         husky_dir = Path(workspace_dir) / ".husky"
         husky_dir.mkdir(parents=True, exist_ok=True)
 
@@ -714,9 +734,8 @@ writable_hooks = true
                 coi_binary,
                 "run",
                 "--",
-                "sh",
-                "-c",
-                "touch /workspace/.git/hooks/test && touch /workspace/.husky/test",
+                "touch",
+                "/workspace/.husky/test",
             ],
             capture_output=True,
             text=True,
@@ -724,12 +743,14 @@ writable_hooks = true
             cwd=workspace_dir,
         )
 
-        # Should succeed
-        assert result.returncode == 0, f"Command failed: {result.stderr}"
-
-        # Both files should be created
-        assert (hooks_dir / "test").exists()
-        assert (husky_dir / "test").exists()
+        # Should fail — .husky is still protected despite writable_hooks
+        assert result.returncode != 0
+        combined = result.stdout + result.stderr
+        assert (
+            "read-only" in combined.lower()
+            or "read only" in combined.lower()
+            or "permission denied" in combined.lower()
+        ), f"Expected read-only error, got: {combined}"
 
 
 class TestImmutableProtection:
