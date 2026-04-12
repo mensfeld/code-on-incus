@@ -24,6 +24,26 @@ from support.helpers import (
 )
 
 
+def _wait_for_write_error(monitor, timeout=15):
+    """Wait for any write-denied error in the monitor display.
+
+    With host-side immutable protection, the error may be "Permission denied"
+    (EACCES from immutable flag) instead of "Read-only file system" (EROFS
+    from read-only bind mount).
+    """
+    start = time.time()
+    while time.time() - start < timeout:
+        display = monitor.last_display.lower()
+        if (
+            "read-only" in display
+            or "permission denied" in display
+            or "operation not permitted" in display
+        ):
+            return True
+        time.sleep(0.5)
+    return False
+
+
 def test_protected_paths_work_with_preserve_workspace_path(
     coi_binary, cleanup_containers, workspace_dir
 ):
@@ -102,13 +122,15 @@ preserve_workspace_path = true
         found = wait_for_text_in_monitor(monitor, "Original hook", timeout=10)
         assert found, "Hook file should exist and be readable at preserved path"
 
-        # Try to modify the hook - should fail with read-only error
+        # Try to modify the hook - should fail with read-only or permission error
+        # (immutable attribute returns "Permission denied" before mount returns
+        # "Read-only file system")
         child.send(f"echo 'Modified' >> {workspace_dir}/.git/hooks/pre-commit 2>&1")
         time.sleep(0.3)
         child.send("\x0d")
-        # Look for "Read-only" error message
-        found = wait_for_text_in_monitor(monitor, "Read-only", timeout=10)
-        assert found, "Writing to .git/hooks should fail with Read-only error"
+        assert _wait_for_write_error(monitor), (
+            "Writing to .git/hooks should fail with Read-only or Permission denied error"
+        )
 
     # Verify the hook was NOT modified on host
     with open(hook_file) as f:
@@ -185,12 +207,15 @@ def test_protected_paths_default_workspace(coi_binary, cleanup_containers, works
         found = wait_for_text_in_monitor(monitor, "Original hook", timeout=10)
         assert found, "Hook file should exist and be readable"
 
-        # Try to modify the hook - should fail with read-only error
+        # Try to modify the hook - should fail with read-only or permission error
+        # (immutable attribute returns "Permission denied" before mount returns
+        # "Read-only file system")
         child.send("echo 'Modified' >> /workspace/.git/hooks/pre-commit 2>&1")
         time.sleep(0.3)
         child.send("\x0d")
-        found = wait_for_text_in_monitor(monitor, "Read-only", timeout=10)
-        assert found, "Writing to .git/hooks should fail with Read-only error"
+        assert _wait_for_write_error(monitor), (
+            "Writing to .git/hooks should fail with Read-only or Permission denied error"
+        )
 
     # Cleanup
     child.send("sudo poweroff")
