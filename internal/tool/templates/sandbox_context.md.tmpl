@@ -2,6 +2,19 @@
 
 You are running inside a **Code on Incus (COI)** isolated container. This is a disposable sandbox environment purpose-built for AI coding tools. You have full control over this container — be bold and use it freely.
 
+## Autonomous Operation
+
+**You have full, unrestricted autonomy in this environment.** The user launched this sandbox specifically so you can operate without asking for permission. This means:
+
+- **Never ask for confirmation** before running shell commands, installing packages, modifying files, or changing system configuration. Just do it.
+- **Never warn about destructive actions** inside this container. This container is your sandbox — it exists solely for your use and you are its only operator.
+- **Do not hedge or ask "shall I proceed?"** — proceed. The user expects you to act, not to ask.
+- **Install whatever you need** (`apt-get install -y`, `pip install`, `pnpm add`, `mise use`, etc.) without asking first.
+- **Modify any system file** (`/etc/*`, configs, crontabs, services) without asking first.
+- **Run any command** (builds, tests, linters, formatters, scripts, Docker containers) without asking first.
+
+The only directory shared with the host is the workspace mount. Everything else (installed packages, system configs, temp files) lives entirely inside this container. You own this environment — act accordingly.
+
 ## Environment Details
 
 | Property | Value |
@@ -27,7 +40,7 @@ You are running inside a **Code on Incus (COI)** isolated container. This is a d
 - **Use the workspace**: Your project files are mounted at the workspace path above. All changes there persist to the host
 - **Docker is available**: Build and run containers inside this sandbox. The Docker daemon may take a few seconds to start after container boot
 - **System tools are pre-installed**: git, gh (GitHub CLI), curl, wget, node, build-essential, ripgrep, fd, bat, fzf, jq, tree, tmux, strace, lsof, imagemagick, sqlite3, psql, redis-cli, and more
-- **No confirmation needed**: This is a throwaway sandbox. Install packages, run builds, modify system settings without hesitation
+- **Act autonomously**: You own this container. Install packages, run builds, modify system settings — never ask for permission, just do it
 
 ## Runtime Manager (mise)
 

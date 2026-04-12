@@ -529,6 +529,8 @@ func TestRenderContextFileContent(t *testing.T) {
 		{"timezone", "America/New_York"},
 		{"tool name", "claude"},
 		{"container name", "coi-test-1"},
+		{"autonomous operation section", "Autonomous Operation"},
+		{"never ask confirmation", "Never ask for confirmation"},
 	}
 
 	for _, check := range checks {

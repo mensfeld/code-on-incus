@@ -2,6 +2,10 @@
 
 ## 0.8.0 (Unreleased)
 
+### Bug Fixes
+
+- [Bug Fix] **Strengthened sandbox context prompt to reduce unnecessary permission requests** — Despite `--permission-mode bypassPermissions` and equivalent OpenCode settings, the AI tools would sometimes still ask "shall I proceed?" or request confirmation before running commands. Strengthened the sandbox context instructions (injected into `~/.claude/CLAUDE.md` for Claude Code and `~/SANDBOX_CONTEXT.md` for OpenCode) with an explicit "Autonomous Operation" section that unambiguously tells the AI it has full autonomy and should never ask for permission in its dedicated sandbox container. (#308)
+
 ### Breaking Changes
 
 - [Breaking] **Default image renamed from `coi` to `coi-default`** — The default image alias has been renamed from `coi` to `coi-default` for consistency with the new profile system. After updating, run `coi build` to create the `coi-default` image. The old `coi` image can be removed with `coi image delete coi`.
