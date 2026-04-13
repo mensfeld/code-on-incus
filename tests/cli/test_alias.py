@@ -52,7 +52,9 @@ def get_aliases_registry():
 class TestAliasStoredOnContainer:
     """Test that alias metadata is set on the container."""
 
-    def test_alias_stored_on_container(self, coi_binary, workspace_dir, cleanup_containers, dummy_image):
+    def test_alias_stored_on_container(
+        self, coi_binary, workspace_dir, cleanup_containers, dummy_image
+    ):
         """Launch session with alias, verify user.coi.alias is set."""
         write_alias_config(workspace_dir, "testalias")
         container_name = calculate_container_name(workspace_dir, 1)
@@ -94,16 +96,16 @@ class TestAliasInRegistry:
         assert result.returncode == 0, f"coi run failed: {result.stderr}"
 
         registry = get_aliases_registry()
-        assert "registrytest" in registry, (
-            f"Alias 'registrytest' not found in registry: {registry}"
-        )
+        assert "registrytest" in registry, f"Alias 'registrytest' not found in registry: {registry}"
         assert registry["registrytest"]["workspace"] == os.path.abspath(workspace_dir)
 
 
 class TestAliasShownInList:
     """Test that aliases are displayed in coi list output."""
 
-    def test_alias_shown_in_list_json(self, coi_binary, workspace_dir, cleanup_containers, dummy_image):
+    def test_alias_shown_in_list_json(
+        self, coi_binary, workspace_dir, cleanup_containers, dummy_image
+    ):
         """Launch container with alias, verify it appears in JSON list output."""
         write_alias_config(workspace_dir, "listalias")
 
@@ -125,7 +127,9 @@ class TestAliasShownInList:
             for c in containers:
                 assert "alias" in c, f"Missing 'alias' key in container: {c}"
 
-    def test_alias_shown_in_list_text(self, coi_binary, workspace_dir, cleanup_containers, dummy_image):
+    def test_alias_shown_in_list_text(
+        self, coi_binary, workspace_dir, cleanup_containers, dummy_image
+    ):
         """Launch container with alias, verify (alias) appears in text output."""
         write_alias_config(workspace_dir, "textalias")
 
@@ -168,7 +172,10 @@ class TestAttachByAlias:
         # It should either succeed or fail with a container-level error, NOT "not found"
         # Alias resolution means it found the container
         if result.returncode != 0:
-            assert "not found" not in result.stderr.lower() or "no running container found with alias" in result.stderr.lower()
+            assert (
+                "not found" not in result.stderr.lower()
+                or "no running container found with alias" in result.stderr.lower()
+            )
 
 
 class TestKillByAlias:
@@ -257,7 +264,9 @@ class TestUnfreezeByAlias:
 class TestAliasSlotSuffix:
     """Test alias with slot suffixes (e.g. myproject-2)."""
 
-    def test_alias_with_slot_suffix(self, coi_binary, workspace_dir, cleanup_containers, dummy_image):
+    def test_alias_with_slot_suffix(
+        self, coi_binary, workspace_dir, cleanup_containers, dummy_image
+    ):
         """Launch two containers, kill slot 2 by alias suffix."""
         write_alias_config(workspace_dir, "slotalias")
 
@@ -297,7 +306,9 @@ class TestAliasSlotSuffix:
 class TestAliasConflict:
     """Test alias conflict detection."""
 
-    def test_alias_conflict_different_workspace(self, coi_binary, workspace_dir, cleanup_containers, dummy_image, tmp_path):
+    def test_alias_conflict_different_workspace(
+        self, coi_binary, workspace_dir, cleanup_containers, dummy_image, tmp_path
+    ):
         """Register alias for workspace A, try to use same alias from workspace B."""
         write_alias_config(workspace_dir, "conflictalias")
 
@@ -323,7 +334,9 @@ class TestAliasConflict:
         assert result.returncode != 0, "Should fail with alias conflict"
         assert "conflict" in result.stderr.lower() or "already registered" in result.stderr.lower()
 
-    def test_alias_same_workspace_idempotent(self, coi_binary, workspace_dir, cleanup_containers, dummy_image):
+    def test_alias_same_workspace_idempotent(
+        self, coi_binary, workspace_dir, cleanup_containers, dummy_image
+    ):
         """Running twice from same workspace with same alias should not conflict."""
         write_alias_config(workspace_dir, "idempotentalias")
 
@@ -372,7 +385,9 @@ class TestShellAlias:
 class TestAliasEdgeCases:
     """Test alias edge cases."""
 
-    def test_alias_exact_container_name_passthrough(self, coi_binary, workspace_dir, cleanup_containers, dummy_image):
+    def test_alias_exact_container_name_passthrough(
+        self, coi_binary, workspace_dir, cleanup_containers, dummy_image
+    ):
         """Exact container name format should pass through without alias resolution."""
         write_alias_config(workspace_dir, "edgealias")
 
@@ -385,7 +400,9 @@ class TestAliasEdgeCases:
         if result.returncode != 0:
             assert "alias" not in result.stderr.lower()
 
-    def test_alias_invalid_characters(self, coi_binary, workspace_dir, cleanup_containers, dummy_image):
+    def test_alias_invalid_characters(
+        self, coi_binary, workspace_dir, cleanup_containers, dummy_image
+    ):
         """Invalid alias characters should be rejected."""
         write_alias_config(workspace_dir, "my project!")
 
@@ -397,7 +414,9 @@ class TestAliasEdgeCases:
         assert result.returncode != 0
         assert "invalid" in result.stderr.lower()
 
-    def test_alias_starts_with_digit(self, coi_binary, workspace_dir, cleanup_containers, dummy_image):
+    def test_alias_starts_with_digit(
+        self, coi_binary, workspace_dir, cleanup_containers, dummy_image
+    ):
         """Alias starting with digit should be rejected."""
         write_alias_config(workspace_dir, "123project")
 
@@ -407,7 +426,10 @@ class TestAliasEdgeCases:
             workspace_dir=workspace_dir,
         )
         assert result.returncode != 0
-        assert "invalid" in result.stderr.lower() or "must start with a letter" in result.stderr.lower()
+        assert (
+            "invalid" in result.stderr.lower()
+            or "must start with a letter" in result.stderr.lower()
+        )
 
     def test_alias_empty_string(self, coi_binary, workspace_dir, cleanup_containers, dummy_image):
         """Empty alias should work normally (no alias set)."""
