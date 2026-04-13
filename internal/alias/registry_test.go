@@ -265,9 +265,10 @@ func TestIsContainerName(t *testing.T) {
 		{"coi-abcdef12-10", true},
 		{"coi-00000000-1", true},
 		{"myproject", false},
-		{"coi-short-1", false},  // hash too short
-		{"coi-a1b2c3d4", false}, // no slot
-		{"coi-a1b2c3d4-", false},
+		{"coi-short-1", true},     // starts with prefix → treated as container name
+		{"coi-a1b2c3d4", true},    // starts with prefix → treated as container name
+		{"coi-a1b2c3d4-", true},   // starts with prefix → treated as container name
+		{"coi-nonexistent", true}, // starts with prefix → treated as container name
 		{"other-a1b2c3d4-1", false},
 	}
 

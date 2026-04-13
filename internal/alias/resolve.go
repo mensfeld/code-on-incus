@@ -21,9 +21,11 @@ type ResolvedAlias struct {
 // containerNamePattern matches the deterministic container name format: <prefix><hex8>-<digits>
 var containerNamePattern = regexp.MustCompile(`^` + regexp.QuoteMeta(session.GetContainerPrefix()) + `[a-f0-9]{8}-\d+$`)
 
-// IsContainerName returns true if the argument looks like an exact container name.
+// IsContainerName returns true if the argument looks like a container name
+// (either exact match or starts with the container prefix).
+// Names starting with the container prefix are never treated as aliases.
 func IsContainerName(arg string) bool {
-	return containerNamePattern.MatchString(arg)
+	return containerNamePattern.MatchString(arg) || strings.HasPrefix(arg, session.GetContainerPrefix())
 }
 
 // ResolveAliasForRunning resolves an alias (or alias-N) to a running container name.
