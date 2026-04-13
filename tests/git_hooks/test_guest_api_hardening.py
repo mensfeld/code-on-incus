@@ -39,6 +39,12 @@ class TestGuestAPIHardening:
             timeout=120,
         )
 
+        assert result.returncode == 0, (
+            f"'coi run' failed before /dev/incus could be checked. "
+            f"Return code: {result.returncode}. "
+            f"Stdout: {result.stdout} Stderr: {result.stderr}"
+        )
+
         combined = result.stdout + result.stderr
         # /dev/incus should not exist — either ls fails or we get our marker
         assert (
@@ -67,6 +73,12 @@ class TestGuestAPIHardening:
             capture_output=True,
             text=True,
             timeout=120,
+        )
+
+        assert result.returncode == 0, (
+            f"'coi run' failed before guest API socket could be checked. "
+            f"Return code: {result.returncode}. "
+            f"Stdout: {result.stdout} Stderr: {result.stderr}"
         )
 
         combined = result.stdout + result.stderr
@@ -98,15 +110,33 @@ class TestGuestAPIHardening:
                 "--",
                 "sh",
                 "-c",
-                "curl -s --unix-socket /dev/incus/sock http://_/1.0/devices 2>&1",
+                "curl -s --unix-socket /dev/incus/sock http://_/1.0/devices 2>&1 || echo GUEST_API_BLOCKED",
             ],
             capture_output=True,
             text=True,
             timeout=120,
         )
 
+        assert result.returncode == 0, (
+            f"'coi run' failed before device topology could be checked. "
+            f"Return code: {result.returncode}. "
+            f"Stdout: {result.stdout} Stderr: {result.stderr}"
+        )
+
         combined = result.stdout + result.stderr
-        # The workspace source path should NOT appear in the output
+
+        # The guest API should be blocked entirely — verify we got the expected
+        # failure marker or a connection error, not a successful JSON response
+        assert (
+            "GUEST_API_BLOCKED" in combined
+            or "No such file" in combined
+            or "Connection refused" in combined
+            or "Couldn't connect" in combined
+            or "cannot access" in combined
+        ), f"FLAWS Finding 3: Guest API /devices endpoint appears reachable. Output: {combined}"
+
+        # Defense-in-depth: even if the above assertion somehow passed with
+        # unexpected output, the workspace source path must never appear
         assert workspace_dir not in combined, (
             f"FLAWS Finding 3: Host workspace path leaked via guest API device topology. "
             f"Workspace path '{workspace_dir}' found in output: {combined}"

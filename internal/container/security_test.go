@@ -35,18 +35,29 @@ func TestContainsPrivilegedValue(t *testing.T) {
 }
 
 // TestDisableGuestAPI verifies that DisableGuestAPI sets security.guestapi=false
-// on a real Incus container. Skipped when no Incus daemon is available.
+// on a real Incus container. Skipped when Incus prerequisites are unavailable.
 func TestDisableGuestAPI(t *testing.T) {
 	// Skip if incus is not available
 	if _, err := exec.LookPath("incus"); err != nil {
 		t.Skip("incus not found in PATH, skipping integration test")
 	}
 
-	name := fmt.Sprintf("coi-test-guestapi-%d", time.Now().UnixNano()%100000)
+	// Skip if the Incus daemon is unavailable
+	if !Available() {
+		t.Skip("Incus daemon not available, skipping integration test")
+	}
+
+	// Skip if the required test image alias is unavailable
+	exists, err := ImageExists("coi-default")
+	if err != nil || !exists {
+		t.Skip("Incus image alias \"coi-default\" not available, skipping integration test")
+	}
+
+	name := fmt.Sprintf("coi-test-guestapi-%d", time.Now().UnixNano())
 
 	// Create a stopped container (init, not start)
 	if err := IncusExec("init", "coi-default", name); err != nil {
-		t.Skipf("could not init test container (Incus daemon not available?): %v", err)
+		t.Fatalf("could not init test container %q from image %q: %v", name, "coi-default", err)
 	}
 	defer func() {
 		_ = IncusExecQuiet("delete", name, "--force")
