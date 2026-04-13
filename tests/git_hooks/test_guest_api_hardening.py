@@ -1,0 +1,113 @@
+"""Test that the Incus guest API is disabled inside COI containers.
+
+The Incus guest API (/dev/incus) exposes the full device topology including
+host source paths (username, workspace location, which paths are RO-protected).
+This is a reconnaissance aid for mount namespace bypass attacks.
+
+COI does NOT use the guest agent internally — it communicates with containers
+via the host admin socket. Disabling the guest API has zero impact on COI
+functionality.
+
+See FLAWS.md Finding 3.
+"""
+
+import subprocess
+
+
+class TestGuestAPIHardening:
+    """Verify that /dev/incus is not accessible inside COI containers."""
+
+    def test_dev_incus_not_accessible(self, coi_binary, workspace_dir, cleanup_containers):
+        """Test that /dev/incus does not exist inside the container.
+
+        When security.guestapi=false, Incus does not create the /dev/incus
+        device inside the container at all.
+        """
+        result = subprocess.run(
+            [
+                coi_binary,
+                "run",
+                "--workspace",
+                workspace_dir,
+                "--",
+                "sh",
+                "-c",
+                "ls /dev/incus/ 2>&1 || echo NO_DEV_INCUS",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
+        combined = result.stdout + result.stderr
+        # /dev/incus should not exist — either ls fails or we get our marker
+        assert (
+            "NO_DEV_INCUS" in combined or "No such file" in combined or "cannot access" in combined
+        ), (
+            f"FLAWS Finding 3: /dev/incus appears to be accessible inside the container. "
+            f"Output: {combined}"
+        )
+
+    def test_guest_api_socket_not_available(self, coi_binary, workspace_dir, cleanup_containers):
+        """Test that the guest API socket is not reachable.
+
+        Even if /dev/incus somehow existed, the socket should not respond.
+        """
+        result = subprocess.run(
+            [
+                coi_binary,
+                "run",
+                "--workspace",
+                workspace_dir,
+                "--",
+                "sh",
+                "-c",
+                "curl -s --unix-socket /dev/incus/sock http://_/1.0 2>&1 || echo SOCKET_UNAVAILABLE",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
+        combined = result.stdout + result.stderr
+        # The socket should not be available
+        assert (
+            "SOCKET_UNAVAILABLE" in combined
+            or "No such file" in combined
+            or "Connection refused" in combined
+            or "Couldn't connect" in combined
+            or "cannot access" in combined
+        ), (
+            f"FLAWS Finding 3: Guest API socket appears reachable inside the container. "
+            f"Output: {combined}"
+        )
+
+    def test_no_host_path_leak(self, coi_binary, workspace_dir, cleanup_containers):
+        """Test that host source paths are not leaked via the device topology API.
+
+        This is the specific attack from FLAWS.md Finding 3: querying
+        /1.0/devices returns host source paths including username and
+        workspace location.
+        """
+        result = subprocess.run(
+            [
+                coi_binary,
+                "run",
+                "--workspace",
+                workspace_dir,
+                "--",
+                "sh",
+                "-c",
+                "curl -s --unix-socket /dev/incus/sock http://_/1.0/devices 2>&1",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
+        combined = result.stdout + result.stderr
+        # The workspace source path should NOT appear in the output
+        assert workspace_dir not in combined, (
+            f"FLAWS Finding 3: Host workspace path leaked via guest API device topology. "
+            f"Workspace path '{workspace_dir}' found in output: {combined}"
+        )

@@ -1,7 +1,10 @@
 package container
 
 import (
+	"fmt"
+	"os/exec"
 	"testing"
+	"time"
 )
 
 func TestContainsPrivilegedValue(t *testing.T) {
@@ -28,5 +31,38 @@ func TestContainsPrivilegedValue(t *testing.T) {
 				t.Errorf("containsPrivilegedValue(%q) = %v, want %v", tt.output, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestDisableGuestAPI verifies that DisableGuestAPI sets security.guestapi=false
+// on a real Incus container. Skipped when no Incus daemon is available.
+func TestDisableGuestAPI(t *testing.T) {
+	// Skip if incus is not available
+	if _, err := exec.LookPath("incus"); err != nil {
+		t.Skip("incus not found in PATH, skipping integration test")
+	}
+
+	name := fmt.Sprintf("coi-test-guestapi-%d", time.Now().UnixNano()%100000)
+
+	// Create a stopped container (init, not start)
+	if err := IncusExec("init", "coi-default", name); err != nil {
+		t.Skipf("could not init test container (Incus daemon not available?): %v", err)
+	}
+	defer func() {
+		_ = IncusExecQuiet("delete", name, "--force")
+	}()
+
+	// Call DisableGuestAPI
+	if err := DisableGuestAPI(name); err != nil {
+		t.Fatalf("DisableGuestAPI() returned error: %v", err)
+	}
+
+	// Read back the value
+	output, err := IncusOutput("config", "get", name, "security.guestapi")
+	if err != nil {
+		t.Fatalf("failed to read security.guestapi: %v", err)
+	}
+	if output != "false" {
+		t.Errorf("security.guestapi = %q, want %q", output, "false")
 	}
 }

@@ -80,6 +80,8 @@
 
 - [Feature] **`coi clean --pools`** — New flag detects COI containers (matched by container name prefix) sitting in storage pools that no profile loaded in the current directory references, and offers to remove them. **The pool itself is never deleted.** A prominent warning explains that COI can only see profiles in `~/.coi/` and `./.coi/`, so pools may still be in use by profiles in other projects on this machine that are invisible to the current `coi` invocation. Honours `--dry-run` and `--force`; included in `--all`.
 
+- [Feature] **Guest API disabled by default (P1-3)** — The Incus guest API (`/dev/incus`) is now disabled on all COI containers via `security.guestapi=false`. This prevents container processes from querying host source paths via the device topology API, which leaked the host username and workspace layout (FLAWS Finding 3).
+
 - [Feature] **Mount namespace bypass regression tests (P1-2)** — Added defense-in-depth integration tests covering the `unshare -m` + `umount` attack across all default protected paths (`.git/hooks`, `.git/config`, `.husky`, `.vscode`). Includes a negative test proving the bypass works when immutable protection is disabled, validating the tests aren't vacuous. All immutable protection assertion messages now reference FLAWS.md Finding 1 for traceability.
 
 ### Bug Fixes

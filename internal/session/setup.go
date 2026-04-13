@@ -375,6 +375,11 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 			return nil, fmt.Errorf("failed to enable Docker support: %w", err)
 		}
 
+		// Disable guest API to prevent host topology leaks (FLAWS Finding 3)
+		if err := container.DisableGuestAPI(result.ContainerName); err != nil {
+			return nil, fmt.Errorf("failed to disable guest API: %w", err)
+		}
+
 		// Block privileged containers — they defeat all isolation
 		if err := container.CheckNotPrivileged(result.ContainerName); err != nil {
 			return nil, err

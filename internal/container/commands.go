@@ -258,6 +258,9 @@ func LaunchContainer(imageAlias, containerName, pool string) error {
 	if err := EnableDockerSupport(containerName); err != nil {
 		return err
 	}
+	if err := DisableGuestAPI(containerName); err != nil {
+		return err
+	}
 	if err := CheckNotPrivileged(containerName); err != nil {
 		return err
 	}
@@ -276,6 +279,9 @@ func LaunchContainerPersistent(imageAlias, containerName, pool string) error {
 		return err
 	}
 	if err := EnableDockerSupport(containerName); err != nil {
+		return err
+	}
+	if err := DisableGuestAPI(containerName); err != nil {
 		return err
 	}
 	if err := CheckNotPrivileged(containerName); err != nil {
@@ -325,6 +331,15 @@ func EnableDockerSupport(containerName string) error {
 	}
 
 	return nil
+}
+
+// DisableGuestAPI prevents the Incus guest API (/dev/incus) from being
+// accessible inside the container. The guest API exposes host source paths
+// in the device topology, leaking the host username and workspace layout
+// (see FLAWS.md Finding 3). COI communicates with containers via the host
+// admin socket and does not need the guest API.
+func DisableGuestAPI(containerName string) error {
+	return IncusExec("config", "set", containerName, "security.guestapi=false")
 }
 
 // StopContainer stops a container
