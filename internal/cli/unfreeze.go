@@ -9,33 +9,33 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var resumeCmd = &cobra.Command{
-	Use:   "resume [container-name]",
-	Short: "Resume a frozen (paused) container",
-	Long: `Resume a container that was paused/frozen by the security monitoring system.
+var unfreezeCmd = &cobra.Command{
+	Use:   "unfreeze [container-name]",
+	Short: "Unfreeze a frozen (paused) container",
+	Long: `Unfreeze a container that was paused/frozen by the security monitoring system.
 
 When the security monitor detects a threat, it may pause (freeze) the container.
-Use this command to resume the container after investigating the threat.
+Use this command to unfreeze the container after investigating the threat.
 
 Examples:
-  coi resume coi-abc123-1    # Resume a specific frozen container
-  coi resume                  # Resume all frozen COI containers`,
+  coi unfreeze coi-abc123-1    # Unfreeze a specific frozen container
+  coi unfreeze                  # Unfreeze all frozen COI containers`,
 	Args: cobra.MaximumNArgs(1),
-	RunE: runResume,
+	RunE: runUnfreeze,
 }
 
-func runResume(cmd *cobra.Command, args []string) error {
+func runUnfreeze(cmd *cobra.Command, args []string) error {
 	if len(args) == 1 {
-		// Resume specific container
+		// Unfreeze specific container
 		containerName := args[0]
-		return resumeContainer(containerName)
+		return unfreezeContainer(containerName)
 	}
 
-	// Resume all frozen COI containers
-	return resumeAllFrozen()
+	// Unfreeze all frozen COI containers
+	return unfreezeAllFrozen()
 }
 
-func resumeContainer(name string) error {
+func unfreezeContainer(name string) error {
 	// Check if container exists and is frozen
 	status, err := getContainerStatus(name)
 	if err != nil {
@@ -46,17 +46,17 @@ func resumeContainer(name string) error {
 		return fmt.Errorf("container %s is not frozen (status: %s)", name, status)
 	}
 
-	// Resume the container
+	// Unfreeze the container
 	_, err = container.IncusOutput("start", name)
 	if err != nil {
-		return fmt.Errorf("failed to resume container: %w", err)
+		return fmt.Errorf("failed to unfreeze container: %w", err)
 	}
 
-	fmt.Fprintf(os.Stderr, "Resumed container: %s\n", name)
+	fmt.Fprintf(os.Stderr, "Unfroze container: %s\n", name)
 	return nil
 }
 
-func resumeAllFrozen() error {
+func unfreezeAllFrozen() error {
 	// List all COI containers
 	output, err := container.IncusOutput("list", "--format", "csv", "-c", "ns")
 	if err != nil {
@@ -64,7 +64,7 @@ func resumeAllFrozen() error {
 	}
 
 	lines := strings.Split(strings.TrimSpace(output), "\n")
-	resumedCount := 0
+	unfrozeCount := 0
 
 	for _, line := range lines {
 		if line == "" {
@@ -78,24 +78,24 @@ func resumeAllFrozen() error {
 		name := parts[0]
 		status := parts[1]
 
-		// Only resume frozen COI containers
+		// Only unfreeze frozen COI containers
 		if !strings.HasPrefix(name, "coi-") {
 			continue
 		}
 
 		if status == "FROZEN" {
-			if err := resumeContainer(name); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: Failed to resume %s: %v\n", name, err)
+			if err := unfreezeContainer(name); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: Failed to unfreeze %s: %v\n", name, err)
 			} else {
-				resumedCount++
+				unfrozeCount++
 			}
 		}
 	}
 
-	if resumedCount == 0 {
+	if unfrozeCount == 0 {
 		fmt.Fprintln(os.Stderr, "No frozen COI containers found")
 	} else {
-		fmt.Fprintf(os.Stderr, "Resumed %d container(s)\n", resumedCount)
+		fmt.Fprintf(os.Stderr, "Unfroze %d container(s)\n", unfrozeCount)
 	}
 
 	return nil

@@ -9,8 +9,8 @@ import (
 	"github.com/mensfeld/code-on-incus/internal/container"
 )
 
-// TestResumeCommand_FrozenContainer tests resuming a frozen container
-func TestResumeCommand_FrozenContainer(t *testing.T) {
+// TestUnfreezeCommand_FrozenContainer tests unfreezing a frozen container
+func TestUnfreezeCommand_FrozenContainer(t *testing.T) {
 	// Skip if incus is not available
 	if _, err := exec.LookPath("incus"); err != nil {
 		t.Skip("incus not found, skipping integration test")
@@ -28,7 +28,7 @@ func TestResumeCommand_FrozenContainer(t *testing.T) {
 	}
 
 	// Create a test container
-	containerName := "coi-test-resume-frozen"
+	containerName := "coi-test-unfreeze-frozen"
 
 	// Clean up any existing container
 	container.IncusOutput("delete", containerName, "--force")
@@ -58,10 +58,10 @@ func TestResumeCommand_FrozenContainer(t *testing.T) {
 		t.Fatalf("Expected container to be Frozen, got %s", status)
 	}
 
-	// Resume the container
-	err = resumeContainer(containerName)
+	// Unfreeze the container
+	err = unfreezeContainer(containerName)
 	if err != nil {
-		t.Fatalf("Failed to resume container: %v", err)
+		t.Fatalf("Failed to unfreeze container: %v", err)
 	}
 
 	// Verify it's running
@@ -70,14 +70,14 @@ func TestResumeCommand_FrozenContainer(t *testing.T) {
 		t.Fatalf("Failed to get container status: %v", err)
 	}
 	if status != "RUNNING" {
-		t.Errorf("Expected container to be RUNNING after resume, got %s", status)
+		t.Errorf("Expected container to be RUNNING after unfreeze, got %s", status)
 	}
 
-	t.Log("Successfully resumed frozen container")
+	t.Log("Successfully unfroze frozen container")
 }
 
-// TestResumeCommand_NotFrozen tests that resume fails on non-frozen container
-func TestResumeCommand_NotFrozen(t *testing.T) {
+// TestUnfreezeCommand_NotFrozen tests that unfreeze fails on non-frozen container
+func TestUnfreezeCommand_NotFrozen(t *testing.T) {
 	// Skip if incus is not available
 	if _, err := exec.LookPath("incus"); err != nil {
 		t.Skip("incus not found, skipping integration test")
@@ -95,7 +95,7 @@ func TestResumeCommand_NotFrozen(t *testing.T) {
 	}
 
 	// Create a test container
-	containerName := "coi-test-resume-running"
+	containerName := "coi-test-unfreeze-running"
 
 	// Clean up any existing container
 	container.IncusOutput("delete", containerName, "--force")
@@ -110,21 +110,21 @@ func TestResumeCommand_NotFrozen(t *testing.T) {
 	// Wait for container to be ready
 	time.Sleep(2 * time.Second)
 
-	// Try to resume a running container (should fail)
-	err = resumeContainer(containerName)
+	// Try to unfreeze a running container (should fail)
+	err = unfreezeContainer(containerName)
 	if err == nil {
-		t.Error("Expected error when resuming non-frozen container, got nil")
+		t.Error("Expected error when unfreezing non-frozen container, got nil")
 	}
 
 	if !strings.Contains(err.Error(), "not frozen") {
 		t.Errorf("Expected error message about 'not frozen', got: %v", err)
 	}
 
-	t.Log("Correctly rejected resume on non-frozen container")
+	t.Log("Correctly rejected unfreeze on non-frozen container")
 }
 
-// TestResumeCommand_NonExistent tests that resume fails on non-existent container
-func TestResumeCommand_NonExistent(t *testing.T) {
+// TestUnfreezeCommand_NonExistent tests that unfreeze fails on non-existent container
+func TestUnfreezeCommand_NonExistent(t *testing.T) {
 	// Skip if incus is not available
 	if _, err := exec.LookPath("incus"); err != nil {
 		t.Skip("incus not found, skipping integration test")
@@ -135,21 +135,21 @@ func TestResumeCommand_NonExistent(t *testing.T) {
 		t.Skip("incus daemon not running, skipping integration test")
 	}
 
-	// Try to resume a non-existent container
-	err := resumeContainer("coi-nonexistent-container-12345")
+	// Try to unfreeze a non-existent container
+	err := unfreezeContainer("coi-nonexistent-container-12345")
 	if err == nil {
-		t.Error("Expected error when resuming non-existent container, got nil")
+		t.Error("Expected error when unfreezing non-existent container, got nil")
 	}
 
 	if !strings.Contains(err.Error(), "not found") {
 		t.Errorf("Expected error message about 'not found', got: %v", err)
 	}
 
-	t.Log("Correctly rejected resume on non-existent container")
+	t.Log("Correctly rejected unfreeze on non-existent container")
 }
 
-// TestResumeAllFrozen tests resuming all frozen containers
-func TestResumeAllFrozen(t *testing.T) {
+// TestUnfreezeAllFrozen tests unfreezing all frozen containers
+func TestUnfreezeAllFrozen(t *testing.T) {
 	// Skip if incus is not available
 	if _, err := exec.LookPath("incus"); err != nil {
 		t.Skip("incus not found, skipping integration test")
@@ -167,7 +167,7 @@ func TestResumeAllFrozen(t *testing.T) {
 	}
 
 	// Create two test containers
-	containers := []string{"coi-test-resume-all-1", "coi-test-resume-all-2"}
+	containers := []string{"coi-test-unfreeze-all-1", "coi-test-unfreeze-all-2"}
 
 	// Clean up any existing containers
 	for _, name := range containers {
@@ -194,10 +194,10 @@ func TestResumeAllFrozen(t *testing.T) {
 		}
 	}
 
-	// Resume all frozen containers
-	err = resumeAllFrozen()
+	// Unfreeze all frozen containers
+	err = unfreezeAllFrozen()
 	if err != nil {
-		t.Fatalf("Failed to resume all frozen: %v", err)
+		t.Fatalf("Failed to unfreeze all frozen: %v", err)
 	}
 
 	// Verify both are running
@@ -207,9 +207,9 @@ func TestResumeAllFrozen(t *testing.T) {
 			t.Fatalf("Failed to get container %s status: %v", name, err)
 		}
 		if status != "RUNNING" {
-			t.Errorf("Expected container %s to be RUNNING after resumeAllFrozen, got %s", name, status)
+			t.Errorf("Expected container %s to be RUNNING after unfreezeAllFrozen, got %s", name, status)
 		}
 	}
 
-	t.Log("Successfully resumed all frozen containers")
+	t.Log("Successfully unfroze all frozen containers")
 }

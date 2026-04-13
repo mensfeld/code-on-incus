@@ -124,7 +124,7 @@ func init() {
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(healthCmd)
 	rootCmd.AddCommand(snapshotCmd)
-	rootCmd.AddCommand(resumeCmd)
+	rootCmd.AddCommand(unfreezeCmd)
 	rootCmd.AddCommand(updateCmd)
 	rootCmd.AddCommand(profileCmd)
 	rootCmd.AddCommand(attachCmd)

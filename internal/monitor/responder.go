@@ -183,7 +183,7 @@ func (r *Responder) pauseContainer(ctx context.Context) error {
 
 	// Notify about the pause action
 	if r.onAction != nil {
-		r.onAction("paused", fmt.Sprintf("Container %s PAUSED due to security threat. Resume with: incus start %s", r.containerName, r.containerName))
+		r.onAction("paused", fmt.Sprintf("Container %s PAUSED due to security threat. Unfreeze with: coi unfreeze %s", r.containerName, r.containerName))
 	}
 
 	return nil

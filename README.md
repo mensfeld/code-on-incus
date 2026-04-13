@@ -465,7 +465,7 @@ coi shell --persistent        # Keep container between sessions
 coi shell --resume            # Resume previous conversation
 coi attach                    # Reconnect to running container
 coi persist                   # Convert ephemeral session to persistent
-coi resume <name>             # Resume paused/frozen container
+coi unfreeze <name>           # Unfreeze paused/frozen container
 sudo poweroff                 # Properly stop container (inside)
 coi shutdown <name>           # Graceful stop (outside)
 ```
@@ -505,7 +505,7 @@ enabled = true
 
 **Automated response levels:**
 - **INFO/WARNING**: Logged (+ alert for WARNING)
-- **HIGH**: Container **paused** (requires `coi resume` to continue)
+- **HIGH**: Container **paused** (requires `coi unfreeze` to continue)
 - **CRITICAL**: Container **killed immediately**
 
 Audit logs are stored at `~/.coi/audit/<container-name>.jsonl` in JSON Lines format.
