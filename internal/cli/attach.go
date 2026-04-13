@@ -75,6 +75,8 @@ func attachCommand(cmd *cobra.Command, args []string) error {
 			targetContainer = args[0]
 			if resolved, err := alias.ResolveAliasForRunning(targetContainer); err == nil {
 				targetContainer = resolved
+			} else if !alias.IsContainerName(targetContainer) {
+				return err
 			}
 			// Verify it exists and is running
 			found := false

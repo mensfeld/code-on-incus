@@ -72,6 +72,14 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
+// OverlayProjectConfig loads the project config from the given workspace directory
+// and merges it into cfg. This is used when launching via alias from a different
+// directory, so the resolved workspace's .coi/config.toml is applied.
+func (c *Config) OverlayProjectConfig(workspaceDir string) error {
+	path := filepath.Join(workspaceDir, ".coi", "config.toml")
+	return loadConfigFile(c, path)
+}
+
 // loadConfigFile loads a TOML config file and merges it into cfg
 func loadConfigFile(cfg *Config, path string) error {
 	// Check if file exists

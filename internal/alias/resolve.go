@@ -67,7 +67,7 @@ func ResolveAliasForRunning(arg string) (string, error) {
 }
 
 // ResolveAliasForLaunch looks up the alias registry to find the workspace and profile.
-// Returns nil if the alias is not found in the registry.
+// Returns an error if the alias is not found in the registry.
 func ResolveAliasForLaunch(arg string) (*ResolvedAlias, error) {
 	alias, slotNum := splitAliasSlot(arg)
 

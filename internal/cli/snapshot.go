@@ -171,6 +171,8 @@ func resolveContainer() (string, error) {
 		name := snapshotContainer
 		if resolved, err := alias.ResolveAliasForRunning(name); err == nil {
 			name = resolved
+		} else if !alias.IsContainerName(name) {
+			return "", err
 		}
 		// Verify container exists
 		mgr := container.NewManager(name)

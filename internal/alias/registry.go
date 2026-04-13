@@ -132,13 +132,24 @@ func (r *Registry) Save() error {
 		return fmt.Errorf("failed to marshal alias registry: %w", err)
 	}
 
-	// Atomic write: temp file + rename
-	tmp := r.path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	// Atomic write: unique temp file + rename
+	tmpFile, err := os.CreateTemp(dir, ".aliases-*.json.tmp")
+	if err != nil {
+		return fmt.Errorf("failed to create temp file for alias registry: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+
+	if _, err := tmpFile.Write(data); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpPath)
 		return fmt.Errorf("failed to write alias registry: %w", err)
 	}
-	if err := os.Rename(tmp, r.path); err != nil {
-		os.Remove(tmp) // best effort cleanup
+	if err := tmpFile.Close(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("failed to close temp file: %w", err)
+	}
+	if err := os.Rename(tmpPath, r.path); err != nil {
+		os.Remove(tmpPath)
 		return fmt.Errorf("failed to rename alias registry: %w", err)
 	}
 

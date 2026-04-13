@@ -82,8 +82,10 @@ func resolveContainerArgs(args []string, all bool, force bool, action string) ([
 		for _, arg := range args {
 			if resolved, err := alias.ResolveAliasForRunning(arg); err == nil {
 				containerNames = append(containerNames, resolved)
-			} else {
+			} else if alias.IsContainerName(arg) {
 				containerNames = append(containerNames, arg)
+			} else {
+				return nil, err
 			}
 		}
 

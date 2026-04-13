@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/mensfeld/code-on-incus/internal/alias"
 	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/limits"
@@ -80,6 +81,12 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Validate and prepare alias if configured
+	effectiveAlias, err := validateAndPrepareAlias(cfg.Container.Alias)
+	if err != nil {
+		return err
+	}
+
 	ensureBridgeTrustedZone()
 
 	fmt.Fprintf(os.Stderr, "Launching container %s from image %s...\n", containerName, img)
@@ -94,6 +101,11 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	if err := launchOrReuseContainer(mgr, img, cfg.Container.StoragePool, containerExists, persistent); err != nil {
+		return err
+	}
+
+	// Set alias metadata on container and register in global registry
+	if err := applyContainerAlias(effectiveAlias, containerName, absWorkspace); err != nil {
 		return err
 	}
 
@@ -454,6 +466,45 @@ func filterWritableGitHooks(paths []string, cfg *config.Config) []string {
 		}
 	}
 	return filtered
+}
+
+// validateAndPrepareAlias validates the alias from config and returns it.
+// Returns ("", nil) if no alias is configured.
+func validateAndPrepareAlias(aliasStr string) (string, error) {
+	if aliasStr == "" {
+		return "", nil
+	}
+	if err := alias.ValidateAlias(aliasStr); err != nil {
+		return "", fmt.Errorf("invalid alias: %w", err)
+	}
+	return aliasStr, nil
+}
+
+// applyContainerAlias sets the user.coi.alias metadata on the container and
+// registers the alias in the global registry. No-op if alias is empty.
+func applyContainerAlias(effectiveAlias, containerName, absWorkspace string) error {
+	if effectiveAlias == "" {
+		return nil
+	}
+
+	if err := container.IncusExec("config", "set", containerName,
+		fmt.Sprintf("user.coi.alias=%s", effectiveAlias)); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: Failed to set alias metadata: %v\n", err)
+	}
+
+	reg, err := alias.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: Failed to load alias registry: %v\n", err)
+		return nil
+	}
+	if err := reg.Register(effectiveAlias, absWorkspace, ""); err != nil {
+		return fmt.Errorf("alias conflict: %w", err)
+	}
+	if err := reg.Save(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: Failed to save alias registry: %v\n", err)
+	}
+
+	return nil
 }
 
 // applyContainerTimezone resolves the timezone and configures it inside the container.

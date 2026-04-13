@@ -55,30 +55,32 @@ class TestAliasStoredOnContainer:
     def test_alias_stored_on_container(
         self, coi_binary, workspace_dir, cleanup_containers, dummy_image
     ):
-        """Launch session with alias, verify user.coi.alias is set."""
+        """Launch persistent session with alias, verify user.coi.alias is set."""
         write_alias_config(workspace_dir, "testalias")
         container_name = calculate_container_name(workspace_dir, 1)
 
         result = run_coi(
             coi_binary,
-            ["run", "--image", dummy_image, "echo", "ok"],
+            ["run", "--persistent", "--image", dummy_image, "sleep", "30"],
             workspace_dir=workspace_dir,
         )
-        # Container may have been cleaned up, but check if it ran
         assert result.returncode == 0, f"coi run failed: {result.stderr}"
 
-        # Check if container still exists to verify alias
+        # Container is persistent, so it should still exist
         containers = get_container_list()
-        if container_name in containers:
-            check = subprocess.run(
-                ["incus", "config", "get", container_name, "user.coi.alias"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            assert check.stdout.strip() == "testalias", (
-                f"Expected alias 'testalias', got '{check.stdout.strip()}'"
-            )
+        assert container_name in containers, (
+            f"Expected persistent container '{container_name}' to exist for alias verification"
+        )
+
+        check = subprocess.run(
+            ["incus", "config", "get", container_name, "user.coi.alias"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert check.stdout.strip() == "testalias", (
+            f"Expected alias 'testalias', got '{check.stdout.strip()}'"
+        )
 
 
 class TestAliasInRegistry:
@@ -108,6 +110,7 @@ class TestAliasShownInList:
     ):
         """Launch container with alias, verify it appears in JSON list output."""
         write_alias_config(workspace_dir, "listalias")
+        container_name = calculate_container_name(workspace_dir, 1)
 
         # Launch a persistent container so it stays running
         run_coi(
@@ -115,23 +118,30 @@ class TestAliasShownInList:
             ["run", "--image", dummy_image, "--persistent", "sleep", "30"],
             workspace_dir=workspace_dir,
         )
-        # Run might still be running; check list
+
         list_result = run_coi(coi_binary, ["list", "--format=json"])
         assert list_result.returncode == 0
 
         data = json.loads(list_result.stdout)
         containers = data.get("active_containers", [])
-        # May or may not find it depending on timing, but structure should be correct
-        if containers:
-            # At minimum, all containers should have the alias key
-            for c in containers:
-                assert "alias" in c, f"Missing 'alias' key in container: {c}"
+
+        # Find our container and verify alias
+        found = [c for c in containers if c.get("name") == container_name]
+        assert len(found) > 0, (
+            f"Expected container '{container_name}' in list output, "
+            f"got: {[c.get('name') for c in containers]}"
+        )
+        assert "alias" in found[0], f"Missing 'alias' key in container: {found[0]}"
+        assert found[0]["alias"] == "listalias", (
+            f"Expected alias 'listalias', got '{found[0].get('alias')}'"
+        )
 
     def test_alias_shown_in_list_text(
         self, coi_binary, workspace_dir, cleanup_containers, dummy_image
     ):
         """Launch container with alias, verify (alias) appears in text output."""
         write_alias_config(workspace_dir, "textalias")
+        container_name = calculate_container_name(workspace_dir, 1)
 
         run_coi(
             coi_binary,
@@ -139,9 +149,11 @@ class TestAliasShownInList:
             workspace_dir=workspace_dir,
         )
         list_result = run_coi(coi_binary, ["list"])
-        # Check text output contains the alias in parentheses
-        if "textalias" in list_result.stdout:
-            assert "(textalias)" in list_result.stdout
+        # Container should be in the list since it's persistent
+        assert container_name in list_result.stdout, (
+            f"Expected container '{container_name}' in text output"
+        )
+        assert "(textalias)" in list_result.stdout, "Expected '(textalias)' in text output"
 
 
 # ============================================================
@@ -444,6 +456,8 @@ class TestAliasEdgeCases:
 
     def test_list_no_alias(self, coi_binary, workspace_dir, cleanup_containers, dummy_image):
         """Container without alias should show empty alias in JSON output."""
+        container_name = calculate_container_name(workspace_dir, 1)
+
         # No alias config — just launch normally
         run_coi(
             coi_binary,
@@ -452,11 +466,11 @@ class TestAliasEdgeCases:
         )
 
         list_result = run_coi(coi_binary, ["list", "--format=json"])
-        if list_result.returncode == 0:
-            data = json.loads(list_result.stdout)
-            containers = data.get("active_containers", [])
-            for c in containers:
-                assert "alias" in c, f"Missing 'alias' key in container: {c}"
-                # No alias configured, so it should be empty
-                if c["name"] == calculate_container_name(workspace_dir, 1):
-                    assert c["alias"] == "", f"Expected empty alias, got '{c['alias']}'"
+        assert list_result.returncode == 0
+
+        data = json.loads(list_result.stdout)
+        containers = data.get("active_containers", [])
+        found = [c for c in containers if c.get("name") == container_name]
+        assert len(found) > 0, f"Expected container '{container_name}' in list output"
+        assert "alias" in found[0], f"Missing 'alias' key in container: {found[0]}"
+        assert found[0]["alias"] == "", f"Expected empty alias, got '{found[0]['alias']}'"

@@ -131,6 +131,8 @@ func resolveMonitorContainer(args []string) (string, error) {
 		name := args[0]
 		if resolved, err := alias.ResolveAliasForRunning(name); err == nil {
 			name = resolved
+		} else if !alias.IsContainerName(name) {
+			return "", err
 		}
 		mgr := container.NewManager(name)
 		exists, err := mgr.Exists()

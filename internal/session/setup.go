@@ -381,14 +381,6 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 			return nil, fmt.Errorf("failed to disable guest API: %w", err)
 		}
 
-		// Set alias metadata on container (for running-container lookup)
-		if opts.Alias != "" {
-			if err := container.IncusExec("config", "set", result.ContainerName,
-				fmt.Sprintf("user.coi.alias=%s", opts.Alias)); err != nil {
-				opts.Logger(fmt.Sprintf("Warning: Failed to set alias metadata: %v", err))
-			}
-		}
-
 		// Block privileged containers — they defeat all isolation
 		if err := container.CheckNotPrivileged(result.ContainerName); err != nil {
 			return nil, err
@@ -398,6 +390,15 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 		opts.Logger("Starting container...")
 		if err := result.Manager.Start(); err != nil {
 			return nil, fmt.Errorf("failed to start container: %w", err)
+		}
+	}
+
+	// Set/update alias metadata on container (for running-container lookup).
+	// This runs for both new and reused containers so alias changes are propagated.
+	if opts.Alias != "" {
+		if err := container.IncusExec("config", "set", result.ContainerName,
+			fmt.Sprintf("user.coi.alias=%s", opts.Alias)); err != nil {
+			opts.Logger(fmt.Sprintf("Warning: Failed to set alias metadata: %v", err))
 		}
 	}
 

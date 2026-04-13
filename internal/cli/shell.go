@@ -93,14 +93,23 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 		}
 		// Override workspace from registry
 		absWorkspace = resolved.Workspace
+
+		// Reload project config from the resolved workspace so that mounts,
+		// network, storage_pool, alias, and other project-level settings from
+		// the target workspace are applied instead of the caller's CWD config.
+		if err := cfg.OverlayProjectConfig(absWorkspace); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to load project config from %s: %w", absWorkspace, err)
+		}
+
 		// Apply profile if registry specifies one and user didn't override
 		if resolved.Profile != "" && !cmd.Flags().Changed("profile") {
 			profile = resolved.Profile
 			if err := cfg.ApplyProfile(profile); err != nil {
 				return err
 			}
-			container.Configure(cfg.Incus.Project, cfg.Incus.Group, cfg.Incus.CodeUser, cfg.Incus.CodeUID)
 		}
+		// Re-apply Incus configuration after config reload
+		container.Configure(cfg.Incus.Project, cfg.Incus.Group, cfg.Incus.CodeUser, cfg.Incus.CodeUID)
 		if resolved.Slot > 0 && !cmd.Flags().Changed("slot") {
 			slot = resolved.Slot
 		}
