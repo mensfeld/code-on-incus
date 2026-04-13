@@ -123,21 +123,24 @@ class TestGuestAPIHardening:
             f"Stdout: {result.stdout} Stderr: {result.stderr}"
         )
 
-        combined = result.stdout + result.stderr
+        # Only check stdout (the in-container command output). stderr contains
+        # COI's own setup logs which naturally reference the workspace path.
+        cmd_output = result.stdout
 
         # The guest API should be blocked entirely — verify we got the expected
         # failure marker or a connection error, not a successful JSON response
         assert (
-            "GUEST_API_BLOCKED" in combined
-            or "No such file" in combined
-            or "Connection refused" in combined
-            or "Couldn't connect" in combined
-            or "cannot access" in combined
-        ), f"FLAWS Finding 3: Guest API /devices endpoint appears reachable. Output: {combined}"
+            "GUEST_API_BLOCKED" in cmd_output
+            or "No such file" in cmd_output
+            or "Connection refused" in cmd_output
+            or "Couldn't connect" in cmd_output
+            or "cannot access" in cmd_output
+        ), f"FLAWS Finding 3: Guest API /devices endpoint appears reachable. Output: {cmd_output}"
 
         # Defense-in-depth: even if the above assertion somehow passed with
         # unexpected output, the workspace source path must never appear
-        assert workspace_dir not in combined, (
+        # in the command output (it would indicate the device topology leaked)
+        assert workspace_dir not in cmd_output, (
             f"FLAWS Finding 3: Host workspace path leaked via guest API device topology. "
-            f"Workspace path '{workspace_dir}' found in output: {combined}"
+            f"Workspace path '{workspace_dir}' found in output: {cmd_output}"
         )
