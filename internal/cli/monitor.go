@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mensfeld/code-on-incus/internal/alias"
 	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/monitor"
@@ -125,9 +126,12 @@ func monitorCommand(cmd *cobra.Command, args []string) error {
 // 2. Check COI_CONTAINER environment variable
 // 3. Find container for current workspace
 func resolveMonitorContainer(args []string) (string, error) {
-	// 1. Use positional arg if provided
+	// 1. Use positional arg if provided (with alias resolution)
 	if len(args) > 0 {
 		name := args[0]
+		if resolved, err := alias.ResolveAliasForRunning(name); err == nil {
+			name = resolved
+		}
 		mgr := container.NewManager(name)
 		exists, err := mgr.Exists()
 		if err != nil {

@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mensfeld/code-on-incus/internal/alias"
 	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/monitor"
@@ -31,7 +32,7 @@ var (
 )
 
 var shellCmd = &cobra.Command{
-	Use:   "shell",
+	Use:   "shell [alias]",
 	Short: "Start an interactive AI coding session",
 	Long: `Start an interactive AI coding session in a container (always runs in tmux).
 
@@ -43,8 +44,13 @@ All sessions run in tmux for monitoring and detach/reattach support:
   - Detach anytime: Ctrl+B d (session keeps running)
   - Reattach: Run 'coi shell' again in same workspace
 
+An optional alias argument launches a session from the registered alias's workspace
+and profile, from any directory. Register an alias with [container] alias = "name"
+in .coi/config.toml.
+
 Examples:
   coi shell                         # Interactive session in tmux
+  coi shell myproject               # Launch session using alias (from any directory)
   coi shell --tool opencode         # Use opencode instead of configured tool
   coi shell --background            # Run in background (detached)
   coi shell --resume                # Resume latest session (auto)
@@ -53,6 +59,7 @@ Examples:
   coi shell --slot 2                # Use specific slot
   coi shell --debug                 # Launch bash for debugging
 `,
+	Args: cobra.MaximumNArgs(1),
 	RunE: shellCommand,
 }
 
@@ -66,15 +73,37 @@ func init() {
 
 //nolint:gocyclo // Sequential initialization with many configuration paths
 func shellCommand(cmd *cobra.Command, args []string) error {
-	// Validate no unexpected positional arguments
+	// Handle positional alias argument
+	var aliasArg string
 	if len(args) > 0 {
-		return fmt.Errorf("unexpected argument '%s' - did you mean --resume=%s? (note: use = when specifying session ID)", args[0], args[0])
+		aliasArg = args[0]
 	}
 
 	// Get absolute workspace path
 	absWorkspace, err := filepath.Abs(workspace)
 	if err != nil {
 		return fmt.Errorf("invalid workspace path: %w", err)
+	}
+
+	// If alias argument provided, resolve it from the registry
+	if aliasArg != "" {
+		resolved, err := alias.ResolveAliasForLaunch(aliasArg)
+		if err != nil {
+			return err
+		}
+		// Override workspace from registry
+		absWorkspace = resolved.Workspace
+		// Apply profile if registry specifies one and user didn't override
+		if resolved.Profile != "" && !cmd.Flags().Changed("profile") {
+			profile = resolved.Profile
+			if err := cfg.ApplyProfile(profile); err != nil {
+				return err
+			}
+			container.Configure(cfg.Incus.Project, cfg.Incus.Group, cfg.Incus.CodeUser, cfg.Incus.CodeUID)
+		}
+		if resolved.Slot > 0 && !cmd.Flags().Changed("slot") {
+			slot = resolved.Slot
+		}
 	}
 
 	// Check if Incus is available
@@ -283,6 +312,7 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 		AutoContext:           cfg.Tool.AutoContext,
 		ContainerName:         containerName,
 		Timezone:              resolvedTimezone,
+		Alias:                 cfg.Container.Alias,
 	}
 
 	// Parse and validate mount configuration
@@ -298,6 +328,13 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 
 	setupOpts.MountConfig = mountConfig
 
+	// Validate alias before proceeding with setup
+	if cfg.Container.Alias != "" {
+		if err := alias.ValidateAlias(cfg.Container.Alias); err != nil {
+			return fmt.Errorf("invalid container alias: %w", err)
+		}
+	}
+
 	fmt.Fprintf(os.Stderr, "Setting up session %s...\n", sessionID)
 	result, err := session.Setup(setupOpts)
 	if err != nil {
@@ -307,6 +344,18 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 	// Save metadata early so coi list shows correct persistent/ephemeral status
 	if err := session.SaveMetadataEarly(sessionsDir, sessionID, result.ContainerName, absWorkspace, persistent); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: Failed to save early metadata: %v\n", err)
+	}
+
+	// Register alias in global registry for cross-directory resolution
+	if effectiveAlias := cfg.Container.Alias; effectiveAlias != "" {
+		if reg, err := alias.Load(); err == nil {
+			if err := reg.Register(effectiveAlias, absWorkspace, profile); err != nil {
+				return fmt.Errorf("alias conflict: %w", err)
+			}
+			if err := reg.Save(); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: Failed to save alias registry: %v\n", err)
+			}
+		}
 	}
 
 	// Start monitoring daemons if enabled via config

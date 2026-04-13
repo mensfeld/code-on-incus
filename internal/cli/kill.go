@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/mensfeld/code-on-incus/internal/alias"
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/network"
 	"github.com/spf13/cobra"
@@ -79,7 +80,15 @@ func killCommand(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
 			return fmt.Errorf("no container names provided - use 'coi list' to see active containers")
 		}
-		containerNames = args
+		// Resolve aliases to container names
+		containerNames = make([]string, 0, len(args))
+		for _, arg := range args {
+			if resolved, err := alias.ResolveAliasForRunning(arg); err == nil {
+				containerNames = append(containerNames, resolved)
+			} else {
+				containerNames = append(containerNames, arg)
+			}
+		}
 
 		// Confirm unless --force
 		if !killForce && len(containerNames) > 1 {

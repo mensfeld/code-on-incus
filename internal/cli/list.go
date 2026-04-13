@@ -112,7 +112,8 @@ type ContainerInfo struct {
 	// Sourced from expanded_devices.root.pool in `incus list --format=json`,
 	// which already reflects profile defaults — so this is the actual pool
 	// being used, not the configured one.
-	Pool string
+	Pool  string
+	Alias string
 }
 
 // SessionInfo holds information about a saved session
@@ -144,9 +145,10 @@ func listActiveContainers() ([]ContainerInfo, error) {
 		status, _ := c["status"].(string)        // Type assertion, default to "" if fails
 		createdAt, _ := c["created_at"].(string) // Type assertion, default to "" if fails
 
-		// Get image info
-		config, _ := c["config"].(map[string]interface{}) // Type assertion
-		image, _ := config["image.description"].(string)  // Type assertion
+		// Get image info and alias
+		config, _ := c["config"].(map[string]interface{})     // Type assertion
+		image, _ := config["image.description"].(string)      // Type assertion
+		containerAlias, _ := config["user.coi.alias"].(string) // Alias metadata
 
 		// Parse created_at time
 		createdTime := ""
@@ -169,6 +171,7 @@ func listActiveContainers() ([]ContainerInfo, error) {
 			Image:     image,
 			IPv4:      ipv4,
 			Pool:      pool,
+			Alias:     containerAlias,
 		})
 	}
 
@@ -316,6 +319,7 @@ func outputJSON(containers []ContainerInfo, sessions []SessionInfo,
 			"persistent": persistent[c.Name],
 			"ipv4":       c.IPv4,
 			"pool":       c.Pool,
+			"alias":      c.Alias,
 		}
 		if ws, ok := workspaces[c.Name]; ok {
 			item["workspace"] = ws
@@ -354,12 +358,15 @@ func outputText(containers []ContainerInfo, sessions []SessionInfo,
 		fmt.Println("  (none)")
 	} else {
 		for _, c := range containers {
-			// Show container name with mode indicator from session metadata
-			// (not from Incus state, since all containers are now created as persistent in Incus)
+			// Show container name with alias and mode indicator
+			nameDisplay := c.Name
+			if c.Alias != "" {
+				nameDisplay = fmt.Sprintf("%s (%s)", c.Name, c.Alias)
+			}
 			if persistent[c.Name] {
-				fmt.Printf("  %s (persistent)\n", c.Name)
+				fmt.Printf("  %s (persistent)\n", nameDisplay)
 			} else {
-				fmt.Printf("  %s (ephemeral)\n", c.Name)
+				fmt.Printf("  %s (ephemeral)\n", nameDisplay)
 			}
 			fmt.Printf("    Status: %s\n", c.Status)
 			if c.IPv4 != "" {

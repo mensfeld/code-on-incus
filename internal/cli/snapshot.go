@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mensfeld/code-on-incus/internal/alias"
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/session"
 	"github.com/spf13/cobra"
@@ -165,18 +166,22 @@ func init() {
 // 2. Check COI_CONTAINER environment variable
 // 3. Find container for current workspace
 func resolveContainer() (string, error) {
-	// 1. Use --container flag if provided
+	// 1. Use --container flag if provided (with alias resolution)
 	if snapshotContainer != "" {
+		name := snapshotContainer
+		if resolved, err := alias.ResolveAliasForRunning(name); err == nil {
+			name = resolved
+		}
 		// Verify container exists
-		mgr := container.NewManager(snapshotContainer)
+		mgr := container.NewManager(name)
 		exists, err := mgr.Exists()
 		if err != nil {
 			return "", fmt.Errorf("failed to check container: %w", err)
 		}
 		if !exists {
-			return "", fmt.Errorf("container '%s' not found", snapshotContainer)
+			return "", fmt.Errorf("container '%s' not found", name)
 		}
-		return snapshotContainer, nil
+		return name, nil
 	}
 
 	// 2. Check COI_CONTAINER environment variable

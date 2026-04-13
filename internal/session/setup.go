@@ -46,6 +46,7 @@ type SetupOptions struct {
 	Timezone              string               // Resolved IANA timezone name (e.g., "America/New_York"), empty for UTC
 	AutoContext           *bool                // Auto-inject sandbox context into tool's native system (default: true)
 	HostImmutable         bool                 // Apply chattr +i on host-side protected paths (set by CLI from config)
+	Alias                 string               // Human-friendly alias for this container (set user.coi.alias)
 	Logger                func(string)
 	ContainerName         string // Use existing container (for testing) - skips container creation
 }
@@ -378,6 +379,14 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 		// Disable guest API to prevent host topology leaks (FLAWS Finding 3)
 		if err := container.DisableGuestAPI(result.ContainerName); err != nil {
 			return nil, fmt.Errorf("failed to disable guest API: %w", err)
+		}
+
+		// Set alias metadata on container (for running-container lookup)
+		if opts.Alias != "" {
+			if err := container.IncusExec("config", "set", result.ContainerName,
+				fmt.Sprintf("user.coi.alias=%s", opts.Alias)); err != nil {
+				opts.Logger(fmt.Sprintf("Warning: Failed to set alias metadata: %v", err))
+			}
 		}
 
 		// Block privileged containers — they defeat all isolation

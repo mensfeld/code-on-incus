@@ -48,6 +48,7 @@ type ContainerConfig struct {
 	Image       string      `toml:"image"`
 	Persistent  *bool       `toml:"persistent"`
 	StoragePool string      `toml:"storage_pool"`
+	Alias       string      `toml:"alias"`
 	Build       BuildConfig `toml:"build"`
 }
 
@@ -56,6 +57,7 @@ func (c *ContainerConfig) HasContainerConfig() bool {
 	return c.Image != "" ||
 		c.Persistent != nil ||
 		c.StoragePool != "" ||
+		c.Alias != "" ||
 		c.Build.HasBuildConfig()
 }
 
@@ -840,6 +842,9 @@ func applyContainerConfig(dst *ContainerConfig, src *ContainerConfig) {
 	}
 	if src.StoragePool != "" {
 		dst.StoragePool = src.StoragePool
+	}
+	if src.Alias != "" {
+		dst.Alias = src.Alias
 	}
 	mergeBuildInto(&dst.Build, &src.Build)
 }

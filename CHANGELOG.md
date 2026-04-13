@@ -74,6 +74,8 @@
 
 ### Features
 
+- [Feature] **Container aliases** — Containers can now be assigned human-friendly aliases via `[container] alias = "myproject"` in project or profile config. Use `coi shell myproject` to launch from any directory, `coi attach myproject` to reconnect, and `coi kill myproject` / `coi unfreeze myproject` to manage. Aliases are stored on containers as Incus `user.coi.alias` metadata and registered in `~/.coi/aliases.json` for cross-directory resolution. Slot suffixes work naturally: `coi attach myproject-2` targets slot 2. (#304)
+
 - [Feature] **Per-profile storage pool support** — Containers can now be routed to a specific Incus storage pool via `[container] storage_pool = "pool-name"` in the global config or any profile. The profile pool overrides the global pool, which falls back to the Incus default pool when empty. This lets users put project A on fast NVMe and project B on bulk spinning storage. Pool existence is validated up front by `coi shell`, `coi run`, `coi container launch`, and `coi build`, with a clear `incus storage create <name> dir|zfs|btrfs` example on failure. Build containers always use the same pool as the resolved profile, so build artefacts land alongside the runtime container. (#302)
 
 - [Feature] **`coi list` shows POOL** — Both text and JSON output of `coi list` now include the storage pool of each container's root device, parsed from `expanded_devices.root.pool` (no extra Incus calls). The value reflects the actual pool the container was created in, not the configured one.

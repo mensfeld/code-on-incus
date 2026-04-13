@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/mensfeld/code-on-incus/internal/alias"
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/spf13/cobra"
 )
@@ -26,8 +27,11 @@ Examples:
 
 func runUnfreeze(cmd *cobra.Command, args []string) error {
 	if len(args) == 1 {
-		// Unfreeze specific container
+		// Unfreeze specific container (with alias resolution)
 		containerName := args[0]
+		if resolved, err := alias.ResolveAliasForRunning(containerName); err == nil {
+			containerName = resolved
+		}
 		return unfreezeContainer(containerName)
 	}
 

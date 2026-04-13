@@ -265,6 +265,25 @@ coi clean
 coi update
 ```
 
+### Container Aliases
+
+Assign human-friendly names to containers for easy management from any directory:
+
+```toml
+# .coi/config.toml (in your project)
+[container]
+alias = "myproject"
+```
+
+```bash
+coi shell myproject              # Launch session using alias (from any directory)
+coi attach myproject             # Attach to running aliased container
+coi kill myproject --force       # Kill by alias
+coi attach myproject-2           # Attach to slot 2
+```
+
+Aliases are registered in `~/.coi/aliases.json` on first use and stored as `user.coi.alias` metadata on each container.
+
 ### Global Flags
 
 ```bash

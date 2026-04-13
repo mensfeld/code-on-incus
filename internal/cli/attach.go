@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 
+	"github.com/mensfeld/code-on-incus/internal/alias"
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/session"
 	"github.com/mensfeld/code-on-incus/internal/terminal"
@@ -69,9 +70,12 @@ func attachCommand(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to list containers: %w", err)
 		}
 
-		// If container name provided, use it
+		// If container name provided, use it (with alias resolution)
 		if len(args) > 0 {
 			targetContainer = args[0]
+			if resolved, err := alias.ResolveAliasForRunning(targetContainer); err == nil {
+				targetContainer = resolved
+			}
 			// Verify it exists and is running
 			found := false
 			for _, c := range containers {
