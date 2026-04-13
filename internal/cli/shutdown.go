@@ -5,7 +5,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/mensfeld/code-on-incus/internal/alias"
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/network"
 	"github.com/spf13/cobra"
@@ -43,66 +42,12 @@ func init() {
 }
 
 func shutdownCommand(cmd *cobra.Command, args []string) error {
-	// Get container names to shutdown
-	var containerNames []string
-
-	if shutdownAll {
-		// Get all containers
-		containers, err := listActiveContainers()
-		if err != nil {
-			return fmt.Errorf("failed to list containers: %w", err)
-		}
-
-		if len(containers) == 0 {
-			fmt.Println("No containers to shutdown")
-			return nil
-		}
-
-		for _, c := range containers {
-			containerNames = append(containerNames, c.Name)
-		}
-
-		// Show what will be shutdown
-		fmt.Printf("Found %d container(s):\n", len(containerNames))
-		for _, name := range containerNames {
-			fmt.Printf("  - %s\n", name)
-		}
-
-		// Confirm unless --force
-		if !shutdownForce {
-			fmt.Print("\nShutdown all these containers? [y/N]: ")
-			var response string
-			_, _ = fmt.Scanln(&response)
-			if response != "y" && response != "Y" {
-				fmt.Println("Cancelled.")
-				return nil
-			}
-		}
-	} else {
-		// Use containers from args
-		if len(args) == 0 {
-			return fmt.Errorf("no container names provided - use 'coi list' to see active containers")
-		}
-		// Resolve aliases to container names
-		containerNames = make([]string, 0, len(args))
-		for _, arg := range args {
-			if resolved, err := alias.ResolveAliasForRunning(arg); err == nil {
-				containerNames = append(containerNames, resolved)
-			} else {
-				containerNames = append(containerNames, arg)
-			}
-		}
-
-		// Confirm unless --force
-		if !shutdownForce && len(containerNames) > 1 {
-			fmt.Printf("Shutdown %d container(s)? [y/N]: ", len(containerNames))
-			var response string
-			_, _ = fmt.Scanln(&response)
-			if response != "y" && response != "Y" {
-				fmt.Println("Cancelled.")
-				return nil
-			}
-		}
+	containerNames, err := resolveContainerArgs(args, shutdownAll, shutdownForce, "Shutdown")
+	if err != nil {
+		return err
+	}
+	if containerNames == nil {
+		return nil
 	}
 
 	// Shutdown each container

@@ -205,19 +205,19 @@ func TestValidateAlias(t *testing.T) {
 		alias string
 		valid bool
 	}{
-		{"", true},                                                           // empty is valid (no alias)
-		{"myproject", true},                                                  // simple
-		{"my-project", true},                                                 // hyphens
-		{"my_project", true},                                                 // underscores
-		{"MyProject123", true},                                               // mixed case + digits
-		{"a", true},                                                          // single letter
+		{"", true},             // empty is valid (no alias)
+		{"myproject", true},    // simple
+		{"my-project", true},   // hyphens
+		{"my_project", true},   // underscores
+		{"MyProject123", true}, // mixed case + digits
+		{"a", true},            // single letter
 		{"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ012345678901", true}, // 64 chars
-		{"123project", false},                // starts with digit
-		{"my project", false},                // space
-		{"my.project", false},                // dot
-		{"my!project", false},                // special char
-		{"-myproject", false},                // starts with hyphen
-		{"_myproject", false},                // starts with underscore
+		{"123project", false}, // starts with digit
+		{"my project", false}, // space
+		{"my.project", false}, // dot
+		{"my!project", false}, // special char
+		{"-myproject", false}, // starts with hyphen
+		{"_myproject", false}, // starts with underscore
 		{"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789012", false}, // 65 chars (too long)
 	}
 
@@ -243,8 +243,8 @@ func TestSplitAliasSlot(t *testing.T) {
 		{"myproject-10", "myproject", 10},
 		{"my-project-3", "my-project", 3},
 		{"myproject-abc", "myproject-abc", 0}, // non-numeric suffix
-		{"-1", "-1", 0},                        // no base alias
-		{"a-0", "a", 0},                         // slot 0 (treated as no slot)
+		{"-1", "-1", 0},                       // no base alias
+		{"a-0", "a", 0},                       // slot 0 (treated as no slot)
 	}
 
 	for _, tt := range tests {

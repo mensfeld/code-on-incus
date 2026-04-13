@@ -39,48 +39,45 @@ func init() {
 	killCmd.Flags().BoolVarP(&killAll, "all", "a", false, "Kill all containers")
 }
 
-func killCommand(cmd *cobra.Command, args []string) error {
-	// Get container names to kill
+// resolveContainerArgs resolves container names from args (with alias support) or --all flag.
+// Returns the resolved container names, or nil if the user cancelled or there are no containers.
+// The action parameter is used in prompts (e.g., "Kill", "Shutdown").
+func resolveContainerArgs(args []string, all bool, force bool, action string) ([]string, error) {
 	var containerNames []string
 
-	if killAll {
-		// Get all containers
+	if all {
 		containers, err := listActiveContainers()
 		if err != nil {
-			return fmt.Errorf("failed to list containers: %w", err)
+			return nil, fmt.Errorf("failed to list containers: %w", err)
 		}
 
 		if len(containers) == 0 {
-			fmt.Println("No containers to kill")
-			return nil
+			fmt.Printf("No containers to %s\n", action)
+			return nil, nil
 		}
 
 		for _, c := range containers {
 			containerNames = append(containerNames, c.Name)
 		}
 
-		// Show what will be killed
 		fmt.Printf("Found %d container(s):\n", len(containerNames))
 		for _, name := range containerNames {
 			fmt.Printf("  - %s\n", name)
 		}
 
-		// Confirm unless --force
-		if !killForce {
-			fmt.Print("\nKill all these containers? [y/N]: ")
+		if !force {
+			fmt.Printf("\n%s all these containers? [y/N]: ", action)
 			var response string
 			_, _ = fmt.Scanln(&response)
 			if response != "y" && response != "Y" {
 				fmt.Println("Cancelled.")
-				return nil
+				return nil, nil
 			}
 		}
 	} else {
-		// Use containers from args
 		if len(args) == 0 {
-			return fmt.Errorf("no container names provided - use 'coi list' to see active containers")
+			return nil, fmt.Errorf("no container names provided - use 'coi list' to see active containers")
 		}
-		// Resolve aliases to container names
 		containerNames = make([]string, 0, len(args))
 		for _, arg := range args {
 			if resolved, err := alias.ResolveAliasForRunning(arg); err == nil {
@@ -90,16 +87,27 @@ func killCommand(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		// Confirm unless --force
-		if !killForce && len(containerNames) > 1 {
-			fmt.Printf("Kill %d container(s)? [y/N]: ", len(containerNames))
+		if !force && len(containerNames) > 1 {
+			fmt.Printf("%s %d container(s)? [y/N]: ", action, len(containerNames))
 			var response string
 			_, _ = fmt.Scanln(&response)
 			if response != "y" && response != "Y" {
 				fmt.Println("Cancelled.")
-				return nil
+				return nil, nil
 			}
 		}
+	}
+
+	return containerNames, nil
+}
+
+func killCommand(cmd *cobra.Command, args []string) error {
+	containerNames, err := resolveContainerArgs(args, killAll, killForce, "Kill")
+	if err != nil {
+		return err
+	}
+	if containerNames == nil {
+		return nil
 	}
 
 	// Kill each container

@@ -146,8 +146,8 @@ func listActiveContainers() ([]ContainerInfo, error) {
 		createdAt, _ := c["created_at"].(string) // Type assertion, default to "" if fails
 
 		// Get image info and alias
-		config, _ := c["config"].(map[string]interface{})     // Type assertion
-		image, _ := config["image.description"].(string)      // Type assertion
+		config, _ := c["config"].(map[string]interface{})      // Type assertion
+		image, _ := config["image.description"].(string)       // Type assertion
 		containerAlias, _ := config["user.coi.alias"].(string) // Alias metadata
 
 		// Parse created_at time
