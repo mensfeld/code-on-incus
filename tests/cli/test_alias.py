@@ -8,8 +8,6 @@ import json
 import os
 import subprocess
 
-import pytest
-
 from support.helpers import calculate_container_name, get_container_list
 
 
@@ -28,7 +26,7 @@ def run_coi(coi_binary, args, workspace_dir=None, env_extra=None, timeout=120):
     if env_extra:
         env.update(env_extra)
     return subprocess.run(
-        [coi_binary] + args,
+        [coi_binary, *args],
         capture_output=True,
         text=True,
         timeout=timeout,
@@ -110,7 +108,7 @@ class TestAliasShownInList:
         write_alias_config(workspace_dir, "listalias")
 
         # Launch a persistent container so it stays running
-        result = run_coi(
+        run_coi(
             coi_binary,
             ["run", "--image", dummy_image, "--persistent", "sleep", "30"],
             workspace_dir=workspace_dir,
@@ -121,7 +119,6 @@ class TestAliasShownInList:
 
         data = json.loads(list_result.stdout)
         containers = data.get("active_containers", [])
-        aliased = [c for c in containers if c.get("alias") == "listalias"]
         # May or may not find it depending on timing, but structure should be correct
         if containers:
             # At minimum, all containers should have the alias key
@@ -426,7 +423,7 @@ class TestAliasEdgeCases:
     def test_list_no_alias(self, coi_binary, workspace_dir, cleanup_containers, dummy_image):
         """Container without alias should show empty alias in JSON output."""
         # No alias config — just launch normally
-        result = run_coi(
+        run_coi(
             coi_binary,
             ["run", "--image", dummy_image, "--persistent", "sleep", "30"],
             workspace_dir=workspace_dir,
