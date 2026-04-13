@@ -186,7 +186,7 @@ class TestAttachByAlias:
         if result.returncode != 0:
             assert (
                 "not found" not in result.stderr.lower()
-                or "no running container found with alias" in result.stderr.lower()
+                or "container or alias" in result.stderr.lower()
             )
 
 

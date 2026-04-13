@@ -46,7 +46,7 @@ func ResolveAliasForRunning(arg string) (string, error) {
 	}
 
 	if len(containers) == 0 {
-		return "", fmt.Errorf("no running container found with alias %q", alias)
+		return "", fmt.Errorf("container or alias %q not found — no running container matches", alias)
 	}
 
 	// If a slot suffix was given, filter to matching slot
@@ -56,7 +56,7 @@ func ResolveAliasForRunning(arg string) (string, error) {
 				return name, nil
 			}
 		}
-		return "", fmt.Errorf("no running container found with alias %q at slot %d", alias, slotNum)
+		return "", fmt.Errorf("container or alias %q not found at slot %d", alias, slotNum)
 	}
 
 	// No slot suffix — must be exactly one match
