@@ -1,6 +1,10 @@
 package cli
 
-import "testing"
+import (
+	"os"
+	"runtime"
+	"testing"
+)
 
 func TestCompareVersions(t *testing.T) {
 	tests := []struct {
@@ -81,4 +85,27 @@ func TestVerifyChecksum(t *testing.T) {
 			t.Error("expected error for empty checksums file")
 		}
 	})
+}
+
+func TestRestoreCapability(t *testing.T) {
+	// Create a temporary file to act as a fake binary
+	tmpFile, err := os.CreateTemp("", "coi-test-cap-*")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	tmpFile.Close()
+
+	// restoreCapability should not panic regardless of platform
+	t.Run("does not panic", func(t *testing.T) {
+		restoreCapability(tmpFile.Name())
+	})
+
+	if runtime.GOOS != "linux" {
+		t.Run("no-op on non-linux", func(t *testing.T) {
+			// On non-Linux, restoreCapability returns immediately.
+			// Just verify it completes without error.
+			restoreCapability("/nonexistent/path")
+		})
+	}
 }
