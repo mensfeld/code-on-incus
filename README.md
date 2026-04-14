@@ -397,10 +397,12 @@ Profiles are reusable container configurations bundling image, tool, limits, mou
 Example profile config (`.coi/profiles/rust-dev/config.toml`):
 
 ```toml
-image = "coi-rust"
-persistent = true
 context = "CONTEXT.md"
 forward_env = ["CARGO_HOME"]
+
+[container]
+image = "coi-rust"
+persistent = true
 
 [environment]
 RUST_BACKTRACE = "1"
@@ -418,6 +420,8 @@ count = "4"
 ```toml
 # .coi/profiles/rust-dev-nightly/config.toml
 inherits = "rust-dev"
+
+[container]
 image = "coi-rust-nightly"
 
 [environment]
@@ -493,6 +497,7 @@ coi shell --resume            # Resume previous conversation
 coi attach                    # Reconnect to running container
 coi persist                   # Convert ephemeral session to persistent
 coi unfreeze <name>           # Unfreeze paused/frozen container
+coi unfreeze                  # Unfreeze all frozen COI containers
 sudo poweroff                 # Properly stop container (inside)
 coi shutdown <name>           # Graceful stop (outside)
 ```
@@ -571,6 +576,7 @@ See the [Troubleshooting guide](https://github.com/mensfeld/code-on-incus/wiki/T
 - **DNS issues during build** - COI automatically fixes systemd-resolved conflicts
 - Run `coi health` to diagnose setup problems
 - Check the troubleshooting guide for detailed solutions
+
 ## Frequently Asked Questions
 
 See the [FAQ](https://github.com/mensfeld/code-on-incus/wiki/FAQ) for answers to common questions.
