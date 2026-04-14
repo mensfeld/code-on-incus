@@ -279,6 +279,11 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	// Configure timezone in container filesystem
 	tz := applyContainerTimezone(mgr)
 
+	// Auto-trust mise config files in the workspace
+	session.SetupMiseTrust(mgr, containerWorkspacePath, func(msg string) {
+		fmt.Fprintf(os.Stderr, "%s\n", msg)
+	})
+
 	// Execute command directly (args are already the full command to run)
 	fmt.Fprintf(os.Stderr, "Executing: %s\n", strings.Join(args, " "))
 
