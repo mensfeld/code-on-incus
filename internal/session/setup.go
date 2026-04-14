@@ -526,6 +526,18 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 		opts.Logger("Reusing existing workspace and mount configurations")
 	}
 
+	// 10.2 Auto-trust mise config files in the workspace so mise doesn't
+	// prompt or error when the workspace contains mise.toml / .tool-versions.
+	{
+		trustCmd := fmt.Sprintf(
+			`printf 'export MISE_TRUSTED_CONFIG_PATHS="%%s"\n' '%s' > /etc/profile.d/coi-mise-trust.sh`,
+			result.ContainerWorkspacePath,
+		)
+		if _, err := result.Manager.ExecCommand(trustCmd, container.ExecCommandOptions{Capture: true}); err != nil {
+			opts.Logger(fmt.Sprintf("Warning: Failed to configure mise workspace trust: %v", err))
+		}
+	}
+
 	// 10.5 Set auto-context path for config-based tools (must happen before setupCLIConfig
 	// so the path is included in GetSandboxSettings output)
 	if opts.Tool != nil && config.BoolVal(opts.AutoContext) {
