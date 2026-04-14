@@ -89,10 +89,17 @@ func ResolveAliasForLaunch(arg string) (*ResolvedAlias, error) {
 		cwd, cwdErr := os.Getwd()
 		if cwdErr == nil {
 			if projectAlias := loadProjectAlias(cwd); projectAlias == alias {
-				absWorkspace, _ := filepath.Abs(cwd)
+				absWorkspace, err := filepath.Abs(cwd)
+				if err != nil {
+					return nil, fmt.Errorf("failed to resolve workspace path for alias %q: %w", alias, err)
+				}
 				// Auto-register so subsequent lookups succeed.
-				_ = reg.Register(alias, absWorkspace, "")
-				_ = reg.Save()
+				if err := reg.Register(alias, absWorkspace, ""); err != nil {
+					return nil, fmt.Errorf("failed to auto-register alias %q: %w", alias, err)
+				}
+				if err := reg.Save(); err != nil {
+					return nil, fmt.Errorf("failed to persist auto-registered alias %q: %w", alias, err)
+				}
 				return &ResolvedAlias{Workspace: absWorkspace, Slot: slotNum}, nil
 			}
 		}

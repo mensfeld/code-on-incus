@@ -1154,31 +1154,52 @@ func TestPreserveWorkspacePathMerge(t *testing.T) {
 	}
 }
 
-func TestApplyContainerConfig_AliasPreservation(t *testing.T) {
+func TestApplyProfile_AliasPreservation(t *testing.T) {
 	t.Run("profile alias does not override project alias", func(t *testing.T) {
-		dst := &ContainerConfig{Alias: "project-alias"}
-		src := &ContainerConfig{Alias: "profile-alias"}
-		applyContainerConfig(dst, src)
-		if dst.Alias != "project-alias" {
-			t.Errorf("Alias = %q, want %q (project alias should win)", dst.Alias, "project-alias")
+		cfg := GetDefaultConfig()
+		cfg.Container.Alias = "project-alias"
+		cfg.Profiles["test"] = ProfileConfig{
+			Container: ContainerConfig{Alias: "profile-alias"},
+		}
+		if err := cfg.ApplyProfile("test"); err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Container.Alias != "project-alias" {
+			t.Errorf("Alias = %q, want %q (project alias should win)", cfg.Container.Alias, "project-alias")
 		}
 	})
 
 	t.Run("profile alias applied when project has no alias", func(t *testing.T) {
-		dst := &ContainerConfig{Alias: ""}
-		src := &ContainerConfig{Alias: "profile-alias"}
-		applyContainerConfig(dst, src)
-		if dst.Alias != "profile-alias" {
-			t.Errorf("Alias = %q, want %q (profile alias should apply when project has none)", dst.Alias, "profile-alias")
+		cfg := GetDefaultConfig()
+		cfg.Profiles["test"] = ProfileConfig{
+			Container: ContainerConfig{Alias: "profile-alias"},
+		}
+		if err := cfg.ApplyProfile("test"); err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Container.Alias != "profile-alias" {
+			t.Errorf("Alias = %q, want %q (profile alias should apply when project has none)", cfg.Container.Alias, "profile-alias")
 		}
 	})
 
 	t.Run("no alias in either", func(t *testing.T) {
-		dst := &ContainerConfig{Alias: ""}
-		src := &ContainerConfig{Alias: ""}
-		applyContainerConfig(dst, src)
-		if dst.Alias != "" {
-			t.Errorf("Alias = %q, want empty", dst.Alias)
+		cfg := GetDefaultConfig()
+		cfg.Profiles["test"] = ProfileConfig{}
+		if err := cfg.ApplyProfile("test"); err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Container.Alias != "" {
+			t.Errorf("Alias = %q, want empty", cfg.Container.Alias)
+		}
+	})
+
+	t.Run("Merge still allows alias override", func(t *testing.T) {
+		cfg := GetDefaultConfig()
+		cfg.Container.Alias = "base-alias"
+		other := &Config{Container: ContainerConfig{Alias: "override-alias"}}
+		cfg.Merge(other)
+		if cfg.Container.Alias != "override-alias" {
+			t.Errorf("Alias = %q, want %q (Merge should allow override)", cfg.Container.Alias, "override-alias")
 		}
 	})
 }
