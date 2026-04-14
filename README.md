@@ -108,6 +108,8 @@ See the [Supported Tools wiki page](https://github.com/mensfeld/code-on-incus/wi
 - Automated response - Auto-pause on HIGH threats, auto-kill on CRITICAL — no manual intervention needed
 - Network isolation - Firewalld-based restricted/allowlist/open modes block private network access and prevent exfiltration
 - Protected paths - `.git/hooks`, `.git/config`, `.husky`, `.vscode` mounted read-only to prevent supply-chain attacks
+- Host-side immutable protection - Protected paths are locked with `chattr +i` during sessions, preventing `unshare -m` + `umount` bypass of read-only mounts (opt out: `[security] host_immutable = false`)
+- Guest API disabled - Incus guest API (`/dev/incus`) disabled by default, preventing host path and topology leaks
 - System containers - Full OS isolation with unprivileged containers, better than Docker privileged mode
 - Automatic UID mapping - No permission hell, files owned correctly
 - Audit logging - All security events logged to JSONL for forensics and compliance
@@ -251,6 +253,9 @@ coi run "npm test"
 # Attach to existing session
 coi attach
 
+# Real-time security monitoring dashboard
+coi monitor
+
 # List active containers and saved sessions
 coi list --all
 
@@ -260,6 +265,7 @@ coi kill --all
 
 # Cleanup stopped containers and orphaned resources
 coi clean
+coi clean --pools             # Detect containers in unused storage pools
 
 # Update coi to the latest release
 coi update
@@ -334,7 +340,7 @@ coi shell --persistent
 
 ```toml
 # Or via config (~/.coi/config.toml)
-[defaults]
+[container]
 persistent = true
 ```
 
@@ -349,9 +355,11 @@ See the [Container Lifecycle and Sessions guide](https://github.com/mensfeld/cod
 Config file: `~/.coi/config.toml`
 
 ```toml
-[defaults]
+[container]
 image = "coi-default"
 persistent = true
+# storage_pool = ""            # Empty = Incus default pool
+# alias = "myproject"          # Human-friendly name for this workspace's containers
 
 [tool]
 name = "claude"
