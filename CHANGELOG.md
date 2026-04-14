@@ -116,6 +116,7 @@
 - [Feature] **Minimum nftables version check (>= 0.9.0)** — `coi health` now validates the installed nftables version and fails if it is below the minimum required 0.9.0 for network monitoring features. The nft version is also displayed in the health check output. Includes reusable version parsing utilities and unit/integration tests.
 - [Feature] **Split version checks between health (warn) and CLI commands (fail)** — `coi health` now reports old Incus/nftables versions as warnings (degraded, not unhealthy), while `coi shell`, `coi run`, and `coi build` fail with a clear error if Incus < 6.1. Added `container.CheckMinimumVersion()` helper. (#214)
 - [Feature] **Improved firewalld setup UX with masquerade checks and auto-setup** — `coi health` now reports granular firewall state (installed/running/masquerade) with actionable fix commands. `install.sh` offers interactive auto-setup for firewalld (install, start, enable masquerade, configure passwordless sudo). (#216)
+- [Feature] **Auto-trust mise config files in workspace** — Workspaces containing `mise.toml` or `.tool-versions` no longer require manual `mise trust` inside the container. COI now sets `MISE_TRUSTED_CONFIG_PATHS` to the container workspace path via `/etc/profile.d/coi-mise-trust.sh`, which is sourced alongside the existing mise activation script. This covers all mise config file types and subdirectories. Non-fatal — logs a warning if the profile.d file cannot be created. (#328)
 
 ### Bug Fixes
 

@@ -526,6 +526,10 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 		opts.Logger("Reusing existing workspace and mount configurations")
 	}
 
+	// 10.2 Auto-trust mise config files in the workspace so mise doesn't
+	// prompt or error when the workspace contains mise.toml / .tool-versions.
+	SetupMiseTrust(result.Manager, result.ContainerWorkspacePath, opts.Logger)
+
 	// 10.5 Set auto-context path for config-based tools (must happen before setupCLIConfig
 	// so the path is included in GetSandboxSettings output)
 	if opts.Tool != nil && config.BoolVal(opts.AutoContext) {

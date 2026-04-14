@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/mensfeld/code-on-incus/internal/config"
+	"github.com/mensfeld/code-on-incus/internal/container"
 )
 
 // isColimaOrLimaEnvironment detects if we're running inside a Colima or Lima VM
@@ -42,6 +43,24 @@ func buildJSONFromSettings(settings map[string]interface{}) (string, error) {
 		return "", fmt.Errorf("failed to marshal settings: %w", err)
 	}
 	return string(jsonBytes), nil
+}
+
+// SetupMiseTrust configures MISE_TRUSTED_CONFIG_PATHS so mise automatically
+// trusts config files (mise.toml, .tool-versions, etc.) in the workspace.
+// The env var is written to both /etc/profile.d/ (login shells) and prepended
+// to /etc/bash.bashrc (non-login interactive shells, sourced before ~/.bashrc
+// where mise activates). Non-fatal: logs a warning on failure.
+func SetupMiseTrust(mgr *container.Manager, containerWorkspacePath string, logger func(string)) {
+	exportLine := fmt.Sprintf(`export MISE_TRUSTED_CONFIG_PATHS="%s"`, containerWorkspacePath)
+	trustCmd := fmt.Sprintf(
+		`printf '%%s\n' '%s' > /etc/profile.d/coi-mise-trust.sh && `+
+			`sed -i '/MISE_TRUSTED_CONFIG_PATHS/d' /etc/bash.bashrc && `+
+			`sed -i '1i %s' /etc/bash.bashrc`,
+		exportLine, exportLine,
+	)
+	if _, err := mgr.ExecCommand(trustCmd, container.ExecCommandOptions{Capture: true}); err != nil {
+		logger(fmt.Sprintf("Warning: Failed to configure mise workspace trust: %v", err))
+	}
 }
 
 // hasLimits checks if any limits are configured
