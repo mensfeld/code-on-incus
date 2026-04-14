@@ -10,7 +10,6 @@ The actual setcap behavior is covered by the Go unit test
 """
 
 import platform
-import subprocess
 
 
 def test_update_go_contains_setcap_restore(coi_binary):
@@ -38,9 +37,7 @@ def test_update_go_contains_setcap_restore(coi_binary):
         source = f.read()
 
     # Verify restoreCapability function exists
-    assert "func restoreCapability(" in source, (
-        "restoreCapability function not found in update.go"
-    )
+    assert "func restoreCapability(" in source, "restoreCapability function not found in update.go"
 
     # Verify it's called after binary replacement
     assert "restoreCapability(binaryPath)" in source, (
@@ -53,9 +50,7 @@ def test_update_go_contains_setcap_restore(coi_binary):
     )
 
     # Verify fallback manual command hint
-    assert "sudo setcap cap_linux_immutable=ep" in source, (
-        "Manual setcap command hint not found"
-    )
+    assert "sudo setcap cap_linux_immutable=ep" in source, "Manual setcap command hint not found"
 
     # Verify it checks for Linux
     assert 'runtime.GOOS != "linux"' in source, (
@@ -63,9 +58,7 @@ def test_update_go_contains_setcap_restore(coi_binary):
     )
 
     # Verify it uses non-interactive sudo
-    assert 'sudo", "-n"' in source, (
-        "Non-interactive sudo (-n) not used in restoreCapability"
-    )
+    assert 'sudo", "-n"' in source, "Non-interactive sudo (-n) not used in restoreCapability"
 
 
 def test_update_setcap_platform_guard():
