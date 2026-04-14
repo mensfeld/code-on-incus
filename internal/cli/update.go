@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -233,7 +234,27 @@ func updateCommand(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("\nSuccessfully updated to v%s\n", latestVersion)
 	fmt.Printf("Binary: %s\n", binaryPath)
+
+	restoreCapability(binaryPath)
+
 	return nil
+}
+
+// restoreCapability attempts to restore cap_linux_immutable on the binary after
+// an update. The capability is a file-level extended attribute that is lost when
+// the binary is replaced (new inode). Uses sudo -n (non-interactive) so it
+// doesn't hang if there are no cached sudo credentials. No-op on non-Linux.
+func restoreCapability(binaryPath string) {
+	if runtime.GOOS != "linux" {
+		return
+	}
+
+	if err := exec.Command("sudo", "-n", "setcap", "cap_linux_immutable=ep", binaryPath).Run(); err == nil {
+		fmt.Println("Restored cap_linux_immutable capability.")
+	} else {
+		fmt.Println("\nNote: Could not restore cap_linux_immutable capability.")
+		fmt.Printf("  Run manually: sudo setcap cap_linux_immutable=ep %s\n", binaryPath)
+	}
 }
 
 // fetchLatestRelease queries the GitHub API for the latest release
