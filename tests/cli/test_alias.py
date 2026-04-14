@@ -474,3 +474,178 @@ class TestAliasEdgeCases:
         assert len(found) > 0, f"Expected container '{container_name}' in list output"
         assert "alias" in found[0], f"Missing 'alias' key in container: {found[0]}"
         assert found[0]["alias"] == "", f"Expected empty alias, got '{found[0]['alias']}'"
+
+
+# ============================================================
+# CWD alias auto-registration tests (chicken-and-egg fix)
+# ============================================================
+
+
+def write_profile_config(workspace_dir, profile_name, alias=None, image=None):
+    """Create a profile with optional alias and image in the workspace."""
+    profile_dir = os.path.join(workspace_dir, ".coi", "profiles", profile_name)
+    os.makedirs(profile_dir, exist_ok=True)
+    lines = ["[container]"]
+    if alias:
+        lines.append(f'alias = "{alias}"')
+    if image:
+        lines.append(f'image = "{image}"')
+    with open(os.path.join(profile_dir, "config.toml"), "w") as f:
+        f.write("\n".join(lines) + "\n")
+
+
+class TestAliasCWDAutoRegister:
+    """Test that aliases from CWD config are auto-registered on first use."""
+
+    def test_shell_alias_auto_registers_from_cwd(
+        self, coi_binary, workspace_dir, cleanup_containers, dummy_image
+    ):
+        """coi shell <alias> should work when CWD config has matching alias, even without prior registration."""
+        write_alias_config(workspace_dir, "cwdauto")
+
+        # Clear any existing registry entry for this alias
+        registry = get_aliases_registry()
+        if "cwdauto" in registry:
+            # Remove it so we test the fallback
+            del registry["cwdauto"]
+            reg_path = os.path.join(os.path.expanduser("~"), ".coi", "aliases.json")
+            with open(reg_path, "w") as f:
+                json.dump(registry, f)
+
+        # Run coi shell <alias> from the workspace dir — should auto-register
+        result = run_coi(
+            coi_binary,
+            ["shell", "cwdauto", "--image", dummy_image, "--", "echo", "hello"],
+            workspace_dir=workspace_dir,
+        )
+        # Should succeed (alias resolved via CWD fallback)
+        assert result.returncode == 0, (
+            f"Expected coi shell cwdauto to succeed via CWD fallback, "
+            f"got rc={result.returncode}\nstderr: {result.stderr}\nstdout: {result.stdout}"
+        )
+
+        # Verify alias was auto-registered in the registry
+        registry = get_aliases_registry()
+        assert "cwdauto" in registry, (
+            f"Alias 'cwdauto' should have been auto-registered, registry: {registry}"
+        )
+        assert registry["cwdauto"]["workspace"] == os.path.abspath(workspace_dir)
+
+    def test_shell_alias_cwd_mismatch_still_fails(self, coi_binary, tmp_path):
+        """coi shell <alias> should still fail when CWD config has a different alias."""
+        workspace = str(tmp_path / "mismatch_workspace")
+        os.makedirs(workspace)
+        write_alias_config(workspace, "actualname")
+
+        result = run_coi(
+            coi_binary,
+            ["shell", "wrongname"],
+            workspace_dir=workspace,
+        )
+        assert result.returncode != 0
+        assert "not found" in result.stderr.lower() or "not found" in result.stdout.lower()
+
+    def test_shell_alias_no_cwd_config_still_fails(self, coi_binary, tmp_path):
+        """coi shell <alias> should still fail when CWD has no .coi/config.toml."""
+        workspace = str(tmp_path / "no_config_workspace")
+        os.makedirs(workspace)
+
+        result = run_coi(
+            coi_binary,
+            ["shell", "nosuchproject"],
+            workspace_dir=workspace,
+        )
+        assert result.returncode != 0
+        assert "not found" in result.stderr.lower() or "not found" in result.stdout.lower()
+
+
+# ============================================================
+# Profile alias override prevention tests
+# ============================================================
+
+
+class TestProfileAliasNoOverride:
+    """Test that profile aliases don't stomp project-level aliases."""
+
+    def test_profile_alias_does_not_override_project_alias(
+        self, coi_binary, workspace_dir, cleanup_containers, dummy_image
+    ):
+        """When project has alias and profile has alias, project alias wins."""
+        # Project config with its own alias
+        write_alias_config(workspace_dir, "projectalias")
+
+        # Profile with a different alias
+        write_profile_config(workspace_dir, "testprofile", alias="profilealias", image=dummy_image)
+
+        result = run_coi(
+            coi_binary,
+            ["run", "--profile", "testprofile", "echo", "ok"],
+            workspace_dir=workspace_dir,
+        )
+        assert result.returncode == 0, f"coi run failed: {result.stderr}"
+
+        # Verify the registry has the project alias, not the profile alias
+        registry = get_aliases_registry()
+        assert "projectalias" in registry, (
+            f"Project alias 'projectalias' should be in registry: {registry}"
+        )
+        # The profile alias should NOT have replaced the project alias
+        assert registry["projectalias"]["workspace"] == os.path.abspath(workspace_dir)
+
+    def test_profile_alias_applied_when_project_has_none(
+        self, coi_binary, workspace_dir, cleanup_containers, dummy_image
+    ):
+        """When project has no alias but profile does, profile alias is used."""
+        # Project config WITHOUT alias
+        config_dir = os.path.join(workspace_dir, ".coi")
+        os.makedirs(config_dir, exist_ok=True)
+        with open(os.path.join(config_dir, "config.toml"), "w") as f:
+            f.write("[container]\n")  # no alias
+
+        # Profile with an alias
+        write_profile_config(workspace_dir, "withalias", alias="fromsprofile", image=dummy_image)
+
+        result = run_coi(
+            coi_binary,
+            ["run", "--profile", "withalias", "echo", "ok"],
+            workspace_dir=workspace_dir,
+        )
+        assert result.returncode == 0, f"coi run failed: {result.stderr}"
+
+        # Verify the profile's alias was applied
+        registry = get_aliases_registry()
+        assert "fromsprofile" in registry, (
+            f"Profile alias 'fromsprofile' should be in registry when project has no alias: {registry}"
+        )
+
+    def test_same_profile_two_projects_no_conflict(
+        self, coi_binary, workspace_dir, cleanup_containers, dummy_image, tmp_path
+    ):
+        """Two projects with own aliases using same profile (which has alias) should not conflict."""
+        # Project A with its own alias
+        write_alias_config(workspace_dir, "projectA")
+        write_profile_config(workspace_dir, "shared", alias="sharedname", image=dummy_image)
+
+        result_a = run_coi(
+            coi_binary,
+            ["run", "--profile", "shared", "echo", "ok"],
+            workspace_dir=workspace_dir,
+        )
+        assert result_a.returncode == 0, f"Project A run failed: {result_a.stderr}"
+
+        # Project B with its own alias
+        workspace_b = str(tmp_path / "workspace_b")
+        os.makedirs(workspace_b)
+        write_alias_config(workspace_b, "projectB")
+        write_profile_config(workspace_b, "shared", alias="sharedname", image=dummy_image)
+
+        result_b = run_coi(
+            coi_binary,
+            ["run", "--profile", "shared", "echo", "ok"],
+            workspace_dir=workspace_b,
+        )
+        # Should NOT conflict because project aliases are preserved (not overridden by profile)
+        assert result_b.returncode == 0, (
+            f"Project B should not conflict with project A when both use same profile. "
+            f"rc={result_b.returncode}\nstderr: {result_b.stderr}"
+        )

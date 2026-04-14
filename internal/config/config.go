@@ -843,7 +843,10 @@ func applyContainerConfig(dst *ContainerConfig, src *ContainerConfig) {
 	if src.StoragePool != "" {
 		dst.StoragePool = src.StoragePool
 	}
-	if src.Alias != "" {
+	// Profiles should not override project-level aliases — aliases are
+	// workspace-specific and a profile used across multiple projects
+	// must not stamp them with a single name.
+	if src.Alias != "" && dst.Alias == "" {
 		dst.Alias = src.Alias
 	}
 	mergeBuildInto(&dst.Build, &src.Build)
