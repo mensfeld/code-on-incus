@@ -3,10 +3,13 @@ package alias
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 
+	"github.com/BurntSushi/toml"
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/session"
 )
@@ -80,6 +83,26 @@ func ResolveAliasForLaunch(arg string) (*ResolvedAlias, error) {
 
 	entry := reg.Lookup(alias)
 	if entry == nil {
+		// Fallback: check CWD project config for matching alias.
+		// This handles the chicken-and-egg case where the user runs
+		// `coi shell <alias> --profile X` before the alias has been registered.
+		cwd, cwdErr := os.Getwd()
+		if cwdErr == nil {
+			if projectAlias := loadProjectAlias(cwd); projectAlias == alias {
+				absWorkspace, err := filepath.Abs(cwd)
+				if err != nil {
+					return nil, fmt.Errorf("failed to resolve workspace path for alias %q: %w", alias, err)
+				}
+				// Auto-register so subsequent lookups succeed.
+				if err := reg.Register(alias, absWorkspace, ""); err != nil {
+					return nil, fmt.Errorf("failed to auto-register alias %q: %w", alias, err)
+				}
+				if err := reg.Save(); err != nil {
+					return nil, fmt.Errorf("failed to persist auto-registered alias %q: %w", alias, err)
+				}
+				return &ResolvedAlias{Workspace: absWorkspace, Slot: slotNum}, nil
+			}
+		}
 		return nil, fmt.Errorf("alias %q not found — register it by adding [container] alias = %q to .coi/config.toml and running a session", alias, alias)
 	}
 
@@ -88,6 +111,20 @@ func ResolveAliasForLaunch(arg string) (*ResolvedAlias, error) {
 		Profile:   entry.Profile,
 		Slot:      slotNum,
 	}, nil
+}
+
+// loadProjectAlias reads only the [container] alias field from a project's
+// .coi/config.toml.  Returns "" if the file doesn't exist or has no alias.
+func loadProjectAlias(dir string) string {
+	var cfg struct {
+		Container struct {
+			Alias string `toml:"alias"`
+		} `toml:"container"`
+	}
+	if _, err := toml.DecodeFile(filepath.Join(dir, ".coi", "config.toml"), &cfg); err != nil {
+		return ""
+	}
+	return cfg.Container.Alias
 }
 
 // FindContainersByAlias queries Incus for COI containers whose user.coi.alias

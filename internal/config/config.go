@@ -761,7 +761,14 @@ func (c *Config) ApplyProfile(name string) error {
 		return err
 	}
 
+	// Save the project-level alias before merging — profiles must not
+	// override it because aliases are workspace-specific and a profile
+	// used across multiple projects must not stamp them with a single name.
+	projectAlias := c.Container.Alias
 	applyContainerConfig(&c.Container, &profile.Container)
+	if projectAlias != "" {
+		c.Container.Alias = projectAlias
+	}
 	if profile.Model != "" {
 		c.Defaults.Model = profile.Model
 	}
