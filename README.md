@@ -284,11 +284,9 @@ alias = "myproject"
 ```bash
 coi shell myproject              # Launch session using alias (from any directory)
 coi attach myproject             # Attach to running aliased container
-coi kill myproject --force       # Kill by alias
-coi attach myproject-2           # Attach to slot 2
 ```
 
-Aliases are registered in `~/.coi/aliases.json` on first use and stored as `user.coi.alias` metadata on each container.
+See the [Container Lifecycle and Sessions guide](https://github.com/mensfeld/code-on-incus/wiki/Container-Lifecycle-and-Sessions#container-aliases) for full alias documentation.
 
 ### Global Flags
 
@@ -381,7 +379,7 @@ See the [Configuration wiki page](https://github.com/mensfeld/code-on-incus/wiki
 
 ## Profiles
 
-Profiles are reusable container configurations bundling image, tool, limits, mounts, build scripts, context files, and environment into named templates. Each profile is a self-contained directory with its own `config.toml` and optional supporting files.
+Profiles are reusable container configurations bundling image, tool, limits, mounts, build scripts, context files, and environment into named templates. Each profile is a self-contained directory under `profiles/`:
 
 ```
 .coi/profiles/
@@ -415,44 +413,13 @@ permission_mode = "bypass"
 count = "4"
 ```
 
-**Profile inheritance:** Profiles can inherit from a parent using `inherits = "parent-name"`, so you only override what differs:
-
-```toml
-# .coi/profiles/rust-dev-nightly/config.toml
-inherits = "rust-dev"
-
-[container]
-image = "coi-rust-nightly"
-
-[environment]
-RUST_CHANNEL = "nightly"
-```
-
-Environment maps merge (child keys win, `""` clears a parent key). Arrays (`mounts`, `forward_env`) fully replace if the child defines them. Struct sections (`limits`, `tool`, `network`) deep-merge field by field. Inheritance works across config levels (a project profile can inherit from a user-level profile) and supports chains up to 10 levels with cycle detection.
-
-**Profile context files:** When a profile includes `context = "CONTEXT.md"`, the referenced markdown file is automatically appended to `~/SANDBOX_CONTEXT.md` and tool-native auto-context files (e.g., `~/.claude/CLAUDE.md`) under a `# User-Provided Profile Context` heading. This gives AI agents profile-specific instructions (e.g., "use pytest", "follow PEP 8") without manual setup.
-
 ```bash
-# Create a new profile
-coi profile create rust-dev --image coi-rust --inherits default
-
-# Edit a profile's config.toml in $EDITOR
-coi profile edit rust-dev
-
-# Delete a profile
-coi profile delete rust-dev --force
-
-# Use a profile
-coi shell --profile rust-dev
-
-# List all available profiles
-coi profile list
-
-# Show profile details
-coi profile info rust-dev
+coi shell --profile rust-dev                          # Use a profile
+coi profile create rust-dev --image coi-rust           # Create a new profile
+coi profile list                                       # List all profiles
 ```
 
-Profile directories are scanned under `~/.coi/profiles/` (user) and `./.coi/profiles/` (project). When `COI_CONFIG` is set, its parent directory is also scanned. Profiles from all discovered locations are merged into a single namespace — if the same profile name is defined in more than one location, COI refuses to start and asks you to rename one so it's always unambiguous which profile is being applied. See the [Profiles wiki page](https://github.com/mensfeld/code-on-incus/wiki/Profiles) for complete documentation.
+Profiles support inheritance (`inherits = "parent-name"`), context files for AI-agent instructions, and custom build scripts. See the [Profiles wiki page](https://github.com/mensfeld/code-on-incus/wiki/Profiles) for complete documentation.
 
 ## Resource and Time Limits
 
