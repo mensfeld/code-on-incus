@@ -56,6 +56,42 @@ prompt_choice() {
     fi
 }
 
+# Detect package manager
+detect_pkg_manager() {
+    if command -v apt-get &> /dev/null; then
+        PKG_MANAGER="apt"
+    elif command -v pacman &> /dev/null; then
+        PKG_MANAGER="pacman"
+    elif command -v dnf &> /dev/null; then
+        PKG_MANAGER="dnf"
+    elif command -v zypper &> /dev/null; then
+        PKG_MANAGER="zypper"
+    else
+        PKG_MANAGER="unknown"
+    fi
+}
+
+# Install a package using the detected package manager
+# Usage: pkg_install <apt-name> [pacman-name] [dnf-name] [zypper-name]
+# If a distro-specific name is omitted, the apt name is used as fallback.
+pkg_install() {
+    local apt_name="$1"
+    local pacman_name="${2:-$apt_name}"
+    local dnf_name="${3:-$apt_name}"
+    local zypper_name="${4:-$apt_name}"
+
+    case "$PKG_MANAGER" in
+        apt)    sudo apt-get install -y "$apt_name" ;;
+        pacman) sudo pacman -S --noconfirm "$pacman_name" ;;
+        dnf)    sudo dnf install -y "$dnf_name" ;;
+        zypper) sudo zypper install -y "$zypper_name" ;;
+        *)
+            echo -e "${RED}✗ Unknown package manager — install '$apt_name' manually${NC}"
+            return 1
+            ;;
+    esac
+}
+
 # Detect OS and architecture
 detect_platform() {
     local os
@@ -103,11 +139,13 @@ check_incus() {
         echo "  claude-on-incus requires Incus to be installed."
         echo "  Install Incus: https://linuxcontainers.org/incus/docs/main/installing/"
         echo ""
-        echo "  Quick install (Ubuntu/Debian):"
-        echo "    sudo apt update"
-        echo "    sudo apt install -y incus"
-        echo "    sudo incus admin init --auto"
-        echo "    sudo usermod -aG incus-admin \$USER"
+        echo "  Quick install examples:"
+        echo "    Ubuntu/Debian: sudo apt install -y incus"
+        echo "    Arch Linux:    sudo pacman -S incus"
+        echo "    Fedora:        sudo dnf install incus"
+        echo ""
+        echo "  Then: sudo incus admin init --auto"
+        echo "        sudo usermod -aG incus-admin \$USER"
         echo ""
         prompt_continue "Continue installation anyway?"
     else
@@ -272,7 +310,7 @@ check_firewalld() {
         echo ""
         if [[ $REPLY =~ ^[Yy]$ ]]; then
             echo -e "${BLUE}→ Installing firewalld...${NC}"
-            sudo apt install -y firewalld
+            pkg_install firewalld
             echo -e "${BLUE}→ Enabling and starting firewalld...${NC}"
             sudo systemctl enable --now firewalld
             echo -e "${BLUE}→ Enabling masquerade (required for container internet access)...${NC}"
@@ -463,6 +501,91 @@ grant_immutable_capability() {
     fi
 }
 
+# Ensure the Incus systemd service is enabled and running
+ensure_incus_service() {
+    if ! command -v incus &> /dev/null; then
+        return
+    fi
+
+    # Check if incus service (or socket) is active
+    if systemctl is-active --quiet incus.service 2>/dev/null || systemctl is-active --quiet incus.socket 2>/dev/null; then
+        echo -e "${GREEN}✓ Incus service is running${NC}"
+        return
+    fi
+
+    echo -e "${BLUE}→ Enabling and starting Incus service...${NC}"
+    if sudo systemctl enable --now incus.service 2>/dev/null; then
+        echo -e "${GREEN}✓ Incus service enabled and started${NC}"
+    elif sudo systemctl enable --now incus.socket 2>/dev/null; then
+        echo -e "${GREEN}✓ Incus socket enabled and started${NC}"
+    else
+        echo -e "${YELLOW}⚠ Could not start Incus service${NC}"
+        echo "  Try manually: sudo systemctl enable --now incus.service"
+    fi
+}
+
+# Ensure subordinate UID/GID ranges are configured for unprivileged containers
+ensure_idmap() {
+    if ! command -v incus &> /dev/null; then
+        return
+    fi
+
+    echo -e "${BLUE}→ Checking subordinate UID/GID mapping...${NC}"
+
+    local needs_fix=0
+
+    # Check if root has a subuid range with at least 65536 UIDs
+    if [ -f /etc/subuid ] && grep -qE '^root:[0-9]+:[0-9]{5,}' /etc/subuid; then
+        echo -e "${GREEN}✓ /etc/subuid has root mapping${NC}"
+    else
+        echo -e "${YELLOW}⚠ /etc/subuid missing root subordinate range${NC}"
+        needs_fix=1
+    fi
+
+    if [ -f /etc/subgid ] && grep -qE '^root:[0-9]+:[0-9]{5,}' /etc/subgid; then
+        echo -e "${GREEN}✓ /etc/subgid has root mapping${NC}"
+    else
+        echo -e "${YELLOW}⚠ /etc/subgid missing root subordinate range${NC}"
+        needs_fix=1
+    fi
+
+    if [ "$needs_fix" = "0" ]; then
+        return
+    fi
+
+    echo ""
+    echo "  Incus needs subordinate UID/GID ranges for unprivileged containers."
+    echo "  Without this, container launches will fail with:"
+    echo "    \"System doesn't have a functional idmap setup\""
+    echo ""
+
+    if [ "$NONINTERACTIVE" = "1" ]; then
+        echo -e "${BLUE}→ Non-interactive mode: configuring idmap...${NC}"
+    else
+        read -p "  Configure subordinate UID/GID ranges now? [Y/n] " -n 1 -r </dev/tty
+        echo ""
+        if [[ $REPLY =~ ^[Nn]$ ]]; then
+            return
+        fi
+    fi
+
+    if ! grep -qE '^root:[0-9]+:[0-9]{5,}' /etc/subuid 2>/dev/null; then
+        echo "root:1000000:1000000000" | sudo tee -a /etc/subuid > /dev/null
+        echo -e "${GREEN}✓ Added root range to /etc/subuid${NC}"
+    fi
+    if ! grep -qE '^root:[0-9]+:[0-9]{5,}' /etc/subgid 2>/dev/null; then
+        echo "root:1000000:1000000000" | sudo tee -a /etc/subgid > /dev/null
+        echo -e "${GREEN}✓ Added root range to /etc/subgid${NC}"
+    fi
+
+    # Restart Incus to pick up new mappings
+    if systemctl is-active --quiet incus.service 2>/dev/null; then
+        echo -e "${BLUE}→ Restarting Incus to apply idmap changes...${NC}"
+        sudo systemctl restart incus.service
+        echo -e "${GREEN}✓ Incus restarted${NC}"
+    fi
+}
+
 # Ensure Incus has been initialized (creates default network, profile devices, etc.)
 ensure_incus_initialized() {
     # Skip if Incus is not installed
@@ -507,7 +630,7 @@ setup_zfs_storage() {
         echo -e "${GREEN}✓ ZFS already installed${NC}"
     else
         echo -e "${BLUE}→ Installing ZFS...${NC}"
-        if sudo apt-get install -y zfsutils-linux 2>&1 | grep -q "E:"; then
+        if ! pkg_install zfsutils-linux zfs-utils zfs zfs 2>/dev/null; then
             echo -e "${YELLOW}⚠ ZFS installation failed (may not be available for your kernel)${NC}"
             echo -e "${YELLOW}  Containers will use default storage (slower but functional)${NC}"
             return 1
@@ -553,6 +676,8 @@ setup_zfs_storage() {
 
 # Post-install setup
 post_install() {
+    ensure_incus_service || true
+    ensure_idmap || true
     ensure_incus_initialized || true
 
     # Try to set up ZFS storage (best-effort, don't abort installer on failure)
@@ -584,11 +709,13 @@ post_install() {
         echo -e "${YELLOW}⚠ Firewalld was skipped (ufw is active) — only --network=open will work.${NC}"
         echo "   To enable network isolation later, disable ufw and install firewalld:"
         echo "   ${BLUE}sudo ufw disable && sudo systemctl disable --now ufw${NC}"
-        echo "   ${BLUE}sudo apt install firewalld && sudo systemctl enable --now firewalld${NC}"
+        echo "   Install firewalld via your package manager, then:"
+        echo "   ${BLUE}sudo systemctl enable --now firewalld${NC}"
         echo ""
     elif ! command -v firewall-cmd &> /dev/null; then
         echo -e "${YELLOW}⚠ Firewalld is not installed — network isolation (restricted/allowlist modes) will not work.${NC}"
-        echo "   Re-run this installer or set up manually: ${BLUE}sudo apt install firewalld && sudo systemctl enable --now firewalld && sudo firewall-cmd --permanent --add-masquerade && sudo firewall-cmd --reload${NC}"
+        echo "   Re-run this installer or install firewalld via your package manager,"
+        echo "   then: ${BLUE}sudo systemctl enable --now firewalld && sudo firewall-cmd --permanent --add-masquerade && sudo firewall-cmd --reload${NC}"
         echo ""
     elif ! sudo -n firewall-cmd --query-masquerade &> /dev/null 2>&1; then
         echo -e "${YELLOW}⚠ Firewalld masquerade is not enabled — containers may not reach the internet.${NC}"
@@ -609,6 +736,7 @@ main() {
     echo ""
 
     detect_platform
+    detect_pkg_manager
     check_incus
     check_group
     check_ufw
