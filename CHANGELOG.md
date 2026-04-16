@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## 0.8.0 (Unreleased)
+## 0.8.0 (2026-04-16)
 
 ### Breaking Changes
 
