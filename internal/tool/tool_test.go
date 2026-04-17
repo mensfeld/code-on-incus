@@ -707,7 +707,16 @@ func TestRenderContextFileContent_GitAuthHints_SSHOnly(t *testing.T) {
 		t.Error("Expected SSH recommendation for git operations")
 	}
 	if !strings.Contains(content, "ssh -T git@github.com") {
-		t.Error("Expected ssh -T command for identity discovery")
+		t.Error("Expected ssh -T github example for identity discovery")
+	}
+	if !strings.Contains(content, "ssh -T git@gitlab.com") {
+		t.Error("Expected ssh -T gitlab example for identity discovery")
+	}
+	if !strings.Contains(content, "ssh -T git@bitbucket.org") {
+		t.Error("Expected ssh -T bitbucket example for identity discovery")
+	}
+	if !strings.Contains(content, "git remote get-url origin") {
+		t.Error("Expected guidance to check remote URL")
 	}
 	if !strings.Contains(content, `Do NOT use "code" as the git author`) {
 		t.Error("Expected warning against using 'code' as git author")

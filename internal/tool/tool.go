@@ -377,27 +377,39 @@ func RenderContextFileContent(info ContextInfo) string {
 		data.HasGitAuth = true
 		data.GitAuthDesc = `**Prefer SSH for git push/pull** — the forwarded SSH agent provides full authentication, while the forwarded GH_TOKEN/GITHUB_TOKEN may have limited scope or permissions (e.g., read-only, or restricted to specific repos).
 
-**Commit identity**: Do NOT use "code" as the git author — this is the container's default user, not the actual developer. To discover the correct identity, run:
+**Commit identity**: Do NOT use "code" as the git author — this is the container's default user, not the actual developer. To discover the correct identity, check the remote URL of the repository and test against the appropriate host:
 ` + "```" + `
-ssh -T git@github.com 2>&1
+# Check which host the repo uses:
+git remote get-url origin
+
+# Then test SSH against that host, e.g.:
+ssh -T git@github.com 2>&1    # GitHub
+ssh -T git@gitlab.com 2>&1    # GitLab
+ssh -T git@bitbucket.org 2>&1 # Bitbucket
 ` + "```" + `
-This will print the GitHub username associated with the SSH key. Use it to set:
+Use the identity from the SSH response to configure git:
 ` + "```" + `
-git config user.name "<name from SSH identity>"
-git config user.email "<username>@users.noreply.github.com"
+git config user.name "<real name>"
+git config user.email "<real email>"
 ` + "```"
 	case info.SSHAgentForwarded:
 		data.HasGitAuth = true
-		data.GitAuthDesc = `**Use SSH for git operations** — the forwarded SSH agent provides authentication for git push/pull/clone via SSH URLs (e.g., ` + "`git@github.com:org/repo.git`" + `).
+		data.GitAuthDesc = `**Use SSH for git operations** — the forwarded SSH agent provides authentication for git push/pull/clone via SSH URLs (e.g., ` + "`git@<host>:org/repo.git`" + `).
 
-**Commit identity**: Do NOT use "code" as the git author — this is the container's default user, not the actual developer. To discover the correct identity, run:
+**Commit identity**: Do NOT use "code" as the git author — this is the container's default user, not the actual developer. To discover the correct identity, check the remote URL of the repository and test against the appropriate host:
 ` + "```" + `
-ssh -T git@github.com 2>&1
+# Check which host the repo uses:
+git remote get-url origin
+
+# Then test SSH against that host, e.g.:
+ssh -T git@github.com 2>&1    # GitHub
+ssh -T git@gitlab.com 2>&1    # GitLab
+ssh -T git@bitbucket.org 2>&1 # Bitbucket
 ` + "```" + `
-This will print the GitHub username associated with the SSH key. Use it to set:
+Use the identity from the SSH response to configure git:
 ` + "```" + `
-git config user.name "<name from SSH identity>"
-git config user.email "<username>@users.noreply.github.com"
+git config user.name "<real name>"
+git config user.email "<real email>"
 ` + "```"
 	case info.GHCLIAuthenticated:
 		data.HasGitAuth = true
@@ -405,12 +417,12 @@ git config user.email "<username>@users.noreply.github.com"
 
 **Commit identity**: Do NOT use "code" as the git author — this is the container's default user, not the actual developer. If the token has sufficient permissions, you can discover the correct identity by running:
 ` + "```" + `
-gh api user --jq '.login'
+gh api user --jq '"Name: \(.name)\nEmail: \(.email)"'
 ` + "```" + `
 Use the result to set:
 ` + "```" + `
-git config user.name "<name>"
-git config user.email "<username>@users.noreply.github.com"
+git config user.name "<real name>"
+git config user.email "<real email>"
 ` + "```"
 	}
 
