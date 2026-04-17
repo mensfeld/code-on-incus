@@ -258,6 +258,15 @@ WRAPPER_EOF
         chmod 755 "/usr/local/bin/${cmd}"
     done
 
+    # Create "close" as an alias for poweroff
+    # This provides a safe alternative that doesn't exist on the host machine,
+    # preventing accidental host shutdowns when typed outside the container
+    cat > "/usr/local/bin/close" << 'WRAPPER_EOF'
+#!/bin/bash
+exec sudo /usr/sbin/poweroff "$@"
+WRAPPER_EOF
+    chmod 755 "/usr/local/bin/close"
+
     log "Power management wrappers configured"
 }
 
