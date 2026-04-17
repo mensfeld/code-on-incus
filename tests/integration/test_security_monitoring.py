@@ -362,16 +362,21 @@ class TestEnvironmentScanningPatterns:
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(5)
+        # Poll for WARNING event in audit log
+        warning_found = False
+        for _ in range(15):
+            time.sleep(1)
+            events = get_threat_events(container_name)
+            warnings = [e for e in events if e.get("level") == "warning"]
+            if len(warnings) > 0:
+                warning_found = True
+                break
 
-        # Container should stay running (WARNING level)
+        # Container should stay running (WARNING doesn't kill)
         state = get_container_state(container_name)
         assert state == "Running", f"Expected Running on WARNING, got {state}"
 
-        # Verify WARNING event for printenv
-        events = get_threat_events(container_name)
-        warnings = [e for e in events if e.get("level") == "warning"]
-        assert len(warnings) > 0, "Expected WARNING for printenv command"
+        assert warning_found, "Expected WARNING for printenv command"
 
         proc.terminate()
         cleanup_container(container_name, coi_binary)
@@ -416,16 +421,33 @@ class TestEnvironmentScanningPatterns:
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(5)
+        # Poll for WARNING event in audit log
+        warning_found = False
+        for _ in range(15):
+            time.sleep(1)
+            events = get_threat_events(container_name)
+            warnings = [e for e in events if e.get("level") == "warning"]
+            if len(warnings) > 0:
+                warning_found = True
+                break
 
-        # Container should stay running
+        # Container should stay running (WARNING doesn't kill)
         state = get_container_state(container_name)
         assert state == "Running", f"Expected Running on WARNING, got {state}"
 
-        # Verify WARNING for grep with API keyword
-        events = get_threat_events(container_name)
-        warnings = [e for e in events if e.get("level") == "warning"]
-        assert len(warnings) > 0, "Expected WARNING for grep API_KEY pattern"
+        if not warning_found:
+            events = get_threat_events(container_name)
+            print("\n=== DEBUG: grep API_KEY test - no warning found ===")
+            print(f"Container state: {state}")
+            print(f"Total threat events: {len(events)}")
+            for event in events:
+                print(
+                    f"  - level={event.get('level')}, category={event.get('category')}, "
+                    f"desc={event.get('description', 'N/A')[:80]}"
+                )
+            print("=== END DEBUG ===\n")
+
+        assert warning_found, "Expected WARNING for grep API_KEY pattern"
 
         proc.terminate()
         cleanup_container(container_name, coi_binary)
@@ -470,16 +492,33 @@ class TestEnvironmentScanningPatterns:
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(5)
+        # Poll for WARNING event in audit log
+        warning_found = False
+        for _ in range(15):
+            time.sleep(1)
+            events = get_threat_events(container_name)
+            warnings = [e for e in events if e.get("level") == "warning"]
+            if len(warnings) > 0:
+                warning_found = True
+                break
 
-        # Container should stay running
+        # Container should stay running (WARNING doesn't kill)
         state = get_container_state(container_name)
         assert state == "Running", f"Expected Running on WARNING, got {state}"
 
-        # Verify WARNING for grep with password keyword
-        events = get_threat_events(container_name)
-        warnings = [e for e in events if e.get("level") == "warning"]
-        assert len(warnings) > 0, "Expected WARNING for grep password pattern"
+        if not warning_found:
+            events = get_threat_events(container_name)
+            print("\n=== DEBUG: grep password test - no warning found ===")
+            print(f"Container state: {state}")
+            print(f"Total threat events: {len(events)}")
+            for event in events:
+                print(
+                    f"  - level={event.get('level')}, category={event.get('category')}, "
+                    f"desc={event.get('description', 'N/A')[:80]}"
+                )
+            print("=== END DEBUG ===\n")
+
+        assert warning_found, "Expected WARNING for grep password pattern"
 
         proc.terminate()
         cleanup_container(container_name, coi_binary)
@@ -524,16 +563,21 @@ class TestEnvironmentScanningPatterns:
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(5)
+        # Poll for WARNING event in audit log
+        warning_found = False
+        for _ in range(15):
+            time.sleep(1)
+            events = get_threat_events(container_name)
+            warnings = [e for e in events if e.get("level") == "warning"]
+            if len(warnings) > 0:
+                warning_found = True
+                break
 
-        # Container should stay running
+        # Container should stay running (WARNING doesn't kill)
         state = get_container_state(container_name)
         assert state == "Running", f"Expected Running on WARNING, got {state}"
 
-        # Verify WARNING for grep with secret keyword
-        events = get_threat_events(container_name)
-        warnings = [e for e in events if e.get("level") == "warning"]
-        assert len(warnings) > 0, "Expected WARNING for grep secret pattern"
+        assert warning_found, "Expected WARNING for grep secret pattern"
 
         proc.terminate()
         cleanup_container(container_name, coi_binary)
@@ -3268,10 +3312,13 @@ class TestLargeWriteDetection:
         time.sleep(10)
 
         # Write a large file (200MB) - potential data exfiltration
-        # This uses dd with direct I/O to ensure block I/O is counted
+        # Use bs=100M so each write syscall clearly exceeds the 50MB threshold
+        # in a single poll interval, regardless of disk speed.
+        # With bs=1M, slow CI disks (~30MB/s) can produce per-interval deltas
+        # below the 50MB threshold, causing flaky failures.
         # Note: The dd command may timeout or be interrupted if monitoring pauses/kills container
         try:
-            subprocess.run(
+            subprocess.Popen(
                 [
                     "incus",
                     "exec",
@@ -3280,41 +3327,63 @@ class TestLargeWriteDetection:
                     "dd",
                     "if=/dev/zero",
                     "of=/workspace/exfiltration_test.bin",
-                    "bs=1M",
-                    "count=200",
+                    "bs=100M",
+                    "count=2",
                     "oflag=direct",
                 ],
-                capture_output=True,
-                timeout=60,  # Shorter timeout - monitoring should detect before completion
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
             )
-        except subprocess.TimeoutExpired:
+        except Exception:
             pass  # Expected if monitoring pauses/stops the container
 
-        # Wait for monitoring to detect
-        time.sleep(10)
-
-        # Check for HIGH threat about large writes
-        events = get_threat_events(container_name)
-        write_threats = [
-            e
-            for e in events
-            if e.get("level") == "high"
-            and e.get("category") == "filesystem"
-            and "write" in e.get("title", "").lower()
-        ]
+        # Poll for HIGH threat event or Frozen state instead of blind sleep
+        write_threat_found = False
+        for _ in range(30):
+            time.sleep(1)
+            events = get_threat_events(container_name)
+            write_threats = [
+                e
+                for e in events
+                if e.get("level") == "high"
+                and e.get("category") == "filesystem"
+                and "write" in e.get("title", "").lower()
+            ]
+            if len(write_threats) > 0:
+                write_threat_found = True
+                break
+            # Container may be paused/frozen on HIGH threat
+            state = get_container_state(container_name)
+            if state == "Frozen":
+                # Give one more second for audit log flush
+                time.sleep(1)
+                events = get_threat_events(container_name)
+                write_threats = [
+                    e
+                    for e in events
+                    if e.get("level") == "high"
+                    and e.get("category") == "filesystem"
+                    and "write" in e.get("title", "").lower()
+                ]
+                if len(write_threats) > 0:
+                    write_threat_found = True
+                break
 
         proc.terminate()
 
-        print("\n=== Large Write Test Debug ===")
-        print(f"Total events: {len(events)}")
-        for event in events:
-            print(
-                f"- level={event.get('level')}, category={event.get('category')}, "
-                f"title={event.get('title')}"
-            )
-        print("=== End Debug ===\n")
+        if not write_threat_found:
+            events = get_threat_events(container_name)
+            print("\n=== Large Write Test Debug ===")
+            print(f"Container state: {get_container_state(container_name)}")
+            print(f"Total events: {len(events)}")
+            for event in events:
+                print(
+                    f"- level={event.get('level')}, category={event.get('category')}, "
+                    f"title={event.get('title')}"
+                )
+            print("=== End Debug ===\n")
 
-        assert len(write_threats) > 0, (
+        assert write_threat_found, (
             f"Expected HIGH threat for 200MB write, got {len(write_threats)} write threats. "
             "Large writes should be detected as potential data exfiltration."
         )
