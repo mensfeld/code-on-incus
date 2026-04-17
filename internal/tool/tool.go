@@ -316,6 +316,8 @@ type contextTemplateData struct {
 	ContainerName       string
 	ProfileContext      string
 	HasProfileContext   bool
+	GitAuthDesc         string
+	HasGitAuth          bool
 }
 
 // RenderContextFileContent renders the embedded sandbox context template with
@@ -366,7 +368,50 @@ func RenderContextFileContent(info ContextInfo) string {
 	}
 
 	if info.GHCLIAuthenticated {
-		data.GitHubCLIDesc = "Authenticated via forwarded token (gh CLI ready to use)"
+		data.GitHubCLIDesc = "Authenticated via forwarded token (gh CLI ready to use; note: token may have limited scope/permissions)"
+	}
+
+	// Git auth hints based on SSH + token availability
+	switch {
+	case info.SSHAgentForwarded && info.GHCLIAuthenticated:
+		data.HasGitAuth = true
+		data.GitAuthDesc = `**Prefer SSH for git push/pull** — the forwarded SSH agent provides full authentication, while the forwarded GH_TOKEN/GITHUB_TOKEN may have limited scope or permissions (e.g., read-only, or restricted to specific repos).
+
+**Commit identity**: Do NOT use "code" as the git author — this is the container's default user, not the actual developer. To discover the correct identity, run:
+` + "```" + `
+ssh -T git@github.com 2>&1
+` + "```" + `
+This will print the GitHub username associated with the SSH key. Use it to set:
+` + "```" + `
+git config user.name "<name from SSH identity>"
+git config user.email "<username>@users.noreply.github.com"
+` + "```"
+	case info.SSHAgentForwarded:
+		data.HasGitAuth = true
+		data.GitAuthDesc = `**Use SSH for git operations** — the forwarded SSH agent provides authentication for git push/pull/clone via SSH URLs (e.g., ` + "`git@github.com:org/repo.git`" + `).
+
+**Commit identity**: Do NOT use "code" as the git author — this is the container's default user, not the actual developer. To discover the correct identity, run:
+` + "```" + `
+ssh -T git@github.com 2>&1
+` + "```" + `
+This will print the GitHub username associated with the SSH key. Use it to set:
+` + "```" + `
+git config user.name "<name from SSH identity>"
+git config user.email "<username>@users.noreply.github.com"
+` + "```"
+	case info.GHCLIAuthenticated:
+		data.HasGitAuth = true
+		data.GitAuthDesc = `**Token-based git authentication is available** via the forwarded GH_TOKEN/GITHUB_TOKEN. Note that this token may have limited scope or permissions (e.g., read-only, restricted to specific repos, or no push access).
+
+**Commit identity**: Do NOT use "code" as the git author — this is the container's default user, not the actual developer. If the token has sufficient permissions, you can discover the correct identity by running:
+` + "```" + `
+gh api user --jq '.login'
+` + "```" + `
+Use the result to set:
+` + "```" + `
+git config user.name "<name>"
+git config user.email "<username>@users.noreply.github.com"
+` + "```"
 	}
 
 	if len(info.ForwardedEnvVars) > 0 {

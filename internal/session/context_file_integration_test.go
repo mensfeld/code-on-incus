@@ -342,6 +342,9 @@ func TestContextFile_GitHubCLIAuthenticated(t *testing.T) {
 	if !strings.Contains(content, "Authenticated via forwarded token") {
 		t.Error("Context file should indicate GitHub CLI is authenticated")
 	}
+	if !strings.Contains(content, "token may have limited scope/permissions") {
+		t.Error("Context file should include scope warning for forwarded token")
+	}
 	if strings.Contains(content, "Not authenticated") {
 		t.Error("Context file should not say 'Not authenticated' when GH CLI is authenticated")
 	}
