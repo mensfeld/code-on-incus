@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 0.8.1 (Unreleased)
+
+### New Features
+
+- Added `close` command inside containers as an alias for `poweroff`. This provides a safe alternative that doesn't exist on the host machine, preventing accidental host shutdowns when typed outside the container.
+
 ## 0.8.0 (2026-04-16)
 
 ### Breaking Changes
