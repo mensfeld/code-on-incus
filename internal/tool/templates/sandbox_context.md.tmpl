@@ -80,6 +80,12 @@ The following extra directories are also mounted into this container: {{.ExtraMo
 
 These paths are available alongside the workspace and persist changes to the host.
 {{- end}}
+{{- if .HasGitAuth}}
+
+## Git Configuration
+
+{{.GitAuthDesc}}
+{{- end}}
 
 ## Limitations
 {{if .NetworkLimitation}}

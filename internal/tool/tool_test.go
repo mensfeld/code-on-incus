@@ -532,6 +532,9 @@ func TestRenderContextFileContent(t *testing.T) {
 		{"autonomous operation section", "Autonomous Operation"},
 		{"never ask confirmation", "Never ask for confirmation"},
 		{"act autonomously guidance", "Act autonomously"},
+		{"git configuration section", "Git Configuration"},
+		{"git ssh recommendation", "Use SSH for git operations"},
+		{"git identity warning", `Do NOT use "code" as the git author`},
 	}
 
 	for _, check := range checks {
@@ -686,6 +689,107 @@ func TestRenderContextFileContent_NoOptionalSections(t *testing.T) {
 	}
 	if strings.Contains(content, "Additional Mounts") {
 		t.Error("Should not contain 'Additional Mounts' when no extra mounts configured")
+	}
+}
+
+func TestRenderContextFileContent_GitAuthHints_SSHOnly(t *testing.T) {
+	info := ContextInfo{
+		WorkspacePath:     "/workspace",
+		HomeDir:           "/home/code",
+		SSHAgentForwarded: true,
+	}
+	content := RenderContextFileContent(info)
+
+	if !strings.Contains(content, "Git Configuration") {
+		t.Error("Expected 'Git Configuration' section when SSH is forwarded")
+	}
+	if !strings.Contains(content, "Use SSH for git operations") {
+		t.Error("Expected SSH recommendation for git operations")
+	}
+	if !strings.Contains(content, "ssh -T git@github.com") {
+		t.Error("Expected ssh -T github example for identity discovery")
+	}
+	if !strings.Contains(content, "ssh -T git@gitlab.com") {
+		t.Error("Expected ssh -T gitlab example for identity discovery")
+	}
+	if !strings.Contains(content, "ssh -T git@bitbucket.org") {
+		t.Error("Expected ssh -T bitbucket example for identity discovery")
+	}
+	if !strings.Contains(content, "git remote get-url origin") {
+		t.Error("Expected guidance to check remote URL")
+	}
+	if !strings.Contains(content, `Do NOT use "code" as the git author`) {
+		t.Error("Expected warning against using 'code' as git author")
+	}
+	if strings.Contains(content, "token may have limited scope") {
+		t.Error("Should not mention token scope when only SSH is available")
+	}
+}
+
+func TestRenderContextFileContent_GitAuthHints_TokenOnly(t *testing.T) {
+	info := ContextInfo{
+		WorkspacePath:      "/workspace",
+		HomeDir:            "/home/code",
+		GHCLIAuthenticated: true,
+	}
+	content := RenderContextFileContent(info)
+
+	if !strings.Contains(content, "Git Configuration") {
+		t.Error("Expected 'Git Configuration' section when token is available")
+	}
+	if !strings.Contains(content, "Token-based git authentication is available") {
+		t.Error("Expected token-based auth description")
+	}
+	if !strings.Contains(content, "token may have limited scope") {
+		t.Error("Expected scope warning for forwarded token")
+	}
+	if !strings.Contains(content, "gh api user") {
+		t.Error("Expected gh api command for identity discovery")
+	}
+	if !strings.Contains(content, `Do NOT use "code" as the git author`) {
+		t.Error("Expected warning against using 'code' as git author")
+	}
+	// GitHubCLIDesc in the environment table should also have scope warning
+	if !strings.Contains(content, "token may have limited scope/permissions") {
+		t.Error("Expected scope/permissions warning in GitHub CLI table row")
+	}
+}
+
+func TestRenderContextFileContent_GitAuthHints_BothSSHAndToken(t *testing.T) {
+	info := ContextInfo{
+		WorkspacePath:      "/workspace",
+		HomeDir:            "/home/code",
+		SSHAgentForwarded:  true,
+		GHCLIAuthenticated: true,
+	}
+	content := RenderContextFileContent(info)
+
+	if !strings.Contains(content, "Git Configuration") {
+		t.Error("Expected 'Git Configuration' section when both SSH and token are available")
+	}
+	if !strings.Contains(content, "Prefer SSH for git push/pull") {
+		t.Error("Expected SSH preference recommendation")
+	}
+	if !strings.Contains(content, "GH_TOKEN/GITHUB_TOKEN may have limited scope") {
+		t.Error("Expected token scope warning")
+	}
+	if !strings.Contains(content, "ssh -T git@github.com") {
+		t.Error("Expected ssh -T command for identity discovery")
+	}
+	if !strings.Contains(content, `Do NOT use "code" as the git author`) {
+		t.Error("Expected warning against using 'code' as git author")
+	}
+}
+
+func TestRenderContextFileContent_GitAuthHints_Neither(t *testing.T) {
+	info := ContextInfo{
+		WorkspacePath: "/workspace",
+		HomeDir:       "/home/code",
+	}
+	content := RenderContextFileContent(info)
+
+	if strings.Contains(content, "Git Configuration") {
+		t.Error("Should not contain 'Git Configuration' section when neither SSH nor token is available")
 	}
 }
 
