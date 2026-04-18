@@ -452,6 +452,12 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 		}
 	}
 
+	// 6.6.1. Prevent git from guessing commit identity from the container user.
+	// Setting user.useConfigOnly=true forces git to refuse commits until
+	// user.name and user.email are explicitly configured, which ensures AI
+	// tools discover and set the real developer identity.
+	SetupGitIdentityGuard(result.Manager, result.HomeDir, opts.Logger)
+
 	// 6.7. Configure timezone inside container
 	// Always set result.Timezone so the TZ env var is applied even if the
 	// filesystem configuration fails (some programs only check TZ).

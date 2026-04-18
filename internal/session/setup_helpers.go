@@ -63,6 +63,21 @@ func SetupMiseTrust(mgr *container.Manager, containerWorkspacePath string, logge
 	}
 }
 
+// SetupGitIdentityGuard configures git to require explicit user.name and
+// user.email before allowing commits. This prevents AI tools from committing
+// as the container's default "code" user. The setting is applied globally
+// (--global) so it covers all repos inside the container.
+// Non-fatal: logs a warning on failure.
+func SetupGitIdentityGuard(mgr *container.Manager, homeDir string, logger func(string)) {
+	cmd := fmt.Sprintf(
+		`HOME=%s git config --global user.useConfigOnly true`,
+		homeDir,
+	)
+	if _, err := mgr.ExecCommand(cmd, container.ExecCommandOptions{Capture: true}); err != nil {
+		logger(fmt.Sprintf("Warning: Failed to set git user.useConfigOnly: %v", err))
+	}
+}
+
 // hasLimits checks if any limits are configured
 func hasLimits(cfg *config.LimitsConfig) bool {
 	if cfg == nil {
