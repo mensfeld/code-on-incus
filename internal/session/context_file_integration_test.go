@@ -374,6 +374,58 @@ func TestContextFile_GitHubCLIAuthenticated(t *testing.T) {
 	t.Logf("Authenticated context file content:\n%s", content)
 }
 
+// TestSetupGitIdentityGuard verifies that SetupGitIdentityGuard configures
+// user.useConfigOnly=true globally and that git refuses to commit without
+// explicit user.name and user.email.
+func TestSetupGitIdentityGuard(t *testing.T) {
+	skipUnlessContextFileTestable(t)
+
+	containerName := "coi-test-git-identity"
+	mgr := launchContextTestContainer(t, containerName)
+
+	homeDir := "/home/" + container.CodeUser
+	logger := func(msg string) { t.Logf("[git-identity] %s", msg) }
+	user := container.CodeUID
+
+	// Apply the guard
+	SetupGitIdentityGuard(mgr, homeDir, logger)
+
+	// Verify the config value is set
+	out, err := mgr.ExecCommand(
+		"HOME="+homeDir+" git config --global user.useConfigOnly",
+		container.ExecCommandOptions{Capture: true, User: &user},
+	)
+	if err != nil {
+		t.Fatalf("Failed to read git config: %v", err)
+	}
+	if strings.TrimSpace(out) != "true" {
+		t.Errorf("Expected user.useConfigOnly=true, got %q", strings.TrimSpace(out))
+	}
+
+	// Create a test repo and try to commit without setting identity — should fail
+	initCmd := "HOME=" + homeDir + " bash -c 'cd /tmp && mkdir testrepo && cd testrepo && git init && touch file && git add file && git commit -m test 2>&1; echo EXIT:$?'"
+	commitOut, err := mgr.ExecCommand(initCmd, container.ExecCommandOptions{Capture: true, User: &user})
+	if err != nil {
+		t.Logf("Command error (expected): %v", err)
+	}
+	if !strings.Contains(commitOut, "EXIT:128") && !strings.Contains(commitOut, "user.useConfigOnly") && !strings.Contains(commitOut, "tell me who you are") {
+		// Git should fail with a message about needing identity
+		if strings.Contains(commitOut, "EXIT:0") {
+			t.Errorf("Expected git commit to fail without identity, but it succeeded.\nOutput: %s", commitOut)
+		}
+	}
+
+	// Now set identity and verify commit succeeds
+	fixCmd := "HOME=" + homeDir + " bash -c 'cd /tmp/testrepo && git config user.name \"Test User\" && git config user.email \"test@example.com\" && git commit -m test 2>&1; echo EXIT:$?'"
+	fixOut, err := mgr.ExecCommand(fixCmd, container.ExecCommandOptions{Capture: true, User: &user})
+	if err != nil {
+		t.Fatalf("Failed to run git commit with identity: %v", err)
+	}
+	if !strings.Contains(fixOut, "EXIT:0") {
+		t.Errorf("Expected git commit to succeed after setting identity.\nOutput: %s", fixOut)
+	}
+}
+
 // TestContextFile_ForwardedEnvVars verifies that forwarded environment variable
 // names appear in the context file when provided.
 func TestContextFile_ForwardedEnvVars(t *testing.T) {
