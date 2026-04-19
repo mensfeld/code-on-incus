@@ -18,6 +18,7 @@ type CleanupOptions struct {
 	ContainerName  string
 	SessionID      string    // COI session ID for saving tool config data
 	Persistent     bool      // If true, stop but don't delete container
+	ProfileName    string    // Profile used for this session (saved in metadata for --resume)
 	SessionsDir    string    // e.g., ~/.coi/sessions-claude
 	SaveSession    bool      // Whether to save tool config directory
 	Workspace      string    // Workspace directory path
@@ -61,7 +62,7 @@ func Cleanup(opts CleanupOptions) error {
 	// This ensures --resume works regardless of how the user exited (including sudo shutdown 0)
 	// Skip if tool uses ENV-based auth (no config directory to save)
 	if opts.SaveSession && exists && opts.SessionID != "" && opts.SessionsDir != "" && opts.Tool != nil && opts.Tool.ConfigDirName() != "" {
-		if err := saveSessionData(mgr, opts.SessionID, opts.Persistent, opts.Workspace, opts.SessionsDir, opts.Tool, opts.Logger); err != nil {
+		if err := saveSessionData(mgr, opts.SessionID, opts.Persistent, opts.ProfileName, opts.Workspace, opts.SessionsDir, opts.Tool, opts.Logger); err != nil {
 			opts.Logger(fmt.Sprintf("Warning: Failed to save session data: %v", err))
 		}
 	}
@@ -133,7 +134,7 @@ func Cleanup(opts CleanupOptions) error {
 }
 
 // saveSessionData saves the tool config directory from the container
-func saveSessionData(mgr *container.Manager, sessionID string, persistent bool, workspace string, sessionsDir string, t tool.Tool, logger func(string)) error {
+func saveSessionData(mgr *container.Manager, sessionID string, persistent bool, profileName string, workspace string, sessionsDir string, t tool.Tool, logger func(string)) error {
 	// Determine home directory
 	// For coi images, we always use /home/code
 	// For other images, we use /root
@@ -182,6 +183,7 @@ func saveSessionData(mgr *container.Manager, sessionID string, persistent bool, 
 		SessionID:     sessionID,
 		ContainerName: mgr.ContainerName,
 		Persistent:    persistent,
+		ProfileName:   profileName,
 		Workspace:     workspace,
 		SavedAt:       getCurrentTime(),
 	}
@@ -201,6 +203,7 @@ type SessionMetadata struct {
 	SessionID     string `json:"session_id"`
 	ContainerName string `json:"container_name"`
 	Persistent    bool   `json:"persistent"`
+	ProfileName   string `json:"profile_name"`
 	Workspace     string `json:"workspace"`
 	SavedAt       string `json:"saved_at"`
 }
@@ -212,10 +215,11 @@ func saveMetadata(path string, metadata SessionMetadata) error {
   "session_id": "%s",
   "container_name": "%s",
   "persistent": %t,
+  "profile_name": "%s",
   "workspace": "%s",
   "saved_at": "%s"
 }
-`, metadata.SessionID, metadata.ContainerName, metadata.Persistent, metadata.Workspace, metadata.SavedAt)
+`, metadata.SessionID, metadata.ContainerName, metadata.Persistent, metadata.ProfileName, metadata.Workspace, metadata.SavedAt)
 
 	return os.WriteFile(path, []byte(content), 0o644)
 }
@@ -226,7 +230,7 @@ func getCurrentTime() string {
 }
 
 // SaveMetadataEarly saves session metadata at session start so coi list can show correct status
-func SaveMetadataEarly(sessionsDir, sessionID, containerName, workspace string, persistent bool) error {
+func SaveMetadataEarly(sessionsDir, sessionID, containerName, workspace string, persistent bool, profileName string) error {
 	// Create session directory if it doesn't exist
 	sessionDir := filepath.Join(sessionsDir, sessionID)
 	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
@@ -237,6 +241,7 @@ func SaveMetadataEarly(sessionsDir, sessionID, containerName, workspace string, 
 		SessionID:     sessionID,
 		ContainerName: containerName,
 		Persistent:    persistent,
+		ProfileName:   profileName,
 		Workspace:     workspace,
 		SavedAt:       getCurrentTime(),
 	}
@@ -388,6 +393,8 @@ func LoadSessionMetadata(path string) (*SessionMetadata, error) {
 			metadata.ContainerName = extractJSONValue(line)
 		} else if strings.Contains(line, "\"persistent\"") {
 			metadata.Persistent = strings.Contains(line, "true")
+		} else if strings.Contains(line, "\"profile_name\"") {
+			metadata.ProfileName = extractJSONValue(line)
 		} else if strings.Contains(line, "\"workspace\"") {
 			metadata.Workspace = extractJSONValue(line)
 		} else if strings.Contains(line, "\"saved_at\"") {

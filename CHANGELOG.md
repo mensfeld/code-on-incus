@@ -4,6 +4,7 @@
 
 ### New Features
 
+- **Profile auto-resume** — `coi shell --resume` now automatically restores the profile used when the session was originally created. No need to pass `--profile` again. Explicitly passing `--profile` on resume overrides the saved profile. (#342)
 - Added `close` command inside containers as an alias for `poweroff`. This provides a safe alternative that doesn't exist on the host machine, preventing accidental host shutdowns when typed outside the container.
 - **Better git auth hints in SANDBOX_CONTEXT.md** — When SSH agent and/or GH_TOKEN is forwarded, the context file now includes a `Git Configuration` section that guides AI tools to: prefer SSH over token-based auth for git operations, derive commit identity from the SSH key instead of using "code" as author, and warns that forwarded tokens may have limited scope/permissions. (#337)
 - **Git identity guard** — Containers now set `git config --global user.useConfigOnly true` during setup, which forces git to refuse commits until `user.name` and `user.email` are explicitly configured. This prevents AI tools from accidentally committing as the container's default "code" user.
