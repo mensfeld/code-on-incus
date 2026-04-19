@@ -17,6 +17,14 @@ Your credentials stay on the host. SSH keys, environment variables, and Git toke
 
 Built by developers, for developers who run AI agents and want to know what those agents are doing. Not a product, not a startup - a tool that does the job.
 
+## Who this is for
+
+- You run AI coding agents and want them to have full machine access - root, Docker, package managers, services - without risking your host
+- You want to know when an agent does something suspicious, not find out after the fact
+- You run multiple agents in parallel and need them isolated from each other
+- You want persistent dev environments that survive restarts and reboots, not throwaway containers that lose your setup every time
+- You care about your credentials not ending up inside an agent-controlled environment
+
 <p align="center">
   <a href="https://www.youtube.com/watch?v=t78-JUnTK5Q">
     <img src="https://img.youtube.com/vi/t78-JUnTK5Q/maxresdefault.jpg" alt="BetterStack video about Code on Incus" width="600">
@@ -29,6 +37,7 @@ Built by developers, for developers who run AI agents and want to know what thos
 
 ## Table of Contents
 
+- [Who this is for](#who-this-is-for)
 - [Supported AI Coding Tools](#supported-ai-coding-tools)
 - [Supported Tools (detailed)](https://github.com/mensfeld/code-on-incus/wiki/Supported-Tools)
 - [Features](#features)
