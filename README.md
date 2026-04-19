@@ -9,13 +9,13 @@
 [![Latest Release](https://img.shields.io/github/v/release/mensfeld/code-on-incus)](https://github.com/mensfeld/code-on-incus/releases)
 [![Join the chat at https://slack.karafka.io](https://raw.githubusercontent.com/karafka/misc/master/slack.svg)](https://slack.karafka.io)
 
-**Real Linux machines for AI coding agents - with active defense.**
+**Isolated machines for AI coding agents - with active defense.**
 
-COI gives each AI agent its own Linux machine - a full system container with root access, systemd, Docker, and the ability to install anything. Agents work like they would on a real server: run services, manage packages, use cron - without touching your actual system. Files stay correctly owned, no permission hacks needed.
+COI gives each AI agent its own machine - a full system container with root access, systemd, Docker, and the ability to install anything. Agents work like they would on a real server: run services, manage packages, use cron - without touching your actual system. Files stay correctly owned, no permission hacks needed.
 
 Your credentials stay on the host. SSH keys, environment variables, and Git tokens are never exposed to AI tools unless you explicitly mount them. If something goes wrong, COI catches it - reverse shells, credential scanning, data exfiltration - and pauses or kills the container automatically. No manual intervention needed.
 
-Built by one developer for developers who run AI agents on Linux and want to know what those agents are doing. Not a product, not a startup - a tool that does the job.
+Built by developers, for developers who run AI agents and want to know what those agents are doing. Not a product, not a startup - a tool that does the job.
 
 <p align="center">
   <a href="https://www.youtube.com/watch?v=t78-JUnTK5Q">
