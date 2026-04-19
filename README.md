@@ -9,17 +9,13 @@
 [![Latest Release](https://img.shields.io/github/v/release/mensfeld/code-on-incus)](https://github.com/mensfeld/code-on-incus/releases)
 [![Join the chat at https://slack.karafka.io](https://raw.githubusercontent.com/karafka/misc/master/slack.svg)](https://slack.karafka.io)
 
-**Security-Hardened Container Runtime for AI Coding Agents with Real-Time Threat Detection**
+**Real Linux machines for AI coding agents - with active defense.**
 
-Run AI coding assistants (Claude Code, opencode, and more) in isolated, production-grade Incus containers with zero permission headaches, perfect file ownership, and true multi-session support.
+COI gives each AI agent its own Linux machine - a full system container with root access, systemd, Docker, and the ability to install anything. Agents work like they would on a real server: run services, manage packages, use cron - without touching your actual system. Files stay correctly owned, no permission hacks needed.
 
-**Limited Blast Radius:** Prepare your workspace upfront, let the AI agent run in isolation, validate the outcome. No SSH keys, no environment variables, no credentials exposed. If compromised, damage is contained to your workspace. Network isolation helps prevent data exfiltration. Your host system stays protected.
+Your credentials stay on the host. SSH keys, environment variables, and Git tokens are never exposed to AI tools unless you explicitly mount them. If something goes wrong, COI catches it - reverse shells, credential scanning, data exfiltration - and pauses or kills the container automatically. No manual intervention needed.
 
-**Security First:** Unlike Docker or bare-metal execution, your environment variables, SSH keys, and Git credentials are **never** exposed to AI tools. Containers run in complete isolation with no access to your host credentials unless explicitly mounted.
-
-**Proactive Defense:** COI doesn't just isolate AI tools — it can actively watch them. Enable the built-in security monitoring daemon (`[monitoring] enabled = true`) to detect reverse shells, credential scanning, and large data reads in real time, automatically pausing or killing the container before damage can occur. No manual intervention needed.
-
-*Think Docker for AI coding tools, but with system containers that actually work like real machines.*
+Built by one developer for developers who run AI agents on Linux and want to know what those agents are doing. Not a product, not a startup - a tool that does the job.
 
 <p align="center">
   <a href="https://www.youtube.com/watch?v=t78-JUnTK5Q">
