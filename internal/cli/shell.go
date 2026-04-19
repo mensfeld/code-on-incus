@@ -201,6 +201,19 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 	if resumeID != "" && !isWorkspaceSessionTool {
 		metadataPath := filepath.Join(sessionsDir, resumeID, "metadata.json")
 		if metadata, err := session.LoadSessionMetadata(metadataPath); err == nil {
+			// Inherit profile if not explicitly set by user
+			if !cmd.Flags().Changed("profile") && metadata.ProfileName != "" {
+				profile = metadata.ProfileName
+				if err := cfg.ApplyProfile(profile); err != nil {
+					return fmt.Errorf("failed to apply saved profile '%s': %w", profile, err)
+				}
+				// Re-apply persistent from config since profile may override it
+				if !cmd.Flags().Changed("persistent") {
+					persistent = config.BoolVal(cfg.Container.Persistent)
+				}
+				fmt.Fprintf(os.Stderr, "Inherited profile '%s' from session\n", profile)
+			}
+
 			// Inherit persistent flag if not explicitly set by user
 			if !cmd.Flags().Changed("persistent") {
 				persistent = metadata.Persistent
@@ -351,7 +364,7 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// Save metadata early so coi list shows correct persistent/ephemeral status
-	if err := session.SaveMetadataEarly(sessionsDir, sessionID, result.ContainerName, absWorkspace, persistent); err != nil {
+	if err := session.SaveMetadataEarly(sessionsDir, sessionID, result.ContainerName, absWorkspace, persistent, profile); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: Failed to save early metadata: %v\n", err)
 	}
 
@@ -416,6 +429,7 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 				ContainerName:  result.ContainerName,
 				SessionID:      sessionID,
 				Persistent:     persistent,
+				ProfileName:    profile,
 				SessionsDir:    sessionsDir,
 				SaveSession:    true, // Always save session data
 				Workspace:      absWorkspace,
