@@ -155,7 +155,7 @@ MISE_PROFILE_EOF
     # This sets ~/.config/mise/config.toml with global tool versions.
     local attempt
     for attempt in 1 2 3; do
-        if su - "$CODE_USER" -c 'mise use --global python@3 pnpm@latest npm:typescript@latest npm:tsx@latest'; then
+        if su - "$CODE_USER" -c 'mise use --global python@3 npm:pnpm@latest npm:typescript@latest npm:tsx@latest'; then
             break
         fi
         if [ "$attempt" -eq 3 ]; then
