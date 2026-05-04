@@ -41,5 +41,8 @@
   "minimumReleaseAge": "7 days",
   "labels": [
     "dependencies"
-  ]
+  ],
+  "lockFileMaintenance": {
+    "enabled": true
+  }
 }
