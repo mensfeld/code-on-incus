@@ -39,6 +39,9 @@ jobs:
           cp profiles/default/build.sh internal/image/embedded/coi_build.sh
           cp profiles/default/config.toml internal/config/embedded/default_config.toml
           cp testdata/dummy/dummy internal/image/embedded/dummy
+          # GitHub Actions runners lack the memory.swap cgroup controller.
+          # Disable swap limit in the embedded default so tests can run.
+          sed -i 's/^swap = "true"/swap = ""/' internal/config/embedded/default_config.toml
 
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20 # v9.2.0
@@ -76,6 +79,9 @@ jobs:
           cp profiles/default/build.sh internal/image/embedded/coi_build.sh
           cp profiles/default/config.toml internal/config/embedded/default_config.toml
           cp testdata/dummy/dummy internal/image/embedded/dummy
+          # GitHub Actions runners lack the memory.swap cgroup controller.
+          # Disable swap limit in the embedded default so tests can run.
+          sed -i 's/^swap = "true"/swap = ""/' internal/config/embedded/default_config.toml
 
       - name: Run unit tests with coverage and race detector
         run: |
@@ -189,28 +195,15 @@ jobs:
           echo "Checking Python code formatting..."
           ruff format --check tests/
 
-      - name: Enable swap and delegate cgroup controllers for Incus
+      - name: Enable swap (for future cgroup controller support)
         run: |
-          # GitHub Actions runners have swap inactive by default. Activate it
-          # so the memory.swap cgroup controller is functional.
+          # Activate swap so the memory.swap cgroup controller can work if
+          # the kernel supports delegation (currently it doesn't on GHA runners,
+          # so we also patch the embedded config to skip swap limits).
           if [ -f /swapfile ]; then
             sudo swapon /swapfile 2>/dev/null || true
           fi
-          if ! swapon --show | grep -q /; then
-            sudo fallocate -l 2G /mnt/swapfile
-            sudo chmod 600 /mnt/swapfile
-            sudo mkswap /mnt/swapfile
-            sudo swapon /mnt/swapfile
-          fi
-          swapon --show
-          # Ensure systemd delegates all controllers (including memory) to
-          # Incus's cgroup slice so containers can use limits.memory.swap.
-          sudo mkdir -p /etc/systemd/system/incus.service.d
-          cat <<CONF | sudo tee /etc/systemd/system/incus.service.d/cgroup-delegation.conf
-          [Service]
-          Delegate=yes
-          CONF
-          sudo systemctl daemon-reload
+          swapon --show || true
 
       - name: Install Incus and Firewalld
         run: |
@@ -397,6 +390,9 @@ jobs:
           cp profiles/default/build.sh internal/image/embedded/coi_build.sh
           cp profiles/default/config.toml internal/config/embedded/default_config.toml
           cp testdata/dummy/dummy internal/image/embedded/dummy
+          # GitHub Actions runners lack the memory.swap cgroup controller.
+          # Disable swap limit in the embedded default so tests can run.
+          sed -i 's/^swap = "true"/swap = ""/' internal/config/embedded/default_config.toml
 
       - name: Build COI binary
         run: |
