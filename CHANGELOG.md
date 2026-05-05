@@ -2,6 +2,10 @@
 
 ## 0.8.1 (Unreleased)
 
+### Improvements
+
+- **Stronger git identity discovery instructions in SANDBOX_CONTEXT.md** — The git auth hints injected into the container context file are now much more directive: they mandate identity discovery before the first commit with a clear priority-ordered sequence (SSH agent → `gh api user` → git log → ask user), explicitly forbid fabricated identities like "code@example.com", and mention that `user.useConfigOnly=true` will block commits without a real identity. This addresses AI tools taking the path of least resistance and committing as "code" despite having SSH agent and/or GitHub token available.
+
 ### Bug Fixes
 
 - **Secure env-var forwarding in tmux sessions** — Forwarded environment variables (e.g. `GITHUB_TOKEN`) are now passed via `tmux new-session -e KEY=VAL` and `tmux set-environment` instead of being inlined as `export KEY=VAL; ...` in the command string. This fixes two issues: secrets no longer appear in `ps auxww` output, and variables now propagate to new tmux windows/panes. (contributed by @SimonArnu, #352)
