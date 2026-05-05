@@ -4,6 +4,7 @@
 
 ### Bug Fixes
 
+- **Make `sg` usage conditional on availability** — On Linux distros where `sg`/`newgrp` is restricted to root (e.g., ALT Linux with `rwx------` permissions), COI now detects `sg` unavailability at startup and falls back to running `incus` directly, the same code path used on macOS. Also fixes a bug where `coi image list --all` hardcoded the `incus-admin` group name instead of using the configurable `IncusGroup` variable. (#349)
 - **Secure env-var forwarding in tmux sessions** — Forwarded environment variables (e.g. `GITHUB_TOKEN`) are now passed via `tmux new-session -e KEY=VAL` and `tmux set-environment` instead of being inlined as `export KEY=VAL; ...` in the command string. This fixes two issues: secrets no longer appear in `ps auxww` output, and variables now propagate to new tmux windows/panes. (contributed by @SimonArnu, #352)
 
 ### New Features

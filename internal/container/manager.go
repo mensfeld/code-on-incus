@@ -524,13 +524,12 @@ func Available() bool {
 		return false
 	}
 
-	// On macOS, run incus directly without sg group switching
-	// macOS doesn't have the incus-admin group like Linux
+	// On macOS or when sg is unavailable, run incus directly.
+	// On Linux with sg available, use sg for group permissions.
 	var cmd *exec.Cmd
-	if runtime.GOOS == "darwin" {
+	if runtime.GOOS == "darwin" || !canUseSg() {
 		cmd = exec.Command("incus", "--project", IncusProject, "info")
 	} else {
-		// Linux - use sg to run with group permissions
 		cmd = exec.Command("sg", IncusGroup, "-c", fmt.Sprintf("incus --project %s info", IncusProject))
 	}
 
