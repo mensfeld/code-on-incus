@@ -189,13 +189,10 @@ jobs:
           echo "Checking Python code formatting..."
           ruff format --check tests/
 
-      - name: Enable swap for cgroup memory.swap controller
+      - name: Enable swap and delegate cgroup controllers for Incus
         run: |
-          # GitHub Actions runners don't have swap enabled, which means the
-          # memory.swap cgroup controller is unavailable. Incus needs this to
-          # apply limits.memory.swap on containers.
-          # The runner may already have a /swapfile (inactive), so activate it
-          # or create a new one at a different path.
+          # GitHub Actions runners have swap inactive by default. Activate it
+          # so the memory.swap cgroup controller is functional.
           if [ -f /swapfile ]; then
             sudo swapon /swapfile 2>/dev/null || true
           fi
@@ -205,17 +202,15 @@ jobs:
             sudo mkswap /mnt/swapfile
             sudo swapon /mnt/swapfile
           fi
-          # Verify swap is active
           swapon --show
-          # Debug: show available cgroup controllers
-          echo "Root cgroup controllers:"
-          cat /sys/fs/cgroup/cgroup.controllers
-          echo "Root cgroup subtree_control:"
-          cat /sys/fs/cgroup/cgroup.subtree_control
-          # Enable memory controller in subtree if not already
-          echo "+memory" | sudo tee /sys/fs/cgroup/cgroup.subtree_control || true
-          # Check if memory.swap.max exists (indicates swap controller support)
-          find /sys/fs/cgroup -name "memory.swap.max" 2>/dev/null | head -3 || echo "No memory.swap.max found"
+          # Ensure systemd delegates all controllers (including memory) to
+          # Incus's cgroup slice so containers can use limits.memory.swap.
+          sudo mkdir -p /etc/systemd/system/incus.service.d
+          cat <<CONF | sudo tee /etc/systemd/system/incus.service.d/cgroup-delegation.conf
+          [Service]
+          Delegate=yes
+          CONF
+          sudo systemctl daemon-reload
 
       - name: Install Incus and Firewalld
         run: |
