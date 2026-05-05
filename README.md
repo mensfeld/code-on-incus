@@ -516,6 +516,41 @@ Audit logs are stored at `~/.coi/audit/<container-name>.jsonl` in JSON Lines for
 
 See the [Security Monitoring wiki page](https://github.com/mensfeld/code-on-incus/wiki/Security-Monitoring) for monitoring commands, configuration options, NFT setup, and audit log management.
 
+### Audit streaming
+
+`coi audit` exposes the audit stream as JSON Lines on stdout, ready to pipe
+into a SIEM, `jq`, or a flat file:
+
+```sh
+# Dump the host-side audit log for a container
+coi audit coi-abc-1
+
+# Live in-container collector: auditd if available, otherwise syslog/auth.log,
+# plus periodic ss + ps snapshots
+coi audit coi-abc-1 --follow
+
+# Re-stream a saved JSONL file
+coi audit --file ./session.jsonl | jq -c 'select(.type=="net")'
+```
+
+Each line is a JSON object of the form:
+
+```json
+{"ts":"2026-05-05T12:34:56.789Z","sessionId":"coi-abc-1","container":"coi-abc-1",
+ "type":"exec|net|file|audit","pid":42,"comm":"curl","args":"curl https://...",
+ "peer":"1.2.3.4:443","path":"/etc/shadow","msg":"...","raw":"..."}
+```
+
+The `--follow` collector is a small POSIX-sh agent (`agent.sh`, ~150 LOC, no
+binary deploy). It picks the best available source — auditd first, falling
+back to `tail -F` of `/var/log/syslog` and `/var/log/auth.log` — and adds
+`ss -tunp` snapshots every 5 s plus `ps`-tree diffs every 2 s for new pids.
+Measured idle overhead: ~4.5 MB total RSS across the agent and its tail/awk
+helpers, ~0.0% CPU when the container is quiet.
+
+**Privacy model:** every event stays on the host running `coi audit`. Nothing
+is sent off-machine unless you pipe it elsewhere yourself.
+
 ## Security Best Practices
 
 See the [Security Best Practices guide](https://github.com/mensfeld/code-on-incus/wiki/Security-Best-Practices) for detailed security recommendations.
