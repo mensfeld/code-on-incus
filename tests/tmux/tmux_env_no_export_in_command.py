@@ -41,9 +41,7 @@ def _wait_for_container_running(name, timeout=60):
     return False
 
 
-def test_no_export_statement_in_tmux_command(
-    coi_binary, cleanup_containers, workspace_dir
-):
+def test_no_export_statement_in_tmux_command(coi_binary, cleanup_containers, workspace_dir):
     """
     The tmux pane command must NOT contain inline export statements.
 

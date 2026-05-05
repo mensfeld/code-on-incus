@@ -168,9 +168,7 @@ forward_env = ["COI_SECRET_TOKEN"]
         timeout=30,
     )
 
-    assert result.returncode == 0, (
-        f"tmux send-keys should succeed. stderr: {result.stderr}"
-    )
+    assert result.returncode == 0, f"tmux send-keys should succeed. stderr: {result.stderr}"
 
     time.sleep(2)
 
@@ -196,9 +194,7 @@ forward_env = ["COI_SECRET_TOKEN"]
         timeout=30,
     )
 
-    assert result.returncode == 0, (
-        f"tmux capture-pane should succeed. stderr: {result.stderr}"
-    )
+    assert result.returncode == 0, f"tmux capture-pane should succeed. stderr: {result.stderr}"
 
     pane_output = result.stdout + result.stderr
     assert f"ENV_CHECK_{secret_value}_END" in pane_output, (

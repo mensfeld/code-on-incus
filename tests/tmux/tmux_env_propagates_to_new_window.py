@@ -48,9 +48,7 @@ def _wait_for_container_running(name, timeout=60):
     return False
 
 
-def test_forwarded_env_available_in_new_tmux_window(
-    coi_binary, cleanup_containers, workspace_dir
-):
+def test_forwarded_env_available_in_new_tmux_window(coi_binary, cleanup_containers, workspace_dir):
     """
     Forwarded env vars must be available in new tmux windows.
 
@@ -149,9 +147,7 @@ forward_env = ["COI_PROPAGATE_VAR"]
         timeout=30,
     )
 
-    assert result.returncode == 0, (
-        f"tmux new-window should succeed. stderr: {result.stderr}"
-    )
+    assert result.returncode == 0, f"tmux new-window should succeed. stderr: {result.stderr}"
 
     time.sleep(2)
 
@@ -180,9 +176,7 @@ forward_env = ["COI_PROPAGATE_VAR"]
         timeout=30,
     )
 
-    assert result.returncode == 0, (
-        f"tmux send-keys should succeed. stderr: {result.stderr}"
-    )
+    assert result.returncode == 0, f"tmux send-keys should succeed. stderr: {result.stderr}"
 
     time.sleep(2)
 
@@ -209,9 +203,7 @@ forward_env = ["COI_PROPAGATE_VAR"]
         timeout=30,
     )
 
-    assert result.returncode == 0, (
-        f"tmux capture-pane should succeed. stderr: {result.stderr}"
-    )
+    assert result.returncode == 0, f"tmux capture-pane should succeed. stderr: {result.stderr}"
 
     pane_output = result.stdout + result.stderr
     assert f"NEWWIN_CHECK_{propagate_value}_END" in pane_output, (
