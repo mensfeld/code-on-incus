@@ -46,7 +46,7 @@ func TestBuildTmuxNewSessionCmd_DeterministicOrder(t *testing.T) {
 	a := strings.Index(got, "AAA=")
 	b := strings.Index(got, "BBB=")
 	c := strings.Index(got, "CCC=")
-	if a < 0 || b < 0 || c < 0 || !(a < b && b < c) {
+	if a < 0 || b < 0 || c < 0 || a >= b || b >= c {
 		t.Errorf("expected env flags in lexicographic order, got: %s", got)
 	}
 }
