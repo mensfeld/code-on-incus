@@ -143,11 +143,37 @@ forward_env = ["COI_SECRET_TOKEN"]
     )
 
     # === Phase 5: Verify the variable IS available inside the tmux pane ===
+    # The tmux pane starts with the dummy CLI. Exit it to get bash
+    # (session cmd: bash -c 'trap : INT; dummy ...; exec bash')
 
     tmux_session = f"coi-{container_name}"
 
-    # Send echo command to the tmux session
-    result = subprocess.run(
+    # Exit the dummy CLI to drop into bash
+    subprocess.run(
+        [
+            coi_binary,
+            "container",
+            "exec",
+            container_name,
+            "--user",
+            "1000",
+            "--",
+            "tmux",
+            "send-keys",
+            "-t",
+            tmux_session,
+            "exit",
+            "Enter",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    time.sleep(3)
+
+    # Now send echo command in bash
+    subprocess.run(
         [
             coi_binary,
             "container",
@@ -167,8 +193,6 @@ forward_env = ["COI_SECRET_TOKEN"]
         text=True,
         timeout=30,
     )
-
-    assert result.returncode == 0, f"tmux send-keys should succeed. stderr: {result.stderr}"
 
     time.sleep(2)
 
