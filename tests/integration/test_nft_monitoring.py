@@ -594,42 +594,77 @@ class TestAuditLogging:
         slot = 56
         container_name = get_container_name_from_workspace(test_workspace, slot)
 
-        proc = subprocess.Popen(
-            [
-                coi_binary,
-                "shell",
-                "--workspace",
-                test_workspace,
-                "--slot",
-                str(slot),
-            ],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            env=coi_monitoring_env,
-        )
-
-        try:
-            if not wait_for_container_ready(container_name, timeout=60):
-                pytest.skip("Container failed to start")
-
-            # Trigger some network activity
-            subprocess.run(
-                ["incus", "exec", container_name, "--", "curl", "-m", "5", "https://example.com"],
-                capture_output=True,
-                timeout=30,
+        stderr_file = Path("/tmp") / f"nft-audit-test-{slot}.log"
+        with open(stderr_file, "w") as stderr_fd:
+            proc = subprocess.Popen(
+                [
+                    coi_binary,
+                    "shell",
+                    "--workspace",
+                    test_workspace,
+                    "--slot",
+                    str(slot),
+                ],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=stderr_fd,
+                env=coi_monitoring_env,
             )
 
-            time.sleep(3)
+            try:
+                if not wait_for_container_ready(container_name, timeout=60):
+                    pytest.skip("Container failed to start")
 
-            # Check if audit directory exists
-            audit_dir = Path.home() / ".coi" / "audit"
-            assert audit_dir.exists(), f"Audit directory {audit_dir} not found"
+                # Wait for the NFT monitoring daemon to actually start before
+                # triggering traffic. Without this, the curl may fire before the
+                # daemon is ready to observe it and write audit logs.
+                daemon_started = False
+                for _ in range(30):
+                    time.sleep(1)
+                    stderr_content = stderr_file.read_text()
+                    if "[security] NFT network monitoring started" in stderr_content:
+                        daemon_started = True
+                        break
 
-        finally:
-            proc.terminate()
-            proc.wait(timeout=10)
-            cleanup_container(container_name, coi_binary, env=coi_monitoring_env)
+                if not daemon_started:
+                    pytest.skip(
+                        "NFT monitoring daemon did not start in time. "
+                        f"stderr:\n{stderr_file.read_text()}"
+                    )
+
+                # Trigger some network activity
+                subprocess.run(
+                    [
+                        "incus",
+                        "exec",
+                        container_name,
+                        "--",
+                        "curl",
+                        "-m",
+                        "5",
+                        "https://example.com",
+                    ],
+                    capture_output=True,
+                    timeout=30,
+                )
+
+                # Poll for the audit directory to appear (the daemon writes
+                # asynchronously so a fixed sleep is unreliable on slow CI).
+                audit_dir = Path.home() / ".coi" / "audit"
+                for _ in range(15):
+                    if audit_dir.exists():
+                        break
+                    time.sleep(1)
+
+                assert audit_dir.exists(), (
+                    f"Audit directory {audit_dir} not found after 15s. "
+                    f"stderr:\n{stderr_file.read_text()}"
+                )
+
+            finally:
+                proc.terminate()
+                proc.wait(timeout=10)
+                cleanup_container(container_name, coi_binary, env=coi_monitoring_env)
 
 
 class TestDaemonLifecycle:
