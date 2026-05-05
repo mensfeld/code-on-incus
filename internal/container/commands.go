@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -29,30 +30,50 @@ func Configure(project, group, codeUser string, codeUID int) {
 	CodeUID = codeUID
 }
 
+var (
+	sgUsable     bool
+	sgUsableOnce sync.Once
+)
+
+// canUseSg reports whether the sg binary is available and executable.
+// The result is cached after the first call.
+func canUseSg() bool {
+	sgUsableOnce.Do(func() {
+		_, err := exec.LookPath("sg")
+		sgUsable = err == nil
+	})
+	return sgUsable
+}
+
+// CanUseSg is the exported form of canUseSg for use by other packages.
+func CanUseSg() bool {
+	return canUseSg()
+}
+
 // execIncusCommand creates an exec.Cmd for running incus commands.
-// On Linux, it wraps the command with sg for group permissions.
-// On macOS, it runs incus directly (no incus-admin group).
+// On Linux with sg available, it wraps the command with sg for group permissions.
+// On macOS or when sg is unavailable, it runs incus directly via sh.
 func execIncusCommand(cmdArgs []string) *exec.Cmd {
-	if runtime.GOOS == "darwin" {
-		// macOS: run incus directly without sg wrapper
+	if runtime.GOOS == "darwin" || !canUseSg() {
+		// Run incus directly without sg wrapper.
 		// cmdArgs is in format: [IncusGroup, "-c", "incus --project ... command"]
-		// Extract the actual incus command from the third element
+		// Extract the actual incus command from the third element.
 		incusCmd := cmdArgs[2] // "incus --project ... command"
 		return exec.Command("sh", "-c", incusCmd)
 	}
-	// Linux: use sg for group permissions
+	// Linux with sg available: use sg for group permissions
 	return exec.Command("sg", cmdArgs...)
 }
 
 // execIncusCommandContext creates a context-aware exec.Cmd for running incus commands.
-// On Linux, it wraps the command with sg for group permissions.
-// On macOS, it runs incus directly (no incus-admin group).
+// On Linux with sg available, it wraps the command with sg for group permissions.
+// On macOS or when sg is unavailable, it runs incus directly via sh.
 //
 // WaitDelay is set so that when the context is cancelled, cmd.Wait returns
 // promptly instead of blocking until all child-process pipes are closed.
 func execIncusCommandContext(ctx context.Context, cmdArgs []string) *exec.Cmd {
 	var cmd *exec.Cmd
-	if runtime.GOOS == "darwin" {
+	if runtime.GOOS == "darwin" || !canUseSg() {
 		incusCmd := cmdArgs[2]
 		cmd = exec.CommandContext(ctx, "sh", "-c", incusCmd)
 	} else {

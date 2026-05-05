@@ -571,14 +571,25 @@ def assert_clean_exit(clean_exit, child):
     assert child.exitstatus == 0, f"Expected exit code 0, got {child.exitstatus}"
 
 
+def _has_sg():
+    """Check if the sg binary is available and executable."""
+    import shutil
+
+    return shutil.which("sg") is not None
+
+
 def get_container_list():
     """
     Get list of all running containers.
     Returns list of container names.
     """
     try:
+        if _has_sg():
+            cmd = ["sg", "incus-admin", "-c", "incus list --format=csv -c n"]
+        else:
+            cmd = ["incus", "list", "--format=csv", "-c", "n"]
         result = subprocess.run(
-            ["sg", "incus-admin", "-c", "incus list --format=csv -c n"],
+            cmd,
             capture_output=True,
             text=True,
             check=True,
@@ -609,8 +620,12 @@ def cleanup_all_test_containers(pattern="coi-test-"):
 
     for container in test_containers:
         try:
+            if _has_sg():
+                cmd = ["sg", "incus-admin", "-c", f"incus delete -f {container}"]
+            else:
+                cmd = ["incus", "delete", "-f", container]
             subprocess.run(
-                ["sg", "incus-admin", "-c", f"incus delete -f {container}"],
+                cmd,
                 capture_output=True,
                 timeout=10,
             )
