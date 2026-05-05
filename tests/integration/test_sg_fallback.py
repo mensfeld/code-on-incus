@@ -13,7 +13,6 @@ These tests verify:
 
 import os
 import subprocess
-import tempfile
 import time
 
 import pytest
