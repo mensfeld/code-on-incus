@@ -706,7 +706,7 @@ func TestRenderContextFileContent_GitAuthHints_SSHOnly(t *testing.T) {
 	if !strings.Contains(content, "Use SSH for git operations") {
 		t.Error("Expected SSH recommendation for git operations")
 	}
-	if !strings.Contains(content, `ssh -T "git@${ssh_host}"`) {
+	if !strings.Contains(content, `ssh -T -o StrictHostKeyChecking=accept-new -o BatchMode=yes "git@${ssh_host}"`) {
 		t.Error("Expected ssh -T command for identity discovery")
 	}
 	if !strings.Contains(content, "git remote get-url origin") {
@@ -746,6 +746,9 @@ func TestRenderContextFileContent_GitAuthHints_TokenOnly(t *testing.T) {
 	if !strings.Contains(content, "NEVER fabricate") {
 		t.Error("Expected warning against fabricating git identity")
 	}
+	if !strings.Contains(content, "code@example.com") {
+		t.Error("Expected explicit mention of forbidden code@example.com")
+	}
 	// GitHubCLIDesc in the environment table should also have scope warning
 	if !strings.Contains(content, "token may have limited scope/permissions") {
 		t.Error("Expected scope/permissions warning in GitHub CLI table row")
@@ -770,11 +773,14 @@ func TestRenderContextFileContent_GitAuthHints_BothSSHAndToken(t *testing.T) {
 	if !strings.Contains(content, "GH_TOKEN/GITHUB_TOKEN may have limited scope") {
 		t.Error("Expected token scope warning")
 	}
-	if !strings.Contains(content, `ssh -T "git@${ssh_host}"`) {
+	if !strings.Contains(content, `ssh -T -o StrictHostKeyChecking=accept-new -o BatchMode=yes "git@${ssh_host}"`) {
 		t.Error("Expected ssh -T command for identity discovery")
 	}
 	if !strings.Contains(content, "NEVER fabricate") {
 		t.Error("Expected warning against fabricating git identity")
+	}
+	if !strings.Contains(content, "code@example.com") {
+		t.Error("Expected explicit mention of forbidden code@example.com")
 	}
 }
 

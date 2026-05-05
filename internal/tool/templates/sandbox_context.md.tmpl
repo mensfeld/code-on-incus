@@ -95,12 +95,14 @@ Run the following commands **in order** and stop at the first one that succeeds:
 
 **1. SSH agent (preferred)**
 ```bash
-# Determine which host the repo uses:
-ssh_host=$(git remote get-url origin 2>/dev/null | sed -n 's|.*@\([^:]*\):.*|\1|p')
+# Determine which host the repo uses (handles scp-style, ssh://, and https:// URLs):
+remote_url=$(git remote get-url origin 2>/dev/null)
+ssh_host=$(echo "$remote_url" | sed -n 's|.*@\([^:/]*\)[:/].*|\1|p')
+[ -z "$ssh_host" ] && ssh_host=$(echo "$remote_url" | sed -n 's|https\{0,1\}://\([^/]*\)/.*|\1|p')
 [ -z "$ssh_host" ] && ssh_host="github.com"   # sensible default
 
 # Test SSH and capture the greeting:
-ssh_output=$(ssh -T "git@${ssh_host}" 2>&1 || true)
+ssh_output=$(ssh -T -o StrictHostKeyChecking=accept-new -o BatchMode=yes "git@${ssh_host}" 2>&1 || true)
 echo "$ssh_output"
 # GitHub  → "Hi <user>! You've successfully authenticated..."
 # GitLab  → "Welcome to GitLab, @<user>!"
@@ -111,7 +113,7 @@ Parse the username from the greeting and look up the full name/email via the pla
 ```bash
 gh api user --jq '"Name: \(.name // .login)\nEmail: \(.email // empty)"'
 ```
-If `.email` is null, try: `gh api user/emails --jq '.[0].email'`
+If `.email` is null, try: `gh api user/emails --jq '.[] | select(.primary and .verified) | .email'`
 
 **3. Existing git log fallback**
 ```bash
@@ -136,12 +138,14 @@ Run the following commands **in order** and stop at the first one that succeeds:
 
 **1. SSH agent (preferred)**
 ```bash
-# Determine which host the repo uses:
-ssh_host=$(git remote get-url origin 2>/dev/null | sed -n 's|.*@\([^:]*\):.*|\1|p')
+# Determine which host the repo uses (handles scp-style, ssh://, and https:// URLs):
+remote_url=$(git remote get-url origin 2>/dev/null)
+ssh_host=$(echo "$remote_url" | sed -n 's|.*@\([^:/]*\)[:/].*|\1|p')
+[ -z "$ssh_host" ] && ssh_host=$(echo "$remote_url" | sed -n 's|https\{0,1\}://\([^/]*\)/.*|\1|p')
 [ -z "$ssh_host" ] && ssh_host="github.com"   # sensible default
 
 # Test SSH and capture the greeting:
-ssh_output=$(ssh -T "git@${ssh_host}" 2>&1 || true)
+ssh_output=$(ssh -T -o StrictHostKeyChecking=accept-new -o BatchMode=yes "git@${ssh_host}" 2>&1 || true)
 echo "$ssh_output"
 # GitHub  → "Hi <user>! You've successfully authenticated..."
 # GitLab  → "Welcome to GitLab, @<user>!"
@@ -173,7 +177,7 @@ Run the following commands **in order** and stop at the first one that succeeds:
 ```bash
 gh api user --jq '"Name: \(.name // .login)\nEmail: \(.email // empty)"'
 ```
-If `.email` is null, try: `gh api user/emails --jq '.[0].email'`
+If `.email` is null, try: `gh api user/emails --jq '.[] | select(.primary and .verified) | .email'`
 
 **2. Existing git log fallback**
 ```bash
