@@ -149,7 +149,9 @@ forward_env = ["COI_NO_EXPORT_SECRET"]
     except (ValueError, KeyError):
         ps_lines = ps_output.splitlines()
 
-    bash_lines = [line for line in ps_lines if "bash -c" in line]
+    # Filter for actual bash processes, excluding the tmux server line
+    # (which contains `bash -c` as a session command argument).
+    bash_lines = [line for line in ps_lines if "bash -c" in line and "tmux" not in line]
     for line in bash_lines:
         assert secret_value not in line, (
             f"REGRESSION: secret value '{secret_value}' found in bash command line! "
