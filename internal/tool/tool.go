@@ -316,8 +316,9 @@ type contextTemplateData struct {
 	ContainerName       string
 	ProfileContext      string
 	HasProfileContext   bool
-	GitAuthDesc         string
 	HasGitAuth          bool
+	SSHAgentForwarded   bool
+	GHCLIAuthenticated  bool
 }
 
 // RenderContextFileContent renders the embedded sandbox context template with
@@ -371,121 +372,11 @@ func RenderContextFileContent(info ContextInfo) string {
 		data.GitHubCLIDesc = "Authenticated via forwarded token (gh CLI ready to use; note: token may have limited scope/permissions)"
 	}
 
-	// Git auth hints based on SSH + token availability.
-	//
-	// These instructions are deliberately forceful — AI tools running inside
-	// the container tend to fabricate git identities ("code@example.com")
-	// instead of discovering the real developer. The guard
-	// `user.useConfigOnly=true` is set globally so that git refuses to
-	// commit without an explicit identity; these instructions tell the AI
-	// exactly how to obtain one.
-	switch {
-	case info.SSHAgentForwarded && info.GHCLIAuthenticated:
+	// Git auth flags — the template renders conditional instructions based on these.
+	if info.SSHAgentForwarded || info.GHCLIAuthenticated {
 		data.HasGitAuth = true
-		data.GitAuthDesc = `**Prefer SSH for git push/pull** — the forwarded SSH agent provides full authentication, while the forwarded GH_TOKEN/GITHUB_TOKEN may have limited scope or permissions (e.g., read-only, or restricted to specific repos).
-
-### MANDATORY — Discover your git identity BEFORE the first commit
-
-` + "`user.useConfigOnly=true`" + ` is set globally, so git will **refuse to commit** until you configure a real identity. **NEVER fabricate** an identity — values like "code", "Code", "code@example.com", or any made-up name/email are WRONG and FORBIDDEN because "code" is just the container's default OS user.
-
-Run the following commands **in order** and stop at the first one that succeeds:
-
-**1. SSH agent (preferred)**
-` + "```bash" + `
-# Determine which host the repo uses:
-ssh_host=$(git remote get-url origin 2>/dev/null | sed -n 's|.*@\([^:]*\):.*|\1|p')
-[ -z "$ssh_host" ] && ssh_host="github.com"   # sensible default
-
-# Test SSH and capture the greeting:
-ssh_output=$(ssh -T "git@${ssh_host}" 2>&1 || true)
-echo "$ssh_output"
-# GitHub  → "Hi <user>! You've successfully authenticated..."
-# GitLab  → "Welcome to GitLab, @<user>!"
-` + "```" + `
-Parse the username from the greeting and look up the full name/email via the platform API (e.g. ` + "`gh api user`" + `).
-
-**2. GitHub CLI fallback**
-` + "```bash" + `
-gh api user --jq '"Name: \(.name // .login)\nEmail: \(.email // empty)"'
-` + "```" + `
-If ` + "`.email`" + ` is null, try: ` + "`gh api user/emails --jq '.[0].email'`" + `
-
-**3. Existing git log fallback**
-` + "```bash" + `
-git log --format='%aN <%aE>' -1 2>/dev/null
-` + "```" + `
-
-**4. Ask the user** — if none of the above works, ask the user for their name and email. Do NOT guess or make up values.
-
-Once you have the real identity, configure git:
-` + "```bash" + `
-git config user.name "<real name>"
-git config user.email "<real email>"
-` + "```"
-	case info.SSHAgentForwarded:
-		data.HasGitAuth = true
-		data.GitAuthDesc = `**Use SSH for git operations** — the forwarded SSH agent provides authentication for git push/pull/clone via SSH URLs (e.g., ` + "`git@<host>:org/repo.git`" + `).
-
-### MANDATORY — Discover your git identity BEFORE the first commit
-
-` + "`user.useConfigOnly=true`" + ` is set globally, so git will **refuse to commit** until you configure a real identity. **NEVER fabricate** an identity — values like "code", "Code", "code@example.com", or any made-up name/email are WRONG and FORBIDDEN because "code" is just the container's default OS user.
-
-Run the following commands **in order** and stop at the first one that succeeds:
-
-**1. SSH agent (preferred)**
-` + "```bash" + `
-# Determine which host the repo uses:
-ssh_host=$(git remote get-url origin 2>/dev/null | sed -n 's|.*@\([^:]*\):.*|\1|p')
-[ -z "$ssh_host" ] && ssh_host="github.com"   # sensible default
-
-# Test SSH and capture the greeting:
-ssh_output=$(ssh -T "git@${ssh_host}" 2>&1 || true)
-echo "$ssh_output"
-# GitHub  → "Hi <user>! You've successfully authenticated..."
-# GitLab  → "Welcome to GitLab, @<user>!"
-` + "```" + `
-Parse the username from the greeting and look up the full name/email via the platform API.
-
-**2. Existing git log fallback**
-` + "```bash" + `
-git log --format='%aN <%aE>' -1 2>/dev/null
-` + "```" + `
-
-**3. Ask the user** — if none of the above works, ask the user for their name and email. Do NOT guess or make up values.
-
-Once you have the real identity, configure git:
-` + "```bash" + `
-git config user.name "<real name>"
-git config user.email "<real email>"
-` + "```"
-	case info.GHCLIAuthenticated:
-		data.HasGitAuth = true
-		data.GitAuthDesc = `**Token-based git authentication is available** via the forwarded GH_TOKEN/GITHUB_TOKEN. Note that this token may have limited scope or permissions (e.g., read-only, restricted to specific repos, or no push access).
-
-### MANDATORY — Discover your git identity BEFORE the first commit
-
-` + "`user.useConfigOnly=true`" + ` is set globally, so git will **refuse to commit** until you configure a real identity. **NEVER fabricate** an identity — values like "code", "Code", "code@example.com", or any made-up name/email are WRONG and FORBIDDEN because "code" is just the container's default OS user.
-
-Run the following commands **in order** and stop at the first one that succeeds:
-
-**1. GitHub CLI (preferred)**
-` + "```bash" + `
-gh api user --jq '"Name: \(.name // .login)\nEmail: \(.email // empty)"'
-` + "```" + `
-If ` + "`.email`" + ` is null, try: ` + "`gh api user/emails --jq '.[0].email'`" + `
-
-**2. Existing git log fallback**
-` + "```bash" + `
-git log --format='%aN <%aE>' -1 2>/dev/null
-` + "```" + `
-
-**3. Ask the user** — if none of the above works, ask the user for their name and email. Do NOT guess or make up values.
-
-Once you have the real identity, configure git:
-` + "```bash" + `
-git config user.name "<real name>"
-git config user.email "<real email>"
-` + "```"
+		data.SSHAgentForwarded = info.SSHAgentForwarded
+		data.GHCLIAuthenticated = info.GHCLIAuthenticated
 	}
 
 	if len(info.ForwardedEnvVars) > 0 {
