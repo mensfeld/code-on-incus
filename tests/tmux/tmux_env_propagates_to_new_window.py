@@ -102,6 +102,7 @@ forward_env = ["COI_PROPAGATE_VAR"]
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         env=env,
+        cwd=workspace_dir,
     )
 
     try:

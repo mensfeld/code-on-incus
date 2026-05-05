@@ -99,6 +99,7 @@ forward_env = ["COI_SECRET_TOKEN"]
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         env=env,
+        cwd=workspace_dir,
     )
 
     # Wait for coi shell --background to finish (it exits after creating the session)
@@ -113,6 +114,9 @@ forward_env = ["COI_SECRET_TOKEN"]
         f"coi shell --background should succeed. "
         f"stdout: {stdout.decode()}\nstderr: {stderr.decode()}"
     )
+
+    # Print stderr for debugging (shows forward_env warnings if any)
+    print(f"\n=== coi shell --background stderr ===\n{stderr.decode()}\n=== end ===")
 
     # === Phase 3: Wait for container to be running ===
 

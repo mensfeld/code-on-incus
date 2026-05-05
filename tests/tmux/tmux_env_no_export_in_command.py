@@ -91,6 +91,7 @@ forward_env = ["COI_NO_EXPORT_SECRET"]
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         env=env,
+        cwd=workspace_dir,
     )
 
     try:
