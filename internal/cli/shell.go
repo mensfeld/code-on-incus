@@ -720,23 +720,24 @@ func buildTmuxNewSessionCmd(sessionName, workspacePath, cliCmd string, env map[s
 	}
 	return fmt.Sprintf(
 		"tmux new-session -d -s %s%s -c %s \"bash -c 'trap : INT; %s; exec bash'\"",
-		sessionName,
+		shellQuote(sessionName),
 		envFlags.String(),
-		workspacePath,
+		shellQuote(workspacePath),
 		cliCmd,
 	)
 }
 
-// buildTmuxSetEnvironmentCmds returns one `tmux set-environment -g` command
-// per entry in env. Running these after `new-session` makes the variables
-// available to any window or pane created later (which would otherwise inherit
-// the tmux server's near-empty environment).
+// buildTmuxSetEnvironmentCmds returns one `tmux set-environment` command per
+// entry in env, scoped to the given session so values don't leak across other
+// tmux sessions sharing the same server. Running these after `new-session`
+// makes the variables available to any window or pane created later (which
+// would otherwise inherit the tmux server's near-empty environment).
 func buildTmuxSetEnvironmentCmds(sessionName string, env map[string]string) []string {
 	cmds := make([]string, 0, len(env))
 	for _, k := range sortedEnvKeys(env) {
 		cmds = append(cmds, fmt.Sprintf(
-			"tmux set-environment -g -t %s %s %s",
-			sessionName,
+			"tmux set-environment -t %s %s %s",
+			shellQuote(sessionName),
 			shellQuote(k),
 			shellQuote(env[k]),
 		))
@@ -766,10 +767,12 @@ func runCLIInTmux(result *session.SetupResult, sessionID string, detached bool, 
 	// call on a session that was already populated.
 	applyTmuxEnv := func() {
 		for _, cmd := range buildTmuxSetEnvironmentCmds(tmuxSessionName, containerEnv) {
-			_, _ = result.Manager.ExecCommand(cmd, container.ExecCommandOptions{
+			if _, err := result.Manager.ExecCommand(cmd, container.ExecCommandOptions{
 				Capture: true,
 				User:    userPtr,
-			})
+			}); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to set tmux session env (%s): %v\n", cmd, err)
+			}
 		}
 	}
 

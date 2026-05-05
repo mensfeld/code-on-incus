@@ -23,10 +23,10 @@ func TestBuildTmuxNewSessionCmd_PassesEnvViaDashE(t *testing.T) {
 	if strings.Contains(got, "export GITHUB_TOKEN") || strings.Contains(got, "export JIRA_USER") {
 		t.Errorf("env must not be inlined as `export` statements (would leak to ps and not propagate to new windows): %s", got)
 	}
-	if !strings.Contains(got, "tmux new-session -d -s coi-x") {
+	if !strings.Contains(got, "tmux new-session -d -s 'coi-x'") {
 		t.Errorf("expected detached new-session for coi-x, got: %s", got)
 	}
-	if !strings.Contains(got, "-c /workspace") {
+	if !strings.Contains(got, "-c '/workspace'") {
 		t.Errorf("expected workspace path -c flag, got: %s", got)
 	}
 	if !strings.Contains(got, "claude --verbose") {
@@ -78,7 +78,7 @@ func TestBuildTmuxNewSessionCmd_EmptyEnv(t *testing.T) {
 	if strings.Contains(got, " -e ") {
 		t.Errorf("expected no -e flags for nil env, got: %s", got)
 	}
-	if !strings.Contains(got, "tmux new-session -d -s s") {
+	if !strings.Contains(got, "tmux new-session -d -s 's'") {
 		t.Errorf("expected new-session header, got: %s", got)
 	}
 }
@@ -90,11 +90,12 @@ func TestBuildTmuxSetEnvironmentCmds_OnePerVar(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("expected 2 commands, got %d: %v", len(got), got)
 	}
-	// Sorted: BAR before FOO.
-	if got[0] != "tmux set-environment -g -t coi-x 'BAR' 'two words'" {
+	// Sorted: BAR before FOO. Session-scoped (no -g) so values don't leak
+	// to other tmux sessions sharing the server.
+	if got[0] != "tmux set-environment -t 'coi-x' 'BAR' 'two words'" {
 		t.Errorf("unexpected first command: %q", got[0])
 	}
-	if got[1] != "tmux set-environment -g -t coi-x 'FOO' '1'" {
+	if got[1] != "tmux set-environment -t 'coi-x' 'FOO' '1'" {
 		t.Errorf("unexpected second command: %q", got[1])
 	}
 }
