@@ -8,9 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
-	"runtime"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -30,55 +28,20 @@ func Configure(project, group, codeUser string, codeUID int) {
 	CodeUID = codeUID
 }
 
-var (
-	sgUsable     bool
-	sgUsableOnce sync.Once
-)
-
-// canUseSg reports whether the sg binary is available and executable.
-// The result is cached after the first call.
-func canUseSg() bool {
-	sgUsableOnce.Do(func() {
-		_, err := exec.LookPath("sg")
-		sgUsable = err == nil
-	})
-	return sgUsable
+// execIncusCommand creates an exec.Cmd for running an incus command string
+// via "sh -c". The user must be in the incus-admin group in their current
+// session (log out / log back in after usermod -aG).
+func execIncusCommand(incusCmd string) *exec.Cmd {
+	return exec.Command("sh", "-c", incusCmd)
 }
 
-// CanUseSg is the exported form of canUseSg for use by other packages.
-func CanUseSg() bool {
-	return canUseSg()
-}
-
-// execIncusCommand creates an exec.Cmd for running incus commands.
-// On Linux with sg available, it wraps the command with sg for group permissions.
-// On macOS or when sg is unavailable, it runs incus directly via sh.
-func execIncusCommand(cmdArgs []string) *exec.Cmd {
-	if runtime.GOOS == "darwin" || !canUseSg() {
-		// Run incus directly without sg wrapper.
-		// cmdArgs is in format: [IncusGroup, "-c", "incus --project ... command"]
-		// Extract the actual incus command from the third element.
-		incusCmd := cmdArgs[2] // "incus --project ... command"
-		return exec.Command("sh", "-c", incusCmd)
-	}
-	// Linux with sg available: use sg for group permissions
-	return exec.Command("sg", cmdArgs...)
-}
-
-// execIncusCommandContext creates a context-aware exec.Cmd for running incus commands.
-// On Linux with sg available, it wraps the command with sg for group permissions.
-// On macOS or when sg is unavailable, it runs incus directly via sh.
+// execIncusCommandContext creates a context-aware exec.Cmd for running an
+// incus command string via "sh -c".
 //
 // WaitDelay is set so that when the context is cancelled, cmd.Wait returns
 // promptly instead of blocking until all child-process pipes are closed.
-func execIncusCommandContext(ctx context.Context, cmdArgs []string) *exec.Cmd {
-	var cmd *exec.Cmd
-	if runtime.GOOS == "darwin" || !canUseSg() {
-		incusCmd := cmdArgs[2]
-		cmd = exec.CommandContext(ctx, "sh", "-c", incusCmd)
-	} else {
-		cmd = exec.CommandContext(ctx, "sg", cmdArgs...)
-	}
+func execIncusCommandContext(ctx context.Context, incusCmd string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "sh", "-c", incusCmd)
 	cmd.WaitDelay = time.Second
 	return cmd
 }
@@ -92,7 +55,7 @@ func IncusExecContext(ctx context.Context, args ...string) error {
 	return cmd.Run()
 }
 
-// IncusExec executes an Incus command via sg wrapper for group permissions (Linux) or directly (macOS)
+// IncusExec executes an Incus command
 func IncusExec(args ...string) error {
 	return IncusExecContext(context.Background(), args...)
 }
@@ -214,19 +177,8 @@ func IncusOutputWithStderr(args ...string) (string, error) {
 
 // IncusOutputWithArgsContext executes incus with raw args and context support (no additional wrapping)
 func IncusOutputWithArgsContext(ctx context.Context, args ...string) (string, error) {
-	// Build command with project flag
-	incusArgs := append([]string{"--project", IncusProject}, args...)
-
-	// Build properly quoted command
-	quotedArgs := make([]string, len(incusArgs))
-	for i, arg := range incusArgs {
-		quotedArgs[i] = shellQuote(arg)
-	}
-
-	incusCmd := "incus " + strings.Join(quotedArgs, " ")
-	sgArgs := []string{IncusGroup, "-c", incusCmd}
-
-	cmd := execIncusCommandContext(ctx, sgArgs)
+	incusCmd := buildIncusCommand(args...)
+	cmd := execIncusCommandContext(ctx, incusCmd)
 
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
@@ -533,8 +485,8 @@ func ListContainers(pattern string) ([]string, error) {
 	return matching, nil
 }
 
-// buildIncusCommand builds the full incus command with project flag
-func buildIncusCommand(args ...string) []string {
+// buildIncusCommand builds the full incus command string with project flag.
+func buildIncusCommand(args ...string) string {
 	incusArgs := append([]string{"--project", IncusProject}, args...)
 
 	// Properly quote arguments for shell execution
@@ -543,8 +495,7 @@ func buildIncusCommand(args ...string) []string {
 		quotedArgs[i] = shellQuote(arg)
 	}
 
-	incusCmd := "incus " + strings.Join(quotedArgs, " ")
-	return []string{IncusGroup, "-c", incusCmd}
+	return "incus " + strings.Join(quotedArgs, " ")
 }
 
 // shellQuote quotes a string for safe use in a shell command

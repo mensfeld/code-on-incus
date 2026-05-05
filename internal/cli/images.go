@@ -321,14 +321,7 @@ func imageListCommand(cmd *cobra.Command, args []string) error {
 func listAllImages() error {
 	mgr := container.NewManager("temp")
 
-	// Get list of images using incus image list, with sg wrapper when available
-	var imgCmd string
-	if container.CanUseSg() {
-		imgCmd = fmt.Sprintf("sg %s -c 'incus image list --format=csv -c l,s,u'", container.IncusGroup)
-	} else {
-		imgCmd = "incus image list --format=csv -c l,s,u"
-	}
-	output, err := mgr.ExecHostCommand(imgCmd, true)
+	output, err := mgr.ExecHostCommand("incus image list --format=csv -c l,s,u", true)
 	if err != nil {
 		return fmt.Errorf("failed to list images: %w", err)
 	}

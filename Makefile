@@ -123,23 +123,13 @@ integrations-setup:
 integrations: build
 	@echo "Running integration tests..."
 	@bash scripts/cleanup-pycache.sh
-	@if groups | grep -q incus-admin; then \
-		pytest tests/ -v; \
-	else \
-		echo "Running with incus-admin group..."; \
-		sg incus-admin -c "pytest tests/ -v"; \
-	fi
+	@pytest tests/ -v
 
 # Run integration tests with output (for debugging)
 integrations-debug: build
 	@echo "Running integration tests with output..."
 	@bash scripts/cleanup-pycache.sh
-	@if groups | grep -q incus-admin; then \
-		pytest tests/ -v -s; \
-	else \
-		echo "Running with incus-admin group..."; \
-		sg incus-admin -c "pytest tests/ -v -s"; \
-	fi
+	@pytest tests/ -v -s
 
 # Run only CLI tests (no Incus required)
 integrations-cli:
