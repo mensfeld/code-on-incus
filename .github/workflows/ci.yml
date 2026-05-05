@@ -189,6 +189,19 @@ jobs:
           echo "Checking Python code formatting..."
           ruff format --check tests/
 
+      - name: Enable swap for cgroup memory.swap controller
+        run: |
+          # GitHub Actions runners don't have swap enabled, which means the
+          # memory.swap cgroup controller is unavailable. Incus needs this to
+          # apply limits.memory.swap on containers.
+          sudo fallocate -l 2G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          # Verify swap is active and controller is available
+          swapon --show
+          cat /proc/swaps
+
       - name: Install Incus and Firewalld
         run: |
           # Try Zabbly repo first (latest Incus), fall back to Ubuntu's native package
