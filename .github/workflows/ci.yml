@@ -207,6 +207,15 @@ jobs:
           fi
           # Verify swap is active
           swapon --show
+          # Debug: show available cgroup controllers
+          echo "Root cgroup controllers:"
+          cat /sys/fs/cgroup/cgroup.controllers
+          echo "Root cgroup subtree_control:"
+          cat /sys/fs/cgroup/cgroup.subtree_control
+          # Enable memory controller in subtree if not already
+          echo "+memory" | sudo tee /sys/fs/cgroup/cgroup.subtree_control || true
+          # Check if memory.swap.max exists (indicates swap controller support)
+          find /sys/fs/cgroup -name "memory.swap.max" 2>/dev/null | head -3 || echo "No memory.swap.max found"
 
       - name: Install Incus and Firewalld
         run: |
