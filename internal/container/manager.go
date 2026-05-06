@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -524,15 +523,7 @@ func Available() bool {
 		return false
 	}
 
-	// On macOS or when sg is unavailable, run incus directly.
-	// On Linux with sg available, use sg for group permissions.
-	var cmd *exec.Cmd
-	if runtime.GOOS == "darwin" || !canUseSg() {
-		cmd = exec.Command("incus", "--project", IncusProject, "info")
-	} else {
-		cmd = exec.Command("sg", IncusGroup, "-c", fmt.Sprintf("incus --project %s info", IncusProject))
-	}
-
+	cmd := exec.Command("incus", "--project", IncusProject, "info")
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	return cmd.Run() == nil
@@ -567,7 +558,6 @@ func (m *Manager) CreateFile(containerPath, content string) error {
 
 // ExecHostCommand executes a command on the host (not in container)
 func (m *Manager) ExecHostCommand(command string, capture bool) (string, error) {
-	// Use sg wrapper if needed, otherwise direct execution
 	cmd := exec.Command("sh", "-c", command)
 
 	if capture {

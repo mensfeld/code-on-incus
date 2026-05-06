@@ -110,7 +110,7 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 			}
 		}
 		// Re-apply Incus configuration after config reload
-		container.Configure(cfg.Incus.Project, cfg.Incus.Group, cfg.Incus.CodeUser, cfg.Incus.CodeUID)
+		container.Configure(cfg.Incus.Project, cfg.Incus.CodeUser, cfg.Incus.CodeUID)
 		if resolved.Slot > 0 && !cmd.Flags().Changed("slot") {
 			slot = resolved.Slot
 		}

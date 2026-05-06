@@ -69,7 +69,7 @@ Examples:
 		}
 
 		// Apply Incus configuration from config file
-		container.Configure(cfg.Incus.Project, cfg.Incus.Group, cfg.Incus.CodeUser, cfg.Incus.CodeUID)
+		container.Configure(cfg.Incus.Project, cfg.Incus.CodeUser, cfg.Incus.CodeUID)
 
 		// Apply config defaults to flags that weren't explicitly set
 		if !cmd.Flags().Changed("persistent") {
