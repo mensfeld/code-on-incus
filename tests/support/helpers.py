@@ -578,7 +578,7 @@ def get_container_list():
     """
     try:
         result = subprocess.run(
-            ["sg", "incus-admin", "-c", "incus list --format=csv -c n"],
+            ["incus", "list", "--format=csv", "-c", "n"],
             capture_output=True,
             text=True,
             check=True,
@@ -610,7 +610,7 @@ def cleanup_all_test_containers(pattern="coi-test-"):
     for container in test_containers:
         try:
             subprocess.run(
-                ["sg", "incus-admin", "-c", f"incus delete -f {container}"],
+                ["incus", "delete", "-f", container],
                 capture_output=True,
                 timeout=10,
             )

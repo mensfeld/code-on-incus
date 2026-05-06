@@ -458,6 +458,13 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 	// tools discover and set the real developer identity.
 	SetupGitIdentityGuard(result.Manager, result.HomeDir, opts.Logger)
 
+	// 6.6.2. Suppress Claude Code auto-mode prompt via managed settings.
+	// Only applies when the tool is Claude Code — the managed settings path
+	// (/etc/claude-code/managed-settings.json) is Claude-specific.
+	if opts.Tool != nil && opts.Tool.Name() == "claude" {
+		SetupClaudeManagedSettings(result.Manager, opts.Logger)
+	}
+
 	// 6.7. Configure timezone inside container
 	// Always set result.Timezone so the TZ env var is applied even if the
 	// filesystem configuration fails (some programs only check TZ).

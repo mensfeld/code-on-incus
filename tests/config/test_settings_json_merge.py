@@ -92,10 +92,12 @@ def test_settings_json_merge_preserves_user_config(
 
     result = subprocess.run(
         [
-            "sg",
-            "incus-admin",
-            "-c",
-            f"incus exec {container_name} -- cat /home/code/.claude/settings.json",
+            "incus",
+            "exec",
+            container_name,
+            "--",
+            "cat",
+            "/home/code/.claude/settings.json",
         ],
         capture_output=True,
         text=True,
@@ -106,10 +108,13 @@ def test_settings_json_merge_preserves_user_config(
         # Try to get some debug info
         debug_result = subprocess.run(
             [
-                "sg",
-                "incus-admin",
-                "-c",
-                f"incus exec {container_name} -- ls -la /home/code/.claude/",
+                "incus",
+                "exec",
+                container_name,
+                "--",
+                "ls",
+                "-la",
+                "/home/code/.claude/",
             ],
             capture_output=True,
             text=True,
