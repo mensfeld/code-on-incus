@@ -45,6 +45,44 @@ func buildJSONFromSettings(settings map[string]interface{}) (string, error) {
 	return string(jsonBytes), nil
 }
 
+// mergeJSONSettings merges settings into existing JSON content with one-level deep merge.
+// If both existing and new values for a key are maps, their entries are merged;
+// otherwise the new value overwrites. Returns indented JSON with trailing newline.
+// If existingContent is empty or invalid JSON, settings are used as the base.
+func mergeJSONSettings(existingContent []byte, settings map[string]interface{}) ([]byte, error) {
+	existing := make(map[string]interface{})
+
+	// Parse existing content if non-empty
+	trimmed := strings.TrimSpace(string(existingContent))
+	if len(trimmed) > 0 {
+		if err := json.Unmarshal([]byte(trimmed), &existing); err != nil {
+			// Invalid JSON — start fresh with settings only
+			existing = make(map[string]interface{})
+		}
+	}
+
+	// One-level deep merge
+	for k, v := range settings {
+		newMap, newIsMap := v.(map[string]interface{})
+		existMap, existIsMap := existing[k].(map[string]interface{})
+
+		if newIsMap && existIsMap {
+			for mk, mv := range newMap {
+				existMap[mk] = mv
+			}
+		} else {
+			existing[k] = v
+		}
+	}
+
+	result, err := json.MarshalIndent(existing, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal merged settings: %w", err)
+	}
+
+	return append(result, '\n'), nil
+}
+
 // SetupMiseTrust configures MISE_TRUSTED_CONFIG_PATHS so mise automatically
 // trusts config files (mise.toml, .tool-versions, etc.) in the workspace.
 // The env var is written to both /etc/profile.d/ (login shells) and prepended
