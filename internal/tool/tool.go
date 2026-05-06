@@ -150,7 +150,7 @@ func (c *ClaudeTool) GetSandboxSettings() map[string]interface{} {
 		settings["allowDangerouslySkipPermissions"] = true
 		settings["bypassPermissionsModeAccepted"] = true
 		settings["permissions"] = map[string]interface{}{
-			"defaultMode":                      "bypassPermissions",
+			"defaultMode":                       "bypassPermissions",
 			"skipDangerousModePermissionPrompt": true,
 		}
 	}
