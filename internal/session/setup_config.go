@@ -88,7 +88,10 @@ func injectCredentials(mgr *container.Manager, hostCLIConfigPath, homeDir string
 			existingContent = content
 		}
 
-		merged, err := mergeJSONSettings(existingContent, sandboxSettings)
+		merged, parseErr, err := mergeJSONSettings(existingContent, sandboxSettings)
+		if parseErr != nil {
+			logger(fmt.Sprintf("Warning: Existing %s has invalid JSON, overwriting with sandbox settings: %v", sandboxTarget, parseErr))
+		}
 		if err != nil {
 			logger(fmt.Sprintf("Warning: Failed to merge sandbox settings: %v", err))
 		} else if err := mgr.CreateFile(settingsPath, string(merged)); err != nil {
@@ -114,7 +117,10 @@ func injectCredentials(mgr *container.Manager, hostCLIConfigPath, homeDir string
 				if err != nil {
 					logger(fmt.Sprintf("Warning: Failed to read host %s: %v", stateConfigFilename, err))
 				} else {
-					merged, err := mergeJSONSettings(hostContent, sandboxSettings)
+					merged, parseErr, err := mergeJSONSettings(hostContent, sandboxSettings)
+					if parseErr != nil {
+						logger(fmt.Sprintf("Warning: Host %s has invalid JSON, overwriting with sandbox settings: %v", stateConfigFilename, parseErr))
+					}
 					if err != nil {
 						logger(fmt.Sprintf("Warning: Failed to merge settings into %s: %v", stateConfigFilename, err))
 					} else if err := mgr.CreateFile(stateJsonDest, string(merged)); err != nil {
@@ -189,7 +195,10 @@ func setupCLIConfig(mgr *container.Manager, hostCLIConfigPath, homeDir string, t
 			}
 		}
 
-		merged, err := mergeJSONSettings(existingContent, sandboxSettings)
+		merged, parseErr, err := mergeJSONSettings(existingContent, sandboxSettings)
+		if parseErr != nil {
+			logger(fmt.Sprintf("Warning: Existing %s has invalid JSON, overwriting with sandbox settings: %v", sandboxTarget, parseErr))
+		}
 		if err != nil {
 			return fmt.Errorf("failed to merge sandbox settings: %w", err)
 		}
@@ -236,7 +245,10 @@ func setupCLIConfig(mgr *container.Manager, hostCLIConfigPath, homeDir string, t
 			if err != nil {
 				logger(fmt.Sprintf("Warning: Failed to read host %s: %v", stateConfigFilename, err))
 			} else {
-				merged, err := mergeJSONSettings(hostContent, sandboxSettings)
+				merged, parseErr, err := mergeJSONSettings(hostContent, sandboxSettings)
+				if parseErr != nil {
+					logger(fmt.Sprintf("Warning: Host %s has invalid JSON, overwriting with sandbox settings: %v", stateConfigFilename, parseErr))
+				}
 				if err != nil {
 					logger(fmt.Sprintf("Warning: Failed to merge settings into %s: %v", stateConfigFilename, err))
 				} else if err := mgr.CreateFile(stateJsonDest, string(merged)); err != nil {
@@ -271,7 +283,7 @@ func setupCLIConfig(mgr *container.Manager, hostCLIConfigPath, homeDir string, t
 			logger(fmt.Sprintf("%s not found on host, creating in container with sandbox settings...", stateConfigFilename))
 			stateJsonDest := filepath.Join(homeDir, stateConfigFilename)
 
-			merged, err := mergeJSONSettings(nil, sandboxSettings)
+			merged, _, err := mergeJSONSettings(nil, sandboxSettings)
 			if err != nil {
 				logger(fmt.Sprintf("Warning: Failed to build JSON from settings: %v", err))
 			} else {

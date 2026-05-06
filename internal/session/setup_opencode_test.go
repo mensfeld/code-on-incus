@@ -97,9 +97,12 @@ func TestMergeJSONSettings_EmptyExisting(t *testing.T) {
 		"permission": map[string]interface{}{"*": "allow"},
 	}
 
-	result, err := mergeJSONSettings(nil, settings)
+	result, parseErr, err := mergeJSONSettings(nil, settings)
 	if err != nil {
 		t.Fatalf("mergeJSONSettings() error: %v", err)
+	}
+	if parseErr != nil {
+		t.Errorf("unexpected parseErr: %v", parseErr)
 	}
 
 	var parsed map[string]interface{}
@@ -107,7 +110,10 @@ func TestMergeJSONSettings_EmptyExisting(t *testing.T) {
 		t.Fatalf("Failed to parse result: %v", err)
 	}
 
-	perm := parsed["permission"].(map[string]interface{})
+	perm, ok := parsed["permission"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("'permission' is %T, want map[string]interface{}", parsed["permission"])
+	}
 	if perm["*"] != "allow" {
 		t.Errorf("permission['*'] = %v, want 'allow'", perm["*"])
 	}
@@ -135,9 +141,12 @@ func TestMergeJSONSettings_DeepMerge(t *testing.T) {
 		"permission": map[string]interface{}{"*": "allow"},
 	}
 
-	result, err := mergeJSONSettings(existing, settings)
+	result, parseErr, err := mergeJSONSettings(existing, settings)
 	if err != nil {
 		t.Fatalf("mergeJSONSettings() error: %v", err)
+	}
+	if parseErr != nil {
+		t.Errorf("unexpected parseErr: %v", parseErr)
 	}
 
 	var parsed map[string]interface{}
@@ -154,7 +163,10 @@ func TestMergeJSONSettings_DeepMerge(t *testing.T) {
 	}
 
 	// Env merged (not overwritten)
-	env := parsed["env"].(map[string]interface{})
+	env, ok := parsed["env"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("'env' is %T, want map[string]interface{}", parsed["env"])
+	}
 	if env["AWS_PROFILE"] != "bedrock-users" {
 		t.Errorf("env.AWS_PROFILE = %v, want 'bedrock-users'", env["AWS_PROFILE"])
 	}
@@ -163,7 +175,10 @@ func TestMergeJSONSettings_DeepMerge(t *testing.T) {
 	}
 
 	// New top-level key added
-	perm := parsed["permission"].(map[string]interface{})
+	perm, ok := parsed["permission"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("'permission' is %T, want map[string]interface{}", parsed["permission"])
+	}
 	if perm["*"] != "allow" {
 		t.Errorf("permission['*'] = %v, want 'allow'", perm["*"])
 	}
@@ -177,9 +192,12 @@ func TestMergeJSONSettings_InvalidJSON(t *testing.T) {
 		"permission": map[string]interface{}{"*": "allow"},
 	}
 
-	result, err := mergeJSONSettings(existing, settings)
+	result, parseErr, err := mergeJSONSettings(existing, settings)
 	if err != nil {
-		t.Fatalf("mergeJSONSettings() should not error on invalid JSON, got: %v", err)
+		t.Fatalf("mergeJSONSettings() should not return err on invalid JSON, got: %v", err)
+	}
+	if parseErr == nil {
+		t.Error("parseErr should be non-nil for invalid JSON input")
 	}
 
 	var parsed map[string]interface{}
@@ -188,7 +206,10 @@ func TestMergeJSONSettings_InvalidJSON(t *testing.T) {
 	}
 
 	// Should contain only the settings since existing was invalid
-	perm := parsed["permission"].(map[string]interface{})
+	perm, ok := parsed["permission"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("'permission' is %T, want map[string]interface{}", parsed["permission"])
+	}
 	if perm["*"] != "allow" {
 		t.Errorf("permission['*'] = %v, want 'allow'", perm["*"])
 	}
@@ -202,9 +223,12 @@ func TestMergeJSONSettings_ScalarOverwrite(t *testing.T) {
 		"allowDangerouslySkipPermissions": true,
 	}
 
-	result, err := mergeJSONSettings(existing, settings)
+	result, parseErr, err := mergeJSONSettings(existing, settings)
 	if err != nil {
 		t.Fatalf("mergeJSONSettings() error: %v", err)
+	}
+	if parseErr != nil {
+		t.Errorf("unexpected parseErr: %v", parseErr)
 	}
 
 	var parsed map[string]interface{}
