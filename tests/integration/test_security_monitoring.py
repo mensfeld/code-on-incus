@@ -2722,11 +2722,14 @@ class TestThresholdBoundaries:
     def test_file_read_below_threshold_no_alert(
         self, test_workspace, enable_monitoring_low_thresholds, coi_binary
     ):
-        """Test that reading 49MB (below 50MB threshold) doesn't trigger."""
-        # Create a 49MB file (just below threshold)
-        large_file = Path(test_workspace) / "data49mb.bin"
-        # 49MB = 49 * 1024 * 1024 bytes
-        large_file.write_bytes(b"A" * (49 * 1024 * 1024))
+        """Test that reading 30MB (below 50MB threshold) doesn't trigger.
+
+        Uses 30MB instead of 49MB to leave headroom for container startup I/O
+        that may accumulate in the same monitoring interval.
+        """
+        # Create a 30MB file (well below 50MB threshold)
+        large_file = Path(test_workspace) / "data30mb.bin"
+        large_file.write_bytes(b"A" * (30 * 1024 * 1024))
 
         proc = subprocess.Popen(
             [
@@ -2748,10 +2751,10 @@ class TestThresholdBoundaries:
             proc.terminate()
             pytest.skip(f"Container {container_name} not found or not running")
 
-        # Wait for monitoring baseline to stabilize
-        time.sleep(10)
+        # Wait for monitoring baseline to stabilize (15s to ensure startup I/O settles)
+        time.sleep(15)
 
-        # Read the 49MB file
+        # Read the 30MB file
         subprocess.Popen(
             [
                 "incus",
@@ -2759,7 +2762,7 @@ class TestThresholdBoundaries:
                 container_name,
                 "--",
                 "cat",
-                "/workspace/data49mb.bin",
+                "/workspace/data30mb.bin",
             ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -2780,7 +2783,7 @@ class TestThresholdBoundaries:
             )
 
         assert state == "Running", (
-            f"Container should stay running for <50MB read (below threshold), got {state}."
+            f"Container should stay running for 30MB read (below 50MB threshold), got {state}."
         )
 
         # No HIGH filesystem threats
@@ -2788,7 +2791,7 @@ class TestThresholdBoundaries:
         high_fs = [
             e for e in events if e.get("level") == "high" and e.get("category") == "filesystem"
         ]
-        assert len(high_fs) == 0, "49MB read should not trigger HIGH threat (threshold is 50MB)"
+        assert len(high_fs) == 0, "30MB read should not trigger HIGH threat (threshold is 50MB)"
 
         proc.terminate()
         cleanup_container(container_name, coi_binary)
@@ -3308,14 +3311,13 @@ class TestLargeWriteDetection:
             proc.terminate()
             pytest.skip(f"Container {container_name} not found or not running")
 
-        # Wait for monitoring baseline to stabilize
-        time.sleep(10)
+        # Wait for monitoring baseline to stabilize (15s to ensure startup I/O settles)
+        time.sleep(15)
 
         # Write a large file (200MB) - potential data exfiltration
-        # Use bs=100M so each write syscall clearly exceeds the 50MB threshold
-        # in a single poll interval, regardless of disk speed.
-        # With bs=1M, slow CI disks (~30MB/s) can produce per-interval deltas
-        # below the 50MB threshold, causing flaky failures.
+        # Use bs=50M count=4 so writes clearly exceed the 50MB threshold
+        # in a single poll interval. Avoid oflag=direct as it can fail
+        # silently in some container configurations.
         # Note: The dd command may timeout or be interrupted if monitoring pauses/kills container
         try:
             subprocess.Popen(
@@ -3327,15 +3329,17 @@ class TestLargeWriteDetection:
                     "dd",
                     "if=/dev/zero",
                     "of=/workspace/exfiltration_test.bin",
-                    "bs=100M",
-                    "count=2",
-                    "oflag=direct",
+                    "bs=50M",
+                    "count=4",
                 ],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
         except Exception:
             pass  # Expected if monitoring pauses/stops the container
+
+        # Give dd a moment to start writing before polling
+        time.sleep(2)
 
         # Poll for HIGH threat event or Frozen state instead of blind sleep
         write_threat_found = False

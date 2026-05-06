@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -109,7 +110,7 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 			}
 		}
 		// Re-apply Incus configuration after config reload
-		container.Configure(cfg.Incus.Project, cfg.Incus.Group, cfg.Incus.CodeUser, cfg.Incus.CodeUID)
+		container.Configure(cfg.Incus.Project, cfg.Incus.CodeUser, cfg.Incus.CodeUID)
 		if resolved.Slot > 0 && !cmd.Flags().Changed("slot") {
 			slot = resolved.Slot
 		}
@@ -696,6 +697,54 @@ func runCLI(result *session.SetupResult, sessionID string, useResumeFlag, restor
 	return err
 }
 
+// sortedEnvKeys returns env's keys in lexicographic order so that command
+// strings built from env are deterministic (and unit-testable).
+func sortedEnvKeys(env map[string]string) []string {
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// buildTmuxNewSessionCmd builds the shell command that creates a detached tmux
+// session. Forwarded variables are passed via tmux's `-e KEY=VALUE` flags
+// rather than as `export` statements, so they don't appear in `ps` output and
+// are not part of the inherited shell environment.
+func buildTmuxNewSessionCmd(sessionName, workspacePath, cliCmd string, env map[string]string) string {
+	var envFlags strings.Builder
+	for _, k := range sortedEnvKeys(env) {
+		envFlags.WriteString(" -e ")
+		envFlags.WriteString(shellQuote(k + "=" + env[k]))
+	}
+	return fmt.Sprintf(
+		"tmux new-session -d -s %s%s -c %s \"bash -c 'trap : INT; %s; exec bash'\"",
+		shellQuote(sessionName),
+		envFlags.String(),
+		shellQuote(workspacePath),
+		cliCmd,
+	)
+}
+
+// buildTmuxSetEnvironmentCmds returns one `tmux set-environment` command per
+// entry in env, scoped to the given session so values don't leak across other
+// tmux sessions sharing the same server. Running these after `new-session`
+// makes the variables available to any window or pane created later (which
+// would otherwise inherit the tmux server's near-empty environment).
+func buildTmuxSetEnvironmentCmds(sessionName string, env map[string]string) []string {
+	cmds := make([]string, 0, len(env))
+	for _, k := range sortedEnvKeys(env) {
+		cmds = append(cmds, fmt.Sprintf(
+			"tmux set-environment -t %s %s %s",
+			shellQuote(sessionName),
+			shellQuote(k),
+			shellQuote(env[k]),
+		))
+	}
+	return cmds
+}
+
 // runCLIInTmux executes CLI tool in a tmux session for background/monitoring support
 func runCLIInTmux(result *session.SetupResult, sessionID string, detached bool, useResumeFlag, restoreOnly bool, sessionsDir, resumeID string, t tool.Tool) error {
 	tmuxSessionName := fmt.Sprintf("coi-%s", result.ContainerName)
@@ -710,14 +759,22 @@ func runCLIInTmux(result *session.SetupResult, sessionID string, detached bool, 
 	containerEnv, userPtr := buildContainerEnv(result)
 	mergeToolEnv(containerEnv, t, workspacePath)
 
-	// Build environment export commands for tmux
-	envExports := ""
-	for k, v := range containerEnv {
-		envExports += fmt.Sprintf("export %s=%q; ", k, v)
-	}
-
 	// Ensure tmux server is running first (critical for CI and new containers)
 	ensureTmuxServer(result.Manager, userPtr)
+
+	// applyTmuxEnv populates the session's update-environment so windows and
+	// panes opened later inherit the forwarded variables. Idempotent: safe to
+	// call on a session that was already populated.
+	applyTmuxEnv := func() {
+		for _, cmd := range buildTmuxSetEnvironmentCmds(tmuxSessionName, containerEnv) {
+			if _, err := result.Manager.ExecCommand(cmd, container.ExecCommandOptions{
+				Capture: true,
+				User:    userPtr,
+			}); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to set tmux session env (%s): %v\n", cmd, err)
+			}
+		}
+	}
 
 	// Check if tmux session already exists
 	checkSessionCmd := fmt.Sprintf("tmux has-session -t %s 2>/dev/null", tmuxSessionName)
@@ -727,6 +784,11 @@ func runCLIInTmux(result *session.SetupResult, sessionID string, detached bool, 
 	})
 
 	if err == nil {
+		// Re-apply forwarded env so panes opened from now on inherit it,
+		// even if the session was created by an older binary that didn't
+		// populate the update-environment.
+		applyTmuxEnv()
+
 		// Session exists - attach or send command
 		if detached {
 			// Send command to existing session
@@ -761,13 +823,7 @@ func runCLIInTmux(result *session.SetupResult, sessionID string, detached bool, 
 	// Use trap to prevent bash from exiting on SIGINT while allowing Ctrl+C to work in claude
 	if detached {
 		// Background mode: create detached session
-		createCmd := fmt.Sprintf(
-			"tmux new-session -d -s %s -c %s \"bash -c 'trap : INT; %s %s; exec bash'\"",
-			tmuxSessionName,
-			workspacePath,
-			envExports,
-			cliCmd,
-		)
+		createCmd := buildTmuxNewSessionCmd(tmuxSessionName, workspacePath, cliCmd, containerEnv)
 		opts := container.ExecCommandOptions{
 			Capture: true,
 			User:    userPtr,
@@ -776,6 +832,7 @@ func runCLIInTmux(result *session.SetupResult, sessionID string, detached bool, 
 		if err != nil {
 			return fmt.Errorf("failed to create tmux session: %w", err)
 		}
+		applyTmuxEnv()
 
 		fmt.Fprintf(os.Stderr, "Created background tmux session: %s\n", tmuxSessionName)
 		fmt.Fprintf(os.Stderr, "Use 'coi tmux capture %s' to view output\n", result.ContainerName)
@@ -798,13 +855,7 @@ func runCLIInTmux(result *session.SetupResult, sessionID string, detached bool, 
 
 		// Create detached session if it doesn't exist
 		if checkErr != nil {
-			createCmd := fmt.Sprintf(
-				"tmux new-session -d -s %s -c %s \"bash -c 'trap : INT; %s %s; exec bash'\"",
-				tmuxSessionName,
-				workspacePath,
-				envExports,
-				cliCmd,
-			)
+			createCmd := buildTmuxNewSessionCmd(tmuxSessionName, workspacePath, cliCmd, containerEnv)
 			createOpts := container.ExecCommandOptions{
 				User:    userPtr,
 				Cwd:     workspacePath,
@@ -817,6 +868,7 @@ func runCLIInTmux(result *session.SetupResult, sessionID string, detached bool, 
 			// Give tmux a moment to fully initialize the session
 			time.Sleep(500 * time.Millisecond)
 		}
+		applyTmuxEnv()
 
 		// Attach to the session
 		attachCmd := fmt.Sprintf("tmux attach -t %s", tmuxSessionName)

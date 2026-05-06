@@ -15,8 +15,8 @@ type StoragePool struct {
 }
 
 // ListStoragePools returns all storage pools known to the local Incus daemon.
-// The call goes through the same sg/incus wrapper as every other Incus
-// invocation in this package so it inherits the project flag and group setup.
+// The call goes through the same incus wrapper as every other Incus
+// invocation in this package so it inherits the project flag.
 func ListStoragePools() ([]StoragePool, error) {
 	out, err := IncusOutputRaw("storage", "list", "--format=json")
 	if err != nil {

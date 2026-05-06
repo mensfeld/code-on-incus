@@ -316,8 +316,9 @@ type contextTemplateData struct {
 	ContainerName       string
 	ProfileContext      string
 	HasProfileContext   bool
-	GitAuthDesc         string
 	HasGitAuth          bool
+	SSHAgentForwarded   bool
+	GHCLIAuthenticated  bool
 }
 
 // RenderContextFileContent renders the embedded sandbox context template with
@@ -371,59 +372,11 @@ func RenderContextFileContent(info ContextInfo) string {
 		data.GitHubCLIDesc = "Authenticated via forwarded token (gh CLI ready to use; note: token may have limited scope/permissions)"
 	}
 
-	// Git auth hints based on SSH + token availability
-	switch {
-	case info.SSHAgentForwarded && info.GHCLIAuthenticated:
+	// Git auth flags — the template renders conditional instructions based on these.
+	if info.SSHAgentForwarded || info.GHCLIAuthenticated {
 		data.HasGitAuth = true
-		data.GitAuthDesc = `**Prefer SSH for git push/pull** — the forwarded SSH agent provides full authentication, while the forwarded GH_TOKEN/GITHUB_TOKEN may have limited scope or permissions (e.g., read-only, or restricted to specific repos).
-
-**Commit identity**: Do NOT use "code" as the git author — this is the container's default user, not the actual developer. To discover the correct identity, check the remote URL of the repository and test against the appropriate host:
-` + "```" + `
-# Check which host the repo uses:
-git remote get-url origin
-
-# Then test SSH against that host, e.g.:
-ssh -T git@github.com 2>&1    # GitHub
-ssh -T git@gitlab.com 2>&1    # GitLab
-ssh -T git@bitbucket.org 2>&1 # Bitbucket
-` + "```" + `
-Use the identity from the SSH response to configure git:
-` + "```" + `
-git config user.name "<real name>"
-git config user.email "<real email>"
-` + "```"
-	case info.SSHAgentForwarded:
-		data.HasGitAuth = true
-		data.GitAuthDesc = `**Use SSH for git operations** — the forwarded SSH agent provides authentication for git push/pull/clone via SSH URLs (e.g., ` + "`git@<host>:org/repo.git`" + `).
-
-**Commit identity**: Do NOT use "code" as the git author — this is the container's default user, not the actual developer. To discover the correct identity, check the remote URL of the repository and test against the appropriate host:
-` + "```" + `
-# Check which host the repo uses:
-git remote get-url origin
-
-# Then test SSH against that host, e.g.:
-ssh -T git@github.com 2>&1    # GitHub
-ssh -T git@gitlab.com 2>&1    # GitLab
-ssh -T git@bitbucket.org 2>&1 # Bitbucket
-` + "```" + `
-Use the identity from the SSH response to configure git:
-` + "```" + `
-git config user.name "<real name>"
-git config user.email "<real email>"
-` + "```"
-	case info.GHCLIAuthenticated:
-		data.HasGitAuth = true
-		data.GitAuthDesc = `**Token-based git authentication is available** via the forwarded GH_TOKEN/GITHUB_TOKEN. Note that this token may have limited scope or permissions (e.g., read-only, restricted to specific repos, or no push access).
-
-**Commit identity**: Do NOT use "code" as the git author — this is the container's default user, not the actual developer. If the token has sufficient permissions, you can discover the correct identity by running:
-` + "```" + `
-gh api user --jq '"Name: \(.name)\nEmail: \(.email)"'
-` + "```" + `
-Use the result to set:
-` + "```" + `
-git config user.name "<real name>"
-git config user.email "<real email>"
-` + "```"
+		data.SSHAgentForwarded = info.SSHAgentForwarded
+		data.GHCLIAuthenticated = info.GHCLIAuthenticated
 	}
 
 	if len(info.ForwardedEnvVars) > 0 {

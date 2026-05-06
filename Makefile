@@ -122,24 +122,16 @@ integrations-setup:
 # Run integration tests (requires Incus)
 integrations: build
 	@echo "Running integration tests..."
+	@incus info >/dev/null 2>&1 || { echo "Error: cannot reach Incus. Ensure you are in the incus-admin group (log out/in after usermod -aG)."; exit 1; }
 	@bash scripts/cleanup-pycache.sh
-	@if groups | grep -q incus-admin; then \
-		pytest tests/ -v; \
-	else \
-		echo "Running with incus-admin group..."; \
-		sg incus-admin -c "pytest tests/ -v"; \
-	fi
+	@pytest tests/ -v
 
 # Run integration tests with output (for debugging)
 integrations-debug: build
 	@echo "Running integration tests with output..."
+	@incus info >/dev/null 2>&1 || { echo "Error: cannot reach Incus. Ensure you are in the incus-admin group (log out/in after usermod -aG)."; exit 1; }
 	@bash scripts/cleanup-pycache.sh
-	@if groups | grep -q incus-admin; then \
-		pytest tests/ -v -s; \
-	else \
-		echo "Running with incus-admin group..."; \
-		sg incus-admin -c "pytest tests/ -v -s"; \
-	fi
+	@pytest tests/ -v -s
 
 # Run only CLI tests (no Incus required)
 integrations-cli:
