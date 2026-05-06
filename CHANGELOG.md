@@ -8,6 +8,7 @@
 
 ### Bug Fixes
 
+- **Fix sandbox settings injection using pure Go instead of Python** — Sandbox settings (e.g., opencode permission bypass, Claude effort level) are now merged into tool config files using Go's `encoding/json` instead of a Python one-liner executed inside the container. This fixes intermittent "exit status 1" failures and eliminates the dependency on `python3` being available inside the container. If the existing config file contains non-standard JSON (comments, trailing commas, BOM), a warning is logged and the file is overwritten with sandbox settings only. (#351, #355)
 - **Remove `sg` dependency** — COI no longer uses `sg` (setgid) to wrap incus commands. All platforms now run `incus` directly, which fixes breakage on Linux distros where `sg` is restricted to root (e.g., ALT Linux). Users must ensure their session has `incus-admin` group membership active (log out and back in after `usermod -aG`). (#349)
 - **Secure env-var forwarding in tmux sessions** — Forwarded environment variables (e.g. `GITHUB_TOKEN`) are now passed via `tmux new-session -e KEY=VAL` and `tmux set-environment` instead of being inlined as `export KEY=VAL; ...` in the command string. This fixes two issues: secrets no longer appear in `ps auxww` output, and variables now propagate to new tmux windows/panes. (contributed by @SimonArnu, #352)
 
