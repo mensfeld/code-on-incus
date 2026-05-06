@@ -45,6 +45,58 @@ func buildJSONFromSettings(settings map[string]interface{}) (string, error) {
 	return string(jsonBytes), nil
 }
 
+// mergeJSONSettings merges settings into existing JSON content with one-level deep merge.
+// If both existing and new values for a key are maps, their entries are merged;
+// otherwise the new value overwrites. Returns indented JSON with trailing newline.
+// If existingContent is empty or invalid JSON, settings are used as the base and
+// parseErr is set to the JSON parse error (callers should log a warning).
+func mergeJSONSettings(existingContent []byte, settings map[string]interface{}) (result []byte, parseErr error, err error) {
+	existing := make(map[string]interface{})
+
+	// Parse existing content if non-empty
+	trimmed := strings.TrimSpace(string(existingContent))
+	if len(trimmed) > 0 {
+		if unmarshalErr := json.Unmarshal([]byte(trimmed), &existing); unmarshalErr != nil {
+			// Invalid JSON — start fresh with settings only, report to caller
+			existing = make(map[string]interface{})
+			parseErr = unmarshalErr
+		}
+	}
+
+	// Normalize settings through JSON round-trip to convert typed maps
+	// (e.g., map[string]string) to map[string]interface{} for consistent
+	// type assertions during merge
+	normalizedSettings := make(map[string]interface{})
+	settingsBytes, marshalErr := json.Marshal(settings)
+	if marshalErr != nil {
+		return nil, parseErr, fmt.Errorf("failed to normalize settings: %w", marshalErr)
+	}
+	if unmarshalErr := json.Unmarshal(settingsBytes, &normalizedSettings); unmarshalErr != nil {
+		return nil, parseErr, fmt.Errorf("failed to normalize settings: %w", unmarshalErr)
+	}
+
+	// One-level deep merge
+	for k, v := range normalizedSettings {
+		newMap, newIsMap := v.(map[string]interface{})
+		existMap, existIsMap := existing[k].(map[string]interface{})
+
+		if newIsMap && existIsMap {
+			for mk, mv := range newMap {
+				existMap[mk] = mv
+			}
+		} else {
+			existing[k] = v
+		}
+	}
+
+	out, marshalErr := json.MarshalIndent(existing, "", "  ")
+	if marshalErr != nil {
+		return nil, parseErr, fmt.Errorf("failed to marshal merged settings: %w", marshalErr)
+	}
+
+	return append(out, '\n'), parseErr, nil
+}
+
 // SetupMiseTrust configures MISE_TRUSTED_CONFIG_PATHS so mise automatically
 // trusts config files (mise.toml, .tool-versions, etc.) in the workspace.
 // The env var is written to both /etc/profile.d/ (login shells) and prepended
@@ -75,6 +127,23 @@ func SetupGitIdentityGuard(mgr *container.Manager, homeDir string, logger func(s
 	)
 	if _, err := mgr.ExecCommand(cmd, container.ExecCommandOptions{Capture: true}); err != nil {
 		logger(fmt.Sprintf("Warning: Failed to set git user.useConfigOnly: %v", err))
+	}
+}
+
+// SetupClaudeManagedSettings writes /etc/claude-code/managed-settings.json
+// inside the container to disable the "Enable auto mode?" prompt that newer
+// Claude Code versions show at startup. The managed-settings path is the only
+// way to set disableAutoMode — it cannot be set via user settings.
+// Non-fatal: logs a warning on failure.
+func SetupClaudeManagedSettings(mgr *container.Manager, logger func(string)) {
+	mkdirCmd := "mkdir -p /etc/claude-code"
+	if _, err := mgr.ExecCommand(mkdirCmd, container.ExecCommandOptions{Capture: true}); err != nil {
+		logger(fmt.Sprintf("Warning: Failed to create Claude managed settings directory: %v", err))
+		return
+	}
+	content := `{"disableAutoMode": "disable"}` + "\n"
+	if err := mgr.CreateFile("/etc/claude-code/managed-settings.json", content); err != nil {
+		logger(fmt.Sprintf("Warning: Failed to write Claude managed settings: %v", err))
 	}
 }
 

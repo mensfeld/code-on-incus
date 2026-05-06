@@ -162,13 +162,17 @@ func TestClaudeGetSandboxSettings(t *testing.T) {
 	}
 
 	// Check permissions map
-	permissions, ok := settings["permissions"].(map[string]string)
+	permissions, ok := settings["permissions"].(map[string]interface{})
 	if !ok {
-		t.Fatal("Expected permissions to be map[string]string")
+		t.Fatal("Expected permissions to be map[string]interface{}")
 	}
 
 	if permissions["defaultMode"] != "bypassPermissions" {
-		t.Errorf("Expected defaultMode 'bypassPermissions', got '%s'", permissions["defaultMode"])
+		t.Errorf("Expected defaultMode 'bypassPermissions', got '%v'", permissions["defaultMode"])
+	}
+
+	if permissions["skipDangerousModePermissionPrompt"] != true {
+		t.Errorf("Expected skipDangerousModePermissionPrompt true, got '%v'", permissions["skipDangerousModePermissionPrompt"])
 	}
 
 	// Check effortLevel defaults to "medium"
@@ -412,12 +416,15 @@ func TestClaudeGetSandboxSettings_BypassModeDefault(t *testing.T) {
 		t.Error("Expected bypassPermissionsModeAccepted to be true")
 	}
 
-	permissions, ok := settings["permissions"].(map[string]string)
+	permissions, ok := settings["permissions"].(map[string]interface{})
 	if !ok {
-		t.Fatal("Expected permissions to be map[string]string")
+		t.Fatal("Expected permissions to be map[string]interface{}")
 	}
 	if permissions["defaultMode"] != "bypassPermissions" {
-		t.Errorf("Expected defaultMode 'bypassPermissions', got '%s'", permissions["defaultMode"])
+		t.Errorf("Expected defaultMode 'bypassPermissions', got '%v'", permissions["defaultMode"])
+	}
+	if permissions["skipDangerousModePermissionPrompt"] != true {
+		t.Errorf("Expected skipDangerousModePermissionPrompt true, got '%v'", permissions["skipDangerousModePermissionPrompt"])
 	}
 
 	// Should also have effort level keys

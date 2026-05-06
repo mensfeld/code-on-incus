@@ -1,15 +1,22 @@
 package session
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/tool"
 )
+
+// readContainerFile reads a file from inside the container via cat
+func readContainerFile(mgr *container.Manager, path string) ([]byte, error) {
+	content, err := mgr.ExecCommand(fmt.Sprintf("cat %s", path), container.ExecCommandOptions{Capture: true})
+	if err != nil {
+		return nil, fmt.Errorf("failed to read %s from container: %w", path, err)
+	}
+	return []byte(content), nil
+}
 
 // restoreSessionData restores tool config directory from a saved session
 // Used when resuming a non-persistent session (container was deleted and recreated)
@@ -75,35 +82,20 @@ func injectCredentials(mgr *container.Manager, hostCLIConfigPath, homeDir string
 		settingsPath := filepath.Join(stateDir, sandboxTarget)
 		logger(fmt.Sprintf("Refreshing sandbox settings in %s...", sandboxTarget))
 
-		settingsJSON, err := buildJSONFromSettings(sandboxSettings)
-		if err != nil {
-			logger(fmt.Sprintf("Warning: Failed to build JSON from settings: %v", err))
-		} else {
-			// Check if sandbox target file exists in container
-			checkCmd := fmt.Sprintf("test -f %s && echo exists || echo missing", settingsPath)
-			checkResult, err := mgr.ExecCommand(checkCmd, container.ExecCommandOptions{Capture: true})
+		// Read existing file from container (may have been modified in-container)
+		var existingContent []byte
+		if content, err := readContainerFile(mgr, settingsPath); err == nil {
+			existingContent = content
+		}
 
-			if err != nil || strings.TrimSpace(checkResult) == "missing" {
-				// File doesn't exist, create it with sandbox settings
-				logger(fmt.Sprintf("%s not found in container, creating with sandbox settings", sandboxTarget))
-				settingsBytes, err := json.MarshalIndent(sandboxSettings, "", "  ")
-				if err != nil {
-					logger(fmt.Sprintf("Warning: Failed to marshal sandbox settings: %v", err))
-				} else if err := mgr.CreateFile(settingsPath, string(settingsBytes)+"\n"); err != nil {
-					logger(fmt.Sprintf("Warning: Failed to create %s: %v", sandboxTarget, err))
-				}
-			} else {
-				// File exists, merge sandbox settings into it
-				escapedJSON := strings.ReplaceAll(settingsJSON, "'", "'\"'\"'")
-				injectCmd := fmt.Sprintf(
-					`python3 -c 'import json; f=open("%s","r+"); d=json.load(f); updates=json.loads('"'"'%s'"'"'); [d.setdefault(k,{}).update(v) if isinstance(v,dict) and isinstance(d.get(k),dict) else d.__setitem__(k,v) for k,v in updates.items()]; f.seek(0); json.dump(d,f,indent=2); f.truncate()'`,
-					settingsPath,
-					escapedJSON,
-				)
-				if _, err := mgr.ExecCommand(injectCmd, container.ExecCommandOptions{Capture: true}); err != nil {
-					logger(fmt.Sprintf("Warning: Failed to inject settings into %s: %v", sandboxTarget, err))
-				}
-			}
+		merged, parseErr, err := mergeJSONSettings(existingContent, sandboxSettings)
+		if parseErr != nil {
+			logger(fmt.Sprintf("Warning: Existing %s has invalid JSON, overwriting with sandbox settings: %v", sandboxTarget, parseErr))
+		}
+		if err != nil {
+			logger(fmt.Sprintf("Warning: Failed to merge sandbox settings: %v", err))
+		} else if err := mgr.CreateFile(settingsPath, string(merged)); err != nil {
+			logger(fmt.Sprintf("Warning: Failed to write %s: %v", sandboxTarget, err))
 		}
 	}
 
@@ -120,18 +112,19 @@ func injectCredentials(mgr *container.Manager, hostCLIConfigPath, homeDir string
 			} else if len(sandboxSettings) > 0 {
 				// Inject sandbox settings into state config too
 				logger(fmt.Sprintf("Injecting sandbox settings into %s...", stateConfigFilename))
-				settingsJSON, err := buildJSONFromSettings(sandboxSettings)
+				// Read from host file (we just pushed it, so host is source of truth)
+				hostContent, err := os.ReadFile(stateConfigPath)
 				if err != nil {
-					logger(fmt.Sprintf("Warning: Failed to build JSON from settings: %v", err))
+					logger(fmt.Sprintf("Warning: Failed to read host %s: %v", stateConfigFilename, err))
 				} else {
-					escapedJSON := strings.ReplaceAll(settingsJSON, "'", "'\"'\"'")
-					injectCmd := fmt.Sprintf(
-						`python3 -c 'import json; f=open("%s","r+"); d=json.load(f); updates=json.loads('"'"'%s'"'"'); [d.setdefault(k,{}).update(v) if isinstance(v,dict) and isinstance(d.get(k),dict) else d.__setitem__(k,v) for k,v in updates.items()]; f.seek(0); json.dump(d,f,indent=2); f.truncate()'`,
-						stateJsonDest,
-						escapedJSON,
-					)
-					if _, err := mgr.ExecCommand(injectCmd, container.ExecCommandOptions{Capture: true}); err != nil {
-						logger(fmt.Sprintf("Warning: Failed to inject settings into %s: %v", stateConfigFilename, err))
+					merged, parseErr, err := mergeJSONSettings(hostContent, sandboxSettings)
+					if parseErr != nil {
+						logger(fmt.Sprintf("Warning: Host %s has invalid JSON, overwriting with sandbox settings: %v", stateConfigFilename, parseErr))
+					}
+					if err != nil {
+						logger(fmt.Sprintf("Warning: Failed to merge settings into %s: %v", stateConfigFilename, err))
+					} else if err := mgr.CreateFile(stateJsonDest, string(merged)); err != nil {
+						logger(fmt.Sprintf("Warning: Failed to write %s: %v", stateConfigFilename, err))
 					}
 				}
 			}
@@ -192,40 +185,25 @@ func setupCLIConfig(mgr *container.Manager, hostCLIConfigPath, homeDir string, t
 	if len(sandboxSettings) > 0 {
 		settingsPath := filepath.Join(stateDir, sandboxTarget)
 		logger(fmt.Sprintf("Merging sandbox settings into %s...", sandboxTarget))
-		settingsJSON, err := buildJSONFromSettings(sandboxSettings)
-		if err != nil {
-			logger(fmt.Sprintf("Warning: Failed to build JSON from settings: %v", err))
-		} else {
-			// Check if sandbox target file exists in container
-			checkCmd := fmt.Sprintf("test -f %s && echo exists || echo missing", settingsPath)
-			checkResult, err := mgr.ExecCommand(checkCmd, container.ExecCommandOptions{Capture: true})
 
-			if err != nil || strings.TrimSpace(checkResult) == "missing" {
-				// File doesn't exist, create it with sandbox settings
-				logger(fmt.Sprintf("%s not found in container, creating with sandbox settings", sandboxTarget))
-				settingsBytes, err := json.MarshalIndent(sandboxSettings, "", "  ")
-				if err != nil {
-					return fmt.Errorf("failed to marshal sandbox settings: %w", err)
-				}
-				if err := mgr.CreateFile(settingsPath, string(settingsBytes)+"\n"); err != nil {
-					return fmt.Errorf("failed to create %s: %w", sandboxTarget, err)
-				}
-			} else {
-				// File exists, merge sandbox settings into it
-				logger(fmt.Sprintf("Merging sandbox settings into existing %s", sandboxTarget))
-				// Properly escape the JSON string for shell command
-				escapedJSON := strings.ReplaceAll(settingsJSON, "'", "'\"'\"'")
-				injectCmd := fmt.Sprintf(
-					`python3 -c 'import json; f=open("%s","r+"); d=json.load(f); updates=json.loads('"'"'%s'"'"'); [d.setdefault(k,{}).update(v) if isinstance(v,dict) and isinstance(d.get(k),dict) else d.__setitem__(k,v) for k,v in updates.items()]; f.seek(0); json.dump(d,f,indent=2); f.truncate()'`,
-					settingsPath,
-					escapedJSON,
-				)
-				if _, err := mgr.ExecCommand(injectCmd, container.ExecCommandOptions{Capture: true}); err != nil {
-					logger(fmt.Sprintf("Warning: Failed to inject settings into %s: %v", sandboxTarget, err))
-				} else {
-					logger(fmt.Sprintf("Successfully merged sandbox settings into %s", sandboxTarget))
-				}
+		// Read host file if it exists (just copied in the essential files loop)
+		var existingContent []byte
+		if hostCLIConfigPath != "" {
+			hostFilePath := filepath.Join(hostCLIConfigPath, sandboxTarget)
+			if content, err := os.ReadFile(hostFilePath); err == nil {
+				existingContent = content
 			}
+		}
+
+		merged, parseErr, err := mergeJSONSettings(existingContent, sandboxSettings)
+		if parseErr != nil {
+			logger(fmt.Sprintf("Warning: Existing %s has invalid JSON, overwriting with sandbox settings: %v", sandboxTarget, parseErr))
+		}
+		if err != nil {
+			return fmt.Errorf("failed to merge sandbox settings: %w", err)
+		}
+		if err := mgr.CreateFile(settingsPath, string(merged)); err != nil {
+			return fmt.Errorf("failed to write %s: %w", sandboxTarget, err)
 		}
 		logger(fmt.Sprintf("%s config copied and sandbox settings merged into %s", tcf.Name(), sandboxTarget))
 	} else {
@@ -262,19 +240,19 @@ func setupCLIConfig(mgr *container.Manager, hostCLIConfigPath, homeDir string, t
 		// Inject sandbox settings if tool provides them
 		if len(sandboxSettings) > 0 {
 			logger(fmt.Sprintf("Injecting sandbox settings into %s...", stateConfigFilename))
-			settingsJSON, err := buildJSONFromSettings(sandboxSettings)
+			// Read from host file (we just pushed it, so host is source of truth)
+			hostContent, err := os.ReadFile(stateConfigPath)
 			if err != nil {
-				logger(fmt.Sprintf("Warning: Failed to build JSON from settings: %v", err))
+				logger(fmt.Sprintf("Warning: Failed to read host %s: %v", stateConfigFilename, err))
 			} else {
-				// Properly escape the JSON string for shell command
-				escapedJSON := strings.ReplaceAll(settingsJSON, "'", "'\"'\"'")
-				injectCmd := fmt.Sprintf(
-					`python3 -c 'import json; f=open("%s","r+"); d=json.load(f); updates=json.loads('"'"'%s'"'"'); [d.setdefault(k,{}).update(v) if isinstance(v,dict) and isinstance(d.get(k),dict) else d.__setitem__(k,v) for k,v in updates.items()]; f.seek(0); json.dump(d,f,indent=2); f.truncate()'`,
-					stateJsonDest,
-					escapedJSON,
-				)
-				if _, err := mgr.ExecCommand(injectCmd, container.ExecCommandOptions{Capture: true}); err != nil {
-					logger(fmt.Sprintf("Warning: Failed to inject settings into %s: %v", stateConfigFilename, err))
+				merged, parseErr, err := mergeJSONSettings(hostContent, sandboxSettings)
+				if parseErr != nil {
+					logger(fmt.Sprintf("Warning: Host %s has invalid JSON, overwriting with sandbox settings: %v", stateConfigFilename, parseErr))
+				}
+				if err != nil {
+					logger(fmt.Sprintf("Warning: Failed to merge settings into %s: %v", stateConfigFilename, err))
+				} else if err := mgr.CreateFile(stateJsonDest, string(merged)); err != nil {
+					logger(fmt.Sprintf("Warning: Failed to write %s: %v", stateConfigFilename, err))
 				} else {
 					logger(fmt.Sprintf("Successfully injected sandbox settings into %s", stateConfigFilename))
 				}
@@ -305,12 +283,11 @@ func setupCLIConfig(mgr *container.Manager, hostCLIConfigPath, homeDir string, t
 			logger(fmt.Sprintf("%s not found on host, creating in container with sandbox settings...", stateConfigFilename))
 			stateJsonDest := filepath.Join(homeDir, stateConfigFilename)
 
-			settingsJSON, err := buildJSONFromSettings(sandboxSettings)
+			merged, _, err := mergeJSONSettings(nil, sandboxSettings)
 			if err != nil {
 				logger(fmt.Sprintf("Warning: Failed to build JSON from settings: %v", err))
 			} else {
-				// Create new file with sandbox settings without going through a shell
-				if err := mgr.CreateFile(stateJsonDest, settingsJSON+"\n"); err != nil {
+				if err := mgr.CreateFile(stateJsonDest, string(merged)); err != nil {
 					logger(fmt.Sprintf("Warning: Failed to create %s: %v", stateConfigFilename, err))
 				} else {
 					logger(fmt.Sprintf("Created %s with sandbox settings", stateConfigFilename))
