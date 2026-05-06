@@ -15,15 +15,13 @@ import (
 var (
 	CodeUID      = 1000
 	CodeUser     = "code"
-	IncusGroup   = "incus-admin"
 	IncusProject = "default"
 )
 
 // Configure sets the package-level Incus configuration variables.
 // This should be called after loading the config file to apply user settings.
-func Configure(project, group, codeUser string, codeUID int) {
+func Configure(project, codeUser string, codeUID int) {
 	IncusProject = project
-	IncusGroup = group
 	CodeUser = codeUser
 	CodeUID = codeUID
 }
