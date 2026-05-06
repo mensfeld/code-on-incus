@@ -130,6 +130,23 @@ func SetupGitIdentityGuard(mgr *container.Manager, homeDir string, logger func(s
 	}
 }
 
+// SetupClaudeManagedSettings writes /etc/claude-code/managed-settings.json
+// inside the container to disable the "Enable auto mode?" prompt that newer
+// Claude Code versions show at startup. The managed-settings path is the only
+// way to set disableAutoMode — it cannot be set via user settings.
+// Non-fatal: logs a warning on failure.
+func SetupClaudeManagedSettings(mgr *container.Manager, logger func(string)) {
+	mkdirCmd := "mkdir -p /etc/claude-code"
+	if _, err := mgr.ExecCommand(mkdirCmd, container.ExecCommandOptions{Capture: true}); err != nil {
+		logger(fmt.Sprintf("Warning: Failed to create Claude managed settings directory: %v", err))
+		return
+	}
+	content := `{"disableAutoMode": "disable"}` + "\n"
+	if err := mgr.CreateFile("/etc/claude-code/managed-settings.json", content); err != nil {
+		logger(fmt.Sprintf("Warning: Failed to write Claude managed settings: %v", err))
+	}
+}
+
 // hasLimits checks if any limits are configured
 func hasLimits(cfg *config.LimitsConfig) bool {
 	if cfg == nil {
