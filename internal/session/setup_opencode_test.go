@@ -243,3 +243,50 @@ func TestMergeJSONSettings_ScalarOverwrite(t *testing.T) {
 		t.Errorf("userKey = %v, want 'kept'", parsed["userKey"])
 	}
 }
+
+// TestMergeJSONSettings_TypedMapMerge verifies that map[string]string in settings
+// (as returned by ClaudeTool.GetSandboxSettings for "env") is properly merged
+// with existing map[string]interface{} from parsed JSON, not overwritten.
+func TestMergeJSONSettings_TypedMapMerge(t *testing.T) {
+	existing := []byte(`{
+  "env": {
+    "AWS_PROFILE": "bedrock-users",
+    "AWS_REGION": "us-west-2"
+  }
+}`)
+
+	// Simulate ClaudeTool.GetSandboxSettings() which uses map[string]string for env
+	settings := map[string]interface{}{
+		"env": map[string]string{
+			"CLAUDE_CODE_EFFORT_LEVEL": "medium",
+		},
+	}
+
+	result, _, err := mergeJSONSettings(existing, settings)
+	if err != nil {
+		t.Fatalf("mergeJSONSettings() error: %v", err)
+	}
+
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(result, &parsed); err != nil {
+		t.Fatalf("Failed to parse result: %v", err)
+	}
+
+	env, ok := parsed["env"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("'env' is %T, want map[string]interface{}", parsed["env"])
+	}
+
+	// User env vars preserved
+	if env["AWS_PROFILE"] != "bedrock-users" {
+		t.Errorf("env.AWS_PROFILE = %v, want 'bedrock-users'", env["AWS_PROFILE"])
+	}
+	if env["AWS_REGION"] != "us-west-2" {
+		t.Errorf("env.AWS_REGION = %v, want 'us-west-2'", env["AWS_REGION"])
+	}
+
+	// Sandbox env var added
+	if env["CLAUDE_CODE_EFFORT_LEVEL"] != "medium" {
+		t.Errorf("env.CLAUDE_CODE_EFFORT_LEVEL = %v, want 'medium'", env["CLAUDE_CODE_EFFORT_LEVEL"])
+	}
+}

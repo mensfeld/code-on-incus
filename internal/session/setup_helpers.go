@@ -63,8 +63,20 @@ func mergeJSONSettings(existingContent []byte, settings map[string]interface{}) 
 		}
 	}
 
+	// Normalize settings through JSON round-trip to convert typed maps
+	// (e.g., map[string]string) to map[string]interface{} for consistent
+	// type assertions during merge
+	normalizedSettings := make(map[string]interface{})
+	settingsBytes, marshalErr := json.Marshal(settings)
+	if marshalErr != nil {
+		return nil, parseErr, fmt.Errorf("failed to normalize settings: %w", marshalErr)
+	}
+	if unmarshalErr := json.Unmarshal(settingsBytes, &normalizedSettings); unmarshalErr != nil {
+		return nil, parseErr, fmt.Errorf("failed to normalize settings: %w", unmarshalErr)
+	}
+
 	// One-level deep merge
-	for k, v := range settings {
+	for k, v := range normalizedSettings {
 		newMap, newIsMap := v.(map[string]interface{})
 		existMap, existIsMap := existing[k].(map[string]interface{})
 
