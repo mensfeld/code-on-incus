@@ -2,13 +2,16 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"sync"
 	"syscall"
+	"time"
 
 	"github.com/mensfeld/code-on-incus/internal/audit"
 	"github.com/mensfeld/code-on-incus/internal/container"
@@ -123,10 +126,51 @@ func runAuditFollow(ctx context.Context, containerName string) error {
 		return fmt.Errorf("start agent: %w", err)
 	}
 
+	// Heartbeat watcher: detect when the in-container agent goes silent
+	// (e.g. an attacker inside the sandbox kills it). Stale transitions go
+	// to stderr and are also injected into the stdout JSONL stream as a
+	// type=audit msg=agent.stale event so downstream consumers see them.
+	stdoutMu := &sync.Mutex{}
+	stdoutEnc := json.NewEncoder(os.Stdout)
+	stdoutEnc.SetEscapeHTML(false)
+	emitStatus := func(sessionID string, status audit.WatcherStatus, lastSeen time.Time) {
+		gap := time.Since(lastSeen).Round(time.Second)
+		switch status {
+		case audit.StatusStale:
+			fmt.Fprintf(os.Stderr,
+				"[audit] WARNING agent silent on %s for %s (last heartbeat %s)\n",
+				sessionID, gap, lastSeen.UTC().Format(time.RFC3339),
+			)
+		case audit.StatusAlive:
+			fmt.Fprintf(os.Stderr,
+				"[audit] agent recovered on %s after %s of silence\n",
+				sessionID, gap,
+			)
+		case audit.StatusFirstSeen:
+			// First heartbeat is informational only — quiet by default.
+			return
+		}
+		stdoutMu.Lock()
+		_ = stdoutEnc.Encode(audit.Event{
+			TS:        time.Now().UTC().Format(time.RFC3339Nano),
+			SessionID: sessionID,
+			Container: containerName,
+			Type:      audit.TypeAudit,
+			Msg:       "agent." + status.String(),
+			Raw:       fmt.Sprintf("gap=%s lastHeartbeat=%s", gap, lastSeen.UTC().Format(time.RFC3339)),
+		})
+		stdoutMu.Unlock()
+	}
+	watcher := audit.NewHeartbeatWatcher(emitStatus, audit.DefaultStaleAfter, audit.DefaultCheckInterval)
+	watcherCtx, watcherCancel := context.WithCancel(ctx)
+	defer watcherCancel()
+	go watcher.Run(watcherCtx)
+
 	collector := &audit.Collector{
 		SessionID: containerName,
 		Container: containerName,
-		Out:       os.Stdout,
+		Out:       newSerializingWriter(os.Stdout, stdoutMu),
+		Watcher:   watcher,
 		OnError: func(err error) {
 			fmt.Fprintf(os.Stderr, "[audit] parse: %v\n", err)
 		},
@@ -142,24 +186,32 @@ func runAuditFollow(ctx context.Context, containerName string) error {
 	return streamErr
 }
 
+// serializingWriter serialises writes to an underlying writer behind a mutex
+// so the collector's per-event JSON encoder and the watcher's stale-event
+// injector don't interleave bytes in the stdout JSONL stream.
+type serializingWriter struct {
+	w  io.Writer
+	mu *sync.Mutex
+}
+
+func newSerializingWriter(w io.Writer, mu *sync.Mutex) *serializingWriter {
+	return &serializingWriter{w: w, mu: mu}
+}
+
+func (s *serializingWriter) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.w.Write(p)
+}
+
 // newIncusPipedCommand returns an exec.Cmd ready to run an incus subcommand
-// (mirroring the sg-or-direct logic in internal/container/commands.go) with
-// its stdout piped back to the caller.
+// with its stdout piped back to the caller. Mirrors the direct invocation
+// path in internal/container/commands.go (post sg removal in #360).
 func newIncusPipedCommand(ctx context.Context, args []string) (*exec.Cmd, io.ReadCloser, error) {
-	// Reuse the package's own command builder via a thin shell-out: this
-	// keeps us aligned with however that file evolves (sg vs direct).
-	cmdArgs := []string{}
-	cmdArgs = append(cmdArgs, "incus")
-	cmdArgs = append(cmdArgs, "--project", container.IncusProject)
+	cmdArgs := []string{"incus", "--project", container.IncusProject}
 	cmdArgs = append(cmdArgs, args...)
 
-	var cmd *exec.Cmd
-	if container.CanUseSg() {
-		joined := joinShellArgs(cmdArgs)
-		cmd = exec.CommandContext(ctx, "sg", container.IncusGroup, "-c", joined)
-	} else {
-		cmd = exec.CommandContext(ctx, "sh", "-c", joinShellArgs(cmdArgs))
-	}
+	cmd := exec.CommandContext(ctx, "sh", "-c", joinShellArgs(cmdArgs))
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, nil, err
