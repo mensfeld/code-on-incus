@@ -18,10 +18,11 @@ import (
 //
 // Stable wire values; consumers may filter by these.
 const (
-	TypeExec  = "exec"
-	TypeNet   = "net"
-	TypeFile  = "file"
-	TypeAudit = "audit"
+	TypeExec      = "exec"
+	TypeNet       = "net"
+	TypeFile      = "file"
+	TypeAudit     = "audit"
+	TypeHeartbeat = "heartbeat"
 )
 
 // Event is the on-the-wire shape of a single JSON-line audit record.
@@ -54,6 +55,10 @@ type Event struct {
 	// type=audit
 	Msg string `json:"msg,omitempty"`
 	Raw string `json:"raw,omitempty"`
+
+	// type=heartbeat
+	Seq     uint64 `json:"seq,omitempty"`
+	Sources string `json:"sources,omitempty"`
 
 	// Forward-compatibility: any unrecognised key from the agent is preserved.
 	Extra map[string]json.RawMessage `json:"-"`

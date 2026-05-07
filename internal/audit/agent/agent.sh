@@ -12,6 +12,7 @@
 #   2. syslog/auth:   tail -F /var/log/syslog /var/log/auth.log     -> type=audit (msg=raw line)
 #   3. ss snapshots:  ss -tunp every $NET_INTERVAL seconds          -> type=net (new connections only)
 #   4. ps snapshots:  ps every $PROC_INTERVAL seconds, diff for new pids -> type=exec
+#   5. heartbeat:     emit every $HEARTBEAT_INTERVAL seconds         -> type=heartbeat (liveness signal)
 #
 # No external deps beyond busybox-compatible coreutils + ss + ps.
 # Designed to be cheap: ~5MB RSS, no Python/Perl/awk loops over big files.
@@ -20,6 +21,7 @@ set -u
 
 NET_INTERVAL="${COI_AUDIT_NET_INTERVAL:-5}"
 PROC_INTERVAL="${COI_AUDIT_PROC_INTERVAL:-2}"
+HEARTBEAT_INTERVAL="${COI_AUDIT_HEARTBEAT_INTERVAL:-10}"
 
 # --- json helpers ------------------------------------------------------------
 # Escape a value for inclusion as a JSON string. Handles \, ", control chars.
@@ -150,6 +152,23 @@ start_ps_loop() {
     return 0
 }
 
+# --- source 5: heartbeat -----------------------------------------------------
+# Emits a liveness ping at a fixed cadence so the host-side watcher can
+# distinguish "agent is healthy and the workload is just quiet" from "agent
+# died or was killed". Sequence number lets the host detect dropped events.
+start_heartbeat_loop() {
+    src="$1"
+    (
+        seq=0
+        while :; do
+            emit "\"type\":\"heartbeat\",\"seq\":${seq},\"sources\":\"$(js "$src")\""
+            seq=$((seq + 1))
+            sleep "$HEARTBEAT_INTERVAL"
+        done
+    ) &
+    return 0
+}
+
 # --- start everything --------------------------------------------------------
 sources=
 if start_auditd_tail; then sources="$sources auditd"; fi
@@ -157,7 +176,9 @@ if [ -z "$sources" ] && start_syslog_tail; then sources="$sources syslog"; fi
 if start_ss_loop; then sources="$sources ss"; fi
 if start_ps_loop; then sources="$sources ps"; fi
 
-emit "\"type\":\"audit\",\"msg\":\"collector.started\",\"raw\":\"sources:${sources# }\""
+active_sources="${sources# }"
+emit "\"type\":\"audit\",\"msg\":\"collector.started\",\"raw\":\"sources:${active_sources}\""
+start_heartbeat_loop "$active_sources"
 
 # Reap children on signal.
 trap 'kill 0 2>/dev/null; exit 0' INT TERM

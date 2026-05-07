@@ -41,11 +41,16 @@ func WriteAgentScriptTemp() (string, error) {
 // Collector consumes JSON-line audit events from an in-container agent and
 // re-emits them — augmented with sessionId + container — as JSON lines on its
 // configured Out writer.
+//
+// When Watcher is non-nil, every observed heartbeat event is fed to it so the
+// caller can detect agent silence (e.g. an attacker inside the sandbox killed
+// the collector). The watcher only observes; it does not filter the stream.
 type Collector struct {
 	SessionID string
 	Container string
 	Out       io.Writer
 	OnError   func(error)
+	Watcher   *HeartbeatWatcher
 }
 
 // Run reads agent JSON-lines from r until EOF or ctx cancellation, writing
@@ -68,6 +73,9 @@ func (c *Collector) Run(ctx context.Context, r io.Reader) error {
 	enc.SetEscapeHTML(false)
 
 	emit := func(ev Event) error {
+		if ev.Type == TypeHeartbeat && c.Watcher != nil {
+			c.Watcher.Observe(ev.SessionID)
+		}
 		return enc.Encode(ev)
 	}
 	return StreamEvents(r, c.SessionID, c.Container, emit, c.OnError)

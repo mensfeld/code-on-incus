@@ -146,6 +146,96 @@ func TestAgentScript_AuditdLineProducesFileEvent(t *testing.T) {
 	}
 }
 
+// TestAgentScript_EmitsHeartbeat runs agent.sh with a short heartbeat
+// interval and verifies that at least one type=heartbeat event with a valid
+// seq lands on stdout. This locks the wire shape the host-side watcher
+// depends on.
+func TestAgentScript_EmitsHeartbeat(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("agent.sh is targeted at Linux containers")
+	}
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("no sh in PATH")
+	}
+
+	tmp := t.TempDir()
+	agentPath := filepath.Join(tmp, "agent.sh")
+	patched := strings.NewReplacer(
+		"/var/log/audit/audit.log", filepath.Join(tmp, "noop1"),
+		"/var/log/syslog", filepath.Join(tmp, "noop2"),
+		"/var/log/auth.log", filepath.Join(tmp, "noop3"),
+		"/var/log/messages", filepath.Join(tmp, "noop4"),
+	).Replace(string(agentScript))
+	if err := os.WriteFile(agentPath, []byte(patched), 0o700); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "sh", agentPath)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Env = append(os.Environ(),
+		"COI_AUDIT_NET_INTERVAL=3600",
+		"COI_AUDIT_PROC_INTERVAL=3600",
+		"COI_AUDIT_HEARTBEAT_INTERVAL=1",
+	)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	defer func() {
+		killProcessGroup(cmd)
+		_ = cmd.Wait()
+	}()
+
+	bailTimer := time.AfterFunc(4*time.Second, func() {
+		killProcessGroup(cmd)
+	})
+	defer bailTimer.Stop()
+
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	var hbCount int
+	var sawSeqZero bool
+	var sawSeqOne bool
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		ev, perr := ParseLine(line)
+		if perr != nil || ev == nil {
+			continue
+		}
+		if ev.Type != TypeHeartbeat {
+			continue
+		}
+		hbCount++
+		if ev.Seq == 0 {
+			sawSeqZero = true
+		}
+		if ev.Seq == 1 {
+			sawSeqOne = true
+		}
+		if hbCount >= 2 {
+			killProcessGroup(cmd)
+			break
+		}
+	}
+	if hbCount < 2 {
+		t.Errorf("expected at least 2 heartbeats with COI_AUDIT_HEARTBEAT_INTERVAL=1, got %d", hbCount)
+	}
+	if !sawSeqZero {
+		t.Errorf("first heartbeat should carry seq=0")
+	}
+	if !sawSeqOne {
+		t.Errorf("second heartbeat should carry seq=1")
+	}
+}
+
 // TestAgentScript_EmitsValidJSON makes sure every line on stdout from a quick
 // startup round-trip parses back to a valid JSON object.
 func TestAgentScript_EmitsValidJSON(t *testing.T) {

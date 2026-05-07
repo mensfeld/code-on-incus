@@ -30,7 +30,7 @@ func ParseLine(line string) (*Event, error) {
 		return nil, fmt.Errorf("parse: missing type field")
 	}
 	switch ev.Type {
-	case TypeExec, TypeNet, TypeFile, TypeAudit:
+	case TypeExec, TypeNet, TypeFile, TypeAudit, TypeHeartbeat:
 		// known
 	default:
 		return nil, fmt.Errorf("parse: unknown type %q", ev.Type)
