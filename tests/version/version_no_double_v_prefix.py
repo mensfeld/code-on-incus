@@ -62,6 +62,4 @@ def test_update_check_no_double_v(coi_binary):
             )
             break
 
-    assert found, (
-        f"Expected 'Current version:' line in output. Got:\n{result.stdout}"
-    )
+    assert found, f"Expected 'Current version:' line in output. Got:\n{result.stdout}"
