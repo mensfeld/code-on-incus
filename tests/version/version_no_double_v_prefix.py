@@ -53,12 +53,15 @@ def test_update_check_no_double_v(coi_binary):
 
     assert result.returncode == 0, f"Update check should succeed. stderr: {result.stderr}"
 
+    found = False
     for line in result.stdout.splitlines():
         if "Current version:" in line:
+            found = True
             assert "vv" not in line, (
                 f"Current version must not contain double 'vv' prefix. Got: {line}"
             )
             break
-    else:
-        # If dev build, "Current version:" may still appear — just skip
-        pass
+
+    assert found, (
+        f"Expected 'Current version:' line in output. Got:\n{result.stdout}"
+    )
