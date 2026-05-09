@@ -402,6 +402,86 @@ install_opencode() {
 }
 
 #######################################
+# Install pi (AI coding agent)
+# See: https://github.com/mariozechner/pi-coding-agent
+#
+# Installed to ~/.npm-global (user-local npm prefix) so the code user
+# can update pi without sudo via: npm install -g @mariozechner/pi-coding-agent
+#######################################
+install_pi() {
+    log "Installing pi..."
+
+    local CODE_HOME="/home/$CODE_USER"
+    local NPM_PREFIX="$CODE_HOME/.npm-global"
+
+    # Configure user-local npm prefix (like: npm set prefix ~/.npm-global)
+    mkdir -p "$NPM_PREFIX"
+    cat >> "$CODE_HOME/.npmrc" << EOF
+prefix=$NPM_PREFIX
+EOF
+    chown -R "$CODE_USER:$CODE_USER" "$CODE_HOME/.npmrc" "$NPM_PREFIX"
+
+    # Add ~/.npm-global/bin to PATH so pi (and any future user-global npm
+    # packages) are found without a full path.
+    local BASHRC="$CODE_HOME/.bashrc"
+    if ! grep -q 'npm-global/bin' "$BASHRC" 2>/dev/null; then
+        cat >> "$BASHRC" << 'NPM_EOF'
+
+# npm user-global prefix: allows `npm install -g` without sudo
+export PATH="$HOME/.npm-global/bin:$PATH"
+NPM_EOF
+    fi
+
+    local PROFILE="$CODE_HOME/.profile"
+    if ! grep -q 'npm-global/bin' "$PROFILE" 2>/dev/null; then
+        cat >> "$PROFILE" << 'NPM_EOF'
+
+# npm user-global prefix: allows `npm install -g` without sudo
+export PATH="$HOME/.npm-global/bin:$PATH"
+NPM_EOF
+    fi
+
+    # System-wide hook for non-interactive shells (tmux, coi exec, etc.)
+    if [ ! -f /etc/profile.d/npm-global.sh ]; then
+        cat > /etc/profile.d/npm-global.sh << 'NPM_PROFILE_EOF'
+# User-local npm global prefix
+if [ -d "$HOME/.npm-global/bin" ]; then
+    export PATH="$HOME/.npm-global/bin:$PATH"
+fi
+NPM_PROFILE_EOF
+        chmod 644 /etc/profile.d/npm-global.sh
+    fi
+
+    # Install as the code user into the user-local prefix
+    local attempt
+    for attempt in 1 2 3; do
+        if su - "$CODE_USER" -c 'npm install -g @mariozechner/pi-coding-agent'; then
+            break
+        fi
+        if [ "$attempt" -eq 3 ]; then
+            log "ERROR: pi installation failed after 3 attempts."
+            exit 1
+        fi
+        log "pi install failed (attempt $attempt/3), retrying in 10s..."
+        sleep 10
+    done
+
+    if [[ ! -x "$NPM_PREFIX/bin/pi" ]]; then
+        log "ERROR: pi binary not found at $NPM_PREFIX/bin/pi after installation."
+        exit 1
+    fi
+
+    # Create a global symlink so pi is found in non-login/non-interactive shells
+    # (e.g. tmux sessions started by COI via bash -c). The actual package remains
+    # user-owned in ~/.npm-global so updates work without sudo.
+    ln -sf "$NPM_PREFIX/bin/pi" /usr/local/bin/pi
+
+    chown -R "$CODE_USER:$CODE_USER" "$NPM_PREFIX"
+
+    log "pi $(su - "$CODE_USER" -c 'pi --version' 2>/dev/null || echo 'installed')"
+}
+
+#######################################
 # Install dummy (test stub for testing)
 #######################################
 install_dummy() {
@@ -603,6 +683,7 @@ main() {
     configure_tmux
     install_claude_cli
     install_opencode
+    install_pi
     install_dummy
     install_docker
     install_github_cli

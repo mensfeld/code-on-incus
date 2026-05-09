@@ -257,6 +257,18 @@ type ToolWithAutoContextPath interface {
 	SetAutoContextPath(path string)
 }
 
+// ToolWithPreLaunch is implemented by tools that need filesystem setup
+// inside the container before the main command runs. Each returned entry
+// is a separate argv slice executed via ExecArgs (no shell interpretation),
+// eliminating shell injection risks.
+type ToolWithPreLaunch interface {
+	Tool
+	// PreLaunch returns commands to execute inside the container before
+	// the tool is launched. Each entry is a separate exec call.
+	// Return nil if no pre-launch steps are needed.
+	PreLaunch() [][]string
+}
+
 // MountInfo describes an extra directory mounted into the container.
 type MountInfo struct {
 	ContainerPath string

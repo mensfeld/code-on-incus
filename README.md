@@ -65,6 +65,7 @@ Built by developers, for developers who run AI agents and want to know what thos
 Currently supported:
 - **Claude Code** (default) - Anthropic's official CLI tool
 - **opencode** - Open-source AI coding agent (https://opencode.ai)
+- **pi** - AI coding assistant (https://github.com/mariozechner/pi-coding-agent)
 
 Coming soon:
 - Aider - AI pair programming in your terminal
@@ -75,6 +76,7 @@ Coming soon:
 ```bash
 coi shell                    # Uses default tool (Claude Code)
 coi shell --tool opencode    # Use opencode instead
+coi shell --tool pi          # Use pi instead
 ```
 
 **Permission mode** - Control whether AI tools run autonomously or ask before each action:
@@ -102,7 +104,7 @@ See the [Supported Tools wiki page](https://github.com/mensfeld/code-on-incus/wi
 - SSH agent forwarding - Use git-over-SSH inside containers without copying private keys (`[ssh] forward_agent = true`)
 - Environment variable forwarding - Selectively forward host env vars by name (`forward_env` in config)
 - Host timezone inheritance - Containers automatically inherit the host's timezone (configurable via `[timezone]` config)
-- Sandbox context file - Auto-injected `~/SANDBOX_CONTEXT.md` tells AI tools about their environment (network mode, workspace path, persistence, etc.). Automatically loaded into each tool's native context system: Claude Code via `~/.claude/CLAUDE.md`, OpenCode via the `instructions` field in `opencode.json` (opt out with `auto_context = false`)
+- Sandbox context file - Auto-injected `~/SANDBOX_CONTEXT.md` tells AI tools about their environment (network mode, workspace path, persistence, etc.). Automatically loaded into each tool's native context system: Claude Code via `~/.claude/CLAUDE.md`, OpenCode via the `instructions` field in `opencode.json`, pi via `~/.pi/agent/APPEND_SYSTEM.md` symlink (opt out with `auto_context = false`)
 
 **Security & Isolation**
 - Credential protection - SSH keys, `.env` files, Git credentials, and environment variables are **never** exposed unless explicitly mounted

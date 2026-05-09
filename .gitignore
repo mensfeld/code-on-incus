@@ -55,6 +55,9 @@ test-config.toml
 # opencode data (created when running opencode in workspace)
 .local/
 
+# pi session data (created when running pi in workspace)
+.pi-sessions/
+
 # Backup files
 *.bck.yml
 *.backup

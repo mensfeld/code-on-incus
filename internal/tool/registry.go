@@ -10,6 +10,7 @@ import (
 var registry = map[string]func() Tool{
 	"claude":   NewClaude,
 	"opencode": NewOpencode,
+	"pi":       NewPi,
 }
 
 // Get returns a tool by name
