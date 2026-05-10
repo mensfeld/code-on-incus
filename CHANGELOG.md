@@ -1,6 +1,12 @@
 # CHANGELOG
 
-## 0.8.1 (Unreleased)
+## 0.8.2 (Unreleased)
+
+### Bug Fixes
+
+- **Fix double `v` prefix in version display** — `coi update` and `coi version` showed `vv0.8.x` instead of `v0.8.x` because `git describe --tags` already includes the `v` prefix and the Go code added another. The Makefile now strips the leading `v` from the injected version string.
+
+## 0.8.1 (2026-05-07)
 
 ### Improvements
 
