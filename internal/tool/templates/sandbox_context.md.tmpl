@@ -216,7 +216,7 @@ git config user.email "<real email>"
 ## Troubleshooting
 
 - **Network errors**: Check the Network policy in the table above — some connections may be blocked by firewall rules
-- **Permission denied on workspace files**: Use `sudo chown -R $(whoami) .` in the workspace directory
+- **Permission denied on workspace files**: Files may have been created by a `sudo` command and are now owned by root. Fix with `sudo chown -R "$(id -u):$(id -g)" .` in the workspace directory. Always fix ownership after any `sudo` command that creates or modifies workspace files.
 - **Docker not responding**: Run `sudo systemctl start docker` — the daemon may not have started yet
 - **Package not found**: Run `sudo apt-get update` first to refresh package lists
 - **SSH authentication fails**: Check the SSH agent row above — if not forwarded, SSH keys are not available
@@ -229,6 +229,7 @@ git config user.email "<real email>"
 - Use `pip install` for Python packages and `pnpm install` (preferred) or `npm install` for Node packages
 - Use `mise use --global <tool>@<version>` to install new runtimes (Python, Ruby, Go, etc.) instead of apt when possible
 - Create a `.mise.toml` in your project root to pin runtime versions per-project
+- **Fix file ownership after using sudo in the workspace**: When you run `sudo` commands that create or modify files inside {{.WorkspacePath}} (e.g., `sudo bundle install`, `sudo gem install`, `sudo pip install`), those files become owned by root — which blocks the host user from editing them. Always fix ownership afterwards: `sudo chown -R "$(id -u):$(id -g)" "{{.WorkspacePath}}"` (or target just the affected subdirectory for speed)
 {{- if .HasProfileContext}}
 
 # User-Provided Profile Context

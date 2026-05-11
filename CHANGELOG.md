@@ -2,6 +2,10 @@
 
 ## 0.8.2 (Unreleased)
 
+### Improvements
+
+- **Sudo ownership guidance in SANDBOX_CONTEXT.md** — The sandbox context file now instructs AI tools to fix workspace file ownership after `sudo` operations. Files created by `sudo` in the workspace are owned by root, blocking host-side access. The guidance tells tools to run `chown` after any sudo command that touches workspace files (#368).
+
 ### Bug Fixes
 
 - **Fix double `v` prefix in version display** — `coi update` and `coi version` showed `vv0.8.x` instead of `v0.8.x` because `git describe --tags` already includes the `v` prefix and the Go code added another. The Makefile now strips the leading `v` from the injected version string.
