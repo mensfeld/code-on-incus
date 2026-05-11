@@ -178,7 +178,7 @@ Incus is a modern Linux container and virtual machine manager, forked from LXD. 
 
 - **System containers, not containers-in-VMs.** Incus system containers run a full OS with systemd and native Docker support inside - one clean isolation layer. Docker Sandboxes nests application containers inside microVMs, adding architectural complexity.
 
-- **No permission hell.** Incus automatic UID/GID shifting means files created by agents have correct ownership on the host. No `chown`, no mapping hacks.
+- **No permission hell.** Incus automatic UID/GID shifting means files created by agents have correct ownership on the host. No mapping hacks needed. (Note: files created via `sudo` in the workspace will be root-owned — the sandbox context file instructs AI tools to fix ownership after sudo operations.)
 
 - **Credential isolation by default.** Host environment variables, SSH keys, and Git credentials are never exposed to AI tools unless explicitly mounted.
 
