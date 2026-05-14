@@ -39,11 +39,18 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid workspace path: %w", err)
 	}
 
-	// Load workspace-local .coi/config.toml on top of global config, same as shell does.
-	if err := cfg.OverlayProjectConfig(absWorkspace); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to load project config from %s: %w", absWorkspace, err)
+	// Load workspace-local .coi/config.toml when the workspace differs from the
+	// process CWD. config.Load() already loads <CWD>/.coi/config.toml via
+	// GetConfigPaths, so we only need to overlay when the user pointed --workspace
+	// at a different directory to avoid loading the same file twice.
+	cwd, _ := os.Getwd()
+	absCWD, _ := filepath.Abs(cwd)
+	if absWorkspace != absCWD {
+		if err := cfg.OverlayProjectConfig(absWorkspace); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to load project config from %s: %w", absWorkspace, err)
+		}
+		container.Configure(cfg.Incus.Project, cfg.Incus.CodeUser, cfg.Incus.CodeUID)
 	}
-	container.Configure(cfg.Incus.Project, cfg.Incus.CodeUser, cfg.Incus.CodeUID)
 
 	// Check if Incus is available
 	if !container.Available() {
