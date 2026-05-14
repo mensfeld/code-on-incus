@@ -181,26 +181,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// Determine container workspace path (respects preserve_workspace_path config)
-	containerWorkspacePath := "/workspace"
-	if cfg.Paths.PreserveWorkspacePath {
-		// Validate that the path doesn't conflict with critical system directories
-		cleanPath := filepath.Clean(absWorkspace)
-		disallowedPrefixes := []string{
-			"/etc", "/bin", "/sbin", "/usr", "/root", "/boot", "/sys", "/proc", "/dev", "/lib", "/lib64",
-		}
-		isDisallowed := false
-		for _, prefix := range disallowedPrefixes {
-			if cleanPath == prefix || strings.HasPrefix(cleanPath, prefix+"/") {
-				isDisallowed = true
-				break
-			}
-		}
-		if isDisallowed {
-			fmt.Fprintf(os.Stderr, "Warning: preserve_workspace_path requested for %q conflicts with system directories; using /workspace instead\n", absWorkspace)
-		} else {
-			containerWorkspacePath = cleanPath
-		}
-	}
+	containerWorkspacePath := resolveContainerWorkspacePath(absWorkspace)
 
 	// Mount workspace (skip if restarting existing persistent container)
 	useShift := !cfg.Incus.DisableShift
@@ -532,6 +513,26 @@ func applyContainerAlias(effectiveAlias, containerName, absWorkspace string) err
 	}
 
 	return nil
+}
+
+// resolveContainerWorkspacePath returns the path inside the container where the
+// workspace should be mounted. When preserve_workspace_path is set it mirrors
+// the host path, falling back to /workspace if the path conflicts with system dirs.
+func resolveContainerWorkspacePath(absWorkspace string) string {
+	if !cfg.Paths.PreserveWorkspacePath {
+		return "/workspace"
+	}
+	cleanPath := filepath.Clean(absWorkspace)
+	disallowedPrefixes := []string{
+		"/etc", "/bin", "/sbin", "/usr", "/root", "/boot", "/sys", "/proc", "/dev", "/lib", "/lib64",
+	}
+	for _, prefix := range disallowedPrefixes {
+		if cleanPath == prefix || strings.HasPrefix(cleanPath, prefix+"/") {
+			fmt.Fprintf(os.Stderr, "Warning: preserve_workspace_path requested for %q conflicts with system directories; using /workspace instead\n", absWorkspace)
+			return "/workspace"
+		}
+	}
+	return cleanPath
 }
 
 // applySSHAgentForwarding forwards the host SSH agent into the container when
