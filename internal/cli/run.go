@@ -43,13 +43,8 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	// process CWD. config.Load() already loads <CWD>/.coi/config.toml via
 	// GetConfigPaths, so we only need to overlay when the user pointed --workspace
 	// at a different directory to avoid loading the same file twice.
-	cwd, _ := os.Getwd()
-	absCWD, _ := filepath.Abs(cwd)
-	if absWorkspace != absCWD {
-		if err := cfg.OverlayProjectConfig(absWorkspace); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("failed to load project config from %s: %w", absWorkspace, err)
-		}
-		container.Configure(cfg.Incus.Project, cfg.Incus.CodeUser, cfg.Incus.CodeUID)
+	if err := overlayWorkspaceConfig(absWorkspace); err != nil {
+		return err
 	}
 
 	// Check if Incus is available
@@ -123,11 +118,23 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// networkMgr holds the network.Manager when isolation is active; set after
+	// applyNetworkIsolation so the defer below can call Teardown before deletion.
+	var networkMgr *network.Manager
+
 	// Cleanup container on exit (only if ephemeral)
 	defer func() {
 		// Clear immutable bits before container deletion (must happen first)
 		logger := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
 		session.RemoveImmutable(containerName, logger)
+
+		// Teardown network isolation before deleting the container so that
+		// firewall rules are removed while the container IP is still resolvable.
+		if networkMgr != nil {
+			if err := networkMgr.Teardown(context.Background(), containerName); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to teardown network isolation: %v\n", err)
+			}
+		}
 
 		if !persistent {
 			fmt.Fprintf(os.Stderr, "Cleaning up container %s...\n", containerName)
@@ -276,7 +283,8 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := applyNetworkIsolation(containerName); err != nil {
+	networkMgr, err = applyNetworkIsolation(containerName)
+	if err != nil {
 		return err
 	}
 
@@ -522,6 +530,29 @@ func applyContainerAlias(effectiveAlias, containerName, absWorkspace string) err
 	return nil
 }
 
+// overlayWorkspaceConfig loads the workspace-local .coi/config.toml on top of
+// the global config when --workspace points to a directory other than the CWD.
+// config.Load() already loads <CWD>/.coi/config.toml, so skipping the overlay
+// when they match avoids doubling entries like AdditionalProtectedPaths.
+func overlayWorkspaceConfig(absWorkspace string) error {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get working directory: %w", err)
+	}
+	absCWD, err := filepath.Abs(cwd)
+	if err != nil {
+		return fmt.Errorf("failed to resolve working directory: %w", err)
+	}
+	if absWorkspace == absCWD {
+		return nil
+	}
+	if err := cfg.OverlayProjectConfig(absWorkspace); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to load project config from %s: %w", absWorkspace, err)
+	}
+	container.Configure(cfg.Incus.Project, cfg.Incus.CodeUser, cfg.Incus.CodeUID)
+	return nil
+}
+
 // resolveContainerWorkspacePath returns the path inside the container where the
 // workspace should be mounted. When preserve_workspace_path is set it mirrors
 // the host path, falling back to /workspace if the path conflicts with system dirs.
@@ -562,10 +593,11 @@ func applySSHAgentForwarding(mgr *container.Manager, containerName string) (stri
 
 // applyNetworkIsolation installs firewall rules for the container when
 // network.mode is set to something other than "open" in config.
-func applyNetworkIsolation(containerName string) error {
+// Returns the Manager so the caller can Teardown before container deletion.
+func applyNetworkIsolation(containerName string) (*network.Manager, error) {
 	networkConfig := cfg.Network
 	if networkConfig.Mode == "" || networkConfig.Mode == config.NetworkModeOpen {
-		return nil
+		return nil, nil
 	}
 	if changed, bridgeName, err := network.EnsureBridgeInTrustedZone(); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not ensure bridge in firewalld trusted zone: %v\n", err)
@@ -574,10 +606,10 @@ func applyNetworkIsolation(containerName string) error {
 	}
 	nm := network.NewManager(&networkConfig)
 	if err := nm.SetupForContainer(context.Background(), containerName); err != nil {
-		return fmt.Errorf("failed to setup network isolation: %w", err)
+		return nil, fmt.Errorf("failed to setup network isolation: %w", err)
 	}
 	fmt.Fprintf(os.Stderr, "Network isolation applied: %s\n", networkConfig.Mode)
-	return nil
+	return nm, nil
 }
 
 // applyContainerTimezone resolves the timezone and configures it inside the container.

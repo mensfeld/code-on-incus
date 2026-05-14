@@ -127,7 +127,9 @@ def test_run_open_does_not_block_private_networks(coi_binary, workspace_dir, cle
     # coi run itself must succeed (exit 0 means curl connected; non-zero means
     # curl failed for any reason). We only assert coi didn't crash with an
     # unexpected error unrelated to the network attempt.
-    assert "failed to" not in result.stderr.lower() or result.returncode in (0, 1, 28), (
+    # curl exit 0: connected; 1: generic error; 7: connection refused (allowed in open
+    # mode — kernel attempted the connection); 28: timeout. All are valid outcomes.
+    assert "failed to" not in result.stderr.lower() or result.returncode in (0, 1, 7, 28), (
         f"coi run in open mode should not crash. stderr: {result.stderr}"
     )
 
