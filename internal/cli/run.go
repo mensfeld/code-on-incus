@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -37,6 +38,12 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("invalid workspace path: %w", err)
 	}
+
+	// Load workspace-local .coi/config.toml on top of global config, same as shell does.
+	if err := cfg.OverlayProjectConfig(absWorkspace); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to load project config from %s: %w", absWorkspace, err)
+	}
+	container.Configure(cfg.Incus.Project, cfg.Incus.CodeUser, cfg.Incus.CodeUID)
 
 	// Check if Incus is available
 	if !container.Available() {
@@ -276,6 +283,33 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		containerWorkspacePath = mgr.GetWorkspacePath()
 	}
 
+	// Forward SSH agent if configured
+	var sshAgentSocketPath string
+	if config.BoolVal(cfg.SSH.ForwardAgent) {
+		logger := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
+		if socketPath, err := session.SetupSSHAgentForwarding(mgr, containerName, logger); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: SSH agent forwarding failed: %v\n", err)
+		} else if socketPath != "" {
+			sshAgentSocketPath = socketPath
+			fmt.Fprintf(os.Stderr, "SSH agent forwarding configured: %s\n", socketPath)
+		}
+	}
+
+	// Apply network isolation if configured
+	networkConfig := cfg.Network
+	if networkConfig.Mode != "" && networkConfig.Mode != config.NetworkModeOpen {
+		if changed, bridgeName, err := network.EnsureBridgeInTrustedZone(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not ensure bridge in firewalld trusted zone: %v\n", err)
+		} else if changed {
+			fmt.Fprintf(os.Stderr, "Added %s to firewalld trusted zone\n", bridgeName)
+		}
+		nm := network.NewManager(&networkConfig)
+		if err := nm.SetupForContainer(context.Background(), containerName); err != nil {
+			return fmt.Errorf("failed to setup network isolation: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "Network isolation applied: %s\n", networkConfig.Mode)
+	}
+
 	// Configure timezone in container filesystem
 	tz := applyContainerTimezone(mgr)
 
@@ -294,7 +328,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// Add all environment variables (timezone, config, forward_env)
-	incusArgs = appendEnvArgs(incusArgs, tz)
+	incusArgs = appendEnvArgs(incusArgs, tz, sshAgentSocketPath)
 
 	incusArgs = append(incusArgs, "--")
 	incusArgs = append(incusArgs, args...)
@@ -415,10 +449,16 @@ func remapContainerUserIfNeeded(mgr *container.Manager, wasRestarted bool) error
 // appendEnvArgs appends --env flags for config environment and forward_env
 // to an incus exec args slice.
 // tz is the resolved timezone name (may be empty).
-func appendEnvArgs(incusArgs []string, tz string) []string {
+// sshAgentSocketPath is the container-side SSH agent socket (may be empty).
+func appendEnvArgs(incusArgs []string, tz, sshAgentSocketPath string) []string {
 	// Timezone (lowest priority — user can override with config env)
 	if tz != "" {
 		incusArgs = append(incusArgs, "--env", fmt.Sprintf("TZ=%s", tz))
+	}
+
+	// SSH agent socket
+	if sshAgentSocketPath != "" {
+		incusArgs = append(incusArgs, "--env", fmt.Sprintf("SSH_AUTH_SOCK=%s", sshAgentSocketPath))
 	}
 
 	// Static environment from config (defaults.environment + profile environment)
