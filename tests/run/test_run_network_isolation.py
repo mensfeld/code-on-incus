@@ -86,9 +86,7 @@ def test_run_restricted_allows_public_internet(coi_binary, workspace_dir, cleanu
         f"coi run in restricted mode should allow example.com. stderr: {result.stderr}"
     )
     combined = result.stdout + result.stderr
-    assert "Example Domain" in combined, (
-        f"Expected example.com HTML in output. Got:\n{combined}"
-    )
+    assert "Example Domain" in combined, f"Expected example.com HTML in output. Got:\n{combined}"
 
 
 def test_run_open_does_not_block_private_networks(coi_binary, workspace_dir, cleanup_containers):
@@ -151,7 +149,7 @@ def test_run_ssh_agent_forwarding(coi_binary, workspace_dir, cleanup_containers)
             "--",
             "sh",
             "-c",
-            "test -n \"$SSH_AUTH_SOCK\" && echo ssh_sock_set",
+            'test -n "$SSH_AUTH_SOCK" && echo ssh_sock_set',
         ],
         capture_output=True,
         text=True,
@@ -159,8 +157,7 @@ def test_run_ssh_agent_forwarding(coi_binary, workspace_dir, cleanup_containers)
     )
 
     assert result.returncode == 0, (
-        f"coi run with forward_agent=true should set SSH_AUTH_SOCK. "
-        f"stderr: {result.stderr}"
+        f"coi run with forward_agent=true should set SSH_AUTH_SOCK. stderr: {result.stderr}"
     )
     combined = result.stdout + result.stderr
     assert "ssh_sock_set" in combined, (
