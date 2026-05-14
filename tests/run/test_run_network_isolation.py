@@ -11,6 +11,7 @@ Tests that:
 4. coi run with ssh.forward_agent = true sets SSH_AUTH_SOCK inside the container
 """
 
+import os
 import pathlib
 import subprocess
 
@@ -137,7 +138,16 @@ def test_run_ssh_agent_forwarding(coi_binary, workspace_dir, cleanup_containers)
 
     This is a regression test for #373: previously ssh.forward_agent was silently
     ignored in coi run, so SSH_AUTH_SOCK was never set inside the container.
+
+    Skipped when SSH_AUTH_SOCK is not set on the host — CI runners typically have
+    no running SSH agent, so forwarding cannot be tested in that environment.
     """
+    import pytest
+
+    host_sock = os.environ.get("SSH_AUTH_SOCK", "")
+    if not host_sock:
+        pytest.skip("SSH_AUTH_SOCK not set on host — no agent to forward")
+
     _write_config(workspace_dir, "[ssh]\nforward_agent = true\n")
 
     result = subprocess.run(
