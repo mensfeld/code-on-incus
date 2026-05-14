@@ -283,31 +283,13 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		containerWorkspacePath = mgr.GetWorkspacePath()
 	}
 
-	// Forward SSH agent if configured
-	var sshAgentSocketPath string
-	if config.BoolVal(cfg.SSH.ForwardAgent) {
-		logger := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
-		if socketPath, err := session.SetupSSHAgentForwarding(mgr, containerName, logger); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: SSH agent forwarding failed: %v\n", err)
-		} else if socketPath != "" {
-			sshAgentSocketPath = socketPath
-			fmt.Fprintf(os.Stderr, "SSH agent forwarding configured: %s\n", socketPath)
-		}
+	// Forward SSH agent and apply network isolation if configured
+	sshAgentSocketPath, err := applySSHAgentForwarding(mgr, containerName)
+	if err != nil {
+		return err
 	}
-
-	// Apply network isolation if configured
-	networkConfig := cfg.Network
-	if networkConfig.Mode != "" && networkConfig.Mode != config.NetworkModeOpen {
-		if changed, bridgeName, err := network.EnsureBridgeInTrustedZone(); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: could not ensure bridge in firewalld trusted zone: %v\n", err)
-		} else if changed {
-			fmt.Fprintf(os.Stderr, "Added %s to firewalld trusted zone\n", bridgeName)
-		}
-		nm := network.NewManager(&networkConfig)
-		if err := nm.SetupForContainer(context.Background(), containerName); err != nil {
-			return fmt.Errorf("failed to setup network isolation: %w", err)
-		}
-		fmt.Fprintf(os.Stderr, "Network isolation applied: %s\n", networkConfig.Mode)
+	if err := applyNetworkIsolation(containerName); err != nil {
+		return err
 	}
 
 	// Configure timezone in container filesystem
@@ -549,6 +531,44 @@ func applyContainerAlias(effectiveAlias, containerName, absWorkspace string) err
 		fmt.Fprintf(os.Stderr, "Warning: Failed to save alias registry: %v\n", err)
 	}
 
+	return nil
+}
+
+// applySSHAgentForwarding forwards the host SSH agent into the container when
+// ssh.forward_agent is true in config. Returns the container-side socket path.
+func applySSHAgentForwarding(mgr *container.Manager, containerName string) (string, error) {
+	if !config.BoolVal(cfg.SSH.ForwardAgent) {
+		return "", nil
+	}
+	logger := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
+	socketPath, err := session.SetupSSHAgentForwarding(mgr, containerName, logger)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: SSH agent forwarding failed: %v\n", err)
+		return "", nil
+	}
+	if socketPath != "" {
+		fmt.Fprintf(os.Stderr, "SSH agent forwarding configured: %s\n", socketPath)
+	}
+	return socketPath, nil
+}
+
+// applyNetworkIsolation installs firewall rules for the container when
+// network.mode is set to something other than "open" in config.
+func applyNetworkIsolation(containerName string) error {
+	networkConfig := cfg.Network
+	if networkConfig.Mode == "" || networkConfig.Mode == config.NetworkModeOpen {
+		return nil
+	}
+	if changed, bridgeName, err := network.EnsureBridgeInTrustedZone(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not ensure bridge in firewalld trusted zone: %v\n", err)
+	} else if changed {
+		fmt.Fprintf(os.Stderr, "Added %s to firewalld trusted zone\n", bridgeName)
+	}
+	nm := network.NewManager(&networkConfig)
+	if err := nm.SetupForContainer(context.Background(), containerName); err != nil {
+		return fmt.Errorf("failed to setup network isolation: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "Network isolation applied: %s\n", networkConfig.Mode)
 	return nil
 }
 
