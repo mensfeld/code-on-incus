@@ -8,6 +8,8 @@
 
 ### Bug Fixes
 
+- **`coi run` now applies network isolation and SSH agent forwarding from config** — `coi run` was silently ignoring the `[network]` and `[ssh]` sections of `.coi/config.toml`. Network isolation (`mode = "restricted"`) is now applied before the command runs, and `ssh.forward_agent = true` now forwards the host SSH agent socket into the container via `SSH_AUTH_SOCK`, matching the behaviour of `coi shell`. (#373)
+
 - **Fix double `v` prefix in version display** — `coi update` and `coi version` showed `vv0.8.x` instead of `v0.8.x` because `git describe --tags` already includes the `v` prefix and the Go code added another. The Makefile now strips the leading `v` from the injected version string.
 
 ## 0.8.1 (2026-05-07)
