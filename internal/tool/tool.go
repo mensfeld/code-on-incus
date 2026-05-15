@@ -74,7 +74,7 @@ type ToolWithConfigDirFiles interface {
 
 // ClaudeTool implements Tool for Claude Code
 type ClaudeTool struct {
-	effortLevel    string // "low", "medium", "high" - defaults to "medium" if empty
+	effortLevel    string // "low", "medium", "high", "xhigh", "max", "auto" — empty means unset (user controls interactively)
 	permissionMode string // "bypass" (default) or "interactive"
 }
 
@@ -155,22 +155,19 @@ func (c *ClaudeTool) GetSandboxSettings() map[string]interface{} {
 		}
 	}
 
-	// Set effort level (default to "medium" if not configured)
-	// We set both effortLevel directly AND via env var for maximum compatibility
-	effortLevel := c.effortLevel
-	if effortLevel == "" {
-		effortLevel = "medium"
-	}
-	settings["effortLevel"] = effortLevel
-
-	// Effort prompt suppression flags (discovered by examining .claude.json after manual selection)
+	// Suppress the effort-level startup prompt without locking the level itself.
 	settings["effortLevelAccepted"] = true
 	settings["hasSeenEffortPrompt"] = true
 	settings["effortCalloutDismissed"] = true
 
-	// Also set via env section (CLAUDE_CODE_EFFORT_LEVEL) as documented
-	settings["env"] = map[string]string{
-		"CLAUDE_CODE_EFFORT_LEVEL": effortLevel,
+	// Only inject the effort level when explicitly configured. Without this,
+	// Claude uses its own default and the user can change it interactively.
+	// Setting CLAUDE_CODE_EFFORT_LEVEL locks the level and prevents changes.
+	if c.effortLevel != "" {
+		settings["effortLevel"] = c.effortLevel
+		settings["env"] = map[string]string{
+			"CLAUDE_CODE_EFFORT_LEVEL": c.effortLevel,
+		}
 	}
 
 	return settings
@@ -197,8 +194,9 @@ func (c *ClaudeTool) AlwaysSetupConfig() bool { return false }
 func (c *ClaudeTool) AutoContextFile() string { return ".claude/CLAUDE.md" }
 
 // SetEffortLevel sets the effort level for Claude Code.
-// Valid values: "low", "medium", "high".
-// This prevents the interactive effort prompt during autonomous sessions.
+// Valid values: "low", "medium", "high", "xhigh", "max", "auto".
+// When set, CLAUDE_CODE_EFFORT_LEVEL is injected and locks the level for the session.
+// When empty (default), the user can change the effort level interactively inside Claude.
 func (c *ClaudeTool) SetEffortLevel(level string) {
 	c.effortLevel = level
 }
