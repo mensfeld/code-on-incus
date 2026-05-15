@@ -9,11 +9,15 @@ import (
 	"github.com/mensfeld/code-on-incus/internal/container"
 )
 
-// setupSSHAgentForwarding configures an Incus proxy device to forward the host's
+// SetupSSHAgentForwarding configures an Incus proxy device to forward the host's
 // SSH agent socket into the container. This allows git operations inside the
 // container to use the host's SSH keys without copying them.
 // Returns the container socket path if forwarding was successfully configured,
 // or an empty string if forwarding was skipped (no SSH_AUTH_SOCK, invalid socket).
+func SetupSSHAgentForwarding(mgr *container.Manager, containerName string, logger func(string)) (string, error) {
+	return setupSSHAgentForwarding(mgr, containerName, logger)
+}
+
 func setupSSHAgentForwarding(mgr *container.Manager, containerName string, logger func(string)) (string, error) {
 	hostSocket := filepath.Clean(os.Getenv("SSH_AUTH_SOCK"))
 	if hostSocket == "." || hostSocket == "" {
