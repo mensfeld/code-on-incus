@@ -511,17 +511,25 @@ EOF
 # per-user settings always win.
 #######################################
 configure_tmux() {
-    log "Configuring tmux scrollback history..."
+    log "Configuring tmux..."
 
     cat > /etc/tmux.conf << 'EOF'
 # COI default: large scrollback so long build outputs (bin/setup, npm ci,
 # cargo build, etc.) are fully retrievable. Override in ~/.tmux.conf —
 # tmux loads the per-user file after this one, so your value wins.
 set -g history-limit 50000
+
+# Reduce escape-time from the default 500ms to 10ms so that the Escape key
+# is delivered promptly to applications (e.g. vim, opencode) even when the
+# container tmux is nested inside one or more outer tmux sessions on the
+# host. With the default, each nesting layer adds up to 500ms of latency,
+# making Esc feel completely broken. 10ms is enough to distinguish Esc from
+# the start of an escape sequence without noticeable delay.
+set -g escape-time 10
 EOF
     chmod 644 /etc/tmux.conf
 
-    log "tmux history-limit set to 50000 in /etc/tmux.conf"
+    log "tmux configured: history-limit=50000, escape-time=10ms in /etc/tmux.conf"
 }
 
 #######################################
