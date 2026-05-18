@@ -38,7 +38,7 @@ func init() {
 func buildCommand(cmd *cobra.Command, args []string) error {
 	// Check if Incus is available
 	if !container.Available() {
-		return fmt.Errorf("incus is not available - please install Incus and ensure you're in the incus-admin group")
+		return container.IncusNotAvailableError()
 	}
 
 	// Check minimum Incus version

@@ -233,10 +233,19 @@ func CheckPermissions() HealthCheck {
 		}
 	}
 
+	// Not active in session — check if they were added but haven't re-logged in.
+	if container.UserInGroupFile(currentUser.Username, "incus-admin") {
+		return HealthCheck{
+			Name:    "permissions",
+			Status:  StatusFailed,
+			Message: fmt.Sprintf("User '%s' is in incus-admin group but session not reloaded — log out and back in, or run: newgrp incus-admin", currentUser.Username),
+		}
+	}
+
 	return HealthCheck{
 		Name:    "permissions",
 		Status:  StatusFailed,
-		Message: fmt.Sprintf("User '%s' not in incus-admin group", currentUser.Username),
+		Message: fmt.Sprintf("User '%s' not in incus-admin group — run: sudo usermod -aG incus-admin $USER", currentUser.Username),
 	}
 }
 
