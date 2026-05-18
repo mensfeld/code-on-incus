@@ -8,6 +8,8 @@
 
 ### Bug Fixes
 
+- **Escape key now works correctly in nested tmux sessions** — The Escape key felt completely broken in applications like opencode and vim when using nested tmux (e.g. SSH → host tmux → COI tmux). The root cause was tmux's default `escape-time` of 500ms stacking across each nesting layer, adding up to multiple seconds of delay before Esc reached the application. COI now ships `/etc/tmux.conf` with `set -g escape-time 10`, delivering Esc within 10ms regardless of nesting depth. (#378)
+
 - **Effort level no longer locked when not configured** — `coi shell` was always injecting `effortLevel = "medium"` and `CLAUDE_CODE_EFFORT_LEVEL=medium` into Claude's `settings.json`, even when `effort_level` was not set in config. Claude treats `CLAUDE_CODE_EFFORT_LEVEL` as authoritative and refuses interactive overrides, making it impossible for users to change the effort level during a session. COI now only injects these settings when `effort_level` is explicitly set in `[tool.claude]`. The documented valid values have also been updated to include `xhigh`, `max`, and `auto`. (#376)
 
 - **`coi run` now applies network isolation and SSH agent forwarding from config** — `coi run` was silently ignoring the `[network]` and `[ssh]` sections of `.coi/config.toml`. Network isolation (`mode = "restricted"`) is now applied before the command runs, and `ssh.forward_agent = true` now forwards the host SSH agent socket into the container via `SSH_AUTH_SOCK`, matching the behaviour of `coi shell`. (#373)
