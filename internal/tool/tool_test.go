@@ -175,12 +175,7 @@ func TestClaudeGetSandboxSettings(t *testing.T) {
 		t.Errorf("Expected skipDangerousModePermissionPrompt true, got '%v'", permissions["skipDangerousModePermissionPrompt"])
 	}
 
-	// Check effortLevel defaults to "medium"
-	if settings["effortLevel"] != "medium" {
-		t.Errorf("Expected default effortLevel 'medium', got '%v'", settings["effortLevel"])
-	}
-
-	// Check effort acceptance flags
+	// Prompt suppression flags must always be present
 	if settings["effortLevelAccepted"] != true {
 		t.Error("Expected effortLevelAccepted to be true")
 	}
@@ -191,54 +186,49 @@ func TestClaudeGetSandboxSettings(t *testing.T) {
 		t.Error("Expected effortCalloutDismissed to be true")
 	}
 
-	// Check env section has CLAUDE_CODE_EFFORT_LEVEL
-	env, ok := settings["env"].(map[string]string)
-	if !ok {
-		t.Fatal("Expected env to be map[string]string")
+	// When effort level is not configured, effortLevel and env must be absent
+	if _, ok := settings["effortLevel"]; ok {
+		t.Error("Expected effortLevel to be absent when not configured")
 	}
-	if env["CLAUDE_CODE_EFFORT_LEVEL"] != "medium" {
-		t.Errorf("Expected CLAUDE_CODE_EFFORT_LEVEL 'medium', got '%s'", env["CLAUDE_CODE_EFFORT_LEVEL"])
+	if _, ok := settings["env"]; ok {
+		t.Error("Expected env (CLAUDE_CODE_EFFORT_LEVEL) to be absent when effort level not configured")
 	}
 }
 
 func TestClaudeSetEffortLevel(t *testing.T) {
-	tool := NewClaude()
-
-	// Cast to ToolWithEffortLevel
-	twel, ok := tool.(ToolWithEffortLevel)
+	twel, ok := NewClaude().(ToolWithEffortLevel)
 	if !ok {
 		t.Fatal("Claude tool should implement ToolWithEffortLevel")
 	}
 
-	// Test setting to "high"
-	twel.SetEffortLevel("high")
-	settings := tool.GetSandboxSettings()
-	if settings["effortLevel"] != "high" {
-		t.Errorf("Expected effortLevel 'high', got '%v'", settings["effortLevel"])
-	}
+	for _, level := range []string{"low", "medium", "high", "xhigh", "max", "auto"} {
+		twel.SetEffortLevel(level)
+		settings := twel.(interface{ GetSandboxSettings() map[string]interface{} }).GetSandboxSettings()
 
-	// Test setting to "low"
-	twel.SetEffortLevel("low")
-	settings = tool.GetSandboxSettings()
-	if settings["effortLevel"] != "low" {
-		t.Errorf("Expected effortLevel 'low', got '%v'", settings["effortLevel"])
-	}
-
-	// Test setting to "medium"
-	twel.SetEffortLevel("medium")
-	settings = tool.GetSandboxSettings()
-	if settings["effortLevel"] != "medium" {
-		t.Errorf("Expected effortLevel 'medium', got '%v'", settings["effortLevel"])
+		if settings["effortLevel"] != level {
+			t.Errorf("level %q: expected effortLevel %q, got %v", level, level, settings["effortLevel"])
+		}
+		env, ok := settings["env"].(map[string]string)
+		if !ok {
+			t.Fatalf("level %q: expected env to be map[string]string", level)
+		}
+		if env["CLAUDE_CODE_EFFORT_LEVEL"] != level {
+			t.Errorf("level %q: expected CLAUDE_CODE_EFFORT_LEVEL %q, got %q", level, level, env["CLAUDE_CODE_EFFORT_LEVEL"])
+		}
 	}
 }
 
 func TestClaudeEffortLevelDefault(t *testing.T) {
-	// When effortLevel is not set, GetSandboxSettings should default to "medium"
+	// When effortLevel is not set, effortLevel and CLAUDE_CODE_EFFORT_LEVEL must be absent
+	// so the user can change the effort level interactively inside Claude.
 	tool := NewClaude()
 	settings := tool.GetSandboxSettings()
 
-	if settings["effortLevel"] != "medium" {
-		t.Errorf("Expected default effortLevel 'medium', got '%v'", settings["effortLevel"])
+	if _, ok := settings["effortLevel"]; ok {
+		t.Error("Expected effortLevel to be absent when not configured — user should control it interactively")
+	}
+	if _, ok := settings["env"]; ok {
+		t.Error("Expected env to be absent when effort level not configured")
 	}
 }
 
@@ -380,10 +370,7 @@ func TestClaudeGetSandboxSettings_InteractiveMode(t *testing.T) {
 		t.Error("Expected no 'permissions' key in interactive mode")
 	}
 
-	// Should still have effort level keys
-	if settings["effortLevel"] != "medium" {
-		t.Errorf("Expected effortLevel 'medium', got '%v'", settings["effortLevel"])
-	}
+	// Prompt suppression flags must always be present
 	if settings["effortLevelAccepted"] != true {
 		t.Error("Expected effortLevelAccepted to be true")
 	}
@@ -394,12 +381,12 @@ func TestClaudeGetSandboxSettings_InteractiveMode(t *testing.T) {
 		t.Error("Expected effortCalloutDismissed to be true")
 	}
 
-	env, ok := settings["env"].(map[string]string)
-	if !ok {
-		t.Fatal("Expected env to be map[string]string")
+	// Effort level not configured — must not be locked
+	if _, ok := settings["effortLevel"]; ok {
+		t.Error("Expected effortLevel to be absent when not configured")
 	}
-	if env["CLAUDE_CODE_EFFORT_LEVEL"] != "medium" {
-		t.Errorf("Expected CLAUDE_CODE_EFFORT_LEVEL 'medium', got '%s'", env["CLAUDE_CODE_EFFORT_LEVEL"])
+	if _, ok := settings["env"]; ok {
+		t.Error("Expected env to be absent when effort level not configured")
 	}
 }
 
@@ -427,9 +414,9 @@ func TestClaudeGetSandboxSettings_BypassModeDefault(t *testing.T) {
 		t.Errorf("Expected skipDangerousModePermissionPrompt true, got '%v'", permissions["skipDangerousModePermissionPrompt"])
 	}
 
-	// Should also have effort level keys
-	if settings["effortLevel"] != "medium" {
-		t.Errorf("Expected effortLevel 'medium', got '%v'", settings["effortLevel"])
+	// Effort level not configured — must not be locked
+	if _, ok := settings["effortLevel"]; ok {
+		t.Error("Expected effortLevel to be absent when not configured")
 	}
 }
 
