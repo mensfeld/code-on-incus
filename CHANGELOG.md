@@ -8,6 +8,10 @@
 
 ### Bug Fixes
 
+- **Effort level no longer locked when not configured** — `coi shell` was always injecting `effortLevel = "medium"` and `CLAUDE_CODE_EFFORT_LEVEL=medium` into Claude's `settings.json`, even when `effort_level` was not set in config. Claude treats `CLAUDE_CODE_EFFORT_LEVEL` as authoritative and refuses interactive overrides, making it impossible for users to change the effort level during a session. COI now only injects these settings when `effort_level` is explicitly set in `[tool.claude]`. The documented valid values have also been updated to include `xhigh`, `max`, and `auto`. (#376)
+
+- **`coi run` now applies network isolation and SSH agent forwarding from config** — `coi run` was silently ignoring the `[network]` and `[ssh]` sections of `.coi/config.toml`. Network isolation (`mode = "restricted"`) is now applied before the command runs, and `ssh.forward_agent = true` now forwards the host SSH agent socket into the container via `SSH_AUTH_SOCK`, matching the behaviour of `coi shell`. (#373)
+
 - **Fix double `v` prefix in version display** — `coi update` and `coi version` showed `vv0.8.x` instead of `v0.8.x` because `git describe --tags` already includes the `v` prefix and the Go code added another. The Makefile now strips the leading `v` from the injected version string.
 
 ## 0.8.1 (2026-05-07)

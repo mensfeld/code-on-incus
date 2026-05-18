@@ -434,7 +434,7 @@ writable_hooks = false
 #   permission_mode = "bypass"
 #
 #   [tool.claude]
-#   effort_level = "high"
+#   effort_level = "high"  # valid: "low", "medium", "high", "xhigh", "max", "auto" (unset = user controls interactively)
 #
 #   [[mounts]]
 #   host = "~/.cargo"

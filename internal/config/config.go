@@ -204,7 +204,7 @@ type ToolConfig struct {
 
 // ClaudeToolConfig contains Claude Code-specific settings
 type ClaudeToolConfig struct {
-	EffortLevel string `toml:"effort_level"` // Effort level: "low", "medium", "high" (default: "medium")
+	EffortLevel string `toml:"effort_level"` // Effort level: "low", "medium", "high", "xhigh", "max", "auto" (unset = user controls interactively)
 }
 
 // MountEntry represents a single directory mount configuration
