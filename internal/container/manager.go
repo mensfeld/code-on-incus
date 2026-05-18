@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -531,12 +532,14 @@ func Available() bool {
 }
 
 // IncusNotAvailableError returns a descriptive error explaining why Incus is not
-// accessible. It distinguishes three common cases so the user knows exactly what
-// to do:
+// accessible. It distinguishes the following cases so the user knows exactly
+// what to do:
 //  1. Incus binary is not installed.
-//  2. User is in the incus-admin group in /etc/group but the current session
+//  2. incus-admin group does not exist (Incus not properly installed).
+//  3. User is in the incus-admin group in /etc/group but the current session
 //     was started before the group was added — a re-login is needed.
-//  3. User is not in the incus-admin group at all.
+//  4. User is not in the incus-admin group at all.
+//  5. Group is active in the session but the Incus daemon is not running.
 func IncusNotAvailableError() error {
 	if _, err := exec.LookPath("incus"); err != nil {
 		return fmt.Errorf("incus is not installed — please install Incus first")
@@ -553,11 +556,14 @@ func IncusNotAvailableError() error {
 		return fmt.Errorf("incus is not available — the incus-admin group does not exist; please install Incus")
 	}
 
-	// Check whether the group is active in the current session.
-	activeGIDs, err := currentUser.GroupIds()
+	// Use os.Getgroups() (getgroups(2)) to get the actual supplementary GIDs
+	// of the current process — not the group database. This is what determines
+	// whether the running session can actually use incus.
+	incusGID, _ := strconv.Atoi(incusGroup.Gid)
+	activeGIDs, err := os.Getgroups()
 	if err == nil {
 		for _, gid := range activeGIDs {
-			if gid == incusGroup.Gid {
+			if gid == incusGID {
 				// Group is active but incus still doesn't work — daemon issue.
 				return fmt.Errorf("incus is not available — please check that the Incus daemon is running (sudo systemctl start incus)")
 			}

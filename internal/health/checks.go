@@ -9,6 +9,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -198,13 +199,15 @@ func CheckPermissions() HealthCheck {
 		}
 	}
 
-	// Get user's groups
-	groups, err := currentUser.GroupIds()
+	// Use os.Getgroups() (getgroups(2)) to get the actual supplementary GIDs
+	// of the current process — not the group database. This correctly reflects
+	// whether the running session has picked up a recent usermod change.
+	activeGIDs, err := os.Getgroups()
 	if err != nil {
 		return HealthCheck{
 			Name:    "permissions",
 			Status:  StatusWarning,
-			Message: fmt.Sprintf("Could not determine user groups: %v", err),
+			Message: fmt.Sprintf("Could not determine active session groups: %v", err),
 		}
 	}
 
@@ -218,9 +221,10 @@ func CheckPermissions() HealthCheck {
 		}
 	}
 
-	// Check if user is in the group
-	for _, gid := range groups {
-		if gid == incusGroup.Gid {
+	// Check if the group is active in the current session.
+	incusGID, _ := strconv.Atoi(incusGroup.Gid)
+	for _, gid := range activeGIDs {
+		if gid == incusGID {
 			return HealthCheck{
 				Name:    "permissions",
 				Status:  StatusOK,
