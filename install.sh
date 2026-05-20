@@ -108,7 +108,7 @@ detect_platform() {
             echo -e "${RED}✗ Unsupported OS: $os${NC}"
             echo "  code-on-incus requires Linux (Incus is Linux-only)"
             echo "  On macOS: Run inside a Colima or Lima VM"
-            echo "  See: https://github.com/mensfeld/code-on-incus#running-on-macos-colimalima"
+            echo "  See: https://github.com/mensfeld/code-on-incus/wiki/macOS-Setup-Guide"
             exit 1
             ;;
     esac
