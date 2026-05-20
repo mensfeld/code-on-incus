@@ -180,8 +180,11 @@ def test_prompt_yes_triggers_build_attempt_for_custom_image(coi_binary, workspac
 
 def test_no_prompt_when_stdin_not_tty(coi_binary, workspace_dir):
     """
-    When stdin is not a TTY (piped subprocess), COI must not show the prompt
-    and must fail immediately with the actionable error message.
+    When stdin is not a TTY, COI must not show the prompt and must fail
+    immediately with the actionable error message.
+
+    stdin=subprocess.DEVNULL guarantees a non-TTY stdin regardless of
+    whether the CI runner itself has a PTY allocated.
     """
     result = subprocess.run(
         [
@@ -194,6 +197,7 @@ def test_no_prompt_when_stdin_not_tty(coi_binary, workspace_dir):
             "--debug",
         ],
         capture_output=True,
+        stdin=subprocess.DEVNULL,
         text=True,
         timeout=30,
         cwd=workspace_dir,
