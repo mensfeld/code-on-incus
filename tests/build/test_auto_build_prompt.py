@@ -14,14 +14,12 @@ Tests:
 """
 
 import subprocess
-import time
 from pathlib import Path
 
 import pytest
 from pexpect import EOF, TIMEOUT
 
 from support.helpers import spawn_coi
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -146,9 +144,7 @@ def test_prompt_yes_triggers_build_attempt_for_custom_image(coi_binary, workspac
     # no [container.build] section — so HasBuildConfig() returns false.
     config_dir = Path(workspace_dir) / ".coi"
     config_dir.mkdir(exist_ok=True)
-    (config_dir / "config.toml").write_text(
-        f'[container]\nimage = "{_FAKE_CUSTOM}"\n'
-    )
+    (config_dir / "config.toml").write_text(f'[container]\nimage = "{_FAKE_CUSTOM}"\n')
 
     child = spawn_coi(
         coi_binary,
