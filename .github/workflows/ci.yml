@@ -306,6 +306,11 @@ jobs:
           # Add current user to incus-admin group
           sudo usermod -aG incus-admin $USER
 
+          # Register the ubuntu: simplestreams remote (not included in Incus by default).
+          # coi build uses ubuntu:22.04 as its base image.
+          incus remote add ubuntu https://cloud-images.ubuntu.com/releases --protocol simplestreams --public || true
+          incus remote list
+
           echo "Bridge network configured successfully"
           incus network list
 
@@ -360,7 +365,9 @@ jobs:
           else
             echo "Downloading Ubuntu 22.04 base image from remote..."
             for attempt in 1 2 3; do
-              if incus image copy images:ubuntu/22.04 local: --alias ubuntu-22.04 --auto-update=false; then
+              # Try ubuntu: (Canonical CDN) first, fall back to images: (LXC CDN)
+              if incus image copy ubuntu:22.04 local: --alias ubuntu-22.04 --auto-update=false 2>/dev/null || \
+                 incus image copy images:ubuntu/22.04 local: --alias ubuntu-22.04 --auto-update=false; then
                 echo "Image downloaded on attempt $attempt"
                 # Export for caching
                 incus image export ubuntu-22.04 /tmp/ubuntu-base-image
