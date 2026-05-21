@@ -102,7 +102,7 @@ func fetchUbuntuImageURLs(version, arch string) (lxdURL, squashfsURL string, err
 	productKey := fmt.Sprintf("com.ubuntu.cloud:server:%s:%s", version, arch)
 	product, ok := streams.Products[productKey]
 	if !ok {
-		return "", "", fmt.Errorf("Ubuntu %s (%s) not found in Canonical simplestreams", version, arch)
+		return "", "", fmt.Errorf("ubuntu %s (%s) not found in Canonical simplestreams", version, arch)
 	}
 
 	// Pick the latest version by sorted key
@@ -123,14 +123,14 @@ func fetchUbuntuImageURLs(version, arch string) (lxdURL, squashfsURL string, err
 	}
 
 	if lxdURL == "" || squashfsURL == "" {
-		return "", "", fmt.Errorf("Ubuntu %s (%s): lxd.tar.xz or squashfs not found in latest release", version, arch)
+		return "", "", fmt.Errorf("ubuntu %s (%s): lxd.tar.xz or squashfs not found in latest release", version, arch)
 	}
 
 	return lxdURL, squashfsURL, nil
 }
 
 func downloadToTemp(url string) (string, error) {
-	resp, err := http.Get(url)
+	resp, err := http.Get(url) //nolint:gosec // URL is always cloud-images.ubuntu.com from our simplestreams parser
 	if err != nil {
 		return "", fmt.Errorf("download failed: %w", err)
 	}
