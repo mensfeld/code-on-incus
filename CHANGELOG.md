@@ -4,6 +4,8 @@
 
 ### Improvements
 
+- **Switch base image source from LXC CDN to Canonical's official Ubuntu remote** — `coi build` previously pulled `images:ubuntu/22.04` from the LXC community image server, which is distributed via a third-party CDN (mirrors like `sgp1lxdmirror01.do.letsbuildthe.cloud`). This CDN is blocked in some corporate networks. The base image is now pulled as `ubuntu:22.04` from Canonical's own infrastructure (`cloud-images.ubuntu.com`), which is the `ubuntu:` remote built into Incus by default. The resulting `coi-default` image is identical — only the download source changes. **If you are upgrading:** run `coi build --force` to rebuild the image from the new source. (#388)
+
 - **Interactive build prompt when image is missing** — When `coi shell` or `coi run` is invoked from a terminal and the required image does not exist, COI now asks "Build it now? (~5 min) [y/N]" instead of immediately failing. Answering `y` triggers the build inline and continues with the session. Non-interactive use (piped input, CI) is unchanged — the existing actionable error is returned immediately.
 
 - **Sudo ownership guidance in SANDBOX_CONTEXT.md** — The sandbox context file now instructs AI tools to fix workspace file ownership after `sudo` operations. Files created by `sudo` in the workspace are owned by root, blocking host-side access. The guidance tells tools to run `chown` after any sudo command that touches workspace files (#368).
