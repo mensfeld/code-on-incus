@@ -118,6 +118,9 @@ func promptYesNo(prompt string) bool {
 	fmt.Fprint(os.Stderr, prompt)
 	scanner := bufio.NewScanner(os.Stdin)
 	if !scanner.Scan() {
+		if err := scanner.Err(); err != nil {
+			fmt.Fprintf(os.Stderr, "\nWarning: failed to read input: %v\n", err)
+		}
 		return false
 	}
 	answer := strings.TrimSpace(scanner.Text())
@@ -149,13 +152,17 @@ func runInlineBuild(cfg *config.Config, imageName string) error {
 		if result.Error != nil {
 			return fmt.Errorf("build failed: %w", result.Error)
 		}
+		if result.Skipped {
+			fmt.Printf("\nImage '%s' already exists — skipping build.\n", imageName)
+			return nil
+		}
 		fmt.Printf("\nImage '%s' built successfully!\n", imageName)
 		return nil
 	}
 
 	// Custom image: requires build config in the resolved cfg.
 	if !cfg.Container.Build.HasBuildConfig() {
-		return fmt.Errorf("image '%s' not found — run 'coi build --profile <profile>' first", imageName)
+		return fmt.Errorf("cannot auto-build '%s': no [container.build] section in config — add a build script or commands, then run 'coi build --profile <profile>'", imageName)
 	}
 
 	scriptPath, cleanup, err := resolveBuildScript(&cfg.Container.Build)
@@ -184,6 +191,10 @@ func runInlineBuild(cfg *config.Config, imageName string) error {
 	result := image.NewBuilder(opts).Build()
 	if result.Error != nil {
 		return fmt.Errorf("build failed: %w", result.Error)
+	}
+	if result.Skipped {
+		fmt.Fprintf(os.Stderr, "\nImage '%s' already exists — skipping build.\n", imageName)
+		return nil
 	}
 	fmt.Fprintf(os.Stderr, "\nImage '%s' built successfully!\n", imageName)
 	return nil
