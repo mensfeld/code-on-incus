@@ -168,9 +168,11 @@ def test_prompt_yes_triggers_build_attempt_for_custom_image(coi_binary, workspac
         f"Expected non-zero exit (no build config). Output:\n{output}"
     )
     # Should explain that there is no build config, not just repeat "not found"
-    assert "container.build" in output or "no [container.build]" in output or "cannot auto-build" in output, (
-        f"Expected explanation of missing build config. Got:\n{output}"
-    )
+    assert (
+        "container.build" in output
+        or "no [container.build]" in output
+        or "cannot auto-build" in output
+    ), f"Expected explanation of missing build config. Got:\n{output}"
 
 
 # ---------------------------------------------------------------------------
