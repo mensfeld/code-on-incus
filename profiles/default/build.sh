@@ -253,15 +253,35 @@ configure_power_wrappers() {
     # This allows users to type "poweroff" instead of "sudo poweroff"
     # while working around the lack of login sessions in containers
 
+    # Install a one-shot systemd service that keeps /etc/hosts consistent with
+    # the container's hostname (which Incus sets at boot, after image build time).
+    # Without this, sudo logs "unable to resolve host <name>" on every invocation
+    # because the hostname doesn't appear in /etc/hosts.
+    cat > /etc/systemd/system/coi-fix-hostname.service << 'UNIT_EOF'
+[Unit]
+Description=Add container hostname to /etc/hosts
+DefaultDependencies=no
+After=local-fs.target
+Before=sysinit.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c 'h=$(hostname); grep -qF "$h" /etc/hosts || echo "127.0.0.1 $h" >> /etc/hosts'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=sysinit.target
+UNIT_EOF
+    systemctl enable coi-fix-hostname.service 2>/dev/null || true
+
     for cmd in shutdown poweroff reboot halt; do
         cat > "/usr/local/bin/${cmd}" << 'WRAPPER_EOF'
 #!/bin/bash
-# Wrapper to run power management commands with sudo automatically
-# This works around the lack of login sessions in container environments
-exec sudo /usr/sbin/COMMAND_NAME "$@"
+# Trigger a clean system shutdown via systemctl.
+# Using systemctl (not sudo /usr/sbin/poweroff) avoids the systemd-logind
+# transaction conflict that occurs in Ubuntu 24.04 containers.
+exec sudo systemctl poweroff
 WRAPPER_EOF
-        # Replace COMMAND_NAME with actual command
-        sed -i "s/COMMAND_NAME/${cmd}/" "/usr/local/bin/${cmd}"
         chmod 755 "/usr/local/bin/${cmd}"
     done
 
@@ -270,7 +290,7 @@ WRAPPER_EOF
     # preventing accidental host shutdowns when typed outside the container
     cat > "/usr/local/bin/close" << 'WRAPPER_EOF'
 #!/bin/bash
-exec sudo /usr/sbin/poweroff "$@"
+exec sudo systemctl poweroff
 WRAPPER_EOF
     chmod 755 "/usr/local/bin/close"
 
