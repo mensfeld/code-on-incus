@@ -205,7 +205,7 @@ func (b *Builder) launchBuildContainer() error {
 // (which works over the Incus API without network) and netplan apply.
 func (b *Builder) ensureContainerNetworking() {
 	for i := 0; i < 10; i++ {
-		out, _ := b.mgr.ExecCommand("ip -4 addr show eth0 2>/dev/null", container.ExecCommandOptions{})
+		out, _ := b.mgr.ExecCommand("ip -4 addr show eth0 2>/dev/null", container.ExecCommandOptions{Capture: true})
 		if strings.Contains(out, "inet ") {
 			return // IPv4 is already up
 		}
@@ -223,7 +223,7 @@ func (b *Builder) ensureContainerNetworking() {
 		"netplan apply 2>/dev/null || true",
 	}, " && ")
 
-	if _, err := b.mgr.ExecCommand(script, container.ExecCommandOptions{}); err != nil {
+	if _, err := b.mgr.ExecCommand(script, container.ExecCommandOptions{Capture: true}); err != nil {
 		b.opts.Logger(fmt.Sprintf("Warning: could not inject netplan config: %v", err))
 	}
 }

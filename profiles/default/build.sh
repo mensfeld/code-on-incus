@@ -253,33 +253,32 @@ configure_power_wrappers() {
     # This allows users to type "poweroff" instead of "sudo poweroff"
     # while working around the lack of login sessions in containers
 
-    # Install a one-shot systemd service that keeps /etc/hosts consistent with
-    # the container's hostname (which Incus sets at boot, after image build time).
-    # Without this, sudo logs "unable to resolve host <name>" on every invocation
-    # because the hostname doesn't appear in /etc/hosts.
-    cat > /etc/systemd/system/coi-fix-hostname.service << 'UNIT_EOF'
-[Unit]
-Description=Add container hostname to /etc/hosts
-DefaultDependencies=no
-After=local-fs.target
-Before=sysinit.target
+    # Incus assigns the container hostname at boot (from the UTS namespace), but
+    # /etc/hosts is baked into the image at build time with a different hostname.
+    # sudo looks up the current hostname for logging; if it is not in /etc/hosts
+    # the lookup fails and prints "unable to resolve host" on every invocation.
+    #
+    # Fix: use /etc/rc.local (guaranteed to run as root before any user session)
+    # to append the current hostname to /etc/hosts on every boot.
+    cat > /etc/rc.local << 'RC_EOF'
+#!/bin/bash
+h=$(hostname)
+grep -qF "$h" /etc/hosts || echo "127.0.0.1 $h" >> /etc/hosts
+exit 0
+RC_EOF
+    chmod 755 /etc/rc.local
+    systemctl enable rc-local 2>/dev/null || true
 
-[Service]
-Type=oneshot
-ExecStart=/bin/bash -c 'h=$(hostname); grep -qF "$h" /etc/hosts || echo "127.0.0.1 $h" >> /etc/hosts'
-RemainAfterExit=yes
-
-[Install]
-WantedBy=sysinit.target
-UNIT_EOF
-    systemctl enable coi-fix-hostname.service 2>/dev/null || true
+    # In Ubuntu 24.04 containers, systemd-logind tries to start when the system
+    # is shutting down, which creates a D-Bus transaction conflict and causes
+    # `systemctl poweroff` to print an error and do nothing.
+    # Logind manages interactive login sessions, which don't exist in containers,
+    # so masking it is safe and eliminates the shutdown conflict entirely.
+    systemctl mask systemd-logind.service 2>/dev/null || true
 
     for cmd in shutdown poweroff reboot halt; do
         cat > "/usr/local/bin/${cmd}" << 'WRAPPER_EOF'
 #!/bin/bash
-# Trigger a clean system shutdown via systemctl.
-# Using systemctl (not sudo /usr/sbin/poweroff) avoids the systemd-logind
-# transaction conflict that occurs in Ubuntu 24.04 containers.
 exec sudo systemctl poweroff
 WRAPPER_EOF
         chmod 755 "/usr/local/bin/${cmd}"
