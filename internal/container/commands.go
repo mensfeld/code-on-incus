@@ -84,9 +84,10 @@ func IncusExecQuiet(args ...string) error {
 
 // ImportImage imports a container image into Incus from a metadata tarball and
 // a rootfs squashfs file, assigning the given alias.
-// Equivalent to: incus image import <lxdTar> <squashfs> --alias <alias>
+// Equivalent to: incus --project <project> image import <lxdTar> <squashfs> --alias <alias>
 func ImportImage(lxdTar, squashfs, alias string) error {
-	cmd := exec.Command("incus", "image", "import", lxdTar, squashfs, "--alias", alias)
+	cmdStr := buildIncusCommand("image", "import", lxdTar, squashfs, "--alias", alias)
+	cmd := execIncusCommand(cmdStr)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("incus image import failed: %w (output: %s)", err, strings.TrimSpace(string(out)))
 	}
