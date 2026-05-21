@@ -82,32 +82,6 @@ func IncusExecQuiet(args ...string) error {
 	return IncusExecQuietContext(context.Background(), args...)
 }
 
-// EnsureUbuntuRemote registers the ubuntu: simplestreams remote
-// (https://cloud-images.ubuntu.com/releases) if it is not already present.
-// Remote operations are global so this bypasses buildIncusCommand's --project flag.
-func EnsureUbuntuRemote() error {
-	// Check whether the remote already exists.
-	out, _ := exec.Command("incus", "remote", "list", "--format", "csv").Output()
-	for _, line := range strings.Split(string(out), "\n") {
-		if strings.HasPrefix(line, "ubuntu,") {
-			return nil
-		}
-	}
-
-	// Add it. --accept-certificate covers HTTPS without prompting.
-	cmd := exec.Command("incus", "remote", "add", "ubuntu",
-		"https://cloud-images.ubuntu.com/releases",
-		"--protocol", "simplestreams",
-		"--public",
-	)
-	if combined, err := cmd.CombinedOutput(); err != nil {
-		if strings.Contains(string(combined), "already exists") {
-			return nil
-		}
-		return fmt.Errorf("failed to register ubuntu remote: %w (output: %s)", err, strings.TrimSpace(string(combined)))
-	}
-	return nil
-}
 
 // ImportImage imports a container image into Incus from a metadata tarball and
 // a rootfs squashfs file, assigning the given alias.
