@@ -410,11 +410,8 @@ jobs:
           cat > ~/.coi/config.toml << 'EOF'
           [network]
           mode = "open"
-
-          [container.build]
-          base = "images:ubuntu/22.04"
           EOF
-          echo "Created COI config with network.mode = open and build base = images:ubuntu/22.04 (monitoring disabled by default)"
+          echo "Created COI config with network.mode = open (monitoring disabled by default)"
 
       - name: Test bind mount functionality
         continue-on-error: true
