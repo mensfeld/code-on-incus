@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	BaseImage      = "ubuntu:22.04"
+	BaseImage      = "ubuntu:24.04"
 	CoiAlias       = "coi-default"
 	BuildContainer = "coi-build"
 )

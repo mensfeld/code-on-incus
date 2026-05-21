@@ -187,9 +187,16 @@ MISE_PROFILE_EOF
 create_code_user() {
     log "Creating code user..."
 
-    # Rename ubuntu user to code
-    usermod -l "$CODE_USER" -d "/home/$CODE_USER" -m ubuntu
-    groupmod -n "$CODE_USER" ubuntu
+    # Rename the default 'ubuntu' user to 'code' if it exists (Ubuntu 22.04 cloud images).
+    # Ubuntu 24.04 minimal container images ship without a default user, so we
+    # fall back to creating 'code' directly in that case.
+    if getent passwd ubuntu > /dev/null 2>&1; then
+        usermod -l "$CODE_USER" -d "/home/$CODE_USER" -m ubuntu
+        groupmod -n "$CODE_USER" ubuntu
+    else
+        groupadd -g "$CODE_UID" "$CODE_USER" 2>/dev/null || true
+        useradd -m -u "$CODE_UID" -g "$CODE_USER" -s /bin/bash "$CODE_USER"
+    fi
     mkdir -p "/home/$CODE_USER/.claude"
     mkdir -p "/home/$CODE_USER/.ssh"
     chmod 700 "/home/$CODE_USER/.ssh"
