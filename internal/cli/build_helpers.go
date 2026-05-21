@@ -138,10 +138,15 @@ func runInlineBuild(cfg *config.Config, imageName string) error {
 	logger := func(msg string) { fmt.Println(msg) }
 
 	if imageName == image.CoiAlias {
+		coiBaseImage := image.BaseImage
+		if cfg.Container.Build.Base != "" {
+			coiBaseImage = cfg.Container.Build.Base
+		}
+
 		opts := image.BuildOptions{
 			Force:       false,
 			ImageType:   "coi",
-			BaseImage:   image.BaseImage,
+			BaseImage:   coiBaseImage,
 			AliasName:   image.CoiAlias,
 			Description: "coi image (Docker + build tools + Claude CLI + GitHub CLI)",
 			StoragePool: buildPool,

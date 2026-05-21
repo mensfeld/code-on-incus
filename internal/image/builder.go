@@ -130,6 +130,14 @@ func (b *Builder) Build() *BuildResult {
 func (b *Builder) launchBuildContainer() error {
 	b.opts.Logger(fmt.Sprintf("Launching build container from %s...", b.opts.BaseImage))
 
+	// The ubuntu: remote is not registered by default in Incus (it was in LXD).
+	// Silently ensure it exists when the base image references it.
+	if strings.HasPrefix(b.opts.BaseImage, "ubuntu:") {
+		if err := container.EnsureUbuntuRemote(); err != nil {
+			b.opts.Logger(fmt.Sprintf("Warning: could not register ubuntu remote: %v", err))
+		}
+	}
+
 	// Autofix: make sure the Incus bridge is in the firewalld trusted zone
 	// *before* we start the container. A bridge outside the trusted zone
 	// causes firewalld to drop DHCP replies, so the container would never
