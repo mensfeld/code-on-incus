@@ -109,6 +109,17 @@ func EnsureUbuntuRemote() error {
 	return nil
 }
 
+// ImportImage imports a container image into Incus from a metadata tarball and
+// a rootfs squashfs file, assigning the given alias.
+// Equivalent to: incus image import <lxdTar> <squashfs> --alias <alias>
+func ImportImage(lxdTar, squashfs, alias string) error {
+	cmd := exec.Command("incus", "image", "import", lxdTar, squashfs, "--alias", alias)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("incus image import failed: %w (output: %s)", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 // IncusOutputContext executes an Incus command with context support and returns the output (trimmed)
 func IncusOutputContext(ctx context.Context, args ...string) (string, error) {
 	cmdArgs := buildIncusCommand(args...)

@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	BaseImage      = "images:ubuntu/22.04"
+	BaseImage      = "ubuntu:22.04"
 	CoiAlias       = "coi-default"
 	BuildContainer = "coi-build"
 )
@@ -130,12 +130,17 @@ func (b *Builder) Build() *BuildResult {
 func (b *Builder) launchBuildContainer() error {
 	b.opts.Logger(fmt.Sprintf("Launching build container from %s...", b.opts.BaseImage))
 
-	// The ubuntu: remote is not registered by default in Incus (it was in LXD).
-	// Silently ensure it exists when the base image references it.
-	if strings.HasPrefix(b.opts.BaseImage, "ubuntu:") {
-		if err := container.EnsureUbuntuRemote(); err != nil {
-			b.opts.Logger(fmt.Sprintf("Warning: could not register ubuntu remote: %v", err))
+	// For ubuntu: references, download the image directly from Canonical's CDN and
+	// import it as a local alias. Incus's simplestreams client is incompatible with
+	// cloud-images.ubuntu.com so the remote approach cannot be used.
+	baseImage := b.opts.BaseImage
+	if strings.HasPrefix(baseImage, "ubuntu:") {
+		version := strings.TrimPrefix(baseImage, "ubuntu:")
+		localAlias, err := EnsureLocalUbuntuImage(version, b.opts.Logger)
+		if err != nil {
+			return fmt.Errorf("failed to obtain Ubuntu base image: %w", err)
 		}
+		baseImage = localAlias
 	}
 
 	// Autofix: make sure the Incus bridge is in the firewalld trusted zone
@@ -150,7 +155,7 @@ func (b *Builder) launchBuildContainer() error {
 		b.opts.Logger(fmt.Sprintf("Added %s to firewalld trusted zone (was missing — containers could not get IPs)", bridgeName))
 	}
 
-	if err := b.mgr.Launch(b.opts.BaseImage, false, b.opts.StoragePool); err != nil {
+	if err := b.mgr.Launch(baseImage, false, b.opts.StoragePool); err != nil {
 		return fmt.Errorf("failed to launch build container: %w", err)
 	}
 
