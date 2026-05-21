@@ -53,6 +53,39 @@ type canonicalItem struct {
 	Size   int64  `json:"size"`
 }
 
+// progressReader wraps an io.Reader and logs download progress every 5%.
+type progressReader struct {
+	r          io.Reader
+	total      int64
+	downloaded int64
+	lastPct    int
+	start      time.Time
+	logger     func(string)
+}
+
+func (pr *progressReader) Read(p []byte) (int, error) {
+	n, err := pr.r.Read(p)
+	pr.downloaded += int64(n)
+
+	if pr.total > 0 {
+		pct := int(pr.downloaded * 100 / pr.total)
+		// Log at every 5% boundary, plus 100% exactly once.
+		if pct/5 > pr.lastPct/5 || (pct == 100 && pr.lastPct < 100) {
+			pr.lastPct = pct
+			mb := pr.downloaded / (1024 * 1024)
+			totalMB := pr.total / (1024 * 1024)
+			elapsed := time.Since(pr.start).Seconds()
+			speed := ""
+			if elapsed > 0 {
+				mbps := float64(pr.downloaded) / (1024 * 1024) / elapsed
+				speed = fmt.Sprintf(" — %.1f MB/s", mbps)
+			}
+			pr.logger(fmt.Sprintf("  %3d%% (%d / %d MB%s)", pct, mb, totalMB, speed))
+		}
+	}
+	return n, err
+}
+
 // EnsureLocalUbuntuImage downloads an Ubuntu image directly from Canonical's CDN
 // and imports it into Incus as a local alias. This bypasses Incus's simplestreams
 // client, which is incompatible with cloud-images.ubuntu.com. Returns the local
@@ -76,16 +109,16 @@ func EnsureLocalUbuntuImage(version string, logger func(string)) (string, error)
 		return "", fmt.Errorf("failed to locate Ubuntu %s image: %w", version, err)
 	}
 
-	// Download metadata tarball (small — a few hundred bytes)
-	lxdFile, err := downloadToTemp(lxdURL, lxdSha256, metaClient)
+	// Download metadata tarball (small — a few hundred bytes, no progress needed)
+	lxdFile, err := downloadToTemp(lxdURL, lxdSha256, metaClient, nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to download Ubuntu metadata: %w", err)
 	}
 	defer os.Remove(lxdFile)
 
 	// Download rootfs squashfs (large — several hundred MB)
-	logger(fmt.Sprintf("Downloading Ubuntu %s rootfs (~450 MB, this may take a few minutes)...", version))
-	squashfsFile, err := downloadToTemp(squashfsURL, squashfsSha256, downloadClient)
+	logger(fmt.Sprintf("Downloading Ubuntu %s rootfs from cloud-images.ubuntu.com...", version))
+	squashfsFile, err := downloadToTemp(squashfsURL, squashfsSha256, downloadClient, logger)
 	if err != nil {
 		return "", fmt.Errorf("failed to download Ubuntu rootfs: %w", err)
 	}
@@ -152,7 +185,10 @@ func fetchUbuntuImageURLs(version, arch string) (lxdURL, squashfsURL, lxdSha256,
 	return lxdURL, squashfsURL, lxdSha256, squashfsSha256, nil
 }
 
-func downloadToTemp(url, expectedSha256 string, client *http.Client) (string, error) {
+// downloadToTemp downloads url to a temporary file, optionally reporting progress
+// via logger (pass nil to suppress progress output). The download is verified
+// against expectedSha256 if non-empty.
+func downloadToTemp(url, expectedSha256 string, client *http.Client, logger func(string)) (string, error) {
 	resp, err := client.Get(url) //nolint:gosec // URL is always cloud-images.ubuntu.com from our simplestreams parser
 	if err != nil {
 		return "", fmt.Errorf("download failed: %w", err)
@@ -168,8 +204,18 @@ func downloadToTemp(url, expectedSha256 string, client *http.Client) (string, er
 		return "", err
 	}
 
+	var src io.Reader = resp.Body
+	if logger != nil && resp.ContentLength > 0 {
+		src = &progressReader{
+			r:      resp.Body,
+			total:  resp.ContentLength,
+			start:  time.Now(),
+			logger: logger,
+		}
+	}
+
 	h := sha256.New()
-	if _, err := io.Copy(io.MultiWriter(tmp, h), resp.Body); err != nil {
+	if _, err := io.Copy(io.MultiWriter(tmp, h), src); err != nil {
 		tmp.Close()
 		os.Remove(tmp.Name())
 		return "", fmt.Errorf("write failed: %w", err)
