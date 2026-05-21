@@ -82,7 +82,6 @@ func IncusExecQuiet(args ...string) error {
 	return IncusExecQuietContext(context.Background(), args...)
 }
 
-
 // ImportImage imports a container image into Incus from a metadata tarball and
 // a rootfs squashfs file, assigning the given alias.
 // Equivalent to: incus image import <lxdTar> <squashfs> --alias <alias>
