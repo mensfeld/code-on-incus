@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	BaseImage      = "images:ubuntu/22.04"
+	BaseImage      = "ubuntu:24.04"
 	CoiAlias       = "coi-default"
 	BuildContainer = "coi-build"
 )
@@ -90,6 +90,12 @@ func (b *Builder) Build() *BuildResult {
 		return result
 	}
 
+	// Canonical Ubuntu cloud images rely on cloud-init to configure networking,
+	// which does not run reliably inside Incus containers. If no IPv4 appears
+	// within 10 seconds, inject a static netplan DHCP config and apply it so
+	// the build can proceed.
+	b.ensureContainerNetworking()
+
 	if err := b.waitForNetwork(); err != nil {
 		result.Error = err
 		b.cleanup()
@@ -130,6 +136,19 @@ func (b *Builder) Build() *BuildResult {
 func (b *Builder) launchBuildContainer() error {
 	b.opts.Logger(fmt.Sprintf("Launching build container from %s...", b.opts.BaseImage))
 
+	// For ubuntu: references, download the image directly from Canonical's CDN and
+	// import it as a local alias. Incus's simplestreams client is incompatible with
+	// cloud-images.ubuntu.com so the remote approach cannot be used.
+	baseImage := b.opts.BaseImage
+	if strings.HasPrefix(baseImage, "ubuntu:") {
+		version := strings.TrimPrefix(baseImage, "ubuntu:")
+		localAlias, err := EnsureLocalUbuntuImage(version, b.opts.Logger)
+		if err != nil {
+			return fmt.Errorf("failed to obtain Ubuntu base image: %w", err)
+		}
+		baseImage = localAlias
+	}
+
 	// Autofix: make sure the Incus bridge is in the firewalld trusted zone
 	// *before* we start the container. A bridge outside the trusted zone
 	// causes firewalld to drop DHCP replies, so the container would never
@@ -142,7 +161,7 @@ func (b *Builder) launchBuildContainer() error {
 		b.opts.Logger(fmt.Sprintf("Added %s to firewalld trusted zone (was missing — containers could not get IPs)", bridgeName))
 	}
 
-	if err := b.mgr.Launch(b.opts.BaseImage, false, b.opts.StoragePool); err != nil {
+	if err := b.mgr.Launch(baseImage, false, b.opts.StoragePool); err != nil {
 		return fmt.Errorf("failed to launch build container: %w", err)
 	}
 
@@ -177,6 +196,36 @@ func (b *Builder) launchBuildContainer() error {
 	}
 
 	return nil
+}
+
+// ensureContainerNetworking injects a static netplan DHCP config when the
+// container has no IPv4 address after 10 seconds. Canonical Ubuntu cloud images
+// depend on cloud-init to write /etc/netplan/50-cloud-init.yaml, but cloud-init
+// does not run reliably inside Incus containers. The injection uses incus exec
+// (which works over the Incus API without network) and netplan apply.
+func (b *Builder) ensureContainerNetworking() {
+	for i := 0; i < 10; i++ {
+		out, _ := b.mgr.ExecCommand("ip -4 addr show eth0 2>/dev/null", container.ExecCommandOptions{Capture: true})
+		if strings.Contains(out, "inet ") {
+			return // IPv4 is already up
+		}
+		time.Sleep(1 * time.Second)
+	}
+
+	b.opts.Logger("No IPv4 after 10s — injecting netplan DHCP config for cloud image...")
+
+	// Write a static DHCP config and disable cloud-init from overwriting it.
+	// Use a series of echo commands to avoid shell quoting issues with multi-line content.
+	script := strings.Join([]string{
+		"mkdir -p /etc/netplan /etc/cloud/cloud.cfg.d",
+		"{ echo 'network:'; echo '  version: 2'; echo '  ethernets:'; echo '    eth0:'; echo '      dhcp4: true'; echo '      dhcp6: false'; } > /etc/netplan/01-coi-dhcp.yaml",
+		"echo 'network: {config: disabled}' > /etc/cloud/cloud.cfg.d/99-disable-network-config.cfg",
+		"netplan apply 2>/dev/null || true",
+	}, " && ")
+
+	if _, err := b.mgr.ExecCommand(script, container.ExecCommandOptions{Capture: true}); err != nil {
+		b.opts.Logger(fmt.Sprintf("Warning: could not inject netplan config: %v", err))
+	}
 }
 
 // waitForNetwork waits for network connectivity in container

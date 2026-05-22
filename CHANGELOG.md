@@ -4,11 +4,15 @@
 
 ### Improvements
 
+- **Base image downloaded directly from Canonical's CDN** — `coi build` now fetches the Ubuntu base image straight from `cloud-images.ubuntu.com` instead of relying on the LXC community image server (`images.linuxcontainers.org`), whose CDN mirrors are blocked in some corporate networks. COI fetches Canonical's simplestreams index directly in Go, downloads the `lxd.tar.xz` metadata and `squashfs` rootfs, and imports them into Incus as a local alias — bypassing Incus's own simplestreams client, which is incompatible with `cloud-images.ubuntu.com`. The default base image reference is now `ubuntu:24.04`; any `ubuntu:VERSION` reference triggers this download path. Users who prefer the old behaviour can set `[container.build] base = "images:ubuntu/22.04"` in their config. The `[container.build] base` override now also applies to `coi-default` builds (previously it was ignored for the default image). (#388)
+
 - **Interactive build prompt when image is missing** — When `coi shell` or `coi run` is invoked from a terminal and the required image does not exist, COI now asks "Build it now? (~5 min) [y/N]" instead of immediately failing. Answering `y` triggers the build inline and continues with the session. Non-interactive use (piped input, CI) is unchanged — the existing actionable error is returned immediately.
 
 - **Sudo ownership guidance in SANDBOX_CONTEXT.md** — The sandbox context file now instructs AI tools to fix workspace file ownership after `sudo` operations. Files created by `sudo` in the workspace are owned by root, blocking host-side access. The guidance tells tools to run `chown` after any sudo command that touches workspace files (#368).
 
 ### Bug Fixes
+
+- **`poweroff` / `close` now work cleanly in Ubuntu 24.04 containers** — In Ubuntu 24.04, calling `sudo /usr/sbin/poweroff` triggered a systemd-logind transaction conflict (`Transaction for systemd-logind.service/start is destructive`), causing the shutdown to fail or hang. The power-management wrappers (`poweroff`, `shutdown`, `reboot`, `halt`, `close`) now call `sudo systemctl poweroff` directly, which bypasses logind and shuts the container down immediately. A companion one-shot systemd service (`coi-fix-hostname`) also now runs at every container boot to ensure the Incus-assigned hostname is present in `/etc/hosts`, eliminating the `sudo: unable to resolve host` warning that appeared before every privileged command.
 
 - **Clearer error when incus-admin group not active in session** — After installing COI and running `sudo usermod -aG incus-admin $USER`, users who ran `coi` without logging out first got a confusing generic error ("incus is not available"). COI now detects the case where the user is already in the group in `/etc/group` but the current session predates the change, and tells them exactly what to do: log out and back in, or run `newgrp incus-admin`. The `coi health` command also surfaces this distinction. (#383)
 
