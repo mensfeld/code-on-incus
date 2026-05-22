@@ -279,13 +279,13 @@ UNIT_EOF
     # Power-off wrappers.
     #
     # In Ubuntu 24.04 containers systemd-logind can be mid-start when a shutdown
-    # is requested, producing a D-Bus transaction conflict.  Using two --force
-    # flags makes systemctl bypass D-Bus / logind entirely and call the kernel
-    # reboot() syscall directly, which is always reliable in containers.
+    # is requested, producing a D-Bus transaction conflict.  One --force flag
+    # makes systemctl talk directly to systemd (bypassing logind) without
+    # resorting to a hard reboot() syscall, which lets COI clean up the session.
     for cmd in shutdown poweroff reboot halt; do
         cat > "/usr/local/bin/${cmd}" << 'WRAPPER_EOF'
 #!/bin/bash
-exec sudo systemctl --force --force poweroff
+exec sudo systemctl --force poweroff
 WRAPPER_EOF
         chmod 755 "/usr/local/bin/${cmd}"
     done
@@ -295,7 +295,7 @@ WRAPPER_EOF
     # preventing accidental host shutdowns when typed outside the container
     cat > "/usr/local/bin/close" << 'WRAPPER_EOF'
 #!/bin/bash
-exec sudo systemctl --force --force poweroff
+exec sudo systemctl --force poweroff
 WRAPPER_EOF
     chmod 755 "/usr/local/bin/close"
 
