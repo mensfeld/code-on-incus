@@ -28,11 +28,13 @@ var metaClient = &http.Client{Timeout: 60 * time.Second}
 // downloadClient is used for large file transfers (squashfs rootfs, ~450 MB).
 // No overall Timeout so a slow-but-active connection isn't killed mid-download;
 // ResponseHeaderTimeout prevents a hung server from blocking forever.
-var downloadClient = &http.Client{
-	Transport: &http.Transport{
-		ResponseHeaderTimeout: 60 * time.Second,
-	},
-}
+// Clones DefaultTransport so proxy settings (HTTP_PROXY/HTTPS_PROXY) and
+// default dial/TLS behaviour are inherited.
+var downloadClient = func() *http.Client {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.ResponseHeaderTimeout = 60 * time.Second
+	return &http.Client{Transport: t}
+}()
 
 type canonicalStreams struct {
 	Products map[string]canonicalProduct `json:"products"`
@@ -91,6 +93,9 @@ func (pr *progressReader) Read(p []byte) (int, error) {
 // client, which is incompatible with cloud-images.ubuntu.com. Returns the local
 // alias name suitable for use with incus launch.
 func EnsureLocalUbuntuImage(version string, logger func(string)) (string, error) {
+	if logger == nil {
+		logger = func(string) {}
+	}
 	arch := canonicalArch()
 	localAlias := fmt.Sprintf("coi-ubuntu-%s", version)
 

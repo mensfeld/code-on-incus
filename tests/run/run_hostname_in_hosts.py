@@ -15,9 +15,10 @@ import pytest
 
 
 @pytest.mark.xfail(
-    reason="CI uses a cached coi-default image that predates the /etc/rc.local fix; "
-    "the test will pass automatically once the cache is invalidated and the image "
-    "is rebuilt with the new build.sh."
+    strict=True,
+    reason="CI uses a cached coi-default image that predates the hostname fix; "
+    "the test will become xpass once the cache is invalidated and the image is "
+    "rebuilt — at that point remove this marker so regressions are caught.",
 )
 def test_hostname_in_hosts(coi_binary, cleanup_containers, workspace_dir):
     """

@@ -282,13 +282,25 @@ UNIT_EOF
     # is requested, producing a D-Bus transaction conflict.  One --force flag
     # makes systemctl talk directly to systemd (bypassing logind) without
     # resorting to a hard reboot() syscall, which lets COI clean up the session.
-    for cmd in shutdown poweroff reboot halt; do
+    for cmd in poweroff halt; do
         cat > "/usr/local/bin/${cmd}" << 'WRAPPER_EOF'
 #!/bin/bash
 exec sudo systemctl --force poweroff
 WRAPPER_EOF
         chmod 755 "/usr/local/bin/${cmd}"
     done
+
+    cat > "/usr/local/bin/reboot" << 'WRAPPER_EOF'
+#!/bin/bash
+exec sudo systemctl --force reboot
+WRAPPER_EOF
+    chmod 755 "/usr/local/bin/reboot"
+
+    cat > "/usr/local/bin/shutdown" << 'WRAPPER_EOF'
+#!/bin/bash
+exec sudo systemctl --force poweroff
+WRAPPER_EOF
+    chmod 755 "/usr/local/bin/shutdown"
 
     # Create "close" as an alias for poweroff
     # This provides a safe alternative that doesn't exist on the host machine,

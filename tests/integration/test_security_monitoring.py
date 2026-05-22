@@ -376,6 +376,11 @@ class TestEnvironmentScanningPatterns:
         state = get_container_state(container_name)
         if state == "Unknown":
             proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except Exception:
+                proc.kill()
+                proc.wait()
             cleanup_container(container_name, coi_binary)
             pytest.skip(
                 f"Container {container_name} vanished during test (state=Unknown). "
@@ -442,6 +447,11 @@ class TestEnvironmentScanningPatterns:
         state = get_container_state(container_name)
         if state == "Unknown":
             proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except Exception:
+                proc.kill()
+                proc.wait()
             cleanup_container(container_name, coi_binary)
             pytest.skip(
                 f"Container {container_name} vanished during test (state=Unknown). "
@@ -520,6 +530,11 @@ class TestEnvironmentScanningPatterns:
         state = get_container_state(container_name)
         if state == "Unknown":
             proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except Exception:
+                proc.kill()
+                proc.wait()
             cleanup_container(container_name, coi_binary)
             pytest.skip(
                 f"Container {container_name} vanished during test (state=Unknown). "
@@ -598,6 +613,11 @@ class TestEnvironmentScanningPatterns:
         state = get_container_state(container_name)
         if state == "Unknown":
             proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except Exception:
+                proc.kill()
+                proc.wait()
             cleanup_container(container_name, coi_binary)
             pytest.skip(
                 f"Container {container_name} vanished during test (state=Unknown). "
@@ -2809,6 +2829,11 @@ class TestThresholdBoundaries:
 
         if state == "Unknown":
             proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except Exception:
+                proc.kill()
+                proc.wait()
             cleanup_container(container_name, coi_binary)
             pytest.skip(
                 f"Container {container_name} vanished during test (state=Unknown). "
