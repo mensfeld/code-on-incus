@@ -31,7 +31,14 @@ var metaClient = &http.Client{Timeout: 60 * time.Second}
 // Clones DefaultTransport so proxy settings (HTTP_PROXY/HTTPS_PROXY) and
 // default dial/TLS behaviour are inherited.
 var downloadClient = func() *http.Client {
-	t := http.DefaultTransport.(*http.Transport).Clone()
+	base, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		// DefaultTransport is always *http.Transport; fall back to a safe default.
+		return &http.Client{
+			Transport: &http.Transport{ResponseHeaderTimeout: 60 * time.Second},
+		}
+	}
+	t := base.Clone()
 	t.ResponseHeaderTimeout = 60 * time.Second
 	return &http.Client{Transport: t}
 }()
