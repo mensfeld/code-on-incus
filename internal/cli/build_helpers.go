@@ -1,8 +1,12 @@
 package cli
 
 import (
+	"bufio"
 	"fmt"
 	"os"
+	"strings"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
@@ -69,10 +73,10 @@ func ResolveImageName(flagValue string, cfg *config.Config) string {
 	return image.CoiAlias
 }
 
-// AutoBuildIfNeeded checks if the image is missing and returns an error with instructions.
-// Returns nil if the image already exists.
+// AutoBuildIfNeeded checks if the image is missing. When stdin is an
+// interactive terminal it prompts the user to build the image on the spot;
+// otherwise it returns an actionable error with build instructions.
 func AutoBuildIfNeeded(cfg *config.Config, imageName string) error {
-	// Check if image exists
 	exists, err := container.ImageExists(imageName)
 	if err != nil {
 		return fmt.Errorf("failed to check image: %w", err)
@@ -81,9 +85,122 @@ func AutoBuildIfNeeded(cfg *config.Config, imageName string) error {
 		return nil
 	}
 
-	// Image doesn't exist — return error with instructions
+	if !stdinIsTerminal() {
+		return imageNotFoundError(imageName)
+	}
+
+	if !promptYesNo(fmt.Sprintf("Image '%s' not found. Build it now? (~5 min) [y/N]: ", imageName)) {
+		return imageNotFoundError(imageName)
+	}
+
+	return runInlineBuild(cfg, imageName)
+}
+
+// imageNotFoundError returns the standard actionable error for a missing image.
+func imageNotFoundError(imageName string) error {
 	if imageName == image.CoiAlias {
 		return fmt.Errorf("image '%s' not found — run 'coi build' first", imageName)
 	}
 	return fmt.Errorf("image '%s' not found — run 'coi build --profile <profile>' first", imageName)
+}
+
+// stdinIsTerminal reports whether os.Stdin is connected to a real terminal.
+// Uses TIOCGWINSZ rather than ModeCharDevice because /dev/null is also a
+// character device on Linux, causing false positives with the stat approach.
+func stdinIsTerminal() bool {
+	_, err := unix.IoctlGetWinsize(int(os.Stdin.Fd()), unix.TIOCGWINSZ)
+	return err == nil
+}
+
+// promptYesNo prints prompt and reads a single line from stdin.
+// Returns true only if the user types "y" or "Y".
+func promptYesNo(prompt string) bool {
+	fmt.Fprint(os.Stderr, prompt)
+	scanner := bufio.NewScanner(os.Stdin)
+	if !scanner.Scan() {
+		if err := scanner.Err(); err != nil {
+			fmt.Fprintf(os.Stderr, "\nWarning: failed to read input: %v\n", err)
+		}
+		return false
+	}
+	answer := strings.TrimSpace(scanner.Text())
+	return strings.EqualFold(answer, "y")
+}
+
+// runInlineBuild builds imageName using the same logic as `coi build`,
+// driven by the already-resolved config (profile already applied).
+func runInlineBuild(cfg *config.Config, imageName string) error {
+	buildPool := cfg.Container.StoragePool
+	if err := container.ValidateStoragePool(buildPool); err != nil {
+		return err
+	}
+
+	logger := func(msg string) { fmt.Println(msg) }
+
+	if imageName == image.CoiAlias {
+		coiBaseImage := image.BaseImage
+		if cfg.Container.Build.Base != "" {
+			coiBaseImage = cfg.Container.Build.Base
+		}
+
+		opts := image.BuildOptions{
+			Force:       false,
+			ImageType:   "coi",
+			BaseImage:   coiBaseImage,
+			AliasName:   image.CoiAlias,
+			Description: "coi image (Docker + build tools + Claude CLI + GitHub CLI)",
+			StoragePool: buildPool,
+			Logger:      logger,
+		}
+		fmt.Printf("Building image '%s'...\n", imageName)
+		result := image.NewBuilder(opts).Build()
+		if result.Error != nil {
+			return fmt.Errorf("build failed: %w", result.Error)
+		}
+		if result.Skipped {
+			fmt.Printf("\nImage '%s' already exists — skipping build.\n", imageName)
+			return nil
+		}
+		fmt.Printf("\nImage '%s' built successfully!\n", imageName)
+		return nil
+	}
+
+	// Custom image: requires build config in the resolved cfg.
+	if !cfg.Container.Build.HasBuildConfig() {
+		return fmt.Errorf("cannot auto-build '%s': no [container.build] section in config — add a build script or commands, then run 'coi build --profile <profile>'", imageName)
+	}
+
+	scriptPath, cleanup, err := resolveBuildScript(&cfg.Container.Build)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	baseImage := cfg.Container.Build.Base
+	if baseImage == "" {
+		baseImage = image.CoiAlias
+	}
+
+	opts := image.BuildOptions{
+		ImageType:   "custom",
+		AliasName:   imageName,
+		Description: fmt.Sprintf("Custom image (%s)", imageName),
+		BaseImage:   baseImage,
+		BuildScript: scriptPath,
+		Force:       false,
+		StoragePool: buildPool,
+		Logger:      func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) },
+	}
+
+	fmt.Fprintf(os.Stderr, "Building image '%s' (base: %s)...\n", imageName, baseImage)
+	result := image.NewBuilder(opts).Build()
+	if result.Error != nil {
+		return fmt.Errorf("build failed: %w", result.Error)
+	}
+	if result.Skipped {
+		fmt.Fprintf(os.Stderr, "\nImage '%s' already exists — skipping build.\n", imageName)
+		return nil
+	}
+	fmt.Fprintf(os.Stderr, "\nImage '%s' built successfully!\n", imageName)
+	return nil
 }

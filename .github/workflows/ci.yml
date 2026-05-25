@@ -350,20 +350,22 @@ jobs:
         uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: /tmp/ubuntu-base-image.tar.gz
-          key: ${{ runner.os }}-ubuntu-22.04-base-image
+          key: ${{ runner.os }}-ubuntu-24.04-base-image
 
       - name: Import or download base Ubuntu image
         run: |
+          # Import with alias coi-ubuntu-24.04 so EnsureLocalUbuntuImage finds it
+          # without downloading 500 MB from Canonical's CDN on every CI run.
           if [ -f /tmp/ubuntu-base-image.tar.gz ]; then
-            echo "Restoring Ubuntu 22.04 base image from cache..."
-            incus image import /tmp/ubuntu-base-image.tar.gz --alias ubuntu-22.04
+            echo "Restoring Ubuntu 24.04 base image from cache..."
+            incus image import /tmp/ubuntu-base-image.tar.gz --alias coi-ubuntu-24.04
           else
-            echo "Downloading Ubuntu 22.04 base image from remote..."
+            echo "Downloading Ubuntu 24.04 base image from remote..."
             for attempt in 1 2 3; do
-              if incus image copy images:ubuntu/22.04 local: --alias ubuntu-22.04 --auto-update=false; then
+              if incus image copy images:ubuntu/24.04 local: --alias coi-ubuntu-24.04 --auto-update=false; then
                 echo "Image downloaded on attempt $attempt"
                 # Export for caching
-                incus image export ubuntu-22.04 /tmp/ubuntu-base-image
+                incus image export coi-ubuntu-24.04 /tmp/ubuntu-base-image
                 break
               fi
               if [ "$attempt" -eq 3 ]; then
@@ -381,7 +383,7 @@ jobs:
         uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: /tmp/ubuntu-base-image.tar.gz
-          key: ${{ runner.os }}-ubuntu-22.04-base-image
+          key: ${{ runner.os }}-ubuntu-24.04-base-image
 
       - name: Prepare embedded build assets
         run: |
@@ -411,14 +413,14 @@ jobs:
           [network]
           mode = "open"
           EOF
-          echo "Created COI config with network.mode = open (monitoring disabled by default)"
+          echo "Created COI config with network.mode = open"
 
       - name: Test bind mount functionality
         continue-on-error: true
         run: |
           # Skip if base image is not available (e.g., remote was unreachable and no cache)
-          if ! incus image info ubuntu-22.04 >/dev/null 2>&1; then
-            echo "WARNING: ubuntu-22.04 image not available, skipping bind mount test"
+          if ! incus image info coi-ubuntu-24.04 >/dev/null 2>&1; then
+            echo "WARNING: coi-ubuntu-24.04 image not available, skipping bind mount test"
             exit 0
           fi
 
@@ -429,7 +431,7 @@ jobs:
           echo "test-content" > /tmp/test-bind-mount/test-file.txt
 
           # Launch test container (use local alias to avoid external network dependency)
-          incus launch ubuntu-22.04 test-bind-mount-container
+          incus launch coi-ubuntu-24.04 test-bind-mount-container
           sleep 5
 
           # Add bind mount with shift=true

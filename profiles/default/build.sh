@@ -187,9 +187,16 @@ MISE_PROFILE_EOF
 create_code_user() {
     log "Creating code user..."
 
-    # Rename ubuntu user to code
-    usermod -l "$CODE_USER" -d "/home/$CODE_USER" -m ubuntu
-    groupmod -n "$CODE_USER" ubuntu
+    # Rename the default 'ubuntu' user to 'code' if it exists (Ubuntu 22.04 cloud images).
+    # Ubuntu 24.04 minimal container images ship without a default user, so we
+    # fall back to creating 'code' directly in that case.
+    if getent passwd ubuntu > /dev/null 2>&1; then
+        usermod -l "$CODE_USER" -d "/home/$CODE_USER" -m ubuntu
+        groupmod -n "$CODE_USER" ubuntu
+    else
+        groupadd -g "$CODE_UID" "$CODE_USER" 2>/dev/null || true
+        useradd -m -u "$CODE_UID" -g "$CODE_USER" -s /bin/bash "$CODE_USER"
+    fi
     mkdir -p "/home/$CODE_USER/.claude"
     mkdir -p "/home/$CODE_USER/.ssh"
     chmod 700 "/home/$CODE_USER/.ssh"
@@ -246,24 +253,61 @@ configure_power_wrappers() {
     # This allows users to type "poweroff" instead of "sudo poweroff"
     # while working around the lack of login sessions in containers
 
-    for cmd in shutdown poweroff reboot halt; do
+    # Incus assigns the container hostname at boot (from the UTS namespace), but
+    # /etc/hosts is baked into the image at build time with a different name.
+    # sudo looks up the current hostname for logging; if it is not in /etc/hosts
+    # the lookup fails and prints "unable to resolve host" on every invocation.
+    #
+    # Fix: a oneshot systemd service that appends the runtime hostname to
+    # /etc/hosts before multi-user.target is reached (i.e. before any shell).
+    cat > /etc/systemd/system/coi-fix-hostname.service << 'UNIT_EOF'
+[Unit]
+Description=Add container hostname to /etc/hosts
+After=local-fs.target
+Before=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c 'h=$(hostname); grep -qF "$h" /etc/hosts || echo "127.0.0.1 $h" >> /etc/hosts'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+UNIT_EOF
+    systemctl enable coi-fix-hostname.service
+
+    # Power-off wrappers.
+    #
+    # In Ubuntu 24.04 containers systemd-logind can be mid-start when a shutdown
+    # is requested, producing a D-Bus transaction conflict.  One --force flag
+    # makes systemctl talk directly to systemd (bypassing logind) without
+    # resorting to a hard reboot() syscall, which lets COI clean up the session.
+    for cmd in poweroff halt; do
         cat > "/usr/local/bin/${cmd}" << 'WRAPPER_EOF'
 #!/bin/bash
-# Wrapper to run power management commands with sudo automatically
-# This works around the lack of login sessions in container environments
-exec sudo /usr/sbin/COMMAND_NAME "$@"
+exec sudo systemctl --force poweroff
 WRAPPER_EOF
-        # Replace COMMAND_NAME with actual command
-        sed -i "s/COMMAND_NAME/${cmd}/" "/usr/local/bin/${cmd}"
         chmod 755 "/usr/local/bin/${cmd}"
     done
+
+    cat > "/usr/local/bin/reboot" << 'WRAPPER_EOF'
+#!/bin/bash
+exec sudo systemctl --force reboot
+WRAPPER_EOF
+    chmod 755 "/usr/local/bin/reboot"
+
+    cat > "/usr/local/bin/shutdown" << 'WRAPPER_EOF'
+#!/bin/bash
+exec sudo systemctl --force poweroff
+WRAPPER_EOF
+    chmod 755 "/usr/local/bin/shutdown"
 
     # Create "close" as an alias for poweroff
     # This provides a safe alternative that doesn't exist on the host machine,
     # preventing accidental host shutdowns when typed outside the container
     cat > "/usr/local/bin/close" << 'WRAPPER_EOF'
 #!/bin/bash
-exec sudo /usr/sbin/poweroff "$@"
+exec sudo systemctl --force poweroff
 WRAPPER_EOF
     chmod 755 "/usr/local/bin/close"
 
@@ -511,17 +555,25 @@ EOF
 # per-user settings always win.
 #######################################
 configure_tmux() {
-    log "Configuring tmux scrollback history..."
+    log "Configuring tmux..."
 
     cat > /etc/tmux.conf << 'EOF'
 # COI default: large scrollback so long build outputs (bin/setup, npm ci,
 # cargo build, etc.) are fully retrievable. Override in ~/.tmux.conf —
 # tmux loads the per-user file after this one, so your value wins.
 set -g history-limit 50000
+
+# Reduce escape-time from the default 500ms to 10ms so that the Escape key
+# is delivered promptly to applications (e.g. vim, opencode) even when the
+# container tmux is nested inside one or more outer tmux sessions on the
+# host. With the default, each nesting layer adds up to 500ms of latency,
+# making Esc feel completely broken. 10ms is enough to distinguish Esc from
+# the start of an escape sequence without noticeable delay.
+set -g escape-time 10
 EOF
     chmod 644 /etc/tmux.conf
 
-    log "tmux history-limit set to 50000 in /etc/tmux.conf"
+    log "tmux configured: history-limit=50000, escape-time=10ms in /etc/tmux.conf"
 }
 
 #######################################
