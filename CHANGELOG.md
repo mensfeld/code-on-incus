@@ -24,6 +24,10 @@
 
 - **Fix double `v` prefix in version display** — `coi update` and `coi version` showed `vv0.8.x` instead of `v0.8.x` because `git describe --tags` already includes the `v` prefix and the Go code added another. The Makefile now strips the leading `v` from the injected version string.
 
+### New Features
+
+- **`coi audit` — live threat-event streaming from containers** — New `coi audit` command exposes the audit stream as JSON Lines on stdout, ready to pipe into a SIEM, `jq`, or a flat file. `coi audit <container>` dumps the host-side audit log; `coi audit <container> --follow` pushes a small POSIX-sh collector into the running container and streams live events: auditd `PATH` records become `type=file` events, `ss -tunp` snapshots every 5 s emit `type=net` events for new connections, and `ps` diffs every 2 s emit `type=exec` events for new processes. When auditd is absent the collector falls back to tailing `/var/log/syslog` and `/var/log/auth.log`. A heartbeat event is emitted every 10 s; the host warns on stderr if the agent goes silent for more than 35 s. No eBPF, no daemon install, no new Go dependencies — idle overhead is ~4.5 MB RSS and ~0.0% CPU. `coi audit --file ./session.jsonl` re-streams a saved recording. (contributed by @ChrisJr404, #362)
+
 ## 0.8.1 (2026-05-07)
 
 ### Improvements
