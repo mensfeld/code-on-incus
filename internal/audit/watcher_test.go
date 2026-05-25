@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"context"
 	"strings"
 	"sync"
 	"testing"
@@ -256,7 +257,7 @@ func TestCollector_FeedsHeartbeatToWatcher(t *testing.T) {
 		Out:       &out,
 		Watcher:   w,
 	}
-	if err := c.Run(nil, strings.NewReader(in)); err != nil {
+	if err := c.Run(context.Background(), strings.NewReader(in)); err != nil {
 		t.Fatalf("collector: %v", err)
 	}
 
