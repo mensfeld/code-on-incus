@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -38,9 +39,17 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid workspace path: %w", err)
 	}
 
+	// Load workspace-local .coi/config.toml when the workspace differs from the
+	// process CWD. config.Load() already loads <CWD>/.coi/config.toml via
+	// GetConfigPaths, so we only need to overlay when the user pointed --workspace
+	// at a different directory to avoid loading the same file twice.
+	if err := overlayWorkspaceConfig(absWorkspace); err != nil {
+		return err
+	}
+
 	// Check if Incus is available
 	if !container.Available() {
-		return fmt.Errorf("incus is not available - please install Incus and ensure you're in the incus-admin group")
+		return container.IncusNotAvailableError()
 	}
 
 	// Check minimum Incus version
@@ -109,11 +118,23 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// networkMgr holds the network.Manager when isolation is active; set after
+	// applyNetworkIsolation so the defer below can call Teardown before deletion.
+	var networkMgr *network.Manager
+
 	// Cleanup container on exit (only if ephemeral)
 	defer func() {
 		// Clear immutable bits before container deletion (must happen first)
 		logger := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
 		session.RemoveImmutable(containerName, logger)
+
+		// Teardown network isolation before deleting the container so that
+		// firewall rules are removed while the container IP is still resolvable.
+		if networkMgr != nil {
+			if err := networkMgr.Teardown(context.Background(), containerName); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to teardown network isolation: %v\n", err)
+			}
+		}
 
 		if !persistent {
 			fmt.Fprintf(os.Stderr, "Cleaning up container %s...\n", containerName)
@@ -174,26 +195,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// Determine container workspace path (respects preserve_workspace_path config)
-	containerWorkspacePath := "/workspace"
-	if cfg.Paths.PreserveWorkspacePath {
-		// Validate that the path doesn't conflict with critical system directories
-		cleanPath := filepath.Clean(absWorkspace)
-		disallowedPrefixes := []string{
-			"/etc", "/bin", "/sbin", "/usr", "/root", "/boot", "/sys", "/proc", "/dev", "/lib", "/lib64",
-		}
-		isDisallowed := false
-		for _, prefix := range disallowedPrefixes {
-			if cleanPath == prefix || strings.HasPrefix(cleanPath, prefix+"/") {
-				isDisallowed = true
-				break
-			}
-		}
-		if isDisallowed {
-			fmt.Fprintf(os.Stderr, "Warning: preserve_workspace_path requested for %q conflicts with system directories; using /workspace instead\n", absWorkspace)
-		} else {
-			containerWorkspacePath = cleanPath
-		}
-	}
+	containerWorkspacePath := resolveContainerWorkspacePath(absWorkspace)
 
 	// Mount workspace (skip if restarting existing persistent container)
 	useShift := !cfg.Incus.DisableShift
@@ -276,6 +278,16 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		containerWorkspacePath = mgr.GetWorkspacePath()
 	}
 
+	// Forward SSH agent and apply network isolation if configured
+	sshAgentSocketPath, err := applySSHAgentForwarding(mgr, containerName)
+	if err != nil {
+		return err
+	}
+	networkMgr, err = applyNetworkIsolation(containerName)
+	if err != nil {
+		return err
+	}
+
 	// Configure timezone in container filesystem
 	tz := applyContainerTimezone(mgr)
 
@@ -294,7 +306,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// Add all environment variables (timezone, config, forward_env)
-	incusArgs = appendEnvArgs(incusArgs, tz)
+	incusArgs = appendEnvArgs(incusArgs, tz, sshAgentSocketPath)
 
 	incusArgs = append(incusArgs, "--")
 	incusArgs = append(incusArgs, args...)
@@ -415,10 +427,16 @@ func remapContainerUserIfNeeded(mgr *container.Manager, wasRestarted bool) error
 // appendEnvArgs appends --env flags for config environment and forward_env
 // to an incus exec args slice.
 // tz is the resolved timezone name (may be empty).
-func appendEnvArgs(incusArgs []string, tz string) []string {
+// sshAgentSocketPath is the container-side SSH agent socket (may be empty).
+func appendEnvArgs(incusArgs []string, tz, sshAgentSocketPath string) []string {
 	// Timezone (lowest priority — user can override with config env)
 	if tz != "" {
 		incusArgs = append(incusArgs, "--env", fmt.Sprintf("TZ=%s", tz))
+	}
+
+	// SSH agent socket
+	if sshAgentSocketPath != "" {
+		incusArgs = append(incusArgs, "--env", fmt.Sprintf("SSH_AUTH_SOCK=%s", sshAgentSocketPath))
 	}
 
 	// Static environment from config (defaults.environment + profile environment)
@@ -510,6 +528,88 @@ func applyContainerAlias(effectiveAlias, containerName, absWorkspace string) err
 	}
 
 	return nil
+}
+
+// overlayWorkspaceConfig loads the workspace-local .coi/config.toml on top of
+// the global config when --workspace points to a directory other than the CWD.
+// config.Load() already loads <CWD>/.coi/config.toml, so skipping the overlay
+// when they match avoids doubling entries like AdditionalProtectedPaths.
+func overlayWorkspaceConfig(absWorkspace string) error {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get working directory: %w", err)
+	}
+	absCWD, err := filepath.Abs(cwd)
+	if err != nil {
+		return fmt.Errorf("failed to resolve working directory: %w", err)
+	}
+	if absWorkspace == absCWD {
+		return nil
+	}
+	if err := cfg.OverlayProjectConfig(absWorkspace); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to load project config from %s: %w", absWorkspace, err)
+	}
+	container.Configure(cfg.Incus.Project, cfg.Incus.CodeUser, cfg.Incus.CodeUID)
+	return nil
+}
+
+// resolveContainerWorkspacePath returns the path inside the container where the
+// workspace should be mounted. When preserve_workspace_path is set it mirrors
+// the host path, falling back to /workspace if the path conflicts with system dirs.
+func resolveContainerWorkspacePath(absWorkspace string) string {
+	if !cfg.Paths.PreserveWorkspacePath {
+		return "/workspace"
+	}
+	cleanPath := filepath.Clean(absWorkspace)
+	disallowedPrefixes := []string{
+		"/etc", "/bin", "/sbin", "/usr", "/root", "/boot", "/sys", "/proc", "/dev", "/lib", "/lib64",
+	}
+	for _, prefix := range disallowedPrefixes {
+		if cleanPath == prefix || strings.HasPrefix(cleanPath, prefix+"/") {
+			fmt.Fprintf(os.Stderr, "Warning: preserve_workspace_path requested for %q conflicts with system directories; using /workspace instead\n", absWorkspace)
+			return "/workspace"
+		}
+	}
+	return cleanPath
+}
+
+// applySSHAgentForwarding forwards the host SSH agent into the container when
+// ssh.forward_agent is true in config. Returns the container-side socket path.
+func applySSHAgentForwarding(mgr *container.Manager, containerName string) (string, error) {
+	if !config.BoolVal(cfg.SSH.ForwardAgent) {
+		return "", nil
+	}
+	logger := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
+	socketPath, err := session.SetupSSHAgentForwarding(mgr, containerName, logger)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: SSH agent forwarding failed: %v\n", err)
+		return "", nil
+	}
+	if socketPath != "" {
+		fmt.Fprintf(os.Stderr, "SSH agent forwarding configured: %s\n", socketPath)
+	}
+	return socketPath, nil
+}
+
+// applyNetworkIsolation installs firewall rules for the container when
+// network.mode is set to something other than "open" in config.
+// Returns the Manager so the caller can Teardown before container deletion.
+func applyNetworkIsolation(containerName string) (*network.Manager, error) {
+	networkConfig := cfg.Network
+	if networkConfig.Mode == "" || networkConfig.Mode == config.NetworkModeOpen {
+		return nil, nil
+	}
+	if changed, bridgeName, err := network.EnsureBridgeInTrustedZone(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not ensure bridge in firewalld trusted zone: %v\n", err)
+	} else if changed {
+		fmt.Fprintf(os.Stderr, "Added %s to firewalld trusted zone\n", bridgeName)
+	}
+	nm := network.NewManager(&networkConfig)
+	if err := nm.SetupForContainer(context.Background(), containerName); err != nil {
+		return nil, fmt.Errorf("failed to setup network isolation: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "Network isolation applied: %s\n", networkConfig.Mode)
+	return nm, nil
 }
 
 // applyContainerTimezone resolves the timezone and configures it inside the container.

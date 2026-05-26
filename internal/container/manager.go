@@ -8,7 +8,9 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -527,6 +529,86 @@ func Available() bool {
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	return cmd.Run() == nil
+}
+
+// IncusNotAvailableError returns a descriptive error explaining why Incus is not
+// accessible. It distinguishes the following cases so the user knows exactly
+// what to do:
+//  1. Incus binary is not installed.
+//  2. incus-admin group does not exist (Incus not properly installed).
+//  3. User is in the incus-admin group in /etc/group but the current session
+//     was started before the group was added — a re-login is needed.
+//  4. User is not in the incus-admin group at all.
+//  5. Group is active in the session but the Incus daemon is not running.
+func IncusNotAvailableError() error {
+	if _, err := exec.LookPath("incus"); err != nil {
+		return fmt.Errorf("incus is not installed — please install Incus first")
+	}
+
+	currentUser, err := user.Current()
+	if err != nil {
+		return fmt.Errorf("incus is not available — please ensure you are in the incus-admin group")
+	}
+
+	incusGroup, err := user.LookupGroup("incus-admin")
+	if err != nil {
+		// Group doesn't exist — Incus not installed properly or daemon not running.
+		return fmt.Errorf("incus is not available — the incus-admin group does not exist; please install Incus")
+	}
+
+	// Use os.Getgroups() (getgroups(2)) to get the actual supplementary GIDs
+	// of the current process — not the group database. This is what determines
+	// whether the running session can actually use incus.
+	incusGID, _ := strconv.Atoi(incusGroup.Gid)
+	activeGIDs, err := os.Getgroups()
+	if err == nil {
+		for _, gid := range activeGIDs {
+			if gid == incusGID {
+				// Group is active but incus still doesn't work — daemon issue.
+				return fmt.Errorf("incus is not available — please check that the Incus daemon is running (sudo systemctl start incus)")
+			}
+		}
+	}
+
+	// Group exists but is not active — check whether it's in /etc/group.
+	if UserInGroupFile(currentUser.Username, "incus-admin") {
+		return fmt.Errorf(
+			"you have been added to the incus-admin group but your current session does not have it active yet\n" +
+				"Log out and back in, or run: newgrp incus-admin",
+		)
+	}
+
+	return fmt.Errorf(
+		"incus is not available — please add your user to the incus-admin group and re-login:\n" +
+			"  sudo usermod -aG incus-admin $USER\n" +
+			"Then log out and back in, or run: newgrp incus-admin",
+	)
+}
+
+// UserInGroupFile reports whether username appears in the member list of
+// groupName in /etc/group, regardless of whether the group is active in the
+// current session.
+func UserInGroupFile(username, groupName string) bool {
+	data, err := os.ReadFile("/etc/group")
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		if !strings.HasPrefix(line, groupName+":") {
+			continue
+		}
+		// Format: name:password:gid:member1,member2,...
+		parts := strings.SplitN(line, ":", 4)
+		if len(parts) != 4 {
+			continue
+		}
+		for _, member := range strings.Split(parts[3], ",") {
+			if strings.TrimSpace(member) == username {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // ImageExistsGlobal checks if an image exists (class method equivalent)

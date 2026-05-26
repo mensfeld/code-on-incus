@@ -114,6 +114,7 @@ See the [Supported Tools wiki page](https://github.com/mensfeld/code-on-incus/wi
 - Network isolation - Firewalld-based restricted/allowlist/open modes block private network access and prevent exfiltration
 - Protected paths - `.git/hooks`, `.git/config`, `.husky`, `.vscode` mounted read-only to prevent supply-chain attacks
 - Host-side immutable protection - Protected paths are locked with `chattr +i` during sessions, preventing `unshare -m` + `umount` bypass of read-only mounts (opt out: `[security] host_immutable = false`)
+- Git identity guard - Containers enforce `user.useConfigOnly=true`, preventing AI tools from committing as the default "code" user
 - Guest API disabled - Incus guest API (`/dev/incus`) disabled by default, preventing host path and topology leaks
 - System containers - Full OS isolation with unprivileged containers, better than Docker privileged mode
 - Automatic UID mapping - No permission hell, files owned correctly
@@ -177,7 +178,7 @@ Incus is a modern Linux container and virtual machine manager, forked from LXD. 
 
 - **System containers, not containers-in-VMs.** Incus system containers run a full OS with systemd and native Docker support inside - one clean isolation layer. Docker Sandboxes nests application containers inside microVMs, adding architectural complexity.
 
-- **No permission hell.** Incus automatic UID/GID shifting means files created by agents have correct ownership on the host. No `chown`, no mapping hacks.
+- **No permission hell.** Incus automatic UID/GID shifting means files created by agents have correct ownership on the host. No mapping hacks needed. (Note: files created via `sudo` in the workspace will be root-owned — the sandbox context file instructs AI tools to fix ownership after sudo operations.)
 
 - **Credential isolation by default.** Host environment variables, SSH keys, and Git credentials are never exposed to AI tools unless explicitly mounted.
 
@@ -198,7 +199,7 @@ curl -fsSL https://raw.githubusercontent.com/mensfeld/code-on-incus/master/insta
 # - Show next steps
 ```
 
-**Manual installation:** Download the binary from [GitHub Releases](https://github.com/mensfeld/code-on-incus/releases), make it executable, and move to `/usr/local/bin/`. Requires Linux with Incus installed and user in the `incus-admin` group. See the [Incus installation guide](https://linuxcontainers.org/incus/docs/main/installing/) for setting up Incus.
+**Manual installation:** Download the binary from [GitHub Releases](https://github.com/mensfeld/code-on-incus/releases), make it executable, and move to `/usr/local/bin/`. Requires Linux with Incus installed and user in the `incus-admin` group. **You must log out and back in** (or run `newgrp incus-admin`) after adding your user to the group — COI runs `incus` directly and requires the group to be active in your session. See the [Incus installation guide](https://linuxcontainers.org/incus/docs/main/installing/) for setting up Incus.
 
 ### Build Images
 
@@ -331,7 +332,7 @@ coi shell --resume=<session-id> # Resume specific session
 coi list --all                  # List available sessions
 ```
 
-**What's restored:** Full conversation history, tool credentials, user settings, and project context. Sessions are workspace-scoped — `--resume` only finds sessions from the current workspace directory.
+**What's restored:** Full conversation history, tool credentials, user settings, and project context. The profile used when the session was created is also automatically restored — no need to pass `--profile` again (explicitly passing `--profile` overrides the saved one). Sessions are workspace-scoped — `--resume` only finds sessions from the current workspace directory.
 
 See the [Container Lifecycle and Sessions guide](https://github.com/mensfeld/code-on-incus/wiki/Container-Lifecycle-and-Sessions) for details on how session persistence works.
 
@@ -474,7 +475,7 @@ coi attach                    # Reconnect to running container
 coi persist                   # Convert ephemeral session to persistent
 coi unfreeze <name>           # Unfreeze paused/frozen container
 coi unfreeze                  # Unfreeze all frozen COI containers
-sudo poweroff                 # Properly stop container (inside)
+close                         # Properly stop container (inside, safe alias for poweroff)
 coi shutdown <name>           # Graceful stop (outside)
 ```
 
@@ -519,6 +520,59 @@ enabled = true
 Audit logs are stored at `~/.coi/audit/<container-name>.jsonl` in JSON Lines format.
 
 See the [Security Monitoring wiki page](https://github.com/mensfeld/code-on-incus/wiki/Security-Monitoring) for monitoring commands, configuration options, NFT setup, and audit log management.
+
+### Audit streaming
+
+`coi audit` exposes the audit stream as JSON Lines on stdout, ready to pipe
+into a SIEM, `jq`, or a flat file:
+
+```sh
+# Dump the host-side audit log for a container
+coi audit coi-abc-1
+
+# Live in-container collector: auditd if available, otherwise syslog/auth.log,
+# plus periodic ss + ps snapshots
+coi audit coi-abc-1 --follow
+
+# Re-stream a saved JSONL file
+coi audit --file ./session.jsonl | jq -c 'select(.type=="net")'
+```
+
+Each line is a JSON object of the form:
+
+```json
+{"ts":"2026-05-05T12:34:56.789Z","sessionId":"coi-abc-1","container":"coi-abc-1",
+ "type":"exec|net|file|audit|heartbeat","pid":42,"comm":"curl","args":"curl https://...",
+ "peer":"1.2.3.4:443","path":"/etc/shadow","msg":"...","raw":"..."}
+```
+
+The `--follow` collector is a small POSIX-sh agent (`agent.sh`, no binary
+deploy). It picks the best available source — auditd first, falling back to
+`tail -F` of `/var/log/syslog` and `/var/log/auth.log` — and adds
+`ss -tunp` snapshots every 5 s plus `ps`-tree diffs every 2 s for new pids.
+Measured idle overhead: ~4.5 MB total RSS across the agent and its tail/awk
+helpers, ~0.0% CPU when the container is quiet.
+
+**Heartbeat / silent-failure detection.** The agent emits a
+`{"type":"heartbeat","seq":N,"sources":"..."}` event every 10 s. The host-side
+watcher tracks the most recent heartbeat per session and surfaces a warning
+if none arrives for 35 s (3 missed heartbeats with a small grace margin),
+both on stderr:
+
+```
+[audit] WARNING agent silent on coi-abc-1 for 36s (last heartbeat 2026-05-05T12:34:46Z)
+```
+
+and inside the JSONL stream as a `type=audit msg=agent.stale` event so SIEMs
+and downstream tooling can pick it up. When heartbeats resume, an
+`agent.alive` event clears the warning. The watcher does not auto-kill the
+connection — operators decide. Tunables: `COI_AUDIT_HEARTBEAT_INTERVAL` on
+the agent side; the 35 s stale threshold and 5 s check cadence are
+host-side defaults exposed as `audit.DefaultStaleAfter` and
+`audit.DefaultCheckInterval` for embedders.
+
+**Privacy model:** every event stays on the host running `coi audit`. Nothing
+is sent off-machine unless you pipe it elsewhere yourself.
 
 ## Security Best Practices
 

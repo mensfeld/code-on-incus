@@ -24,7 +24,7 @@ GOFMT=$(GOCMD) fmt
 GOVET=$(GOCMD) vet
 
 # Version injection
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+VERSION ?= $(shell (git describe --tags --always --dirty 2>/dev/null || echo "dev") | sed 's/^v//')
 LDFLAGS=-ldflags "-X github.com/mensfeld/code-on-incus/internal/cli.Version=$(VERSION)"
 
 # Check required system build dependencies.

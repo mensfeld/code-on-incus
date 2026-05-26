@@ -1,6 +1,34 @@
 # CHANGELOG
 
-## 0.8.1 (Unreleased)
+## 0.9.0 (Unreleased)
+
+### Improvements
+
+- **Base image downloaded directly from Canonical's CDN** — `coi build` now fetches the Ubuntu base image straight from `cloud-images.ubuntu.com` instead of relying on the LXC community image server (`images.linuxcontainers.org`), whose CDN mirrors are blocked in some corporate networks. COI fetches Canonical's simplestreams index directly in Go, downloads the `lxd.tar.xz` metadata and `squashfs` rootfs, and imports them into Incus as a local alias — bypassing Incus's own simplestreams client, which is incompatible with `cloud-images.ubuntu.com`. The default base image reference is now `ubuntu:24.04`; any `ubuntu:VERSION` reference triggers this download path. Users who prefer the old behaviour can set `[container.build] base = "images:ubuntu/22.04"` in their config. The `[container.build] base` override now also applies to `coi-default` builds (previously it was ignored for the default image). (#388)
+
+- **Interactive build prompt when image is missing** — When `coi shell` or `coi run` is invoked from a terminal and the required image does not exist, COI now asks "Build it now? (~5 min) [y/N]" instead of immediately failing. Answering `y` triggers the build inline and continues with the session. Non-interactive use (piped input, CI) is unchanged — the existing actionable error is returned immediately.
+
+- **Sudo ownership guidance in SANDBOX_CONTEXT.md** — The sandbox context file now instructs AI tools to fix workspace file ownership after `sudo` operations. Files created by `sudo` in the workspace are owned by root, blocking host-side access. The guidance tells tools to run `chown` after any sudo command that touches workspace files (#368).
+
+### Bug Fixes
+
+- **`poweroff` / `close` now work cleanly in Ubuntu 24.04 containers** — In Ubuntu 24.04, calling `sudo /usr/sbin/poweroff` triggered a systemd-logind transaction conflict (`Transaction for systemd-logind.service/start is destructive`), causing the shutdown to fail or hang. The power-management wrappers (`poweroff`, `shutdown`, `reboot`, `halt`, `close`) now call `sudo systemctl poweroff` directly, which bypasses logind and shuts the container down immediately. A companion one-shot systemd service (`coi-fix-hostname`) also now runs at every container boot to ensure the Incus-assigned hostname is present in `/etc/hosts`, eliminating the `sudo: unable to resolve host` warning that appeared before every privileged command.
+
+- **Clearer error when incus-admin group not active in session** — After installing COI and running `sudo usermod -aG incus-admin $USER`, users who ran `coi` without logging out first got a confusing generic error ("incus is not available"). COI now detects the case where the user is already in the group in `/etc/group` but the current session predates the change, and tells them exactly what to do: log out and back in, or run `newgrp incus-admin`. The `coi health` command also surfaces this distinction. (#383)
+
+- **Escape key now works correctly in nested tmux sessions** — The Escape key felt completely broken in applications like opencode and vim when using nested tmux (e.g. SSH → host tmux → COI tmux). The root cause was tmux's default `escape-time` of 500ms stacking across each nesting layer, adding up to multiple seconds of delay before Esc reached the application. COI now ships `/etc/tmux.conf` with `set -g escape-time 10`, reducing per-layer latency from 500ms to 10ms so that Esc reaches the application promptly even across multiple nesting levels. (#378)
+
+- **Effort level no longer locked when not configured** — `coi shell` was always injecting `effortLevel = "medium"` and `CLAUDE_CODE_EFFORT_LEVEL=medium` into Claude's `settings.json`, even when `effort_level` was not set in config. Claude treats `CLAUDE_CODE_EFFORT_LEVEL` as authoritative and refuses interactive overrides, making it impossible for users to change the effort level during a session. COI now only injects these settings when `effort_level` is explicitly set in `[tool.claude]`. The documented valid values have also been updated to include `xhigh`, `max`, and `auto`. (#376)
+
+- **`coi run` now applies network isolation and SSH agent forwarding from config** — `coi run` was silently ignoring the `[network]` and `[ssh]` sections of `.coi/config.toml`. Network isolation (`mode = "restricted"`) is now applied before the command runs, and `ssh.forward_agent = true` now forwards the host SSH agent socket into the container via `SSH_AUTH_SOCK`, matching the behaviour of `coi shell`. (#373)
+
+- **Fix double `v` prefix in version display** — `coi update` and `coi version` showed `vv0.8.x` instead of `v0.8.x` because `git describe --tags` already includes the `v` prefix and the Go code added another. The Makefile now strips the leading `v` from the injected version string.
+
+### New Features
+
+- **`coi audit` — live threat-event streaming from containers** — New `coi audit` command exposes the audit stream as JSON Lines on stdout, ready to pipe into a SIEM, `jq`, or a flat file. `coi audit <container>` dumps the host-side audit log; `coi audit <container> --follow` pushes a small POSIX-sh collector into the running container and streams live events: auditd `PATH` records become `type=file` events, `ss -tunp` snapshots every 5 s emit `type=net` events for new connections, and `ps` diffs every 2 s emit `type=exec` events for new processes. When auditd is absent the collector falls back to tailing `/var/log/syslog` and `/var/log/auth.log`. A heartbeat event is emitted every 10 s; the host warns on stderr if the agent goes silent for more than 35 s. No eBPF, no daemon install, no new Go dependencies — idle overhead is ~4.5 MB RSS and ~0.0% CPU. `coi audit --file ./session.jsonl` re-streams a saved recording. (contributed by @ChrisJr404, #362)
+
+## 0.8.1 (2026-05-07)
 
 ### Improvements
 

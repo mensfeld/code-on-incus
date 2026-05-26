@@ -1,8 +1,9 @@
 """
-Test behavior when image is missing on coi shell / coi run.
+Test non-interactive behavior when image is missing on coi shell / coi run.
 
-Since auto-build was removed, missing images now return an error
-instructing the user to run 'coi build' first.
+When stdin is NOT a terminal (piped subprocess), missing images return an
+error instructing the user to run 'coi build' first. Interactive TTY
+behavior (prompt to build) is covered in test_auto_build_prompt.py.
 
 Tests:
 - coi run with missing image → error with build instructions

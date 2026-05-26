@@ -38,7 +38,7 @@ func init() {
 func buildCommand(cmd *cobra.Command, args []string) error {
 	// Check if Incus is available
 	if !container.Available() {
-		return fmt.Errorf("incus is not available - please install Incus and ensure you're in the incus-admin group")
+		return container.IncusNotAvailableError()
 	}
 
 	// Check minimum Incus version
@@ -82,10 +82,16 @@ func buildCommand(cmd *cobra.Command, args []string) error {
 
 	// For coi-default image: always use the embedded build script
 	if imageName == image.CoiAlias {
+		// Allow overriding the base image via [container.build] base in profile/config.
+		coiBaseImage := image.BaseImage
+		if p.Container.Build.Base != "" {
+			coiBaseImage = p.Container.Build.Base
+		}
+
 		opts := image.BuildOptions{
 			Force:       buildForce,
 			ImageType:   "coi",
-			BaseImage:   image.BaseImage,
+			BaseImage:   coiBaseImage,
 			AliasName:   image.CoiAlias,
 			Description: "coi image (Docker + build tools + Claude CLI + GitHub CLI)",
 			Compression: buildCompression,

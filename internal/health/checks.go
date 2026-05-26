@@ -9,6 +9,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -198,13 +199,15 @@ func CheckPermissions() HealthCheck {
 		}
 	}
 
-	// Get user's groups
-	groups, err := currentUser.GroupIds()
+	// Use os.Getgroups() (getgroups(2)) to get the actual supplementary GIDs
+	// of the current process — not the group database. This correctly reflects
+	// whether the running session has picked up a recent usermod change.
+	activeGIDs, err := os.Getgroups()
 	if err != nil {
 		return HealthCheck{
 			Name:    "permissions",
 			Status:  StatusWarning,
-			Message: fmt.Sprintf("Could not determine user groups: %v", err),
+			Message: fmt.Sprintf("Could not determine active session groups: %v", err),
 		}
 	}
 
@@ -218,9 +221,10 @@ func CheckPermissions() HealthCheck {
 		}
 	}
 
-	// Check if user is in the group
-	for _, gid := range groups {
-		if gid == incusGroup.Gid {
+	// Check if the group is active in the current session.
+	incusGID, _ := strconv.Atoi(incusGroup.Gid)
+	for _, gid := range activeGIDs {
+		if gid == incusGID {
 			return HealthCheck{
 				Name:    "permissions",
 				Status:  StatusOK,
@@ -233,10 +237,19 @@ func CheckPermissions() HealthCheck {
 		}
 	}
 
+	// Not active in session — check if they were added but haven't re-logged in.
+	if container.UserInGroupFile(currentUser.Username, "incus-admin") {
+		return HealthCheck{
+			Name:    "permissions",
+			Status:  StatusFailed,
+			Message: fmt.Sprintf("User '%s' is in incus-admin group but session not reloaded — log out and back in, or run: newgrp incus-admin", currentUser.Username),
+		}
+	}
+
 	return HealthCheck{
 		Name:    "permissions",
 		Status:  StatusFailed,
-		Message: fmt.Sprintf("User '%s' not in incus-admin group", currentUser.Username),
+		Message: fmt.Sprintf("User '%s' not in incus-admin group — run: sudo usermod -aG incus-admin $USER", currentUser.Username),
 	}
 }
 
