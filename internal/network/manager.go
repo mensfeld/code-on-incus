@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -37,6 +38,7 @@ type Manager struct {
 	cacheManager  *CacheManager
 	containerName string
 	containerIP   string
+	homeDir       string
 
 	// iptables fallback (when firewalld unavailable but FORWARD DROP present)
 	iptablesBridgeName string
@@ -56,6 +58,7 @@ func NewManager(cfg *config.NetworkConfig) *Manager {
 	return &Manager{
 		config:       cfg,
 		cacheManager: NewCacheManager(homeDir),
+		homeDir:      homeDir,
 	}
 }
 
@@ -290,6 +293,21 @@ func (m *Manager) computeRefreshInterval(minTTL uint32) time.Duration {
 	return configInterval
 }
 
+// newRefreshLogger creates a file-based logger for the background refresh goroutine.
+// Writing to stderr would pollute the active terminal/tmux session.
+func (m *Manager) newRefreshLogger() *log.Logger {
+	logDir := filepath.Join(m.homeDir, ".coi", "logs")
+	if err := os.MkdirAll(logDir, 0o750); err != nil {
+		return log.New(os.Stderr, "[network-refresh] ", log.LstdFlags)
+	}
+	logPath := filepath.Join(logDir, fmt.Sprintf("network-refresh-%s.log", m.containerName))
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640)
+	if err != nil {
+		return log.New(os.Stderr, "[network-refresh] ", log.LstdFlags)
+	}
+	return log.New(f, "", log.LstdFlags)
+}
+
 // startRefresher starts the background IP refresh goroutine with TTL-aware scheduling.
 // It uses time.Timer instead of time.Ticker to allow dynamic rescheduling after each refresh.
 func (m *Manager) startRefresher(ctx context.Context, initialMinTTL uint32) {
@@ -305,25 +323,28 @@ func (m *Manager) startRefresher(ctx context.Context, initialMinTTL uint32) {
 
 	log.Printf("Starting IP refresh (interval: %s, TTL-based: %v)", interval, initialMinTTL > 0)
 
+	// Use a file logger so periodic refresh output doesn't pollute the terminal session.
+	logger := m.newRefreshLogger()
+
 	go func() {
 		defer timer.Stop()
 
 		for {
 			select {
 			case <-timer.C:
-				log.Println("IP refresh: checking for updated IPs...")
-				newMinTTL, err := m.refreshAllowedIPs()
+				logger.Println("IP refresh: checking for updated IPs...")
+				newMinTTL, err := m.refreshAllowedIPs(logger)
 				if err != nil {
-					log.Printf("Warning: IP refresh failed: %v", err)
+					logger.Printf("Warning: IP refresh failed: %v", err)
 				}
 
 				// Recompute interval from new TTLs
 				nextInterval := m.computeRefreshInterval(newMinTTL)
-				log.Printf("IP refresh: next check in %s", nextInterval)
+				logger.Printf("IP refresh: next check in %s", nextInterval)
 				timer.Reset(nextInterval)
 
 			case <-m.refreshCtx.Done():
-				log.Println("IP refresher stopped")
+				logger.Println("IP refresher stopped")
 				return
 			}
 		}
@@ -340,7 +361,7 @@ func (m *Manager) stopRefresher() {
 
 // refreshAllowedIPs refreshes domain IPs and updates firewall rules if changed.
 // Returns the minimum TTL from the new resolution for rescheduling.
-func (m *Manager) refreshAllowedIPs() (uint32, error) {
+func (m *Manager) refreshAllowedIPs(logger *log.Logger) (uint32, error) {
 	// Resolve all domains again
 	newIPs, err := m.resolver.ResolveAll(m.config.AllowedDomains)
 	if err != nil && len(newIPs) == 0 {
@@ -351,13 +372,13 @@ func (m *Manager) refreshAllowedIPs() (uint32, error) {
 
 	// Check if anything changed
 	if m.resolver.IPsUnchanged(newIPs) {
-		log.Println("IP refresh: no changes detected")
+		logger.Println("IP refresh: no changes detected")
 		return newMinTTL, nil
 	}
 
 	// Update firewall rules with new IPs
 	totalIPs := countIPs(newIPs)
-	log.Printf("IP refresh: updating firewall with %d IPs", totalIPs)
+	logger.Printf("IP refresh: updating firewall with %d IPs", totalIPs)
 
 	// Apply new rules BEFORE removing old ones to avoid a gap where no rules exist.
 	// firewall-cmd --direct --add-rule is idempotent, so duplicate rules are harmless.
@@ -368,19 +389,19 @@ func (m *Manager) refreshAllowedIPs() (uint32, error) {
 
 	// Now remove all rules (including stale ones) and reapply to clean up
 	if err := m.firewall.RemoveRules(); err != nil {
-		log.Printf("Warning: failed to remove old rules: %v", err)
+		logger.Printf("Warning: failed to remove old rules: %v", err)
 	}
 	if err := m.firewall.ApplyAllowlist(m.config, allowedIPs); err != nil {
-		log.Printf("Warning: failed to reapply rules after cleanup: %v", err)
+		logger.Printf("Warning: failed to reapply rules after cleanup: %v", err)
 	}
 
 	// Update cache
 	m.resolver.UpdateCache(newIPs)
 	if err := m.cacheManager.Save(m.containerName, m.resolver.GetCache()); err != nil {
-		log.Printf("Warning: Failed to save cache: %v", err)
+		logger.Printf("Warning: Failed to save cache: %v", err)
 	}
 
-	log.Printf("IP refresh: successfully updated firewall rules")
+	logger.Printf("IP refresh: successfully updated firewall rules")
 	return newMinTTL, nil
 }
 
