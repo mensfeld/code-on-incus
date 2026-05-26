@@ -4,16 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"log"
 	"net"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
+	"github.com/mensfeld/code-on-incus/internal/logger"
 )
 
 // errFirewallNotAvailable is the user-facing error message when firewalld is not available
@@ -39,19 +37,18 @@ type Manager struct {
 	cacheManager  *CacheManager
 	containerName string
 	containerIP   string
-	homeDir       string
+	logger        *logger.SessionLogger
 
 	// iptables fallback (when firewalld unavailable but FORWARD DROP present)
 	iptablesBridgeName string
 
 	// Refresher lifecycle (for allowlist mode)
-	refreshCtx     context.Context
-	refreshCancel  context.CancelFunc
-	refreshLogFile *os.File
+	refreshCtx    context.Context
+	refreshCancel context.CancelFunc
 }
 
 // NewManager creates a new network manager with the specified configuration
-func NewManager(cfg *config.NetworkConfig) *Manager {
+func NewManager(cfg *config.NetworkConfig, log *logger.SessionLogger) *Manager {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		homeDir = "/tmp"
@@ -60,7 +57,7 @@ func NewManager(cfg *config.NetworkConfig) *Manager {
 	return &Manager{
 		config:       cfg,
 		cacheManager: NewCacheManager(homeDir),
-		homeDir:      homeDir,
+		logger:       log,
 	}
 }
 
@@ -71,12 +68,12 @@ func (m *Manager) SetupForContainer(ctx context.Context, containerName string) e
 	// Handle different network modes
 	switch m.config.Mode {
 	case config.NetworkModeOpen:
-		log.Println("Network mode: open (no restrictions)")
+		m.logger.Println("Network mode: open (no restrictions)")
 		// Still need to add ACCEPT rules if firewall FORWARD policy is DROP
 		if FirewallAvailable() {
 			containerIP, err := GetContainerIP(containerName)
 			if err != nil {
-				log.Printf("Warning: could not get container IP for open mode rules: %v", err)
+				m.logger.Errorf("Warning: could not get container IP for open mode rules: %v", err)
 				return nil
 			}
 			// Cache the container IP for cleanup later
@@ -84,23 +81,23 @@ func (m *Manager) SetupForContainer(ctx context.Context, containerName string) e
 			// Create firewall manager for cleanup
 			m.firewall = NewFirewallManager(containerIP, "")
 			if err := EnsureOpenModeRules(containerIP); err != nil {
-				log.Printf("Warning: could not add open mode rules: %v", err)
+				m.logger.Errorf("Warning: could not add open mode rules: %v", err)
 			}
 		} else if NeedsIptablesFallback() {
 			bridgeName, err := GetIncusBridgeName()
 			if err != nil {
-				log.Printf("Warning: could not get bridge name for iptables fallback: %v", err)
+				m.logger.Errorf("Warning: could not get bridge name for iptables fallback: %v", err)
 			} else {
 				if err := EnsureIptablesBridgeRules(bridgeName); err != nil {
-					log.Printf("Warning: could not add iptables bridge rules: %v", err)
+					m.logger.Errorf("Warning: could not add iptables bridge rules: %v", err)
 				} else {
 					m.iptablesBridgeName = bridgeName
-					log.Printf("iptables fallback: added FORWARD ACCEPT rules for bridge %s (FORWARD policy is DROP, firewalld not available)", bridgeName)
+					m.logger.Printf("iptables fallback: added FORWARD ACCEPT rules for bridge %s (FORWARD policy is DROP, firewalld not available)", bridgeName)
 				}
 			}
 		} else {
-			log.Println("Warning: firewalld not available - container has unrestricted network access")
-			log.Println("         Network isolation (restricted/allowlist modes) requires firewalld")
+			m.logger.Errorln("Warning: firewalld not available - container has unrestricted network access")
+			m.logger.Errorln("         Network isolation (restricted/allowlist modes) requires firewalld")
 		}
 		return nil
 
@@ -117,7 +114,7 @@ func (m *Manager) SetupForContainer(ctx context.Context, containerName string) e
 
 // setupRestricted configures restricted mode using firewalld
 func (m *Manager) setupRestricted(ctx context.Context, containerName string) error {
-	log.Println("Network mode: restricted (blocking local/internal networks)")
+	m.logger.Println("Network mode: restricted (blocking local/internal networks)")
 
 	// Check if firewalld is available
 	if !FirewallAvailable() {
@@ -130,19 +127,19 @@ func (m *Manager) setupRestricted(ctx context.Context, containerName string) err
 		return fmt.Errorf("failed to get container IP: %w", err)
 	}
 	m.containerIP = containerIP
-	log.Printf("Container IP: %s", containerIP)
+	m.logger.Printf("Container IP: %s", containerIP)
 
 	// Get gateway IP
 	gatewayIP, err := getContainerGatewayIP(containerName)
 	if err != nil {
-		log.Printf("Warning: Could not auto-detect gateway IP: %v", err)
+		m.logger.Errorf("Warning: Could not auto-detect gateway IP: %v", err)
 	} else {
-		log.Printf("Gateway IP: %s", gatewayIP)
+		m.logger.Printf("Gateway IP: %s", gatewayIP)
 	}
 
 	// Disable IPv6 to prevent bypass of IPv4-only firewall rules
 	if err := DisableIPv6ForContainer(containerName); err != nil {
-		log.Printf("Warning: failed to disable IPv6: %v", err)
+		m.logger.Errorf("Warning: failed to disable IPv6: %v", err)
 	}
 
 	// Create firewall manager
@@ -153,14 +150,14 @@ func (m *Manager) setupRestricted(ctx context.Context, containerName string) err
 		return fmt.Errorf("failed to apply firewall rules: %w", err)
 	}
 
-	log.Printf("Firewall rules applied for container %s", containerName)
+	m.logger.Printf("Firewall rules applied for container %s", containerName)
 
 	// Log what is blocked
 	if config.BoolVal(m.config.BlockPrivateNetworks) {
-		log.Println("  Blocking private networks (RFC1918)")
+		m.logger.Println("  Blocking private networks (RFC1918)")
 	}
 	if config.BoolVal(m.config.BlockMetadataEndpoint) {
-		log.Println("  Blocking cloud metadata endpoints")
+		m.logger.Println("  Blocking cloud metadata endpoints")
 	}
 
 	return nil
@@ -168,7 +165,7 @@ func (m *Manager) setupRestricted(ctx context.Context, containerName string) err
 
 // setupAllowlist configures allowlist mode with DNS resolution and refresh
 func (m *Manager) setupAllowlist(ctx context.Context, containerName string) error {
-	log.Println("Network mode: allowlist (domain-based filtering)")
+	m.logger.Println("Network mode: allowlist (domain-based filtering)")
 
 	// Check if firewalld is available
 	if !FirewallAvailable() {
@@ -186,19 +183,19 @@ func (m *Manager) setupAllowlist(ctx context.Context, containerName string) erro
 		return fmt.Errorf("failed to get container IP: %w", err)
 	}
 	m.containerIP = containerIP
-	log.Printf("Container IP: %s", containerIP)
+	m.logger.Printf("Container IP: %s", containerIP)
 
 	// Get gateway IP
 	gatewayIP, err := getContainerGatewayIP(containerName)
 	if err != nil {
-		log.Printf("Warning: Could not auto-detect gateway IP: %v", err)
+		m.logger.Errorf("Warning: Could not auto-detect gateway IP: %v", err)
 	} else {
-		log.Printf("Gateway IP: %s", gatewayIP)
+		m.logger.Printf("Gateway IP: %s", gatewayIP)
 	}
 
 	// Disable IPv6 to prevent bypass of IPv4-only firewall rules
 	if err := DisableIPv6ForContainer(containerName); err != nil {
-		log.Printf("Warning: failed to disable IPv6: %v", err)
+		m.logger.Errorf("Warning: failed to disable IPv6: %v", err)
 	}
 
 	// Create firewall manager
@@ -207,7 +204,7 @@ func (m *Manager) setupAllowlist(ctx context.Context, containerName string) erro
 	// Load IP cache
 	cache, err := m.cacheManager.Load(containerName)
 	if err != nil {
-		log.Printf("Warning: Failed to load cache: %v", err)
+		m.logger.Errorf("Warning: Failed to load cache: %v", err)
 		cache = &IPCache{
 			Domains:    make(map[string][]string),
 			TTLs:       make(map[string]uint32),
@@ -219,7 +216,7 @@ func (m *Manager) setupAllowlist(ctx context.Context, containerName string) erro
 	m.resolver = NewResolver(cache)
 
 	// Resolve domains
-	log.Printf("Resolving %d allowed domains...", len(m.config.AllowedDomains))
+	m.logger.Printf("Resolving %d allowed domains...", len(m.config.AllowedDomains))
 	domainIPs, err := m.resolver.ResolveAll(m.config.AllowedDomains)
 	if err != nil && len(domainIPs) == 0 {
 		return fmt.Errorf("failed to resolve any allowed domains: %w", err)
@@ -227,15 +224,15 @@ func (m *Manager) setupAllowlist(ctx context.Context, containerName string) erro
 
 	// Log resolution results
 	totalIPs := countIPs(domainIPs)
-	log.Printf("Resolved %d domains to %d IPs", len(domainIPs), totalIPs)
+	m.logger.Printf("Resolved %d domains to %d IPs", len(domainIPs), totalIPs)
 	for domain, ips := range domainIPs {
-		log.Printf("  %s -> %d IPs", domain, len(ips))
+		m.logger.Printf("  %s -> %d IPs", domain, len(ips))
 	}
 
 	// Save resolved IPs to cache
 	m.resolver.UpdateCache(domainIPs)
 	if err := m.cacheManager.Save(containerName, m.resolver.GetCache()); err != nil {
-		log.Printf("Warning: Failed to save cache: %v", err)
+		m.logger.Errorf("Warning: Failed to save cache: %v", err)
 	}
 
 	// Collect all unique IPs from resolved domains
@@ -246,10 +243,10 @@ func (m *Manager) setupAllowlist(ctx context.Context, containerName string) erro
 		return fmt.Errorf("failed to apply firewall rules: %w", err)
 	}
 
-	log.Printf("Firewall rules applied for container %s", containerName)
-	log.Println("  Allowing only specified domains")
-	log.Println("  Blocking all RFC1918 private networks")
-	log.Println("  Blocking cloud metadata endpoints")
+	m.logger.Printf("Firewall rules applied for container %s", containerName)
+	m.logger.Println("  Allowing only specified domains")
+	m.logger.Println("  Blocking all RFC1918 private networks")
+	m.logger.Println("  Blocking cloud metadata endpoints")
 
 	// Compute initial refresh interval from DNS TTLs
 	minTTL := m.resolver.GetMinTTL()
@@ -295,31 +292,11 @@ func (m *Manager) computeRefreshInterval(minTTL uint32) time.Duration {
 	return configInterval
 }
 
-// newRefreshLogger creates a file-based logger for the background refresh goroutine.
-// Writing to stderr would pollute the active terminal/tmux session, so errors fall
-// back to io.Discard (after a single warning) rather than stderr.
-// The caller must close m.refreshLogFile when the goroutine exits.
-func (m *Manager) newRefreshLogger() *log.Logger {
-	logDir := filepath.Join(m.homeDir, ".coi", "logs")
-	if err := os.MkdirAll(logDir, 0o750); err != nil {
-		log.Printf("Warning: cannot create network-refresh log dir, refresh output suppressed: %v", err)
-		return log.New(io.Discard, "", 0)
-	}
-	logPath := filepath.Join(logDir, fmt.Sprintf("network-refresh-%s.log", m.containerName))
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640)
-	if err != nil {
-		log.Printf("Warning: cannot open network-refresh log file, refresh output suppressed: %v", err)
-		return log.New(io.Discard, "", 0)
-	}
-	m.refreshLogFile = f
-	return log.New(f, "", log.LstdFlags)
-}
-
 // startRefresher starts the background IP refresh goroutine with TTL-aware scheduling.
 // It uses time.Timer instead of time.Ticker to allow dynamic rescheduling after each refresh.
 func (m *Manager) startRefresher(ctx context.Context, initialMinTTL uint32) {
 	if m.config.RefreshIntervalMinutes <= 0 {
-		log.Println("IP refresh disabled (refresh_interval_minutes <= 0)")
+		m.logger.Println("IP refresh disabled (refresh_interval_minutes <= 0)")
 		return
 	}
 
@@ -328,36 +305,27 @@ func (m *Manager) startRefresher(ctx context.Context, initialMinTTL uint32) {
 	interval := m.computeRefreshInterval(initialMinTTL)
 	timer := time.NewTimer(interval)
 
-	log.Printf("Starting IP refresh (interval: %s, TTL-based: %v)", interval, initialMinTTL > 0)
-
-	// Use a file logger so periodic refresh output doesn't pollute the terminal session.
-	logger := m.newRefreshLogger()
+	m.logger.Printf("Starting IP refresh (interval: %s, TTL-based: %v)", interval, initialMinTTL > 0)
 
 	go func() {
 		defer timer.Stop()
-		defer func() {
-			if m.refreshLogFile != nil {
-				m.refreshLogFile.Close()
-				m.refreshLogFile = nil
-			}
-		}()
 
 		for {
 			select {
 			case <-timer.C:
-				logger.Println("IP refresh: checking for updated IPs...")
-				newMinTTL, err := m.refreshAllowedIPs(logger)
+				m.logger.Println("IP refresh: checking for updated IPs...")
+				newMinTTL, err := m.refreshAllowedIPs()
 				if err != nil {
-					logger.Printf("Warning: IP refresh failed: %v", err)
+					m.logger.Errorf("Warning: IP refresh failed: %v", err)
 				}
 
 				// Recompute interval from new TTLs
 				nextInterval := m.computeRefreshInterval(newMinTTL)
-				logger.Printf("IP refresh: next check in %s", nextInterval)
+				m.logger.Printf("IP refresh: next check in %s", nextInterval)
 				timer.Reset(nextInterval)
 
 			case <-m.refreshCtx.Done():
-				logger.Println("IP refresher stopped")
+				m.logger.Println("IP refresher stopped")
 				return
 			}
 		}
@@ -374,7 +342,7 @@ func (m *Manager) stopRefresher() {
 
 // refreshAllowedIPs refreshes domain IPs and updates firewall rules if changed.
 // Returns the minimum TTL from the new resolution for rescheduling.
-func (m *Manager) refreshAllowedIPs(logger *log.Logger) (uint32, error) {
+func (m *Manager) refreshAllowedIPs() (uint32, error) {
 	// Resolve all domains again
 	newIPs, err := m.resolver.ResolveAll(m.config.AllowedDomains)
 	if err != nil && len(newIPs) == 0 {
@@ -385,13 +353,13 @@ func (m *Manager) refreshAllowedIPs(logger *log.Logger) (uint32, error) {
 
 	// Check if anything changed
 	if m.resolver.IPsUnchanged(newIPs) {
-		logger.Println("IP refresh: no changes detected")
+		m.logger.Println("IP refresh: no changes detected")
 		return newMinTTL, nil
 	}
 
 	// Update firewall rules with new IPs
 	totalIPs := countIPs(newIPs)
-	logger.Printf("IP refresh: updating firewall with %d IPs", totalIPs)
+	m.logger.Printf("IP refresh: updating firewall with %d IPs", totalIPs)
 
 	// Apply new rules BEFORE removing old ones to avoid a gap where no rules exist.
 	// firewall-cmd --direct --add-rule is idempotent, so duplicate rules are harmless.
@@ -402,19 +370,19 @@ func (m *Manager) refreshAllowedIPs(logger *log.Logger) (uint32, error) {
 
 	// Now remove all rules (including stale ones) and reapply to clean up
 	if err := m.firewall.RemoveRules(); err != nil {
-		logger.Printf("Warning: failed to remove old rules: %v", err)
+		m.logger.Errorf("Warning: failed to remove old rules: %v", err)
 	}
 	if err := m.firewall.ApplyAllowlist(m.config, allowedIPs); err != nil {
-		logger.Printf("Warning: failed to reapply rules after cleanup: %v", err)
+		m.logger.Errorf("Warning: failed to reapply rules after cleanup: %v", err)
 	}
 
 	// Update cache
 	m.resolver.UpdateCache(newIPs)
 	if err := m.cacheManager.Save(m.containerName, m.resolver.GetCache()); err != nil {
-		logger.Printf("Warning: Failed to save cache: %v", err)
+		m.logger.Errorf("Warning: Failed to save cache: %v", err)
 	}
 
-	logger.Printf("IP refresh: successfully updated firewall rules")
+	m.logger.Printf("IP refresh: successfully updated firewall rules")
 	return newMinTTL, nil
 }
 
@@ -456,12 +424,12 @@ func (m *Manager) Teardown(ctx context.Context, containerName string) error {
 
 		if !hasOtherContainers {
 			if err := RemoveIptablesBridgeRules(m.iptablesBridgeName); err != nil {
-				log.Printf("Warning: failed to remove iptables bridge rules: %v", err)
+				m.logger.Errorf("Warning: failed to remove iptables bridge rules: %v", err)
 			} else {
-				log.Printf("iptables fallback: removed FORWARD ACCEPT rules for bridge %s", m.iptablesBridgeName)
+				m.logger.Printf("iptables fallback: removed FORWARD ACCEPT rules for bridge %s", m.iptablesBridgeName)
 			}
 		} else {
-			log.Printf("iptables fallback: skipping rule removal, other containers still running")
+			m.logger.Printf("iptables fallback: skipping rule removal, other containers still running")
 		}
 	}
 
@@ -491,9 +459,9 @@ func (m *Manager) Teardown(ctx context.Context, containerName string) error {
 	// Remove firewall rules for ALL modes
 	if m.firewall != nil {
 		if err := m.firewall.RemoveRules(); err != nil {
-			log.Printf("Warning: failed to remove firewall rules: %v", err)
+			m.logger.Errorf("Warning: failed to remove firewall rules: %v", err)
 		} else {
-			log.Printf("Firewall rules removed for container %s", containerName)
+			m.logger.Printf("Firewall rules removed for container %s", containerName)
 		}
 	}
 

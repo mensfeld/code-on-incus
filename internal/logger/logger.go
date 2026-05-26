@@ -1,0 +1,133 @@
+package logger
+
+import (
+	"fmt"
+	"io"
+	"log"
+	"os"
+	"path/filepath"
+	"sync"
+)
+
+// SessionLogger writes informational output to <container>.stdout.log and
+// warnings/errors to <container>.stderr.log under ~/.coi/logs/.
+// All methods are safe for concurrent use.
+type SessionLogger struct {
+	outMu   sync.Mutex
+	errMu   sync.Mutex
+	outFile *os.File
+	errFile *os.File
+	out     *log.Logger
+	err     *log.Logger
+	outPath string
+	errPath string
+}
+
+// New creates both log files under homeDir/.coi/logs/.
+// On any error a single warning is printed to stderr and a discard logger is returned.
+// New never returns nil.
+func New(containerName, homeDir string) *SessionLogger {
+	logDir := filepath.Join(homeDir, ".coi", "logs")
+	if err := os.MkdirAll(logDir, 0o750); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: cannot create session log dir, session output suppressed: %v\n", err)
+		return newDiscard()
+	}
+
+	outPath := filepath.Join(logDir, containerName+".stdout.log")
+	errPath := filepath.Join(logDir, containerName+".stderr.log")
+
+	outFile, err := os.OpenFile(outPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: cannot open session stdout log, output suppressed: %v\n", err)
+		return newDiscard()
+	}
+
+	errFile, err := os.OpenFile(errPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640)
+	if err != nil {
+		_ = outFile.Close()
+		fmt.Fprintf(os.Stderr, "Warning: cannot open session stderr log, output suppressed: %v\n", err)
+		return newDiscard()
+	}
+
+	return &SessionLogger{
+		outFile: outFile,
+		errFile: errFile,
+		out:     log.New(outFile, "", log.LstdFlags),
+		err:     log.New(errFile, "", log.LstdFlags),
+		outPath: outPath,
+		errPath: errPath,
+	}
+}
+
+// NewDiscard returns a no-op logger that discards all output.
+// Use in tests and non-session callers (coi run, configure).
+func NewDiscard() *SessionLogger {
+	return newDiscard()
+}
+
+func newDiscard() *SessionLogger {
+	return &SessionLogger{
+		out: log.New(io.Discard, "", 0),
+		err: log.New(io.Discard, "", 0),
+	}
+}
+
+// Printf writes an informational message to the stdout log.
+func (l *SessionLogger) Printf(format string, args ...any) {
+	l.outMu.Lock()
+	defer l.outMu.Unlock()
+	l.out.Printf(format, args...)
+}
+
+// Println writes an informational message to the stdout log.
+func (l *SessionLogger) Println(v ...any) {
+	l.outMu.Lock()
+	defer l.outMu.Unlock()
+	l.out.Println(v...)
+}
+
+// Errorf writes a warning or error message to the stderr log.
+func (l *SessionLogger) Errorf(format string, args ...any) {
+	l.errMu.Lock()
+	defer l.errMu.Unlock()
+	l.err.Printf(format, args...)
+}
+
+// Errorln writes a warning or error message to the stderr log.
+func (l *SessionLogger) Errorln(v ...any) {
+	l.errMu.Lock()
+	defer l.errMu.Unlock()
+	l.err.Println(v...)
+}
+
+// OutPath returns the absolute path of the stdout log file.
+// Returns empty string for discard loggers.
+func (l *SessionLogger) OutPath() string { return l.outPath }
+
+// ErrPath returns the absolute path of the stderr log file.
+// Returns empty string for discard loggers.
+func (l *SessionLogger) ErrPath() string { return l.errPath }
+
+// Close closes both underlying log files.
+// Safe to call on a discard logger or multiple times.
+func (l *SessionLogger) Close() error {
+	l.outMu.Lock()
+	l.errMu.Lock()
+	defer l.outMu.Unlock()
+	defer l.errMu.Unlock()
+
+	var firstErr error
+	if l.outFile != nil {
+		if err := l.outFile.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+		l.outFile = nil
+	}
+	if l.errFile != nil {
+		if err := l.errFile.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+		l.errFile = nil
+	}
+	return firstErr
+}

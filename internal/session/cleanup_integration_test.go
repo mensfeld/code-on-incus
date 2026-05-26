@@ -9,6 +9,7 @@ import (
 
 	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
+	"github.com/mensfeld/code-on-incus/internal/logger"
 	"github.com/mensfeld/code-on-incus/internal/network"
 )
 
@@ -103,7 +104,7 @@ func TestEndToEndCleanupWithOpenMode(t *testing.T) {
 	netCfg := &config.NetworkConfig{
 		Mode: config.NetworkModeOpen,
 	}
-	netMgr := network.NewManager(netCfg)
+	netMgr := network.NewManager(netCfg, logger.NewDiscard())
 
 	// Set up network (creates firewall rules)
 	if err := netMgr.SetupForContainer(context.Background(), containerName); err != nil {
@@ -240,7 +241,7 @@ func TestEndToEndCleanupWithRestrictedMode(t *testing.T) {
 		BlockPrivateNetworks:  &boolTrue,
 		BlockMetadataEndpoint: &boolTrue,
 	}
-	netMgr := network.NewManager(netCfg)
+	netMgr := network.NewManager(netCfg, logger.NewDiscard())
 
 	// Set up network (creates firewall rules)
 	if err := netMgr.SetupForContainer(context.Background(), containerName); err != nil {
@@ -369,7 +370,7 @@ func TestEndToEndCleanupMultipleContainers(t *testing.T) {
 		netCfg := &config.NetworkConfig{
 			Mode: config.NetworkModeOpen,
 		}
-		netMgr := network.NewManager(netCfg)
+		netMgr := network.NewManager(netCfg, logger.NewDiscard())
 		if err := netMgr.SetupForContainer(context.Background(), containerName); err != nil {
 			t.Logf("Warning: SetupForContainer failed for %s: %v", containerName, err)
 		}

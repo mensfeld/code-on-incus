@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/mensfeld/code-on-incus/internal/container"
+	"github.com/mensfeld/code-on-incus/internal/logger"
 	"github.com/mensfeld/code-on-incus/internal/network"
 	"github.com/mensfeld/code-on-incus/internal/tool"
 )
@@ -24,6 +25,7 @@ type CleanupOptions struct {
 	Workspace      string    // Workspace directory path
 	Tool           tool.Tool // AI coding tool being used
 	NetworkManager *network.Manager
+	SessionLogger  *logger.SessionLogger
 	Logger         func(string)
 }
 
@@ -128,6 +130,10 @@ func Cleanup(opts CleanupOptions) error {
 		} else {
 			opts.Logger("Container was already removed")
 		}
+	}
+
+	if opts.SessionLogger != nil {
+		opts.SessionLogger.Close()
 	}
 
 	return nil

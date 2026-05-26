@@ -13,6 +13,7 @@ import (
 	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/limits"
+	"github.com/mensfeld/code-on-incus/internal/logger"
 	"github.com/mensfeld/code-on-incus/internal/network"
 	"github.com/mensfeld/code-on-incus/internal/tool"
 )
@@ -57,6 +58,7 @@ type SetupResult struct {
 	Manager                *container.Manager
 	NetworkManager         *network.Manager
 	TimeoutMonitor         *limits.TimeoutMonitor
+	Logger                 *logger.SessionLogger
 	HomeDir                string
 	RunAsRoot              bool
 	Image                  string
@@ -93,6 +95,9 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 	}
 	result.ContainerName = containerName
 	result.Manager = container.NewManager(containerName)
+
+	hostHome, _ := os.UserHomeDir()
+	result.Logger = logger.New(containerName, hostHome)
 
 	// 1.5 Validate Bedrock setup if running in Colima/Lima
 	if isColimaOrLimaEnvironment() && opts.CLIConfigPath != "" {
@@ -500,7 +505,7 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 				config.BoolVal(opts.LimitsConfig.Runtime.AutoStop),
 				config.BoolVal(opts.LimitsConfig.Runtime.StopGraceful),
 				opts.IncusProject,
-				opts.Logger,
+				result.Logger,
 			)
 			result.TimeoutMonitor.Start()
 		}
@@ -508,7 +513,7 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 
 	// 8. Setup network isolation (after container is running and has IP)
 	if opts.NetworkConfig != nil {
-		result.NetworkManager = network.NewManager(opts.NetworkConfig)
+		result.NetworkManager = network.NewManager(opts.NetworkConfig, result.Logger)
 		if err := result.NetworkManager.SetupForContainer(context.Background(), result.ContainerName); err != nil {
 			return nil, fmt.Errorf("failed to setup network isolation: %w", err)
 		}
