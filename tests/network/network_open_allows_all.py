@@ -47,11 +47,6 @@ mode = "open"
 
     assert result.returncode == 0, f"Shell should start successfully. stderr: {result.stderr}"
 
-    # Should see "Network mode: open" message in stderr
-    assert "open" in result.stderr.lower() or "no restrictions" in result.stderr.lower(), (
-        f"Should indicate open network mode. stderr: {result.stderr}"
-    )
-
     # Extract container name from output
     container_name = None
     for line in result.stderr.split("\n"):

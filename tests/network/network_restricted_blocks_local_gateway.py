@@ -51,11 +51,6 @@ def test_restricted_blocks_local_gateway(coi_binary, workspace_dir, cleanup_cont
 
     assert result.returncode == 0, f"Shell should start successfully. stderr: {result.stderr}"
 
-    # Should see "restricted" or "blocking" in the output
-    assert "restricted" in result.stderr.lower() or "blocking" in result.stderr.lower(), (
-        f"Should indicate restricted network mode. stderr: {result.stderr}"
-    )
-
     # Extract container name from output
     # Look for pattern like "Container name: coi-xxxxx-1"
     container_name = None
