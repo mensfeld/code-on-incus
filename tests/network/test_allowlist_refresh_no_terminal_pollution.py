@@ -81,9 +81,7 @@ refresh_interval_minutes = 1
         os.unlink(config_file)
 
 
-def test_setup_phase_logs_still_appear_in_terminal(
-    coi_binary, workspace_dir, cleanup_containers
-):
+def test_setup_phase_logs_still_appear_in_terminal(coi_binary, workspace_dir, cleanup_containers):
     """
     One-time setup messages (logged before the shell launches) must remain
     visible on stderr so the user can see what the network setup is doing.
@@ -173,18 +171,14 @@ refresh_interval_minutes = 1
 
         # The log file is created when the goroutine starts (before any refresh fires),
         # so it should exist immediately after container startup.
-        log_file = os.path.expanduser(
-            f"~/.coi/logs/network-refresh-{container_name}.log"
-        )
+        log_file = os.path.expanduser(f"~/.coi/logs/network-refresh-{container_name}.log")
 
         # Poll briefly — the goroutine starts asynchronously but almost instantly.
         deadline = time.time() + 10
         while not os.path.exists(log_file) and time.time() < deadline:
             time.sleep(0.5)
 
-        assert os.path.exists(log_file), (
-            f"Expected refresh log file to be created at {log_file}"
-        )
+        assert os.path.exists(log_file), f"Expected refresh log file to be created at {log_file}"
 
     finally:
         os.unlink(config_file)
