@@ -517,6 +517,59 @@ Audit logs are stored at `~/.coi/audit/<container-name>.jsonl` in JSON Lines for
 
 See the [Security Monitoring wiki page](https://github.com/mensfeld/code-on-incus/wiki/Security-Monitoring) for monitoring commands, configuration options, NFT setup, and audit log management.
 
+### Audit streaming
+
+`coi audit` exposes the audit stream as JSON Lines on stdout, ready to pipe
+into a SIEM, `jq`, or a flat file:
+
+```sh
+# Dump the host-side audit log for a container
+coi audit coi-abc-1
+
+# Live in-container collector: auditd if available, otherwise syslog/auth.log,
+# plus periodic ss + ps snapshots
+coi audit coi-abc-1 --follow
+
+# Re-stream a saved JSONL file
+coi audit --file ./session.jsonl | jq -c 'select(.type=="net")'
+```
+
+Each line is a JSON object of the form:
+
+```json
+{"ts":"2026-05-05T12:34:56.789Z","sessionId":"coi-abc-1","container":"coi-abc-1",
+ "type":"exec|net|file|audit|heartbeat","pid":42,"comm":"curl","args":"curl https://...",
+ "peer":"1.2.3.4:443","path":"/etc/shadow","msg":"...","raw":"..."}
+```
+
+The `--follow` collector is a small POSIX-sh agent (`agent.sh`, no binary
+deploy). It picks the best available source — auditd first, falling back to
+`tail -F` of `/var/log/syslog` and `/var/log/auth.log` — and adds
+`ss -tunp` snapshots every 5 s plus `ps`-tree diffs every 2 s for new pids.
+Measured idle overhead: ~4.5 MB total RSS across the agent and its tail/awk
+helpers, ~0.0% CPU when the container is quiet.
+
+**Heartbeat / silent-failure detection.** The agent emits a
+`{"type":"heartbeat","seq":N,"sources":"..."}` event every 10 s. The host-side
+watcher tracks the most recent heartbeat per session and surfaces a warning
+if none arrives for 35 s (3 missed heartbeats with a small grace margin),
+both on stderr:
+
+```
+[audit] WARNING agent silent on coi-abc-1 for 36s (last heartbeat 2026-05-05T12:34:46Z)
+```
+
+and inside the JSONL stream as a `type=audit msg=agent.stale` event so SIEMs
+and downstream tooling can pick it up. When heartbeats resume, an
+`agent.alive` event clears the warning. The watcher does not auto-kill the
+connection — operators decide. Tunables: `COI_AUDIT_HEARTBEAT_INTERVAL` on
+the agent side; the 35 s stale threshold and 5 s check cadence are
+host-side defaults exposed as `audit.DefaultStaleAfter` and
+`audit.DefaultCheckInterval` for embedders.
+
+**Privacy model:** every event stays on the host running `coi audit`. Nothing
+is sent off-machine unless you pipe it elsewhere yourself.
+
 ## Security Best Practices
 
 See the [Security Best Practices guide](https://github.com/mensfeld/code-on-incus/wiki/Security-Best-Practices) for detailed security recommendations.
