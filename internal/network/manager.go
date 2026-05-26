@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -46,6 +47,7 @@ type Manager struct {
 	// Refresher lifecycle (for allowlist mode)
 	refreshCtx    context.Context
 	refreshCancel context.CancelFunc
+	refreshLogFile *os.File
 }
 
 // NewManager creates a new network manager with the specified configuration
@@ -294,17 +296,22 @@ func (m *Manager) computeRefreshInterval(minTTL uint32) time.Duration {
 }
 
 // newRefreshLogger creates a file-based logger for the background refresh goroutine.
-// Writing to stderr would pollute the active terminal/tmux session.
+// Writing to stderr would pollute the active terminal/tmux session, so errors fall
+// back to io.Discard (after a single warning) rather than stderr.
+// The caller must close m.refreshLogFile when the goroutine exits.
 func (m *Manager) newRefreshLogger() *log.Logger {
 	logDir := filepath.Join(m.homeDir, ".coi", "logs")
 	if err := os.MkdirAll(logDir, 0o750); err != nil {
-		return log.New(os.Stderr, "[network-refresh] ", log.LstdFlags)
+		log.Printf("Warning: cannot create network-refresh log dir, refresh output suppressed: %v", err)
+		return log.New(io.Discard, "", 0)
 	}
 	logPath := filepath.Join(logDir, fmt.Sprintf("network-refresh-%s.log", m.containerName))
 	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640)
 	if err != nil {
-		return log.New(os.Stderr, "[network-refresh] ", log.LstdFlags)
+		log.Printf("Warning: cannot open network-refresh log file, refresh output suppressed: %v", err)
+		return log.New(io.Discard, "", 0)
 	}
+	m.refreshLogFile = f
 	return log.New(f, "", log.LstdFlags)
 }
 
@@ -328,6 +335,12 @@ func (m *Manager) startRefresher(ctx context.Context, initialMinTTL uint32) {
 
 	go func() {
 		defer timer.Stop()
+		defer func() {
+			if m.refreshLogFile != nil {
+				m.refreshLogFile.Close()
+				m.refreshLogFile = nil
+			}
+		}()
 
 		for {
 			select {
