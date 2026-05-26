@@ -45,8 +45,8 @@ type Manager struct {
 	iptablesBridgeName string
 
 	// Refresher lifecycle (for allowlist mode)
-	refreshCtx    context.Context
-	refreshCancel context.CancelFunc
+	refreshCtx     context.Context
+	refreshCancel  context.CancelFunc
 	refreshLogFile *os.File
 }
 
