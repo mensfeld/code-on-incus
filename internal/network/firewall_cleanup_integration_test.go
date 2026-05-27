@@ -9,6 +9,7 @@ import (
 
 	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
+	"github.com/mensfeld/code-on-incus/internal/logger"
 )
 
 // cleanupTestContainer is a helper that ensures complete cleanup of a test container
@@ -94,7 +95,7 @@ func TestOpenModeFirewallCleanup(t *testing.T) {
 	netCfg := &config.NetworkConfig{
 		Mode: config.NetworkModeOpen,
 	}
-	netMgr := NewManager(netCfg)
+	netMgr := NewManager(netCfg, logger.NewDiscard())
 
 	// Set up network (creates firewall rules)
 	if err := netMgr.SetupForContainer(context.Background(), containerName); err != nil {
@@ -191,7 +192,7 @@ func TestRestrictedModeFirewallCleanup(t *testing.T) {
 		BlockPrivateNetworks:  &boolTrue,
 		BlockMetadataEndpoint: &boolTrue,
 	}
-	netMgr := NewManager(netCfg)
+	netMgr := NewManager(netCfg, logger.NewDiscard())
 
 	// Set up network (creates firewall rules)
 	if err := netMgr.SetupForContainer(context.Background(), containerName); err != nil {
@@ -293,7 +294,7 @@ func TestFirewallCleanupBeforeContainerDeletion(t *testing.T) {
 		BlockPrivateNetworks:  &boolTrue,
 		BlockMetadataEndpoint: &boolTrue,
 	}
-	netMgr := NewManager(netCfg)
+	netMgr := NewManager(netCfg, logger.NewDiscard())
 
 	// Set up network (creates firewall rules)
 	if err := netMgr.SetupForContainer(context.Background(), containerName); err != nil {
@@ -399,7 +400,7 @@ func TestFirewallCleanupCorrectOrder(t *testing.T) {
 		BlockPrivateNetworks:  &boolTrue,
 		BlockMetadataEndpoint: &boolTrue,
 	}
-	netMgr := NewManager(netCfg)
+	netMgr := NewManager(netCfg, logger.NewDiscard())
 
 	// Set up network (creates firewall rules)
 	if err := netMgr.SetupForContainer(context.Background(), containerName); err != nil {

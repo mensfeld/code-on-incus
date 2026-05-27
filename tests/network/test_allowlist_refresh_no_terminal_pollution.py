@@ -9,15 +9,16 @@ goroutine used the global log package (stderr), which is attached to the
 running tmux/shell session, causing every refresh cycle to dump log lines
 directly into the user's terminal.
 
-After the fix, goroutine output is written to
-~/.coi/logs/network-refresh-<container>.log instead.
+After the SessionLogger migration, all network manager logging goes to
+~/.coi/logs/<container>.stdout.log and ~/.coi/logs/<container>.stderr.log
+rather than the terminal.
 
 What we verify:
   1. Startup stderr/stdout does NOT contain background-goroutine-only messages
      ("checking for updated IPs", "no changes detected", "next check in").
-  2. The one-time setup message "Starting IP refresh" IS present in startup
-     output (setup-phase logging is intentionally kept on stderr).
-  3. The log file ~/.coi/logs/network-refresh-<container>.log is created so
+  2. The one-time setup message "Starting IP refresh" IS present in the
+     session log file (~/.coi/logs/<container>.stdout.log).
+  3. The session log file ~/.coi/logs/<container>.stdout.log is created so
      that the output is not silently discarded.
 """
 
@@ -81,10 +82,11 @@ refresh_interval_minutes = 1
         os.unlink(config_file)
 
 
-def test_setup_phase_logs_still_appear_in_terminal(coi_binary, workspace_dir, cleanup_containers):
+def test_network_setup_logs_captured_in_session_log(coi_binary, workspace_dir, cleanup_containers):
     """
-    One-time setup messages (logged before the shell launches) must remain
-    visible on stderr so the user can see what the network setup is doing.
+    One-time setup messages (e.g. "Starting IP refresh") are written to the
+    session log file (~/.coi/logs/<container>.stdout.log) rather than the
+    terminal after the SessionLogger migration.
     """
     with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as f:
         f.write("""
@@ -113,11 +115,33 @@ refresh_interval_minutes = 30
 
         assert result.returncode == 0, f"coi shell failed: {result.stderr}"
 
-        output = result.stdout + result.stderr
+        # Extract container name from terminal output.
+        container_name = None
+        for line in (result.stdout + result.stderr).split("\n"):
+            if "Container:" in line or "Container name:" in line:
+                parts = line.split(":", 1)
+                if len(parts) == 2:
+                    container_name = parts[1].strip()
+                    break
 
-        # Setup-phase messages must still reach the terminal.
-        assert "Starting IP refresh" in output, (
-            f"Expected 'Starting IP refresh' in startup output.\nFull output:\n{output}"
+        assert container_name, (
+            f"Could not find container name in output:\n{result.stdout + result.stderr}"
+        )
+
+        # Poll until the session stdout log file exists (created asynchronously).
+        log_path = os.path.expanduser(f"~/.coi/logs/{container_name}.stdout.log")
+        deadline = time.time() + 15
+        while not os.path.exists(log_path) and time.time() < deadline:
+            time.sleep(0.5)
+
+        assert os.path.exists(log_path), f"Expected session log file to exist at {log_path}"
+
+        with open(log_path) as fh:
+            log_contents = fh.read()
+
+        assert "Starting IP refresh" in log_contents, (
+            f"Expected 'Starting IP refresh' in session log {log_path}.\n"
+            f"Log contents:\n{log_contents}"
         )
 
     finally:
@@ -126,11 +150,9 @@ refresh_interval_minutes = 30
 
 def test_refresh_log_file_created(coi_binary, workspace_dir, cleanup_containers):
     """
-    Background refresh output must be written to
-    ~/.coi/logs/network-refresh-<container>.log, not discarded.
+    Session logger output must be written to
+    ~/.coi/logs/<container>.stdout.log, not discarded.
     """
-    # Use refresh_interval_minutes=1 and sleep past the first tick so the
-    # goroutine actually fires and writes to the log file.
     with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as f:
         f.write("""
 [network]
@@ -161,24 +183,25 @@ refresh_interval_minutes = 1
         # Extract container name from output
         container_name = None
         for line in (result.stdout + result.stderr).split("\n"):
-            if "Container: " in line:
-                container_name = line.split("Container: ")[1].strip()
-                break
+            if "Container:" in line or "Container name:" in line:
+                parts = line.split(":", 1)
+                if len(parts) == 2:
+                    container_name = parts[1].strip()
+                    break
 
         assert container_name, (
             f"Could not find container name in output:\n{result.stdout + result.stderr}"
         )
 
-        # The log file is created when the goroutine starts (before any refresh fires),
-        # so it should exist immediately after container startup.
-        log_file = os.path.expanduser(f"~/.coi/logs/network-refresh-{container_name}.log")
+        # The session log file is created at container startup.
+        log_file = os.path.expanduser(f"~/.coi/logs/{container_name}.stdout.log")
 
-        # Poll briefly — the goroutine starts asynchronously but almost instantly.
+        # Poll briefly — the file is created asynchronously but almost instantly.
         deadline = time.time() + 10
         while not os.path.exists(log_file) and time.time() < deadline:
             time.sleep(0.5)
 
-        assert os.path.exists(log_file), f"Expected refresh log file to be created at {log_file}"
+        assert os.path.exists(log_file), f"Expected session log file to be created at {log_file}"
 
     finally:
         os.unlink(config_file)

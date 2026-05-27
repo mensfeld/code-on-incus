@@ -11,6 +11,7 @@ import (
 	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/limits"
+	"github.com/mensfeld/code-on-incus/internal/logger"
 	"github.com/mensfeld/code-on-incus/internal/network"
 	"github.com/mensfeld/code-on-incus/internal/session"
 	"github.com/spf13/cobra"
@@ -604,7 +605,7 @@ func applyNetworkIsolation(containerName string) (*network.Manager, error) {
 	} else if changed {
 		fmt.Fprintf(os.Stderr, "Added %s to firewalld trusted zone\n", bridgeName)
 	}
-	nm := network.NewManager(&networkConfig)
+	nm := network.NewManager(&networkConfig, logger.NewDiscard())
 	if err := nm.SetupForContainer(context.Background(), containerName); err != nil {
 		return nil, fmt.Errorf("failed to setup network isolation: %w", err)
 	}
