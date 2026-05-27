@@ -35,6 +35,9 @@
     "dependencies"
   ],
   "lockFileMaintenance": {
-    "enabled": true
+    "enabled": true,
+    "schedule": [
+      "before 4am on the first day of the month"
+    ]
   }
 }
