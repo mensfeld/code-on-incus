@@ -262,6 +262,10 @@ coi attach
 # Real-time security monitoring dashboard
 coi monitor
 
+# View session logs (setup messages, network notices, errors)
+coi logs                        # Auto-detect container from current workspace
+coi logs coi-abc123-1 -f        # Tail logs live
+
 # List active containers and saved sessions
 coi list --all
 
