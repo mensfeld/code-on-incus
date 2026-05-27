@@ -13,24 +13,32 @@ import (
 // warnings/errors to <container>.stderr.log under ~/.coi/logs/.
 // All methods are safe for concurrent use.
 type SessionLogger struct {
-	outMu   sync.Mutex
-	errMu   sync.Mutex
-	outFile *os.File
-	errFile *os.File
-	out     *log.Logger
-	err     *log.Logger
-	outPath string
-	errPath string
+	outMu       sync.Mutex
+	errMu       sync.Mutex
+	outFile     *os.File
+	errFile     *os.File
+	out         *log.Logger
+	err         *log.Logger
+	outPath     string
+	errPath     string
+	initWarning string // non-empty when New fell back to discard
 }
 
 // New creates both log files under homeDir/.coi/logs/.
-// On any error a single warning is printed to stderr and a discard logger is returned.
+// On any error a discard logger is returned with InitWarning() set; nothing is written to stderr.
 // New never returns nil.
 func New(containerName, homeDir string) *SessionLogger {
+	if homeDir == "" {
+		l := newDiscard()
+		l.initWarning = "cannot determine home directory; session output will be suppressed"
+		return l
+	}
+
 	logDir := filepath.Join(homeDir, ".coi", "logs")
 	if err := os.MkdirAll(logDir, 0o750); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: cannot create session log dir, session output suppressed: %v\n", err)
-		return newDiscard()
+		l := newDiscard()
+		l.initWarning = fmt.Sprintf("cannot create session log dir, session output suppressed: %v", err)
+		return l
 	}
 
 	outPath := filepath.Join(logDir, containerName+".stdout.log")
@@ -38,15 +46,17 @@ func New(containerName, homeDir string) *SessionLogger {
 
 	outFile, err := os.OpenFile(outPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: cannot open session stdout log, output suppressed: %v\n", err)
-		return newDiscard()
+		l := newDiscard()
+		l.initWarning = fmt.Sprintf("cannot open session stdout log, output suppressed: %v", err)
+		return l
 	}
 
 	errFile, err := os.OpenFile(errPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o640)
 	if err != nil {
 		_ = outFile.Close()
-		fmt.Fprintf(os.Stderr, "Warning: cannot open session stderr log, output suppressed: %v\n", err)
-		return newDiscard()
+		l := newDiscard()
+		l.initWarning = fmt.Sprintf("cannot open session stderr log, output suppressed: %v", err)
+		return l
 	}
 
 	return &SessionLogger{
@@ -58,6 +68,10 @@ func New(containerName, homeDir string) *SessionLogger {
 		errPath: errPath,
 	}
 }
+
+// InitWarning returns a non-empty string if New fell back to a discard logger due to an
+// initialization error. The caller can forward this via its own progress logger.
+func (l *SessionLogger) InitWarning() string { return l.initWarning }
 
 // NewDiscard returns a no-op logger that discards all output.
 // Use in tests and non-session callers (coi run, configure).

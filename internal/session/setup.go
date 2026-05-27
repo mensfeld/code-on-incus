@@ -96,8 +96,11 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 	result.ContainerName = containerName
 	result.Manager = container.NewManager(containerName)
 
-	hostHome, _ := os.UserHomeDir()
+	hostHome, _ := os.UserHomeDir() // empty string on failure; logger.New handles it
 	result.Logger = logger.New(containerName, hostHome)
+	if w := result.Logger.InitWarning(); w != "" {
+		opts.Logger(fmt.Sprintf("Warning: %s", w))
+	}
 
 	// 1.5 Validate Bedrock setup if running in Colima/Lima
 	if isColimaOrLimaEnvironment() && opts.CLIConfigPath != "" {

@@ -133,7 +133,9 @@ func Cleanup(opts CleanupOptions) error {
 	}
 
 	if opts.SessionLogger != nil {
-		opts.SessionLogger.Close()
+		if err := opts.SessionLogger.Close(); err != nil && opts.Logger != nil {
+			opts.Logger(fmt.Sprintf("Warning: failed to close session log: %v", err))
+		}
 	}
 
 	return nil

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -163,6 +164,8 @@ func openForTail(path string) (*os.File, int64, error) {
 }
 
 // readNewLines reads any bytes appended since offset, prints them line by line, and returns the new offset.
+// The offset is only advanced for bytes that were successfully scanned; a scanner error (e.g. line too long)
+// leaves the offset unchanged so the data is retried on the next tick rather than silently dropped.
 func readNewLines(f *os.File, offset int64, w io.Writer, prefix string) int64 {
 	if _, err := f.Seek(offset, io.SeekStart); err != nil {
 		return offset
@@ -171,27 +174,18 @@ func readNewLines(f *os.File, offset int64, w io.Writer, prefix string) int64 {
 	if err != nil || len(data) == 0 {
 		return offset
 	}
-	newOffset := offset + int64(len(data))
 
-	scanner := bufio.NewScanner(bytesReader(data))
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024) // 1 MiB max line length
+	scanned := int64(0)
 	for scanner.Scan() {
-		fmt.Fprintf(w, "%s%s\n", prefix, scanner.Text())
+		line := scanner.Bytes()
+		scanned += int64(len(line)) + 1 // +1 for the newline consumed by the scanner
+		fmt.Fprintf(w, "%s%s\n", prefix, line)
 	}
-	return newOffset
-}
-
-// bytesReader wraps a byte slice in an io.Reader.
-type bytesReaderT struct {
-	b   []byte
-	pos int
-}
-
-func (r *bytesReaderT) Read(p []byte) (int, error) {
-	if r.pos >= len(r.b) {
-		return 0, io.EOF
+	if scanner.Err() != nil {
+		// Do not advance past unscanned data; it will be retried on the next tick.
+		return offset + scanned
 	}
-	n := copy(p, r.b[r.pos:])
-	r.pos += n
-	return n, nil
+	return offset + int64(len(data))
 }
-func bytesReader(b []byte) io.Reader { return &bytesReaderT{b: b} }
