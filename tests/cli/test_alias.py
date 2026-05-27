@@ -207,8 +207,8 @@ class TestKillByAlias:
             coi_binary,
             ["kill", "killalias", "--force"],
         )
-        # Should succeed (exit 0) or at least resolve the alias
-        assert result.returncode == 0 or "no running container found" in result.stderr.lower()
+        # Should succeed (exit 0) or report a "not found" style error (not a flag/syntax error)
+        assert result.returncode == 0 or "not found" in result.stderr.lower()
 
 
 class TestShutdownByAlias:
@@ -228,7 +228,8 @@ class TestShutdownByAlias:
             coi_binary,
             ["shutdown", "shutdownalias", "--force"],
         )
-        assert result.returncode == 0 or "no running container found" in result.stderr.lower()
+        # Should succeed (exit 0) or report a "not found" style error (not a flag/syntax error)
+        assert result.returncode == 0 or "not found" in result.stderr.lower()
 
 
 class TestUnfreezeByAlias:
@@ -512,10 +513,11 @@ class TestAliasCWDAutoRegister:
             with open(reg_path, "w") as f:
                 json.dump(registry, f)
 
-        # Run coi shell <alias> from the workspace dir — should auto-register
+        # Run coi shell <alias> --background from the workspace dir — should auto-register.
+        # Use --background so the command exits after starting the detached session.
         result = run_coi(
             coi_binary,
-            ["shell", "cwdauto", "--image", dummy_image, "--", "echo", "hello"],
+            ["shell", "cwdauto", "--image", dummy_image, "--background"],
             workspace_dir=workspace_dir,
         )
         # Should succeed (alias resolved via CWD fallback)

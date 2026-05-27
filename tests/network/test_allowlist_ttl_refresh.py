@@ -8,6 +8,7 @@ and that the dynamic refresh interval is computed from DNS TTLs.
 import os
 import subprocess
 import tempfile
+import time
 
 
 def test_allowlist_logs_ttl_information(coi_binary, workspace_dir, cleanup_containers):
@@ -49,9 +50,33 @@ refresh_interval_minutes = 30
 
         assert result.returncode == 0, f"Failed to start container: {result.stderr}"
 
-        # TTL information should appear in stderr (log output)
-        output = result.stdout + result.stderr
-        assert "TTL" in output, f"Expected TTL information in log output, got: {output}"
+        # Extract container name from terminal output.
+        container_name = None
+        for line in (result.stdout + result.stderr).split("\n"):
+            if "Container:" in line or "Container name:" in line:
+                parts = line.split(":", 1)
+                if len(parts) == 2:
+                    container_name = parts[1].strip()
+                    break
+
+        assert container_name, (
+            f"Could not find container name in output:\n{result.stdout + result.stderr}"
+        )
+
+        # TTL information is now written to the session stdout log.
+        log_path = os.path.expanduser(f"~/.coi/logs/{container_name}.stdout.log")
+        deadline = time.time() + 15
+        while not os.path.exists(log_path) and time.time() < deadline:
+            time.sleep(0.5)
+
+        assert os.path.exists(log_path), f"Expected session log file at {log_path}"
+
+        with open(log_path) as fh:
+            log_contents = fh.read()
+
+        assert "TTL" in log_contents, (
+            f"Expected TTL information in session log {log_path}.\nLog contents:\n{log_contents}"
+        )
 
     finally:
         os.unlink(config_file)
@@ -97,14 +122,37 @@ refresh_interval_minutes = 30
 
         assert result.returncode == 0, f"Failed to start container: {result.stderr}"
 
-        output = result.stdout + result.stderr
+        # Extract container name from terminal output.
+        container_name = None
+        for line in (result.stdout + result.stderr).split("\n"):
+            if "Container:" in line or "Container name:" in line:
+                parts = line.split(":", 1)
+                if len(parts) == 2:
+                    container_name = parts[1].strip()
+                    break
 
-        # Should log the refresh interval start message with TTL-based info
-        assert "Starting IP refresh" in output, (
-            f"Expected refresh start message in output, got: {output}"
+        assert container_name, (
+            f"Could not find container name in output:\n{result.stdout + result.stderr}"
         )
-        assert "TTL-based" in output, (
-            f"Expected TTL-based indicator in refresh message, got: {output}"
+
+        # "Starting IP refresh" and "TTL-based" are now written to the session stdout log.
+        log_path = os.path.expanduser(f"~/.coi/logs/{container_name}.stdout.log")
+        deadline = time.time() + 15
+        while not os.path.exists(log_path) and time.time() < deadline:
+            time.sleep(0.5)
+
+        assert os.path.exists(log_path), f"Expected session log file at {log_path}"
+
+        with open(log_path) as fh:
+            log_contents = fh.read()
+
+        assert "Starting IP refresh" in log_contents, (
+            f"Expected refresh start message in session log {log_path}.\n"
+            f"Log contents:\n{log_contents}"
+        )
+        assert "TTL-based" in log_contents, (
+            f"Expected TTL-based indicator in session log {log_path}.\n"
+            f"Log contents:\n{log_contents}"
         )
 
     finally:
