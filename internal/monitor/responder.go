@@ -3,6 +3,7 @@ package monitor
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -221,11 +222,11 @@ func (r *Responder) killContainer(ctx context.Context) error {
 	if containerIP != "" {
 		if err := r.cleanupFirewallRules(containerIP); err != nil {
 			// Log warning but don't fail the kill operation
-			fmt.Printf("Warning: Failed to cleanup firewall rules: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Warning: Failed to cleanup firewall rules: %v\n", err)
 		}
 		if err := r.cleanupNFTRules(containerIP); err != nil {
 			// Log warning but don't fail the kill operation
-			fmt.Printf("Warning: Failed to cleanup NFT monitoring rules: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Warning: Failed to cleanup NFT monitoring rules: %v\n", err)
 		}
 	}
 
@@ -238,7 +239,7 @@ func (r *Responder) killContainer(ctx context.Context) error {
 	// Clean up firewalld zone binding for the veth interface AFTER container deletion
 	if vethName != "" {
 		if err := network.RemoveVethFromFirewalldZone(vethName); err != nil {
-			fmt.Printf("Warning: Failed to cleanup firewalld zone binding: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Warning: Failed to cleanup firewalld zone binding: %v\n", err)
 		}
 	}
 

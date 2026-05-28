@@ -135,8 +135,6 @@ func runInlineBuild(cfg *config.Config, imageName string) error {
 		return err
 	}
 
-	logger := func(msg string) { fmt.Println(msg) }
-
 	if imageName == image.CoiAlias {
 		coiBaseImage := image.BaseImage
 		if cfg.Container.Build.Base != "" {
@@ -150,18 +148,18 @@ func runInlineBuild(cfg *config.Config, imageName string) error {
 			AliasName:   image.CoiAlias,
 			Description: "coi image (Docker + build tools + Claude CLI + GitHub CLI)",
 			StoragePool: buildPool,
-			Logger:      logger,
+			Logger:      func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) },
 		}
-		fmt.Printf("Building image '%s'...\n", imageName)
+		fmt.Fprintf(os.Stderr, "Building image '%s'...\n", imageName)
 		result := image.NewBuilder(opts).Build()
 		if result.Error != nil {
 			return fmt.Errorf("build failed: %w", result.Error)
 		}
 		if result.Skipped {
-			fmt.Printf("\nImage '%s' already exists — skipping build.\n", imageName)
+			fmt.Fprintf(os.Stderr, "\nImage '%s' already exists — skipping build.\n", imageName)
 			return nil
 		}
-		fmt.Printf("\nImage '%s' built successfully!\n", imageName)
+		fmt.Fprintf(os.Stderr, "\nImage '%s' built successfully!\n", imageName)
 		return nil
 	}
 
