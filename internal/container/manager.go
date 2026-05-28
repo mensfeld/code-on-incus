@@ -25,9 +25,13 @@ type Manager struct {
 type ExitError struct {
 	ExitCode int
 	Err      error
+	Stderr   string // captured stderr from the incus subprocess, if any
 }
 
 func (e *ExitError) Error() string {
+	if e.Stderr != "" {
+		return fmt.Sprintf("exit status %d: %s", e.ExitCode, e.Stderr)
+	}
 	return fmt.Sprintf("exit status %d", e.ExitCode)
 }
 
