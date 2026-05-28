@@ -60,30 +60,30 @@ func Cleanup(opts CleanupOptions) error {
 		opts.Logger(fmt.Sprintf("Warning: Could not check container existence: %v", err))
 	}
 
-	// Always save session data if container exists (works even from stopped containers)
-	// This ensures --resume works regardless of how the user exited (including sudo shutdown 0)
-	// Skip if tool uses ENV-based auth (no config directory to save)
-	if opts.SaveSession && exists && opts.SessionID != "" && opts.SessionsDir != "" && opts.Tool != nil && opts.Tool.ConfigDirName() != "" {
-		if err := saveSessionData(mgr, opts.SessionID, opts.Persistent, opts.ProfileName, opts.Workspace, opts.SessionsDir, opts.Tool, opts.Logger); err != nil {
-			opts.Logger(fmt.Sprintf("Warning: Failed to save session data: %v", err))
+	wantSave := opts.SaveSession && exists && opts.SessionID != "" && opts.SessionsDir != "" && opts.Tool != nil && opts.Tool.ConfigDirName() != ""
+	doSave := func() {
+		if wantSave {
+			if err := saveSessionData(mgr, opts.SessionID, opts.Persistent, opts.ProfileName, opts.Workspace, opts.SessionsDir, opts.Tool, opts.Logger); err != nil {
+				opts.Logger(fmt.Sprintf("Warning: Failed to save session data: %v", err))
+			}
 		}
 	}
 
 	// Handle container based on persistence mode
 	if opts.Persistent {
-		// Persistent mode: keep container for reuse (with all its data/modifications)
+		// Persistent mode: container is running — SFTP is reliable, save now then keep.
+		doSave()
 		if exists {
 			opts.Logger("Container kept running - use 'coi attach' to reconnect, 'coi shutdown' to stop, or 'coi kill' to force stop")
 		} else {
 			opts.Logger("Container was stopped but kept for reuse")
 		}
 	} else {
-		// Non-persistent mode: behavior depends on how user exited
-		// - If container is running (user typed 'exit' or detached): keep it running
-		// - If container is stopped (user did 'sudo shutdown 0'): delete it
+		// Non-persistent mode: behavior depends on how user exited.
+		// Save session data only after confirming container state so SFTP is never
+		// called mid-shutdown (which causes transient "bad file descriptor" / EOF errors).
 		if exists {
-			// Check if container is stopped, with retries to handle shutdown delay
-			// Poweroff/shutdown can take several seconds to complete
+			// Wait for container to stop; poweroff/shutdown can take several seconds.
 			running := true
 			for i := 0; i < 10; i++ {
 				time.Sleep(500 * time.Millisecond)
@@ -94,10 +94,15 @@ func Cleanup(opts CleanupOptions) error {
 			}
 
 			if running {
-				// Container still running - user exited normally, keep it for potential re-attach
+				// Container still running — user exited the tool normally (typed 'exit',
+				// detached, etc.). SFTP is reliable on a running container; save now and
+				// keep the container for potential re-attach.
+				doSave()
 				opts.Logger("Container kept running - use 'coi attach' to reconnect, 'coi shutdown' to stop, or 'coi kill' to force stop")
 			} else {
-				// Container stopped (user did 'sudo shutdown 0') - delete it
+				// Container fully stopped (user ran 'sudo poweroff').
+				// SFTP is reliable on a fully stopped container; save before deleting.
+				doSave()
 				opts.Logger("Container was stopped, removing...")
 
 				// Get the container's veth interface name BEFORE deletion
@@ -169,21 +174,47 @@ func saveSessionData(mgr *container.Manager, sessionID string, persistent bool, 
 		}
 	}
 
-	// Pull config directory from container
-	// Note: incus file pull works on stopped containers, so we don't need to check if running
-	// If config dir doesn't exist, PullDirectory will fail and we handle it gracefully.
-	// Incus reports missing paths as one of several message variants
-	// ("file does not exist", "not found", "No such file or directory"),
-	// so match all of them case-insensitively.
-	if err := mgr.PullDirectory(stateDir, localConfigDir); err != nil {
-		msg := strings.ToLower(err.Error())
+	// Pull config directory from container.
+	//
+	// Callers invoke saveSessionData only after confirming container state:
+	// either confirmed running (normal exit — SFTP fully functional) or confirmed
+	// fully stopped (poweroff — incus uses direct file access, not SFTP).
+	// In both cases SFTP errors should not occur.
+	//
+	// The retry loop below is a safety net for one narrow edge case: the
+	// non-persistent "still running" branch, where the wait loop exhausts its
+	// 5 s window before the container finishes shutting down. In that case the
+	// container is mid-shutdown (SFTP may be dead) but mgr.Running() still
+	// returns true. Retrying with short delays bridges the gap until the
+	// stopped-container direct-access path takes over on a subsequent attempt.
+	// On stopped containers (direct file access) and on healthy running containers
+	// these retries never trigger.
+	var pullErr error
+	for attempt := range 3 {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt) * time.Second)
+		}
+		pullErr = mgr.PullDirectory(stateDir, localConfigDir)
+		if pullErr == nil {
+			break
+		}
+		msg := strings.ToLower(pullErr.Error())
 		if strings.Contains(msg, "does not exist") ||
 			strings.Contains(msg, "not found") ||
 			strings.Contains(msg, "no such file") {
 			logger(fmt.Sprintf("No %s directory found in container", configDirName))
 			return nil
 		}
-		return fmt.Errorf("failed to pull %s directory: %w", configDirName, err)
+		if !strings.Contains(msg, "sftp") &&
+			!strings.Contains(msg, "unexpected eof") &&
+			!strings.Contains(msg, "bad file descriptor") &&
+			!strings.Contains(msg, "server unexpectedly closed") &&
+			!strings.Contains(msg, "error receiving version packet") {
+			break
+		}
+	}
+	if pullErr != nil {
+		return fmt.Errorf("failed to pull %s directory: %w", configDirName, pullErr)
 	}
 
 	// Save metadata
