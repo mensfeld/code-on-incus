@@ -169,21 +169,40 @@ func saveSessionData(mgr *container.Manager, sessionID string, persistent bool, 
 		}
 	}
 
-	// Pull config directory from container
-	// Note: incus file pull works on stopped containers, so we don't need to check if running
-	// If config dir doesn't exist, PullDirectory will fail and we handle it gracefully.
-	// Incus reports missing paths as one of several message variants
-	// ("file does not exist", "not found", "No such file or directory"),
-	// so match all of them case-insensitively.
-	if err := mgr.PullDirectory(stateDir, localConfigDir); err != nil {
-		msg := strings.ToLower(err.Error())
+	// Pull config directory from container.
+	// incus file pull works on stopped containers, but when the container shuts
+	// down via 'sudo poweroff' the SFTP subsystem may be mid-teardown when
+	// cleanup runs — causing transient "bad file descriptor" / "unexpected EOF"
+	// errors. Retry up to 3 times with increasing delays to bridge the gap
+	// between container stop and filesystem being fully accessible.
+	var pullErr error
+	for attempt := range 3 {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt) * time.Second)
+		}
+		pullErr = mgr.PullDirectory(stateDir, localConfigDir)
+		if pullErr == nil {
+			break
+		}
+		msg := strings.ToLower(pullErr.Error())
 		if strings.Contains(msg, "does not exist") ||
 			strings.Contains(msg, "not found") ||
 			strings.Contains(msg, "no such file") {
 			logger(fmt.Sprintf("No %s directory found in container", configDirName))
 			return nil
 		}
-		return fmt.Errorf("failed to pull %s directory: %w", configDirName, err)
+		// Only retry on transient SFTP/connection errors from a container mid-shutdown.
+		// Non-SFTP errors (permission denied, disk full, etc.) are not retryable.
+		if !strings.Contains(msg, "sftp") &&
+			!strings.Contains(msg, "unexpected eof") &&
+			!strings.Contains(msg, "bad file descriptor") &&
+			!strings.Contains(msg, "server unexpectedly closed") &&
+			!strings.Contains(msg, "error receiving version packet") {
+			break
+		}
+	}
+	if pullErr != nil {
+		return fmt.Errorf("failed to pull %s directory: %w", configDirName, pullErr)
 	}
 
 	// Save metadata
