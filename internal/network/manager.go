@@ -26,8 +26,12 @@ To fix this:
   3. Start firewalld: sudo systemctl enable --now firewalld
   4. Configure passwordless sudo for firewall-cmd (see README)
 
-Alternatively, run with unrestricted network access:
-  coi shell --network=open`
+Alternatively, run with unrestricted network access by setting open mode in
+your config file (.coi/config.toml in your workspace, or the profile's
+config.toml):
+
+  [network]
+  mode = "open"`
 
 // Manager provides high-level network isolation management for containers
 type Manager struct {

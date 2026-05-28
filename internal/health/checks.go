@@ -434,7 +434,7 @@ func CheckFirewall(mode config.NetworkMode) HealthCheck {
 	if !installed {
 		message := fmt.Sprintf("Not installed (required for %s mode) — install with: sudo apt install firewalld", mode)
 		if isColima {
-			message = "Not installed - use --network=open for Colima"
+			message = "Not installed — on Colima, set mode = \"open\" in [network] section of your config.toml"
 		}
 		return HealthCheck{
 			Name:    "firewall",
@@ -447,7 +447,7 @@ func CheckFirewall(mode config.NetworkMode) HealthCheck {
 	if !running {
 		message := fmt.Sprintf("Installed but not running (required for %s mode) — start with: sudo systemctl enable --now firewalld", mode)
 		if isColima {
-			message = "Installed but not running - use --network=open for Colima"
+			message = "Installed but not running — on Colima, set mode = \"open\" in [network] section of your config.toml"
 		}
 		return HealthCheck{
 			Name:    "firewall",
@@ -508,7 +508,7 @@ func CheckUFWConflict() HealthCheck {
 	return HealthCheck{
 		Name:    "ufw_conflict",
 		Status:  StatusWarning,
-		Message: "ufw is active — only --network=open will work. Disable ufw to use firewalld: sudo ufw disable && sudo systemctl disable --now ufw",
+		Message: "ufw is active — disable ufw to use firewalld: sudo ufw disable && sudo systemctl disable --now ufw. Alternatively, set mode = \"open\" in [network] section of your config.toml to skip network isolation.",
 		Details: details,
 	}
 }
