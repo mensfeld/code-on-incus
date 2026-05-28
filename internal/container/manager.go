@@ -35,6 +35,8 @@ func (e *ExitError) Error() string {
 	return fmt.Sprintf("exit status %d", e.ExitCode)
 }
 
+func (e *ExitError) Unwrap() error { return e.Err }
+
 // NewManager creates a new container manager
 func NewManager(containerName string) *Manager {
 	return &Manager{
