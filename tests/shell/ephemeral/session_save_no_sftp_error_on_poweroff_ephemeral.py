@@ -102,9 +102,7 @@ def test_session_save_no_sftp_error_on_poweroff(coi_binary, cleanup_containers, 
         child.close(force=True)
 
     container_deleted = wait_for_specific_container_deletion(container_name, timeout=60)
-    assert container_deleted, (
-        f"Container {container_name} should be deleted after poweroff"
-    )
+    assert container_deleted, f"Container {container_name} should be deleted after poweroff"
 
     # Primary assertions: session data saved, no SFTP warning
     assert "Session data saved successfully" in output1 or "Saving session data" in output1, (
