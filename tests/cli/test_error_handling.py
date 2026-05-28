@@ -114,6 +114,30 @@ def test_exit_code_error_no_usage_dump(coi_binary):
     )
 
 
+def test_container_info_nonexistent_shows_incus_error(coi_binary):
+    """coi container info with a nonexistent container should include the actual
+    Incus error text, not just the bare 'exit status 1'.
+
+    Regression test for issue #276 — IncusOutput* functions previously set
+    cmd.Stderr = nil, so callers only got "exit status 1" with no context.
+    After the fix, ExitError carries the captured stderr and Error() includes
+    it, producing messages like "exit status 1: Error: Instance not found".
+    """
+    result = subprocess.run(
+        [coi_binary, "container", "info", "nonexistent-container-xyz-276"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert result.returncode != 0, "Should fail for nonexistent container"
+    combined = result.stdout + result.stderr
+    # The error should mention something meaningful from Incus, not just "exit status 1"
+    assert "not found" in combined.lower() or "instance" in combined.lower(), (
+        f"Expected Incus error detail (e.g. 'Instance not found') in output, got:\n{combined}"
+    )
+
+
 def test_arg_validation_error_shows_usage(coi_binary):
     """Commands with wrong number of args should still show usage hint.
 
