@@ -60,19 +60,19 @@ func Cleanup(opts CleanupOptions) error {
 		opts.Logger(fmt.Sprintf("Warning: Could not check container existence: %v", err))
 	}
 
-	wantSave := opts.SaveSession && exists && opts.SessionID != "" && opts.SessionsDir != "" && opts.Tool != nil && opts.Tool.ConfigDirName() != ""
-	doSave := func() {
-		if wantSave {
-			if err := saveSessionData(mgr, opts.SessionID, opts.Persistent, opts.ProfileName, opts.Workspace, opts.SessionsDir, opts.Tool, opts.Logger); err != nil {
-				opts.Logger(fmt.Sprintf("Warning: Failed to save session data: %v", err))
-			}
+	// Save session data immediately — no pre-delay regardless of persistence mode.
+	// saveSessionData handles the mid-shutdown race internally: on a transient SFTP
+	// error it waits for the container to fully stop, then retries using incus's
+	// direct file-access path (no SFTP) so the save succeeds in every exit scenario.
+	if opts.SaveSession && exists && opts.SessionID != "" && opts.SessionsDir != "" && opts.Tool != nil && opts.Tool.ConfigDirName() != "" {
+		if err := saveSessionData(mgr, opts.SessionID, opts.Persistent, opts.ProfileName, opts.Workspace, opts.SessionsDir, opts.Tool, opts.Logger); err != nil {
+			opts.Logger(fmt.Sprintf("Warning: Failed to save session data: %v", err))
 		}
 	}
 
 	// Handle container based on persistence mode
 	if opts.Persistent {
-		// Persistent mode: container is running — SFTP is reliable, save now then keep.
-		doSave()
+		// Persistent mode: keep container regardless of whether it is running or stopped.
 		if exists {
 			opts.Logger("Container kept running - use 'coi attach' to reconnect, 'coi shutdown' to stop, or 'coi kill' to force stop")
 		} else {
@@ -80,10 +80,11 @@ func Cleanup(opts CleanupOptions) error {
 		}
 	} else {
 		// Non-persistent mode: behavior depends on how user exited.
-		// Save session data only after confirming container state so SFTP is never
-		// called mid-shutdown (which causes transient "bad file descriptor" / EOF errors).
+		// - Container still running (user typed 'exit' or detached): keep it running.
+		// - Container stopped (user ran 'sudo poweroff'): delete it.
 		if exists {
-			// Wait for container to stop; poweroff/shutdown can take several seconds.
+			// Check if container is stopped, with retries to handle shutdown delay.
+			// Poweroff/shutdown can take several seconds to complete.
 			running := true
 			for i := 0; i < 10; i++ {
 				time.Sleep(500 * time.Millisecond)
@@ -94,15 +95,10 @@ func Cleanup(opts CleanupOptions) error {
 			}
 
 			if running {
-				// Container still running — user exited the tool normally (typed 'exit',
-				// detached, etc.). SFTP is reliable on a running container; save now and
-				// keep the container for potential re-attach.
-				doSave()
+				// Container still running - user exited normally, keep it for potential re-attach.
 				opts.Logger("Container kept running - use 'coi attach' to reconnect, 'coi shutdown' to stop, or 'coi kill' to force stop")
 			} else {
-				// Container fully stopped (user ran 'sudo poweroff').
-				// SFTP is reliable on a fully stopped container; save before deleting.
-				doSave()
+				// Container stopped (user ran 'sudo poweroff') - delete it.
 				opts.Logger("Container was stopped, removing...")
 
 				// Get the container's veth interface name BEFORE deletion
@@ -176,23 +172,25 @@ func saveSessionData(mgr *container.Manager, sessionID string, persistent bool, 
 
 	// Pull config directory from container.
 	//
-	// Callers invoke saveSessionData only after confirming container state:
-	// either confirmed running (normal exit — SFTP fully functional) or confirmed
-	// fully stopped (poweroff — incus uses direct file access, not SFTP).
-	// In both cases SFTP errors should not occur.
+	// On the normal exit path the container is running and SFTP is healthy —
+	// the first attempt succeeds immediately.
 	//
-	// The retry loop below is a safety net for one narrow edge case: the
-	// non-persistent "still running" branch, where the wait loop exhausts its
-	// 5 s window before the container finishes shutting down. In that case the
-	// container is mid-shutdown (SFTP may be dead) but mgr.Running() still
-	// returns true. Retrying with short delays bridges the gap until the
-	// stopped-container direct-access path takes over on a subsequent attempt.
-	// On stopped containers (direct file access) and on healthy running containers
-	// these retries never trigger.
+	// On the poweroff path, cleanup may start while the container's SFTP subsystem
+	// is still mid-teardown (sshd killed by init, container not yet fully stopped).
+	// On a transient SFTP/connection error we wait up to 5 s for the container to
+	// fully stop, then retry. Once stopped, incus switches to direct file access
+	// (no SFTP), so the retry reliably succeeds.
 	var pullErr error
 	for attempt := range 3 {
 		if attempt > 0 {
-			time.Sleep(time.Duration(attempt) * time.Second)
+			// SFTP failed — wait for the container to fully stop so incus
+			// uses direct file access (not SFTP) on the next attempt.
+			for i := 0; i < 10; i++ {
+				time.Sleep(500 * time.Millisecond)
+				if running, _ := mgr.Running(); !running {
+					break
+				}
+			}
 		}
 		pullErr = mgr.PullDirectory(stateDir, localConfigDir)
 		if pullErr == nil {

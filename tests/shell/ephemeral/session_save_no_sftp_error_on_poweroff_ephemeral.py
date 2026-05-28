@@ -16,7 +16,12 @@ Root cause (fixed in #397):
     These errors caused saveSessionData to fail, silently dropping the
     session — so --resume stopped working after a poweroff-triggered exit.
 
-Fix: retry PullDirectory up to 3 times on transient SFTP/connection errors.
+Fix: on the normal exit path the save succeeds immediately (container is
+running, SFTP healthy). On the poweroff path, if a transient SFTP error
+occurs saveSessionData waits up to 5 s for the container to fully stop,
+then retries — once stopped, incus uses direct file access (no SFTP) and
+the retry succeeds. The fix applies to all modes (persistent and
+non-persistent) and all tools with a config directory.
 
 This test verifies:
   1. After 'sudo poweroff', "Session data saved successfully" appears.
@@ -151,12 +156,16 @@ def test_session_save_no_sftp_error_on_poweroff(coi_binary, cleanup_containers, 
         child2.close(force=True)
 
     container_name2 = calculate_container_name(workspace_dir, 1)
-    wait_for_specific_container_deletion(container_name2, timeout=60)
-    subprocess.run(
-        [coi_binary, "container", "delete", container_name2, "--force"],
-        capture_output=True,
-        timeout=30,
-        check=False,
+    container2_deleted = wait_for_specific_container_deletion(container_name2, timeout=60)
+    if not container2_deleted:
+        subprocess.run(
+            [coi_binary, "container", "delete", container_name2, "--force"],
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+    assert container2_deleted, (
+        f"Container {container_name2} should be deleted after phase 2 poweroff"
     )
 
     assert resumed, (
