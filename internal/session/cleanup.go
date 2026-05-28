@@ -175,10 +175,29 @@ func saveSessionData(mgr *container.Manager, sessionID string, persistent bool, 
 	}
 
 	// Pull config directory from container.
-	// Caller guarantees the container is either confirmed running or confirmed
-	// fully stopped before calling saveSessionData, so SFTP is stable here.
-	pullErr := mgr.PullDirectory(stateDir, localConfigDir)
-	if pullErr != nil {
+	//
+	// Callers invoke saveSessionData only after confirming container state:
+	// either confirmed running (normal exit — SFTP fully functional) or confirmed
+	// fully stopped (poweroff — incus uses direct file access, not SFTP).
+	// In both cases SFTP errors should not occur.
+	//
+	// The retry loop below is a safety net for one narrow edge case: the
+	// non-persistent "still running" branch, where the wait loop exhausts its
+	// 5 s window before the container finishes shutting down. In that case the
+	// container is mid-shutdown (SFTP may be dead) but mgr.Running() still
+	// returns true. Retrying with short delays bridges the gap until the
+	// stopped-container direct-access path takes over on a subsequent attempt.
+	// On stopped containers (direct file access) and on healthy running containers
+	// these retries never trigger.
+	var pullErr error
+	for attempt := range 3 {
+		if attempt > 0 {
+			time.Sleep(time.Duration(attempt) * time.Second)
+		}
+		pullErr = mgr.PullDirectory(stateDir, localConfigDir)
+		if pullErr == nil {
+			break
+		}
 		msg := strings.ToLower(pullErr.Error())
 		if strings.Contains(msg, "does not exist") ||
 			strings.Contains(msg, "not found") ||
@@ -186,6 +205,15 @@ func saveSessionData(mgr *container.Manager, sessionID string, persistent bool, 
 			logger(fmt.Sprintf("No %s directory found in container", configDirName))
 			return nil
 		}
+		if !strings.Contains(msg, "sftp") &&
+			!strings.Contains(msg, "unexpected eof") &&
+			!strings.Contains(msg, "bad file descriptor") &&
+			!strings.Contains(msg, "server unexpectedly closed") &&
+			!strings.Contains(msg, "error receiving version packet") {
+			break
+		}
+	}
+	if pullErr != nil {
 		return fmt.Errorf("failed to pull %s directory: %w", configDirName, pullErr)
 	}
 
