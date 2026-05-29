@@ -134,7 +134,9 @@ def test_health_bridge_firewalld_zone_ok_when_configured(coi_binary):
     assert check["details"]["bridge_name"] == bridge_name, (
         f"Details should show bridge name {bridge_name}"
     )
-    assert check["details"]["in_trusted_zone"] is True, "Details should show in_trusted_zone=true"
+    assert check["details"]["has_forward_rules"] is True, (
+        "Details should show has_forward_rules=true"
+    )
 
 
 def test_health_bridge_firewalld_zone_ok_without_firewalld(coi_binary):

@@ -144,8 +144,8 @@ def test_bridge_trusted_zone_detection_matches_reality(coi_binary):
     check = get_health_bridge_check(coi_binary)
     assert check is not None, "bridge_firewalld_zone check should exist"
     assert "details" in check, "Check should have details"
-    assert check["details"]["in_trusted_zone"] == actual_has_rules, (
-        f"Health check reports in_trusted_zone={check['details']['in_trusted_zone']} "
+    assert check["details"]["has_forward_rules"] == actual_has_rules, (
+        f"Health check reports has_forward_rules={check['details']['has_forward_rules']} "
         f"but actual iptables state is {actual_has_rules}"
     )
 
@@ -197,8 +197,8 @@ def test_bridge_zone_removal_and_restore_detected(coi_binary):
         assert check["status"] == "warning", (
             f"Expected warning after removing bridge FORWARD rules, got: {check['status']}"
         )
-        assert check["details"]["in_trusted_zone"] is False, (
-            "Should report in_trusted_zone=false after removal"
+        assert check["details"]["has_forward_rules"] is False, (
+            "Should report has_forward_rules=false after removal"
         )
 
         # Step 2: Re-add by running coi health (or any coi command that triggers autofix)
