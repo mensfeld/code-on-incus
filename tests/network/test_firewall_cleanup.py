@@ -81,24 +81,14 @@ def count_rules_for_ip(ip):
 def nft_available():
     """Check if nft is available with sudo access."""
     try:
-        result = subprocess.run(
-            ["sudo", "-n", "nft", "-a", "list", "chain", "ip", "coi", "forward"],
+        subprocess.run(
+            ["sudo", "-n", "nft", "list", "ruleset"],
             capture_output=True,
             timeout=10,
+            check=True,
         )
-        # returncode 0 means chain exists; non-zero may mean chain doesn't exist yet
-        # but nft itself is available
-        try:
-            subprocess.run(
-                ["sudo", "-n", "nft", "list", "ruleset"],
-                capture_output=True,
-                timeout=10,
-                check=True,
-            )
-            return True
-        except subprocess.CalledProcessError:
-            return False
-    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return True
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
         return False
 
 
@@ -118,9 +108,6 @@ def test_open_mode_nft_cleanup(coi_binary, workspace_dir, cleanup_containers):
 
     if not nft_available():
         pytest.skip("nft not available")
-
-    # Count rules before
-    rules_before = count_rules_for_ip("0.0.0.0")  # sentinel — just get baseline
 
     # Write network config to workspace .coi/config.toml
     config_dir = Path(workspace_dir) / ".coi"

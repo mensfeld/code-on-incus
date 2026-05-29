@@ -102,7 +102,7 @@ def remove_bridge_forward_rules(bridge_name):
             # Convert -A to -D and execute
             delete_rule = line.replace("-A FORWARD", "-D FORWARD", 1).split()
             del_result = subprocess.run(
-                ["sudo", "-n", "iptables"] + delete_rule,
+                ["sudo", "-n", "iptables", *delete_rule],
                 capture_output=True,
                 timeout=10,
             )
