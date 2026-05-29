@@ -186,8 +186,10 @@ func DisableIPv6ForContainer(containerName string) error {
 // Rules are appended in call order, so callers must invoke addRule from most-specific
 // to least-specific (gateway → allowlist → RFC1918 block → default).
 func (f *FirewallManager) addRule(source, destination, action string) error {
-	args := []string{"add", "rule", "ip", "coi", "forward",
-		"ip", "saddr", source}
+	args := []string{
+		"add", "rule", "ip", "coi", "forward",
+		"ip", "saddr", source,
+	}
 	// 0.0.0.0/0 matches all destinations — omit the daddr match for cleaner nft syntax
 	if destination != "0.0.0.0/0" {
 		args = append(args, "ip", "daddr", destination)

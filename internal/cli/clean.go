@@ -313,7 +313,6 @@ func printOrphanedResources(orphans *cleanup.OrphanedResources) {
 		}
 	}
 
-
 	if len(orphans.NFTMonitorRules) > 0 {
 		fmt.Printf("  Orphaned nft monitoring rules (%d):\n", len(orphans.NFTMonitorRules))
 		shown := 0
