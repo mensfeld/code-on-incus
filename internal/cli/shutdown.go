@@ -133,7 +133,6 @@ func shutdownCommand(cmd *cobra.Command, args []string) error {
 			shutdown++
 			fmt.Printf("  ✓ Shutdown %s\n", name)
 		}
-
 	}
 
 	if shutdown > 0 {

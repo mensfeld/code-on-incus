@@ -162,7 +162,6 @@ func killCommand(cmd *cobra.Command, args []string) error {
 			killed++
 			fmt.Printf("  ✓ Killed %s\n", name)
 		}
-
 	}
 
 	if killed > 0 {
