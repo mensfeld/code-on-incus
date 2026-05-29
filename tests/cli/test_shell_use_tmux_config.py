@@ -14,6 +14,9 @@ from pathlib import Path
 def test_use_tmux_false_config_runs_direct_mode(coi_binary, workspace_dir, cleanup_containers):
     """
     When use_tmux = false in [shell] config, coi shell should run in Direct mode.
+
+    --background is a tmux concept and is not used here. Instead, we run in
+    direct mode and feed "exit" to bash via stdin so the session terminates.
     """
     config_dir = Path(workspace_dir) / ".coi"
     config_dir.mkdir(exist_ok=True)
@@ -23,18 +26,17 @@ use_tmux = false
 """)
 
     result = subprocess.run(
-        [coi_binary, "shell", "--workspace", workspace_dir, "--background", "--debug"],
+        [coi_binary, "shell", "--workspace", workspace_dir, "--debug"],
+        input="exit\n",
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=120,
     )
 
-    # With --debug (bash) and direct mode, it should start and the mode message should be Direct
     combined = result.stdout + result.stderr
-    assert "Direct" in combined or result.returncode == 0, (
-        f"Expected Direct mode with use_tmux=false. Output:\n{combined}"
+    assert "Mode: Direct" in combined, (
+        f"Expected 'Mode: Direct' with use_tmux=false config. Output:\n{combined}"
     )
-    # Should NOT say "tmux" in mode line
     assert (
         "Mode: Interactive (tmux)" not in combined and "Mode: Background (tmux)" not in combined
     ), f"Expected no tmux mode with use_tmux=false config. Output:\n{combined}"
