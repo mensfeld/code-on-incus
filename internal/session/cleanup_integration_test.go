@@ -49,7 +49,7 @@ func TestEndToEndCleanupWithOpenMode(t *testing.T) {
 
 	// Skip if firewall is not available
 	if !network.FirewallAvailable() {
-		t.Skip("firewalld not available, skipping integration test")
+		t.Skip("nft not available, skipping integration test")
 	}
 
 	// Check if the default 'coi' image exists
@@ -183,7 +183,7 @@ func TestEndToEndCleanupWithRestrictedMode(t *testing.T) {
 
 	// Skip if firewall is not available
 	if !network.FirewallAvailable() {
-		t.Skip("firewalld not available, skipping integration test")
+		t.Skip("nft not available, skipping integration test")
 	}
 
 	// Check if the default 'coi' image exists
@@ -309,7 +309,7 @@ func TestEndToEndCleanupMultipleContainers(t *testing.T) {
 
 	// Skip if firewall is not available
 	if !network.FirewallAvailable() {
-		t.Skip("firewalld not available, skipping integration test")
+		t.Skip("nft not available, skipping integration test")
 	}
 
 	// Check if the default 'coi' image exists
