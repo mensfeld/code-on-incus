@@ -31,8 +31,7 @@ By default, cleans only stopped containers. Use flags to control what gets clean
 
 Orphaned resources include:
 - Orphaned veth interfaces (network pairs with no master bridge)
-- Orphaned firewall rules (rules for container IPs that no longer exist)
-- Orphaned firewalld zone bindings (stale veth entries in firewalld zones)
+- Orphaned firewall rules (nft coi chain rules for container IPs that no longer exist)
 - Orphaned iptables bridge rules (coi-bridge-forward rules with no containers running)
 
 The --pools flag detects COI containers in storage pools that are not
@@ -269,7 +268,7 @@ func cleanOrphanedResources() (int, bool) {
 		return 0, false
 	}
 
-	totalOrphans := len(orphans.Veths) + len(orphans.FirewallRules) + len(orphans.FirewalldZoneBindings) + len(orphans.NFTMonitorRules) + len(orphans.IptablesBridgeRules)
+	totalOrphans := len(orphans.Veths) + len(orphans.FirewallRules) + len(orphans.NFTMonitorRules) + len(orphans.IptablesBridgeRules)
 
 	if totalOrphans == 0 {
 		fmt.Println("  (no orphaned resources found)")
@@ -297,7 +296,7 @@ func cleanOrphanedResources() (int, bool) {
 
 // printOrphanedResources prints the list of orphaned resources found.
 func printOrphanedResources(orphans *cleanup.OrphanedResources) {
-	totalOrphans := len(orphans.Veths) + len(orphans.FirewallRules) + len(orphans.FirewalldZoneBindings) + len(orphans.NFTMonitorRules) + len(orphans.IptablesBridgeRules)
+	totalOrphans := len(orphans.Veths) + len(orphans.FirewallRules) + len(orphans.NFTMonitorRules) + len(orphans.IptablesBridgeRules)
 	fmt.Printf("Found %d orphaned resource(s):\n", totalOrphans)
 
 	if len(orphans.Veths) > 0 {
@@ -311,20 +310,6 @@ func printOrphanedResources(orphans *cleanup.OrphanedResources) {
 		fmt.Printf("  Orphaned firewall rules (%d):\n", len(orphans.FirewallRules))
 		for _, rule := range orphans.FirewallRules {
 			fmt.Printf("    - %s\n", rule)
-		}
-	}
-
-	if len(orphans.FirewalldZoneBindings) > 0 {
-		fmt.Printf("  Orphaned firewalld zone bindings (%d):\n", len(orphans.FirewalldZoneBindings))
-		shown := 0
-		for _, veth := range orphans.FirewalldZoneBindings {
-			if shown < 10 {
-				fmt.Printf("    - %s\n", veth)
-				shown++
-			}
-		}
-		if len(orphans.FirewalldZoneBindings) > 10 {
-			fmt.Printf("    ... and %d more\n", len(orphans.FirewalldZoneBindings)-10)
 		}
 	}
 
@@ -365,11 +350,6 @@ func doCleanOrphanedResources(orphans *cleanup.OrphanedResources) int {
 	if len(orphans.FirewallRules) > 0 {
 		rulesCleaned, _ := cleanup.CleanupOrphanedFirewallRules(orphans.FirewallRules, logger)
 		cleaned += rulesCleaned
-	}
-
-	if len(orphans.FirewalldZoneBindings) > 0 {
-		zoneBindingsCleaned, _ := cleanup.CleanupOrphanedFirewalldZoneBindings(orphans.FirewalldZoneBindings, logger)
-		cleaned += zoneBindingsCleaned
 	}
 
 	if len(orphans.NFTMonitorRules) > 0 {

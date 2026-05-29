@@ -129,9 +129,9 @@ func ConfigureContainer(opts ConfigureOptions) (*ConfigureResult, error) {
 	if opts.NetworkConfig != nil && opts.NetworkConfig.Mode != "" && opts.NetworkConfig.Mode != config.NetworkModeOpen {
 		// Ensure bridge is in trusted zone before applying network rules
 		if changed, bridgeName, err := network.EnsureBridgeInTrustedZone(); err != nil {
-			opts.Logger(fmt.Sprintf("Warning: could not ensure bridge in firewalld trusted zone: %v", err))
+			opts.Logger(fmt.Sprintf("Warning: could not ensure bridge forwarding rules: %v", err))
 		} else if changed {
-			opts.Logger(fmt.Sprintf("Added %s to firewalld trusted zone", bridgeName))
+			opts.Logger(fmt.Sprintf("Added iptables FORWARD rules for %s", bridgeName))
 		}
 
 		nm := network.NewManager(opts.NetworkConfig, logger.NewDiscard())

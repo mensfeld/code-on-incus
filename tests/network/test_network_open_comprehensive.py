@@ -4,7 +4,7 @@ Integration tests for network OPEN mode.
 Tests that OPEN mode allows unrestricted network access to all destinations,
 including public internet, RFC1918 private networks, and metadata endpoints.
 
-Network isolation is implemented using firewalld direct rules in restricted/allowlist modes.
+Network isolation is implemented using nft rules in restricted/allowlist modes.
 OPEN mode has no firewall rules applied.
 """
 

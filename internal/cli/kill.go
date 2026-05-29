@@ -129,13 +129,10 @@ func killCommand(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		// Get container IP and veth name BEFORE stopping/deleting (needed for firewall cleanup)
-		// Use fast version since container should already have an IP assigned
+		// Get container IP BEFORE stopping/deleting (needed for firewall cleanup)
 		var containerIP string
-		var vethName string
 		if network.FirewallAvailable() {
 			containerIP, _ = network.GetContainerIPFast(name)
-			vethName, _ = network.GetContainerVethName(name)
 		}
 
 		// Stop container (only if running - skip if already stopped)
@@ -164,13 +161,6 @@ func killCommand(cmd *cobra.Command, args []string) error {
 		} else {
 			killed++
 			fmt.Printf("  ✓ Killed %s\n", name)
-		}
-
-		// Clean up firewalld zone binding for the veth interface AFTER container deletion
-		if vethName != "" {
-			if err := network.RemoveVethFromFirewalldZone(vethName); err != nil {
-				fmt.Fprintf(os.Stderr, "  Warning: Failed to cleanup firewalld zone binding: %v\n", err)
-			}
 		}
 	}
 

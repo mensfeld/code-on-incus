@@ -1137,12 +1137,11 @@ def wait_for_pattern_in_monitor(monitor, pattern, timeout=30, poll_interval=0.5)
 
 def wait_for_firewall_rules(container_name, timeout=30, poll_interval=0.5):
     """
-    Poll firewalld until the default-deny REJECT rule is active for a container.
+    Poll nftables until the default-deny rule is active for a container.
 
-    Queries ``firewall-cmd --direct --get-all-rules`` and looks for the
-    priority-99 ``0.0.0.0/0 REJECT`` rule whose source matches the
-    container's IP.  Returns ``True`` once the rule appears, or ``False``
-    on timeout.
+    Queries ``sudo nft -a list chain ip coi forward`` and looks for a rule
+    whose source matches the container's IP.  Returns ``True`` once the rule
+    appears, or ``False`` on timeout.
 
     Args:
         container_name: Incus container name (used to look up the IP).
@@ -1174,20 +1173,17 @@ def wait_for_firewall_rules(container_name, timeout=30, poll_interval=0.5):
     if not container_ip:
         return False
 
-    # Poll for the default-deny rule.
+    # Poll for a rule referencing this container IP in the ip coi forward chain.
     start = time.time()
     while time.time() - start < timeout:
         result = subprocess.run(
-            ["sudo", "-n", "firewall-cmd", "--direct", "--get-all-rules"],
+            ["sudo", "-n", "nft", "-a", "list", "chain", "ip", "coi", "forward"],
             capture_output=True,
             text=True,
             timeout=10,
         )
-        if result.returncode == 0:
-            for line in result.stdout.splitlines():
-                # Match: ipv4 filter FORWARD 99 -s <container_ip> -d 0.0.0.0/0 -j REJECT
-                if container_ip in line and "0.0.0.0/0" in line and "REJECT" in line:
-                    return True
+        if result.returncode == 0 and container_ip in result.stdout:
+            return True
         time.sleep(poll_interval)
 
     return False

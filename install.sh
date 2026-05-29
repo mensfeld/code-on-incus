@@ -199,191 +199,54 @@ check_group() {
     fi
 }
 
-# Ensure the Incus bridge is in the firewalld trusted zone
-# Without this, containers may fail to get IP addresses
-ensure_bridge_trusted_zone() {
-    # Try to detect the Incus bridge name
-    local bridge_name=""
-    if command -v incus &> /dev/null; then
-        bridge_name=$(incus network list -f csv 2>/dev/null | grep ',bridge,' | head -1 | cut -d, -f1)
-    fi
-    # Fallback to incusbr0
-    if [ -z "$bridge_name" ]; then
-        bridge_name="incusbr0"
-    fi
-
-    # Check if bridge is already in trusted zone
-    if sudo -n firewall-cmd --zone=trusted --query-interface="$bridge_name" &> /dev/null; then
-        echo -e "${GREEN}✓ Bridge $bridge_name is in firewalld trusted zone${NC}"
+# Set up passwordless sudo for nft (required for network isolation)
+setup_nft_sudoers() {
+    local nft_path
+    nft_path="$(command -v nft 2>/dev/null)"
+    if [ -z "$nft_path" ]; then
         return
     fi
 
-    echo -e "${YELLOW}⚠ Bridge $bridge_name is not in firewalld trusted zone${NC}"
-    echo ""
-    echo "  Without this, containers may fail to get IP addresses."
-    echo ""
-
-    if [ "$NONINTERACTIVE" = "1" ]; then
-        echo -e "${BLUE}→ Non-interactive mode: adding bridge to trusted zone...${NC}"
-        sudo firewall-cmd --zone=trusted --add-interface="$bridge_name" --permanent
-        sudo firewall-cmd --reload
-        echo -e "${GREEN}✓ Bridge $bridge_name added to trusted zone${NC}"
+    # Already configured? Check for the sudoers drop-in directly so we don't
+    # get a false positive from a cached sudo timestamp.
+    if [ -f /etc/sudoers.d/coi-nft ]; then
+        echo -e "${GREEN}✓ Passwordless sudo for nft already configured${NC}"
         return
     fi
 
-    read -p "  Add $bridge_name to firewalld trusted zone now? [Y/n] " -n 1 -r </dev/tty
-    echo ""
-    if [[ ! $REPLY =~ ^[Nn]$ ]]; then
-        echo -e "${BLUE}→ Adding $bridge_name to trusted zone...${NC}"
-        sudo firewall-cmd --zone=trusted --add-interface="$bridge_name" --permanent
-        sudo firewall-cmd --reload
-        echo -e "${GREEN}✓ Bridge $bridge_name added to trusted zone${NC}"
-    fi
+    echo -e "${BLUE}→ Configuring passwordless sudo for nft...${NC}"
+    echo "$USER ALL=(ALL) NOPASSWD: $nft_path" | sudo tee /etc/sudoers.d/coi-nft > /dev/null
+    sudo chmod 0440 /etc/sudoers.d/coi-nft
+    echo -e "${GREEN}✓ Passwordless sudo configured for nft${NC}"
 }
 
-# Check for ufw conflict before installing firewalld
-check_ufw() {
-    echo -e "${BLUE}→ Checking for ufw...${NC}"
+# Check nftables availability for network isolation
+check_nft() {
+    echo -e "${BLUE}→ Checking nftables (for network isolation)...${NC}"
 
-    if ! command -v ufw &> /dev/null; then
-        # ufw not installed, nothing to do
-        return
-    fi
-
-    # Check if ufw is active (systemctl doesn't require sudo)
-    if ! systemctl is-active --quiet ufw 2>/dev/null; then
-        echo -e "${GREEN}✓ ufw is installed but inactive (no conflict)${NC}"
-        return
-    fi
-
-    # ufw is active — this conflicts with firewalld
-    echo -e "${YELLOW}⚠ ufw is active${NC}"
-    echo ""
-    echo "  ufw and firewalld both manage netfilter rules. Running both at the"
-    echo "  same time will silently break container networking."
-    echo ""
-    echo "  Options:"
-    echo "    1) Disable ufw and continue with firewalld setup (recommended)"
-    echo "    2) Keep ufw and skip firewalld (only --network=open will work)"
-    echo ""
-
-    if [ "$NONINTERACTIVE" = "1" ]; then
-        echo -e "${RED}✗ Cannot proceed: ufw is active and conflicts with firewalld.${NC}"
-        echo "  Disable ufw first: sudo ufw disable && sudo systemctl disable --now ufw"
-        echo "  Then re-run this installer."
-        exit 1
-    fi
-
-    prompt_choice "  Choose [1/2] (default: 1): " "1"
-
-    case "$REPLY" in
-        2)
-            echo -e "${BLUE}→ Keeping ufw, skipping firewalld setup${NC}"
-            SKIP_FIREWALLD=1
-            ;;
-        *)
-            echo -e "${BLUE}→ Disabling ufw...${NC}"
-            sudo ufw disable
-            sudo systemctl disable --now ufw
-            echo -e "${GREEN}✓ ufw disabled${NC}"
-            ;;
-    esac
-}
-
-# Check firewalld for network isolation
-check_firewalld() {
-    echo -e "${BLUE}→ Checking firewalld (for network isolation)...${NC}"
-
-    if ! command -v firewall-cmd &> /dev/null; then
-        echo -e "${YELLOW}⚠ Firewalld not found${NC}"
+    if ! command -v nft &> /dev/null; then
+        echo -e "${YELLOW}⚠ nft not found${NC}"
         echo ""
-        echo "  Network isolation (restricted/allowlist modes) requires firewalld."
-        echo "  Without it, you can still use --network=open mode."
+        echo "  Network isolation (restricted/allowlist modes) requires nftables."
+        echo "  Without it, you can still use open mode."
         echo ""
 
         if [ "$NONINTERACTIVE" = "1" ]; then
-            echo -e "${BLUE}→ Non-interactive mode: skipping firewalld setup (optional)${NC}"
-            return
-        fi
-
-        read -p "  Install and configure firewalld now? [y/N] " -n 1 -r </dev/tty
-        echo ""
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            echo -e "${BLUE}→ Installing firewalld...${NC}"
-            pkg_install firewalld
-            echo -e "${BLUE}→ Enabling and starting firewalld...${NC}"
-            sudo systemctl enable --now firewalld
-            echo -e "${BLUE}→ Enabling masquerade (required for container internet access)...${NC}"
-            sudo firewall-cmd --permanent --add-masquerade
-            sudo firewall-cmd --reload
-            echo -e "${BLUE}→ Setting up passwordless sudo for firewall-cmd...${NC}"
-            local fwcmd_path
-            fwcmd_path="$(command -v firewall-cmd)"
-            echo "$USER ALL=(ALL) NOPASSWD: $fwcmd_path" | sudo tee /etc/sudoers.d/coi-firewalld > /dev/null
-            sudo chmod 0440 /etc/sudoers.d/coi-firewalld
-            echo -e "${GREEN}✓ Firewalld installed and configured${NC}"
-            ensure_bridge_trusted_zone
-        fi
-        return
-    fi
-
-    if ! sudo -n firewall-cmd --state &> /dev/null 2>&1; then
-        echo -e "${YELLOW}⚠ Firewalld is installed but not running${NC}"
-        echo ""
-        echo "  Network isolation (restricted/allowlist modes) requires firewalld."
-        echo ""
-
-        if [ "$NONINTERACTIVE" = "1" ]; then
-            echo -e "${BLUE}→ Non-interactive mode: skipping firewalld start (optional)${NC}"
-            return
-        fi
-
-        read -p "  Start and enable firewalld now? [y/N] " -n 1 -r </dev/tty
-        echo ""
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            echo -e "${BLUE}→ Enabling and starting firewalld...${NC}"
-            sudo systemctl enable --now firewalld
-            echo -e "${GREEN}✓ Firewalld started${NC}"
-
-            # Check masquerade after starting
-            if ! sudo -n firewall-cmd --query-masquerade &> /dev/null; then
-                echo -e "${BLUE}→ Enabling masquerade (required for container internet access)...${NC}"
-                sudo firewall-cmd --permanent --add-masquerade
-                sudo firewall-cmd --reload
-                echo -e "${GREEN}✓ Masquerade enabled${NC}"
+            echo -e "${BLUE}→ Non-interactive mode: installing nftables...${NC}"
+            pkg_install nftables
+        else
+            read -p "  Install nftables now? [Y/n] " -n 1 -r </dev/tty
+            echo ""
+            if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+                echo -e "${BLUE}→ Installing nftables...${NC}"
+                pkg_install nftables
             fi
-            ensure_bridge_trusted_zone
         fi
-        return
-    fi
-
-    # Firewalld is installed and running — check masquerade
-    if sudo -n firewall-cmd --query-masquerade &> /dev/null; then
-        echo -e "${GREEN}✓ Firewalld is running with masquerade enabled${NC}"
     else
-        echo -e "${YELLOW}⚠ Firewalld is running but masquerade is not enabled${NC}"
-        echo ""
-        echo "  Masquerade is required for containers to reach the internet."
-        echo ""
-
-        if [ "$NONINTERACTIVE" = "1" ]; then
-            echo -e "${BLUE}→ Non-interactive mode: skipping masquerade setup (optional)${NC}"
-            ensure_bridge_trusted_zone
-            return
-        fi
-
-        read -p "  Enable masquerade now? [y/N] " -n 1 -r </dev/tty
-        echo ""
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            echo -e "${BLUE}→ Enabling masquerade...${NC}"
-            sudo firewall-cmd --permanent --add-masquerade
-            sudo firewall-cmd --reload
-            echo -e "${GREEN}✓ Masquerade enabled${NC}"
-        fi
+        echo -e "${GREEN}✓ nft is installed${NC}"
     fi
 
-    # Check bridge trusted zone (regardless of masquerade status)
-    ensure_bridge_trusted_zone
+    setup_nft_sudoers
 }
 
 # Download binary from GitHub releases
@@ -705,21 +568,13 @@ post_install() {
         echo ""
     fi
 
-    if [ "${SKIP_FIREWALLD:-0}" = "1" ]; then
-        echo -e "${YELLOW}⚠ Firewalld was skipped (ufw is active) — only --network=open will work.${NC}"
-        echo "   To enable network isolation later, disable ufw and install firewalld:"
-        echo "   ${BLUE}sudo ufw disable && sudo systemctl disable --now ufw${NC}"
-        echo "   Install firewalld via your package manager, then:"
-        echo "   ${BLUE}sudo systemctl enable --now firewalld${NC}"
+    if ! command -v nft &> /dev/null; then
+        echo -e "${YELLOW}⚠ nftables is not installed — network isolation (restricted/allowlist modes) will not work.${NC}"
+        echo "   Install with: ${BLUE}sudo apt install nftables${NC}"
         echo ""
-    elif ! command -v firewall-cmd &> /dev/null; then
-        echo -e "${YELLOW}⚠ Firewalld is not installed — network isolation (restricted/allowlist modes) will not work.${NC}"
-        echo "   Re-run this installer or install firewalld via your package manager,"
-        echo "   then: ${BLUE}sudo systemctl enable --now firewalld && sudo firewall-cmd --permanent --add-masquerade && sudo firewall-cmd --reload${NC}"
-        echo ""
-    elif ! sudo -n firewall-cmd --query-masquerade &> /dev/null 2>&1; then
-        echo -e "${YELLOW}⚠ Firewalld masquerade is not enabled — containers may not reach the internet.${NC}"
-        echo "   Run: ${BLUE}sudo firewall-cmd --permanent --add-masquerade && sudo firewall-cmd --reload${NC}"
+    elif ! [ -f /etc/sudoers.d/coi-nft ]; then
+        echo -e "${YELLOW}⚠ Passwordless sudo for nft not configured — network isolation will not work.${NC}"
+        echo "   Run: ${BLUE}echo \"\$USER ALL=(ALL) NOPASSWD: \$(command -v nft)\" | sudo tee /etc/sudoers.d/coi-nft && sudo chmod 0440 /etc/sudoers.d/coi-nft${NC}"
         echo ""
     fi
 
@@ -739,10 +594,7 @@ main() {
     detect_pkg_manager
     check_incus
     check_group
-    check_ufw
-    if [ "${SKIP_FIREWALLD:-0}" != "1" ]; then
-        check_firewalld
-    fi
+    check_nft
 
     echo ""
     echo "Installation method:"

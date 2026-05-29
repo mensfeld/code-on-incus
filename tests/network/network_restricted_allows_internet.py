@@ -6,7 +6,7 @@ Tests that:
 2. Development workflows (npm, pypi, GitHub) work normally
 3. Only local/internal networks are blocked
 
-Network isolation is implemented using firewalld direct rules.
+Network isolation is implemented using nft rules.
 """
 
 import pathlib

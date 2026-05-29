@@ -4,7 +4,7 @@ Integration tests for network ALLOWLIST mode.
 Tests that ALLOWLIST mode implements default-deny behavior, only allowing
 access to explicitly specified domains and IPs.
 
-Network isolation is implemented using firewalld direct rules.
+Network isolation is implemented using nft rules.
 """
 
 import os

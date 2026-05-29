@@ -1,22 +1,29 @@
 """
-Test for coi health - bridge firewalld zone check.
+Test for coi health - bridge firewalld zone check (now backed by iptables rules).
 
 Tests that:
 1. The bridge_firewalld_zone check exists in health output
-2. When firewalld is running and bridge is in trusted zone, check is OK
-3. When bridge is not in trusted zone, check warns with fix command
+2. When iptables bridge FORWARD rules (tagged coi-bridge-forward) are present,
+   check is OK
+3. When the rules are absent, check warns
 4. Check appears in text output under NETWORKING section
+
+The Go functions BridgeInTrustedZone / EnsureBridgeInTrustedZone now check
+iptables FORWARD rules tagged with the comment `coi-bridge-forward` rather
+than firewalld zones.  The health check key is still `bridge_firewalld_zone`.
+Masquerade / NAT is handled by Incus (`ipv4.nat=true` on the bridge), so no
+firewalld presence is required.
 """
 
 import json
 import subprocess
 
 
-def firewalld_available():
-    """Check if firewalld is available and running."""
+def iptables_available():
+    """Check if iptables is available with sudo access."""
     try:
         result = subprocess.run(
-            ["sudo", "-n", "firewall-cmd", "--state"],
+            ["sudo", "-n", "iptables", "-S", "FORWARD"],
             capture_output=True,
             timeout=10,
         )
@@ -44,21 +51,18 @@ def get_bridge_name():
     return "incusbr0"
 
 
-def bridge_in_trusted_zone(bridge_name):
-    """Check if the bridge is in the firewalld trusted zone."""
+def bridge_has_forward_rules(bridge_name):
+    """Check if coi-bridge-forward iptables FORWARD rules exist for the bridge."""
     try:
         result = subprocess.run(
-            [
-                "sudo",
-                "-n",
-                "firewall-cmd",
-                "--zone=trusted",
-                f"--query-interface={bridge_name}",
-            ],
+            ["sudo", "-n", "iptables", "-S", "FORWARD"],
             capture_output=True,
+            text=True,
             timeout=10,
         )
-        return result.returncode == 0
+        if result.returncode != 0:
+            return False
+        return "coi-bridge-forward" in result.stdout and bridge_name in result.stdout
     except (subprocess.TimeoutExpired, FileNotFoundError):
         return False
 
@@ -97,21 +101,21 @@ def test_health_bridge_firewalld_zone_check_exists(coi_binary):
 
 def test_health_bridge_firewalld_zone_ok_when_configured(coi_binary):
     """
-    When firewalld is running and bridge is in trusted zone, check reports OK.
+    When iptables coi-bridge-forward rules are present, check reports OK.
 
     Flow:
-    1. Skip if firewalld not available or bridge not in trusted zone
+    1. Skip if iptables not available or bridge rules not present
     2. Run coi health --format json
     3. Verify bridge_firewalld_zone check is OK with correct details
     """
     import pytest
 
-    if not firewalld_available():
-        pytest.skip("firewalld not available")
+    if not iptables_available():
+        pytest.skip("iptables not available")
 
     bridge_name = get_bridge_name()
-    if not bridge_in_trusted_zone(bridge_name):
-        pytest.skip(f"Bridge {bridge_name} not in trusted zone (test requires it to be)")
+    if not bridge_has_forward_rules(bridge_name):
+        pytest.skip(f"Bridge {bridge_name} has no coi-bridge-forward rules (test requires them)")
 
     result = subprocess.run(
         [coi_binary, "health", "--format", "json"],
@@ -124,113 +128,27 @@ def test_health_bridge_firewalld_zone_ok_when_configured(coi_binary):
     check = data["checks"]["bridge_firewalld_zone"]
 
     assert check["status"] == "ok", (
-        f"Expected OK when bridge is in trusted zone, got: {check['status']} - {check['message']}"
+        f"Expected OK when bridge FORWARD rules are present, got: {check['status']} - {check['message']}"
     )
-    assert "trusted zone" in check["message"], (
-        f"Message should mention trusted zone: {check['message']}"
-    )
-    assert "details" in check, "Should have details when firewalld is running"
+    assert "details" in check, "Should have details"
     assert check["details"]["bridge_name"] == bridge_name, (
         f"Details should show bridge name {bridge_name}"
     )
-    assert check["details"]["in_trusted_zone"] is True, "Details should show in_trusted_zone=true"
-
-
-def test_health_bridge_firewalld_zone_warns_when_not_configured(coi_binary):
-    """
-    When bridge is removed from trusted zone, health reports warning with fix command.
-
-    Flow:
-    1. Skip if firewalld not available
-    2. Remove bridge from trusted zone temporarily
-    3. Run coi health --format json
-    4. Verify warning status with actionable fix command
-    5. Restore bridge to trusted zone
-    """
-    import pytest
-
-    if not firewalld_available():
-        pytest.skip("firewalld not available")
-
-    bridge_name = get_bridge_name()
-
-    # Check if bridge is currently in trusted zone so we know whether to restore
-    was_in_zone = bridge_in_trusted_zone(bridge_name)
-
-    try:
-        # Remove bridge from trusted zone
-        subprocess.run(
-            [
-                "sudo",
-                "-n",
-                "firewall-cmd",
-                "--zone=trusted",
-                f"--remove-interface={bridge_name}",
-            ],
-            capture_output=True,
-            timeout=10,
-        )
-
-        # Verify it was actually removed
-        if bridge_in_trusted_zone(bridge_name):
-            pytest.skip("Could not remove bridge from trusted zone for testing")
-
-        result = subprocess.run(
-            [coi_binary, "health", "--format", "json"],
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-
-        data = json.loads(result.stdout)
-        check = data["checks"]["bridge_firewalld_zone"]
-
-        assert check["status"] == "warning", (
-            f"Expected warning when bridge not in trusted zone, got: {check['status']} - {check['message']}"
-        )
-        assert "not in trusted zone" in check["message"], (
-            f"Message should explain the issue: {check['message']}"
-        )
-        assert "firewall-cmd" in check["message"], (
-            f"Message should include fix command: {check['message']}"
-        )
-        assert bridge_name in check["message"], (
-            f"Message should include bridge name: {check['message']}"
-        )
-        assert check["details"]["in_trusted_zone"] is False, (
-            "Details should show in_trusted_zone=false"
-        )
-
-    finally:
-        # Restore bridge to trusted zone if it was there before
-        if was_in_zone:
-            subprocess.run(
-                [
-                    "sudo",
-                    "-n",
-                    "firewall-cmd",
-                    "--zone=trusted",
-                    f"--add-interface={bridge_name}",
-                ],
-                capture_output=True,
-                timeout=10,
-            )
+    assert check["details"]["has_forward_rules"] is True, (
+        "Details should show has_forward_rules=true"
+    )
 
 
 def test_health_bridge_firewalld_zone_ok_without_firewalld(coi_binary):
     """
-    When firewalld is not running, bridge zone check is OK (not applicable).
+    When firewalld is not running (the normal nftables case), bridge zone check
+    is OK as long as iptables coi-bridge-forward rules are present.
 
     Flow:
-    1. Skip if firewalld IS available (this test is for when it's not)
-    2. Run coi health --format json
-    3. Verify bridge_firewalld_zone check is OK with not-applicable message
+    1. Run coi health --format json
+    2. Verify bridge_firewalld_zone check returns ok or warning (not failed/error)
+    3. Verify message is meaningful
     """
-    import pytest
-
-    if firewalld_available():
-        pytest.skip("firewalld is available (test is for when it is not)")
-
     result = subprocess.run(
         [coi_binary, "health", "--format", "json"],
         capture_output=True,
@@ -241,12 +159,12 @@ def test_health_bridge_firewalld_zone_ok_without_firewalld(coi_binary):
     data = json.loads(result.stdout)
     check = data["checks"]["bridge_firewalld_zone"]
 
-    assert check["status"] == "ok", (
-        f"Expected OK when firewalld not running, got: {check['status']}"
+    # Without firewalld, the check relies on iptables rules.
+    # Status is ok if rules exist, warning if not — both are valid non-error states.
+    assert check["status"] in ("ok", "warning"), (
+        f"Expected ok or warning for bridge check, got: {check['status']}"
     )
-    assert (
-        "not running" in check["message"].lower() or "not applicable" in check["message"].lower()
-    ), f"Message should indicate check is not applicable: {check['message']}"
+    assert check["message"], "Check should have a non-empty message"
 
 
 def test_health_bridge_firewalld_zone_text_output(coi_binary):

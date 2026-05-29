@@ -6,7 +6,7 @@ Tests that:
 2. Works regardless of what private network range the host uses
 3. Dynamically discovers the gateway IP
 
-Network isolation is implemented using firewalld direct rules.
+Network isolation is implemented using nft rules.
 """
 
 import pathlib

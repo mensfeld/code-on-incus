@@ -5,7 +5,7 @@ Tests that:
 1. Container cannot reach cloud metadata service at 169.254.169.254
 2. Prevents cloud credential exfiltration
 
-Network isolation is implemented using firewalld direct rules.
+Network isolation is implemented using nft rules.
 """
 
 import pathlib

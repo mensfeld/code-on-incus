@@ -67,12 +67,10 @@ func shutdownCommand(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		// Get container IP and veth name BEFORE stopping/deleting (needed for firewall cleanup)
+		// Get container IP BEFORE stopping/deleting (needed for firewall cleanup)
 		var containerIP string
-		var vethName string
 		if network.FirewallAvailable() {
 			containerIP, _ = network.GetContainerIPFast(name)
-			vethName, _ = network.GetContainerVethName(name)
 		}
 
 		// Check if container is running
@@ -134,13 +132,6 @@ func shutdownCommand(cmd *cobra.Command, args []string) error {
 		} else {
 			shutdown++
 			fmt.Printf("  ✓ Shutdown %s\n", name)
-		}
-
-		// Clean up firewalld zone binding AFTER container deletion
-		if vethName != "" {
-			if err := network.RemoveVethFromFirewalldZone(vethName); err != nil {
-				fmt.Fprintf(os.Stderr, "  Warning: Failed to cleanup firewalld zone binding: %v\n", err)
-			}
 		}
 	}
 
