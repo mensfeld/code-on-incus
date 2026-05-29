@@ -4,6 +4,8 @@
 
 ### Improvements
 
+- [Refactor] **Renamed remaining legacy firewall identifiers to nft** — Continued nft naming cleanup: health check key `firewall` → `nft`; `CheckFirewall()` → `CheckNft()`; `orphaned_firewall_rules` JSON detail key → `orphaned_nft_rules`; `errFirewallNotAvailable` → `errNftNotAvailable`. Breaking changes: `coi health --format json` consumers checking `checks.firewall` must update to `checks.nft`; `orphaned_firewall_rules` detail key renamed to `orphaned_nft_rules`.
+
 - [Refactor] **Renamed legacy firewalld identifiers to nft** — Cleaned up all remaining `firewalld`-era naming after the firewalld→nftables migration: health check key `bridge_firewalld_zone` → `bridge_forward_rules`; Go function `CheckBridgeFirewalldZone` → `CheckBridgeForwardRules`; `FirewallManager`/`NewFirewallManager` → `NftManager`/`NewNftManager`; `FirewallAvailable`/`FirewallInstalled` → `NftAvailable`/`NftInstalled`; orphan helpers `DetectOrphanedFirewallRules`/`CleanupOrphanedFirewallRules` → `DetectOrphanedNftRules`/`CleanupOrphanedNftRules`; source file `firewall.go` → `nft_filter.go`. Breaking change: `coi health --format json` consumers checking the `bridge_firewalld_zone` key must update to `bridge_forward_rules`.
 
 

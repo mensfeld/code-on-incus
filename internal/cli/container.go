@@ -92,17 +92,17 @@ var containerDeleteCmd = &cobra.Command{
 
 		mgr := container.NewManager(name)
 
-		// Get container IP BEFORE deleting (needed for firewall cleanup)
+		// Get container IP BEFORE deleting (needed for nft cleanup)
 		var containerIP string
 		if network.NftAvailable() {
 			containerIP, _ = network.GetContainerIPFast(name)
 		}
 
-		// Clean up firewall rules BEFORE deleting container
+		// Clean up nft rules BEFORE deleting container
 		if containerIP != "" {
 			fm := network.NewNftManager(containerIP, "")
 			if err := fm.RemoveRules(); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: Failed to cleanup firewall rules: %v\n", err)
+				fmt.Fprintf(os.Stderr, "Warning: Failed to cleanup nft rules: %v\n", err)
 			}
 		}
 

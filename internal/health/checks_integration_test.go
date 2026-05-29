@@ -435,9 +435,9 @@ func TestCheckContainerConnectivity_Cleanup(t *testing.T) {
 	}
 }
 
-// CheckFirewall should return a details map containing nft_installed, nft_available, and masquerade
-// booleans, and the status should reflect the actual firewall state.
-func TestCheckFirewall_DetailedStatus(t *testing.T) {
+// CheckNft should return a details map containing nft_installed, nft_available, and masquerade
+// booleans, and the status should reflect the actual nft state.
+func TestCheckNft_DetailedStatus(t *testing.T) {
 	installed := network.NftInstalled()
 	available := network.NftAvailable()
 	masquerade := network.MasqueradeEnabled()
@@ -449,10 +449,10 @@ func TestCheckFirewall_DetailedStatus(t *testing.T) {
 
 	for _, mode := range modes {
 		t.Run(string(mode), func(t *testing.T) {
-			result := CheckFirewall(mode)
+			result := CheckNft(mode)
 
-			if result.Name != "firewall" {
-				t.Errorf("Expected check name 'firewall', got %q", result.Name)
+			if result.Name != "nft" {
+				t.Errorf("Expected check name 'nft', got %q", result.Name)
 			}
 
 			// Verify details map has the expected keys
@@ -505,7 +505,7 @@ func TestCheckFirewall_DetailedStatus(t *testing.T) {
 				}
 			}
 
-			t.Logf("CheckFirewall(%s): status=%s installed=%v available=%v masquerade=%v message=%s",
+			t.Logf("CheckNft(%s): status=%s installed=%v available=%v masquerade=%v message=%s",
 				mode, result.Status, installed, available, masquerade, result.Message)
 		})
 	}
