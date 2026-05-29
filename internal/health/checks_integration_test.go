@@ -438,8 +438,8 @@ func TestCheckContainerConnectivity_Cleanup(t *testing.T) {
 // CheckFirewall should return a details map containing nft_installed, nft_available, and masquerade
 // booleans, and the status should reflect the actual firewall state.
 func TestCheckFirewall_DetailedStatus(t *testing.T) {
-	installed := network.FirewallInstalled()
-	available := network.FirewallAvailable()
+	installed := network.NftInstalled()
+	available := network.NftAvailable()
 	masquerade := network.MasqueradeEnabled()
 
 	modes := []config.NetworkMode{
@@ -525,7 +525,7 @@ func TestCheckNetworkRestriction_NoFirewall(t *testing.T) {
 	}
 
 	// This test only makes sense if firewall is NOT available
-	if network.FirewallAvailable() {
+	if network.NftAvailable() {
 		t.Skip("nft is available, cannot test no-firewall scenario")
 	}
 
@@ -560,7 +560,7 @@ func TestCheckNetworkRestriction_NoImage(t *testing.T) {
 	}
 
 	// Skip if firewall is not available
-	if !network.FirewallAvailable() {
+	if !network.NftAvailable() {
 		t.Skip("nft not available, skipping integration test")
 	}
 
@@ -597,7 +597,7 @@ func TestCheckNetworkRestriction_WithImage(t *testing.T) {
 	}
 
 	// Skip if firewall is not available
-	if !network.FirewallAvailable() {
+	if !network.NftAvailable() {
 		t.Skip("nft not available, skipping integration test")
 	}
 
@@ -657,7 +657,7 @@ func TestCheckNetworkRestriction_Cleanup(t *testing.T) {
 	}
 
 	// Skip if firewall is not available
-	if !network.FirewallAvailable() {
+	if !network.NftAvailable() {
 		t.Skip("nft not available, skipping integration test")
 	}
 

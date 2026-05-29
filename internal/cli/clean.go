@@ -31,7 +31,7 @@ By default, cleans only stopped containers. Use flags to control what gets clean
 
 Orphaned resources include:
 - Orphaned veth interfaces (network pairs with no master bridge)
-- Orphaned firewall rules (nft coi chain rules for container IPs that no longer exist)
+- Orphaned nft rules (ip coi forward chain rules for container IPs that no longer exist)
 - Orphaned iptables bridge rules (coi-bridge-forward rules with no containers running)
 
 The --pools flag detects COI containers in storage pools that are not
@@ -43,7 +43,7 @@ other projects on this machine.
 Examples:
   coi clean                    # Clean stopped containers
   coi clean --sessions         # Clean saved session data
-  coi clean --orphans          # Clean orphaned veths and firewall rules
+  coi clean --orphans          # Clean orphaned veths and nft rules
   coi clean --pools            # Clean COI containers in unreferenced pools
   coi clean --all              # Clean everything
   coi clean --all --force      # Clean without confirmation
@@ -56,7 +56,7 @@ func init() {
 	cleanCmd.Flags().BoolVarP(&cleanAll, "all", "a", false, "Clean all containers, sessions, and orphaned resources")
 	cleanCmd.Flags().BoolVarP(&cleanForce, "force", "f", false, "Skip confirmation prompts")
 	cleanCmd.Flags().BoolVar(&cleanSessions, "sessions", false, "Clean saved session data")
-	cleanCmd.Flags().BoolVar(&cleanOrphans, "orphans", false, "Clean orphaned veths and firewall rules")
+	cleanCmd.Flags().BoolVar(&cleanOrphans, "orphans", false, "Clean orphaned veths and nft rules")
 	cleanCmd.Flags().BoolVar(&cleanPools, "pools", false, "Clean COI containers in unreferenced storage pools")
 	cleanCmd.Flags().BoolVar(&cleanDryRun, "dry-run", false, "Show what would be cleaned without making changes")
 }
@@ -102,7 +102,7 @@ func cleanCommand(cmd *cobra.Command, args []string) error {
 		cleaned += count
 	}
 
-	// Clean orphaned resources (veths and firewall rules)
+	// Clean orphaned resources (veths and nft rules)
 	if cleanAll || cleanOrphans {
 		count, cancelled := cleanOrphanedResources()
 		if cancelled {
@@ -257,7 +257,7 @@ func cleanSavedSessions(sessionsDir string) (int, bool, error) {
 	return cleaned, false, nil
 }
 
-// cleanOrphanedResources finds and removes orphaned veths and firewall rules.
+// cleanOrphanedResources finds and removes orphaned veths and nft rules.
 // Returns (count cleaned, was cancelled).
 func cleanOrphanedResources() (int, bool) {
 	fmt.Println("\nScanning for orphaned resources...")
@@ -268,7 +268,7 @@ func cleanOrphanedResources() (int, bool) {
 		return 0, false
 	}
 
-	totalOrphans := len(orphans.Veths) + len(orphans.FirewallRules) + len(orphans.NFTMonitorRules) + len(orphans.IptablesBridgeRules)
+	totalOrphans := len(orphans.Veths) + len(orphans.NftRules) + len(orphans.NFTMonitorRules) + len(orphans.IptablesBridgeRules)
 
 	if totalOrphans == 0 {
 		fmt.Println("  (no orphaned resources found)")
@@ -296,7 +296,7 @@ func cleanOrphanedResources() (int, bool) {
 
 // printOrphanedResources prints the list of orphaned resources found.
 func printOrphanedResources(orphans *cleanup.OrphanedResources) {
-	totalOrphans := len(orphans.Veths) + len(orphans.FirewallRules) + len(orphans.NFTMonitorRules) + len(orphans.IptablesBridgeRules)
+	totalOrphans := len(orphans.Veths) + len(orphans.NftRules) + len(orphans.NFTMonitorRules) + len(orphans.IptablesBridgeRules)
 	fmt.Printf("Found %d orphaned resource(s):\n", totalOrphans)
 
 	if len(orphans.Veths) > 0 {
@@ -306,9 +306,9 @@ func printOrphanedResources(orphans *cleanup.OrphanedResources) {
 		}
 	}
 
-	if len(orphans.FirewallRules) > 0 {
-		fmt.Printf("  Orphaned firewall rules (%d):\n", len(orphans.FirewallRules))
-		for _, rule := range orphans.FirewallRules {
+	if len(orphans.NftRules) > 0 {
+		fmt.Printf("  Orphaned nft rules (%d):\n", len(orphans.NftRules))
+		for _, rule := range orphans.NftRules {
 			fmt.Printf("    - %s\n", rule)
 		}
 	}
@@ -347,8 +347,8 @@ func doCleanOrphanedResources(orphans *cleanup.OrphanedResources) int {
 		cleaned += vethsCleaned
 	}
 
-	if len(orphans.FirewallRules) > 0 {
-		rulesCleaned, _ := cleanup.CleanupOrphanedFirewallRules(orphans.FirewallRules, logger)
+	if len(orphans.NftRules) > 0 {
+		rulesCleaned, _ := cleanup.CleanupOrphanedNftRules(orphans.NftRules, logger)
 		cleaned += rulesCleaned
 	}
 

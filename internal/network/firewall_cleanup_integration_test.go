@@ -51,7 +51,7 @@ func TestOpenModeFirewallCleanup(t *testing.T) {
 	}
 
 	// Skip if firewall is not available
-	if !FirewallAvailable() {
+	if !NftAvailable() {
 		t.Skip("nft not available, skipping integration test")
 	}
 
@@ -145,7 +145,7 @@ func TestRestrictedModeFirewallCleanup(t *testing.T) {
 	}
 
 	// Skip if firewall is not available
-	if !FirewallAvailable() {
+	if !NftAvailable() {
 		t.Skip("nft not available, skipping integration test")
 	}
 
@@ -243,7 +243,7 @@ func TestFirewallCleanupBeforeContainerDeletion(t *testing.T) {
 	}
 
 	// Skip if firewall is not available
-	if !FirewallAvailable() {
+	if !NftAvailable() {
 		t.Skip("nft not available, skipping integration test")
 	}
 
@@ -349,7 +349,7 @@ func TestFirewallCleanupCorrectOrder(t *testing.T) {
 	}
 
 	// Skip if firewall is not available
-	if !FirewallAvailable() {
+	if !NftAvailable() {
 		t.Skip("nft not available, skipping integration test")
 	}
 

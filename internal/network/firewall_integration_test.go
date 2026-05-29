@@ -5,15 +5,15 @@ import (
 	"testing"
 )
 
-// FirewallAvailable should return true when nft is installed and passwordless sudo works.
-func TestFirewallAvailable_Integration(t *testing.T) {
+// NftAvailable should return true when nft is installed and passwordless sudo works.
+func TestNftAvailable_Integration(t *testing.T) {
 	_, lookPathErr := exec.LookPath("nft")
 	installed := lookPathErr == nil
 
 	if !installed {
-		t.Log("nft not installed — expecting FirewallAvailable() == false")
-		if FirewallAvailable() {
-			t.Error("FirewallAvailable() returned true but nft is not installed")
+		t.Log("nft not installed — expecting NftAvailable() == false")
+		if NftAvailable() {
+			t.Error("NftAvailable() returned true but nft is not installed")
 		}
 		return
 	}
@@ -22,25 +22,25 @@ func TestFirewallAvailable_Integration(t *testing.T) {
 	cmd := exec.Command("sudo", "-n", "nft", "list", "tables")
 	sudoOK := cmd.Run() == nil
 
-	result := FirewallAvailable()
+	result := NftAvailable()
 	if result != sudoOK {
-		t.Errorf("FirewallAvailable() = %v, but sudo nft list tables returned %v", result, sudoOK)
+		t.Errorf("NftAvailable() = %v, but sudo nft list tables returned %v", result, sudoOK)
 	}
 
-	t.Logf("FirewallAvailable: installed=%v sudoOK=%v result=%v", installed, sudoOK, result)
+	t.Logf("NftAvailable: installed=%v sudoOK=%v result=%v", installed, sudoOK, result)
 }
 
-// FirewallInstalled should return true when the nft binary exists on PATH.
-func TestFirewallInstalled_Integration(t *testing.T) {
+// NftInstalled should return true when the nft binary exists on PATH.
+func TestNftInstalled_Integration(t *testing.T) {
 	_, lookPathErr := exec.LookPath("nft")
 	expected := lookPathErr == nil
 
-	result := FirewallInstalled()
+	result := NftInstalled()
 	if result != expected {
-		t.Errorf("FirewallInstalled() = %v, but exec.LookPath(\"nft\") says %v", result, expected)
+		t.Errorf("NftInstalled() = %v, but exec.LookPath(\"nft\") says %v", result, expected)
 	}
 
-	t.Logf("FirewallInstalled: %v", result)
+	t.Logf("NftInstalled: %v", result)
 }
 
 // MasqueradeEnabled should return true when the Incus bridge has ipv4.nat=true.

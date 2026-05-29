@@ -4,6 +4,10 @@
 
 ### Improvements
 
+- [Refactor] **Renamed legacy firewalld identifiers to nft** — Cleaned up all remaining `firewalld`-era naming after the firewalld→nftables migration: health check key `bridge_firewalld_zone` → `bridge_forward_rules`; Go function `CheckBridgeFirewalldZone` → `CheckBridgeForwardRules`; `FirewallManager`/`NewFirewallManager` → `NftManager`/`NewNftManager`; `FirewallAvailable`/`FirewallInstalled` → `NftAvailable`/`NftInstalled`; orphan helpers `DetectOrphanedFirewallRules`/`CleanupOrphanedFirewallRules` → `DetectOrphanedNftRules`/`CleanupOrphanedNftRules`; source file `firewall.go` → `nft_filter.go`. Breaking change: `coi health --format json` consumers checking the `bridge_firewalld_zone` key must update to `bridge_forward_rules`.
+
+
+
 - **Base image downloaded directly from Canonical's CDN** — `coi build` now fetches the Ubuntu base image straight from `cloud-images.ubuntu.com` instead of relying on the LXC community image server (`images.linuxcontainers.org`), whose CDN mirrors are blocked in some corporate networks. COI fetches Canonical's simplestreams index directly in Go, downloads the `lxd.tar.xz` metadata and `squashfs` rootfs, and imports them into Incus as a local alias — bypassing Incus's own simplestreams client, which is incompatible with `cloud-images.ubuntu.com`. The default base image reference is now `ubuntu:24.04`; any `ubuntu:VERSION` reference triggers this download path. Users who prefer the old behaviour can set `[container.build] base = "images:ubuntu/22.04"` in their config. The `[container.build] base` override now also applies to `coi-default` builds (previously it was ignored for the default image). (#388)
 
 - **Interactive build prompt when image is missing** — When `coi shell` or `coi run` is invoked from a terminal and the required image does not exist, COI now asks "Build it now? (~5 min) [y/N]" instead of immediately failing. Answering `y` triggers the build inline and continues with the session. Non-interactive use (piped input, CI) is unchanged — the existing actionable error is returned immediately.

@@ -13,24 +13,24 @@ import (
 	"github.com/mensfeld/code-on-incus/internal/container"
 )
 
-// FirewallManager manages nftables rules for container network isolation.
+// NftManager manages nftables rules for container network isolation.
 // Rules live in the dedicated "ip coi" table, forward chain, keeping COI
 // rules isolated from Docker, ufw, and other tools.
-type FirewallManager struct {
+type NftManager struct {
 	containerIP string
 	gatewayIP   string
 }
 
-// NewFirewallManager creates a new firewall manager for a container
-func NewFirewallManager(containerIP, gatewayIP string) *FirewallManager {
-	return &FirewallManager{
+// NewNftManager creates a new nft manager for a container
+func NewNftManager(containerIP, gatewayIP string) *NftManager {
+	return &NftManager{
 		containerIP: containerIP,
 		gatewayIP:   gatewayIP,
 	}
 }
 
 // ApplyRestricted applies restricted mode rules (block RFC1918, allow internet)
-func (f *FirewallManager) ApplyRestricted(cfg *config.NetworkConfig) error {
+func (f *NftManager) ApplyRestricted(cfg *config.NetworkConfig) error {
 	if err := EnsureBaseRules(); err != nil {
 		log.Printf("Warning: failed to ensure base rules: %v", err)
 	}
@@ -70,7 +70,7 @@ func (f *FirewallManager) ApplyRestricted(cfg *config.NetworkConfig) error {
 }
 
 // ApplyAllowlist applies allowlist mode rules (allow specific IPs, block all else)
-func (f *FirewallManager) ApplyAllowlist(cfg *config.NetworkConfig, allowedIPs []string) error {
+func (f *NftManager) ApplyAllowlist(cfg *config.NetworkConfig, allowedIPs []string) error {
 	if err := EnsureBaseRules(); err != nil {
 		log.Printf("Warning: failed to ensure base rules: %v", err)
 	}
@@ -121,7 +121,7 @@ func (f *FirewallManager) ApplyAllowlist(cfg *config.NetworkConfig, allowedIPs [
 }
 
 // RemoveRules removes all nftables rules for this container's IP
-func (f *FirewallManager) RemoveRules() error {
+func (f *NftManager) RemoveRules() error {
 	if f.containerIP == "" {
 		return nil
 	}
@@ -185,7 +185,7 @@ func DisableIPv6ForContainer(containerName string) error {
 // addRule appends a nftables rule to ip coi forward for this container.
 // Rules are appended in call order, so callers must invoke addRule from most-specific
 // to least-specific (gateway → allowlist → RFC1918 block → default).
-func (f *FirewallManager) addRule(source, destination, action string) error {
+func (f *NftManager) addRule(source, destination, action string) error {
 	args := []string{
 		"add", "rule", "ip", "coi", "forward",
 		"ip", "saddr", source,
@@ -360,14 +360,14 @@ func getContainerIPOnce(containerName string) (string, error) {
 	return "", fmt.Errorf("no IPv4 address found for container %s", containerName)
 }
 
-// FirewallInstalled checks if the nft binary is installed
-func FirewallInstalled() bool {
+// NftInstalled checks if the nft binary is installed
+func NftInstalled() bool {
 	_, err := exec.LookPath("nft")
 	return err == nil
 }
 
-// FirewallAvailable checks if nft is available and passwordless sudo is configured
-func FirewallAvailable() bool {
+// NftAvailable checks if nft is available and passwordless sudo is configured
+func NftAvailable() bool {
 	cmd := exec.Command("sudo", "-n", "nft", "list", "tables")
 	return cmd.Run() == nil
 }
@@ -391,7 +391,7 @@ func UfwActive() bool {
 }
 
 // MasqueradeEnabled checks if the Incus bridge has NAT (masquerade) enabled.
-// Incus manages masquerade natively via its bridge config; no firewalld needed.
+// Incus manages masquerade natively via its bridge config; no extra firewall daemon needed.
 // ipv4.nat defaults to true for Incus-managed bridges; an unset/empty value
 // means the default (enabled), so only an explicit "false" means disabled.
 func MasqueradeEnabled() bool {
@@ -408,7 +408,7 @@ func MasqueradeEnabled() bool {
 }
 
 // BridgeInTrustedZone checks whether the Incus bridge has iptables FORWARD ACCEPT
-// rules in place (the nft-era replacement for firewalld trusted-zone membership).
+// rules in place (the nft-based replacement for iptables bridge forwarding rules).
 // Returns (inZone, bridgeName, error).
 func BridgeInTrustedZone() (bool, string, error) {
 	bridgeName, err := GetIncusBridgeName()
@@ -455,10 +455,10 @@ func ForwardPolicyIsDrop() bool {
 	return strings.Contains(lines[0], "policy DROP")
 }
 
-// NeedsIptablesFallback returns true when firewalld is not available but
+// NeedsIptablesFallback returns true when nft is not available but
 // the FORWARD chain policy is DROP and iptables is available as a fallback
 func NeedsIptablesFallback() bool {
-	return !FirewallAvailable() && ForwardPolicyIsDrop() && IptablesAvailable()
+	return !NftAvailable() && ForwardPolicyIsDrop() && IptablesAvailable()
 }
 
 // GetIncusBridgeName extracts the bridge/network name from the Incus default profile

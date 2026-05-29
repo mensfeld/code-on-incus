@@ -168,7 +168,7 @@ func (b *Builder) launchBuildContainer() error {
 
 	// Setup open mode firewall rules for build container
 	// This is needed when FORWARD chain policy is DROP (common with Docker)
-	if network.FirewallAvailable() {
+	if network.NftAvailable() {
 		containerIP, err := network.GetContainerIP(b.mgr.ContainerName)
 		if err != nil {
 			b.opts.Logger(fmt.Sprintf("Warning: could not get container IP for firewall rules: %v", err))

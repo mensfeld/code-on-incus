@@ -1,16 +1,16 @@
 """
-Test for coi health - bridge firewalld zone check (now backed by iptables rules).
+Test for coi health - bridge forward rules check (backed by iptables rules).
 
 Tests that:
-1. The bridge_firewalld_zone check exists in health output
+1. The bridge_forward_rules check exists in health output
 2. When iptables bridge FORWARD rules (tagged coi-bridge-forward) are present,
    check is OK
 3. When the rules are absent, check warns
 4. Check appears in text output under NETWORKING section
 
-The Go functions BridgeInTrustedZone / EnsureBridgeInTrustedZone now check
-iptables FORWARD rules tagged with the comment `coi-bridge-forward` rather
-than firewalld zones.  The health check key is still `bridge_firewalld_zone`.
+The Go functions BridgeInTrustedZone / EnsureBridgeInTrustedZone check
+iptables FORWARD rules tagged with the comment `coi-bridge-forward`.
+The health check key is `bridge_forward_rules`.
 Masquerade / NAT is handled by Incus (`ipv4.nat=true` on the bridge), so no
 firewalld presence is required.
 """
@@ -67,13 +67,13 @@ def bridge_has_forward_rules(bridge_name):
         return False
 
 
-def test_health_bridge_firewalld_zone_check_exists(coi_binary):
+def test_health_bridge_forward_rules_check_exists(coi_binary):
     """
-    Verify bridge_firewalld_zone check appears in health JSON output.
+    Verify bridge_forward_rules check appears in health JSON output.
 
     Flow:
     1. Run coi health --format json
-    2. Parse JSON, verify bridge_firewalld_zone key exists
+    2. Parse JSON, verify bridge_forward_rules key exists
     3. Verify it has required fields
     """
     result = subprocess.run(
@@ -90,23 +90,23 @@ def test_health_bridge_firewalld_zone_check_exists(coi_binary):
     data = json.loads(result.stdout)
     checks = data["checks"]
 
-    assert "bridge_firewalld_zone" in checks, "Should have bridge_firewalld_zone check"
+    assert "bridge_forward_rules" in checks, "Should have bridge_forward_rules check"
 
-    check = checks["bridge_firewalld_zone"]
+    check = checks["bridge_forward_rules"]
     assert "name" in check, "Check should have 'name' field"
     assert "status" in check, "Check should have 'status' field"
     assert "message" in check, "Check should have 'message' field"
     assert check["status"] in ["ok", "warning", "failed"], f"Invalid status: {check['status']}"
 
 
-def test_health_bridge_firewalld_zone_ok_when_configured(coi_binary):
+def test_health_bridge_forward_rules_ok_when_configured(coi_binary):
     """
     When iptables coi-bridge-forward rules are present, check reports OK.
 
     Flow:
     1. Skip if iptables not available or bridge rules not present
     2. Run coi health --format json
-    3. Verify bridge_firewalld_zone check is OK with correct details
+    3. Verify bridge_forward_rules check is OK with correct details
     """
     import pytest
 
@@ -125,7 +125,7 @@ def test_health_bridge_firewalld_zone_ok_when_configured(coi_binary):
     )
 
     data = json.loads(result.stdout)
-    check = data["checks"]["bridge_firewalld_zone"]
+    check = data["checks"]["bridge_forward_rules"]
 
     assert check["status"] == "ok", (
         f"Expected OK when bridge FORWARD rules are present, got: {check['status']} - {check['message']}"
@@ -139,14 +139,14 @@ def test_health_bridge_firewalld_zone_ok_when_configured(coi_binary):
     )
 
 
-def test_health_bridge_firewalld_zone_ok_without_firewalld(coi_binary):
+def test_health_bridge_forward_rules_ok_without_firewalld(coi_binary):
     """
-    When firewalld is not running (the normal nftables case), bridge zone check
+    When firewalld is not running (the normal nftables case), bridge forward rules check
     is OK as long as iptables coi-bridge-forward rules are present.
 
     Flow:
     1. Run coi health --format json
-    2. Verify bridge_firewalld_zone check returns ok or warning (not failed/error)
+    2. Verify bridge_forward_rules check returns ok or warning (not failed/error)
     3. Verify message is meaningful
     """
     result = subprocess.run(
@@ -157,7 +157,7 @@ def test_health_bridge_firewalld_zone_ok_without_firewalld(coi_binary):
     )
 
     data = json.loads(result.stdout)
-    check = data["checks"]["bridge_firewalld_zone"]
+    check = data["checks"]["bridge_forward_rules"]
 
     # Without firewalld, the check relies on iptables rules.
     # Status is ok if rules exist, warning if not — both are valid non-error states.
@@ -167,13 +167,13 @@ def test_health_bridge_firewalld_zone_ok_without_firewalld(coi_binary):
     assert check["message"], "Check should have a non-empty message"
 
 
-def test_health_bridge_firewalld_zone_text_output(coi_binary):
+def test_health_bridge_forward_rules_text_output(coi_binary):
     """
-    Verify bridge zone check appears in text health output under NETWORKING.
+    Verify bridge forward rules check appears in text health output under NETWORKING.
 
     Flow:
     1. Run coi health (text format)
-    2. Verify 'Bridge FW zone' appears in output
+    2. Verify 'Bridge forward' appears in output
     """
     result = subprocess.run(
         [coi_binary, "health"],
@@ -187,6 +187,6 @@ def test_health_bridge_firewalld_zone_text_output(coi_binary):
     )
 
     output = result.stdout
-    assert "Bridge FW zone" in output, (
-        f"Should show 'Bridge FW zone' in text output. Got:\n{output}"
+    assert "Bridge forward" in output, (
+        f"Should show 'Bridge forward' in text output. Got:\n{output}"
     )

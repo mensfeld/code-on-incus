@@ -10,7 +10,7 @@ Tests that:
 
 The Go functions BridgeInTrustedZone / EnsureBridgeInTrustedZone now check
 iptables FORWARD rules tagged with the comment `coi-bridge-forward` rather
-than firewalld zones.  The health check key is still `bridge_firewalld_zone`.
+than firewalld zones.  The health check key is `bridge_forward_rules`.
 
 Masquerade / NAT is handled by Incus itself (`ipv4.nat=true` on the bridge),
 so no firewalld setup is required.
@@ -112,7 +112,7 @@ def remove_bridge_forward_rules(bridge_name):
 
 
 def get_health_bridge_check(coi_binary):
-    """Run coi health and return the bridge_firewalld_zone check."""
+    """Run coi health and return the bridge_forward_rules check."""
     result = subprocess.run(
         [coi_binary, "health", "--format", "json"],
         capture_output=True,
@@ -120,7 +120,7 @@ def get_health_bridge_check(coi_binary):
         timeout=120,
     )
     data = json.loads(result.stdout)
-    return data["checks"].get("bridge_firewalld_zone")
+    return data["checks"].get("bridge_forward_rules")
 
 
 def test_bridge_trusted_zone_detection_matches_reality(coi_binary):
@@ -130,7 +130,7 @@ def test_bridge_trusted_zone_detection_matches_reality(coi_binary):
     Flow:
     1. Skip if iptables not available
     2. Check actual bridge FORWARD rule state via iptables -S FORWARD
-    3. Run coi health and get bridge_firewalld_zone check
+    3. Run coi health and get bridge_forward_rules check
     4. Verify the check details match the actual state
     """
     import pytest
@@ -142,7 +142,7 @@ def test_bridge_trusted_zone_detection_matches_reality(coi_binary):
     actual_has_rules = bridge_has_forward_rules(bridge_name)
 
     check = get_health_bridge_check(coi_binary)
-    assert check is not None, "bridge_firewalld_zone check should exist"
+    assert check is not None, "bridge_forward_rules check should exist"
     assert "details" in check, "Check should have details"
     assert check["details"]["has_forward_rules"] == actual_has_rules, (
         f"Health check reports has_forward_rules={check['details']['has_forward_rules']} "
@@ -193,7 +193,7 @@ def test_bridge_zone_removal_and_restore_detected(coi_binary):
 
         # Verify health check detects removal
         check = get_health_bridge_check(coi_binary)
-        assert check is not None, "bridge_firewalld_zone check should exist"
+        assert check is not None, "bridge_forward_rules check should exist"
         assert check["status"] == "warning", (
             f"Expected warning after removing bridge FORWARD rules, got: {check['status']}"
         )
@@ -206,7 +206,7 @@ def test_bridge_zone_removal_and_restore_detected(coi_binary):
         # We trigger it by running a container command or waiting for autofix.
         # For simplicity, verify the check status reflects the current state.
         check_after = get_health_bridge_check(coi_binary)
-        assert check_after is not None, "bridge_firewalld_zone check should exist"
+        assert check_after is not None, "bridge_forward_rules check should exist"
         assert check_after["status"] in ("ok", "warning"), (
             f"Expected ok or warning after checking bridge rules, got: {check_after['status']}"
         )
