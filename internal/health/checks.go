@@ -1702,7 +1702,7 @@ func CheckOrphanedResources() HealthCheck {
 		Status:  StatusWarning,
 		Message: message,
 		Details: map[string]interface{}{
-			"orphaned_veths":          orphanedVeths,
+			"orphaned_veths":     orphanedVeths,
 			"orphaned_nft_rules": orphanedRules,
 		},
 	}
