@@ -214,7 +214,7 @@ func formatCheckName(name string) string {
 		"network_bridge":        "Network bridge",
 		"ip_forwarding":         "IP forwarding",
 		"firewall":              "Firewalld",
-		"bridge_forward_rules": "Bridge forward",
+		"bridge_forward_rules":  "Bridge forward",
 		"docker_forward_policy": "Docker FORWARD",
 		"nftables":              "nftables",
 		"systemd_journal":       "systemd journal",
