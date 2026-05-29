@@ -101,9 +101,6 @@ func Cleanup(opts CleanupOptions) error {
 				// Container stopped (user ran 'sudo poweroff') - delete it.
 				opts.Logger("Container was stopped, removing...")
 
-				// Get the container's veth interface name BEFORE deletion
-				vethName, _ := network.GetContainerVethName(opts.ContainerName)
-
 				// Clean up network FIRST while container still exists
 				// This ensures we can get the container IP to remove firewall rules
 				if opts.NetworkManager != nil {
@@ -119,10 +116,6 @@ func Cleanup(opts CleanupOptions) error {
 					opts.Logger("Container removed (session data saved for --resume)")
 				}
 
-				if vethName != "" {
-					// no-op with nft-based firewall; kept for future cleanup hooks
-					_ = network.RemoveVethFromFirewalldZone(vethName)
-				}
 			}
 		} else {
 			opts.Logger("Container was already removed")

@@ -7,7 +7,7 @@ Tests that:
 3. Blocks 172.16.0.0/12
 4. Blocks 192.168.0.0/16
 
-Network isolation is implemented using firewalld direct rules.
+Network isolation is implemented using nft rules.
 """
 
 import pathlib

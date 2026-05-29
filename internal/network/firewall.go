@@ -392,6 +392,8 @@ func UfwActive() bool {
 
 // MasqueradeEnabled checks if the Incus bridge has NAT (masquerade) enabled.
 // Incus manages masquerade natively via its bridge config; no firewalld needed.
+// ipv4.nat defaults to true for Incus-managed bridges; an unset/empty value
+// means the default (enabled), so only an explicit "false" means disabled.
 func MasqueradeEnabled() bool {
 	bridgeName, err := GetIncusBridgeName()
 	if err != nil {
@@ -401,7 +403,8 @@ func MasqueradeEnabled() bool {
 	if err != nil {
 		return false
 	}
-	return strings.TrimSpace(output) == "true"
+	val := strings.TrimSpace(output)
+	return val != "false" // empty string = default = enabled
 }
 
 // BridgeInTrustedZone checks whether the Incus bridge has iptables FORWARD ACCEPT
@@ -579,20 +582,4 @@ func GetContainerVethName(containerName string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("no veth interface found for container %s", containerName)
-}
-
-// RemoveVethFromFirewalldZone is a no-op kept for API compatibility.
-// Firewalld zone management is no longer used; nftables has no zone concept.
-func RemoveVethFromFirewalldZone(_ string) error {
-	return nil
-}
-
-// DetectOrphanedFirewalldZoneBindings is a no-op kept for API compatibility.
-func DetectOrphanedFirewalldZoneBindings() ([]string, error) {
-	return nil, nil
-}
-
-// CleanupOrphanedFirewalldZoneBindings is a no-op kept for API compatibility.
-func CleanupOrphanedFirewalldZoneBindings(_ []string, _ func(string)) (int, error) {
-	return 0, nil
 }

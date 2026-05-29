@@ -204,9 +204,8 @@ func (r *Responder) killContainer(ctx context.Context) error {
 		r.onAction("killed", fmt.Sprintf("Container %s KILLED due to critical security threat", r.containerName))
 	}
 
-	// Get container IP and veth name BEFORE stopping (needed for cleanup)
+	// Get container IP BEFORE stopping (needed for cleanup)
 	containerIP, _ := network.GetContainerIPFast(r.containerName)
-	vethName, _ := network.GetContainerVethName(r.containerName)
 
 	// First stop the container
 	_, err := container.IncusOutputContext(ctx, "stop", r.containerName, "--force")
@@ -230,10 +229,6 @@ func (r *Responder) killContainer(ctx context.Context) error {
 	_, err = container.IncusOutputContext(ctx, "delete", r.containerName)
 	if err != nil {
 		return fmt.Errorf("failed to delete container: %w", err)
-	}
-
-	if vethName != "" {
-		_ = network.RemoveVethFromFirewalldZone(vethName) // no-op with nft-based firewall
 	}
 
 	r.mu.Lock()

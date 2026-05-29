@@ -3,7 +3,7 @@ Integration tests for network allowlist mode.
 
 Tests the domain allowlisting feature with DNS resolution and IP-based filtering.
 
-Network isolation is implemented using firewalld direct rules.
+Network isolation is implemented using nft rules.
 """
 
 import json
@@ -371,7 +371,7 @@ def test_allowlist_blocks_public_ips_not_in_list(coi_binary, workspace_dir, clea
     """
     Test that allowlist mode blocks public IPs not in the allowlist.
 
-    Verifies that firewalld's implicit default-deny blocks non-allowed public IPs.
+    Verifies that nft's default-deny rules block non-allowed public IPs.
     """
     # Create temporary config with only DNS
     with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as f:

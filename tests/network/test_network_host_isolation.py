@@ -4,7 +4,7 @@ Integration tests for network host isolation.
 Tests that containers cannot access host services in RESTRICTED and ALLOWLIST modes,
 but that host can access container services (response traffic allowed).
 
-Network isolation is implemented using firewalld direct rules.
+Network isolation is implemented using nft rules.
 """
 
 import json

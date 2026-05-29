@@ -207,8 +207,9 @@ setup_nft_sudoers() {
         return
     fi
 
-    # Already configured?
-    if sudo -n nft list tables &> /dev/null 2>&1; then
+    # Already configured? Check for the sudoers drop-in directly so we don't
+    # get a false positive from a cached sudo timestamp.
+    if [ -f /etc/sudoers.d/coi-nft ]; then
         echo -e "${GREEN}✓ Passwordless sudo for nft already configured${NC}"
         return
     fi
@@ -571,7 +572,7 @@ post_install() {
         echo -e "${YELLOW}⚠ nftables is not installed — network isolation (restricted/allowlist modes) will not work.${NC}"
         echo "   Install with: ${BLUE}sudo apt install nftables${NC}"
         echo ""
-    elif ! sudo -n nft list tables &> /dev/null 2>&1; then
+    elif ! [ -f /etc/sudoers.d/coi-nft ]; then
         echo -e "${YELLOW}⚠ Passwordless sudo for nft not configured — network isolation will not work.${NC}"
         echo "   Run: ${BLUE}echo \"\$USER ALL=(ALL) NOPASSWD: \$(command -v nft)\" | sudo tee /etc/sudoers.d/coi-nft && sudo chmod 0440 /etc/sudoers.d/coi-nft${NC}"
         echo ""

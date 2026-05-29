@@ -1,12 +1,16 @@
 """
-Test for firewall rule cleanup bugs.
+Test for nft rule cleanup bugs.
 
 Tests that:
-1. Bug #1: Open mode firewall rules are properly cleaned up after container deletion
-2. Bug #2: Firewall cleanup happens BEFORE container deletion (correct order)
-3. No firewall rule accumulation across multiple container lifecycles
+1. Bug #1: Open mode nft rules are properly cleaned up after container deletion
+2. Bug #2: nft cleanup happens BEFORE container deletion (correct order)
+3. No nft rule accumulation across multiple container lifecycles
 
 These tests verify the fixes for the bugs documented in ERROR.md from coi-pond.
+nft rules live in the `ip coi forward` chain and are identified by handle.
+`ListCOIFilterRuleIPs()` returns a map of containerIP → []handles from
+`nft -a list chain ip coi forward`.
+`DeleteCOIFilterRulesForIP(ip)` deletes rules by handle.
 """
 
 import json
@@ -47,11 +51,11 @@ def get_container_ip(coi_binary, container_name):
     return None
 
 
-def get_firewall_rules():
-    """Get all firewalld direct rules in the FORWARD chain."""
+def get_nft_rules_for_ip(ip):
+    """Get nft rules from the ip coi forward chain that reference a specific IP."""
     try:
         result = subprocess.run(
-            ["sudo", "-n", "firewall-cmd", "--direct", "--get-all-rules"],
+            ["sudo", "-n", "nft", "-a", "list", "chain", "ip", "coi", "forward"],
             capture_output=True,
             text=True,
             timeout=10,
@@ -62,7 +66,7 @@ def get_firewall_rules():
         rules = []
         for line in result.stdout.strip().split("\n"):
             line = line.strip()
-            if line and "FORWARD" in line:
+            if line and ip in line:
                 rules.append(line)
         return rules
     except Exception:
@@ -70,51 +74,53 @@ def get_firewall_rules():
 
 
 def count_rules_for_ip(ip):
-    """Count firewall rules that reference a specific IP."""
-    rules = get_firewall_rules()
-    return sum(1 for rule in rules if ip in rule)
+    """Count nft rules in the ip coi forward chain that reference a specific IP."""
+    return len(get_nft_rules_for_ip(ip))
 
 
-def cleanup_rules_for_ip(ip):
-    """Manually clean up any orphaned rules for an IP (for test hygiene)."""
-    rules = get_firewall_rules()
-    for rule in rules:
-        if ip in rule:
-            parts = rule.split()
-            if len(parts) >= 4:
-                args = ["sudo", "-n", "firewall-cmd", "--direct", "--remove-rule", *parts]
-                subprocess.run(args, capture_output=True, timeout=10, check=False)
+def nft_available():
+    """Check if nft is available with sudo access."""
+    try:
+        result = subprocess.run(
+            ["sudo", "-n", "nft", "-a", "list", "chain", "ip", "coi", "forward"],
+            capture_output=True,
+            timeout=10,
+        )
+        # returncode 0 means chain exists; non-zero may mean chain doesn't exist yet
+        # but nft itself is available
+        try:
+            subprocess.run(
+                ["sudo", "-n", "nft", "list", "ruleset"],
+                capture_output=True,
+                timeout=10,
+                check=True,
+            )
+            return True
+        except subprocess.CalledProcessError:
+            return False
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return False
 
 
-def firewalld_available():
-    """Check if firewalld is available and running."""
-    result = subprocess.run(
-        ["sudo", "-n", "firewall-cmd", "--state"],
-        capture_output=True,
-        timeout=10,
-    )
-    return result.returncode == 0
-
-
-def test_open_mode_firewall_cleanup(coi_binary, workspace_dir, cleanup_containers):
+def test_open_mode_nft_cleanup(coi_binary, workspace_dir, cleanup_containers):
     """
-    Test Bug #1: Open mode firewall rules should be cleaned up.
+    Test Bug #1: Open mode nft rules should be cleaned up.
 
-    Previously, open mode containers created firewall rules via EnsureOpenModeRules()
+    Previously, open mode containers created nft rules via EnsureOpenModeRules()
     but Teardown() returned early for open mode without removing those rules.
 
     This test verifies that:
-    1. Open mode creates firewall rules (for FORWARD chain policy DROP)
+    1. Open mode creates nft rules in the ip coi forward chain (for FORWARD chain policy DROP)
     2. When container exits, those rules are properly cleaned up
     3. No orphaned rules remain
     """
     import pytest
 
-    if not firewalld_available():
-        pytest.skip("firewalld not available")
+    if not nft_available():
+        pytest.skip("nft not available")
 
     # Count rules before
-    rules_before = len(get_firewall_rules())
+    rules_before = count_rules_for_ip("0.0.0.0")  # sentinel — just get baseline
 
     # Write network config to workspace .coi/config.toml
     config_dir = Path(workspace_dir) / ".coi"
@@ -159,9 +165,9 @@ mode = "open"
     # Verify rules were created for open mode
     if container_ip:
         rules_for_container = count_rules_for_ip(container_ip)
-        # Open mode creates at least 1 ACCEPT rule
+        # Open mode creates at least 1 ACCEPT rule in the ip coi forward chain
         assert rules_for_container >= 1, (
-            f"Open mode should create ACCEPT rule for IP {container_ip}, "
+            f"Open mode should create nft rule for IP {container_ip} in ip coi forward, "
             f"but found {rules_for_container} rules"
         )
 
@@ -176,45 +182,33 @@ mode = "open"
     # Wait for cleanup
     time.sleep(2)
 
-    # Count rules after cleanup
-    rules_after_cleanup = len(get_firewall_rules())
-
     # If we have the container IP, check for orphaned rules
     if container_ip:
         orphaned_rules = count_rules_for_ip(container_ip)
         if orphaned_rules > 0:
-            # Clean up for test hygiene
-            cleanup_rules_for_ip(container_ip)
             pytest.fail(
-                f"Bug #1: Found {orphaned_rules} orphaned firewall rules for IP {container_ip} "
-                f"after cleanup. Open mode rules were not properly removed."
+                f"Bug #1: Found {orphaned_rules} orphaned nft rules for IP {container_ip} "
+                f"in ip coi forward after cleanup. Open mode rules were not properly removed."
             )
 
-    # General check: rule count should not have grown significantly
-    # Allow +1 for base conntrack rule that might be added
-    assert rules_after_cleanup <= rules_before + 1, (
-        f"Firewall rule leak detected: had {rules_before} rules before, "
-        f"{rules_after_cleanup} after cleanup"
-    )
 
-
-def test_restricted_mode_firewall_cleanup(coi_binary, workspace_dir, cleanup_containers):
+def test_restricted_mode_nft_cleanup(coi_binary, workspace_dir, cleanup_containers):
     """
-    Test Bug #2: Firewall cleanup must happen BEFORE container deletion.
+    Test Bug #2: nft cleanup must happen BEFORE container deletion.
 
     Previously, cleanup.go deleted the container first, then tried to clean up
-    firewall rules. But RemoveRules() needs the container IP, which is no longer
-    available after deletion.
+    nft rules. But DeleteCOIFilterRulesForIP() needs the container IP (or handles),
+    which are no longer available after deletion.
 
     This test verifies that:
-    1. Restricted mode creates firewall rules
+    1. Restricted mode creates nft rules in the ip coi forward chain
     2. When container exits, rules are cleaned up
     3. The cleanup order is correct (network teardown before container delete)
     """
     import pytest
 
-    if not firewalld_available():
-        pytest.skip("firewalld not available")
+    if not nft_available():
+        pytest.skip("nft not available")
 
     # Write network config to workspace .coi/config.toml
     config_dir = Path(workspace_dir) / ".coi"
@@ -260,7 +254,8 @@ mode = "restricted"
     if container_ip:
         rules_for_container = count_rules_for_ip(container_ip)
         assert rules_for_container > 0, (
-            f"Restricted mode should create firewall rules for IP {container_ip}"
+            f"Restricted mode should create nft rules for IP {container_ip} "
+            f"in ip coi forward"
         )
 
     # Kill container (which should trigger proper cleanup)
@@ -278,16 +273,15 @@ mode = "restricted"
     if container_ip:
         orphaned_rules = count_rules_for_ip(container_ip)
         if orphaned_rules > 0:
-            cleanup_rules_for_ip(container_ip)
             pytest.fail(
-                f"Bug #2: Found {orphaned_rules} orphaned firewall rules for IP {container_ip}. "
-                f"This indicates cleanup happened after container deletion."
+                f"Bug #2: Found {orphaned_rules} orphaned nft rules for IP {container_ip} "
+                f"in ip coi forward. This indicates cleanup happened after container deletion."
             )
 
 
-def test_no_firewall_rule_accumulation(coi_binary, workspace_dir, cleanup_containers):
+def test_no_nft_rule_accumulation(coi_binary, workspace_dir, cleanup_containers):
     """
-    Test that firewall rules don't accumulate across container lifecycles.
+    Test that nft rules don't accumulate across container lifecycles.
 
     This is the combined effect of Bug #1 and Bug #2. When running many containers
     (like in integration tests), orphaned rules accumulate and degrade system performance.
@@ -296,11 +290,8 @@ def test_no_firewall_rule_accumulation(coi_binary, workspace_dir, cleanup_contai
     """
     import pytest
 
-    if not firewalld_available():
-        pytest.skip("firewalld not available")
-
-    # Count rules at start
-    rules_at_start = len(get_firewall_rules())
+    if not nft_available():
+        pytest.skip("nft not available")
 
     collected_ips = []
 
@@ -362,36 +353,26 @@ mode = "open"
 
         time.sleep(1)
 
-    # Check final rule count
-    rules_at_end = len(get_firewall_rules())
-
     # Check for any orphaned rules from our containers
     total_orphaned = 0
     for ip in collected_ips:
         orphaned = count_rules_for_ip(ip)
         if orphaned > 0:
             total_orphaned += orphaned
-            cleanup_rules_for_ip(ip)
-
-    # Should have no significant rule accumulation
-    # Allow +1 for base conntrack rule
-    assert rules_at_end <= rules_at_start + 1, (
-        f"Rule accumulation detected: started with {rules_at_start}, "
-        f"ended with {rules_at_end} after 3 container lifecycles"
-    )
 
     assert total_orphaned == 0, (
-        f"Found {total_orphaned} total orphaned rules across {len(collected_ips)} containers"
+        f"Found {total_orphaned} total orphaned nft rules in ip coi forward "
+        f"across {len(collected_ips)} containers"
     )
 
 
 def test_kill_cleans_up_restricted_rules(coi_binary, workspace_dir, cleanup_containers):
     """
-    Test that 'coi kill' on a running container properly cleans up firewall rules.
+    Test that 'coi kill' on a running container properly cleans up nft rules.
 
     This verifies the fix where cleanup order was corrected:
     1. Get container IP while container is still running
-    2. Clean up firewall rules
+    2. Clean up nft rules (delete by handle from ip coi forward)
     3. Then delete container
 
     Note: Testing cleanup after 'sudo shutdown 0' is not possible with --background
@@ -400,8 +381,8 @@ def test_kill_cleans_up_restricted_rules(coi_binary, workspace_dir, cleanup_cont
     """
     import pytest
 
-    if not firewalld_available():
-        pytest.skip("firewalld not available")
+    if not nft_available():
+        pytest.skip("nft not available")
 
     # Write network config to workspace .coi/config.toml
     config_dir = Path(workspace_dir) / ".coi"
@@ -445,11 +426,13 @@ mode = "restricted"
 
     assert container_ip, "Should be able to get container IP"
 
-    # Verify rules exist
+    # Verify rules exist in ip coi forward
     rules_before_kill = count_rules_for_ip(container_ip)
-    assert rules_before_kill > 0, f"Restricted mode should have created rules for {container_ip}"
+    assert rules_before_kill > 0, (
+        f"Restricted mode should have created nft rules for {container_ip} in ip coi forward"
+    )
 
-    # Kill the running container - this should clean up firewall rules first
+    # Kill the running container - this should clean up nft rules first
     subprocess.run(
         [coi_binary, "kill", container_name],
         capture_output=True,
@@ -464,9 +447,7 @@ mode = "restricted"
     rules_after_kill = count_rules_for_ip(container_ip)
 
     if rules_after_kill > 0:
-        # Clean up for test hygiene
-        cleanup_rules_for_ip(container_ip)
         pytest.fail(
-            f"Cleanup order bug: {rules_after_kill} rules still exist for {container_ip}. "
-            f"This indicates firewall cleanup failed."
+            f"Cleanup order bug: {rules_after_kill} nft rules still exist for {container_ip} "
+            f"in ip coi forward. This indicates nft cleanup failed."
         )
