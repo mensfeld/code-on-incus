@@ -14,8 +14,8 @@ import (
 	"github.com/mensfeld/code-on-incus/internal/logger"
 )
 
-// errFirewallNotAvailable is the user-facing error when nft is unavailable
-const errFirewallNotAvailable = `nft is not available or passwordless sudo is not configured
+// errNftNotAvailable is the user-facing error when nft is unavailable
+const errNftNotAvailable = `nft is not available or passwordless sudo is not configured
 
 Network isolation in restricted/allowlist modes requires nftables (nft).
 
@@ -116,7 +116,7 @@ func (m *Manager) setupRestricted(ctx context.Context, containerName string) err
 
 	// Check if nft is available
 	if !NftAvailable() {
-		return fmt.Errorf("%s", errFirewallNotAvailable)
+		return fmt.Errorf("%s", errNftNotAvailable)
 	}
 
 	// Get container IP
@@ -167,7 +167,7 @@ func (m *Manager) setupAllowlist(ctx context.Context, containerName string) erro
 
 	// Check if nft is available
 	if !NftAvailable() {
-		return fmt.Errorf("%s", errFirewallNotAvailable)
+		return fmt.Errorf("%s", errNftNotAvailable)
 	}
 
 	// Validate configuration

@@ -395,8 +395,8 @@ func CheckIPForwarding() HealthCheck {
 	}
 }
 
-// CheckFirewall verifies nft availability and masquerade configuration
-func CheckFirewall(mode config.NetworkMode) HealthCheck {
+// CheckNft verifies nft availability and masquerade configuration
+func CheckNft(mode config.NetworkMode) HealthCheck {
 	installed := network.NftInstalled()
 	available := network.NftAvailable()
 	masquerade := network.MasqueradeEnabled()
@@ -411,7 +411,7 @@ func CheckFirewall(mode config.NetworkMode) HealthCheck {
 
 	if mode == config.NetworkModeOpen {
 		return HealthCheck{
-			Name:    "firewall",
+			Name:    "nft",
 			Status:  StatusOK,
 			Message: "nft not required for open mode",
 			Details: details,
@@ -425,7 +425,7 @@ func CheckFirewall(mode config.NetworkMode) HealthCheck {
 			message = "nft not installed — on Colima, set mode = \"open\" in [network] section of your config.toml"
 		}
 		return HealthCheck{
-			Name:    "firewall",
+			Name:    "nft",
 			Status:  StatusFailed,
 			Message: message,
 			Details: details,
@@ -438,7 +438,7 @@ func CheckFirewall(mode config.NetworkMode) HealthCheck {
 			message = "nft sudo not configured — on Colima, set mode = \"open\" in [network] section of your config.toml"
 		}
 		return HealthCheck{
-			Name:    "firewall",
+			Name:    "nft",
 			Status:  StatusFailed,
 			Message: message,
 			Details: details,
@@ -447,7 +447,7 @@ func CheckFirewall(mode config.NetworkMode) HealthCheck {
 
 	if !masquerade {
 		return HealthCheck{
-			Name:    "firewall",
+			Name:    "nft",
 			Status:  StatusWarning,
 			Message: "Incus bridge NAT (masquerade) not enabled — containers may not reach the internet. Check with: incus network get incusbr0 ipv4.nat",
 			Details: details,
@@ -455,7 +455,7 @@ func CheckFirewall(mode config.NetworkMode) HealthCheck {
 	}
 
 	return HealthCheck{
-		Name:    "firewall",
+		Name:    "nft",
 		Status:  StatusOK,
 		Message: fmt.Sprintf("nft available, Incus bridge NAT enabled (%s mode available)", mode),
 		Details: details,
@@ -1009,13 +1009,13 @@ func CheckNetworkRestriction(imageName string) HealthCheck {
 	}
 
 	// Track if we applied firewall rules (for cleanup)
-	var firewallManager *network.NftManager
+	var nftManager *network.NftManager
 
 	// Ensure cleanup on any exit path
 	defer func() {
 		// Remove firewall rules first
-		if firewallManager != nil {
-			_ = firewallManager.RemoveRules()
+		if nftManager != nil {
+			_ = nftManager.RemoveRules()
 		}
 		// Then stop/delete container
 		_ = container.StopContainer(containerName)
@@ -1079,7 +1079,7 @@ func CheckNetworkRestriction(imageName string) HealthCheck {
 	}
 
 	// Apply restricted mode firewall rules
-	firewallManager = network.NewNftManager(containerIP, gatewayIP)
+	nftManager = network.NewNftManager(containerIP, gatewayIP)
 	boolTrue := true
 	restrictedConfig := &config.NetworkConfig{
 		Mode:                  config.NetworkModeRestricted,
@@ -1087,7 +1087,7 @@ func CheckNetworkRestriction(imageName string) HealthCheck {
 		BlockMetadataEndpoint: &boolTrue,
 	}
 
-	if err := firewallManager.ApplyRestricted(restrictedConfig); err != nil {
+	if err := nftManager.ApplyRestricted(restrictedConfig); err != nil {
 		return HealthCheck{
 			Name:    "network_restriction",
 			Status:  StatusFailed,
@@ -1702,8 +1702,8 @@ func CheckOrphanedResources() HealthCheck {
 		Status:  StatusWarning,
 		Message: message,
 		Details: map[string]interface{}{
-			"orphaned_veths":          orphanedVeths,
-			"orphaned_firewall_rules": orphanedRules,
+			"orphaned_veths":     orphanedVeths,
+			"orphaned_nft_rules": orphanedRules,
 		},
 	}
 }
@@ -2193,13 +2193,13 @@ func CheckMonitoringConfiguration(cfg *config.Config) HealthCheck {
 func CheckDockerForwardPolicy() HealthCheck {
 	dockerRunning := network.IsDockerRunning()
 	forwardDrop := network.ForwardPolicyIsDrop()
-	firewallAvailable := network.NftAvailable()
+	nftAvailable := network.NftAvailable()
 	iptablesAvailable := network.IptablesAvailable()
 
 	details := map[string]interface{}{
 		"docker_running":      dockerRunning,
 		"forward_policy_drop": forwardDrop,
-		"nft_available":       firewallAvailable,
+		"nft_available":       nftAvailable,
 		"iptables_available":  iptablesAvailable,
 	}
 
@@ -2222,7 +2222,7 @@ func CheckDockerForwardPolicy() HealthCheck {
 	}
 
 	// FORWARD is DROP
-	if firewallAvailable {
+	if nftAvailable {
 		return HealthCheck{
 			Name:    "docker_forward_policy",
 			Status:  StatusOK,

@@ -166,17 +166,17 @@ func (b *Builder) launchBuildContainer() error {
 	// Wait for container to start
 	time.Sleep(3 * time.Second)
 
-	// Setup open mode firewall rules for build container
+	// Setup open mode nft rules for build container
 	// This is needed when FORWARD chain policy is DROP (common with Docker)
 	if network.NftAvailable() {
 		containerIP, err := network.GetContainerIP(b.mgr.ContainerName)
 		if err != nil {
-			b.opts.Logger(fmt.Sprintf("Warning: could not get container IP for firewall rules: %v", err))
+			b.opts.Logger(fmt.Sprintf("Warning: could not get container IP for nft rules: %v", err))
 		} else {
 			if err := network.EnsureOpenModeRules(containerIP); err != nil {
-				b.opts.Logger(fmt.Sprintf("Warning: could not add firewall rules: %v", err))
+				b.opts.Logger(fmt.Sprintf("Warning: could not add nft rules: %v", err))
 			} else {
-				b.opts.Logger(fmt.Sprintf("Firewall rules added for build container (%s)", containerIP))
+				b.opts.Logger(fmt.Sprintf("nft rules added for build container (%s)", containerIP))
 			}
 		}
 	} else if network.NeedsIptablesFallback() {
