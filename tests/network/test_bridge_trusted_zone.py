@@ -255,8 +255,7 @@ def test_coi_run_autofixes_missing_bridge_forward_rules(
 
     if bridge_has_forward_rules(bridge_name):
         pytest.skip(
-            "Could not remove bridge FORWARD rules "
-            "(may be recreated immediately by the system)"
+            "Could not remove bridge FORWARD rules (may be recreated immediately by the system)"
         )
 
     try:

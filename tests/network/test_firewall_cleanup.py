@@ -241,8 +241,7 @@ mode = "restricted"
     if container_ip:
         rules_for_container = count_rules_for_ip(container_ip)
         assert rules_for_container > 0, (
-            f"Restricted mode should create nft rules for IP {container_ip} "
-            f"in ip coi forward"
+            f"Restricted mode should create nft rules for IP {container_ip} in ip coi forward"
         )
 
     # Kill container (which should trigger proper cleanup)
