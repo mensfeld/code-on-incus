@@ -92,5 +92,8 @@ rate_limit_per_second = 100
 dns_query_threshold = 100
 log_dns_queries = true
 
+[shell]
+use_tmux = true
+
 [timezone]
 mode = "host"

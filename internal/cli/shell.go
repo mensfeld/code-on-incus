@@ -117,6 +117,15 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Determine useTmux: config default, overridden by explicit --tmux flag
+	useTmuxDefault := true
+	if cfg.Shell.UseTmux != nil {
+		useTmuxDefault = *cfg.Shell.UseTmux
+	}
+	if !cmd.Flags().Changed("tmux") {
+		useTmux = useTmuxDefault
+	}
+
 	// Check if Incus is available
 	if !container.Available() {
 		return container.IncusNotAvailableError()
