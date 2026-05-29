@@ -16,7 +16,7 @@ import (
 // OrphanedResources holds information about orphaned system resources
 type OrphanedResources struct {
 	Veths               []string // Orphaned veth interfaces (no master bridge)
-	FirewallRules       []string // Orphaned firewall rules (for non-existent container IPs)
+	NftRules            []string // Orphaned nft rules (for non-existent container IPs)
 	NFTMonitorRules     []string // Orphaned nft monitoring rules (NFT_COI/NFT_DNS/NFT_SUSPICIOUS)
 	IptablesBridgeRules []string // Orphaned iptables coi-bridge-forward rules (no coi containers running)
 }
@@ -51,9 +51,9 @@ func DetectOrphanedVeths() ([]string, error) {
 	return orphaned, nil
 }
 
-// DetectOrphanedFirewallRules finds container IPs in the ip coi forward chain
+// DetectOrphanedNftRules finds container IPs in the ip coi forward chain
 // that don't belong to any running container.
-func DetectOrphanedFirewallRules() ([]string, error) {
+func DetectOrphanedNftRules() ([]string, error) {
 	ipHandles, err := network.ListCOIFilterRuleIPs()
 	if err != nil || len(ipHandles) == 0 {
 		return nil, err
@@ -145,9 +145,9 @@ func CleanupOrphanedVeths(veths []string, logger func(string)) (int, error) {
 	return cleaned, nil
 }
 
-// CleanupOrphanedFirewallRules removes all ip coi forward rules for the given container IPs.
-// The rules slice contains container IP addresses (as returned by DetectOrphanedFirewallRules).
-func CleanupOrphanedFirewallRules(rules []string, logger func(string)) (int, error) {
+// CleanupOrphanedNftRules removes all ip coi forward rules for the given container IPs.
+// The rules slice contains container IP addresses (as returned by DetectOrphanedNftRules).
+func CleanupOrphanedNftRules(rules []string, logger func(string)) (int, error) {
 	if logger == nil {
 		logger = func(msg string) { log.Println(msg) }
 	}
@@ -314,12 +314,12 @@ func DetectAll() (*OrphanedResources, error) {
 	}
 	result.Veths = veths
 
-	rules, err := DetectOrphanedFirewallRules()
+	rules, err := DetectOrphanedNftRules()
 	if err != nil {
 		// Non-fatal - firewall might not be available
 		log.Printf("Warning: Could not check firewall rules: %v", err)
 	}
-	result.FirewallRules = rules
+	result.NftRules = rules
 
 	nftRules, err := DetectOrphanedNFTMonitorRules()
 	if err != nil {
@@ -353,8 +353,8 @@ func CleanupAll(logger func(string)) (vethsCleaned, rulesCleaned, nftRulesCleane
 		vethsCleaned, _ = CleanupOrphanedVeths(orphans.Veths, logger)
 	}
 
-	if len(orphans.FirewallRules) > 0 {
-		rulesCleaned, _ = CleanupOrphanedFirewallRules(orphans.FirewallRules, logger)
+	if len(orphans.NftRules) > 0 {
+		rulesCleaned, _ = CleanupOrphanedNftRules(orphans.NftRules, logger)
 	}
 
 	if len(orphans.NFTMonitorRules) > 0 {
@@ -374,5 +374,5 @@ func HasOrphans() bool {
 	if err != nil {
 		return false
 	}
-	return len(orphans.Veths) > 0 || len(orphans.FirewallRules) > 0 || len(orphans.NFTMonitorRules) > 0 || len(orphans.IptablesBridgeRules) > 0
+	return len(orphans.Veths) > 0 || len(orphans.NftRules) > 0 || len(orphans.NFTMonitorRules) > 0 || len(orphans.IptablesBridgeRules) > 0
 }

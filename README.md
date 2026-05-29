@@ -481,7 +481,7 @@ coi shutdown <name>           # Graceful stop (outside)
 
 ## Network Isolation
 
-See the [Network Isolation guide](https://github.com/mensfeld/code-on-incus/wiki/Network-Isolation) for complete documentation on network security and firewalld setup.
+See the [Network Isolation guide](https://github.com/mensfeld/code-on-incus/wiki/Network-Isolation) for complete documentation on network security and nftables-based network filtering.
 
 **Network modes:**
 - **Restricted (default)** - Blocks private networks, allows internet
@@ -612,7 +612,7 @@ See the [Troubleshooting guide](https://github.com/mensfeld/code-on-incus/wiki/T
 See the [FAQ](https://github.com/mensfeld/code-on-incus/wiki/FAQ) for answers to common questions.
 
 **Topics covered:**
-- Orphaned firewalld zone bindings (Docker + firewalld interaction)
+- Orphaned nftables/iptables rules
 - How COI compares to Docker Sandboxes and DevContainers
 - Windows support (WSL2)
 - Security model and prompt injection protection

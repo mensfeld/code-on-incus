@@ -70,7 +70,7 @@ func RunAllChecks(cfg *config.Config, verbose bool) *HealthResult {
 	checks["network_bridge"] = CheckNetworkBridge()
 	checks["ip_forwarding"] = CheckIPForwarding()
 	checks["firewall"] = CheckFirewall(cfg.Network.Mode)
-	checks["bridge_firewalld_zone"] = CheckBridgeFirewalldZone()
+	checks["bridge_forward_rules"] = CheckBridgeForwardRules()
 	checks["docker_forward_policy"] = CheckDockerForwardPolicy()
 	checks["ufw_conflict"] = CheckUFWConflict()
 

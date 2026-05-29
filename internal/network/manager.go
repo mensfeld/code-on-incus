@@ -35,7 +35,7 @@ config.toml):
 // Manager provides high-level network isolation management for containers
 type Manager struct {
 	config        *config.NetworkConfig
-	firewall      *FirewallManager
+	firewall      *NftManager
 	resolver      *Resolver
 	cacheManager  *CacheManager
 	containerName string
@@ -73,14 +73,14 @@ func (m *Manager) SetupForContainer(ctx context.Context, containerName string) e
 	case config.NetworkModeOpen:
 		m.logger.Println("Network mode: open (no restrictions)")
 		// Add ACCEPT rules via nft so traffic flows even when FORWARD policy is DROP
-		if FirewallAvailable() {
+		if NftAvailable() {
 			containerIP, err := GetContainerIP(containerName)
 			if err != nil {
 				m.logger.Errorf("Warning: could not get container IP for open mode rules: %v", err)
 				return nil
 			}
 			m.containerIP = containerIP
-			m.firewall = NewFirewallManager(containerIP, "")
+			m.firewall = NewNftManager(containerIP, "")
 			if err := EnsureOpenModeRules(containerIP); err != nil {
 				m.logger.Errorf("Warning: could not add open mode rules: %v", err)
 			}
@@ -115,7 +115,7 @@ func (m *Manager) setupRestricted(ctx context.Context, containerName string) err
 	m.logger.Println("Network mode: restricted (blocking local/internal networks)")
 
 	// Check if nft is available
-	if !FirewallAvailable() {
+	if !NftAvailable() {
 		return fmt.Errorf("%s", errFirewallNotAvailable)
 	}
 
@@ -141,7 +141,7 @@ func (m *Manager) setupRestricted(ctx context.Context, containerName string) err
 	}
 
 	// Create firewall manager
-	m.firewall = NewFirewallManager(containerIP, gatewayIP)
+	m.firewall = NewNftManager(containerIP, gatewayIP)
 
 	// Apply restricted mode rules
 	if err := m.firewall.ApplyRestricted(m.config); err != nil {
@@ -166,7 +166,7 @@ func (m *Manager) setupAllowlist(ctx context.Context, containerName string) erro
 	m.logger.Println("Network mode: allowlist (domain-based filtering)")
 
 	// Check if nft is available
-	if !FirewallAvailable() {
+	if !NftAvailable() {
 		return fmt.Errorf("%s", errFirewallNotAvailable)
 	}
 
@@ -197,7 +197,7 @@ func (m *Manager) setupAllowlist(ctx context.Context, containerName string) erro
 	}
 
 	// Create firewall manager
-	m.firewall = NewFirewallManager(containerIP, gatewayIP)
+	m.firewall = NewNftManager(containerIP, gatewayIP)
 
 	// Load IP cache
 	cache, err := m.cacheManager.Load(containerName)
@@ -433,7 +433,7 @@ func (m *Manager) Teardown(ctx context.Context, containerName string) error {
 
 	// For open mode, also clean up nft ACCEPT rules created by EnsureOpenModeRules()
 	if m.config.Mode == config.NetworkModeOpen {
-		if !FirewallAvailable() && m.iptablesBridgeName == "" {
+		if !NftAvailable() && m.iptablesBridgeName == "" {
 			return nil // No nft and no iptables fallback, no rules to clean up
 		}
 
@@ -449,7 +449,7 @@ func (m *Manager) Teardown(ctx context.Context, containerName string) error {
 
 		// Create firewall manager if not already created
 		if m.firewall == nil {
-			m.firewall = NewFirewallManager(m.containerIP, "")
+			m.firewall = NewNftManager(m.containerIP, "")
 		}
 	}
 

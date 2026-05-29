@@ -215,7 +215,7 @@ func (r *Responder) killContainer(ctx context.Context) error {
 
 	// Clean up firewall and NFT monitoring rules BEFORE deleting container
 	if containerIP != "" {
-		if err := r.cleanupFirewallRules(containerIP); err != nil {
+		if err := r.cleanupNftRules(containerIP); err != nil {
 			// Log warning but don't fail the kill operation
 			fmt.Fprintf(os.Stderr, "Warning: Failed to cleanup firewall rules: %v\n", err)
 		}
@@ -237,9 +237,9 @@ func (r *Responder) killContainer(ctx context.Context) error {
 	return nil
 }
 
-// cleanupFirewallRules removes firewall rules for a container IP
-func (r *Responder) cleanupFirewallRules(containerIP string) error {
-	fm := network.NewFirewallManager(containerIP, "")
+// cleanupNftRules removes nft rules for a container IP
+func (r *Responder) cleanupNftRules(containerIP string) error {
+	fm := network.NewNftManager(containerIP, "")
 	return fm.RemoveRules()
 }
 

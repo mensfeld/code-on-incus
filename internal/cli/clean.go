@@ -268,7 +268,7 @@ func cleanOrphanedResources() (int, bool) {
 		return 0, false
 	}
 
-	totalOrphans := len(orphans.Veths) + len(orphans.FirewallRules) + len(orphans.NFTMonitorRules) + len(orphans.IptablesBridgeRules)
+	totalOrphans := len(orphans.Veths) + len(orphans.NftRules) + len(orphans.NFTMonitorRules) + len(orphans.IptablesBridgeRules)
 
 	if totalOrphans == 0 {
 		fmt.Println("  (no orphaned resources found)")
@@ -296,7 +296,7 @@ func cleanOrphanedResources() (int, bool) {
 
 // printOrphanedResources prints the list of orphaned resources found.
 func printOrphanedResources(orphans *cleanup.OrphanedResources) {
-	totalOrphans := len(orphans.Veths) + len(orphans.FirewallRules) + len(orphans.NFTMonitorRules) + len(orphans.IptablesBridgeRules)
+	totalOrphans := len(orphans.Veths) + len(orphans.NftRules) + len(orphans.NFTMonitorRules) + len(orphans.IptablesBridgeRules)
 	fmt.Printf("Found %d orphaned resource(s):\n", totalOrphans)
 
 	if len(orphans.Veths) > 0 {
@@ -306,9 +306,9 @@ func printOrphanedResources(orphans *cleanup.OrphanedResources) {
 		}
 	}
 
-	if len(orphans.FirewallRules) > 0 {
-		fmt.Printf("  Orphaned firewall rules (%d):\n", len(orphans.FirewallRules))
-		for _, rule := range orphans.FirewallRules {
+	if len(orphans.NftRules) > 0 {
+		fmt.Printf("  Orphaned firewall rules (%d):\n", len(orphans.NftRules))
+		for _, rule := range orphans.NftRules {
 			fmt.Printf("    - %s\n", rule)
 		}
 	}
@@ -347,8 +347,8 @@ func doCleanOrphanedResources(orphans *cleanup.OrphanedResources) int {
 		cleaned += vethsCleaned
 	}
 
-	if len(orphans.FirewallRules) > 0 {
-		rulesCleaned, _ := cleanup.CleanupOrphanedFirewallRules(orphans.FirewallRules, logger)
+	if len(orphans.NftRules) > 0 {
+		rulesCleaned, _ := cleanup.CleanupOrphanedNftRules(orphans.NftRules, logger)
 		cleaned += rulesCleaned
 	}
 

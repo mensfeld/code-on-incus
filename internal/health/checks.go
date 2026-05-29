@@ -397,8 +397,8 @@ func CheckIPForwarding() HealthCheck {
 
 // CheckFirewall verifies nft availability and masquerade configuration
 func CheckFirewall(mode config.NetworkMode) HealthCheck {
-	installed := network.FirewallInstalled()
-	available := network.FirewallAvailable()
+	installed := network.NftInstalled()
+	available := network.NftAvailable()
 	masquerade := network.MasqueradeEnabled()
 	isColima := isColimaEnvironment()
 
@@ -502,13 +502,13 @@ func CheckUFWConflict() HealthCheck {
 	}
 }
 
-// CheckBridgeFirewalldZone checks whether the Incus bridge has iptables FORWARD
+// CheckBridgeForwardRules checks whether the Incus bridge has iptables FORWARD
 // ACCEPT rules so containers can get IPs via DHCP even when FORWARD policy is DROP.
-func CheckBridgeFirewalldZone() HealthCheck {
+func CheckBridgeForwardRules() HealthCheck {
 	hasRules, bridgeName, err := network.BridgeInTrustedZone()
 	if err != nil {
 		return HealthCheck{
-			Name:    "bridge_firewalld_zone",
+			Name:    "bridge_forward_rules",
 			Status:  StatusWarning,
 			Message: fmt.Sprintf("Could not check bridge forwarding rules: %v", err),
 		}
@@ -521,7 +521,7 @@ func CheckBridgeFirewalldZone() HealthCheck {
 
 	if !hasRules {
 		return HealthCheck{
-			Name:    "bridge_firewalld_zone",
+			Name:    "bridge_forward_rules",
 			Status:  StatusWarning,
 			Message: fmt.Sprintf("Bridge %s has no iptables FORWARD rules — containers may fail to get IPs if FORWARD policy is DROP (rules are added automatically on first container start)", bridgeName),
 			Details: details,
@@ -529,7 +529,7 @@ func CheckBridgeFirewalldZone() HealthCheck {
 	}
 
 	return HealthCheck{
-		Name:    "bridge_firewalld_zone",
+		Name:    "bridge_forward_rules",
 		Status:  StatusOK,
 		Message: fmt.Sprintf("Bridge %s has iptables FORWARD rules", bridgeName),
 		Details: details,
@@ -859,7 +859,7 @@ func CheckContainerConnectivity(imageName string) HealthCheck {
 	var usedIptablesFallback bool
 	var iptablesBridgeName string
 
-	if network.FirewallAvailable() {
+	if network.NftAvailable() {
 		if err := network.EnsureOpenModeRules(containerIP); err != nil {
 			return HealthCheck{
 				Name:    "container_connectivity",
@@ -891,7 +891,7 @@ func CheckContainerConnectivity(imageName string) HealthCheck {
 	defer func() {
 		if usedIptablesFallback {
 			_ = network.RemoveIptablesBridgeRules(iptablesBridgeName)
-		} else if network.FirewallAvailable() {
+		} else if network.NftAvailable() {
 			_ = network.RemoveOpenModeRules(containerIP)
 		}
 	}()
@@ -973,7 +973,7 @@ func CheckContainerConnectivity(imageName string) HealthCheck {
 // CheckNetworkRestriction tests that restricted network mode properly blocks private networks
 func CheckNetworkRestriction(imageName string) HealthCheck {
 	// Skip if firewall not available
-	if !network.FirewallAvailable() {
+	if !network.NftAvailable() {
 		return HealthCheck{
 			Name:    "network_restriction",
 			Status:  StatusWarning,
@@ -1009,7 +1009,7 @@ func CheckNetworkRestriction(imageName string) HealthCheck {
 	}
 
 	// Track if we applied firewall rules (for cleanup)
-	var firewallManager *network.FirewallManager
+	var firewallManager *network.NftManager
 
 	// Ensure cleanup on any exit path
 	defer func() {
@@ -1079,7 +1079,7 @@ func CheckNetworkRestriction(imageName string) HealthCheck {
 	}
 
 	// Apply restricted mode firewall rules
-	firewallManager = network.NewFirewallManager(containerIP, gatewayIP)
+	firewallManager = network.NewNftManager(containerIP, gatewayIP)
 	boolTrue := true
 	restrictedConfig := &config.NetworkConfig{
 		Mode:                  config.NetworkModeRestricted,
@@ -1633,7 +1633,7 @@ func CheckOrphanedResources() HealthCheck {
 
 	// Check for orphaned firewall rules
 	orphanedRules := 0
-	if network.FirewallAvailable() {
+	if network.NftAvailable() {
 		// Get running container IPs
 		containerIPs := make(map[string]bool)
 		output, err := container.IncusOutput("list", "--format=json")
@@ -2193,7 +2193,7 @@ func CheckMonitoringConfiguration(cfg *config.Config) HealthCheck {
 func CheckDockerForwardPolicy() HealthCheck {
 	dockerRunning := network.IsDockerRunning()
 	forwardDrop := network.ForwardPolicyIsDrop()
-	firewallAvailable := network.FirewallAvailable()
+	firewallAvailable := network.NftAvailable()
 	iptablesAvailable := network.IptablesAvailable()
 
 	details := map[string]interface{}{
