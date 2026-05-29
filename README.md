@@ -111,7 +111,7 @@ See the [Supported Tools wiki page](https://github.com/mensfeld/code-on-incus/wi
 - Kernel version enforcement - Warns on host kernels below 5.15 that may lack security features for safe isolation
 - Real-time threat detection - Kernel-level nftables monitoring detects reverse shells, C2 connections, data exfiltration, DNS tunneling, and credential scanning
 - Automated response - Auto-pause on HIGH threats, auto-kill on CRITICAL — no manual intervention needed
-- Network isolation - Firewalld-based restricted/allowlist/open modes block private network access and prevent exfiltration
+- Network isolation - nftables-based restricted/allowlist/open modes block private network access and prevent exfiltration
 - Protected paths - `.git/hooks`, `.git/config`, `.husky`, `.vscode` mounted read-only to prevent supply-chain attacks
 - Host-side immutable protection - Protected paths are locked with `chattr +i` during sessions, preventing `unshare -m` + `umount` bypass of read-only mounts (opt out: `[security] host_immutable = false`)
 - Git identity guard - Containers enforce `user.useConfigOnly=true`, preventing AI tools from committing as the default "code" user
@@ -164,7 +164,7 @@ Incus is a modern Linux container and virtual machine manager, forked from LXD. 
 | **Real-time threat detection** | Kernel-level (nftables) | No | No |
 | **Reverse shell detection** | Auto-kill | No | No |
 | **Data exfiltration alerts** | Auto-pause | No | No |
-| **Network isolation** | Firewalld (3 modes) | Basic | No |
+| **Network isolation** | nftables (3 modes) | Basic | No |
 | **Protected paths** | Read-only mounts | No | No |
 | **Auto response (pause/kill)** | Yes | No | No |
 | **Audit logging** | JSONL forensics | No | No |

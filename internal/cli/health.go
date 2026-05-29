@@ -213,7 +213,7 @@ func formatCheckName(name string) string {
 		"privileged_profile":    "Privileged check",
 		"network_bridge":        "Network bridge",
 		"ip_forwarding":         "IP forwarding",
-		"firewall":              "Firewalld",
+		"firewall":              "nft firewall",
 		"bridge_forward_rules":  "Bridge forward",
 		"docker_forward_policy": "Docker FORWARD",
 		"nftables":              "nftables",

@@ -154,7 +154,7 @@ func CleanupOrphanedNftRules(rules []string, logger func(string)) (int, error) {
 
 	cleaned := 0
 	for _, ip := range rules {
-		logger(fmt.Sprintf("Removing orphaned firewall rules for container IP: %s", ip))
+		logger(fmt.Sprintf("Removing orphaned nft rules for container IP: %s", ip))
 		if err := network.DeleteCOIFilterRulesForIP(ip); err != nil {
 			logger(fmt.Sprintf("  Warning: Failed to remove rules for %s: %v", ip, err))
 			continue
@@ -317,7 +317,7 @@ func DetectAll() (*OrphanedResources, error) {
 	rules, err := DetectOrphanedNftRules()
 	if err != nil {
 		// Non-fatal - firewall might not be available
-		log.Printf("Warning: Could not check firewall rules: %v", err)
+		log.Printf("Warning: Could not check nft rules: %v", err)
 	}
 	result.NftRules = rules
 

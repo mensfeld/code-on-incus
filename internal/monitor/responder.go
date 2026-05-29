@@ -217,7 +217,7 @@ func (r *Responder) killContainer(ctx context.Context) error {
 	if containerIP != "" {
 		if err := r.cleanupNftRules(containerIP); err != nil {
 			// Log warning but don't fail the kill operation
-			fmt.Fprintf(os.Stderr, "Warning: Failed to cleanup firewall rules: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Warning: Failed to cleanup nft rules: %v\n", err)
 		}
 		if err := r.cleanupNFTRules(containerIP); err != nil {
 			// Log warning but don't fail the kill operation

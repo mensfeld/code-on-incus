@@ -118,7 +118,7 @@ func TestEnsureAndRemoveIptablesBridgeRules(t *testing.T) {
 // TestNeedsIptablesFallback verifies the boolean logic.
 func TestNeedsIptablesFallback(t *testing.T) {
 	result := NeedsIptablesFallback()
-	t.Logf("NeedsIptablesFallback: %v (firewall=%v, forwardDrop=%v, iptables=%v)",
+	t.Logf("NeedsIptablesFallback: %v (nft=%v, forwardDrop=%v, iptables=%v)",
 		result, NftAvailable(), ForwardPolicyIsDrop(), IptablesAvailable())
 }
 
