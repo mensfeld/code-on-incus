@@ -44,7 +44,7 @@ jobs:
           sed -i 's/^swap = "true"/swap = ""/' internal/config/embedded/default_config.toml
 
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20 # v9.2.0
+        uses: golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee # v9.2.1
         with:
           version: latest
           args: --timeout=5m
@@ -100,7 +100,7 @@ jobs:
 
   # Integration tests run in parallel with unit tests (after build passes)
   # Split into 6 test groups for parallel execution
-  # Network isolation uses firewalld (works with any bridge network)
+  # Network isolation uses nftables (ip coi forward chain)
   integration:
     name: Integration Tests (${{ matrix.test_group.name }})
     runs-on: ubuntu-24.04
@@ -126,8 +126,8 @@ jobs:
             path: tests/list tests/attach tests/tmux tests/kill tests/run tests/persist tests/build
             description: "Core commands: list/attach/tmux/kill/run/persist/build (83 tests)"
           - name: misc
-            path: tests/clean tests/completion tests/config tests/docker tests/errors tests/help tests/image tests/info tests/mount tests/shutdown tests/version tests/meta tests/main_help_flag.py tests/main_help_shorthand.py
-            description: "Misc commands: clean/completion/config/docker/errors/help/image/info/mount/shutdown/version/meta/main help (72 tests)"
+            path: tests/clean tests/cli tests/completion tests/config tests/docker tests/errors tests/help tests/image tests/info tests/mount tests/shutdown tests/version tests/meta tests/main_help_flag.py tests/main_help_shorthand.py
+            description: "Misc commands: clean/cli/completion/config/docker/errors/help/image/info/mount/shutdown/version/meta/main help"
           - name: monitoring-nft
             path: tests/integration/test_nft_monitoring.py
             description: "NFT network monitoring tests (17 tests)"
@@ -205,7 +205,7 @@ jobs:
           fi
           swapon --show || true
 
-      - name: Install Incus and Firewalld
+      - name: Install Incus and nftables
         run: |
           # Try Zabbly repo first (latest Incus), fall back to Ubuntu's native package
           sudo mkdir -p /etc/apt/keyrings/
@@ -227,33 +227,22 @@ jobs:
             echo "WARNING: Zabbly repo unreachable"
           fi
 
+          # nftables is pre-installed on Ubuntu 24.04 runners; install incus only
           # Install with fallback: try with Zabbly, if it fails remove Zabbly and use Ubuntu native
           sudo apt-get update
-          if ! sudo apt-get install -y incus firewalld; then
+          if ! sudo apt-get install -y incus nftables; then
             echo "WARNING: Install failed, removing Zabbly repo and falling back to Ubuntu native Incus"
             sudo rm -f "$ZABBLY_SOURCES"
             sudo apt-get update
-            sudo apt-get install -y incus firewalld
+            sudo apt-get install -y incus nftables
           fi
           incus version || incus --version || true
 
-      - name: Configure Firewalld for network isolation tests
-        run: |
-          # Start firewalld for network isolation tests
-          sudo systemctl enable --now firewalld
-
-          # Use trusted zone - it allows all traffic by default, which is what we need
-          # Our direct rules explicitly REJECT what we want blocked
-          sudo firewall-cmd --set-default-zone=trusted
-
-          # Enable masquerading for container NAT
-          sudo firewall-cmd --zone=trusted --add-masquerade
-
-          # Verify firewalld is running
-          sudo firewall-cmd --state
-          sudo firewall-cmd --get-default-zone
-
-          echo "Firewalld configured with trusted zone"
+          # Configure passwordless sudo for nft (masquerade is handled by Incus ipv4.nat=true)
+          echo "$USER ALL=(ALL) NOPASSWD: /usr/sbin/nft *" | sudo tee /etc/sudoers.d/coi-nft-incus
+          sudo chmod 0440 /etc/sudoers.d/coi-nft-incus
+          sudo -n nft list ruleset || echo "nft access configured"
+          echo "nftables ready for network isolation tests"
 
       - name: Initialize Incus
         run: |
@@ -335,7 +324,7 @@ jobs:
           sudo iptables -P FORWARD ACCEPT
 
           # Ensure NAT/masquerade is working for container internet access
-          # This is needed in addition to firewalld's masquerade for reliability
+          # Masquerade is handled by Incus (ipv4.nat=true), but add an explicit rule for reliability
           DEFAULT_IFACE=$(ip route | grep default | awk '{print $5}' | head -1)
           sudo iptables -t nat -A POSTROUTING -s 10.47.62.0/24 -o $DEFAULT_IFACE -j MASQUERADE
 
@@ -503,13 +492,13 @@ jobs:
           path: /tmp/coi-image.tar.gz
           key: ${{ runner.os }}-coi-image-${{ hashFiles('internal/image/**', 'testdata/dummy/**', 'profiles/default/**') }}
 
-      - name: Debug iptables state before tests
+      - name: Debug iptables/nft state before tests
         run: |
           echo "=== FORWARD chain policy and rules ==="
           sudo iptables -L FORWARD -n -v --line-numbers
           echo ""
-          echo "=== Firewalld direct rules ==="
-          sudo firewall-cmd --direct --get-all-rules
+          echo "=== nft coi table (if it exists) ==="
+          sudo nft list table ip coi 2>/dev/null || echo "(ip coi table not yet created)"
           echo ""
           echo "=== NAT table ==="
           sudo iptables -t nat -L -n -v | head -30

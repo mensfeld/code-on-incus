@@ -1,14 +1,15 @@
 package limits
 
 import (
-	"fmt"
 	"testing"
 	"time"
+
+	"github.com/mensfeld/code-on-incus/internal/logger"
 )
 
 // TestStopGracefulTrue verifies that StopGraceful=true maps to force=false
 func TestStopGracefulTrue(t *testing.T) {
-	tm := NewTimeoutMonitor("test-container", 50*time.Millisecond, true, true, "", nil)
+	tm := NewTimeoutMonitor("test-container", 50*time.Millisecond, true, true, "", logger.NewDiscard())
 
 	if tm.StopGraceful != true {
 		t.Errorf("expected StopGraceful=true, got %v", tm.StopGraceful)
@@ -24,7 +25,7 @@ func TestStopGracefulTrue(t *testing.T) {
 
 // TestStopGracefulFalse verifies that StopGraceful=false calls Stop(true) (force)
 func TestStopGracefulFalse(t *testing.T) {
-	tm := NewTimeoutMonitor("test-container", 50*time.Millisecond, true, false, "", nil)
+	tm := NewTimeoutMonitor("test-container", 50*time.Millisecond, true, false, "", logger.NewDiscard())
 
 	if tm.StopGraceful != false {
 		t.Errorf("expected StopGraceful=false, got %v", tm.StopGraceful)
@@ -37,53 +38,35 @@ func TestStopGracefulFalse(t *testing.T) {
 	}
 }
 
-// TestHandleTimeoutLogMessages verifies the correct log messages for each mode
-func TestHandleTimeoutLogMessages(t *testing.T) {
+// TestHandleTimeoutStopType verifies the correct stopType is derived from StopGraceful
+func TestHandleTimeoutStopType(t *testing.T) {
 	tests := []struct {
 		name         string
 		stopGraceful bool
-		expectedLog  string
+		expectedType string
 	}{
 		{
-			name:         "graceful mode logs gracefully",
+			name:         "graceful mode",
 			stopGraceful: true,
-			expectedLog:  "gracefully",
+			expectedType: "gracefully",
 		},
 		{
-			name:         "force mode logs forcefully",
+			name:         "force mode",
 			stopGraceful: false,
-			expectedLog:  "forcefully",
+			expectedType: "forcefully",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var logs []string
-			logger := func(msg string) {
-				logs = append(logs, msg)
-			}
+			tm := NewTimeoutMonitor("test-container", time.Hour, true, tt.stopGraceful, "", logger.NewDiscard())
 
-			tm := NewTimeoutMonitor("test-container", time.Hour, true, tt.stopGraceful, "", logger)
-
-			// Check the log message format
 			stopType := "gracefully"
 			if !tm.StopGraceful {
 				stopType = "forcefully"
 			}
-			expected := fmt.Sprintf("[limits] Runtime limit reached (%s), stopping container %s...", tm.MaxDuration, stopType)
-
-			// Simulate the log message that handleTimeout would produce
-			logger(expected)
-
-			found := false
-			for _, log := range logs {
-				if log == expected {
-					found = true
-					break
-				}
-			}
-			if !found {
-				t.Errorf("expected log message containing %q, got %v", tt.expectedLog, logs)
+			if stopType != tt.expectedType {
+				t.Errorf("expected stopType=%q, got %q", tt.expectedType, stopType)
 			}
 		})
 	}
@@ -91,7 +74,7 @@ func TestHandleTimeoutLogMessages(t *testing.T) {
 
 // TestTimeoutMonitorNoLimit verifies that MaxDuration=0 means no monitoring
 func TestTimeoutMonitorNoLimit(t *testing.T) {
-	tm := NewTimeoutMonitor("test-container", 0, true, true, "", nil)
+	tm := NewTimeoutMonitor("test-container", 0, true, true, "", logger.NewDiscard())
 	tm.Start()
 
 	// Should complete immediately
@@ -105,7 +88,7 @@ func TestTimeoutMonitorNoLimit(t *testing.T) {
 
 // TestTimeoutMonitorCancel verifies that Stop() cancels the monitor
 func TestTimeoutMonitorCancel(t *testing.T) {
-	tm := NewTimeoutMonitor("test-container", time.Hour, true, true, "", nil)
+	tm := NewTimeoutMonitor("test-container", time.Hour, true, true, "", logger.NewDiscard())
 	tm.Start()
 
 	// Cancel immediately

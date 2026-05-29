@@ -99,9 +99,9 @@ func IncusOutputContext(ctx context.Context, args ...string) (string, error) {
 	cmdArgs := buildIncusCommand(args...)
 	cmd := execIncusCommandContext(ctx, cmdArgs)
 
-	var stdout bytes.Buffer
+	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
-	cmd.Stderr = nil
+	cmd.Stderr = &stderr
 
 	err := cmd.Run()
 	output := strings.TrimSpace(stdout.String())
@@ -111,6 +111,7 @@ func IncusOutputContext(ctx context.Context, args ...string) (string, error) {
 			return output, &ExitError{
 				ExitCode: exitErr.ExitCode(),
 				Err:      err,
+				Stderr:   strings.TrimSpace(stderr.String()),
 			}
 		}
 		return output, err
@@ -129,9 +130,9 @@ func IncusOutputRawContext(ctx context.Context, args ...string) (string, error) 
 	cmdArgs := buildIncusCommand(args...)
 	cmd := execIncusCommandContext(ctx, cmdArgs)
 
-	var stdout bytes.Buffer
+	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
-	cmd.Stderr = nil
+	cmd.Stderr = &stderr
 
 	err := cmd.Run()
 	output := stdout.String()
@@ -141,6 +142,7 @@ func IncusOutputRawContext(ctx context.Context, args ...string) (string, error) 
 			return output, &ExitError{
 				ExitCode: exitErr.ExitCode(),
 				Err:      err,
+				Stderr:   strings.TrimSpace(stderr.String()),
 			}
 		}
 		return output, err
@@ -190,9 +192,9 @@ func IncusOutputWithArgsContext(ctx context.Context, args ...string) (string, er
 	incusCmd := buildIncusCommand(args...)
 	cmd := execIncusCommandContext(ctx, incusCmd)
 
-	var stdout bytes.Buffer
+	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
-	cmd.Stderr = nil
+	cmd.Stderr = &stderr
 
 	err := cmd.Run()
 	output := strings.TrimSpace(stdout.String())
@@ -202,6 +204,7 @@ func IncusOutputWithArgsContext(ctx context.Context, args ...string) (string, er
 			return output, &ExitError{
 				ExitCode: exitErr.ExitCode(),
 				Err:      err,
+				Stderr:   strings.TrimSpace(stderr.String()),
 			}
 		}
 		return output, err

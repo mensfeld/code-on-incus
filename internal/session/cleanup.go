@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/mensfeld/code-on-incus/internal/container"
+	"github.com/mensfeld/code-on-incus/internal/logger"
 	"github.com/mensfeld/code-on-incus/internal/network"
 	"github.com/mensfeld/code-on-incus/internal/tool"
 )
@@ -24,6 +25,7 @@ type CleanupOptions struct {
 	Workspace      string    // Workspace directory path
 	Tool           tool.Tool // AI coding tool being used
 	NetworkManager *network.Manager
+	SessionLogger  *logger.SessionLogger
 	Logger         func(string)
 }
 
@@ -58,9 +60,10 @@ func Cleanup(opts CleanupOptions) error {
 		opts.Logger(fmt.Sprintf("Warning: Could not check container existence: %v", err))
 	}
 
-	// Always save session data if container exists (works even from stopped containers)
-	// This ensures --resume works regardless of how the user exited (including sudo shutdown 0)
-	// Skip if tool uses ENV-based auth (no config directory to save)
+	// Save session data immediately — no pre-delay regardless of persistence mode.
+	// saveSessionData handles the mid-shutdown race internally: on a transient SFTP
+	// error it waits for the container to fully stop, then retries using incus's
+	// direct file-access path (no SFTP) so the save succeeds in every exit scenario.
 	if opts.SaveSession && exists && opts.SessionID != "" && opts.SessionsDir != "" && opts.Tool != nil && opts.Tool.ConfigDirName() != "" {
 		if err := saveSessionData(mgr, opts.SessionID, opts.Persistent, opts.ProfileName, opts.Workspace, opts.SessionsDir, opts.Tool, opts.Logger); err != nil {
 			opts.Logger(fmt.Sprintf("Warning: Failed to save session data: %v", err))
@@ -69,19 +72,19 @@ func Cleanup(opts CleanupOptions) error {
 
 	// Handle container based on persistence mode
 	if opts.Persistent {
-		// Persistent mode: keep container for reuse (with all its data/modifications)
+		// Persistent mode: keep container regardless of whether it is running or stopped.
 		if exists {
 			opts.Logger("Container kept running - use 'coi attach' to reconnect, 'coi shutdown' to stop, or 'coi kill' to force stop")
 		} else {
 			opts.Logger("Container was stopped but kept for reuse")
 		}
 	} else {
-		// Non-persistent mode: behavior depends on how user exited
-		// - If container is running (user typed 'exit' or detached): keep it running
-		// - If container is stopped (user did 'sudo shutdown 0'): delete it
+		// Non-persistent mode: behavior depends on how user exited.
+		// - Container still running (user typed 'exit' or detached): keep it running.
+		// - Container stopped (user ran 'sudo poweroff'): delete it.
 		if exists {
-			// Check if container is stopped, with retries to handle shutdown delay
-			// Poweroff/shutdown can take several seconds to complete
+			// Check if container is stopped, with retries to handle shutdown delay.
+			// Poweroff/shutdown can take several seconds to complete.
 			running := true
 			for i := 0; i < 10; i++ {
 				time.Sleep(500 * time.Millisecond)
@@ -92,15 +95,11 @@ func Cleanup(opts CleanupOptions) error {
 			}
 
 			if running {
-				// Container still running - user exited normally, keep it for potential re-attach
+				// Container still running - user exited normally, keep it for potential re-attach.
 				opts.Logger("Container kept running - use 'coi attach' to reconnect, 'coi shutdown' to stop, or 'coi kill' to force stop")
 			} else {
-				// Container stopped (user did 'sudo shutdown 0') - delete it
+				// Container stopped (user ran 'sudo poweroff') - delete it.
 				opts.Logger("Container was stopped, removing...")
-
-				// Get the container's veth interface name BEFORE deletion
-				// We need this to clean up firewalld zone bindings after container deletion
-				vethName, _ := network.GetContainerVethName(opts.ContainerName)
 
 				// Clean up network FIRST while container still exists
 				// This ensures we can get the container IP to remove firewall rules
@@ -116,17 +115,15 @@ func Cleanup(opts CleanupOptions) error {
 				} else {
 					opts.Logger("Container removed (session data saved for --resume)")
 				}
-
-				// Clean up firewalld zone binding for the veth interface
-				// This must happen AFTER container deletion when the veth no longer exists
-				if vethName != "" {
-					if err := network.RemoveVethFromFirewalldZone(vethName); err != nil {
-						opts.Logger(fmt.Sprintf("Warning: Failed to cleanup firewalld zone binding: %v", err))
-					}
-				}
 			}
 		} else {
 			opts.Logger("Container was already removed")
+		}
+	}
+
+	if opts.SessionLogger != nil {
+		if err := opts.SessionLogger.Close(); err != nil && opts.Logger != nil {
+			opts.Logger(fmt.Sprintf("Warning: failed to close session log: %v", err))
 		}
 	}
 
@@ -161,21 +158,49 @@ func saveSessionData(mgr *container.Manager, sessionID string, persistent bool, 
 		}
 	}
 
-	// Pull config directory from container
-	// Note: incus file pull works on stopped containers, so we don't need to check if running
-	// If config dir doesn't exist, PullDirectory will fail and we handle it gracefully.
-	// Incus reports missing paths as one of several message variants
-	// ("file does not exist", "not found", "No such file or directory"),
-	// so match all of them case-insensitively.
-	if err := mgr.PullDirectory(stateDir, localConfigDir); err != nil {
-		msg := strings.ToLower(err.Error())
+	// Pull config directory from container.
+	//
+	// On the normal exit path the container is running and SFTP is healthy —
+	// the first attempt succeeds immediately.
+	//
+	// On the poweroff path, cleanup may start while the container's SFTP subsystem
+	// is still mid-teardown (sshd killed by init, container not yet fully stopped).
+	// On a transient SFTP/connection error we wait up to 5 s for the container to
+	// fully stop, then retry. Once stopped, incus switches to direct file access
+	// (no SFTP), so the retry reliably succeeds.
+	var pullErr error
+	for attempt := range 3 {
+		if attempt > 0 {
+			// SFTP failed — wait for the container to fully stop so incus
+			// uses direct file access (not SFTP) on the next attempt.
+			for i := 0; i < 10; i++ {
+				time.Sleep(500 * time.Millisecond)
+				if running, _ := mgr.Running(); !running {
+					break
+				}
+			}
+		}
+		pullErr = mgr.PullDirectory(stateDir, localConfigDir)
+		if pullErr == nil {
+			break
+		}
+		msg := strings.ToLower(pullErr.Error())
 		if strings.Contains(msg, "does not exist") ||
 			strings.Contains(msg, "not found") ||
 			strings.Contains(msg, "no such file") {
 			logger(fmt.Sprintf("No %s directory found in container", configDirName))
 			return nil
 		}
-		return fmt.Errorf("failed to pull %s directory: %w", configDirName, err)
+		if !strings.Contains(msg, "sftp") &&
+			!strings.Contains(msg, "unexpected eof") &&
+			!strings.Contains(msg, "bad file descriptor") &&
+			!strings.Contains(msg, "server unexpectedly closed") &&
+			!strings.Contains(msg, "error receiving version packet") {
+			break
+		}
+	}
+	if pullErr != nil {
+		return fmt.Errorf("failed to pull %s directory: %w", configDirName, pullErr)
 	}
 
 	// Save metadata

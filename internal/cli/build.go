@@ -97,11 +97,11 @@ func buildCommand(cmd *cobra.Command, args []string) error {
 			Compression: buildCompression,
 			StoragePool: buildPool,
 			Logger: func(msg string) {
-				fmt.Println(msg)
+				fmt.Fprintf(os.Stderr, "%s\n", msg)
 			},
 		}
 
-		fmt.Printf("Building image '%s' from profile '%s'...\n", imageName, profileName)
+		fmt.Fprintf(os.Stderr, "Building image '%s' from profile '%s'...\n", imageName, profileName)
 		builder := image.NewBuilder(opts)
 		result := builder.Build()
 
@@ -110,13 +110,13 @@ func buildCommand(cmd *cobra.Command, args []string) error {
 		}
 
 		if result.Skipped {
-			fmt.Printf("\nImage '%s' already exists. Use --force to rebuild.\n", opts.AliasName)
+			fmt.Fprintf(os.Stderr, "\nImage '%s' already exists. Use --force to rebuild.\n", opts.AliasName)
 			return nil
 		}
 
-		fmt.Printf("\nImage '%s' built successfully!\n", opts.AliasName)
-		fmt.Printf("  Version: %s\n", result.VersionAlias)
-		fmt.Printf("  Fingerprint: %s\n", result.Fingerprint)
+		fmt.Fprintf(os.Stderr, "\nImage '%s' built successfully!\n", opts.AliasName)
+		fmt.Fprintf(os.Stderr, "  Version: %s\n", result.VersionAlias)
+		fmt.Fprintf(os.Stderr, "  Fingerprint: %s\n", result.Fingerprint)
 		return nil
 	}
 

@@ -3,6 +3,7 @@ package monitor
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -203,13 +204,8 @@ func (r *Responder) killContainer(ctx context.Context) error {
 		r.onAction("killed", fmt.Sprintf("Container %s KILLED due to critical security threat", r.containerName))
 	}
 
-	// Get container IP and veth name BEFORE stopping (needed for cleanup)
-	var containerIP string
-	var vethName string
-	if network.FirewallAvailable() {
-		containerIP, _ = network.GetContainerIPFast(r.containerName)
-		vethName, _ = network.GetContainerVethName(r.containerName)
-	}
+	// Get container IP BEFORE stopping (needed for cleanup)
+	containerIP, _ := network.GetContainerIPFast(r.containerName)
 
 	// First stop the container
 	_, err := container.IncusOutputContext(ctx, "stop", r.containerName, "--force")
@@ -219,13 +215,13 @@ func (r *Responder) killContainer(ctx context.Context) error {
 
 	// Clean up firewall and NFT monitoring rules BEFORE deleting container
 	if containerIP != "" {
-		if err := r.cleanupFirewallRules(containerIP); err != nil {
+		if err := r.cleanupNftRules(containerIP); err != nil {
 			// Log warning but don't fail the kill operation
-			fmt.Printf("Warning: Failed to cleanup firewall rules: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Warning: Failed to cleanup nft rules: %v\n", err)
 		}
 		if err := r.cleanupNFTRules(containerIP); err != nil {
 			// Log warning but don't fail the kill operation
-			fmt.Printf("Warning: Failed to cleanup NFT monitoring rules: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Warning: Failed to cleanup NFT monitoring rules: %v\n", err)
 		}
 	}
 
@@ -235,22 +231,15 @@ func (r *Responder) killContainer(ctx context.Context) error {
 		return fmt.Errorf("failed to delete container: %w", err)
 	}
 
-	// Clean up firewalld zone binding for the veth interface AFTER container deletion
-	if vethName != "" {
-		if err := network.RemoveVethFromFirewalldZone(vethName); err != nil {
-			fmt.Printf("Warning: Failed to cleanup firewalld zone binding: %v\n", err)
-		}
-	}
-
 	r.mu.Lock()
 	r.killed = true
 	r.mu.Unlock()
 	return nil
 }
 
-// cleanupFirewallRules removes firewall rules for a container IP
-func (r *Responder) cleanupFirewallRules(containerIP string) error {
-	fm := network.NewFirewallManager(containerIP, "")
+// cleanupNftRules removes nft rules for a container IP
+func (r *Responder) cleanupNftRules(containerIP string) error {
+	fm := network.NewNftManager(containerIP, "")
 	return fm.RemoveRules()
 }
 

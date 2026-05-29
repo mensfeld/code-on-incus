@@ -11,6 +11,7 @@ import (
 	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/limits"
+	"github.com/mensfeld/code-on-incus/internal/logger"
 	"github.com/mensfeld/code-on-incus/internal/network"
 	"github.com/mensfeld/code-on-incus/internal/session"
 	"github.com/spf13/cobra"
@@ -377,14 +378,14 @@ func waitForContainer(mgr *container.Manager, maxRetries int) error {
 	return fmt.Errorf("container failed to become ready")
 }
 
-// ensureBridgeTrustedZone ensures the Incus bridge is in the firewalld trusted
-// zone before launching a container. Without this, DHCP replies are dropped and
-// the container never gets an IP.
+// ensureBridgeTrustedZone ensures the Incus bridge has iptables FORWARD ACCEPT
+// rules before launching a container. Without this, DHCP replies are dropped and
+// the container never gets an IP when the FORWARD policy is DROP.
 func ensureBridgeTrustedZone() {
 	if changed, bridgeName, err := network.EnsureBridgeInTrustedZone(); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not ensure bridge in firewalld trusted zone: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Warning: could not ensure bridge forwarding rules: %v\n", err)
 	} else if changed {
-		fmt.Fprintf(os.Stderr, "Added %s to firewalld trusted zone (was missing — containers could not get IPs)\n", bridgeName)
+		fmt.Fprintf(os.Stderr, "Added iptables FORWARD rules for %s (was missing — containers could not get IPs)\n", bridgeName)
 	}
 }
 
@@ -600,11 +601,11 @@ func applyNetworkIsolation(containerName string) (*network.Manager, error) {
 		return nil, nil
 	}
 	if changed, bridgeName, err := network.EnsureBridgeInTrustedZone(); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: could not ensure bridge in firewalld trusted zone: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Warning: could not ensure bridge forwarding rules: %v\n", err)
 	} else if changed {
-		fmt.Fprintf(os.Stderr, "Added %s to firewalld trusted zone\n", bridgeName)
+		fmt.Fprintf(os.Stderr, "Added iptables FORWARD rules for %s\n", bridgeName)
 	}
-	nm := network.NewManager(&networkConfig)
+	nm := network.NewManager(&networkConfig, logger.NewDiscard())
 	if err := nm.SetupForContainer(context.Background(), containerName); err != nil {
 		return nil, fmt.Errorf("failed to setup network isolation: %w", err)
 	}

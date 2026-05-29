@@ -963,10 +963,10 @@ class TestNFTRuleCleanupOnShutdown:
             cleanup_container(container_name, coi_binary, env=coi_monitoring_env)
 
 
-def check_firewall_rules_exist(container_ip):
-    """Check if firewalld direct rules exist for container IP."""
+def check_nft_coi_rules_exist(container_ip):
+    """Check if nft rules in the ip coi forward chain exist for container IP."""
     result = subprocess.run(
-        ["sudo", "-n", "firewall-cmd", "--direct", "--get-all-rules"],
+        ["sudo", "-n", "nft", "-a", "list", "chain", "ip", "coi", "forward"],
         capture_output=True,
         text=True,
         timeout=10,
@@ -976,22 +976,22 @@ def check_firewall_rules_exist(container_ip):
     return container_ip in result.stdout
 
 
-class TestFirewallRuleCleanupOnAutoKill:
-    """Test firewall rule cleanup when containers are auto-killed by responder."""
+class TestNFTCOIRuleCleanupOnAutoKill:
+    """Test nft coi forward rule cleanup when containers are auto-killed by responder."""
 
     @pytest.fixture(autouse=True)
     def check_nft_available(self, nft_monitoring_available):
         """Ensure NFT monitoring is available before running tests."""
         pass
 
-    def test_firewall_rules_cleaned_on_auto_kill(
+    def test_nft_coi_rules_cleaned_on_auto_kill(
         self, test_workspace, coi_binary, coi_monitoring_env
     ):
-        """Verify firewall rules are removed when container is auto-killed by responder."""
+        """Verify nft rules in ip coi forward are removed when container is auto-killed."""
         slot = 63
         container_name = get_container_name_from_workspace(test_workspace, slot)
 
-        # Add restricted network to config (needed for firewall rules)
+        # Add restricted network to config (needed for nft coi forward rules)
         import pathlib
 
         config_path = pathlib.Path(test_workspace) / ".coi" / "config.toml"
@@ -999,7 +999,8 @@ class TestFirewallRuleCleanupOnAutoKill:
         if "[network]" not in config_text:
             config_path.write_text(config_text + '\n[network]\nmode = "restricted"\n')
 
-        # Start session with monitoring (via config) AND restricted network (to have firewall rules)
+        # Start session with monitoring (via config) AND restricted network
+        # (to have nft coi forward rules)
         proc = subprocess.Popen(
             [
                 coi_binary,
@@ -1023,10 +1024,10 @@ class TestFirewallRuleCleanupOnAutoKill:
             if not container_ip:
                 pytest.skip("Container has no IP address")
 
-            # Verify firewall rules exist before triggering kill
-            # (restricted mode creates firewall rules)
-            if not check_firewall_rules_exist(container_ip):
-                pytest.skip("No firewall rules created (firewalld may not be available)")
+            # Verify nft rules exist before triggering kill
+            # (restricted mode creates rules in ip coi forward)
+            if not check_nft_coi_rules_exist(container_ip):
+                pytest.skip("No nft coi forward rules created (chain may not exist yet)")
 
             # Trigger auto-kill by accessing metadata endpoint (CRITICAL threat)
             subprocess.run(
@@ -1055,16 +1056,17 @@ class TestFirewallRuleCleanupOnAutoKill:
 
             assert killed, f"Container should have been killed but state is {state}"
 
-            # Verify firewall rules are cleaned up (may take a moment after kill)
+            # Verify nft coi forward rules are cleaned up (may take a moment after kill)
             cleaned = False
             for _ in range(15):
-                if not check_firewall_rules_exist(container_ip):
+                if not check_nft_coi_rules_exist(container_ip):
                     cleaned = True
                     break
                 time.sleep(1)
 
             assert cleaned, (
-                f"Firewall rules should be cleaned up for {container_ip} after auto-kill"
+                f"nft rules in ip coi forward should be cleaned up for "
+                f"{container_ip} after auto-kill"
             )
 
         finally:
@@ -1101,13 +1103,14 @@ def get_container_veth_name(container_name):
 
 
 def check_veth_in_firewalld_zone(veth_name):
-    """Check if veth interface is registered in any firewalld zone."""
+    """Check if veth interface is registered in any nft zone/policy table."""
     if not veth_name:
         return False
 
-    # Check nft firewalld table for the veth name
+    # Check the nft ruleset for the veth name (covers both firewalld-managed and
+    # nftables-native zone tables)
     result = subprocess.run(
-        ["sudo", "-n", "nft", "list", "table", "inet", "firewalld"],
+        ["sudo", "-n", "nft", "list", "ruleset"],
         capture_output=True,
         text=True,
         timeout=10,

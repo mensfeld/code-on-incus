@@ -9,17 +9,15 @@ import (
 
 	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
+	"github.com/mensfeld/code-on-incus/internal/logger"
 	"github.com/mensfeld/code-on-incus/internal/network"
 )
 
-// cleanupTestContainer is a helper that ensures complete cleanup of a test container
-// including firewalld zone bindings. Use with t.Cleanup() to ensure cleanup even on test failure.
+// cleanupTestContainer is a helper that ensures complete cleanup of a test container.
+// Use with t.Cleanup() to ensure cleanup even on test failure.
 func cleanupTestContainer(t *testing.T, containerName string) {
 	t.Helper()
 	mgr := container.NewManager(containerName)
-
-	// Get veth name before any cleanup (might fail if container doesn't exist)
-	vethName, _ := network.GetContainerVethName(containerName)
 
 	// Get container IP for firewall rule cleanup
 	containerIP, _ := network.GetContainerIPFast(containerName)
@@ -30,14 +28,9 @@ func cleanupTestContainer(t *testing.T, containerName string) {
 		_ = mgr.Delete(true)
 	}
 
-	// Clean up firewall rules for the IP
+	// Clean up nft rules for the IP
 	if containerIP != "" {
 		cleanupRulesForIP(t, containerIP)
-	}
-
-	// Clean up firewalld zone binding for the veth
-	if vethName != "" {
-		_ = network.RemoveVethFromFirewalldZone(vethName)
 	}
 }
 
@@ -55,8 +48,8 @@ func TestEndToEndCleanupWithOpenMode(t *testing.T) {
 	}
 
 	// Skip if firewall is not available
-	if !network.FirewallAvailable() {
-		t.Skip("firewalld not available, skipping integration test")
+	if !network.NftAvailable() {
+		t.Skip("nft not available, skipping integration test")
 	}
 
 	// Check if the default 'coi' image exists
@@ -103,7 +96,7 @@ func TestEndToEndCleanupWithOpenMode(t *testing.T) {
 	netCfg := &config.NetworkConfig{
 		Mode: config.NetworkModeOpen,
 	}
-	netMgr := network.NewManager(netCfg)
+	netMgr := network.NewManager(netCfg, logger.NewDiscard())
 
 	// Set up network (creates firewall rules)
 	if err := netMgr.SetupForContainer(context.Background(), containerName); err != nil {
@@ -189,8 +182,8 @@ func TestEndToEndCleanupWithRestrictedMode(t *testing.T) {
 	}
 
 	// Skip if firewall is not available
-	if !network.FirewallAvailable() {
-		t.Skip("firewalld not available, skipping integration test")
+	if !network.NftAvailable() {
+		t.Skip("nft not available, skipping integration test")
 	}
 
 	// Check if the default 'coi' image exists
@@ -240,7 +233,7 @@ func TestEndToEndCleanupWithRestrictedMode(t *testing.T) {
 		BlockPrivateNetworks:  &boolTrue,
 		BlockMetadataEndpoint: &boolTrue,
 	}
-	netMgr := network.NewManager(netCfg)
+	netMgr := network.NewManager(netCfg, logger.NewDiscard())
 
 	// Set up network (creates firewall rules)
 	if err := netMgr.SetupForContainer(context.Background(), containerName); err != nil {
@@ -315,8 +308,8 @@ func TestEndToEndCleanupMultipleContainers(t *testing.T) {
 	}
 
 	// Skip if firewall is not available
-	if !network.FirewallAvailable() {
-		t.Skip("firewalld not available, skipping integration test")
+	if !network.NftAvailable() {
+		t.Skip("nft not available, skipping integration test")
 	}
 
 	// Check if the default 'coi' image exists
@@ -369,7 +362,7 @@ func TestEndToEndCleanupMultipleContainers(t *testing.T) {
 		netCfg := &config.NetworkConfig{
 			Mode: config.NetworkModeOpen,
 		}
-		netMgr := network.NewManager(netCfg)
+		netMgr := network.NewManager(netCfg, logger.NewDiscard())
 		if err := netMgr.SetupForContainer(context.Background(), containerName); err != nil {
 			t.Logf("Warning: SetupForContainer failed for %s: %v", containerName, err)
 		}
@@ -417,63 +410,38 @@ func TestEndToEndCleanupMultipleContainers(t *testing.T) {
 // Helper functions
 
 func countFirewallRules(t *testing.T) int {
-	cmd := exec.Command("sudo", "-n", "firewall-cmd", "--direct", "--get-all-rules")
-	output, err := cmd.CombinedOutput()
+	t.Helper()
+	ipHandles, err := network.ListCOIFilterRuleIPs()
 	if err != nil {
-		t.Logf("Warning: Failed to count firewall rules: %v", err)
+		t.Logf("Warning: Failed to count nft coi forward rules: %v", err)
 		return 0
 	}
-
-	count := 0
-	for _, line := range strings.Split(string(output), "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" && strings.Contains(line, "FORWARD") {
-			count++
-		}
+	total := 0
+	for _, handles := range ipHandles {
+		total += len(handles)
 	}
-	return count
+	return total
 }
 
 func countRulesForIP(t *testing.T, ip string) int {
-	cmd := exec.Command("sudo", "-n", "firewall-cmd", "--direct", "--get-all-rules")
-	output, err := cmd.CombinedOutput()
+	t.Helper()
+	ipHandles, err := network.ListCOIFilterRuleIPs()
 	if err != nil {
-		t.Logf("Warning: Failed to list firewall rules: %v", err)
+		t.Logf("Warning: Failed to list nft coi forward rules: %v", err)
 		return 0
 	}
-
-	count := 0
-	for _, line := range strings.Split(string(output), "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" && strings.Contains(line, ip) {
-			count++
-		}
+	handles, ok := ipHandles[ip]
+	if !ok {
+		return 0
 	}
-	return count
+	return len(handles)
 }
 
 func cleanupRulesForIP(t *testing.T, ip string) {
-	cmd := exec.Command("sudo", "-n", "firewall-cmd", "--direct", "--get-all-rules")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Logf("Warning: Failed to list firewall rules for cleanup: %v", err)
-		return
-	}
-
-	for _, line := range strings.Split(string(output), "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" && strings.Contains(line, ip) {
-			parts := strings.Fields(line)
-			if len(parts) >= 4 {
-				args := []string{"-n", "firewall-cmd", "--direct", "--remove-rule"}
-				args = append(args, parts...)
-				removeCmd := exec.Command("sudo", args...)
-				if err := removeCmd.Run(); err != nil {
-					t.Logf("Warning: Failed to remove rule: %s", line)
-				} else {
-					t.Logf("Cleaned up orphaned rule: %s", line)
-				}
-			}
-		}
+	t.Helper()
+	if err := network.DeleteCOIFilterRulesForIP(ip); err != nil {
+		t.Logf("Warning: Failed to cleanup nft rules for IP %s: %v", ip, err)
+	} else {
+		t.Logf("Cleaned up nft rules for IP %s", ip)
 	}
 }

@@ -435,12 +435,12 @@ func TestCheckContainerConnectivity_Cleanup(t *testing.T) {
 	}
 }
 
-// CheckFirewall should return a details map containing installed, running, and masquerade
-// booleans, and the status should reflect the actual firewall state.
-func TestCheckFirewall_DetailedStatus(t *testing.T) {
-	installed := network.FirewallInstalled()
-	running := network.FirewallAvailable()
-	masquerade := running && network.MasqueradeEnabled()
+// CheckNft should return a details map containing nft_installed, nft_available, and masquerade
+// booleans, and the status should reflect the actual nft state.
+func TestCheckNft_DetailedStatus(t *testing.T) {
+	installed := network.NftInstalled()
+	available := network.NftAvailable()
+	masquerade := network.MasqueradeEnabled()
 
 	modes := []config.NetworkMode{
 		config.NetworkModeOpen,
@@ -449,10 +449,10 @@ func TestCheckFirewall_DetailedStatus(t *testing.T) {
 
 	for _, mode := range modes {
 		t.Run(string(mode), func(t *testing.T) {
-			result := CheckFirewall(mode)
+			result := CheckNft(mode)
 
-			if result.Name != "firewall" {
-				t.Errorf("Expected check name 'firewall', got %q", result.Name)
+			if result.Name != "nft" {
+				t.Errorf("Expected check name 'nft', got %q", result.Name)
 			}
 
 			// Verify details map has the expected keys
@@ -460,7 +460,7 @@ func TestCheckFirewall_DetailedStatus(t *testing.T) {
 				t.Fatal("Expected non-nil Details map")
 			}
 
-			for _, key := range []string{"installed", "running", "masquerade"} {
+			for _, key := range []string{"nft_installed", "nft_available", "masquerade"} {
 				val, ok := result.Details[key]
 				if !ok {
 					t.Errorf("Expected %q key in details", key)
@@ -472,11 +472,11 @@ func TestCheckFirewall_DetailedStatus(t *testing.T) {
 			}
 
 			// Verify detail values match actual system state
-			if result.Details["installed"] != installed {
-				t.Errorf("details[installed] = %v, want %v", result.Details["installed"], installed)
+			if result.Details["nft_installed"] != installed {
+				t.Errorf("details[nft_installed] = %v, want %v", result.Details["nft_installed"], installed)
 			}
-			if result.Details["running"] != running {
-				t.Errorf("details[running] = %v, want %v", result.Details["running"], running)
+			if result.Details["nft_available"] != available {
+				t.Errorf("details[nft_available] = %v, want %v", result.Details["nft_available"], available)
 			}
 			if result.Details["masquerade"] != masquerade {
 				t.Errorf("details[masquerade] = %v, want %v", result.Details["masquerade"], masquerade)
@@ -490,9 +490,9 @@ func TestCheckFirewall_DetailedStatus(t *testing.T) {
 			} else {
 				// restricted/allowlist mode
 				switch {
-				case !installed || !running:
+				case !installed || !available:
 					if result.Status != StatusFailed {
-						t.Errorf("Expected StatusFailed when firewall not available, got %s: %s", result.Status, result.Message)
+						t.Errorf("Expected StatusFailed when nft not available, got %s: %s", result.Status, result.Message)
 					}
 				case !masquerade:
 					if result.Status != StatusWarning {
@@ -505,14 +505,14 @@ func TestCheckFirewall_DetailedStatus(t *testing.T) {
 				}
 			}
 
-			t.Logf("CheckFirewall(%s): status=%s installed=%v running=%v masquerade=%v message=%s",
-				mode, result.Status, installed, running, masquerade, result.Message)
+			t.Logf("CheckNft(%s): status=%s installed=%v available=%v masquerade=%v message=%s",
+				mode, result.Status, installed, available, masquerade, result.Message)
 		})
 	}
 }
 
-// CheckNetworkRestriction should return StatusWarning with "firewalld not available" when
-// firewalld is not installed or not running, rather than attempting the restriction check.
+// CheckNetworkRestriction should return StatusWarning with "nft not available" when
+// nft is not installed or passwordless sudo is not configured.
 func TestCheckNetworkRestriction_NoFirewall(t *testing.T) {
 	// Skip if incus is not available
 	if _, err := exec.LookPath("incus"); err != nil {
@@ -525,8 +525,8 @@ func TestCheckNetworkRestriction_NoFirewall(t *testing.T) {
 	}
 
 	// This test only makes sense if firewall is NOT available
-	if network.FirewallAvailable() {
-		t.Skip("firewalld is available, cannot test no-firewall scenario")
+	if network.NftAvailable() {
+		t.Skip("nft is available, cannot test no-firewall scenario")
 	}
 
 	result := CheckNetworkRestriction("coi-default")
@@ -539,8 +539,8 @@ func TestCheckNetworkRestriction_NoFirewall(t *testing.T) {
 		t.Errorf("Expected StatusWarning when firewall not available, got %s", result.Status)
 	}
 
-	if !strings.Contains(result.Message, "firewalld not available") {
-		t.Errorf("Expected message about firewalld not available, got '%s'", result.Message)
+	if !strings.Contains(result.Message, "nft not available") {
+		t.Errorf("Expected message about nft not available, got '%s'", result.Message)
 	}
 
 	t.Logf("Correctly skipped check when firewall unavailable: %s", result.Message)
@@ -560,8 +560,8 @@ func TestCheckNetworkRestriction_NoImage(t *testing.T) {
 	}
 
 	// Skip if firewall is not available
-	if !network.FirewallAvailable() {
-		t.Skip("firewalld not available, skipping integration test")
+	if !network.NftAvailable() {
+		t.Skip("nft not available, skipping integration test")
 	}
 
 	// Use a non-existent image name
@@ -583,7 +583,7 @@ func TestCheckNetworkRestriction_NoImage(t *testing.T) {
 }
 
 // CheckNetworkRestriction should complete and return a definitive status (OK/Warning/Failed)
-// when both firewalld and the COI image are available, and leave no leftover restriction-check
+// when both nft and the COI image are available, and leave no leftover restriction-check
 // containers afterwards.
 func TestCheckNetworkRestriction_WithImage(t *testing.T) {
 	// Skip if incus is not available
@@ -597,8 +597,8 @@ func TestCheckNetworkRestriction_WithImage(t *testing.T) {
 	}
 
 	// Skip if firewall is not available
-	if !network.FirewallAvailable() {
-		t.Skip("firewalld not available, skipping integration test")
+	if !network.NftAvailable() {
+		t.Skip("nft not available, skipping integration test")
 	}
 
 	// Check if the default 'coi' image exists
@@ -657,8 +657,8 @@ func TestCheckNetworkRestriction_Cleanup(t *testing.T) {
 	}
 
 	// Skip if firewall is not available
-	if !network.FirewallAvailable() {
-		t.Skip("firewalld not available, skipping integration test")
+	if !network.NftAvailable() {
+		t.Skip("nft not available, skipping integration test")
 	}
 
 	// Check if the default 'coi' image exists

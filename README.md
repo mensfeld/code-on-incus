@@ -111,7 +111,7 @@ See the [Supported Tools wiki page](https://github.com/mensfeld/code-on-incus/wi
 - Kernel version enforcement - Warns on host kernels below 5.15 that may lack security features for safe isolation
 - Real-time threat detection - Kernel-level nftables monitoring detects reverse shells, C2 connections, data exfiltration, DNS tunneling, and credential scanning
 - Automated response - Auto-pause on HIGH threats, auto-kill on CRITICAL — no manual intervention needed
-- Network isolation - Firewalld-based restricted/allowlist/open modes block private network access and prevent exfiltration
+- Network isolation - nftables-based restricted/allowlist/open modes block private network access and prevent exfiltration
 - Protected paths - `.git/hooks`, `.git/config`, `.husky`, `.vscode` mounted read-only to prevent supply-chain attacks
 - Host-side immutable protection - Protected paths are locked with `chattr +i` during sessions, preventing `unshare -m` + `umount` bypass of read-only mounts (opt out: `[security] host_immutable = false`)
 - Git identity guard - Containers enforce `user.useConfigOnly=true`, preventing AI tools from committing as the default "code" user
@@ -164,7 +164,7 @@ Incus is a modern Linux container and virtual machine manager, forked from LXD. 
 | **Real-time threat detection** | Kernel-level (nftables) | No | No |
 | **Reverse shell detection** | Auto-kill | No | No |
 | **Data exfiltration alerts** | Auto-pause | No | No |
-| **Network isolation** | Firewalld (3 modes) | Basic | No |
+| **Network isolation** | nftables (3 modes) | Basic | No |
 | **Protected paths** | Read-only mounts | No | No |
 | **Auto response (pause/kill)** | Yes | No | No |
 | **Audit logging** | JSONL forensics | No | No |
@@ -261,6 +261,10 @@ coi attach
 
 # Real-time security monitoring dashboard
 coi monitor
+
+# View session logs (setup messages, network notices, errors)
+coi logs                        # Auto-detect container from current workspace
+coi logs coi-abc123-1 -f        # Tail logs live
 
 # List active containers and saved sessions
 coi list --all
@@ -481,7 +485,7 @@ coi shutdown <name>           # Graceful stop (outside)
 
 ## Network Isolation
 
-See the [Network Isolation guide](https://github.com/mensfeld/code-on-incus/wiki/Network-Isolation) for complete documentation on network security and firewalld setup.
+See the [Network Isolation guide](https://github.com/mensfeld/code-on-incus/wiki/Network-Isolation) for complete documentation on network security and nftables-based network filtering.
 
 **Network modes:**
 - **Restricted (default)** - Blocks private networks, allows internet
@@ -612,7 +616,7 @@ See the [Troubleshooting guide](https://github.com/mensfeld/code-on-incus/wiki/T
 See the [FAQ](https://github.com/mensfeld/code-on-incus/wiki/FAQ) for answers to common questions.
 
 **Topics covered:**
-- Orphaned firewalld zone bindings (Docker + firewalld interaction)
+- Orphaned nftables/iptables rules
 - How COI compares to Docker Sandboxes and DevContainers
 - Windows support (WSL2)
 - Security model and prompt injection protection

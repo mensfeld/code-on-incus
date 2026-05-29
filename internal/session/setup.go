@@ -13,6 +13,7 @@ import (
 	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/limits"
+	"github.com/mensfeld/code-on-incus/internal/logger"
 	"github.com/mensfeld/code-on-incus/internal/network"
 	"github.com/mensfeld/code-on-incus/internal/tool"
 )
@@ -57,6 +58,7 @@ type SetupResult struct {
 	Manager                *container.Manager
 	NetworkManager         *network.Manager
 	TimeoutMonitor         *limits.TimeoutMonitor
+	Logger                 *logger.SessionLogger
 	HomeDir                string
 	RunAsRoot              bool
 	Image                  string
@@ -93,6 +95,12 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 	}
 	result.ContainerName = containerName
 	result.Manager = container.NewManager(containerName)
+
+	hostHome, _ := os.UserHomeDir() // empty string on failure; logger.New handles it
+	result.Logger = logger.New(containerName, hostHome)
+	if w := result.Logger.InitWarning(); w != "" {
+		opts.Logger(fmt.Sprintf("Warning: %s", w))
+	}
 
 	// 1.5 Validate Bedrock setup if running in Colima/Lima
 	if isColimaOrLimaEnvironment() && opts.CLIConfigPath != "" {
@@ -133,16 +141,13 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 		}
 	}
 
-	// Autofix: make sure the Incus bridge is in the firewalld trusted zone
-	// *before* any container is started. A bridge outside the trusted zone
-	// prevents containers from getting IP addresses via DHCP (firewalld drops
-	// the response), so without this the container start would succeed but
-	// waitForReady would time out and the whole flow would fail with an
-	// opaque error. No-op when firewalld is not available.
+	// Autofix: make sure the Incus bridge has iptables FORWARD ACCEPT rules
+	// before any container is started. Without them, containers cannot get IPs
+	// via DHCP when the FORWARD chain policy is DROP (e.g. when Docker is running).
 	if changed, bridgeName, err := network.EnsureBridgeInTrustedZone(); err != nil {
-		opts.Logger(fmt.Sprintf("Warning: could not ensure bridge in firewalld trusted zone: %v", err))
+		opts.Logger(fmt.Sprintf("Warning: could not ensure bridge forwarding rules: %v", err))
 	} else if changed {
-		opts.Logger(fmt.Sprintf("Added %s to firewalld trusted zone (was missing — containers could not get IPs)", bridgeName))
+		opts.Logger(fmt.Sprintf("Added iptables FORWARD rules for %s (was missing — containers could not get IPs)", bridgeName))
 	}
 
 	// 2. Determine image
@@ -500,7 +505,7 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 				config.BoolVal(opts.LimitsConfig.Runtime.AutoStop),
 				config.BoolVal(opts.LimitsConfig.Runtime.StopGraceful),
 				opts.IncusProject,
-				opts.Logger,
+				result.Logger,
 			)
 			result.TimeoutMonitor.Start()
 		}
@@ -508,7 +513,7 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 
 	// 8. Setup network isolation (after container is running and has IP)
 	if opts.NetworkConfig != nil {
-		result.NetworkManager = network.NewManager(opts.NetworkConfig)
+		result.NetworkManager = network.NewManager(opts.NetworkConfig, result.Logger)
 		if err := result.NetworkManager.SetupForContainer(context.Background(), result.ContainerName); err != nil {
 			return nil, fmt.Errorf("failed to setup network isolation: %w", err)
 		}

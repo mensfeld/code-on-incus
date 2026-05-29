@@ -395,62 +395,50 @@ func CheckIPForwarding() HealthCheck {
 	}
 }
 
-// CheckFirewall verifies firewalld availability based on network mode
-func CheckFirewall(mode config.NetworkMode) HealthCheck {
-	installed := network.FirewallInstalled()
-	running := network.FirewallAvailable()
-	masquerade := running && network.MasqueradeEnabled()
+// CheckNft verifies nft availability and masquerade configuration
+func CheckNft(mode config.NetworkMode) HealthCheck {
+	installed := network.NftInstalled()
+	available := network.NftAvailable()
+	masquerade := network.MasqueradeEnabled()
 	isColima := isColimaEnvironment()
 
 	details := map[string]interface{}{
-		"installed":  installed,
-		"running":    running,
-		"masquerade": masquerade,
-		"colima":     isColima,
+		"nft_installed": installed,
+		"nft_available": available,
+		"masquerade":    masquerade,
+		"colima":        isColima,
 	}
 
 	if mode == config.NetworkModeOpen {
-		// Firewall not required for open mode — always OK, but report actual state
-		var message string
-		switch {
-		case running && masquerade:
-			message = "Running with masquerade enabled (not required for open mode)"
-		case running:
-			message = "Running but masquerade not enabled (not required for open mode)"
-		case installed:
-			message = "Installed but not running (not required for open mode)"
-		default:
-			message = "Not installed (not required for open mode)"
-		}
 		return HealthCheck{
-			Name:    "firewall",
+			Name:    "nft",
 			Status:  StatusOK,
-			Message: message,
+			Message: "nft not required for open mode",
 			Details: details,
 		}
 	}
 
 	// Required for restricted/allowlist modes
 	if !installed {
-		message := fmt.Sprintf("Not installed (required for %s mode) — install with: sudo apt install firewalld", mode)
+		message := fmt.Sprintf("nft not installed (required for %s mode) — install with: sudo apt install nftables", mode)
 		if isColima {
-			message = "Not installed - use --network=open for Colima"
+			message = "nft not installed — on Colima, set mode = \"open\" in [network] section of your config.toml"
 		}
 		return HealthCheck{
-			Name:    "firewall",
+			Name:    "nft",
 			Status:  StatusFailed,
 			Message: message,
 			Details: details,
 		}
 	}
 
-	if !running {
-		message := fmt.Sprintf("Installed but not running (required for %s mode) — start with: sudo systemctl enable --now firewalld", mode)
+	if !available {
+		message := "nft installed but passwordless sudo not configured — run: echo \"$USER ALL=(ALL) NOPASSWD: /usr/sbin/nft\" | sudo tee /etc/sudoers.d/coi-nft && sudo chmod 0440 /etc/sudoers.d/coi-nft"
 		if isColima {
-			message = "Installed but not running - use --network=open for Colima"
+			message = "nft sudo not configured — on Colima, set mode = \"open\" in [network] section of your config.toml"
 		}
 		return HealthCheck{
-			Name:    "firewall",
+			Name:    "nft",
 			Status:  StatusFailed,
 			Message: message,
 			Details: details,
@@ -459,98 +447,91 @@ func CheckFirewall(mode config.NetworkMode) HealthCheck {
 
 	if !masquerade {
 		return HealthCheck{
-			Name:    "firewall",
+			Name:    "nft",
 			Status:  StatusWarning,
-			Message: "Running but masquerade not enabled — containers may not reach the internet. Enable with: sudo firewall-cmd --permanent --add-masquerade && sudo firewall-cmd --reload",
+			Message: "Incus bridge NAT (masquerade) not enabled — containers may not reach the internet. Check with: incus network get incusbr0 ipv4.nat",
 			Details: details,
 		}
 	}
 
 	return HealthCheck{
-		Name:    "firewall",
+		Name:    "nft",
 		Status:  StatusOK,
-		Message: fmt.Sprintf("Running with masquerade enabled (%s mode available)", mode),
+		Message: fmt.Sprintf("nft available, Incus bridge NAT enabled (%s mode available)", mode),
 		Details: details,
 	}
 }
 
-// CheckUFWConflict checks if ufw is active, which conflicts with firewalld.
-// When both are active, netfilter chains conflict and container networking breaks.
+// CheckUFWConflict checks if ufw is active with a DROP FORWARD policy that
+// would block container traffic. With nft-based COI, ufw and COI can coexist
+// as long as bridge forwarding rules are in place.
 func CheckUFWConflict() HealthCheck {
 	ufwInstalled := network.UfwInstalled()
 	ufwActive := ufwInstalled && network.UfwActive()
-	firewallActive := network.FirewallAvailable()
+	forwardDrop := network.ForwardPolicyIsDrop()
 
 	details := map[string]interface{}{
-		"ufw_installed":    ufwInstalled,
-		"ufw_active":       ufwActive,
-		"firewalld_active": firewallActive,
+		"ufw_installed":       ufwInstalled,
+		"ufw_active":          ufwActive,
+		"forward_policy_drop": forwardDrop,
 	}
 
 	if !ufwActive {
 		return HealthCheck{
 			Name:    "ufw_conflict",
 			Status:  StatusOK,
-			Message: "ufw is not active (no conflict)",
+			Message: "ufw is not active",
 			Details: details,
 		}
 	}
 
-	if firewallActive {
+	if forwardDrop {
 		return HealthCheck{
 			Name:    "ufw_conflict",
-			Status:  StatusFailed,
-			Message: "Both ufw and firewalld are active — netfilter conflict will break container networking. Disable ufw (recommended): sudo ufw disable && sudo systemctl disable --now ufw — or disable firewalld: sudo systemctl disable --now firewalld",
+			Status:  StatusWarning,
+			Message: "ufw is active and FORWARD policy is DROP — coi will add iptables bridge rules automatically to ensure containers can reach the network",
 			Details: details,
 		}
 	}
 
 	return HealthCheck{
 		Name:    "ufw_conflict",
-		Status:  StatusWarning,
-		Message: "ufw is active — only --network=open will work. Disable ufw to use firewalld: sudo ufw disable && sudo systemctl disable --now ufw",
+		Status:  StatusOK,
+		Message: "ufw is active but FORWARD policy is not DROP — no conflict with COI",
 		Details: details,
 	}
 }
 
-// CheckBridgeFirewalldZone checks if the Incus bridge is in the firewalld trusted zone.
-// When the bridge is not in the trusted zone, containers may fail to obtain IP addresses.
-func CheckBridgeFirewalldZone() HealthCheck {
-	if !network.FirewallAvailable() {
-		return HealthCheck{
-			Name:    "bridge_firewalld_zone",
-			Status:  StatusOK,
-			Message: "Firewalld not running (check not applicable)",
-		}
-	}
-
-	inZone, bridgeName, err := network.BridgeInTrustedZone()
+// CheckBridgeForwardRules checks whether the Incus bridge has iptables FORWARD
+// ACCEPT rules so containers can get IPs via DHCP even when FORWARD policy is DROP.
+func CheckBridgeForwardRules() HealthCheck {
+	hasRules, bridgeName, err := network.BridgeInTrustedZone()
 	if err != nil {
 		return HealthCheck{
-			Name:    "bridge_firewalld_zone",
+			Name:    "bridge_forward_rules",
 			Status:  StatusWarning,
-			Message: fmt.Sprintf("Could not check bridge zone: %v", err),
+			Message: fmt.Sprintf("Could not check bridge forwarding rules: %v", err),
 		}
 	}
 
 	details := map[string]interface{}{
-		"bridge_name":     bridgeName,
-		"in_trusted_zone": inZone,
+		"bridge_name":       bridgeName,
+		"has_forward_rules": hasRules,
 	}
 
-	if !inZone {
+	if !hasRules {
 		return HealthCheck{
-			Name:    "bridge_firewalld_zone",
+			Name:    "bridge_forward_rules",
 			Status:  StatusWarning,
-			Message: fmt.Sprintf("Bridge %s not in trusted zone — containers may fail to get IPs. Fix: sudo firewall-cmd --zone=trusted --add-interface=%s --permanent && sudo firewall-cmd --reload", bridgeName, bridgeName),
+			Message: fmt.Sprintf("Bridge %s has no iptables FORWARD rules — containers may fail to get IPs if FORWARD policy is DROP (rules are added automatically on first container start)", bridgeName),
 			Details: details,
 		}
 	}
 
 	return HealthCheck{
-		Name:    "bridge_firewalld_zone",
+		Name:    "bridge_forward_rules",
 		Status:  StatusOK,
-		Message: fmt.Sprintf("Bridge %s is in trusted zone", bridgeName),
+		Message: fmt.Sprintf("Bridge %s has iptables FORWARD rules", bridgeName),
 		Details: details,
 	}
 }
@@ -874,11 +855,11 @@ func CheckContainerConnectivity(imageName string) HealthCheck {
 	}
 
 	// Apply firewall rules to allow container traffic
-	// (FORWARD chain policy may be DROP with firewalld or Docker)
+	// (FORWARD chain policy may be DROP with Docker)
 	var usedIptablesFallback bool
 	var iptablesBridgeName string
 
-	if network.FirewallAvailable() {
+	if network.NftAvailable() {
 		if err := network.EnsureOpenModeRules(containerIP); err != nil {
 			return HealthCheck{
 				Name:    "container_connectivity",
@@ -910,7 +891,7 @@ func CheckContainerConnectivity(imageName string) HealthCheck {
 	defer func() {
 		if usedIptablesFallback {
 			_ = network.RemoveIptablesBridgeRules(iptablesBridgeName)
-		} else if network.FirewallAvailable() {
+		} else if network.NftAvailable() {
 			_ = network.RemoveOpenModeRules(containerIP)
 		}
 	}()
@@ -992,11 +973,11 @@ func CheckContainerConnectivity(imageName string) HealthCheck {
 // CheckNetworkRestriction tests that restricted network mode properly blocks private networks
 func CheckNetworkRestriction(imageName string) HealthCheck {
 	// Skip if firewall not available
-	if !network.FirewallAvailable() {
+	if !network.NftAvailable() {
 		return HealthCheck{
 			Name:    "network_restriction",
 			Status:  StatusWarning,
-			Message: "Skipped (firewalld not available)",
+			Message: "Skipped (nft not available)",
 		}
 	}
 
@@ -1028,13 +1009,13 @@ func CheckNetworkRestriction(imageName string) HealthCheck {
 	}
 
 	// Track if we applied firewall rules (for cleanup)
-	var firewallManager *network.FirewallManager
+	var nftManager *network.NftManager
 
 	// Ensure cleanup on any exit path
 	defer func() {
 		// Remove firewall rules first
-		if firewallManager != nil {
-			_ = firewallManager.RemoveRules()
+		if nftManager != nil {
+			_ = nftManager.RemoveRules()
 		}
 		// Then stop/delete container
 		_ = container.StopContainer(containerName)
@@ -1098,7 +1079,7 @@ func CheckNetworkRestriction(imageName string) HealthCheck {
 	}
 
 	// Apply restricted mode firewall rules
-	firewallManager = network.NewFirewallManager(containerIP, gatewayIP)
+	nftManager = network.NewNftManager(containerIP, gatewayIP)
 	boolTrue := true
 	restrictedConfig := &config.NetworkConfig{
 		Mode:                  config.NetworkModeRestricted,
@@ -1106,7 +1087,7 @@ func CheckNetworkRestriction(imageName string) HealthCheck {
 		BlockMetadataEndpoint: &boolTrue,
 	}
 
-	if err := firewallManager.ApplyRestricted(restrictedConfig); err != nil {
+	if err := nftManager.ApplyRestricted(restrictedConfig); err != nil {
 		return HealthCheck{
 			Name:    "network_restriction",
 			Status:  StatusFailed,
@@ -1180,9 +1161,8 @@ func CheckNetworkRestriction(imageName string) HealthCheck {
 	}
 }
 
-// CheckPasswordlessSudo verifies passwordless sudo for firewall-cmd
+// CheckPasswordlessSudo verifies passwordless sudo for nft
 func CheckPasswordlessSudo() HealthCheck {
-	// On macOS, not needed
 	if runtime.GOOS == "darwin" {
 		return HealthCheck{
 			Name:    "passwordless_sudo",
@@ -1191,30 +1171,26 @@ func CheckPasswordlessSudo() HealthCheck {
 		}
 	}
 
-	// Try to run firewall-cmd --state with sudo -n
-	cmd := exec.Command("sudo", "-n", "firewall-cmd", "--state")
-	err := cmd.Run()
-	if err != nil {
-		// Check if firewall-cmd even exists
-		if _, lookErr := exec.LookPath("firewall-cmd"); lookErr != nil {
-			return HealthCheck{
-				Name:    "passwordless_sudo",
-				Status:  StatusOK,
-				Message: "firewall-cmd not installed (not needed for open mode)",
-			}
-		}
-
+	if _, err := exec.LookPath("nft"); err != nil {
 		return HealthCheck{
 			Name:    "passwordless_sudo",
 			Status:  StatusWarning,
-			Message: "Passwordless sudo not configured for firewall-cmd",
+			Message: "nft not installed — install with: sudo apt install nftables",
+		}
+	}
+
+	if exec.Command("sudo", "-n", "nft", "list", "tables").Run() != nil {
+		return HealthCheck{
+			Name:    "passwordless_sudo",
+			Status:  StatusWarning,
+			Message: "Passwordless sudo not configured for nft — run: echo \"$USER ALL=(ALL) NOPASSWD: /usr/sbin/nft\" | sudo tee /etc/sudoers.d/coi-nft && sudo chmod 0440 /etc/sudoers.d/coi-nft",
 		}
 	}
 
 	return HealthCheck{
 		Name:    "passwordless_sudo",
 		Status:  StatusOK,
-		Message: "Configured for firewall-cmd",
+		Message: "Passwordless sudo configured for nft",
 	}
 }
 
@@ -1657,7 +1633,7 @@ func CheckOrphanedResources() HealthCheck {
 
 	// Check for orphaned firewall rules
 	orphanedRules := 0
-	if network.FirewallAvailable() {
+	if network.NftAvailable() {
 		// Get running container IPs
 		containerIPs := make(map[string]bool)
 		output, err := container.IncusOutput("list", "--format=json")
@@ -1688,23 +1664,10 @@ func CheckOrphanedResources() HealthCheck {
 			}
 		}
 
-		// Check firewall rules for orphaned IPs
-		cmd := exec.Command("sudo", "-n", "firewall-cmd", "--direct", "--get-all-rules")
-		if ruleOutput, err := cmd.Output(); err == nil {
-			for _, line := range strings.Split(string(ruleOutput), "\n") {
-				line = strings.TrimSpace(line)
-				if line == "" || !strings.Contains(line, "FORWARD") || strings.Contains(line, "conntrack") {
-					continue
-				}
-				// Check if rule references a 10.x.x.x IP that's not a running container
-				isOrphaned := true
-				for ip := range containerIPs {
-					if strings.Contains(line, ip) {
-						isOrphaned = false
-						break
-					}
-				}
-				if isOrphaned && strings.Contains(line, "10.") {
+		// Check nft coi chain for orphaned rules
+		if ipHandles, err := network.ListCOIFilterRuleIPs(); err == nil {
+			for ip := range ipHandles {
+				if !containerIPs[ip] {
 					orphanedRules++
 				}
 			}
@@ -1739,8 +1702,8 @@ func CheckOrphanedResources() HealthCheck {
 		Status:  StatusWarning,
 		Message: message,
 		Details: map[string]interface{}{
-			"orphaned_veths":          orphanedVeths,
-			"orphaned_firewall_rules": orphanedRules,
+			"orphaned_veths":     orphanedVeths,
+			"orphaned_nft_rules": orphanedRules,
 		},
 	}
 }
@@ -2186,7 +2149,7 @@ func CheckMonitoringConfiguration(cfg *config.Config) HealthCheck {
 		return HealthCheck{
 			Name:    "monitoring_configuration",
 			Status:  StatusWarning,
-			Message: "Security monitoring is disabled (use --monitor flag or set monitoring.enabled=true in config)",
+			Message: "Security monitoring is disabled (set monitoring.enabled=true in [monitoring] section of config.toml)",
 			Details: details,
 		}
 	}
@@ -2230,13 +2193,13 @@ func CheckMonitoringConfiguration(cfg *config.Config) HealthCheck {
 func CheckDockerForwardPolicy() HealthCheck {
 	dockerRunning := network.IsDockerRunning()
 	forwardDrop := network.ForwardPolicyIsDrop()
-	firewallAvailable := network.FirewallAvailable()
+	nftAvailable := network.NftAvailable()
 	iptablesAvailable := network.IptablesAvailable()
 
 	details := map[string]interface{}{
 		"docker_running":      dockerRunning,
 		"forward_policy_drop": forwardDrop,
-		"firewalld_available": firewallAvailable,
+		"nft_available":       nftAvailable,
 		"iptables_available":  iptablesAvailable,
 	}
 
@@ -2259,11 +2222,11 @@ func CheckDockerForwardPolicy() HealthCheck {
 	}
 
 	// FORWARD is DROP
-	if firewallAvailable {
+	if nftAvailable {
 		return HealthCheck{
 			Name:    "docker_forward_policy",
 			Status:  StatusOK,
-			Message: "Docker FORWARD DROP detected, firewalld will handle it",
+			Message: "Docker FORWARD DROP detected — nft bridge rules will handle it",
 			Details: details,
 		}
 	}
@@ -2272,7 +2235,7 @@ func CheckDockerForwardPolicy() HealthCheck {
 		return HealthCheck{
 			Name:    "docker_forward_policy",
 			Status:  StatusWarning,
-			Message: "Docker FORWARD DROP detected, no firewalld — coi will use iptables fallback automatically",
+			Message: "Docker FORWARD DROP detected, nft not available — coi will use iptables fallback automatically",
 			Details: details,
 		}
 	}
@@ -2280,7 +2243,7 @@ func CheckDockerForwardPolicy() HealthCheck {
 	return HealthCheck{
 		Name:    "docker_forward_policy",
 		Status:  StatusFailed,
-		Message: "Docker FORWARD DROP detected, no firewalld or iptables — containers cannot reach internet",
+		Message: "Docker FORWARD DROP detected, no nft or iptables — containers cannot reach internet",
 		Details: details,
 	}
 }

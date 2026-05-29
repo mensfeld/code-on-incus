@@ -4,7 +4,7 @@ Integration tests for network RESTRICTED mode.
 Tests that RESTRICTED mode blocks RFC1918 private networks and metadata endpoint
 while allowing access to public internet and gateway.
 
-Network isolation is implemented using firewalld direct rules.
+Network isolation is implemented using nft rules.
 """
 
 import os

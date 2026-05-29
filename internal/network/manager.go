@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net"
 	"os"
 	"strings"
@@ -12,33 +11,38 @@ import (
 
 	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
+	"github.com/mensfeld/code-on-incus/internal/logger"
 )
 
-// errFirewallNotAvailable is the user-facing error message when firewalld is not available
-const errFirewallNotAvailable = `firewalld is not available or not running
+// errNftNotAvailable is the user-facing error when nft is unavailable
+const errNftNotAvailable = `nft is not available or passwordless sudo is not configured
 
-Network isolation in restricted/allowlist modes requires firewalld.
+Network isolation in restricted/allowlist modes requires nftables (nft).
 
 To fix this:
-  1. Check for ufw: if 'sudo ufw status' shows active, disable it first —
-     ufw and firewalld conflict: sudo ufw disable && sudo systemctl disable --now ufw
-  2. Install firewalld: sudo apt install firewalld
-  3. Start firewalld: sudo systemctl enable --now firewalld
-  4. Configure passwordless sudo for firewall-cmd (see README)
+  1. Install nftables: sudo apt install nftables
+  2. Configure passwordless sudo for nft:
+     echo "$USER ALL=(ALL) NOPASSWD: /usr/sbin/nft" | sudo tee /etc/sudoers.d/coi-nft
+     sudo chmod 0440 /etc/sudoers.d/coi-nft
 
-Alternatively, run with unrestricted network access:
-  coi shell --network=open`
+Alternatively, run with unrestricted network access by setting open mode in
+your config file (.coi/config.toml in your workspace, or the profile's
+config.toml):
+
+  [network]
+  mode = "open"`
 
 // Manager provides high-level network isolation management for containers
 type Manager struct {
 	config        *config.NetworkConfig
-	firewall      *FirewallManager
+	firewall      *NftManager
 	resolver      *Resolver
 	cacheManager  *CacheManager
 	containerName string
 	containerIP   string
+	logger        *logger.SessionLogger
 
-	// iptables fallback (when firewalld unavailable but FORWARD DROP present)
+	// iptables fallback (when FORWARD DROP is set and bridge rules are missing)
 	iptablesBridgeName string
 
 	// Refresher lifecycle (for allowlist mode)
@@ -47,7 +51,7 @@ type Manager struct {
 }
 
 // NewManager creates a new network manager with the specified configuration
-func NewManager(cfg *config.NetworkConfig) *Manager {
+func NewManager(cfg *config.NetworkConfig, log *logger.SessionLogger) *Manager {
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		homeDir = "/tmp"
@@ -56,6 +60,7 @@ func NewManager(cfg *config.NetworkConfig) *Manager {
 	return &Manager{
 		config:       cfg,
 		cacheManager: NewCacheManager(homeDir),
+		logger:       log,
 	}
 }
 
@@ -66,36 +71,31 @@ func (m *Manager) SetupForContainer(ctx context.Context, containerName string) e
 	// Handle different network modes
 	switch m.config.Mode {
 	case config.NetworkModeOpen:
-		log.Println("Network mode: open (no restrictions)")
-		// Still need to add ACCEPT rules if firewall FORWARD policy is DROP
-		if FirewallAvailable() {
+		m.logger.Println("Network mode: open (no restrictions)")
+		// Add ACCEPT rules via nft so traffic flows even when FORWARD policy is DROP
+		if NftAvailable() {
 			containerIP, err := GetContainerIP(containerName)
 			if err != nil {
-				log.Printf("Warning: could not get container IP for open mode rules: %v", err)
+				m.logger.Errorf("Warning: could not get container IP for open mode rules: %v", err)
 				return nil
 			}
-			// Cache the container IP for cleanup later
 			m.containerIP = containerIP
-			// Create firewall manager for cleanup
-			m.firewall = NewFirewallManager(containerIP, "")
+			m.firewall = NewNftManager(containerIP, "")
 			if err := EnsureOpenModeRules(containerIP); err != nil {
-				log.Printf("Warning: could not add open mode rules: %v", err)
+				m.logger.Errorf("Warning: could not add open mode rules: %v", err)
 			}
 		} else if NeedsIptablesFallback() {
 			bridgeName, err := GetIncusBridgeName()
 			if err != nil {
-				log.Printf("Warning: could not get bridge name for iptables fallback: %v", err)
+				m.logger.Errorf("Warning: could not get bridge name for iptables fallback: %v", err)
 			} else {
 				if err := EnsureIptablesBridgeRules(bridgeName); err != nil {
-					log.Printf("Warning: could not add iptables bridge rules: %v", err)
+					m.logger.Errorf("Warning: could not add iptables bridge rules: %v", err)
 				} else {
 					m.iptablesBridgeName = bridgeName
-					log.Printf("iptables fallback: added FORWARD ACCEPT rules for bridge %s (FORWARD policy is DROP, firewalld not available)", bridgeName)
+					m.logger.Printf("iptables fallback: added FORWARD ACCEPT rules for bridge %s (FORWARD policy is DROP, nft not available)", bridgeName)
 				}
 			}
-		} else {
-			log.Println("Warning: firewalld not available - container has unrestricted network access")
-			log.Println("         Network isolation (restricted/allowlist modes) requires firewalld")
 		}
 		return nil
 
@@ -110,13 +110,13 @@ func (m *Manager) SetupForContainer(ctx context.Context, containerName string) e
 	}
 }
 
-// setupRestricted configures restricted mode using firewalld
+// setupRestricted configures restricted mode using nftables
 func (m *Manager) setupRestricted(ctx context.Context, containerName string) error {
-	log.Println("Network mode: restricted (blocking local/internal networks)")
+	m.logger.Println("Network mode: restricted (blocking local/internal networks)")
 
-	// Check if firewalld is available
-	if !FirewallAvailable() {
-		return fmt.Errorf("%s", errFirewallNotAvailable)
+	// Check if nft is available
+	if !NftAvailable() {
+		return fmt.Errorf("%s", errNftNotAvailable)
 	}
 
 	// Get container IP
@@ -125,37 +125,37 @@ func (m *Manager) setupRestricted(ctx context.Context, containerName string) err
 		return fmt.Errorf("failed to get container IP: %w", err)
 	}
 	m.containerIP = containerIP
-	log.Printf("Container IP: %s", containerIP)
+	m.logger.Printf("Container IP: %s", containerIP)
 
 	// Get gateway IP
 	gatewayIP, err := getContainerGatewayIP(containerName)
 	if err != nil {
-		log.Printf("Warning: Could not auto-detect gateway IP: %v", err)
+		m.logger.Errorf("Warning: Could not auto-detect gateway IP: %v", err)
 	} else {
-		log.Printf("Gateway IP: %s", gatewayIP)
+		m.logger.Printf("Gateway IP: %s", gatewayIP)
 	}
 
 	// Disable IPv6 to prevent bypass of IPv4-only firewall rules
 	if err := DisableIPv6ForContainer(containerName); err != nil {
-		log.Printf("Warning: failed to disable IPv6: %v", err)
+		m.logger.Errorf("Warning: failed to disable IPv6: %v", err)
 	}
 
 	// Create firewall manager
-	m.firewall = NewFirewallManager(containerIP, gatewayIP)
+	m.firewall = NewNftManager(containerIP, gatewayIP)
 
 	// Apply restricted mode rules
 	if err := m.firewall.ApplyRestricted(m.config); err != nil {
 		return fmt.Errorf("failed to apply firewall rules: %w", err)
 	}
 
-	log.Printf("Firewall rules applied for container %s", containerName)
+	m.logger.Printf("Firewall rules applied for container %s", containerName)
 
 	// Log what is blocked
 	if config.BoolVal(m.config.BlockPrivateNetworks) {
-		log.Println("  Blocking private networks (RFC1918)")
+		m.logger.Println("  Blocking private networks (RFC1918)")
 	}
 	if config.BoolVal(m.config.BlockMetadataEndpoint) {
-		log.Println("  Blocking cloud metadata endpoints")
+		m.logger.Println("  Blocking cloud metadata endpoints")
 	}
 
 	return nil
@@ -163,11 +163,11 @@ func (m *Manager) setupRestricted(ctx context.Context, containerName string) err
 
 // setupAllowlist configures allowlist mode with DNS resolution and refresh
 func (m *Manager) setupAllowlist(ctx context.Context, containerName string) error {
-	log.Println("Network mode: allowlist (domain-based filtering)")
+	m.logger.Println("Network mode: allowlist (domain-based filtering)")
 
-	// Check if firewalld is available
-	if !FirewallAvailable() {
-		return fmt.Errorf("%s", errFirewallNotAvailable)
+	// Check if nft is available
+	if !NftAvailable() {
+		return fmt.Errorf("%s", errNftNotAvailable)
 	}
 
 	// Validate configuration
@@ -181,28 +181,28 @@ func (m *Manager) setupAllowlist(ctx context.Context, containerName string) erro
 		return fmt.Errorf("failed to get container IP: %w", err)
 	}
 	m.containerIP = containerIP
-	log.Printf("Container IP: %s", containerIP)
+	m.logger.Printf("Container IP: %s", containerIP)
 
 	// Get gateway IP
 	gatewayIP, err := getContainerGatewayIP(containerName)
 	if err != nil {
-		log.Printf("Warning: Could not auto-detect gateway IP: %v", err)
+		m.logger.Errorf("Warning: Could not auto-detect gateway IP: %v", err)
 	} else {
-		log.Printf("Gateway IP: %s", gatewayIP)
+		m.logger.Printf("Gateway IP: %s", gatewayIP)
 	}
 
 	// Disable IPv6 to prevent bypass of IPv4-only firewall rules
 	if err := DisableIPv6ForContainer(containerName); err != nil {
-		log.Printf("Warning: failed to disable IPv6: %v", err)
+		m.logger.Errorf("Warning: failed to disable IPv6: %v", err)
 	}
 
 	// Create firewall manager
-	m.firewall = NewFirewallManager(containerIP, gatewayIP)
+	m.firewall = NewNftManager(containerIP, gatewayIP)
 
 	// Load IP cache
 	cache, err := m.cacheManager.Load(containerName)
 	if err != nil {
-		log.Printf("Warning: Failed to load cache: %v", err)
+		m.logger.Errorf("Warning: Failed to load cache: %v", err)
 		cache = &IPCache{
 			Domains:    make(map[string][]string),
 			TTLs:       make(map[string]uint32),
@@ -214,7 +214,7 @@ func (m *Manager) setupAllowlist(ctx context.Context, containerName string) erro
 	m.resolver = NewResolver(cache)
 
 	// Resolve domains
-	log.Printf("Resolving %d allowed domains...", len(m.config.AllowedDomains))
+	m.logger.Printf("Resolving %d allowed domains...", len(m.config.AllowedDomains))
 	domainIPs, err := m.resolver.ResolveAll(m.config.AllowedDomains)
 	if err != nil && len(domainIPs) == 0 {
 		return fmt.Errorf("failed to resolve any allowed domains: %w", err)
@@ -222,15 +222,15 @@ func (m *Manager) setupAllowlist(ctx context.Context, containerName string) erro
 
 	// Log resolution results
 	totalIPs := countIPs(domainIPs)
-	log.Printf("Resolved %d domains to %d IPs", len(domainIPs), totalIPs)
+	m.logger.Printf("Resolved %d domains to %d IPs", len(domainIPs), totalIPs)
 	for domain, ips := range domainIPs {
-		log.Printf("  %s -> %d IPs", domain, len(ips))
+		m.logger.Printf("  %s -> %d IPs", domain, len(ips))
 	}
 
 	// Save resolved IPs to cache
 	m.resolver.UpdateCache(domainIPs)
 	if err := m.cacheManager.Save(containerName, m.resolver.GetCache()); err != nil {
-		log.Printf("Warning: Failed to save cache: %v", err)
+		m.logger.Errorf("Warning: Failed to save cache: %v", err)
 	}
 
 	// Collect all unique IPs from resolved domains
@@ -241,10 +241,10 @@ func (m *Manager) setupAllowlist(ctx context.Context, containerName string) erro
 		return fmt.Errorf("failed to apply firewall rules: %w", err)
 	}
 
-	log.Printf("Firewall rules applied for container %s", containerName)
-	log.Println("  Allowing only specified domains")
-	log.Println("  Blocking all RFC1918 private networks")
-	log.Println("  Blocking cloud metadata endpoints")
+	m.logger.Printf("Firewall rules applied for container %s", containerName)
+	m.logger.Println("  Allowing only specified domains")
+	m.logger.Println("  Blocking all RFC1918 private networks")
+	m.logger.Println("  Blocking cloud metadata endpoints")
 
 	// Compute initial refresh interval from DNS TTLs
 	minTTL := m.resolver.GetMinTTL()
@@ -294,7 +294,7 @@ func (m *Manager) computeRefreshInterval(minTTL uint32) time.Duration {
 // It uses time.Timer instead of time.Ticker to allow dynamic rescheduling after each refresh.
 func (m *Manager) startRefresher(ctx context.Context, initialMinTTL uint32) {
 	if m.config.RefreshIntervalMinutes <= 0 {
-		log.Println("IP refresh disabled (refresh_interval_minutes <= 0)")
+		m.logger.Println("IP refresh disabled (refresh_interval_minutes <= 0)")
 		return
 	}
 
@@ -303,7 +303,7 @@ func (m *Manager) startRefresher(ctx context.Context, initialMinTTL uint32) {
 	interval := m.computeRefreshInterval(initialMinTTL)
 	timer := time.NewTimer(interval)
 
-	log.Printf("Starting IP refresh (interval: %s, TTL-based: %v)", interval, initialMinTTL > 0)
+	m.logger.Printf("Starting IP refresh (interval: %s, TTL-based: %v)", interval, initialMinTTL > 0)
 
 	go func() {
 		defer timer.Stop()
@@ -311,19 +311,19 @@ func (m *Manager) startRefresher(ctx context.Context, initialMinTTL uint32) {
 		for {
 			select {
 			case <-timer.C:
-				log.Println("IP refresh: checking for updated IPs...")
+				m.logger.Println("IP refresh: checking for updated IPs...")
 				newMinTTL, err := m.refreshAllowedIPs()
 				if err != nil {
-					log.Printf("Warning: IP refresh failed: %v", err)
+					m.logger.Errorf("Warning: IP refresh failed: %v", err)
 				}
 
 				// Recompute interval from new TTLs
 				nextInterval := m.computeRefreshInterval(newMinTTL)
-				log.Printf("IP refresh: next check in %s", nextInterval)
+				m.logger.Printf("IP refresh: next check in %s", nextInterval)
 				timer.Reset(nextInterval)
 
 			case <-m.refreshCtx.Done():
-				log.Println("IP refresher stopped")
+				m.logger.Println("IP refresher stopped")
 				return
 			}
 		}
@@ -351,16 +351,16 @@ func (m *Manager) refreshAllowedIPs() (uint32, error) {
 
 	// Check if anything changed
 	if m.resolver.IPsUnchanged(newIPs) {
-		log.Println("IP refresh: no changes detected")
+		m.logger.Println("IP refresh: no changes detected")
 		return newMinTTL, nil
 	}
 
 	// Update firewall rules with new IPs
 	totalIPs := countIPs(newIPs)
-	log.Printf("IP refresh: updating firewall with %d IPs", totalIPs)
+	m.logger.Printf("IP refresh: updating firewall with %d IPs", totalIPs)
 
 	// Apply new rules BEFORE removing old ones to avoid a gap where no rules exist.
-	// firewall-cmd --direct --add-rule is idempotent, so duplicate rules are harmless.
+	// nft add rule is idempotent by handle; applying new rules before removing old avoids gaps.
 	allowedIPs := collectUniqueIPs(newIPs)
 	if err := m.firewall.ApplyAllowlist(m.config, allowedIPs); err != nil {
 		return newMinTTL, fmt.Errorf("failed to update firewall rules: %w", err)
@@ -368,19 +368,19 @@ func (m *Manager) refreshAllowedIPs() (uint32, error) {
 
 	// Now remove all rules (including stale ones) and reapply to clean up
 	if err := m.firewall.RemoveRules(); err != nil {
-		log.Printf("Warning: failed to remove old rules: %v", err)
+		m.logger.Errorf("Warning: failed to remove old rules: %v", err)
 	}
 	if err := m.firewall.ApplyAllowlist(m.config, allowedIPs); err != nil {
-		log.Printf("Warning: failed to reapply rules after cleanup: %v", err)
+		m.logger.Errorf("Warning: failed to reapply rules after cleanup: %v", err)
 	}
 
 	// Update cache
 	m.resolver.UpdateCache(newIPs)
 	if err := m.cacheManager.Save(m.containerName, m.resolver.GetCache()); err != nil {
-		log.Printf("Warning: Failed to save cache: %v", err)
+		m.logger.Errorf("Warning: Failed to save cache: %v", err)
 	}
 
-	log.Printf("IP refresh: successfully updated firewall rules")
+	m.logger.Printf("IP refresh: successfully updated firewall rules")
 	return newMinTTL, nil
 }
 
@@ -422,20 +422,19 @@ func (m *Manager) Teardown(ctx context.Context, containerName string) error {
 
 		if !hasOtherContainers {
 			if err := RemoveIptablesBridgeRules(m.iptablesBridgeName); err != nil {
-				log.Printf("Warning: failed to remove iptables bridge rules: %v", err)
+				m.logger.Errorf("Warning: failed to remove iptables bridge rules: %v", err)
 			} else {
-				log.Printf("iptables fallback: removed FORWARD ACCEPT rules for bridge %s", m.iptablesBridgeName)
+				m.logger.Printf("iptables fallback: removed FORWARD ACCEPT rules for bridge %s", m.iptablesBridgeName)
 			}
 		} else {
-			log.Printf("iptables fallback: skipping rule removal, other containers still running")
+			m.logger.Printf("iptables fallback: skipping rule removal, other containers still running")
 		}
 	}
 
-	// For open mode, we also need to clean up firewall rules
-	// Open mode creates ACCEPT rules via EnsureOpenModeRules()
+	// For open mode, also clean up nft ACCEPT rules created by EnsureOpenModeRules()
 	if m.config.Mode == config.NetworkModeOpen {
-		if !FirewallAvailable() && m.iptablesBridgeName == "" {
-			return nil // No firewall and no iptables fallback, no rules to clean up
+		if !NftAvailable() && m.iptablesBridgeName == "" {
+			return nil // No nft and no iptables fallback, no rules to clean up
 		}
 
 		// Use cached container IP if available (set during SetupForContainer)
@@ -450,16 +449,16 @@ func (m *Manager) Teardown(ctx context.Context, containerName string) error {
 
 		// Create firewall manager if not already created
 		if m.firewall == nil {
-			m.firewall = NewFirewallManager(m.containerIP, "")
+			m.firewall = NewNftManager(m.containerIP, "")
 		}
 	}
 
 	// Remove firewall rules for ALL modes
 	if m.firewall != nil {
 		if err := m.firewall.RemoveRules(); err != nil {
-			log.Printf("Warning: failed to remove firewall rules: %v", err)
+			m.logger.Errorf("Warning: failed to remove firewall rules: %v", err)
 		} else {
-			log.Printf("Firewall rules removed for container %s", containerName)
+			m.logger.Printf("Firewall rules removed for container %s", containerName)
 		}
 	}
 

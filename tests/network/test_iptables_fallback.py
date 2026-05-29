@@ -11,11 +11,11 @@ import json
 import subprocess
 
 
-def firewalld_available():
-    """Check if firewalld is available and running."""
+def nft_available():
+    """Check if nft is available with sudo access."""
     try:
         result = subprocess.run(
-            ["sudo", "-n", "firewall-cmd", "--state"],
+            ["sudo", "-n", "nft", "list", "tables"],
             capture_output=True,
             timeout=10,
         )
@@ -101,7 +101,7 @@ def test_health_reports_docker_forward_policy(coi_binary):
     expected_fields = [
         "docker_running",
         "forward_policy_drop",
-        "firewalld_available",
+        "nft_available",
         "iptables_available",
     ]
     for field in expected_fields:
@@ -120,8 +120,8 @@ def test_iptables_fallback_during_build(coi_binary):
     """
     import pytest
 
-    if firewalld_available():
-        pytest.skip("firewalld is available — iptables fallback not needed")
+    if not nft_available():
+        pytest.skip("nft not available — cannot test fallback")
     if not docker_running():
         pytest.skip("Docker not running — scenario does not apply")
     if not forward_policy_is_drop():

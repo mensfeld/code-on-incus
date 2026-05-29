@@ -15,6 +15,7 @@ import (
 	"github.com/mensfeld/code-on-incus/internal/alias"
 	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
+	"github.com/mensfeld/code-on-incus/internal/logger"
 	"github.com/mensfeld/code-on-incus/internal/monitor"
 	"github.com/mensfeld/code-on-incus/internal/network"
 	"github.com/mensfeld/code-on-incus/internal/nftmonitor"
@@ -386,14 +387,14 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 	var nftDaemon *nftmonitor.Daemon
 	if config.BoolVal(cfg.Monitoring.Enabled) {
 		// Start traditional monitoring (process/filesystem)
-		if err := startMonitoringDaemon(result.ContainerName, absWorkspace, cfg, &monitorDaemon); err != nil {
+		if err := startMonitoringDaemon(result.ContainerName, absWorkspace, cfg, result.Logger, &monitorDaemon); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: Failed to start monitoring daemon: %v\n", err)
 			// Don't fail the session if monitoring fails
 		}
 
 		// Start nftables monitoring (network only)
 		if config.BoolVal(cfg.Monitoring.NFT.Enabled) {
-			if err := startNFTMonitoringDaemon(result.ContainerName, cfg, &nftDaemon); err != nil {
+			if err := startNFTMonitoringDaemon(result.ContainerName, cfg, result.Logger, &nftDaemon); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: Failed to start NFT monitoring: %v\n", err)
 				// Don't fail the session if NFT monitoring fails
 			}
@@ -436,6 +437,7 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 				Workspace:      absWorkspace,
 				Tool:           toolInstance,
 				NetworkManager: result.NetworkManager,
+				SessionLogger:  result.Logger,
 			}
 			if err := session.Cleanup(cleanupOpts); err != nil {
 				fmt.Fprintf(os.Stderr, "Cleanup error: %v\n", err)
@@ -915,7 +917,7 @@ func detectHostTimezone() string {
 }
 
 // startMonitoringDaemon starts the background monitoring daemon
-func startMonitoringDaemon(containerName, workspacePath string, cfg *config.Config, daemon **monitor.Daemon) error {
+func startMonitoringDaemon(containerName, workspacePath string, cfg *config.Config, log *logger.SessionLogger, daemon **monitor.Daemon) error {
 	// Get home directory for audit log
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -941,13 +943,13 @@ func startMonitoringDaemon(containerName, workspacePath string, cfg *config.Conf
 		AutoPauseOnHigh:      config.BoolVal(cfg.Monitoring.AutoPauseOnHigh),
 		AutoKillOnCritical:   config.BoolVal(cfg.Monitoring.AutoKillOnCritical),
 		OnThreat: func(threat monitor.ThreatEvent) {
-			// Threats are logged to audit file - no terminal output to avoid corrupting TUI
+			log.Printf("[monitor] threat detected: %s severity=%s", threat.Title, threat.Level)
 		},
 		OnError: func(err error) {
-			// Errors are logged to audit file - no terminal output to avoid corrupting TUI
+			log.Errorf("[monitor] collection error: %v", err)
 		},
 		OnAction: func(action, message string) {
-			// Critical actions (pause/kill) should notify the user
+			// Critical actions (pause/kill) must stay visible on stderr
 			fmt.Fprintf(os.Stderr, "\n\n*** SECURITY: %s ***\n\n", message)
 		},
 	}
@@ -965,7 +967,7 @@ func startMonitoringDaemon(containerName, workspacePath string, cfg *config.Conf
 }
 
 // startNFTMonitoringDaemon starts the nftables network monitoring daemon
-func startNFTMonitoringDaemon(containerName string, cfg *config.Config, daemon **nftmonitor.Daemon) error {
+func startNFTMonitoringDaemon(containerName string, cfg *config.Config, log *logger.SessionLogger, daemon **nftmonitor.Daemon) error {
 	// Get container IP
 	containerIP, err := network.GetContainerIPWithRetries(containerName, 3)
 	if err != nil {
@@ -1003,14 +1005,14 @@ func startNFTMonitoringDaemon(containerName string, cfg *config.Config, daemon *
 		LogDNSQueries:      config.BoolVal(cfg.Monitoring.NFT.LogDNSQueries),
 		LimaHost:           cfg.Monitoring.NFT.LimaHost,
 		OnThreat: func(threat nftmonitor.ThreatEvent) {
-			// Threats are logged to audit file - no terminal output to avoid corrupting TUI
+			log.Printf("[nft] threat detected: %s severity=%s", threat.Title, threat.Level)
 		},
 		OnAction: func(action, message string) {
-			// Critical actions (pause/kill) should notify the user
+			// Critical actions (pause/kill) must stay visible on stderr
 			fmt.Fprintf(os.Stderr, "\n\n*** SECURITY: %s ***\n\n", message)
 		},
 		OnError: func(err error) {
-			// Errors are logged to audit file - no terminal output to avoid corrupting TUI
+			log.Errorf("[nft] error: %v", err)
 		},
 	}
 

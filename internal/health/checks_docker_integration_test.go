@@ -22,7 +22,7 @@ func TestCheckDockerForwardPolicy_Structure(t *testing.T) {
 	}
 
 	// Verify expected details fields exist
-	expectedFields := []string{"docker_running", "forward_policy_drop", "firewalld_available", "iptables_available"}
+	expectedFields := []string{"docker_running", "forward_policy_drop", "nft_available", "iptables_available"}
 	for _, field := range expectedFields {
 		if _, ok := result.Details[field]; !ok {
 			t.Errorf("Details missing expected field %q", field)

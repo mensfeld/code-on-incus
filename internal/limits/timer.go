@@ -2,10 +2,10 @@ package limits
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/mensfeld/code-on-incus/internal/container"
+	"github.com/mensfeld/code-on-incus/internal/logger"
 )
 
 // TimeoutMonitor monitors a container's runtime and stops it when max duration is reached
@@ -15,7 +15,7 @@ type TimeoutMonitor struct {
 	AutoStop      bool
 	StopGraceful  bool
 	Project       string
-	Logger        func(string)
+	Logger        *logger.SessionLogger
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -23,7 +23,7 @@ type TimeoutMonitor struct {
 }
 
 // NewTimeoutMonitor creates a new timeout monitor
-func NewTimeoutMonitor(containerName string, maxDuration time.Duration, autoStop, stopGraceful bool, project string, logger func(string)) *TimeoutMonitor {
+func NewTimeoutMonitor(containerName string, maxDuration time.Duration, autoStop, stopGraceful bool, project string, log *logger.SessionLogger) *TimeoutMonitor {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &TimeoutMonitor{
 		ContainerName: containerName,
@@ -31,7 +31,7 @@ func NewTimeoutMonitor(containerName string, maxDuration time.Duration, autoStop
 		AutoStop:      autoStop,
 		StopGraceful:  stopGraceful,
 		Project:       project,
-		Logger:        logger,
+		Logger:        log,
 		ctx:           ctx,
 		cancel:        cancel,
 		done:          make(chan struct{}),
@@ -47,9 +47,7 @@ func (tm *TimeoutMonitor) Start() {
 		return
 	}
 
-	if tm.Logger != nil {
-		tm.Logger(fmt.Sprintf("[limits] Container will auto-stop after %s", tm.MaxDuration))
-	}
+	tm.Logger.Printf("[limits] Container will auto-stop after %s", tm.MaxDuration)
 
 	go tm.run()
 }
@@ -68,9 +66,7 @@ func (tm *TimeoutMonitor) run() {
 		if tm.AutoStop {
 			tm.handleTimeout()
 		} else {
-			if tm.Logger != nil {
-				tm.Logger(fmt.Sprintf("[limits] Runtime limit reached (%s) but auto_stop is disabled", tm.MaxDuration))
-			}
+			tm.Logger.Printf("[limits] Runtime limit reached (%s) but auto_stop is disabled", tm.MaxDuration)
 		}
 	case <-tm.ctx.Done():
 		// Monitor was cancelled before timeout
@@ -80,13 +76,11 @@ func (tm *TimeoutMonitor) run() {
 
 // handleTimeout handles the timeout event by stopping the container
 func (tm *TimeoutMonitor) handleTimeout() {
-	if tm.Logger != nil {
-		stopType := "gracefully"
-		if !tm.StopGraceful {
-			stopType = "forcefully"
-		}
-		tm.Logger(fmt.Sprintf("[limits] Runtime limit reached (%s), stopping container %s...", tm.MaxDuration, stopType))
+	stopType := "gracefully"
+	if !tm.StopGraceful {
+		stopType = "forcefully"
 	}
+	tm.Logger.Printf("[limits] Runtime limit reached (%s), stopping container %s...", tm.MaxDuration, stopType)
 
 	mgr := container.NewManager(tm.ContainerName)
 
@@ -94,33 +88,25 @@ func (tm *TimeoutMonitor) handleTimeout() {
 		// Graceful: try non-force first, escalate to force if needed
 		// StopGraceful=true means graceful shutdown (force=false)
 		if err := mgr.Stop(false); err != nil {
-			if tm.Logger != nil {
-				tm.Logger(fmt.Sprintf("[limits] Graceful stop failed: %v, forcing...", err))
-			}
+			tm.Logger.Errorf("[limits] Graceful stop failed: %v, forcing...", err)
 			_ = mgr.Stop(true)
 		}
 
 		// Verify container actually stopped, force if still running
 		time.Sleep(5 * time.Second)
 		if running, _ := mgr.Running(); running {
-			if tm.Logger != nil {
-				tm.Logger("[limits] Container still running after graceful stop, forcing...")
-			}
+			tm.Logger.Println("[limits] Container still running after graceful stop, forcing...")
 			_ = mgr.Stop(true)
 		}
 	} else {
 		// StopGraceful=false means force stop immediately (force=true)
 		if err := mgr.Stop(true); err != nil {
-			if tm.Logger != nil {
-				tm.Logger(fmt.Sprintf("[limits] Error force-stopping container: %v", err))
-			}
+			tm.Logger.Errorf("[limits] Error force-stopping container: %v", err)
 			return
 		}
 	}
 
-	if tm.Logger != nil {
-		tm.Logger("[limits] Container stopped due to runtime limit")
-	}
+	tm.Logger.Println("[limits] Container stopped due to runtime limit")
 }
 
 // Stop stops the timeout monitor

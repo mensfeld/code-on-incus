@@ -3,16 +3,16 @@ package network
 import (
 	"context"
 	"os/exec"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
+	"github.com/mensfeld/code-on-incus/internal/logger"
 )
 
-// cleanupTestContainer is a helper that ensures complete cleanup of a test container
-// including firewalld zone bindings. Use with t.Cleanup() to ensure cleanup even on test failure.
+// cleanupTestContainer is a helper that ensures complete cleanup of a test container.
+// Use with t.Cleanup() to ensure cleanup even on test failure.
 func cleanupTestContainer(t *testing.T, containerName string) {
 	t.Helper()
 	mgr := container.NewManager(containerName)
@@ -34,10 +34,7 @@ func cleanupTestContainer(t *testing.T, containerName string) {
 		cleanupRulesForIP(t, containerIP)
 	}
 
-	// Clean up firewalld zone binding for the veth
-	if vethName != "" {
-		_ = RemoveVethFromFirewalldZone(vethName)
-	}
+	_ = vethName // zone bindings no longer used
 }
 
 // TestOpenModeFirewallCleanup verifies that open mode firewall rules are cleaned up
@@ -54,8 +51,8 @@ func TestOpenModeFirewallCleanup(t *testing.T) {
 	}
 
 	// Skip if firewall is not available
-	if !FirewallAvailable() {
-		t.Skip("firewalld not available, skipping integration test")
+	if !NftAvailable() {
+		t.Skip("nft not available, skipping integration test")
 	}
 
 	// Check if the default 'coi' image exists
@@ -94,7 +91,7 @@ func TestOpenModeFirewallCleanup(t *testing.T) {
 	netCfg := &config.NetworkConfig{
 		Mode: config.NetworkModeOpen,
 	}
-	netMgr := NewManager(netCfg)
+	netMgr := NewManager(netCfg, logger.NewDiscard())
 
 	// Set up network (creates firewall rules)
 	if err := netMgr.SetupForContainer(context.Background(), containerName); err != nil {
@@ -148,8 +145,8 @@ func TestRestrictedModeFirewallCleanup(t *testing.T) {
 	}
 
 	// Skip if firewall is not available
-	if !FirewallAvailable() {
-		t.Skip("firewalld not available, skipping integration test")
+	if !NftAvailable() {
+		t.Skip("nft not available, skipping integration test")
 	}
 
 	// Check if the default 'coi' image exists
@@ -191,7 +188,7 @@ func TestRestrictedModeFirewallCleanup(t *testing.T) {
 		BlockPrivateNetworks:  &boolTrue,
 		BlockMetadataEndpoint: &boolTrue,
 	}
-	netMgr := NewManager(netCfg)
+	netMgr := NewManager(netCfg, logger.NewDiscard())
 
 	// Set up network (creates firewall rules)
 	if err := netMgr.SetupForContainer(context.Background(), containerName); err != nil {
@@ -246,8 +243,8 @@ func TestFirewallCleanupBeforeContainerDeletion(t *testing.T) {
 	}
 
 	// Skip if firewall is not available
-	if !FirewallAvailable() {
-		t.Skip("firewalld not available, skipping integration test")
+	if !NftAvailable() {
+		t.Skip("nft not available, skipping integration test")
 	}
 
 	// Check if the default 'coi' image exists
@@ -293,7 +290,7 @@ func TestFirewallCleanupBeforeContainerDeletion(t *testing.T) {
 		BlockPrivateNetworks:  &boolTrue,
 		BlockMetadataEndpoint: &boolTrue,
 	}
-	netMgr := NewManager(netCfg)
+	netMgr := NewManager(netCfg, logger.NewDiscard())
 
 	// Set up network (creates firewall rules)
 	if err := netMgr.SetupForContainer(context.Background(), containerName); err != nil {
@@ -352,8 +349,8 @@ func TestFirewallCleanupCorrectOrder(t *testing.T) {
 	}
 
 	// Skip if firewall is not available
-	if !FirewallAvailable() {
-		t.Skip("firewalld not available, skipping integration test")
+	if !NftAvailable() {
+		t.Skip("nft not available, skipping integration test")
 	}
 
 	// Check if the default 'coi' image exists
@@ -399,7 +396,7 @@ func TestFirewallCleanupCorrectOrder(t *testing.T) {
 		BlockPrivateNetworks:  &boolTrue,
 		BlockMetadataEndpoint: &boolTrue,
 	}
-	netMgr := NewManager(netCfg)
+	netMgr := NewManager(netCfg, logger.NewDiscard())
 
 	// Set up network (creates firewall rules)
 	if err := netMgr.SetupForContainer(context.Background(), containerName); err != nil {
@@ -435,72 +432,47 @@ func TestFirewallCleanupCorrectOrder(t *testing.T) {
 // Helper functions
 
 func countFirewallRules(t *testing.T) int {
-	cmd := exec.Command("sudo", "-n", "firewall-cmd", "--direct", "--get-all-rules")
-	output, err := cmd.CombinedOutput()
+	t.Helper()
+	ipHandles, err := ListCOIFilterRuleIPs()
 	if err != nil {
-		t.Logf("Warning: Failed to count firewall rules: %v", err)
+		t.Logf("Warning: Failed to count nft coi forward rules: %v", err)
 		return 0
 	}
-
-	count := 0
-	for _, line := range strings.Split(string(output), "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" && strings.Contains(line, "FORWARD") {
-			count++
-		}
+	total := 0
+	for _, handles := range ipHandles {
+		total += len(handles)
 	}
-	return count
+	return total
 }
 
 func countRulesForContainer(t *testing.T, containerName string) int {
-	// Get container IP if possible
+	t.Helper()
 	ip, err := GetContainerIP(containerName)
 	if err != nil {
-		return 0 // Container doesn't exist
+		return 0
 	}
 	return countRulesForIP(t, ip)
 }
 
 func countRulesForIP(t *testing.T, ip string) int {
-	cmd := exec.Command("sudo", "-n", "firewall-cmd", "--direct", "--get-all-rules")
-	output, err := cmd.CombinedOutput()
+	t.Helper()
+	ipHandles, err := ListCOIFilterRuleIPs()
 	if err != nil {
-		t.Logf("Warning: Failed to list firewall rules: %v", err)
+		t.Logf("Warning: Failed to list nft coi forward rules: %v", err)
 		return 0
 	}
-
-	count := 0
-	for _, line := range strings.Split(string(output), "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" && strings.Contains(line, ip) {
-			count++
-		}
+	handles, ok := ipHandles[ip]
+	if !ok {
+		return 0
 	}
-	return count
+	return len(handles)
 }
 
 func cleanupRulesForIP(t *testing.T, ip string) {
-	cmd := exec.Command("sudo", "-n", "firewall-cmd", "--direct", "--get-all-rules")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Logf("Warning: Failed to list firewall rules for cleanup: %v", err)
-		return
-	}
-
-	for _, line := range strings.Split(string(output), "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" && strings.Contains(line, ip) {
-			parts := strings.Fields(line)
-			if len(parts) >= 4 {
-				args := []string{"-n", "firewall-cmd", "--direct", "--remove-rule"}
-				args = append(args, parts...)
-				removeCmd := exec.Command("sudo", args...)
-				if err := removeCmd.Run(); err != nil {
-					t.Logf("Warning: Failed to remove rule: %s", line)
-				} else {
-					t.Logf("Cleaned up orphaned rule: %s", line)
-				}
-			}
-		}
+	t.Helper()
+	if err := DeleteCOIFilterRulesForIP(ip); err != nil {
+		t.Logf("Warning: Failed to cleanup nft rules for IP %s: %v", ip, err)
+	} else {
+		t.Logf("Cleaned up nft rules for IP %s", ip)
 	}
 }
