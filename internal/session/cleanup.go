@@ -115,7 +115,6 @@ func Cleanup(opts CleanupOptions) error {
 				} else {
 					opts.Logger("Container removed (session data saved for --resume)")
 				}
-
 			}
 		} else {
 			opts.Logger("Container was already removed")
