@@ -8,6 +8,11 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
+// ShellConfig contains shell session configuration
+type ShellConfig struct {
+	UseTmux *bool `toml:"use_tmux"` // Use tmux for session management (default: true)
+}
+
 // Config represents the complete configuration
 type Config struct {
 	Container          ContainerConfig          `toml:"container"`
@@ -16,6 +21,7 @@ type Config struct {
 	Incus              IncusConfig              `toml:"incus"`
 	Network            NetworkConfig            `toml:"network"`
 	Tool               ToolConfig               `toml:"tool"`
+	Shell              ShellConfig              `toml:"shell"`
 	Mounts             MountsConfig             `toml:"mounts"`
 	Limits             LimitsConfig             `toml:"limits"`
 	Git                GitConfig                `toml:"git"`
@@ -190,6 +196,7 @@ type ProfileConfig struct {
 	Security   *SecurityConfig   `toml:"security"`
 	Monitoring *MonitoringConfig `toml:"monitoring"`
 	Timezone   *TimezoneConfig   `toml:"timezone"`
+	Shell      *ShellConfig      `toml:"shell"`
 }
 
 // ToolConfig represents AI coding tool configuration
@@ -341,6 +348,7 @@ func cloneMap[M ~map[K]V, K comparable, V any](in M) M {
 func synthesizeDefaultProfile(cfg *Config) ProfileConfig {
 	limits := cfg.Limits
 	tool := cfg.Tool
+	shell := cfg.Shell
 	network := cfg.Network
 	network.AllowedDomains = cloneSlice(cfg.Network.AllowedDomains)
 	paths := cfg.Paths
@@ -363,6 +371,7 @@ func synthesizeDefaultProfile(cfg *Config) ProfileConfig {
 		ForwardEnv:  cloneSlice(cfg.Defaults.ForwardEnv),
 		Limits:      &limits,
 		Tool:        &tool,
+		Shell:       &shell,
 		Network:     &network,
 		Mounts:      cloneSlice(cfg.Mounts.Default),
 		Paths:       &paths,
@@ -551,6 +560,11 @@ func (c *Config) Merge(other *Config) {
 	}
 	if other.Network.Logging.Enabled != nil {
 		c.Network.Logging.Enabled = other.Network.Logging.Enabled
+	}
+
+	// Merge Shell settings
+	if other.Shell.UseTmux != nil {
+		c.Shell.UseTmux = other.Shell.UseTmux
 	}
 
 	// Merge Tool settings
@@ -800,6 +814,7 @@ func (c *Config) ApplyProfile(name string) error {
 		mergeMonitoring(&c.Monitoring, profile.Monitoring)
 	}
 	applyToolConfig(&c.Tool, profile.Tool)
+	applyShellConfig(&c.Shell, profile.Shell)
 	applyNetworkConfig(&c.Network, profile.Network)
 	applyPathsConfig(&c.Paths, profile.Paths)
 	applyIncusConfig(&c.Incus, profile.Incus)
@@ -832,6 +847,15 @@ func applyToolConfig(dst *ToolConfig, src *ToolConfig) {
 	}
 	if src.Claude.EffortLevel != "" {
 		dst.Claude.EffortLevel = src.Claude.EffortLevel
+	}
+}
+
+func applyShellConfig(dst *ShellConfig, src *ShellConfig) {
+	if src == nil {
+		return
+	}
+	if src.UseTmux != nil {
+		dst.UseTmux = src.UseTmux
 	}
 }
 
@@ -1033,6 +1057,7 @@ func mergeProfiles(parent, child ProfileConfig) ProfileConfig {
 	result.SSH = mergeStructPtr(parent.SSH, result.SSH, mergeSSHInto)
 	result.Security = mergeStructPtr(parent.Security, result.Security, mergeSecurityInto)
 	result.Timezone = mergeStructPtr(parent.Timezone, result.Timezone, mergeTimezoneInto)
+	result.Shell = mergeStructPtr(parent.Shell, result.Shell, mergeShellInto)
 
 	return result
 }
@@ -1207,6 +1232,12 @@ func mergeTimezoneInto(dst *TimezoneConfig, src *TimezoneConfig) {
 	}
 	if src.Name != "" {
 		dst.Name = src.Name
+	}
+}
+
+func mergeShellInto(dst *ShellConfig, src *ShellConfig) {
+	if src.UseTmux != nil {
+		dst.UseTmux = src.UseTmux
 	}
 }
 

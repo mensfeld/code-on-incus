@@ -87,6 +87,17 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid workspace path: %w", err)
 	}
 
+	// If workspace differs from CWD, overlay its project config. config.Load()
+	// only reads from CWD, so a --workspace pointing elsewhere would otherwise
+	// miss that directory's .coi/config.toml.
+	if cwd, err := os.Getwd(); err == nil {
+		if absCWD, err := filepath.Abs(cwd); err == nil && absWorkspace != absCWD {
+			if err := cfg.OverlayProjectConfig(absWorkspace); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("failed to load project config from %s: %w", absWorkspace, err)
+			}
+		}
+	}
+
 	// If alias argument provided, resolve it from the registry
 	if aliasArg != "" {
 		resolved, err := alias.ResolveAliasForLaunch(aliasArg)
@@ -115,6 +126,15 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 		if resolved.Slot > 0 && !cmd.Flags().Changed("slot") {
 			slot = resolved.Slot
 		}
+	}
+
+	// Determine useTmux: config default, overridden by explicit --tmux flag
+	useTmuxDefault := true
+	if cfg.Shell.UseTmux != nil {
+		useTmuxDefault = *cfg.Shell.UseTmux
+	}
+	if !cmd.Flags().Changed("tmux") {
+		useTmux = useTmuxDefault
 	}
 
 	// Check if Incus is available
