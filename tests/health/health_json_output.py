@@ -70,6 +70,8 @@ def test_health_json_output(coi_binary):
         "privileged_profile",
         "security_posture",
         "network_bridge",
+        "nft",
+        "bridge_forward_rules",
         "disk_space",
         "incus_storage_pools",
     ]

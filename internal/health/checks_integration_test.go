@@ -583,7 +583,7 @@ func TestCheckNetworkRestriction_NoImage(t *testing.T) {
 }
 
 // CheckNetworkRestriction should complete and return a definitive status (OK/Warning/Failed)
-// when both firewalld and the COI image are available, and leave no leftover restriction-check
+// when both nft and the COI image are available, and leave no leftover restriction-check
 // containers afterwards.
 func TestCheckNetworkRestriction_WithImage(t *testing.T) {
 	// Skip if incus is not available
