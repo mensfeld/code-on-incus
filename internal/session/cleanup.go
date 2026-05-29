@@ -102,7 +102,6 @@ func Cleanup(opts CleanupOptions) error {
 				opts.Logger("Container was stopped, removing...")
 
 				// Get the container's veth interface name BEFORE deletion
-				// We need this to clean up firewalld zone bindings after container deletion
 				vethName, _ := network.GetContainerVethName(opts.ContainerName)
 
 				// Clean up network FIRST while container still exists
@@ -120,12 +119,9 @@ func Cleanup(opts CleanupOptions) error {
 					opts.Logger("Container removed (session data saved for --resume)")
 				}
 
-				// Clean up firewalld zone binding for the veth interface
-				// This must happen AFTER container deletion when the veth no longer exists
 				if vethName != "" {
-					if err := network.RemoveVethFromFirewalldZone(vethName); err != nil {
-						opts.Logger(fmt.Sprintf("Warning: Failed to cleanup firewalld zone binding: %v", err))
-					}
+					// no-op with nft-based firewall; kept for future cleanup hooks
+					_ = network.RemoveVethFromFirewalldZone(vethName)
 				}
 			}
 		} else {

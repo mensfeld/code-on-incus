@@ -14,17 +14,16 @@ import (
 	"github.com/mensfeld/code-on-incus/internal/logger"
 )
 
-// errFirewallNotAvailable is the user-facing error message when firewalld is not available
-const errFirewallNotAvailable = `firewalld is not available or not running
+// errFirewallNotAvailable is the user-facing error when nft is unavailable
+const errFirewallNotAvailable = `nft is not available or passwordless sudo is not configured
 
-Network isolation in restricted/allowlist modes requires firewalld.
+Network isolation in restricted/allowlist modes requires nftables (nft).
 
 To fix this:
-  1. Check for ufw: if 'sudo ufw status' shows active, disable it first —
-     ufw and firewalld conflict: sudo ufw disable && sudo systemctl disable --now ufw
-  2. Install firewalld: sudo apt install firewalld
-  3. Start firewalld: sudo systemctl enable --now firewalld
-  4. Configure passwordless sudo for firewall-cmd (see README)
+  1. Install nftables: sudo apt install nftables
+  2. Configure passwordless sudo for nft:
+     echo "$USER ALL=(ALL) NOPASSWD: /usr/sbin/nft" | sudo tee /etc/sudoers.d/coi-nft
+     sudo chmod 0440 /etc/sudoers.d/coi-nft
 
 Alternatively, run with unrestricted network access by setting open mode in
 your config file (.coi/config.toml in your workspace, or the profile's
@@ -43,7 +42,7 @@ type Manager struct {
 	containerIP   string
 	logger        *logger.SessionLogger
 
-	// iptables fallback (when firewalld unavailable but FORWARD DROP present)
+	// iptables fallback (when FORWARD DROP is set and bridge rules are missing)
 	iptablesBridgeName string
 
 	// Refresher lifecycle (for allowlist mode)
@@ -73,16 +72,14 @@ func (m *Manager) SetupForContainer(ctx context.Context, containerName string) e
 	switch m.config.Mode {
 	case config.NetworkModeOpen:
 		m.logger.Println("Network mode: open (no restrictions)")
-		// Still need to add ACCEPT rules if firewall FORWARD policy is DROP
+		// Add ACCEPT rules via nft so traffic flows even when FORWARD policy is DROP
 		if FirewallAvailable() {
 			containerIP, err := GetContainerIP(containerName)
 			if err != nil {
 				m.logger.Errorf("Warning: could not get container IP for open mode rules: %v", err)
 				return nil
 			}
-			// Cache the container IP for cleanup later
 			m.containerIP = containerIP
-			// Create firewall manager for cleanup
 			m.firewall = NewFirewallManager(containerIP, "")
 			if err := EnsureOpenModeRules(containerIP); err != nil {
 				m.logger.Errorf("Warning: could not add open mode rules: %v", err)
@@ -96,12 +93,9 @@ func (m *Manager) SetupForContainer(ctx context.Context, containerName string) e
 					m.logger.Errorf("Warning: could not add iptables bridge rules: %v", err)
 				} else {
 					m.iptablesBridgeName = bridgeName
-					m.logger.Printf("iptables fallback: added FORWARD ACCEPT rules for bridge %s (FORWARD policy is DROP, firewalld not available)", bridgeName)
+					m.logger.Printf("iptables fallback: added FORWARD ACCEPT rules for bridge %s (FORWARD policy is DROP, nft not available)", bridgeName)
 				}
 			}
-		} else {
-			m.logger.Errorln("Warning: firewalld not available - container has unrestricted network access")
-			m.logger.Errorln("         Network isolation (restricted/allowlist modes) requires firewalld")
 		}
 		return nil
 
@@ -116,11 +110,11 @@ func (m *Manager) SetupForContainer(ctx context.Context, containerName string) e
 	}
 }
 
-// setupRestricted configures restricted mode using firewalld
+// setupRestricted configures restricted mode using nftables
 func (m *Manager) setupRestricted(ctx context.Context, containerName string) error {
 	m.logger.Println("Network mode: restricted (blocking local/internal networks)")
 
-	// Check if firewalld is available
+	// Check if nft is available
 	if !FirewallAvailable() {
 		return fmt.Errorf("%s", errFirewallNotAvailable)
 	}
@@ -171,7 +165,7 @@ func (m *Manager) setupRestricted(ctx context.Context, containerName string) err
 func (m *Manager) setupAllowlist(ctx context.Context, containerName string) error {
 	m.logger.Println("Network mode: allowlist (domain-based filtering)")
 
-	// Check if firewalld is available
+	// Check if nft is available
 	if !FirewallAvailable() {
 		return fmt.Errorf("%s", errFirewallNotAvailable)
 	}
@@ -366,7 +360,7 @@ func (m *Manager) refreshAllowedIPs() (uint32, error) {
 	m.logger.Printf("IP refresh: updating firewall with %d IPs", totalIPs)
 
 	// Apply new rules BEFORE removing old ones to avoid a gap where no rules exist.
-	// firewall-cmd --direct --add-rule is idempotent, so duplicate rules are harmless.
+	// nft add rule is idempotent by handle; applying new rules before removing old avoids gaps.
 	allowedIPs := collectUniqueIPs(newIPs)
 	if err := m.firewall.ApplyAllowlist(m.config, allowedIPs); err != nil {
 		return newMinTTL, fmt.Errorf("failed to update firewall rules: %w", err)
@@ -437,11 +431,10 @@ func (m *Manager) Teardown(ctx context.Context, containerName string) error {
 		}
 	}
 
-	// For open mode, we also need to clean up firewall rules
-	// Open mode creates ACCEPT rules via EnsureOpenModeRules()
+	// For open mode, also clean up nft ACCEPT rules created by EnsureOpenModeRules()
 	if m.config.Mode == config.NetworkModeOpen {
 		if !FirewallAvailable() && m.iptablesBridgeName == "" {
-			return nil // No firewall and no iptables fallback, no rules to clean up
+			return nil // No nft and no iptables fallback, no rules to clean up
 		}
 
 		// Use cached container IP if available (set during SetupForContainer)

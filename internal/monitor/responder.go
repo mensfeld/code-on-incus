@@ -205,12 +205,8 @@ func (r *Responder) killContainer(ctx context.Context) error {
 	}
 
 	// Get container IP and veth name BEFORE stopping (needed for cleanup)
-	var containerIP string
-	var vethName string
-	if network.FirewallAvailable() {
-		containerIP, _ = network.GetContainerIPFast(r.containerName)
-		vethName, _ = network.GetContainerVethName(r.containerName)
-	}
+	containerIP, _ := network.GetContainerIPFast(r.containerName)
+	vethName, _ := network.GetContainerVethName(r.containerName)
 
 	// First stop the container
 	_, err := container.IncusOutputContext(ctx, "stop", r.containerName, "--force")
@@ -236,11 +232,8 @@ func (r *Responder) killContainer(ctx context.Context) error {
 		return fmt.Errorf("failed to delete container: %w", err)
 	}
 
-	// Clean up firewalld zone binding for the veth interface AFTER container deletion
 	if vethName != "" {
-		if err := network.RemoveVethFromFirewalldZone(vethName); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: Failed to cleanup firewalld zone binding: %v\n", err)
-		}
+		_ = network.RemoveVethFromFirewalldZone(vethName) // no-op with nft-based firewall
 	}
 
 	r.mu.Lock()

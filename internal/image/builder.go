@@ -149,16 +149,14 @@ func (b *Builder) launchBuildContainer() error {
 		baseImage = localAlias
 	}
 
-	// Autofix: make sure the Incus bridge is in the firewalld trusted zone
-	// *before* we start the container. A bridge outside the trusted zone
-	// causes firewalld to drop DHCP replies, so the container would never
-	// receive an IP and the GetContainerIP call below would block for 30s
-	// and then fail. Running this before Launch() guarantees DHCP works on
-	// the very first attempt.
+	// Ensure iptables FORWARD ACCEPT rules for the Incus bridge before starting
+	// the container. Without these, DHCP replies are dropped when the FORWARD
+	// chain policy is DROP (e.g. when Docker is running), so the container would
+	// never receive an IP and GetContainerIP would block for 30s and then fail.
 	if changed, bridgeName, zoneErr := network.EnsureBridgeInTrustedZone(); zoneErr != nil {
-		b.opts.Logger(fmt.Sprintf("Warning: could not ensure bridge in firewalld trusted zone: %v", zoneErr))
+		b.opts.Logger(fmt.Sprintf("Warning: could not ensure bridge forwarding rules: %v", zoneErr))
 	} else if changed {
-		b.opts.Logger(fmt.Sprintf("Added %s to firewalld trusted zone (was missing — containers could not get IPs)", bridgeName))
+		b.opts.Logger(fmt.Sprintf("Added iptables FORWARD rules for %s (was missing — containers could not get IPs)", bridgeName))
 	}
 
 	if err := b.mgr.Launch(baseImage, false, b.opts.StoragePool); err != nil {
@@ -169,7 +167,7 @@ func (b *Builder) launchBuildContainer() error {
 	time.Sleep(3 * time.Second)
 
 	// Setup open mode firewall rules for build container
-	// This is needed when FORWARD chain policy is DROP (common with Docker/firewalld)
+	// This is needed when FORWARD chain policy is DROP (common with Docker)
 	if network.FirewallAvailable() {
 		containerIP, err := network.GetContainerIP(b.mgr.ContainerName)
 		if err != nil {
@@ -291,7 +289,7 @@ func (b *Builder) waitForNetwork() error {
 			if network.NeedsIptablesFallback() {
 				bridgeName, err := network.GetIncusBridgeName()
 				if err == nil && !network.IptablesBridgeRulesExist(bridgeName) {
-					b.opts.Logger("Hint: Docker has set iptables FORWARD policy to DROP and firewalld is not available.")
+					b.opts.Logger("Hint: Docker has set iptables FORWARD policy to DROP and iptables bridge rules are missing.")
 					b.opts.Logger("      iptables bridge rules are missing. This is likely causing the network timeout.")
 					b.opts.Logger(fmt.Sprintf("      Manual fix: sudo iptables -I FORWARD -i %s -j ACCEPT && sudo iptables -I FORWARD -o %s -j ACCEPT", bridgeName, bridgeName))
 				}

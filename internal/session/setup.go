@@ -141,16 +141,13 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 		}
 	}
 
-	// Autofix: make sure the Incus bridge is in the firewalld trusted zone
-	// *before* any container is started. A bridge outside the trusted zone
-	// prevents containers from getting IP addresses via DHCP (firewalld drops
-	// the response), so without this the container start would succeed but
-	// waitForReady would time out and the whole flow would fail with an
-	// opaque error. No-op when firewalld is not available.
+	// Autofix: make sure the Incus bridge has iptables FORWARD ACCEPT rules
+	// before any container is started. Without them, containers cannot get IPs
+	// via DHCP when the FORWARD chain policy is DROP (e.g. when Docker is running).
 	if changed, bridgeName, err := network.EnsureBridgeInTrustedZone(); err != nil {
-		opts.Logger(fmt.Sprintf("Warning: could not ensure bridge in firewalld trusted zone: %v", err))
+		opts.Logger(fmt.Sprintf("Warning: could not ensure bridge forwarding rules: %v", err))
 	} else if changed {
-		opts.Logger(fmt.Sprintf("Added %s to firewalld trusted zone (was missing — containers could not get IPs)", bridgeName))
+		opts.Logger(fmt.Sprintf("Added iptables FORWARD rules for %s (was missing — containers could not get IPs)", bridgeName))
 	}
 
 	// 2. Determine image

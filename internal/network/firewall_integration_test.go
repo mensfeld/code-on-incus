@@ -5,143 +5,100 @@ import (
 	"testing"
 )
 
-// FirewallAvailable should return true only when firewall-cmd is installed AND
-// firewalld is actually running.
+// FirewallAvailable should return true when nft is installed and passwordless sudo works.
 func TestFirewallAvailable_Integration(t *testing.T) {
-	_, lookPathErr := exec.LookPath("firewall-cmd")
+	_, lookPathErr := exec.LookPath("nft")
 	installed := lookPathErr == nil
 
 	if !installed {
-		t.Log("firewall-cmd not installed — expecting FirewallAvailable() == false")
+		t.Log("nft not installed — expecting FirewallAvailable() == false")
 		if FirewallAvailable() {
-			t.Error("FirewallAvailable() returned true but firewall-cmd is not installed")
+			t.Error("FirewallAvailable() returned true but nft is not installed")
 		}
 		return
 	}
 
-	// firewall-cmd is installed; check if firewalld is running
-	cmd := exec.Command("sudo", "-n", "firewall-cmd", "--state")
-	running := cmd.Run() == nil
+	// nft is installed; check if passwordless sudo works
+	cmd := exec.Command("sudo", "-n", "nft", "list", "tables")
+	sudoOK := cmd.Run() == nil
 
 	result := FirewallAvailable()
-	if result != running {
-		t.Errorf("FirewallAvailable() = %v, but firewalld running state is %v", result, running)
+	if result != sudoOK {
+		t.Errorf("FirewallAvailable() = %v, but sudo nft list tables returned %v", result, sudoOK)
 	}
 
-	t.Logf("FirewallAvailable: installed=%v running=%v result=%v", installed, running, result)
+	t.Logf("FirewallAvailable: installed=%v sudoOK=%v result=%v", installed, sudoOK, result)
 }
 
-// FirewallInstalled should return true when firewall-cmd binary exists on PATH.
+// FirewallInstalled should return true when the nft binary exists on PATH.
 func TestFirewallInstalled_Integration(t *testing.T) {
-	_, lookPathErr := exec.LookPath("firewall-cmd")
+	_, lookPathErr := exec.LookPath("nft")
 	expected := lookPathErr == nil
 
 	result := FirewallInstalled()
 	if result != expected {
-		t.Errorf("FirewallInstalled() = %v, but exec.LookPath says %v", result, expected)
+		t.Errorf("FirewallInstalled() = %v, but exec.LookPath(\"nft\") says %v", result, expected)
 	}
 
 	t.Logf("FirewallInstalled: %v", result)
 }
 
-// MasqueradeEnabled should return true only when firewalld is running and
-// masquerade is configured.
+// MasqueradeEnabled should return true when the Incus bridge has ipv4.nat=true.
 func TestMasqueradeEnabled_Integration(t *testing.T) {
-	if !FirewallAvailable() {
-		t.Log("firewalld not available — expecting MasqueradeEnabled() == false")
-		if MasqueradeEnabled() {
-			t.Error("MasqueradeEnabled() returned true but firewalld is not available")
-		}
-		return
+	bridgeName, err := GetIncusBridgeName()
+	if err != nil || bridgeName == "" {
+		t.Skip("Incus bridge not available — skipping MasqueradeEnabled test")
 	}
 
-	// Query masquerade directly to compare
-	cmd := exec.Command("sudo", "-n", "firewall-cmd", "--query-masquerade")
-	expected := cmd.Run() == nil
+	// Query Incus directly to compare
+	cmd := exec.Command("incus", "network", "get", bridgeName, "ipv4.nat")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Skipf("could not query incus bridge nat setting: %v", err)
+	}
 
+	natEnabled := string(out) == "true\n" || string(out) == "true"
 	result := MasqueradeEnabled()
-	if result != expected {
-		t.Errorf("MasqueradeEnabled() = %v, but direct query says %v", result, expected)
+	if result != natEnabled {
+		t.Errorf("MasqueradeEnabled() = %v, but incus bridge ipv4.nat = %v", result, natEnabled)
 	}
 
 	t.Logf("MasqueradeEnabled: %v", result)
 }
 
-// EnsureBridgeInTrustedZone should:
-//  1. Be a no-op when firewalld is not available (no error, no change).
-//  2. Be a no-op when the bridge is already in the trusted zone (changed=false).
-//  3. Add the bridge to the trusted zone when it isn't, and report changed=true.
-//  4. Be idempotent across back-to-back calls.
-//
-// The test captures the initial zone state and restores it on exit so the CI
-// environment is left exactly as it was found.
+// EnsureBridgeInTrustedZone manages iptables FORWARD ACCEPT rules for the Incus bridge.
+// The test verifies the function works correctly and cleans up after itself.
 func TestEnsureBridgeInTrustedZone_Integration(t *testing.T) {
-	if !FirewallAvailable() {
-		t.Log("firewalld not available — EnsureBridgeInTrustedZone should no-op without error")
-		changed, name, err := EnsureBridgeInTrustedZone()
-		if err != nil {
-			t.Errorf("EnsureBridgeInTrustedZone() returned error when firewalld unavailable: %v", err)
-		}
-		if changed {
-			t.Errorf("EnsureBridgeInTrustedZone() reported changed=true with no firewalld; got name=%q", name)
-		}
-		return
+	bridgeName, err := GetIncusBridgeName()
+	if err != nil || bridgeName == "" {
+		t.Skip("Incus bridge not available — skipping EnsureBridgeInTrustedZone test")
 	}
+	t.Logf("bridge: %s", bridgeName)
 
-	// Capture initial bridge zone state so we can restore it on teardown.
-	initiallyInZone, bridgeName, err := BridgeInTrustedZone()
-	if err != nil {
-		t.Skipf("could not determine initial bridge state: %v", err)
-	}
-	if bridgeName == "" {
-		t.Skip("bridge name could not be determined (Incus not set up?)")
-	}
-	t.Logf("initial state: bridge=%s inZone=%v", bridgeName, initiallyInZone)
+	initiallyHasRules := IptablesBridgeRulesExist(bridgeName)
+	t.Logf("initial state: hasRules=%v", initiallyHasRules)
 
-	// Ensure we always leave the system in its original state.
+	// Restore initial state on exit.
 	t.Cleanup(func() {
-		currentInZone, _, err := BridgeInTrustedZone()
-		if err != nil {
-			t.Logf("cleanup: could not query current zone state: %v", err)
-			return
-		}
-		if currentInZone == initiallyInZone {
-			return
-		}
-		var args []string
-		if initiallyInZone {
-			args = []string{"-n", "firewall-cmd", "--zone=trusted", "--add-interface=" + bridgeName, "--permanent"}
+		if initiallyHasRules {
+			_ = EnsureIptablesBridgeRules(bridgeName)
 		} else {
-			args = []string{"-n", "firewall-cmd", "--zone=trusted", "--remove-interface=" + bridgeName, "--permanent"}
-		}
-		if out, err := exec.Command("sudo", args...).CombinedOutput(); err != nil {
-			t.Logf("cleanup: could not restore initial zone state: %v: %s", err, string(out))
-		}
-		if out, err := exec.Command("sudo", "-n", "firewall-cmd", "--reload").CombinedOutput(); err != nil {
-			t.Logf("cleanup: could not reload firewalld: %v: %s", err, string(out))
+			_ = RemoveIptablesBridgeRules(bridgeName)
 		}
 	})
 
-	// Force a known state: remove the bridge from the trusted zone so we can
-	// exercise the "not in zone → add it" branch deterministically.
-	if initiallyInZone {
-		out, err := exec.Command("sudo", "-n", "firewall-cmd", "--zone=trusted", "--remove-interface="+bridgeName, "--permanent").CombinedOutput()
-		if err != nil {
-			t.Skipf("could not remove bridge from trusted zone (sudoers?): %v: %s", err, string(out))
-		}
-		if out, err := exec.Command("sudo", "-n", "firewall-cmd", "--reload").CombinedOutput(); err != nil {
-			t.Skipf("could not reload firewalld after removing bridge: %v: %s", err, string(out))
+	// Remove rules so we can exercise the "missing → add it" path.
+	if initiallyHasRules {
+		if err := RemoveIptablesBridgeRules(bridgeName); err != nil {
+			t.Skipf("could not remove bridge rules (sudoers?): %v", err)
 		}
 	}
 
-	// Sanity: confirm the bridge really is out of the zone now.
-	if stillInZone, _, err := BridgeInTrustedZone(); err != nil {
-		t.Fatalf("BridgeInTrustedZone() after remove: %v", err)
-	} else if stillInZone {
-		t.Skip("could not remove bridge from trusted zone (CI may set it as default zone)")
+	if IptablesBridgeRulesExist(bridgeName) {
+		t.Skip("bridge rules still present after removal — skipping")
 	}
 
-	// First call: should detect the missing bridge and add it.
+	// First call: should add the missing rules and report changed=true.
 	changed, name, err := EnsureBridgeInTrustedZone()
 	if err != nil {
 		t.Fatalf("EnsureBridgeInTrustedZone() first call: %v", err)
@@ -153,11 +110,9 @@ func TestEnsureBridgeInTrustedZone_Integration(t *testing.T) {
 		t.Errorf("EnsureBridgeInTrustedZone() first call: bridge name = %q, want %q", name, bridgeName)
 	}
 
-	// Verify the bridge is actually in the zone now.
-	if inZone, _, err := BridgeInTrustedZone(); err != nil {
-		t.Fatalf("BridgeInTrustedZone() after first EnsureBridgeInTrustedZone: %v", err)
-	} else if !inZone {
-		t.Errorf("bridge still not in trusted zone after successful EnsureBridgeInTrustedZone")
+	// Verify rules are now in place.
+	if !IptablesBridgeRulesExist(bridgeName) {
+		t.Errorf("bridge rules not present after successful EnsureBridgeInTrustedZone")
 	}
 
 	// Second call: idempotent — should report changed=false.
@@ -166,7 +121,7 @@ func TestEnsureBridgeInTrustedZone_Integration(t *testing.T) {
 		t.Fatalf("EnsureBridgeInTrustedZone() second call: %v", err)
 	}
 	if changed {
-		t.Errorf("EnsureBridgeInTrustedZone() second call: expected changed=false (already in zone), got true")
+		t.Errorf("EnsureBridgeInTrustedZone() second call: expected changed=false (rules already exist), got true")
 	}
 	if name != bridgeName {
 		t.Errorf("EnsureBridgeInTrustedZone() second call: bridge name = %q, want %q", name, bridgeName)

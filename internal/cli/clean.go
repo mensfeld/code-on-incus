@@ -31,8 +31,7 @@ By default, cleans only stopped containers. Use flags to control what gets clean
 
 Orphaned resources include:
 - Orphaned veth interfaces (network pairs with no master bridge)
-- Orphaned firewall rules (rules for container IPs that no longer exist)
-- Orphaned firewalld zone bindings (stale veth entries in firewalld zones)
+- Orphaned firewall rules (nft coi chain rules for container IPs that no longer exist)
 - Orphaned iptables bridge rules (coi-bridge-forward rules with no containers running)
 
 The --pools flag detects COI containers in storage pools that are not
@@ -314,19 +313,6 @@ func printOrphanedResources(orphans *cleanup.OrphanedResources) {
 		}
 	}
 
-	if len(orphans.FirewalldZoneBindings) > 0 {
-		fmt.Printf("  Orphaned firewalld zone bindings (%d):\n", len(orphans.FirewalldZoneBindings))
-		shown := 0
-		for _, veth := range orphans.FirewalldZoneBindings {
-			if shown < 10 {
-				fmt.Printf("    - %s\n", veth)
-				shown++
-			}
-		}
-		if len(orphans.FirewalldZoneBindings) > 10 {
-			fmt.Printf("    ... and %d more\n", len(orphans.FirewalldZoneBindings)-10)
-		}
-	}
 
 	if len(orphans.NFTMonitorRules) > 0 {
 		fmt.Printf("  Orphaned nft monitoring rules (%d):\n", len(orphans.NFTMonitorRules))

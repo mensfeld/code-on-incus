@@ -17,7 +17,7 @@ import (
 type OrphanedResources struct {
 	Veths                 []string // Orphaned veth interfaces (no master bridge)
 	FirewallRules         []string // Orphaned firewall rules (for non-existent container IPs)
-	FirewalldZoneBindings []string // Orphaned firewalld zone bindings (veths in zones but not on system)
+	FirewalldZoneBindings []string // Unused: kept for API compatibility (was firewalld zone bindings)
 	NFTMonitorRules       []string // Orphaned nft monitoring rules (NFT_COI/NFT_DNS/NFT_SUSPICIOUS)
 	IptablesBridgeRules   []string // Orphaned iptables coi-bridge-forward rules (no coi containers running)
 }
@@ -52,53 +52,30 @@ func DetectOrphanedVeths() ([]string, error) {
 	return orphaned, nil
 }
 
-// DetectOrphanedFirewallRules finds firewall rules for IPs that don't belong to any running container
+// DetectOrphanedFirewallRules finds container IPs in the ip coi forward chain
+// that don't belong to any running container.
 func DetectOrphanedFirewallRules() ([]string, error) {
-	if !network.FirewallAvailable() {
-		return nil, nil
+	ipHandles, err := network.ListCOIFilterRuleIPs()
+	if err != nil || len(ipHandles) == 0 {
+		return nil, err
 	}
 
-	// Get all direct rules
-	cmd := exec.Command("sudo", "-n", "firewall-cmd", "--direct", "--get-all-rules")
-	output, err := cmd.Output()
-	if err != nil {
-		return nil, fmt.Errorf("failed to list firewall rules: %w", err)
-	}
-
-	// Get all running container IPs
 	containerIPs, err := getRunningContainerIPs()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get container IPs: %w", err)
 	}
 
-	var orphaned []string
-	scanner := bufio.NewScanner(strings.NewReader(string(output)))
-	for scanner.Scan() {
-		rule := strings.TrimSpace(scanner.Text())
-		if rule == "" || !strings.Contains(rule, "FORWARD") {
-			continue
-		}
-
-		// Skip the base conntrack rule
-		if strings.Contains(rule, "conntrack") {
-			continue
-		}
-
-		// Check if this rule references a container IP that no longer exists
-		isOrphaned := true
-		for _, ip := range containerIPs {
-			if strings.Contains(rule, ip) {
-				isOrphaned = false
-				break
-			}
-		}
-
-		// Only consider rules with container-like IPs (10.x.x.x pattern) as potentially orphaned
-		if isOrphaned && strings.Contains(rule, "10.") {
-			orphaned = append(orphaned, rule)
-		}
+	running := make(map[string]bool, len(containerIPs))
+	for _, ip := range containerIPs {
+		running[ip] = true
 	}
 
+	var orphaned []string
+	for ip := range ipHandles {
+		if !running[ip] {
+			orphaned = append(orphaned, ip)
+		}
+	}
 	return orphaned, nil
 }
 
@@ -169,34 +146,22 @@ func CleanupOrphanedVeths(veths []string, logger func(string)) (int, error) {
 	return cleaned, nil
 }
 
-// CleanupOrphanedFirewallRules removes orphaned firewall rules
-// Returns the number of rules cleaned up and any error
+// CleanupOrphanedFirewallRules removes all ip coi forward rules for the given container IPs.
+// The rules slice contains container IP addresses (as returned by DetectOrphanedFirewallRules).
 func CleanupOrphanedFirewallRules(rules []string, logger func(string)) (int, error) {
 	if logger == nil {
 		logger = func(msg string) { log.Println(msg) }
 	}
 
 	cleaned := 0
-	for _, rule := range rules {
-		logger(fmt.Sprintf("Removing orphaned firewall rule: %s", rule))
-
-		// Parse rule and remove it
-		parts := strings.Fields(rule)
-		if len(parts) < 4 {
-			continue
-		}
-
-		args := []string{"-n", "firewall-cmd", "--direct", "--remove-rule"}
-		args = append(args, parts...)
-
-		cmd := exec.Command("sudo", args...)
-		if err := cmd.Run(); err != nil {
-			logger(fmt.Sprintf("  Warning: Failed to remove rule: %v", err))
+	for _, ip := range rules {
+		logger(fmt.Sprintf("Removing orphaned firewall rules for container IP: %s", ip))
+		if err := network.DeleteCOIFilterRulesForIP(ip); err != nil {
+			logger(fmt.Sprintf("  Warning: Failed to remove rules for %s: %v", ip, err))
 			continue
 		}
 		cleaned++
 	}
-
 	return cleaned, nil
 }
 
@@ -359,8 +324,8 @@ func DetectAll() (*OrphanedResources, error) {
 
 	zoneBindings, err := network.DetectOrphanedFirewalldZoneBindings()
 	if err != nil {
-		// Non-fatal - firewalld might not be available
-		log.Printf("Warning: Could not check firewalld zone bindings: %v", err)
+		// Non-fatal - firewalld zone bindings are no longer used
+		log.Printf("Warning: Could not check zone bindings: %v", err)
 	}
 	result.FirewalldZoneBindings = zoneBindings
 

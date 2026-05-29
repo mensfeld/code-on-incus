@@ -136,11 +136,8 @@ func shutdownCommand(cmd *cobra.Command, args []string) error {
 			fmt.Printf("  ✓ Shutdown %s\n", name)
 		}
 
-		// Clean up firewalld zone binding AFTER container deletion
 		if vethName != "" {
-			if err := network.RemoveVethFromFirewalldZone(vethName); err != nil {
-				fmt.Fprintf(os.Stderr, "  Warning: Failed to cleanup firewalld zone binding: %v\n", err)
-			}
+			_ = network.RemoveVethFromFirewalldZone(vethName)
 		}
 	}
 
