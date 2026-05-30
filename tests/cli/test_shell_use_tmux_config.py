@@ -69,11 +69,11 @@ use_tmux = false
     )
 
     combined = result.stdout + result.stderr
-    # With --tmux=true explicit flag, should use tmux even though config says false
-    assert "tmux" in combined.lower() or result.returncode == 0, (
-        f"Expected tmux mode when --tmux=true overrides config. Output:\n{combined}"
+    # --tmux=true explicitly overrides use_tmux=false; must show a tmux Mode line
+    assert "Mode: Background (tmux)" in combined or "Mode: Interactive (tmux)" in combined, (
+        f"Expected tmux Mode line when --tmux=true overrides use_tmux=false config. Output:\n{combined}"
     )
-    assert "Direct" not in combined or "tmux" in combined.lower(), (
+    assert "Mode: Direct" not in combined, (
         f"Expected --tmux=true to override use_tmux=false config. Output:\n{combined}"
     )
 
