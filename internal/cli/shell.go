@@ -36,11 +36,15 @@ var (
 var shellCmd = &cobra.Command{
 	Use:   "shell [alias]",
 	Short: "Start an interactive AI coding session",
-	Long: `Start an interactive AI coding session in a container (always runs in tmux).
+	Long: `Start an interactive AI coding session in a container.
 
 By default, runs Claude Code. Other tools can be configured via the tool.name config option.
 
-All sessions run in tmux for monitoring and detach/reattach support:
+Sessions run in tmux by default for monitoring and detach/reattach support.
+Set [shell] use_tmux = false in .coi/config.toml to run without tmux (direct mode).
+The --tmux flag always overrides the config setting.
+
+Tmux mode (default):
   - Interactive: Automatically attaches to tmux session
   - Background: Runs detached, use 'coi tmux capture' to view output
   - Detach anytime: Ctrl+B d (session keeps running)
@@ -54,7 +58,8 @@ Examples:
   coi shell                         # Interactive session in tmux
   coi shell myproject               # Launch session using alias (from any directory)
   coi shell --tool opencode         # Use opencode instead of configured tool
-  coi shell --background            # Run in background (detached)
+  coi shell --background            # Run in background (detached, tmux only)
+  coi shell --tmux=false            # Run in direct mode (no tmux)
   coi shell --resume                # Resume latest session (auto)
   coi shell --resume=<session-id>   # Resume specific session (note: = is required)
   coi shell --continue=<session-id> # Same as --resume (alias)
@@ -87,13 +92,18 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("invalid workspace path: %w", err)
 	}
 
-	// If workspace differs from CWD, overlay its project config. config.Load()
-	// only reads from CWD, so a --workspace pointing elsewhere would otherwise
-	// miss that directory's .coi/config.toml.
-	if cwd, err := os.Getwd(); err == nil {
-		if absCWD, err := filepath.Abs(cwd); err == nil && absWorkspace != absCWD {
-			if err := cfg.OverlayProjectConfig(absWorkspace); err != nil && !os.IsNotExist(err) {
-				return fmt.Errorf("failed to load project config from %s: %w", absWorkspace, err)
+	// If workspace differs from CWD and no alias argument overrides it, overlay
+	// the workspace's project config. config.Load() only reads from CWD, so a
+	// --workspace pointing elsewhere would otherwise miss that .coi/config.toml.
+	// Skip when aliasArg is set: alias resolution will reassign absWorkspace and
+	// call OverlayProjectConfig itself, avoiding a double-overlay from the wrong dir.
+	if aliasArg == "" {
+		if cwd, err := os.Getwd(); err == nil {
+			if absCWD, err := filepath.Abs(cwd); err == nil && absWorkspace != absCWD {
+				if err := cfg.OverlayProjectConfig(absWorkspace); err != nil && !os.IsNotExist(err) {
+					return fmt.Errorf("failed to load project config from %s: %w", absWorkspace, err)
+				}
+				container.Configure(cfg.Incus.Project, cfg.Incus.CodeUser, cfg.Incus.CodeUID)
 			}
 		}
 	}
