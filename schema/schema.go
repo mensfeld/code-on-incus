@@ -14,6 +14,7 @@ import (
 	"bytes"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -96,6 +97,38 @@ func ValidateProfileMap(data map[string]any) error {
 		return err
 	}
 	return nil
+}
+
+// ValidationIssue is a single schema violation with the JSON-pointer path to
+// the offending value and a human-readable message.
+type ValidationIssue struct {
+	Path    string `json:"path"`
+	Message string `json:"message"`
+}
+
+// ExtractErrors converts a schema validation error into a flat slice of
+// ValidationIssue values.  Returns nil when err is nil.  Non-schema errors
+// (e.g. TOML parse failures) are returned as a single issue with an empty path.
+func ExtractErrors(err error) []ValidationIssue {
+	if err == nil {
+		return nil
+	}
+	var ve *jsonschema.ValidationError
+	if !errors.As(err, &ve) {
+		return []ValidationIssue{{Path: "", Message: err.Error()}}
+	}
+	return flattenVE(ve)
+}
+
+func flattenVE(ve *jsonschema.ValidationError) []ValidationIssue {
+	if len(ve.Causes) == 0 {
+		return []ValidationIssue{{Path: ve.InstanceLocation, Message: ve.Message}}
+	}
+	var issues []ValidationIssue
+	for _, c := range ve.Causes {
+		issues = append(issues, flattenVE(c)...)
+	}
+	return issues
 }
 
 // bundle merges defs/*.json into the root schema's $defs and returns the
