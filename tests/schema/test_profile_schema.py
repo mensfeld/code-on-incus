@@ -20,15 +20,13 @@ import pytest
 # Ensure jsonschema is available; skip gracefully if it can't be installed.
 # ---------------------------------------------------------------------------
 try:
-    import jsonschema
-    from jsonschema import Draft202012Validator, ValidationError
+    from jsonschema import Draft202012Validator
 except ImportError:
     subprocess.run(
         [sys.executable, "-m", "pip", "install", "jsonschema", "-q"],
         check=True,
     )
-    import jsonschema
-    from jsonschema import Draft202012Validator, ValidationError
+    from jsonschema import Draft202012Validator
 
 
 # ---------------------------------------------------------------------------

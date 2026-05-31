@@ -431,6 +431,20 @@ coi profile list                                       # List all profiles
 
 Profiles support inheritance (`inherits = "parent-name"`), context files for AI-agent instructions, and custom build scripts. See the [Profiles wiki page](https://github.com/mensfeld/code-on-incus/wiki/Profiles) for complete documentation.
 
+### Profile JSON Schema
+
+COI ships a [JSON Schema 2020-12](schema/profile.schema.json) document that describes every field accepted by a profile `config.toml`. External tools — such as a web UI or editor plugin — can consume it to validate profile data without duplicating COI's validation logic.
+
+```bash
+# Print the schema
+coi schema profile
+
+# Save it for use in another tool
+coi schema profile > profile.schema.json
+```
+
+The schema covers all field types, enum values (`network.mode`, `tool.permission_mode`, `tool.claude.effort_level`, `timezone.mode`), required fields on mount entries, and rejects unknown keys. Any JSON Schema 2020-12 validator can use it — for example, the Ruby [`json_schemer`](https://github.com/davishmcclurg/json_schemer) gem or the Python [`jsonschema`](https://python-jsonschema.readthedocs.io/) package.
+
 ## Resource and Time Limits
 
 See the [Resource and Time Limits guide](https://github.com/mensfeld/code-on-incus/wiki/Resource-and-Time-Limits) for complete documentation on controlling container resource consumption and runtime.
