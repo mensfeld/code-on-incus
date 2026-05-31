@@ -261,9 +261,7 @@ def test_network_mode_open(validator):
 
 
 def test_network_mode_allowlist(validator):
-    validator.validate(
-        {"network": {"mode": "allowlist", "allowed_domains": ["example.com"]}}
-    )
+    validator.validate({"network": {"mode": "allowlist", "allowed_domains": ["example.com"]}})
 
 
 def test_tool_permission_mode_interactive(validator):
