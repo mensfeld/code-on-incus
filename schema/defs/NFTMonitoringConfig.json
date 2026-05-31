@@ -1,0 +1,29 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "nftables-based network monitoring settings",
+  "properties": {
+    "enabled": {
+      "type": "boolean",
+      "description": "Enable nftables network monitoring"
+    },
+    "rate_limit_per_second": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Maximum number of nftables log entries per second (default: 100)"
+    },
+    "dns_query_threshold": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Alert when DNS queries per minute exceed this threshold (default: 100)"
+    },
+    "log_dns_queries": {
+      "type": "boolean",
+      "description": "Log DNS queries separately (default: true)"
+    },
+    "lima_host": {
+      "type": "string",
+      "description": "Lima VM host name for macOS environments, e.g. \"lima-default\""
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "Resource limits for the container",
+  "properties": {
+    "cpu": { "$ref": "#/$defs/CPULimits" },
+    "memory": { "$ref": "#/$defs/MemoryLimits" },
+    "disk": { "$ref": "#/$defs/DiskLimits" },
+    "runtime": { "$ref": "#/$defs/RuntimeLimits" }
+  }
+}

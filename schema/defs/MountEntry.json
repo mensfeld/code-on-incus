@@ -1,0 +1,22 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "A single host-to-container directory mount",
+  "required": ["host", "container"],
+  "properties": {
+    "host": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Host path to mount (supports ~ expansion)"
+    },
+    "container": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Absolute path inside the container where the host path is mounted"
+    },
+    "readonly": {
+      "type": "boolean",
+      "description": "Mount the path read-only (default: false)"
+    }
+  }
+}

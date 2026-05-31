@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "Git-related security settings",
+  "properties": {
+    "writable_hooks": {
+      "type": "boolean",
+      "description": "Allow the container to write to .git/hooks (default: false — hooks are mounted read-only)"
+    }
+  }
+}

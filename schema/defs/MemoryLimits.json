@@ -1,0 +1,20 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "Memory resource limits",
+  "properties": {
+    "limit": {
+      "type": "string",
+      "description": "Maximum memory, e.g. \"512MiB\", \"2GiB\", \"50%\". Empty means unlimited."
+    },
+    "enforce": {
+      "type": "string",
+      "enum": ["hard", "soft", ""],
+      "description": "Enforcement mode: \"hard\" (OOM kill) or \"soft\" (best-effort)"
+    },
+    "swap": {
+      "type": "string",
+      "description": "Swap space, e.g. \"true\", \"false\", or a size like \"1GiB\""
+    }
+  }
+}

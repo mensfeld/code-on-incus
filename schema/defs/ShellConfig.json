@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "Shell session behaviour",
+  "properties": {
+    "use_tmux": {
+      "type": "boolean",
+      "description": "Run the tool inside a tmux session (default: true)"
+    }
+  }
+}

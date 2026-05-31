@@ -1,0 +1,16 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "Container timezone configuration",
+  "properties": {
+    "mode": {
+      "type": "string",
+      "enum": ["host", "fixed", "utc", ""],
+      "description": "Timezone source: \"host\" (mirror the host timezone), \"fixed\" (use a specific IANA zone), or \"utc\""
+    },
+    "name": {
+      "type": "string",
+      "description": "IANA timezone name to use when mode is \"fixed\", e.g. \"America/New_York\""
+    }
+  }
+}

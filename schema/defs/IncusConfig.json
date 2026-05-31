@@ -1,0 +1,27 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "Incus daemon configuration",
+  "properties": {
+    "project": {
+      "type": "string",
+      "description": "Incus project to use for containers"
+    },
+    "group": {
+      "type": "string",
+      "description": "Unix group with access to the Incus socket"
+    },
+    "code_uid": {
+      "type": "integer",
+      "description": "UID of the 'code' user inside containers"
+    },
+    "code_user": {
+      "type": "string",
+      "description": "Username of the unprivileged user inside containers (default: \"code\")"
+    },
+    "disable_shift": {
+      "type": "boolean",
+      "description": "Disable UID shifting. Required for Colima/Lima environments that do not support idmapped mounts."
+    }
+  }
+}

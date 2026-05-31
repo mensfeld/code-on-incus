@@ -1,0 +1,31 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "AI coding tool configuration",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Tool name, e.g. \"claude\", \"aider\", \"cursor\""
+    },
+    "binary": {
+      "type": "string",
+      "description": "Binary name to execute. Defaults to the tool name if not set."
+    },
+    "permission_mode": {
+      "type": "string",
+      "enum": ["bypass", "interactive", ""],
+      "description": "Permission mode: \"bypass\" (default) skips interactive prompts; \"interactive\" prompts the user"
+    },
+    "context_file": {
+      "type": "string",
+      "description": "Path to a custom context Markdown file injected into the tool (supports ~ expansion)"
+    },
+    "auto_context": {
+      "type": "boolean",
+      "description": "Automatically inject the COI sandbox context into the tool's native system (default: true)"
+    },
+    "claude": {
+      "$ref": "#/$defs/ClaudeToolConfig"
+    }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "Instructions for building a custom container image",
+  "properties": {
+    "base": {
+      "type": "string",
+      "description": "Base image to build from (default: \"coi\")"
+    },
+    "script": {
+      "type": "string",
+      "description": "Path to a build shell script (relative to profile directory or absolute)"
+    },
+    "commands": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Inline build commands as an alternative to a script file"
+    }
+  }
+}

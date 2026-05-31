@@ -1,0 +1,25 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "Workspace protection settings",
+  "properties": {
+    "protected_paths": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Workspace-relative paths to mount read-only. Replaces the defaults when set."
+    },
+    "additional_protected_paths": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Extra paths to protect in addition to the defaults"
+    },
+    "disable_protection": {
+      "type": "boolean",
+      "description": "Disable all read-only path protection (not recommended)"
+    },
+    "host_immutable": {
+      "type": "boolean",
+      "description": "Apply the Linux immutable attribute (chattr +i) to protected paths on the host before container start. Prevents the unshare+umount bypass. Default: true."
+    }
+  }
+}

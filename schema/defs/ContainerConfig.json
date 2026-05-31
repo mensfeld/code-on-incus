@@ -1,0 +1,26 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "Container image and build configuration",
+  "properties": {
+    "image": {
+      "type": "string",
+      "description": "Container image name to use"
+    },
+    "persistent": {
+      "type": "boolean",
+      "description": "Reuse the container across sessions instead of creating a fresh one"
+    },
+    "storage_pool": {
+      "type": "string",
+      "description": "Incus storage pool to use for this container"
+    },
+    "alias": {
+      "type": "string",
+      "description": "Human-readable alias for the workspace container"
+    },
+    "build": {
+      "$ref": "#/$defs/BuildConfig"
+    }
+  }
+}
