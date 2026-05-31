@@ -11,11 +11,15 @@
 package schema
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 
 	"embed"
+
+	"github.com/santhosh-tekuri/jsonschema/v5"
 )
 
 //go:embed profile.schema.json
@@ -41,6 +45,58 @@ func ProfileSchemaID() (string, error) {
 		return "", fmt.Errorf("failed to parse profile schema: %w", err)
 	}
 	return doc.ID, nil
+}
+
+// compiled holds the lazily-compiled JSON Schema validator (thread-safe).
+var (
+	compiledOnce   sync.Once
+	compiledSchema *jsonschema.Schema
+	compiledErr    error
+)
+
+// ValidateProfileMap validates a profile represented as a map (e.g. decoded
+// from a TOML config.toml) against the JSON Schema.  Returns nil if the
+// profile is structurally valid, or a descriptive error listing every
+// violation found.
+//
+// The map values must use standard JSON-compatible Go types (string, bool,
+// float64, []any, map[string]any).  Values decoded from TOML via
+// github.com/BurntSushi/toml into map[string]any satisfy this after a
+// JSON round-trip; call this helper after marshaling to JSON and back if
+// your source uses int64 or other non-JSON types.
+func ValidateProfileMap(data map[string]any) error {
+	compiledOnce.Do(func() {
+		bundled, err := bundle()
+		if err != nil {
+			compiledErr = fmt.Errorf("failed to bundle profile schema: %w", err)
+			return
+		}
+		compiler := jsonschema.NewCompiler()
+		compiler.Draft = jsonschema.Draft2020
+		if err := compiler.AddResource("profile.schema.json", bytes.NewReader(bundled)); err != nil {
+			compiledErr = fmt.Errorf("failed to register profile schema: %w", err)
+			return
+		}
+		compiledSchema, compiledErr = compiler.Compile("profile.schema.json")
+	})
+	if compiledErr != nil {
+		return compiledErr
+	}
+
+	// Convert to canonical JSON types (TOML int64 → float64 etc.)
+	jsonBytes, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Errorf("failed to serialize profile for validation: %w", err)
+	}
+	var jsonValue any
+	if err := json.Unmarshal(jsonBytes, &jsonValue); err != nil {
+		return fmt.Errorf("failed to deserialize profile for validation: %w", err)
+	}
+
+	if err := compiledSchema.Validate(jsonValue); err != nil {
+		return err
+	}
+	return nil
 }
 
 // bundle merges defs/*.json into the root schema's $defs and returns the

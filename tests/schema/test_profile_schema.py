@@ -365,6 +365,487 @@ def test_wrong_type_for_environment_value(validator):
 
 
 # ---------------------------------------------------------------------------
+# Edge cases: unknown keys in every nested section
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "profile",
+    [
+        {"network": {"typo": "x"}},
+        {"limits": {"cpu": {"typo": "x"}}},
+        {"limits": {"memory": {"typo": "x"}}},
+        {"limits": {"disk": {"typo": "x"}}},
+        {"limits": {"runtime": {"typo": "x"}}},
+        {"tool": {"typo": "x"}},
+        {"tool": {"claude": {"typo": "x"}}},
+        {"mounts": [{"host": "~/x", "container": "/x", "typo": True}]},
+        {"network": {"logging": {"typo": "x"}}},
+        {"paths": {"typo": "x"}},
+        {"incus": {"typo": "x"}},
+        {"git": {"typo": "x"}},
+        {"ssh": {"typo": "x"}},
+        {"security": {"typo": "x"}},
+        {"monitoring": {"typo": "x"}},
+        {"monitoring": {"nft": {"typo": "x"}}},
+        {"timezone": {"typo": "x"}},
+        {"shell": {"typo": "x"}},
+        {"container": {"build": {"typo": "x"}}},
+    ],
+)
+def test_unknown_key_in_nested_section_rejected(validator, profile):
+    """Unknown keys inside any nested section must be rejected."""
+    errors = list(validator.iter_errors(profile))
+    assert errors, f"Expected rejection for unknown key in: {profile}"
+
+
+# ---------------------------------------------------------------------------
+# Edge cases: wrong types for scalar fields
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "profile",
+    [
+        # Strings expected — wrong types supplied
+        {"inherits": 123},
+        {"context": True},
+        {"model": ["gpt-4"]},
+        {"container": {"image": 42}},
+        {"container": {"storage_pool": False}},
+        {"container": {"alias": 0}},
+        {"container": {"build": {"base": True}}},
+        {"container": {"build": {"script": 99}}},
+        {"tool": {"name": False}},
+        {"tool": {"binary": 0}},
+        {"tool": {"context_file": []}},
+        {"network": {"logging": {"path": 1}}},
+        {"paths": {"sessions_dir": True}},
+        {"paths": {"storage_dir": 0}},
+        {"paths": {"logs_dir": False}},
+        {"incus": {"project": 1}},
+        {"incus": {"group": True}},
+        {"incus": {"code_user": []}},
+        {"monitoring": {"nft": {"lima_host": 1}}},
+        {"timezone": {"name": 42}},
+        # Booleans expected — strings/ints supplied
+        {"container": {"persistent": "true"}},
+        {"container": {"persistent": 1}},
+        {"tool": {"auto_context": "yes"}},
+        {"tool": {"auto_context": 0}},
+        {"paths": {"preserve_workspace_path": "false"}},
+        {"git": {"writable_hooks": "no"}},
+        {"ssh": {"forward_agent": 1}},
+        {"security": {"disable_protection": "true"}},
+        {"security": {"host_immutable": "false"}},
+        {"monitoring": {"enabled": "yes"}},
+        {"monitoring": {"auto_pause_on_high": 1}},
+        {"monitoring": {"auto_kill_on_critical": "true"}},
+        {"monitoring": {"nft": {"enabled": "true"}}},
+        {"monitoring": {"nft": {"log_dns_queries": 0}}},
+        {"network": {"block_private_networks": "true"}},
+        {"network": {"block_metadata_endpoint": "no"}},
+        {"network": {"allow_local_network_access": 1}},
+        {"network": {"logging": {"enabled": "yes"}}},
+        {"limits": {"runtime": {"auto_stop": "true"}}},
+        {"limits": {"runtime": {"stop_graceful": 0}}},
+        {"shell": {"use_tmux": "yes"}},
+        {"mounts": [{"host": "~/x", "container": "/x", "readonly": "true"}]},
+        # Integers expected — strings/booleans supplied
+        {"limits": {"cpu": {"priority": "5"}}},
+        {"limits": {"cpu": {"priority": True}}},
+        {"limits": {"disk": {"priority": "3"}}},
+        {"limits": {"runtime": {"max_processes": "100"}}},
+        {"limits": {"runtime": {"max_processes": True}}},
+        {"monitoring": {"poll_interval_sec": "5"}},
+        {"monitoring": {"audit_log_retention_days": "30"}},
+        {"monitoring": {"nft": {"rate_limit_per_second": "100"}}},
+        {"monitoring": {"nft": {"dns_query_threshold": True}}},
+        {"incus": {"code_uid": "1000"}},
+        {"network": {"refresh_interval_minutes": "60"}},
+        # Arrays expected — wrong types supplied
+        {"forward_env": "SOME_VAR"},
+        {"forward_env": True},
+        {"mounts": {}},
+        {"network": {"allowed_domains": "github.com"}},
+        {"security": {"protected_paths": ".git/hooks"}},
+        {"security": {"additional_protected_paths": True}},
+        {"container": {"build": {"commands": "apt-get install foo"}}},
+        # Object expected — wrong types supplied
+        {"environment": ["KEY=VALUE"]},
+        {"container": "coi-rust"},
+        {"limits": "unlimited"},
+        {"tool": "claude"},
+        {"network": "open"},
+        {"paths": "/home/user/.coi"},
+        {"incus": "default"},
+        {"git": True},
+        {"ssh": 1},
+        {"security": "disabled"},
+        {"monitoring": False},
+        {"timezone": "UTC"},
+        {"shell": "bash"},
+        {"container": {"build": "build.sh"}},
+        {"network": {"logging": True}},
+        {"limits": {"cpu": "4"}},
+        {"limits": {"memory": "2GiB"}},
+        {"limits": {"disk": "fast"}},
+        {"limits": {"runtime": "2h"}},
+        {"tool": {"claude": "high"}},
+        {"monitoring": {"nft": "enabled"}},
+    ],
+)
+def test_wrong_type_rejected(validator, profile):
+    """Wrong-type values for any field must fail validation."""
+    errors = list(validator.iter_errors(profile))
+    assert errors, f"Expected type error for: {profile}"
+
+
+# ---------------------------------------------------------------------------
+# Edge cases: numeric boundary conditions
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("priority", [0, 1, 5, 10])
+def test_cpu_priority_valid_boundaries(validator, priority):
+    """CPU priority must accept values 0-10 inclusive."""
+    validator.validate({"limits": {"cpu": {"priority": priority}}})
+
+
+@pytest.mark.parametrize("priority", [-1, 11, 100, -100])
+def test_cpu_priority_invalid_boundaries(validator, priority):
+    """CPU priority outside 0-10 must be rejected."""
+    errors = list(validator.iter_errors({"limits": {"cpu": {"priority": priority}}}))
+    assert errors, f"Expected rejection for cpu.priority={priority}"
+
+
+@pytest.mark.parametrize("priority", [0, 1, 5, 10])
+def test_disk_priority_valid_boundaries(validator, priority):
+    """Disk priority must accept values 0-10 inclusive."""
+    validator.validate({"limits": {"disk": {"priority": priority}}})
+
+
+@pytest.mark.parametrize("priority", [-1, 11])
+def test_disk_priority_invalid_boundaries(validator, priority):
+    """Disk priority outside 0-10 must be rejected."""
+    errors = list(validator.iter_errors({"limits": {"disk": {"priority": priority}}}))
+    assert errors, f"Expected rejection for disk.priority={priority}"
+
+
+@pytest.mark.parametrize("count", [0, 1, 999])
+def test_max_processes_valid_values(validator, count):
+    """max_processes must accept 0 (unlimited) and any positive integer."""
+    validator.validate({"limits": {"runtime": {"max_processes": count}}})
+
+
+def test_max_processes_negative_rejected(validator):
+    """max_processes must reject negative values."""
+    errors = list(validator.iter_errors({"limits": {"runtime": {"max_processes": -1}}}))
+    assert errors, "Expected rejection for negative max_processes"
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("poll_interval_sec", 0),
+        ("poll_interval_sec", 1),
+        ("file_read_threshold_mb", 0.0),
+        ("file_read_threshold_mb", 0.001),
+        ("file_read_rate_mb_per_sec", 0.0),
+        ("audit_log_retention_days", 0),
+        ("audit_log_retention_days", 365),
+    ],
+)
+def test_monitoring_numeric_valid(validator, field, value):
+    """Non-negative monitoring numeric fields must accept 0 and positive values."""
+    validator.validate({"monitoring": {field: value}})
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("poll_interval_sec", -1),
+        ("file_read_threshold_mb", -0.1),
+        ("file_read_rate_mb_per_sec", -1.0),
+        ("audit_log_retention_days", -1),
+    ],
+)
+def test_monitoring_numeric_negative_rejected(validator, field, value):
+    """Negative monitoring numeric values must be rejected."""
+    errors = list(validator.iter_errors({"monitoring": {field: value}}))
+    assert errors, f"Expected rejection for monitoring.{field}={value}"
+
+
+@pytest.mark.parametrize("value", [0, 1, 100])
+def test_nft_rate_limit_valid(validator, value):
+    validator.validate({"monitoring": {"nft": {"rate_limit_per_second": value}}})
+
+
+def test_nft_rate_limit_negative_rejected(validator):
+    errors = list(validator.iter_errors({"monitoring": {"nft": {"rate_limit_per_second": -1}}}))
+    assert errors, "Expected rejection for negative nft.rate_limit_per_second"
+
+
+@pytest.mark.parametrize("value", [0, 1, 1000])
+def test_refresh_interval_valid(validator, value):
+    validator.validate({"network": {"refresh_interval_minutes": value}})
+
+
+def test_refresh_interval_negative_rejected(validator):
+    errors = list(validator.iter_errors({"network": {"refresh_interval_minutes": -1}}))
+    assert errors, "Expected rejection for negative refresh_interval_minutes"
+
+
+# ---------------------------------------------------------------------------
+# Edge cases: mount entry specifics
+# ---------------------------------------------------------------------------
+
+
+def test_mount_empty_host_rejected(validator):
+    """Mount host must not be an empty string (minLength: 1)."""
+    errors = list(validator.iter_errors({"mounts": [{"host": "", "container": "/data"}]}))
+    assert errors, "Expected rejection for empty mount host"
+
+
+def test_mount_empty_container_rejected(validator):
+    """Mount container path must not be an empty string (minLength: 1)."""
+    errors = list(validator.iter_errors({"mounts": [{"host": "~/data", "container": ""}]}))
+    assert errors, "Expected rejection for empty mount container path"
+
+
+def test_mount_both_paths_empty_rejected(validator):
+    """Both host and container empty must be rejected."""
+    errors = list(validator.iter_errors({"mounts": [{"host": "", "container": ""}]}))
+    assert errors, "Expected rejection for mount with both paths empty"
+
+
+def test_mount_no_fields_at_all_rejected(validator):
+    """A mount entry with no fields at all must be rejected (host+container required)."""
+    errors = list(validator.iter_errors({"mounts": [{}]}))
+    assert errors, "Expected rejection for completely empty mount entry"
+
+
+def test_mount_only_readonly_rejected(validator):
+    """A mount entry with only readonly set must be rejected (host+container required)."""
+    errors = list(validator.iter_errors({"mounts": [{"readonly": True}]}))
+    assert errors, "Expected rejection for mount with only readonly"
+
+
+def test_mounts_non_array_rejected(validator):
+    """mounts must be an array, not an object or string."""
+    for bad in [{"host": "~/x", "container": "/x"}, "~/x:/x", 42]:
+        errors = list(validator.iter_errors({"mounts": bad}))
+        assert errors, f"Expected rejection for mounts={bad!r}"
+
+
+def test_multiple_mounts_one_invalid(validator):
+    """A list of mounts where one entry is invalid must fail validation."""
+    errors = list(
+        validator.iter_errors(
+            {
+                "mounts": [
+                    {"host": "~/.cargo", "container": "/home/code/.cargo"},
+                    {"container": "/data"},  # missing host
+                ]
+            }
+        )
+    )
+    assert errors, "Expected rejection when one mount is missing host"
+
+
+# ---------------------------------------------------------------------------
+# Edge cases: array item type errors
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "field,bad_items",
+    [
+        ("forward_env", [1, 2, 3]),
+        ("forward_env", [True, "VAR"]),
+        ("forward_env", [None]),
+        ("network.allowed_domains", [1, "example.com"]),
+        ("network.allowed_domains", [None]),
+        ("security.protected_paths", [True]),
+        ("security.protected_paths", [42]),
+        ("security.additional_protected_paths", [{}]),
+        ("container.build.commands", [1, 2]),
+        ("container.build.commands", [None, "apt install"]),
+    ],
+)
+def test_array_item_wrong_type_rejected(validator, field, bad_items):
+    """Non-string items in string-array fields must be rejected."""
+    parts = field.split(".")
+    profile: dict = {}
+    node = profile
+    for part in parts[:-1]:
+        node[part] = {}
+        node = node[part]
+    node[parts[-1]] = bad_items
+    errors = list(validator.iter_errors(profile))
+    assert errors, f"Expected rejection for {field}={bad_items!r}"
+
+
+# ---------------------------------------------------------------------------
+# Edge cases: null values
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "profile",
+    [
+        {"inherits": None},
+        {"model": None},
+        {"context": None},
+        {"container": None},
+        {"limits": None},
+        {"tool": None},
+        {"network": None},
+        {"mounts": None},
+        {"environment": None},
+        {"forward_env": None},
+        {"git": None},
+        {"ssh": None},
+        {"security": None},
+        {"monitoring": None},
+        {"timezone": None},
+        {"shell": None},
+        {"container": {"image": None}},
+        {"container": {"persistent": None}},
+        {"network": {"mode": None}},
+        {"tool": {"permission_mode": None}},
+        {"tool": {"claude": {"effort_level": None}}},
+        {"timezone": {"mode": None}},
+        {"limits": {"memory": {"enforce": None}}},
+    ],
+)
+def test_null_values_rejected(validator, profile):
+    """Null values must be rejected for typed fields."""
+    errors = list(validator.iter_errors(profile))
+    assert errors, f"Expected rejection for null value in: {profile}"
+
+
+# ---------------------------------------------------------------------------
+# Edge cases: empty collections are valid
+# ---------------------------------------------------------------------------
+
+
+def test_empty_forward_env_valid(validator):
+    validator.validate({"forward_env": []})
+
+
+def test_empty_mounts_valid(validator):
+    validator.validate({"mounts": []})
+
+
+def test_empty_allowed_domains_valid(validator):
+    validator.validate({"network": {"allowed_domains": []}})
+
+
+def test_empty_protected_paths_valid(validator):
+    validator.validate({"security": {"protected_paths": []}})
+
+
+def test_empty_additional_protected_paths_valid(validator):
+    validator.validate({"security": {"additional_protected_paths": []}})
+
+
+def test_empty_build_commands_valid(validator):
+    validator.validate({"container": {"build": {"commands": []}}})
+
+
+def test_empty_environment_valid(validator):
+    validator.validate({"environment": {}})
+
+
+# ---------------------------------------------------------------------------
+# Edge cases: enum boundary — empty string is allowed where specified
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "profile",
+    [
+        {"network": {"mode": ""}},
+        {"tool": {"permission_mode": ""}},
+        {"tool": {"claude": {"effort_level": ""}}},
+        {"timezone": {"mode": ""}},
+        {"limits": {"memory": {"enforce": ""}}},
+    ],
+)
+def test_empty_string_enum_valid(validator, profile):
+    """Empty string must be accepted for enum fields that list '' as a valid value."""
+    validator.validate(profile)
+
+
+# ---------------------------------------------------------------------------
+# Edge cases: error path precision
+# ---------------------------------------------------------------------------
+
+
+def test_error_path_points_to_invalid_network_mode(validator):
+    """Validation error for an invalid network mode must reference network→mode."""
+    errors = list(validator.iter_errors({"network": {"mode": "deny-all"}}))
+    assert errors
+    paths = [list(e.absolute_path) for e in errors]
+    assert any(p == ["network", "mode"] for p in paths), (
+        f"Expected path ['network', 'mode'], got: {paths}"
+    )
+
+
+def test_error_path_points_to_invalid_effort_level(validator):
+    """Validation error for an invalid effort level must reference tool→claude→effort_level."""
+    errors = list(validator.iter_errors({"tool": {"claude": {"effort_level": "extreme"}}}))
+    assert errors
+    paths = [list(e.absolute_path) for e in errors]
+    assert any(p == ["tool", "claude", "effort_level"] for p in paths), (
+        f"Expected path ['tool', 'claude', 'effort_level'], got: {paths}"
+    )
+
+
+def test_error_path_points_to_invalid_mount_host(validator):
+    """Missing required 'host' in the second mount must reference mounts[1]."""
+    errors = list(
+        validator.iter_errors(
+            {
+                "mounts": [
+                    {"host": "~/valid", "container": "/valid"},
+                    {"container": "/no-host"},
+                ]
+            }
+        )
+    )
+    assert errors
+    # At least one error must reference index 1 in the mounts array
+    paths = [list(e.absolute_path) for e in errors]
+    assert any(len(p) >= 2 and p[0] == "mounts" and p[1] == 1 for p in paths), (
+        f"Expected error at mounts[1], got paths: {paths}"
+    )
+
+
+def test_error_path_points_to_wrong_type_in_environment(validator):
+    """Type error for an environment value must reference the specific key."""
+    errors = list(validator.iter_errors({"environment": {"PORT": 8080}}))
+    assert errors
+    paths = [list(e.absolute_path) for e in errors]
+    assert any("PORT" in p for p in paths), f"Expected error path containing 'PORT', got: {paths}"
+
+
+def test_multiple_errors_reported(validator):
+    """A profile with multiple violations must report all of them."""
+    errors = list(
+        validator.iter_errors(
+            {
+                "network": {"mode": "bad-mode"},
+                "tool": {"permission_mode": "unknown"},
+                "limits": {"cpu": {"priority": 99}},
+            }
+        )
+    )
+    assert len(errors) >= 3, f"Expected at least 3 errors, got {len(errors)}: {errors}"
+
+
+# ---------------------------------------------------------------------------
 # Schema command output stability tests
 # ---------------------------------------------------------------------------
 

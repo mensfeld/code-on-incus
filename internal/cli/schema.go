@@ -49,8 +49,11 @@ Examples:
   print('valid')
   " path/to/config.toml`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		b := coischema.GetProfileSchema()
-		_, err := fmt.Println(string(b))
+		b, err := coischema.GetProfileSchema()
+		if err != nil {
+			return fmt.Errorf("failed to build profile schema: %w", err)
+		}
+		_, err = fmt.Println(string(b))
 		return err
 	},
 }
