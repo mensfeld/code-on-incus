@@ -24,7 +24,7 @@ without importing a JSON Schema library.`,
 }
 
 type validateResult struct {
-	Valid  bool                       `json:"valid"`
+	Valid  bool                        `json:"valid"`
 	Errors []coischema.ValidationIssue `json:"errors"`
 }
 
