@@ -16,7 +16,10 @@ var schemaCmd = &cobra.Command{
 These schemas can be consumed by external tools (e.g. a web UI or editor
 plugin) to validate configuration files without duplicating COI's own
 validation logic.`,
-	// Skip config loading — schema output requires no local COI setup.
+	// Cobra walks up from the leaf command and stops at the first
+	// PersistentPreRunE it finds, so defining one here prevents
+	// rootCmd.PersistentPreRunE from running for this subtree.
+	// Schema output requires no local COI setup.
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		return nil
 	},

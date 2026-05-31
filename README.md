@@ -433,7 +433,7 @@ Profiles support inheritance (`inherits = "parent-name"`), context files for AI-
 
 ### Profile JSON Schema
 
-COI ships a [JSON Schema 2020-12](schema/profile.schema.json) document that describes every field accepted by a profile `config.toml`. External tools — such as a web UI or editor plugin — can consume it to validate profile data without duplicating COI's validation logic.
+COI ships a JSON Schema 2020-12 document that describes every field accepted by a profile `config.toml`. External tools — such as a web UI or editor plugin — can consume it to validate profile data without duplicating COI's validation logic. The self-contained schema (with all definitions bundled inline) is produced by `coi schema profile`; the source files live under [`schema/`](schema/) but are incomplete without the bundling step.
 
 ```bash
 # Print the schema

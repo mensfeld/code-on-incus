@@ -4,30 +4,16 @@ Integration tests for `coi schema profile`.
 Verifies that the command outputs a valid JSON Schema (2020-12) document
 and that the schema correctly accepts and rejects profile configurations.
 
-These tests use the `jsonschema` Python package to exercise the schema as
-an external consumer (e.g. a Rails web UI) would.
-
-jsonschema is installed automatically by the test setup if not present.
+These tests use the `jsonschema` Python package (declared in
+tests/support/requirements.txt) to exercise the schema as an external
+consumer (e.g. a Rails web UI) would.
 """
 
 import json
 import subprocess
-import sys
 
 import pytest
-
-# ---------------------------------------------------------------------------
-# Ensure jsonschema is available; skip gracefully if it can't be installed.
-# ---------------------------------------------------------------------------
-try:
-    from jsonschema import Draft202012Validator
-except ImportError:
-    subprocess.run(
-        [sys.executable, "-m", "pip", "install", "jsonschema", "-q"],
-        check=True,
-    )
-    from jsonschema import Draft202012Validator
-
+from jsonschema import Draft202012Validator
 
 # ---------------------------------------------------------------------------
 # Fixtures

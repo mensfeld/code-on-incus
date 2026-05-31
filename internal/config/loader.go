@@ -164,11 +164,12 @@ func loadProfileDirectories(cfg *Config, configDir string) error {
 		// Validate the raw TOML against the JSON Schema to catch unknown keys,
 		// wrong types, and invalid enum values with precise error paths.
 		var rawMap map[string]any
-		if _, err := toml.DecodeFile(profileConfigPath, &rawMap); err == nil {
-			if schemaErr := coischema.ValidateProfileMap(rawMap); schemaErr != nil {
-				return fmt.Errorf("profile %q at %s failed schema validation: %w",
-					profileName, profileConfigPath, schemaErr)
-			}
+		if _, err := toml.DecodeFile(profileConfigPath, &rawMap); err != nil {
+			return fmt.Errorf("failed to re-read profile %q for schema validation: %w", profileName, err)
+		}
+		if schemaErr := coischema.ValidateProfileMap(rawMap); schemaErr != nil {
+			return fmt.Errorf("profile %q at %s failed schema validation: %w",
+				profileName, profileConfigPath, schemaErr)
 		}
 
 		// Resolve paths relative to profile directory

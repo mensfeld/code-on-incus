@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/BurntSushi/toml"
 	coischema "github.com/mensfeld/code-on-incus/schema"
@@ -13,25 +14,16 @@ import (
 var validateCmd = &cobra.Command{
 	Use:   "validate",
 	Short: "Validate COI configuration files",
-	Long: `Validate COI configuration files and report any errors as JSON.
+	Long: `Validate COI configuration files and report any errors.
 
-Exit code 0 means the file is valid; exit code 1 means it is not.
-Output is always a JSON object so it can be consumed by scripts and web UIs
-without importing a JSON Schema library.`,
+Use --format json for machine-readable output (e.g. from a web UI or script).
+Exit code 0 = valid, 1 = invalid.`,
+	// Cobra stops at the first PersistentPreRunE it finds walking up from the
+	// leaf, so this prevents rootCmd.PersistentPreRunE (config loading) from
+	// running for the validate subtree.
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		return nil
 	},
-}
-
-type validateResult struct {
-	Valid  bool                        `json:"valid"`
-	Errors []coischema.ValidationIssue `json:"errors"`
-}
-
-func writeValidateResult(r validateResult) {
-	enc := json.NewEncoder(os.Stdout)
-	enc.SetIndent("", "  ")
-	_ = enc.Encode(r)
 }
 
 var validateProfileCmd = &cobra.Command{
@@ -39,51 +31,82 @@ var validateProfileCmd = &cobra.Command{
 	Short: "Validate a profile config.toml against the COI JSON Schema",
 	Long: `Validate a profile config.toml against the COI JSON Schema.
 
-Always outputs a JSON object with a "valid" boolean and an "errors" array.
-Each error has a "path" (JSON Pointer to the offending field) and a "message".
+Text output (default):
+  Profile is valid.
+  Profile validation failed:
+    /network/mode: value must be one of "open", "restricted", "allowlist"
+
+JSON output (--format json):
+  {"valid": true,  "errors": []}
+  {"valid": false, "errors": [{"path": "/network/mode", "message": "..."}]}
 
 Exit code 0 = valid, 1 = invalid.
 
 Examples:
-  # Check whether a profile is valid
   coi validate profile ~/.coi/profiles/myproject/config.toml
+  coi validate profile config.toml --format json | jq '.errors[]'
 
-  # Use from a shell script
-  if coi validate profile config.toml | jq -e '.valid'; then
-    echo "ok"
-  fi
-
-  # Collect error messages in Ruby
-  result = JSON.parse(` + "`" + `coi validate profile #{path}` + "`" + `)
-  result["errors"].each { |e| puts "#{e["path"]}: #{e["message"]}" }`,
+  # Ruby / Rails — shell out without needing a JSON Schema library:
+  result = JSON.parse(` + "`coi validate profile #{Shellwords.escape(path)} --format json`" + `)`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		format, _ := cmd.Flags().GetString("format")
+		if format != "text" && format != "json" {
+			return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid format %q: must be 'text' or 'json'", format)}
+		}
+
 		path := args[0]
 
 		var rawMap map[string]any
 		if _, err := toml.DecodeFile(path, &rawMap); err != nil {
-			writeValidateResult(validateResult{
-				Valid:  false,
-				Errors: []coischema.ValidationIssue{{Path: "", Message: fmt.Sprintf("failed to parse TOML: %s", err)}},
-			})
+			emitValidateOutput(format, false,
+				[]coischema.ValidationIssue{{Path: "", Message: fmt.Sprintf("failed to parse TOML: %s", err)}})
 			os.Exit(1)
 		}
 
 		schemaErr := coischema.ValidateProfileMap(rawMap)
 		if schemaErr == nil {
-			writeValidateResult(validateResult{Valid: true, Errors: []coischema.ValidationIssue{}})
+			emitValidateOutput(format, true, nil)
 			return nil
 		}
 
-		writeValidateResult(validateResult{
-			Valid:  false,
-			Errors: coischema.ExtractErrors(schemaErr),
-		})
+		emitValidateOutput(format, false, coischema.ExtractErrors(schemaErr))
 		os.Exit(1)
 		return nil
 	},
 }
 
+func emitValidateOutput(format string, valid bool, issues []coischema.ValidationIssue) {
+	if format == "json" {
+		errs := issues
+		if errs == nil {
+			errs = []coischema.ValidationIssue{}
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(struct {
+			Valid  bool                        `json:"valid"`
+			Errors []coischema.ValidationIssue `json:"errors"`
+		}{Valid: valid, Errors: errs})
+		return
+	}
+
+	// Text format
+	if valid {
+		fmt.Println("Profile is valid.")
+		return
+	}
+	fmt.Fprintln(os.Stderr, "Profile validation failed:")
+	for _, issue := range issues {
+		path := issue.Path
+		if path == "" {
+			path = "(root)"
+		}
+		fmt.Fprintf(os.Stderr, "  %s: %s\n", path, strings.TrimRight(issue.Message, "."))
+	}
+}
+
 func init() {
+	validateProfileCmd.Flags().String("format", "text", "Output format: text or json")
 	validateCmd.AddCommand(validateProfileCmd)
 }
