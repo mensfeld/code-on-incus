@@ -12,12 +12,11 @@ package schema
 
 import (
 	"bytes"
+	"embed"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
-
-	"embed"
 
 	"github.com/santhosh-tekuri/jsonschema/v5"
 )
@@ -51,7 +50,7 @@ func ProfileSchemaID() (string, error) {
 var (
 	compiledOnce   sync.Once
 	compiledSchema *jsonschema.Schema
-	compiledErr    error
+	errCompiled    error
 )
 
 // ValidateProfileMap validates a profile represented as a map (e.g. decoded
@@ -68,19 +67,19 @@ func ValidateProfileMap(data map[string]any) error {
 	compiledOnce.Do(func() {
 		bundled, err := bundle()
 		if err != nil {
-			compiledErr = fmt.Errorf("failed to bundle profile schema: %w", err)
+			errCompiled = fmt.Errorf("failed to bundle profile schema: %w", err)
 			return
 		}
 		compiler := jsonschema.NewCompiler()
 		compiler.Draft = jsonschema.Draft2020
 		if err := compiler.AddResource("profile.schema.json", bytes.NewReader(bundled)); err != nil {
-			compiledErr = fmt.Errorf("failed to register profile schema: %w", err)
+			errCompiled = fmt.Errorf("failed to register profile schema: %w", err)
 			return
 		}
-		compiledSchema, compiledErr = compiler.Compile("profile.schema.json")
+		compiledSchema, errCompiled = compiler.Compile("profile.schema.json")
 	})
-	if compiledErr != nil {
-		return compiledErr
+	if errCompiled != nil {
+		return errCompiled
 	}
 
 	// Convert to canonical JSON types (TOML int64 → float64 etc.)
