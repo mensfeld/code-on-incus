@@ -88,13 +88,13 @@ func outputHealthText(result *health.HealthResult) error {
 	// Group checks by category
 	categories := map[string][]string{
 		"SYSTEM":        {"os", "kernel_version", "timezone"},
-		"CRITICAL":      {"incus", "permissions", "image", "image_age", "privileged_profile", "security_posture"},
-		"NETWORKING":    {"network_bridge", "ip_forwarding", "nft", "bridge_forward_rules", "iptables_sudo", "docker_forward_policy"},
-		"MONITORING":    {"nftables", "systemd_journal", "libsystemd"},
+		"CRITICAL":      {"incus", "permissions", "image", "image_age", "privileged_profile", "security_posture", "immutable_capability"},
+		"NETWORKING":    {"network_bridge", "ip_forwarding", "nft", "bridge_forward_rules", "iptables_sudo", "docker_forward_policy", "ufw_conflict", "container_connectivity", "network_restriction"},
+		"MONITORING":    {"nftables", "systemd_journal", "libsystemd", "monitoring_configuration", "audit_log_directory", "cgroup_availability"},
 		"STORAGE":       {"coi_directory", "sessions_directory", "disk_space", "incus_storage_pools"},
 		"CONFIGURATION": {"config", "network_mode", "tool"},
 		"STATUS":        {"active_containers", "saved_sessions", "orphaned_resources"},
-		"OPTIONAL":      {"dns_resolution"},
+		"OPTIONAL":      {"dns_resolution", "process_monitoring"},
 	}
 
 	// Category order
@@ -229,9 +229,17 @@ func formatCheckName(name string) string {
 		"tool":                  "Tool",
 		"active_containers":     "Containers",
 		"saved_sessions":        "Saved sessions",
-		"dns_resolution":        "DNS resolution",
-		"orphaned_resources":    "Orphaned resources",
-		"security_posture":      "Security posture",
+		"dns_resolution":          "DNS resolution",
+		"orphaned_resources":      "Orphaned resources",
+		"security_posture":        "Security posture",
+		"immutable_capability":    "Immutable cap",
+		"ufw_conflict":            "UFW conflict",
+		"container_connectivity":  "Container connect",
+		"network_restriction":     "Network restriction",
+		"monitoring_configuration": "Monitoring config",
+		"audit_log_directory":     "Audit log dir",
+		"cgroup_availability":     "cgroup v2",
+		"process_monitoring":      "Process monitoring",
 	}
 
 	if displayName, ok := specialCases[name]; ok {
