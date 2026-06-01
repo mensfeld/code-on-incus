@@ -61,7 +61,7 @@ Examples:
 		if _, err := toml.DecodeFile(path, &rawMap); err != nil {
 			emitValidateOutput(format, false,
 				[]coischema.ValidationIssue{{Path: "", Message: fmt.Sprintf("failed to parse TOML: %s", err)}})
-			os.Exit(1)
+			return &ExitCodeError{Code: 1}
 		}
 
 		schemaErr := coischema.ValidateProfileMap(rawMap)
@@ -71,8 +71,7 @@ Examples:
 		}
 
 		emitValidateOutput(format, false, coischema.ExtractErrors(schemaErr))
-		os.Exit(1)
-		return nil
+		return &ExitCodeError{Code: 1}
 	},
 }
 
