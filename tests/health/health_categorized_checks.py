@@ -51,9 +51,7 @@ def test_immutable_capability_present(coi_binary):
 def test_immutable_capability_valid_status(coi_binary):
     """immutable_capability must have a valid status value."""
     check = run_health_json(coi_binary)["checks"]["immutable_capability"]
-    assert check["status"] in ("ok", "warning", "failed"), (
-        f"Unexpected status: {check['status']!r}"
-    )
+    assert check["status"] in ("ok", "warning", "failed"), f"Unexpected status: {check['status']!r}"
 
 
 def test_immutable_capability_in_critical_section(coi_binary):
@@ -72,9 +70,9 @@ def test_immutable_capability_not_in_other(coi_binary):
     if "OTHER:" not in output:
         return
     other_block = output.split("OTHER:")[1].split("\n\n")[0]
-    assert "immutable_capability" not in other_block.lower() and "Immutable cap" not in other_block, (
-        "immutable_capability ended up in OTHER section"
-    )
+    assert (
+        "immutable_capability" not in other_block.lower() and "Immutable cap" not in other_block
+    ), "immutable_capability ended up in OTHER section"
 
 
 # ---------------------------------------------------------------------------
@@ -124,9 +122,7 @@ def test_container_connectivity_present(coi_binary):
 def test_container_connectivity_valid_status(coi_binary):
     """container_connectivity must have a valid status."""
     check = run_health_json(coi_binary)["checks"]["container_connectivity"]
-    assert check["status"] in ("ok", "warning", "failed"), (
-        f"Unexpected status: {check['status']!r}"
-    )
+    assert check["status"] in ("ok", "warning", "failed"), f"Unexpected status: {check['status']!r}"
 
 
 def test_container_connectivity_in_networking_section(coi_binary):
@@ -155,9 +151,7 @@ def test_network_restriction_present(coi_binary):
 def test_network_restriction_valid_status(coi_binary):
     """network_restriction must have a valid status."""
     check = run_health_json(coi_binary)["checks"]["network_restriction"]
-    assert check["status"] in ("ok", "warning", "failed"), (
-        f"Unexpected status: {check['status']!r}"
-    )
+    assert check["status"] in ("ok", "warning", "failed"), f"Unexpected status: {check['status']!r}"
 
 
 def test_network_restriction_in_networking_section(coi_binary):
@@ -186,9 +180,7 @@ def test_monitoring_configuration_present(coi_binary):
 def test_monitoring_configuration_valid_status(coi_binary):
     """monitoring_configuration must have a valid status."""
     check = run_health_json(coi_binary)["checks"]["monitoring_configuration"]
-    assert check["status"] in ("ok", "warning", "failed"), (
-        f"Unexpected status: {check['status']!r}"
-    )
+    assert check["status"] in ("ok", "warning", "failed"), f"Unexpected status: {check['status']!r}"
 
 
 def test_monitoring_configuration_in_monitoring_section(coi_binary):
@@ -217,9 +209,7 @@ def test_audit_log_directory_present(coi_binary):
 def test_audit_log_directory_valid_status(coi_binary):
     """audit_log_directory must have a valid status."""
     check = run_health_json(coi_binary)["checks"]["audit_log_directory"]
-    assert check["status"] in ("ok", "warning", "failed"), (
-        f"Unexpected status: {check['status']!r}"
-    )
+    assert check["status"] in ("ok", "warning", "failed"), f"Unexpected status: {check['status']!r}"
 
 
 def test_audit_log_directory_in_monitoring_section(coi_binary):
@@ -248,9 +238,7 @@ def test_cgroup_availability_present(coi_binary):
 def test_cgroup_availability_valid_status(coi_binary):
     """cgroup_availability must have a valid status."""
     check = run_health_json(coi_binary)["checks"]["cgroup_availability"]
-    assert check["status"] in ("ok", "warning", "failed"), (
-        f"Unexpected status: {check['status']!r}"
-    )
+    assert check["status"] in ("ok", "warning", "failed"), f"Unexpected status: {check['status']!r}"
 
 
 def test_cgroup_availability_in_monitoring_section(coi_binary):
