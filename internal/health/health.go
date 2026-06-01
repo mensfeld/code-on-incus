@@ -71,6 +71,7 @@ func RunAllChecks(cfg *config.Config, verbose bool) *HealthResult {
 	checks["ip_forwarding"] = CheckIPForwarding()
 	checks["nft"] = CheckNft(cfg.Network.Mode)
 	checks["bridge_forward_rules"] = CheckBridgeForwardRules()
+	checks["iptables_sudo"] = CheckIptablesSudo()
 	checks["docker_forward_policy"] = CheckDockerForwardPolicy()
 	checks["ufw_conflict"] = CheckUFWConflict()
 
@@ -109,7 +110,6 @@ func RunAllChecks(cfg *config.Config, verbose bool) *HealthResult {
 	// Optional checks (only if verbose)
 	if verbose {
 		checks["dns_resolution"] = CheckDNS()
-		checks["passwordless_sudo"] = CheckPasswordlessSudo()
 		checks["process_monitoring"] = CheckProcessMonitoringCapability(cfg.Container.Image)
 	}
 
