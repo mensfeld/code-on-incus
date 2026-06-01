@@ -553,7 +553,8 @@ func CheckIptablesSudo() HealthCheck {
 		}
 	}
 
-	if _, err := exec.LookPath("iptables"); err != nil {
+	iptablesPath, err := exec.LookPath("iptables")
+	if err != nil {
 		return HealthCheck{
 			Name:    "iptables_sudo",
 			Status:  StatusOK,
@@ -561,11 +562,11 @@ func CheckIptablesSudo() HealthCheck {
 		}
 	}
 
-	if exec.Command("sudo", "-n", "iptables", "-L", "FORWARD", "-n").Run() != nil {
+	if exec.Command("sudo", "-n", iptablesPath, "-L", "FORWARD", "-n").Run() != nil {
 		return HealthCheck{
 			Name:    "iptables_sudo",
 			Status:  StatusWarning,
-			Message: `Passwordless sudo not configured for iptables — run: echo "$USER ALL=(ALL) NOPASSWD: /usr/sbin/iptables" | sudo tee /etc/sudoers.d/coi-iptables && sudo chmod 0440 /etc/sudoers.d/coi-iptables`,
+			Message: fmt.Sprintf(`Passwordless sudo not configured for iptables — run: echo "$USER ALL=(ALL) NOPASSWD: %s" | sudo tee /etc/sudoers.d/coi-iptables && sudo chmod 0440 /etc/sudoers.d/coi-iptables`, iptablesPath),
 		}
 	}
 
