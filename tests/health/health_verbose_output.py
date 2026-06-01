@@ -39,7 +39,6 @@ def test_health_verbose_output(coi_binary):
     # Verify DNS check appears
     assert "DNS resolution" in output, "Verbose should check DNS resolution"
 
-    # Verify passwordless sudo check appears
-    assert "Passwordless sudo" in output or "sudo" in output.lower(), (
-        "Verbose should check passwordless sudo"
-    )
+    # Verify iptables sudo check appears (passwordless_sudo was removed as
+    # it duplicated what CheckNft already verifies)
+    assert "iptables sudo" in output.lower(), "Verbose should show iptables sudo check"

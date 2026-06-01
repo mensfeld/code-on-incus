@@ -110,7 +110,6 @@ func RunAllChecks(cfg *config.Config, verbose bool) *HealthResult {
 	// Optional checks (only if verbose)
 	if verbose {
 		checks["dns_resolution"] = CheckDNS()
-		checks["passwordless_sudo"] = CheckPasswordlessSudo()
 		checks["process_monitoring"] = CheckProcessMonitoringCapability(cfg.Container.Image)
 	}
 

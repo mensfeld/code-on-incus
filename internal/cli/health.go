@@ -94,7 +94,7 @@ func outputHealthText(result *health.HealthResult) error {
 		"STORAGE":       {"coi_directory", "sessions_directory", "disk_space", "incus_storage_pools"},
 		"CONFIGURATION": {"config", "network_mode", "tool"},
 		"STATUS":        {"active_containers", "saved_sessions", "orphaned_resources"},
-		"OPTIONAL":      {"dns_resolution", "passwordless_sudo"},
+		"OPTIONAL":      {"dns_resolution"},
 	}
 
 	// Category order
@@ -230,7 +230,6 @@ func formatCheckName(name string) string {
 		"active_containers":     "Containers",
 		"saved_sessions":        "Saved sessions",
 		"dns_resolution":        "DNS resolution",
-		"passwordless_sudo":     "Passwordless sudo",
 		"orphaned_resources":    "Orphaned resources",
 		"security_posture":      "Security posture",
 	}

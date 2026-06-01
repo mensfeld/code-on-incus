@@ -1201,39 +1201,6 @@ func CheckNetworkRestriction(imageName string) HealthCheck {
 	}
 }
 
-// CheckPasswordlessSudo verifies passwordless sudo for nft
-func CheckPasswordlessSudo() HealthCheck {
-	if runtime.GOOS == "darwin" {
-		return HealthCheck{
-			Name:    "passwordless_sudo",
-			Status:  StatusOK,
-			Message: "macOS - not required",
-		}
-	}
-
-	if _, err := exec.LookPath("nft"); err != nil {
-		return HealthCheck{
-			Name:    "passwordless_sudo",
-			Status:  StatusWarning,
-			Message: "nft not installed — install with: sudo apt install nftables",
-		}
-	}
-
-	if exec.Command("sudo", "-n", "nft", "list", "tables").Run() != nil {
-		return HealthCheck{
-			Name:    "passwordless_sudo",
-			Status:  StatusWarning,
-			Message: "Passwordless sudo not configured for nft — run: echo \"$USER ALL=(ALL) NOPASSWD: /usr/sbin/nft\" | sudo tee /etc/sudoers.d/coi-nft && sudo chmod 0440 /etc/sudoers.d/coi-nft",
-		}
-	}
-
-	return HealthCheck{
-		Name:    "passwordless_sudo",
-		Status:  StatusOK,
-		Message: "Passwordless sudo configured for nft",
-	}
-}
-
 // CheckDiskSpace checks available disk space in ~/.coi directory
 func CheckDiskSpace() HealthCheck {
 	homeDir, err := os.UserHomeDir()
