@@ -241,7 +241,7 @@ func CheckPermissions() HealthCheck {
 	if container.UserInGroupFile(currentUser.Username, "incus-admin") {
 		return HealthCheck{
 			Name:    "permissions",
-			Status:  StatusFailed,
+			Status:  StatusWarning,
 			Message: fmt.Sprintf("User '%s' is in incus-admin group but session not reloaded — log out and back in, or run: newgrp incus-admin", currentUser.Username),
 		}
 	}
