@@ -4,6 +4,10 @@
 
 ### Improvements
 
+- [Feature] **`coi version --format json`** — `coi version` now accepts `--format json`, returning `{"version":"v...","url":"..."}` for scripts and tooling that need to parse the version without regex.
+
+- [Fix] **`coi validate profile` exit consistency** — The validate command was calling `os.Exit(1)` directly instead of returning `ExitCodeError`, bypassing cobra's error handling and any deferred cleanup. It now returns `ExitCodeError{Code: 1}` consistently with the rest of the CLI.
+
 - [Fix] **Health checks now appear in correct sections** — Eight health checks (`immutable_capability`, `ufw_conflict`, `container_connectivity`, `network_restriction`, `monitoring_configuration`, `audit_log_directory`, `cgroup_availability`, `process_monitoring`) were missing from the category map and display-name table in `coi health`, causing them to appear in an "OTHER" catch-all section with auto-generated names. They are now correctly placed: `immutable_capability` → CRITICAL; `ufw_conflict`, `container_connectivity`, `network_restriction` → NETWORKING; `monitoring_configuration`, `audit_log_directory`, `cgroup_availability` → MONITORING; `process_monitoring` → OPTIONAL (verbose only). The OTHER catch-all section remains in the code as a safety net for any future checks not yet assigned to a category.
 
 - [Feature] **`use_tmux` config option for `coi shell`** — Users who consistently prefer `--tmux=false` can now set `use_tmux = false` once in their `[shell]` section of `config.toml` instead of passing the flag on every invocation. The `--tmux` CLI flag still overrides the config when explicitly set. Resolves #399.

@@ -137,8 +137,21 @@ func init() {
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version information",
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
+		format, _ := cmd.Flags().GetString("format")
+		if format != "text" && format != "json" {
+			return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid format %q: must be 'text' or 'json'", format)}
+		}
+		if format == "json" {
+			fmt.Printf(`{"version":%q,"url":"https://github.com/mensfeld/code-on-incus"}`+"\n", "v"+Version)
+			return nil
+		}
 		fmt.Printf("code-on-incus (coi) v%s\n", Version)
 		fmt.Println("https://github.com/mensfeld/code-on-incus")
+		return nil
 	},
+}
+
+func init() {
+	versionCmd.Flags().String("format", "text", "Output format: text or json")
 }

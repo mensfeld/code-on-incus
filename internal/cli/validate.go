@@ -50,6 +50,7 @@ Examples:
   result = JSON.parse(` + "`coi validate profile #{Shellwords.escape(path)} --format json`" + `)`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		cmd.SilenceUsage = true
 		format, _ := cmd.Flags().GetString("format")
 		if format != "text" && format != "json" {
 			return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid format %q: must be 'text' or 'json'", format)}
@@ -61,7 +62,7 @@ Examples:
 		if _, err := toml.DecodeFile(path, &rawMap); err != nil {
 			emitValidateOutput(format, false,
 				[]coischema.ValidationIssue{{Path: "", Message: fmt.Sprintf("failed to parse TOML: %s", err)}})
-			os.Exit(1)
+			return &ExitCodeError{Code: 1}
 		}
 
 		schemaErr := coischema.ValidateProfileMap(rawMap)
@@ -71,8 +72,7 @@ Examples:
 		}
 
 		emitValidateOutput(format, false, coischema.ExtractErrors(schemaErr))
-		os.Exit(1)
-		return nil
+		return &ExitCodeError{Code: 1}
 	},
 }
 
