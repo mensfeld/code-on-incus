@@ -956,3 +956,27 @@ func TestCheckIptablesSudo_InRunAllChecks(t *testing.T) {
 		t.Error("RunAllChecks should include 'iptables_sudo' check")
 	}
 }
+
+func TestCheckBridgeForwardRules_NoFalsePositiveWhenForwardNotDrop(t *testing.T) {
+	// If FORWARD policy is not DROP, missing bridge rules are harmless —
+	// the check must not warn in that case.
+	if _, err := exec.LookPath("incus"); err != nil {
+		t.Skip("incus not found, skipping bridge check test")
+	}
+	if network.ForwardPolicyIsDrop() {
+		t.Skip("FORWARD policy is DROP on this host; skipping false-positive test")
+	}
+
+	result := CheckBridgeForwardRules()
+
+	if result.Name != "bridge_forward_rules" {
+		t.Errorf("Expected check name 'bridge_forward_rules', got %q", result.Name)
+	}
+
+	if result.Status != StatusOK {
+		t.Errorf("FORWARD policy is not DROP: expected StatusOK regardless of rule presence, got %s: %s",
+			result.Status, result.Message)
+	}
+
+	t.Logf("CheckBridgeForwardRules (FORWARD not DROP): status=%s message=%s", result.Status, result.Message)
+}

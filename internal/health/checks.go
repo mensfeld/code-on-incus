@@ -503,7 +503,9 @@ func CheckUFWConflict() HealthCheck {
 }
 
 // CheckBridgeForwardRules checks whether the Incus bridge has iptables FORWARD
-// ACCEPT rules so containers can get IPs via DHCP even when FORWARD policy is DROP.
+// ACCEPT rules in place when the FORWARD chain policy is DROP.  When the policy
+// is ACCEPT (the common case) no per-bridge rules are needed and the check
+// returns OK regardless of whether rules are present.
 func CheckBridgeForwardRules() HealthCheck {
 	hasRules, bridgeName, err := network.BridgeInTrustedZone()
 	if err != nil {
@@ -514,16 +516,19 @@ func CheckBridgeForwardRules() HealthCheck {
 		}
 	}
 
+	forwardDrop := network.ForwardPolicyIsDrop()
+
 	details := map[string]interface{}{
-		"bridge_name":       bridgeName,
-		"has_forward_rules": hasRules,
+		"bridge_name":         bridgeName,
+		"has_forward_rules":   hasRules,
+		"forward_policy_drop": forwardDrop,
 	}
 
-	if !hasRules {
+	if !hasRules && forwardDrop {
 		return HealthCheck{
 			Name:    "bridge_forward_rules",
 			Status:  StatusWarning,
-			Message: fmt.Sprintf("Bridge %s has no iptables FORWARD rules — containers may fail to get IPs if FORWARD policy is DROP (rules are added automatically on first container start)", bridgeName),
+			Message: fmt.Sprintf("Bridge %s has no iptables FORWARD rules and FORWARD policy is DROP — rules are added automatically on first container start", bridgeName),
 			Details: details,
 		}
 	}
@@ -531,7 +536,7 @@ func CheckBridgeForwardRules() HealthCheck {
 	return HealthCheck{
 		Name:    "bridge_forward_rules",
 		Status:  StatusOK,
-		Message: fmt.Sprintf("Bridge %s has iptables FORWARD rules", bridgeName),
+		Message: fmt.Sprintf("Bridge %s forwarding OK", bridgeName),
 		Details: details,
 	}
 }
