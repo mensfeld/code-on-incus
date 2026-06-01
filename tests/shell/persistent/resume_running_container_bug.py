@@ -24,7 +24,7 @@ See: https://github.com/mensfeld/code-on-incus/issues/413
 """
 
 import json
-import re
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -34,7 +34,6 @@ from pexpect import EOF, TIMEOUT
 from support.helpers import (
     calculate_container_name,
     get_container_list,
-    send_prompt,
     spawn_coi,
     wait_for_container_ready,
     wait_for_prompt,
@@ -45,34 +44,40 @@ from support.helpers import (
 SESSIONS_DIR = Path.home() / ".coi" / "sessions-claude"
 
 
-def _extract_session_id(raw_output: str) -> str | None:
-    """Parse session ID from 'Setting up session <id>...' line in coi output."""
-    match = re.search(r"Setting up session ([a-f0-9-]+)", raw_output)
-    if match:
-        return match.group(1)
-    return None
+def _find_session_for_container(container_name: str) -> str | None:
+    """Find the most recently modified session whose metadata matches the given container."""
+    if not SESSIONS_DIR.exists():
+        return None
+
+    candidates = []
+    for session_dir in SESSIONS_DIR.iterdir():
+        if not session_dir.is_dir():
+            continue
+        metadata_file = session_dir / "metadata.json"
+        if not metadata_file.exists():
+            continue
+        try:
+            with metadata_file.open() as f:
+                meta = json.load(f)
+            if meta.get("container_name") == container_name:
+                candidates.append((metadata_file.stat().st_mtime, session_dir.name))
+        except (json.JSONDecodeError, OSError):
+            continue
+
+    if not candidates:
+        return None
+
+    candidates.sort(reverse=True)
+    return candidates[0][1]
 
 
-def test_resume_running_container_succeeds(coi_binary, cleanup_containers, workspace_dir):
+def _start_persistent_session_and_exit(coi_binary, workspace_dir, env):
     """
-    Confirm bug #413: resuming a non-persistent session whose container is already
-    Running fails with "slot already in use".
+    Start a persistent coi shell, wait for the dummy to be ready, then exit immediately.
 
-    This test asserts the CORRECT behavior (resume should succeed). It currently
-    FAILS because the bug is present. It will PASS once the bug is fixed.
-
-    Simulation steps:
-    1. Start --persistent session → container stays Running after coi exits
-    2. Edit metadata: set persistent=false (simulates post-reboot non-persistent session)
-    3. coi shell --resume → currently errors, should succeed
+    Container stays Running after exit (persistent mode). Returns the child process
+    output for debugging.
     """
-    env = {"COI_USE_DUMMY": "1"}
-    container_name = calculate_container_name(workspace_dir, 1)
-
-    # ------------------------------------------------------------------ #
-    # Phase 1: Start persistent session, exit bash (container stays up)   #
-    # ------------------------------------------------------------------ #
-
     child = spawn_coi(
         coi_binary,
         ["shell", "--persistent"],
@@ -84,19 +89,13 @@ def test_resume_running_container_succeeds(coi_binary, cleanup_containers, works
     wait_for_container_ready(child, timeout=60)
     wait_for_prompt(child, timeout=90)
 
-    with with_live_screen(child) as monitor:
-        time.sleep(2)
-        send_prompt(child, "ping")
-        responded = wait_for_text_in_monitor(monitor, "ping-BACK", timeout=30)
-        assert responded, "Dummy should echo prompt back"
-
-    # Exit dummy → bash
+    # Exit the dummy tool (no interaction needed — metadata is already saved)
     child.send("exit")
     time.sleep(0.3)
     child.send("\x0d")
     time.sleep(3)
 
-    # Exit bash → coi process exits, container stays Running (persistent mode)
+    # Exit bash — coi exits, container stays Running (persistent mode)
     child.send("exit")
     time.sleep(0.3)
     child.send("\x0d")
@@ -118,16 +117,45 @@ def test_resume_running_container_succeeds(coi_binary, cleanup_containers, works
         child.close(force=True)
 
     time.sleep(2)
+    return raw_output
 
-    # Extract session ID from output
-    session_id = _extract_session_id(raw_output)
-    assert session_id is not None, f"Could not find session ID in output. Output:\n{raw_output}"
+
+def test_resume_running_container_succeeds(coi_binary, cleanup_containers, workspace_dir):
+    """
+    Confirm bug #413: resuming a non-persistent session whose container is already
+    Running fails with "slot already in use".
+
+    This test asserts the CORRECT behavior (resume should succeed). It currently
+    FAILS because the bug is present. It will PASS once the bug is fixed.
+
+    Simulation steps:
+    1. Start --persistent session → container stays Running after coi exits
+    2. Edit metadata: set persistent=false (simulates post-reboot non-persistent session)
+    3. coi shell --resume → currently errors, should succeed
+    """
+    env = {"COI_USE_DUMMY": "1"}
+    container_name = calculate_container_name(workspace_dir, 1)
+
+    # ------------------------------------------------------------------ #
+    # Phase 1: Start persistent session, exit immediately (no interaction) #
+    # Container stays Running; metadata is saved before dummy starts.      #
+    # ------------------------------------------------------------------ #
+
+    raw_output = _start_persistent_session_and_exit(coi_binary, workspace_dir, env)
 
     # Verify container is still Running (persistent exit keeps it up)
     containers = get_container_list()
     assert container_name in containers, (
         f"Container {container_name} should still be Running after persistent exit. "
         f"Containers: {containers}\nOutput:\n{raw_output}"
+    )
+
+    # Find session ID from sessions directory (metadata is saved by SaveMetadataEarly
+    # right after container setup, before the dummy tool starts).
+    session_id = _find_session_for_container(container_name)
+    assert session_id is not None, (
+        f"Could not find session metadata for container {container_name} in {SESSIONS_DIR}. "
+        f"Output:\n{raw_output}"
     )
 
     # ------------------------------------------------------------------ #
@@ -137,10 +165,6 @@ def test_resume_running_container_succeeds(coi_binary, cleanup_containers, works
     # ------------------------------------------------------------------ #
 
     metadata_path = SESSIONS_DIR / session_id / "metadata.json"
-    assert metadata_path.exists(), (
-        f"Session metadata not found at {metadata_path}. Session ID: {session_id}"
-    )
-
     with metadata_path.open() as f:
         metadata = json.load(f)
 
@@ -149,15 +173,9 @@ def test_resume_running_container_succeeds(coi_binary, cleanup_containers, works
     with metadata_path.open("w") as f:
         json.dump(metadata, f, indent=2)
 
-    assert metadata_path.read_text().__contains__('"persistent": false'), (
-        "Failed to set persistent=false in metadata"
-    )
-
     # ------------------------------------------------------------------ #
     # Phase 3: Resume — should reuse running container (currently fails)  #
     # ------------------------------------------------------------------ #
-
-    import os as _os
 
     # Run with --tmux=false so it runs directly (no tmux detach).
     # The bug causes an immediate error exit; a successful resume would start
@@ -169,7 +187,7 @@ def test_resume_running_container_succeeds(coi_binary, cleanup_containers, works
         stderr=subprocess.PIPE,
         text=True,
         cwd=workspace_dir,
-        env={**_os.environ, "COI_USE_DUMMY": "1"},
+        env={**os.environ, "COI_USE_DUMMY": "1"},
     )
 
     resume_stderr = ""
@@ -230,39 +248,8 @@ def test_workaround_attach_bash_works_when_container_running(
     env = {"COI_USE_DUMMY": "1"}
     container_name = calculate_container_name(workspace_dir, 1)
 
-    # Start persistent session and exit (container stays Running)
-    child = spawn_coi(
-        coi_binary,
-        ["shell", "--persistent"],
-        cwd=workspace_dir,
-        env=env,
-        timeout=120,
-    )
-
-    wait_for_container_ready(child, timeout=60)
-    wait_for_prompt(child, timeout=90)
-
-    # Exit dummy → bash → exit bash (container stays Running)
-    child.send("exit")
-    time.sleep(0.3)
-    child.send("\x0d")
-    time.sleep(3)
-
-    child.send("exit")
-    time.sleep(0.3)
-    child.send("\x0d")
-
-    try:
-        child.expect(EOF, timeout=30)
-    except TIMEOUT:
-        pass
-
-    try:
-        child.close(force=False)
-    except Exception:
-        child.close(force=True)
-
-    time.sleep(2)
+    # Start persistent session and exit immediately (container stays Running)
+    _start_persistent_session_and_exit(coi_binary, workspace_dir, env)
 
     # Verify container is still Running
     containers = get_container_list()
