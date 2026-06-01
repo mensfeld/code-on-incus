@@ -143,7 +143,7 @@ var versionCmd = &cobra.Command{
 			return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid format %q: must be 'text' or 'json'", format)}
 		}
 		if format == "json" {
-			fmt.Printf(`{"version":%q,"url":"https://github.com/mensfeld/code-on-incus"}`+"\n", Version)
+			fmt.Printf(`{"version":%q,"url":"https://github.com/mensfeld/code-on-incus"}`+"\n", "v"+Version)
 			return nil
 		}
 		fmt.Printf("code-on-incus (coi) v%s\n", Version)

@@ -50,6 +50,7 @@ Examples:
   result = JSON.parse(` + "`coi validate profile #{Shellwords.escape(path)} --format json`" + `)`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		cmd.SilenceUsage = true
 		format, _ := cmd.Flags().GetString("format")
 		if format != "text" && format != "json" {
 			return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid format %q: must be 'text' or 'json'", format)}
