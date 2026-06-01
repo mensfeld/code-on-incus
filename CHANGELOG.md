@@ -24,6 +24,10 @@
 
 - **Sudo ownership guidance in SANDBOX_CONTEXT.md** — The sandbox context file now instructs AI tools to fix workspace file ownership after `sudo` operations. Files created by `sudo` in the workspace are owned by root, blocking host-side access. The guidance tells tools to run `chown` after any sudo command that touches workspace files (#368).
 
+### Tests
+
+- **Integration tests for post-reboot container resume bug (#413)** — Added `tests/shell/persistent/resume_running_container_bug.py` with two tests that document issue #413 (resuming a non-persistent session whose container is already Running after Incus stateful restore fails with "slot already in use"). The tests simulate the post-reboot state without rebooting: start a persistent session (container stays Running after coi exits), then modify the session metadata to mark it as non-persistent. `test_resume_running_container_succeeds` asserts correct behavior (resume should reconnect to the running container) and currently fails — confirming the bug. `test_workaround_attach_bash_works_when_container_running` verifies the documented workaround (`coi attach <container> --bash`) works even before the fix.
+
 ### Bug Fixes
 
 - **Error messages no longer suggest removed CLI flags** — Several user-facing error messages referenced flags that were removed in an earlier refactor (replaced by config.toml settings). Following the suggestions produced `Error: unknown flag`. Fixed: (1) `--network=open` in `network/manager.go` and three `health/checks.go` messages — now points to `mode = "open"` in `[network]` section of `config.toml`; (2) `--monitor` in the monitoring health check — now points to `monitoring.enabled = true` in `[monitoring]` section. Wiki: corrected the opencode resume description which incorrectly implied `--resume` and `--continue` behave differently (they are identical aliases). Closes #398.

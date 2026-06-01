@@ -1,0 +1,315 @@
+"""
+Integration test for issue #413: coi shell --resume fails when container is already running.
+
+After a host reboot, Incus may restore containers to their pre-reboot Running state via
+stateful restore. When the user then runs `coi shell --resume`, it fails with:
+
+  failed to setup session: slot 1 is already in use by a running container
+  coi-<id>-1 - this should not happen (bug in slot allocation)
+
+This is because:
+1. The session was non-persistent (metadata.persistent = false)
+2. The container is Running (Incus restored it)
+3. setup.go line ~210: sees running container + not persistent → error
+
+Simulated without rebooting by:
+1. Starting a persistent session (container stays Running after coi exits)
+2. Modifying the saved session metadata to set persistent=false
+3. Attempting to resume
+
+Expected correct behavior: resume succeeds by reusing the running container.
+Current (buggy) behavior: resume fails with "slot already in use" error.
+
+See: https://github.com/mensfeld/code-on-incus/issues/413
+"""
+
+import json
+import re
+import subprocess
+import time
+from pathlib import Path
+
+from pexpect import EOF, TIMEOUT
+
+from support.helpers import (
+    calculate_container_name,
+    get_container_list,
+    send_prompt,
+    spawn_coi,
+    wait_for_container_ready,
+    wait_for_prompt,
+    wait_for_text_in_monitor,
+    with_live_screen,
+)
+
+SESSIONS_DIR = Path.home() / ".coi" / "sessions-claude"
+
+
+def _extract_session_id(raw_output: str) -> str | None:
+    """Parse session ID from 'Setting up session <id>...' line in coi output."""
+    match = re.search(r"Setting up session ([a-f0-9-]+)", raw_output)
+    if match:
+        return match.group(1)
+    return None
+
+
+def test_resume_running_container_succeeds(coi_binary, cleanup_containers, workspace_dir):
+    """
+    Confirm bug #413: resuming a non-persistent session whose container is already
+    Running fails with "slot already in use".
+
+    This test asserts the CORRECT behavior (resume should succeed). It currently
+    FAILS because the bug is present. It will PASS once the bug is fixed.
+
+    Simulation steps:
+    1. Start --persistent session → container stays Running after coi exits
+    2. Edit metadata: set persistent=false (simulates post-reboot non-persistent session)
+    3. coi shell --resume → currently errors, should succeed
+    """
+    env = {"COI_USE_DUMMY": "1"}
+    container_name = calculate_container_name(workspace_dir, 1)
+
+    # ------------------------------------------------------------------ #
+    # Phase 1: Start persistent session, exit bash (container stays up)   #
+    # ------------------------------------------------------------------ #
+
+    child = spawn_coi(
+        coi_binary,
+        ["shell", "--persistent"],
+        cwd=workspace_dir,
+        env=env,
+        timeout=120,
+    )
+
+    wait_for_container_ready(child, timeout=60)
+    wait_for_prompt(child, timeout=90)
+
+    with with_live_screen(child) as monitor:
+        time.sleep(2)
+        send_prompt(child, "ping")
+        responded = wait_for_text_in_monitor(monitor, "ping-BACK", timeout=30)
+        assert responded, "Dummy should echo prompt back"
+
+    # Exit dummy → bash
+    child.send("exit")
+    time.sleep(0.3)
+    child.send("\x0d")
+    time.sleep(3)
+
+    # Exit bash → coi process exits, container stays Running (persistent mode)
+    child.send("exit")
+    time.sleep(0.3)
+    child.send("\x0d")
+
+    try:
+        child.expect(EOF, timeout=30)
+    except TIMEOUT:
+        pass
+
+    raw_output = ""
+    if hasattr(child.logfile_read, "get_raw_output"):
+        raw_output = child.logfile_read.get_raw_output()
+    elif hasattr(child.logfile_read, "get_output"):
+        raw_output = child.logfile_read.get_output()
+
+    try:
+        child.close(force=False)
+    except Exception:
+        child.close(force=True)
+
+    time.sleep(2)
+
+    # Extract session ID from output
+    session_id = _extract_session_id(raw_output)
+    assert session_id is not None, f"Could not find session ID in output. Output:\n{raw_output}"
+
+    # Verify container is still Running (persistent exit keeps it up)
+    containers = get_container_list()
+    assert container_name in containers, (
+        f"Container {container_name} should still be Running after persistent exit. "
+        f"Containers: {containers}\nOutput:\n{raw_output}"
+    )
+
+    # ------------------------------------------------------------------ #
+    # Phase 2: Simulate post-reboot state                                 #
+    # Modify metadata: persistent=false (Incus restored non-persistent    #
+    # container after reboot)                                             #
+    # ------------------------------------------------------------------ #
+
+    metadata_path = SESSIONS_DIR / session_id / "metadata.json"
+    assert metadata_path.exists(), (
+        f"Session metadata not found at {metadata_path}. Session ID: {session_id}"
+    )
+
+    with metadata_path.open() as f:
+        metadata = json.load(f)
+
+    metadata["persistent"] = False
+
+    with metadata_path.open("w") as f:
+        json.dump(metadata, f, indent=2)
+
+    assert metadata_path.read_text().__contains__('"persistent": false'), (
+        "Failed to set persistent=false in metadata"
+    )
+
+    # ------------------------------------------------------------------ #
+    # Phase 3: Resume — should reuse running container (currently fails)  #
+    # ------------------------------------------------------------------ #
+
+    import os as _os
+
+    # Run with --tmux=false so it runs directly (no tmux detach).
+    # The bug causes an immediate error exit; a successful resume would start
+    # an interactive session that we'd then kill via timeout.
+    proc = subprocess.Popen(
+        [coi_binary, "shell", "--resume", session_id, "--tmux=false"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=workspace_dir,
+        env={**_os.environ, "COI_USE_DUMMY": "1"},
+    )
+
+    resume_stderr = ""
+    resume_returncode = None
+    timed_out = False
+
+    try:
+        # Send "exit\n" after a brief delay to allow setup to proceed.
+        # If the bug is present, the process exits before reading stdin.
+        # If setup succeeds, "exit\n" tells the dummy to quit cleanly.
+        _stdout, resume_stderr = proc.communicate(input="exit\n", timeout=20)
+        resume_returncode = proc.returncode
+    except subprocess.TimeoutExpired:
+        # Timeout means the session started and is waiting for interactive input
+        # (no immediate error occurred). This is the "success" path when bug is fixed.
+        proc.kill()
+        proc.wait()
+        timed_out = True
+
+    if not timed_out:
+        # Process exited — check it wasn't the slot conflict bug
+        has_slot_conflict = (
+            "slot" in resume_stderr.lower() and "already in use" in resume_stderr.lower()
+        )
+        assert not has_slot_conflict, (
+            f"Bug #413 confirmed: resume failed with slot conflict error.\n"
+            f"Stderr: {resume_stderr}\n"
+            f"This should NOT happen — coi should reuse the running container.\n"
+            f"See: https://github.com/mensfeld/code-on-incus/issues/413"
+        )
+        assert resume_returncode == 0, (
+            f"Expected coi shell --resume to succeed (exit 0), got exit {resume_returncode}.\n"
+            f"Stderr: {resume_stderr}"
+        )
+    # else: timed_out = True means setup succeeded (no immediate error) — test passes
+
+    # ------------------------------------------------------------------ #
+    # Cleanup                                                             #
+    # ------------------------------------------------------------------ #
+
+    subprocess.run(
+        [coi_binary, "container", "delete", container_name, "--force"],
+        capture_output=True,
+        timeout=30,
+        check=False,
+    )
+
+
+def test_workaround_attach_bash_works_when_container_running(
+    coi_binary, cleanup_containers, workspace_dir
+):
+    """
+    Verify the workaround for bug #413: `coi attach <container> --bash` works
+    when the container is already Running and --resume fails.
+
+    This test should PASS even before the bug fix (workaround is functional).
+    """
+    env = {"COI_USE_DUMMY": "1"}
+    container_name = calculate_container_name(workspace_dir, 1)
+
+    # Start persistent session and exit (container stays Running)
+    child = spawn_coi(
+        coi_binary,
+        ["shell", "--persistent"],
+        cwd=workspace_dir,
+        env=env,
+        timeout=120,
+    )
+
+    wait_for_container_ready(child, timeout=60)
+    wait_for_prompt(child, timeout=90)
+
+    # Exit dummy → bash → exit bash (container stays Running)
+    child.send("exit")
+    time.sleep(0.3)
+    child.send("\x0d")
+    time.sleep(3)
+
+    child.send("exit")
+    time.sleep(0.3)
+    child.send("\x0d")
+
+    try:
+        child.expect(EOF, timeout=30)
+    except TIMEOUT:
+        pass
+
+    try:
+        child.close(force=False)
+    except Exception:
+        child.close(force=True)
+
+    time.sleep(2)
+
+    # Verify container is still Running
+    containers = get_container_list()
+    assert container_name in containers, (
+        f"Container {container_name} should still be Running. Containers: {containers}"
+    )
+
+    # Workaround: coi attach --bash
+    child2 = spawn_coi(
+        coi_binary,
+        ["attach", container_name, "--bash"],
+        cwd=workspace_dir,
+        env=env,
+        timeout=30,
+    )
+
+    time.sleep(3)
+
+    with with_live_screen(child2) as monitor:
+        child2.send("echo WORKAROUND_OK_12345")
+        time.sleep(0.3)
+        child2.send("\x0d")
+        time.sleep(2)
+        workaround_works = wait_for_text_in_monitor(monitor, "WORKAROUND_OK_12345", timeout=15)
+
+    assert workaround_works, (
+        "Workaround 'coi attach --bash' should work when container is already Running"
+    )
+
+    child2.send("exit")
+    time.sleep(0.3)
+    child2.send("\x0d")
+
+    try:
+        child2.expect(EOF, timeout=10)
+    except TIMEOUT:
+        pass
+
+    try:
+        child2.close(force=False)
+    except Exception:
+        child2.close(force=True)
+
+    # Cleanup
+    subprocess.run(
+        [coi_binary, "container", "delete", container_name, "--force"],
+        capture_output=True,
+        timeout=30,
+        check=False,
+    )
