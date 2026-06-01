@@ -2,6 +2,7 @@ package health
 
 import (
 	"os/exec"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -892,4 +893,66 @@ func TestCheckProcessMonitoringCapability(t *testing.T) {
 
 	t.Logf("Process monitoring capability check: %s (status: %s)",
 		result.Message, result.Status)
+}
+
+func TestCheckIptablesSudo(t *testing.T) {
+	result := CheckIptablesSudo()
+
+	if result.Name != "iptables_sudo" {
+		t.Errorf("Expected check name 'iptables_sudo', got %q", result.Name)
+	}
+
+	// Never fails — only OK or Warning
+	if result.Status != StatusOK && result.Status != StatusWarning {
+		t.Errorf("Expected StatusOK or StatusWarning, got %s: %s", result.Status, result.Message)
+	}
+
+	// On macOS the check always returns OK
+	if runtime.GOOS == "darwin" {
+		if result.Status != StatusOK {
+			t.Errorf("macOS: expected StatusOK, got %s", result.Status)
+		}
+		return
+	}
+
+	// If iptables is not installed we expect OK with a clear message
+	if _, err := exec.LookPath("iptables"); err != nil {
+		if result.Status != StatusOK {
+			t.Errorf("iptables not installed: expected StatusOK, got %s", result.Status)
+		}
+		return
+	}
+
+	// iptables is installed — status depends on whether sudo is configured
+	sudoWorks := exec.Command("sudo", "-n", "iptables", "-L", "FORWARD", "-n").Run() == nil
+	if sudoWorks {
+		if result.Status != StatusOK {
+			t.Errorf("sudo iptables works: expected StatusOK, got %s: %s", result.Status, result.Message)
+		}
+		if !strings.Contains(result.Message, "configured") {
+			t.Errorf("OK message should mention 'configured', got: %q", result.Message)
+		}
+	} else {
+		if result.Status != StatusWarning {
+			t.Errorf("sudo iptables fails: expected StatusWarning, got %s: %s", result.Status, result.Message)
+		}
+		// Warning message must include the fix command
+		if !strings.Contains(result.Message, "sudoers.d") {
+			t.Errorf("Warning message should include sudoers.d fix path, got: %q", result.Message)
+		}
+		if !strings.Contains(result.Message, "iptables") {
+			t.Errorf("Warning message should reference iptables, got: %q", result.Message)
+		}
+	}
+
+	t.Logf("CheckIptablesSudo: status=%s message=%s", result.Status, result.Message)
+}
+
+func TestCheckIptablesSudo_InRunAllChecks(t *testing.T) {
+	cfg := config.GetDefaultConfig()
+	result := RunAllChecks(cfg, false)
+
+	if _, ok := result.Checks["iptables_sudo"]; !ok {
+		t.Error("RunAllChecks should include 'iptables_sudo' check")
+	}
 }

@@ -536,6 +536,41 @@ func CheckBridgeForwardRules() HealthCheck {
 	}
 }
 
+// CheckIptablesSudo verifies passwordless sudo for iptables, which COI uses
+// for bridge FORWARD rule inspection and management regardless of whether nft
+// is also available.
+func CheckIptablesSudo() HealthCheck {
+	if runtime.GOOS == "darwin" {
+		return HealthCheck{
+			Name:    "iptables_sudo",
+			Status:  StatusOK,
+			Message: "macOS — not required",
+		}
+	}
+
+	if _, err := exec.LookPath("iptables"); err != nil {
+		return HealthCheck{
+			Name:    "iptables_sudo",
+			Status:  StatusOK,
+			Message: "iptables not installed — not required",
+		}
+	}
+
+	if exec.Command("sudo", "-n", "iptables", "-L", "FORWARD", "-n").Run() != nil {
+		return HealthCheck{
+			Name:    "iptables_sudo",
+			Status:  StatusWarning,
+			Message: `Passwordless sudo not configured for iptables — run: echo "$USER ALL=(ALL) NOPASSWD: /usr/sbin/iptables" | sudo tee /etc/sudoers.d/coi-iptables && sudo chmod 0440 /etc/sudoers.d/coi-iptables`,
+		}
+	}
+
+	return HealthCheck{
+		Name:    "iptables_sudo",
+		Status:  StatusOK,
+		Message: "Passwordless sudo configured for iptables",
+	}
+}
+
 // CheckCOIDirectory verifies the COI directory exists and is writable
 func CheckCOIDirectory() HealthCheck {
 	homeDir, err := os.UserHomeDir()

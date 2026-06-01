@@ -126,8 +126,8 @@ jobs:
             path: tests/list tests/attach tests/tmux tests/kill tests/run tests/persist tests/build
             description: "Core commands: list/attach/tmux/kill/run/persist/build (83 tests)"
           - name: misc
-            path: tests/clean tests/cli tests/completion tests/config tests/docker tests/errors tests/help tests/image tests/info tests/mount tests/shutdown tests/version tests/meta tests/main_help_flag.py tests/main_help_shorthand.py
-            description: "Misc commands: clean/cli/completion/config/docker/errors/help/image/info/mount/shutdown/version/meta/main help"
+            path: tests/clean tests/cli tests/completion tests/config tests/docker tests/errors tests/health tests/help tests/image tests/info tests/mount tests/shutdown tests/version tests/meta tests/main_help_flag.py tests/main_help_shorthand.py
+            description: "Misc commands: clean/cli/completion/config/docker/errors/health/help/image/info/mount/shutdown/version/meta/main help"
           - name: monitoring-nft
             path: tests/integration/test_nft_monitoring.py
             description: "NFT network monitoring tests (17 tests)"
