@@ -344,7 +344,9 @@ mode = "bogus"
 
     assert result.returncode != 0, f"Should fail with invalid network mode. stdout: {result.stdout}"
     combined = result.stdout + result.stderr
-    assert "network mode" in combined.lower(), (
+    # Schema validation reports the path as /network/mode; older Go validation
+    # used the phrase "network mode" — accept either form.
+    assert "/network/mode" in combined or "network mode" in combined.lower(), (
         f"Error should mention invalid network mode. Got:\n{combined}"
     )
 

@@ -1,0 +1,24 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "Time-based and process count limits",
+  "properties": {
+    "max_duration": {
+      "type": "string",
+      "description": "Maximum session duration, e.g. \"2h\", \"30m\", \"1h30m\". Empty means unlimited."
+    },
+    "max_processes": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Maximum number of processes (0 means unlimited)"
+    },
+    "auto_stop": {
+      "type": "boolean",
+      "description": "Automatically stop the container when the duration limit is reached"
+    },
+    "stop_graceful": {
+      "type": "boolean",
+      "description": "Use graceful shutdown instead of force-kill when stopping"
+    }
+  }
+}

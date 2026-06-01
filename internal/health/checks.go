@@ -241,7 +241,7 @@ func CheckPermissions() HealthCheck {
 	if container.UserInGroupFile(currentUser.Username, "incus-admin") {
 		return HealthCheck{
 			Name:    "permissions",
-			Status:  StatusFailed,
+			Status:  StatusWarning,
 			Message: fmt.Sprintf("User '%s' is in incus-admin group but session not reloaded — log out and back in, or run: newgrp incus-admin", currentUser.Username),
 		}
 	}
@@ -503,7 +503,9 @@ func CheckUFWConflict() HealthCheck {
 }
 
 // CheckBridgeForwardRules checks whether the Incus bridge has iptables FORWARD
-// ACCEPT rules so containers can get IPs via DHCP even when FORWARD policy is DROP.
+// ACCEPT rules in place when the FORWARD chain policy is DROP.  When the policy
+// is ACCEPT (the common case) no per-bridge rules are needed and the check
+// returns OK regardless of whether rules are present.
 func CheckBridgeForwardRules() HealthCheck {
 	hasRules, bridgeName, err := network.BridgeInTrustedZone()
 	if err != nil {
@@ -514,16 +516,19 @@ func CheckBridgeForwardRules() HealthCheck {
 		}
 	}
 
+	forwardDrop := network.ForwardPolicyIsDrop()
+
 	details := map[string]interface{}{
-		"bridge_name":       bridgeName,
-		"has_forward_rules": hasRules,
+		"bridge_name":         bridgeName,
+		"has_forward_rules":   hasRules,
+		"forward_policy_drop": forwardDrop,
 	}
 
-	if !hasRules {
+	if !hasRules && forwardDrop {
 		return HealthCheck{
 			Name:    "bridge_forward_rules",
 			Status:  StatusWarning,
-			Message: fmt.Sprintf("Bridge %s has no iptables FORWARD rules — containers may fail to get IPs if FORWARD policy is DROP (rules are added automatically on first container start)", bridgeName),
+			Message: fmt.Sprintf("Bridge %s has no iptables FORWARD rules and FORWARD policy is DROP — rules are added automatically on first container start", bridgeName),
 			Details: details,
 		}
 	}
@@ -531,8 +536,44 @@ func CheckBridgeForwardRules() HealthCheck {
 	return HealthCheck{
 		Name:    "bridge_forward_rules",
 		Status:  StatusOK,
-		Message: fmt.Sprintf("Bridge %s has iptables FORWARD rules", bridgeName),
+		Message: fmt.Sprintf("Bridge %s forwarding OK", bridgeName),
 		Details: details,
+	}
+}
+
+// CheckIptablesSudo verifies passwordless sudo for iptables, which COI uses
+// for bridge FORWARD rule inspection and management regardless of whether nft
+// is also available.
+func CheckIptablesSudo() HealthCheck {
+	if runtime.GOOS == "darwin" {
+		return HealthCheck{
+			Name:    "iptables_sudo",
+			Status:  StatusOK,
+			Message: "macOS — not required",
+		}
+	}
+
+	iptablesPath, err := exec.LookPath("iptables")
+	if err != nil {
+		return HealthCheck{
+			Name:    "iptables_sudo",
+			Status:  StatusOK,
+			Message: "iptables not installed — not required",
+		}
+	}
+
+	if exec.Command("sudo", "-n", iptablesPath, "-L", "FORWARD", "-n").Run() != nil {
+		return HealthCheck{
+			Name:    "iptables_sudo",
+			Status:  StatusWarning,
+			Message: fmt.Sprintf(`Passwordless sudo not configured for iptables — run: echo "$USER ALL=(ALL) NOPASSWD: %s" | sudo tee /etc/sudoers.d/coi-iptables && sudo chmod 0440 /etc/sudoers.d/coi-iptables`, iptablesPath),
+		}
+	}
+
+	return HealthCheck{
+		Name:    "iptables_sudo",
+		Status:  StatusOK,
+		Message: "Passwordless sudo configured for iptables",
 	}
 }
 
@@ -1158,39 +1199,6 @@ func CheckNetworkRestriction(imageName string) HealthCheck {
 		Status:  StatusWarning,
 		Message: "Restricted mode partially working",
 		Details: details,
-	}
-}
-
-// CheckPasswordlessSudo verifies passwordless sudo for nft
-func CheckPasswordlessSudo() HealthCheck {
-	if runtime.GOOS == "darwin" {
-		return HealthCheck{
-			Name:    "passwordless_sudo",
-			Status:  StatusOK,
-			Message: "macOS - not required",
-		}
-	}
-
-	if _, err := exec.LookPath("nft"); err != nil {
-		return HealthCheck{
-			Name:    "passwordless_sudo",
-			Status:  StatusWarning,
-			Message: "nft not installed — install with: sudo apt install nftables",
-		}
-	}
-
-	if exec.Command("sudo", "-n", "nft", "list", "tables").Run() != nil {
-		return HealthCheck{
-			Name:    "passwordless_sudo",
-			Status:  StatusWarning,
-			Message: "Passwordless sudo not configured for nft — run: echo \"$USER ALL=(ALL) NOPASSWD: /usr/sbin/nft\" | sudo tee /etc/sudoers.d/coi-nft && sudo chmod 0440 /etc/sudoers.d/coi-nft",
-		}
-	}
-
-	return HealthCheck{
-		Name:    "passwordless_sudo",
-		Status:  StatusOK,
-		Message: "Passwordless sudo configured for nft",
 	}
 }
 

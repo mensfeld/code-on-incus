@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "SSH forwarding settings",
+  "properties": {
+    "forward_agent": {
+      "type": "boolean",
+      "description": "Forward the host SSH agent into the container (default: false)"
+    }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "Disk I/O and size limits",
+  "properties": {
+    "read": {
+      "type": "string",
+      "description": "Read throughput limit, e.g. \"10MiB/s\" or \"1000iops\". Empty means unlimited."
+    },
+    "write": {
+      "type": "string",
+      "description": "Write throughput limit, e.g. \"5MiB/s\" or \"500iops\". Empty means unlimited."
+    },
+    "max": {
+      "type": "string",
+      "description": "Combined read+write throughput limit"
+    },
+    "priority": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10,
+      "description": "Disk I/O scheduling priority (0–10)"
+    },
+    "tmpfs_size": {
+      "type": "string",
+      "description": "Size of /tmp tmpfs, e.g. \"2GiB\" (default: \"2GiB\")"
+    }
+  }
+}

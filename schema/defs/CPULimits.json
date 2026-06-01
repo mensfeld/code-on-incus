@@ -1,0 +1,21 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "CPU resource limits",
+  "properties": {
+    "count": {
+      "type": "string",
+      "description": "Number of CPUs or pinned range, e.g. \"2\" or \"0-3\". Empty means unlimited."
+    },
+    "allowance": {
+      "type": "string",
+      "description": "CPU time allowance as a percentage or time slice, e.g. \"50%\" or \"25ms/100ms\""
+    },
+    "priority": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10,
+      "description": "CPU scheduling priority (0–10)"
+    }
+  }
+}

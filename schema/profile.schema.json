@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/mensfeld/code-on-incus/schema/profile.schema.json",
+  "title": "COI Profile Configuration",
+  "description": "Schema for Code on Incus (COI) profile config.toml files",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "inherits": {
+      "type": "string",
+      "description": "Parent profile name for inheritance"
+    },
+    "context": {
+      "type": "string",
+      "description": "Path to context .md file (resolved relative to profile directory)"
+    },
+    "model": {
+      "type": "string",
+      "description": "AI model name to use in this profile"
+    },
+    "forward_env": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Host environment variable names to forward into the container"
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Environment variables to set inside the container. Empty string value clears an inherited key."
+    },
+    "container": { "$ref": "#/$defs/ContainerConfig" },
+    "limits":    { "$ref": "#/$defs/LimitsConfig" },
+    "tool":      { "$ref": "#/$defs/ToolConfig" },
+    "mounts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/MountEntry" },
+      "description": "Additional host directories to mount into the container"
+    },
+    "network":    { "$ref": "#/$defs/NetworkConfig" },
+    "paths":      { "$ref": "#/$defs/PathsConfig" },
+    "incus":      { "$ref": "#/$defs/IncusConfig" },
+    "git":        { "$ref": "#/$defs/GitConfig" },
+    "ssh":        { "$ref": "#/$defs/SSHConfig" },
+    "security":   { "$ref": "#/$defs/SecurityConfig" },
+    "monitoring": { "$ref": "#/$defs/MonitoringConfig" },
+    "timezone":   { "$ref": "#/$defs/TimezoneConfig" },
+    "shell":      { "$ref": "#/$defs/ShellConfig" }
+  }
+}

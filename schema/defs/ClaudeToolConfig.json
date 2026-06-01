@@ -1,0 +1,12 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "Claude Code-specific settings",
+  "properties": {
+    "effort_level": {
+      "type": "string",
+      "enum": ["low", "medium", "high", "xhigh", "max", "auto", ""],
+      "description": "Thinking effort level passed to Claude. Empty means the user controls it interactively."
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "Filesystem path overrides for COI data directories",
+  "properties": {
+    "sessions_dir": {
+      "type": "string",
+      "description": "Directory for session data (default: ~/.coi/sessions)"
+    },
+    "storage_dir": {
+      "type": "string",
+      "description": "Directory for persistent container storage (default: ~/.coi/storage)"
+    },
+    "logs_dir": {
+      "type": "string",
+      "description": "Directory for log files (default: ~/.coi/logs)"
+    },
+    "preserve_workspace_path": {
+      "type": "boolean",
+      "description": "Mount the workspace at the same absolute path as the host (e.g. /home/user/project) instead of /workspace"
+    }
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "Security monitoring and threat response settings",
+  "properties": {
+    "enabled": {
+      "type": "boolean",
+      "description": "Enable background security monitoring"
+    },
+    "auto_pause_on_high": {
+      "type": "boolean",
+      "description": "Automatically pause the container when a high-severity threat is detected"
+    },
+    "auto_kill_on_critical": {
+      "type": "boolean",
+      "description": "Automatically kill the container when a critical-severity threat is detected"
+    },
+    "poll_interval_sec": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "How often to collect container stats (seconds)"
+    },
+    "file_read_threshold_mb": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Alert when the container reads more than this many MB in a single poll interval"
+    },
+    "file_read_rate_mb_per_sec": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Alert when the sustained file read rate exceeds this threshold (MB/s)"
+    },
+    "audit_log_retention_days": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of days to retain audit log files"
+    },
+    "nft": {
+      "$ref": "#/$defs/NFTMonitoringConfig"
+    }
+  }
+}

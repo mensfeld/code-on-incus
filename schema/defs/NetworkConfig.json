@@ -1,0 +1,37 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "Network isolation and filtering configuration",
+  "properties": {
+    "mode": {
+      "type": "string",
+      "enum": ["open", "restricted", "allowlist", ""],
+      "description": "Network isolation mode: \"open\" (unrestricted), \"restricted\" (internet only, no LAN), or \"allowlist\" (explicit domain list only)"
+    },
+    "block_private_networks": {
+      "type": "boolean",
+      "description": "Block access to RFC 1918 private network ranges"
+    },
+    "block_metadata_endpoint": {
+      "type": "boolean",
+      "description": "Block access to cloud instance metadata endpoints (e.g. 169.254.169.254)"
+    },
+    "allowed_domains": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Domains allowed when mode is \"allowlist\". RFC 1918 ranges are always blocked in allowlist mode."
+    },
+    "refresh_interval_minutes": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "How often to refresh DNS-resolved allowlist rules (minutes)"
+    },
+    "allow_local_network_access": {
+      "type": "boolean",
+      "description": "Allow established connections from the entire local network, not just the gateway"
+    },
+    "logging": {
+      "$ref": "#/$defs/NetworkLoggingConfig"
+    }
+  }
+}
