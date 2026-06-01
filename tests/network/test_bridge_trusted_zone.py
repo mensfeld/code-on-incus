@@ -85,6 +85,25 @@ def bridge_has_forward_rules(bridge_name):
         return False
 
 
+def forward_policy_is_drop():
+    """Check if the iptables FORWARD chain policy is DROP."""
+    try:
+        result = subprocess.run(
+            ["sudo", "-n", "iptables", "-S", "FORWARD"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            return False
+        for line in result.stdout.splitlines():
+            if line.startswith("-P FORWARD "):
+                return "DROP" in line
+        return False
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return False
+
+
 def remove_bridge_forward_rules(bridge_name):
     """Remove coi-bridge-forward iptables rules for the bridge (simulates broken state)."""
     # Get all FORWARD rules and delete the ones matching coi-bridge-forward for this bridge
@@ -153,9 +172,13 @@ def test_bridge_trusted_zone_detection_matches_reality(coi_binary):
         assert check["status"] == "ok", (
             f"Expected OK when bridge FORWARD rules exist, got: {check['status']}"
         )
-    else:
+    elif forward_policy_is_drop():
         assert check["status"] == "warning", (
-            f"Expected warning when bridge FORWARD rules missing, got: {check['status']}"
+            f"Expected warning when bridge FORWARD rules missing and FORWARD policy is DROP, got: {check['status']}"
+        )
+    else:
+        assert check["status"] == "ok", (
+            f"Expected OK when bridge FORWARD rules missing but FORWARD policy is not DROP, got: {check['status']}"
         )
 
 
@@ -194,12 +217,17 @@ def test_bridge_zone_removal_and_restore_detected(coi_binary):
         # Verify health check detects removal
         check = get_health_bridge_check(coi_binary)
         assert check is not None, "bridge_forward_rules check should exist"
-        assert check["status"] == "warning", (
-            f"Expected warning after removing bridge FORWARD rules, got: {check['status']}"
-        )
         assert check["details"]["has_forward_rules"] is False, (
             "Should report has_forward_rules=false after removal"
         )
+        if forward_policy_is_drop():
+            assert check["status"] == "warning", (
+                f"Expected warning after removing bridge FORWARD rules (FORWARD policy is DROP), got: {check['status']}"
+            )
+        else:
+            assert check["status"] == "ok", (
+                f"Expected OK after removing bridge FORWARD rules (FORWARD policy is not DROP), got: {check['status']}"
+            )
 
         # Step 2: Re-add by running coi health (or any coi command that triggers autofix)
         # The autofix path in EnsureBridgeInTrustedZone will re-add the rules.
