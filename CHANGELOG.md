@@ -4,6 +4,8 @@
 
 ### Improvements
 
+- [Fix] **Health checks now appear in correct sections** — Eight health checks (`immutable_capability`, `ufw_conflict`, `container_connectivity`, `network_restriction`, `monitoring_configuration`, `audit_log_directory`, `cgroup_availability`, `process_monitoring`) were missing from the category map and display-name table in `coi health`, causing them to appear in an "OTHER" catch-all section with auto-generated names. They are now correctly placed: `immutable_capability` → CRITICAL; `ufw_conflict`, `container_connectivity`, `network_restriction` → NETWORKING; `monitoring_configuration`, `audit_log_directory`, `cgroup_availability` → MONITORING; `process_monitoring` → OPTIONAL (verbose only). The OTHER catch-all section remains in the code as a safety net for any future checks not yet assigned to a category.
+
 - [Feature] **`use_tmux` config option for `coi shell`** — Users who consistently prefer `--tmux=false` can now set `use_tmux = false` once in their `[shell]` section of `config.toml` instead of passing the flag on every invocation. The `--tmux` CLI flag still overrides the config when explicitly set. Resolves #399.
 
 - [Refactor] **Renamed remaining legacy firewall identifiers to nft** — Continued nft naming cleanup: health check key `firewall` → `nft`; `CheckFirewall()` → `CheckNft()`; `orphaned_firewall_rules` JSON detail key → `orphaned_nft_rules`; `errFirewallNotAvailable` → `errNftNotAvailable`. Breaking changes: `coi health --format json` consumers checking `checks.firewall` must update to `checks.nft`; `orphaned_firewall_rules` detail key renamed to `orphaned_nft_rules`.
