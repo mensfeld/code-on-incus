@@ -122,16 +122,19 @@ def _start_persistent_session_and_exit(coi_binary, workspace_dir, env):
 
 def test_resume_running_container_succeeds(coi_binary, cleanup_containers, workspace_dir):
     """
-    Confirm bug #413: resuming a non-persistent session whose container is already
-    Running fails with "slot already in use".
+    Regression test for bug #413: resuming a non-persistent session whose container
+    is already Running (e.g. restored by Incus stateful restore after a host reboot).
 
-    This test asserts the CORRECT behavior (resume should succeed). It currently
-    FAILS because the bug is present. It will PASS once the bug is fixed.
+    Before the fix, coi shell --resume=<id> failed with:
+      "slot N is already in use by a running container — this should not happen"
+
+    After the fix (setup.go: allow reuse when ResumeFromID is set), resume succeeds
+    by reconnecting to the already-running container.
 
     Simulation steps:
     1. Start --persistent session → container stays Running after coi exits
     2. Edit metadata: set persistent=false (simulates post-reboot non-persistent session)
-    3. coi shell --resume → currently errors, should succeed
+    3. coi shell --resume=<id> → should succeed (reconnects to running container)
     """
     env = {"COI_USE_DUMMY": "1"}
     container_name = calculate_container_name(workspace_dir, 1)
