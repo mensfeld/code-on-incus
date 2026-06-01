@@ -181,7 +181,7 @@ def test_resume_running_container_succeeds(coi_binary, cleanup_containers, works
     # The bug causes an immediate error exit; a successful resume would start
     # an interactive session that we'd then kill via timeout.
     proc = subprocess.Popen(
-        [coi_binary, "shell", "--resume", session_id, "--tmux=false"],
+        [coi_binary, "shell", f"--resume={session_id}", "--tmux=false"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
