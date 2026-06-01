@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+	coischema "github.com/mensfeld/code-on-incus/schema"
 )
 
 // Load loads configuration from all available sources
@@ -153,9 +154,22 @@ func loadProfileDirectories(cfg *Config, configDir string) error {
 			return fmt.Errorf("failed to parse profile %q config at %s: %w", profileName, profileConfigPath, err)
 		}
 
-		// Detect pre-0.8.0 profile layouts and refuse to load.
+		// Detect pre-0.8.0 profile layouts and refuse to load with a friendly
+		// message before schema validation runs (deprecated fields would
+		// otherwise surface as unhelpful "additionalProperties not allowed").
 		if err := checkDeprecatedProfileFields(profileConfigPath); err != nil {
 			return err
+		}
+
+		// Validate the raw TOML against the JSON Schema to catch unknown keys,
+		// wrong types, and invalid enum values with precise error paths.
+		var rawMap map[string]any
+		if _, err := toml.DecodeFile(profileConfigPath, &rawMap); err != nil {
+			return fmt.Errorf("failed to re-read profile %q for schema validation: %w", profileName, err)
+		}
+		if schemaErr := coischema.ValidateProfileMap(rawMap); schemaErr != nil {
+			return fmt.Errorf("profile %q at %s failed schema validation: %w",
+				profileName, profileConfigPath, schemaErr)
 		}
 
 		// Resolve paths relative to profile directory
