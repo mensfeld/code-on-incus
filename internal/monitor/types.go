@@ -90,7 +90,7 @@ func (e Evidence) String() string {
 // MonitorSnapshot represents a point-in-time view of container metrics
 type MonitorSnapshot struct {
 	Timestamp     time.Time       `json:"timestamp"`
-	ContainerName string          `json:"container_name"`
+	ContainerName string          `json:"container"`
 	ContainerIP   string          `json:"container_ip,omitempty"`
 	Network       NetworkStats    `json:"network"`
 	Processes     ProcessStats    `json:"processes"`

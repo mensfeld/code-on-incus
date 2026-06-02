@@ -21,8 +21,11 @@ var (
 	// memoryRegex matches memory sizes: "512MiB", "2GiB", "50%"
 	memoryRegex = regexp.MustCompile(`^\d+(%|[KMGT]i?B)$`)
 
-	// diskIORegex matches disk I/O rates: "10MiB/s", "1000iops"
-	diskIORegex = regexp.MustCompile(`^(\d+[KMGT]i?B/s|\d+iops)$`)
+	// diskIORegex matches disk I/O byte rates and IOPS.
+	// Incus expects a size value (e.g. "10MB", "10MiB") meaning bytes-per-second,
+	// NOT "10MB/s". The /s suffix is documentation-only; the config value omits it.
+	// SI units use lowercase k (kB); IEC units use uppercase K (KiB).
+	diskIORegex = regexp.MustCompile(`^(\d+[KMGT]iB|\d+[kMGT]B|\d+iops)$`)
 )
 
 // ValidateCPUCount validates CPU count format
@@ -98,27 +101,31 @@ func ValidateMemorySwap(swap string) error {
 }
 
 // ValidateDiskIO validates disk I/O rate format
-// Valid formats: "10MiB/s", "1000iops", "" (empty = unlimited)
+// Valid formats: "10MB", "10MiB", "1000iops", "" (empty = unlimited)
+// Note: Incus uses size values (e.g. "10MB") as bytes-per-second, not "10MB/s".
 func ValidateDiskIO(io string) error {
 	if io == "" {
 		return nil // Empty = unlimited
 	}
 	if !diskIORegex.MatchString(io) {
-		return fmt.Errorf("invalid disk I/O rate: %s (examples: '10MiB/s', '1000iops')", io)
+		return fmt.Errorf("invalid disk I/O rate: %s (examples: '10MB', '10MiB', '1000iops')", io)
 	}
 	return nil
 }
 
 // ValidateDuration validates duration format
 // Valid formats: "2h", "30m", "1h30m", "" (empty = unlimited)
-// Uses Go's time.ParseDuration
+// Uses Go's time.ParseDuration; negative or zero durations are rejected.
 func ValidateDuration(duration string) error {
 	if duration == "" {
 		return nil // Empty = unlimited
 	}
-	_, err := time.ParseDuration(duration)
+	d, err := time.ParseDuration(duration)
 	if err != nil {
 		return fmt.Errorf("invalid duration: %s (examples: '2h', '30m', '1h30m')", duration)
+	}
+	if d <= 0 {
+		return fmt.Errorf("invalid duration: %s (must be a positive value)", duration)
 	}
 	return nil
 }
@@ -132,13 +139,20 @@ func ValidateMaxProcesses(maxProc int) error {
 	return nil
 }
 
-// ParseDuration parses a duration string and returns the duration
-// Returns 0 if the string is empty (unlimited)
+// ParseDuration parses a duration string and returns the duration.
+// Returns 0 if the string is empty (unlimited). Negative durations are rejected.
 func ParseDuration(duration string) (time.Duration, error) {
 	if duration == "" {
 		return 0, nil
 	}
-	return time.ParseDuration(duration)
+	d, err := time.ParseDuration(duration)
+	if err != nil {
+		return 0, err
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf("duration must be positive, got %s", duration)
+	}
+	return d, nil
 }
 
 // NormalizeBoolString converts "true"/"false" strings to proper boolean strings

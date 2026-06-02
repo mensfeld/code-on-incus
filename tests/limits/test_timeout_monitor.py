@@ -8,14 +8,17 @@ Tests that:
 4. Session data is saved before stop
 """
 
+import json
 import subprocess
 import time
 from pathlib import Path
 
+from support.helpers import calculate_container_name
+
 
 def test_container_auto_stops_after_timeout(coi_binary, workspace_dir, cleanup_containers):
     """Test that container auto-stops after max_duration is reached."""
-    container_name = f"coi-{Path(workspace_dir).name}-1"
+    container_name = calculate_container_name(workspace_dir, 1)
 
     # Create config with short timeout
     config_dir = Path(workspace_dir) / ".coi"
@@ -52,6 +55,7 @@ echo "Script completed"
         capture_output=True,
         text=True,
         timeout=60,  # Generous timeout for the test itself
+        cwd=workspace_dir,
     )
 
     elapsed_time = time.time() - start_time
@@ -77,8 +81,6 @@ echo "Script completed"
     # Container should either be stopped or deleted (depending on timing)
     # We just verify it's not running
     if result.returncode == 0 and result.stdout:
-        import json
-
         containers = json.loads(result.stdout)
         if containers:  # Container still exists
             container = containers[0]
@@ -89,7 +91,7 @@ echo "Script completed"
 
 def test_timeout_with_persistent_container(coi_binary, workspace_dir, cleanup_containers):
     """Test that timeout works with persistent containers."""
-    container_name = f"coi-{Path(workspace_dir).name}-1"
+    container_name = calculate_container_name(workspace_dir, 1)
 
     # Create config with short timeout
     config_dir = Path(workspace_dir) / ".coi"
@@ -127,6 +129,7 @@ echo "Done"
         capture_output=True,
         text=True,
         timeout=60,
+        cwd=workspace_dir,
     )
 
     elapsed_time = time.time() - start_time
@@ -148,8 +151,6 @@ echo "Done"
     )
 
     assert result.returncode == 0, "Should be able to list container"
-
-    import json
 
     containers = json.loads(result.stdout)
     assert len(containers) > 0, "Persistent container should still exist"
@@ -187,6 +188,7 @@ max_duration = "30s"
         capture_output=True,
         text=True,
         timeout=60,
+        cwd=workspace_dir,
     )
 
     elapsed_time = time.time() - start_time
@@ -236,6 +238,7 @@ sleep 30
         capture_output=True,
         text=True,
         timeout=60,
+        cwd=workspace_dir,
     )
 
     assert result.returncode == 0, "Should load config successfully"
@@ -249,6 +252,7 @@ def test_zero_duration_means_unlimited(coi_binary, workspace_dir, cleanup_contai
         capture_output=True,
         text=True,
         timeout=60,
+        cwd=workspace_dir,
     )
 
     assert result.returncode == 0, "Command with no timeout should complete normally"
@@ -289,6 +293,7 @@ sleep 15
         capture_output=True,
         text=True,
         timeout=60,
+        cwd=workspace_dir,
     )
 
     # Check stderr for timeout message

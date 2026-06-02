@@ -100,37 +100,122 @@ func applyMemoryLimits(containerName string, memory MemoryLimits, project string
 	return nil
 }
 
-// applyDiskLimits applies disk I/O limits to a container
+// applyDiskLimits applies disk I/O limits to the root device of a container.
+// Disk I/O limits in Incus are device-level config on the root disk, not
+// container-level config keys, so we use `incus config device set`.
+// When the container's root disk device comes from an Incus profile (not from
+// the instance config), Incus refuses to modify it via `config device set`.
+// We work around this by ensuring an instance-level root device exists first.
 func applyDiskLimits(containerName string, disk DiskLimits, project string) error {
-	// Apply disk read limit
+	if disk.Read == "" && disk.Write == "" && disk.Max == "" && disk.Priority == 0 {
+		return nil
+	}
+
+	// Ensure root device is at the instance level before setting disk I/O limits.
+	if err := ensureInstanceRootDevice(containerName, project); err != nil {
+		return fmt.Errorf("failed to ensure instance-level root device: %w", err)
+	}
+
 	if disk.Read != "" {
-		if err := setIncusConfig(containerName, "limits.read", disk.Read, project); err != nil {
+		if err := setIncusDeviceConfig(containerName, "root", "limits.read", disk.Read, project); err != nil {
 			return err
 		}
 	}
 
-	// Apply disk write limit
 	if disk.Write != "" {
-		if err := setIncusConfig(containerName, "limits.write", disk.Write, project); err != nil {
+		if err := setIncusDeviceConfig(containerName, "root", "limits.write", disk.Write, project); err != nil {
 			return err
 		}
 	}
 
-	// Apply combined disk limit (overrides read/write)
 	if disk.Max != "" {
-		if err := setIncusConfig(containerName, "limits.max", disk.Max, project); err != nil {
+		if err := setIncusDeviceConfig(containerName, "root", "limits.max", disk.Max, project); err != nil {
 			return err
 		}
 	}
 
-	// Apply disk priority
 	if disk.Priority != 0 {
-		if err := setIncusConfig(containerName, "limits.disk.priority", fmt.Sprintf("%d", disk.Priority), project); err != nil {
+		if err := setIncusDeviceConfig(containerName, "root", "limits.disk.priority", fmt.Sprintf("%d", disk.Priority), project); err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+// ensureInstanceRootDevice ensures the root disk device is defined at the instance
+// level rather than only in an Incus profile. Without this, `incus config device set`
+// fails with "Device from profile(s) cannot be modified for individual instance."
+func ensureInstanceRootDevice(containerName, project string) error {
+	pool, err := getRootDevicePool(containerName, project)
+	if err != nil {
+		return err
+	}
+
+	args := []string{"config", "device", "add"}
+	if project != "" && project != "default" {
+		args = append(args, "--project", project)
+	}
+	args = append(args, containerName, "root", "disk", "path=/", fmt.Sprintf("pool=%s", pool))
+
+	cmd := exec.Command("incus", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		outputStr := string(output)
+		// Device already exists at the instance level — that's exactly what we want.
+		if strings.Contains(strings.ToLower(outputStr), "already") {
+			return nil
+		}
+		return fmt.Errorf("failed to add instance-level root device: %w (output: %s)", err, outputStr)
+	}
+	return nil
+}
+
+// getRootDevicePool returns the storage pool name used by the root disk device
+// by querying the expanded container config (which includes profile-inherited devices).
+// Falls back to "default" if the pool cannot be determined.
+func getRootDevicePool(containerName, project string) (string, error) {
+	args := []string{"config", "show", "--expanded"}
+	if project != "" && project != "default" {
+		args = append(args, "--project", project)
+	}
+	args = append(args, containerName)
+
+	cmd := exec.Command("incus", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "default", fmt.Errorf("failed to get expanded container config: %w", err)
+	}
+
+	lines := strings.Split(string(output), "\n")
+	inDevices, inRoot := false, false
+	for _, line := range lines {
+		if line == "devices:" {
+			inDevices = true
+			continue
+		}
+		if inDevices && strings.TrimSpace(line) == "root:" {
+			inRoot = true
+			continue
+		}
+		if inRoot {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "pool:") {
+				parts := strings.SplitN(trimmed, ":", 2)
+				if len(parts) == 2 {
+					return strings.TrimSpace(parts[1]), nil
+				}
+			}
+			if len(line) > 0 && !strings.HasPrefix(line, "    ") {
+				inRoot = false
+			}
+		}
+		if inDevices && len(line) > 0 && !strings.HasPrefix(line, " ") {
+			inDevices = false
+		}
+	}
+
+	return "default", nil
 }
 
 // applyProcessLimits applies process limits to a container
@@ -140,6 +225,25 @@ func applyProcessLimits(containerName string, maxProcesses int, project string) 
 			return err
 		}
 	}
+	return nil
+}
+
+// setIncusDeviceConfig sets a device-level configuration key using `incus config device set`.
+func setIncusDeviceConfig(containerName, device, key, value, project string) error {
+	args := []string{"config", "device", "set"}
+
+	if project != "" && project != "default" {
+		args = append(args, "--project", project)
+	}
+
+	args = append(args, containerName, device, fmt.Sprintf("%s=%s", key, value))
+
+	cmd := exec.Command("incus", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("incus config device set %s=%s failed: %w (output: %s)", key, value, err, string(output))
+	}
+
 	return nil
 }
 
@@ -165,24 +269,57 @@ func setIncusConfig(containerName, key, value, project string) error {
 
 // RemoveLimits removes all limits from a container
 func RemoveLimits(containerName, project string) error {
-	limits := []string{
+	// Container-level limits
+	containerLimits := []string{
 		"limits.cpu",
 		"limits.cpu.allowance",
 		"limits.cpu.priority",
 		"limits.memory",
 		"limits.memory.enforce",
 		"limits.memory.swap",
+		"limits.processes",
+	}
+	for _, limit := range containerLimits {
+		_ = unsetIncusConfig(containerName, limit, project)
+	}
+
+	// Device-level disk I/O limits on the root device
+	deviceLimits := []string{
 		"limits.read",
 		"limits.write",
 		"limits.max",
 		"limits.disk.priority",
-		"limits.processes",
+	}
+	for _, limit := range deviceLimits {
+		_ = unsetIncusDeviceConfig(containerName, "root", limit, project)
 	}
 
-	for _, limit := range limits {
-		// Continue even if unsetting fails (limit might not be set)
-		// We intentionally ignore errors here to allow cleanup to proceed
-		_ = unsetIncusConfig(containerName, limit, project)
+	return nil
+}
+
+// unsetIncusDeviceConfig unsets a device-level configuration key.
+func unsetIncusDeviceConfig(containerName, device, key, project string) error {
+	args := []string{"config", "device", "set"}
+
+	if project != "" && project != "default" {
+		args = append(args, "--project", project)
+	}
+
+	// Setting to empty string effectively removes the limit from the device
+	args = append(args, containerName, device, fmt.Sprintf("%s=", key))
+
+	cmd := exec.Command("incus", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		outputStr := string(output)
+		if strings.Contains(outputStr, "not found") || strings.Contains(outputStr, "doesn't exist") {
+			return nil
+		}
+		// If the device is from a profile (limits were never applied at instance level), skip.
+		if strings.Contains(outputStr, "Device from profile") {
+			return nil
+		}
+		return fmt.Errorf("incus config device set %s= failed: %w (output: %s)", key, err, outputStr)
 	}
 
 	return nil

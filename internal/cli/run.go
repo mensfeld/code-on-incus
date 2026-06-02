@@ -48,6 +48,13 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Validate max_duration early so the user gets a clear error before any container work.
+	if cfg.Limits.Runtime.MaxDuration != "" {
+		if _, err := limits.ParseDuration(cfg.Limits.Runtime.MaxDuration); err != nil {
+			return fmt.Errorf("invalid max_duration: %w", err)
+		}
+	}
+
 	// Check if Incus is available
 	if !container.Available() {
 		return container.IncusNotAvailableError()
@@ -200,83 +207,8 @@ func runCommand(cmd *cobra.Command, args []string) error {
 
 	// Mount workspace (skip if restarting existing persistent container)
 	useShift := !cfg.Incus.DisableShift
-	if !wasRestarted {
-		if containerWorkspacePath == absWorkspace {
-			fmt.Fprintf(os.Stderr, "Mounting workspace %s -> %s (preserving host path)...\n", absWorkspace, containerWorkspacePath)
-		} else {
-			fmt.Fprintf(os.Stderr, "Mounting workspace %s -> %s...\n", absWorkspace, containerWorkspacePath)
-		}
-		if err := mgr.MountDisk("workspace", absWorkspace, containerWorkspacePath, useShift, false); err != nil {
-			return fmt.Errorf("failed to mount workspace: %w", err)
-		}
-
-		// Parse and validate mount configuration
-		mountConfig, err := ParseMountConfig(cfg)
-		if err != nil {
-			return fmt.Errorf("invalid mount configuration: %w", err)
-		}
-
-		// Validate no nested mounts
-		if err := session.ValidateMounts(mountConfig); err != nil {
-			return fmt.Errorf("mount validation failed: %w", err)
-		}
-
-		// Mount all configured directories
-		if mountConfig != nil && len(mountConfig.Mounts) > 0 {
-			for _, mount := range mountConfig.Mounts {
-				if mount.Readonly {
-					// For readonly mounts, skip creating host directory — if the source
-					// doesn't exist, log a warning and skip the mount
-					if _, err := os.Stat(mount.HostPath); err != nil {
-						if os.IsNotExist(err) {
-							fmt.Fprintf(os.Stderr, "Warning: readonly mount source %s does not exist, skipping\n", mount.HostPath)
-							continue
-						}
-						return fmt.Errorf("failed to stat readonly mount source '%s': %w", mount.HostPath, err)
-					}
-					fmt.Fprintf(os.Stderr, "Adding mount (read-only): %s -> %s\n", mount.HostPath, mount.ContainerPath)
-				} else {
-					// Create host directory if it doesn't exist (writable mounts only)
-					if err := os.MkdirAll(mount.HostPath, 0o755); err != nil {
-						return fmt.Errorf("failed to create mount directory '%s': %w", mount.HostPath, err)
-					}
-					fmt.Fprintf(os.Stderr, "Adding mount: %s -> %s\n", mount.HostPath, mount.ContainerPath)
-				}
-
-				if err := mgr.MountDisk(mount.DeviceName, mount.HostPath, mount.ContainerPath, useShift, mount.Readonly); err != nil {
-					return fmt.Errorf("failed to add mount '%s': %w", mount.DeviceName, err)
-				}
-			}
-		}
-
-		// Protect security-sensitive paths by mounting read-only (security feature)
-		if !cfg.Security.DisableProtection {
-			protectedPaths := filterWritableGitHooks(cfg.Security.GetEffectiveProtectedPaths(), cfg)
-			if len(protectedPaths) > 0 {
-				if err := session.SetupSecurityMounts(mgr, absWorkspace, containerWorkspacePath, protectedPaths, useShift); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: Failed to setup security mounts: %v\n", err)
-				} else {
-					// Log which paths were actually protected
-					actualPaths := session.GetProtectedPathsForLogging(absWorkspace, protectedPaths)
-					if len(actualPaths) > 0 {
-						fmt.Fprintf(os.Stderr, "Protected paths (mounted read-only): %s\n", strings.Join(actualPaths, ", "))
-					}
-				}
-
-				// Apply host-side immutable attribute for defense-in-depth
-				if cfg.Security.IsHostImmutableEnabled() {
-					logger := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
-					immutablePaths := session.ApplyImmutable(absWorkspace, protectedPaths, containerName, logger)
-					if len(immutablePaths) > 0 {
-						fmt.Fprintf(os.Stderr, "Host-side immutable protection applied: %s\n", strings.Join(immutablePaths, ", "))
-					}
-				}
-			}
-		}
-	} else {
-		fmt.Fprintf(os.Stderr, "Reusing existing workspace mount...\n")
-		// For restarted containers, get the workspace path from container config
-		containerWorkspacePath = mgr.GetWorkspacePath()
+	if err := applyWorkspaceMounts(mgr, containerName, absWorkspace, &containerWorkspacePath, useShift, wasRestarted); err != nil {
+		return err
 	}
 
 	// Forward SSH agent and apply network isolation if configured
@@ -296,6 +228,23 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	session.SetupMiseTrust(mgr, containerWorkspacePath, func(msg string) {
 		fmt.Fprintf(os.Stderr, "%s\n", msg)
 	})
+
+	// Start timeout monitor if max_duration is configured.
+	// The monitor runs in a background goroutine and stops the container when
+	// the duration elapses, which causes the blocking incus exec below to return.
+	var timeoutMon *limits.TimeoutMonitor
+	if cfg.Limits.Runtime.MaxDuration != "" {
+		maxDur, _ := limits.ParseDuration(cfg.Limits.Runtime.MaxDuration) // already validated above
+		autoStop := config.BoolVal(cfg.Limits.Runtime.AutoStop)
+		if cfg.Limits.Runtime.AutoStop == nil {
+			autoStop = true // default: auto-stop when limit reached
+		}
+		stopGraceful := config.BoolVal(cfg.Limits.Runtime.StopGraceful)
+		runLog := logger.NewDiscard()
+		timeoutMon = limits.NewTimeoutMonitor(containerName, maxDur, autoStop, stopGraceful, cfg.Incus.Project, runLog)
+		timeoutMon.Start()
+		defer timeoutMon.Stop()
+	}
 
 	// Execute command directly (args are already the full command to run)
 	fmt.Fprintf(os.Stderr, "Executing: %s\n", strings.Join(args, " "))
@@ -572,6 +521,95 @@ func resolveContainerWorkspacePath(absWorkspace string) string {
 		}
 	}
 	return cleanPath
+}
+
+// applyWorkspaceMounts mounts the workspace and all configured additional directories
+// into the container, then applies security (read-only) mounts. For restarted persistent
+// containers it retrieves the existing workspace path from the container config instead.
+func applyWorkspaceMounts(mgr *container.Manager, containerName, absWorkspace string, containerWorkspacePath *string, useShift, wasRestarted bool) error {
+	if wasRestarted {
+		fmt.Fprintf(os.Stderr, "Reusing existing workspace mount...\n")
+		*containerWorkspacePath = mgr.GetWorkspacePath()
+		return nil
+	}
+
+	if *containerWorkspacePath == absWorkspace {
+		fmt.Fprintf(os.Stderr, "Mounting workspace %s -> %s (preserving host path)...\n", absWorkspace, *containerWorkspacePath)
+	} else {
+		fmt.Fprintf(os.Stderr, "Mounting workspace %s -> %s...\n", absWorkspace, *containerWorkspacePath)
+	}
+	if err := mgr.MountDisk("workspace", absWorkspace, *containerWorkspacePath, useShift, false); err != nil {
+		return fmt.Errorf("failed to mount workspace: %w", err)
+	}
+
+	mountConfig, err := ParseMountConfig(cfg)
+	if err != nil {
+		return fmt.Errorf("invalid mount configuration: %w", err)
+	}
+	if err := session.ValidateMounts(mountConfig); err != nil {
+		return fmt.Errorf("mount validation failed: %w", err)
+	}
+	if mountConfig != nil {
+		for _, mount := range mountConfig.Mounts {
+			if err := addMount(mgr, mount, useShift); err != nil {
+				return err
+			}
+		}
+	}
+
+	if !cfg.Security.DisableProtection {
+		if err := applySecurityMounts(mgr, absWorkspace, *containerWorkspacePath, containerName, useShift); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// addMount adds a single configured directory mount to the container.
+func addMount(mgr *container.Manager, mount session.MountEntry, useShift bool) error {
+	if mount.Readonly {
+		if _, err := os.Stat(mount.HostPath); err != nil {
+			if os.IsNotExist(err) {
+				fmt.Fprintf(os.Stderr, "Warning: readonly mount source %s does not exist, skipping\n", mount.HostPath)
+				return nil
+			}
+			return fmt.Errorf("failed to stat readonly mount source '%s': %w", mount.HostPath, err)
+		}
+		fmt.Fprintf(os.Stderr, "Adding mount (read-only): %s -> %s\n", mount.HostPath, mount.ContainerPath)
+	} else {
+		if err := os.MkdirAll(mount.HostPath, 0o755); err != nil {
+			return fmt.Errorf("failed to create mount directory '%s': %w", mount.HostPath, err)
+		}
+		fmt.Fprintf(os.Stderr, "Adding mount: %s -> %s\n", mount.HostPath, mount.ContainerPath)
+	}
+	if err := mgr.MountDisk(mount.DeviceName, mount.HostPath, mount.ContainerPath, useShift, mount.Readonly); err != nil {
+		return fmt.Errorf("failed to add mount '%s': %w", mount.DeviceName, err)
+	}
+	return nil
+}
+
+// applySecurityMounts sets up read-only protection mounts and optional host immutable flags.
+func applySecurityMounts(mgr *container.Manager, absWorkspace, containerWorkspacePath, containerName string, useShift bool) error {
+	protectedPaths := filterWritableGitHooks(cfg.Security.GetEffectiveProtectedPaths(), cfg)
+	if len(protectedPaths) == 0 {
+		return nil
+	}
+	if err := session.SetupSecurityMounts(mgr, absWorkspace, containerWorkspacePath, protectedPaths, useShift); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: Failed to setup security mounts: %v\n", err)
+	} else {
+		actualPaths := session.GetProtectedPathsForLogging(absWorkspace, protectedPaths)
+		if len(actualPaths) > 0 {
+			fmt.Fprintf(os.Stderr, "Protected paths (mounted read-only): %s\n", strings.Join(actualPaths, ", "))
+		}
+	}
+	if cfg.Security.IsHostImmutableEnabled() {
+		logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
+		immutablePaths := session.ApplyImmutable(absWorkspace, protectedPaths, containerName, logFn)
+		if len(immutablePaths) > 0 {
+			fmt.Fprintf(os.Stderr, "Host-side immutable protection applied: %s\n", strings.Join(immutablePaths, ", "))
+		}
+	}
+	return nil
 }
 
 // applySSHAgentForwarding forwards the host SSH agent into the container when

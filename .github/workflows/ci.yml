@@ -99,7 +99,7 @@ jobs:
           go tool cover -func=coverage.out | tail -1  # Show total coverage
 
   # Integration tests run in parallel with unit tests (after build passes)
-  # Split into 6 test groups for parallel execution
+  # Split into 13 test groups for parallel execution
   # Network isolation uses nftables (ip coi forward chain)
   integration:
     name: Integration Tests (${{ matrix.test_group.name }})
@@ -112,39 +112,45 @@ jobs:
         test_group:
           - name: shell-ephemeral
             path: tests/shell/ephemeral
-            description: "Ephemeral shell session tests (17 tests)"
+            description: "Ephemeral shell session tests"
           - name: shell-persistent
             path: tests/shell/persistent
-            description: "Persistent shell session tests (9 tests)"
+            description: "Persistent shell session tests"
           - name: network
             path: tests/network
-            description: "Network isolation tests (10 tests)"
+            description: "Network isolation tests"
           - name: container-file
             path: tests/container tests/file
-            description: "Container and file operations (54 tests)"
+            description: "Container and file operations"
           - name: core
-            path: tests/list tests/attach tests/tmux tests/kill tests/run tests/persist tests/build
-            description: "Core commands: list/attach/tmux/kill/run/persist/build (83 tests)"
+            path: tests/list tests/attach tests/tmux tests/kill tests/persist
+            description: "Core commands: list/attach/tmux/kill/persist"
+          - name: core-build
+            path: tests/build tests/run
+            description: "Build and run command tests"
           - name: misc
-            path: tests/clean tests/cli tests/completion tests/config tests/docker tests/errors tests/health tests/help tests/image tests/info tests/mount tests/shutdown tests/version tests/meta tests/main_help_flag.py tests/main_help_shorthand.py
-            description: "Misc commands: clean/cli/completion/config/docker/errors/health/help/image/info/mount/shutdown/version/meta/main help"
+            path: tests/clean tests/cli tests/completion tests/docker tests/errors tests/help tests/image tests/info tests/mount tests/monitor tests/shutdown tests/snapshot tests/update tests/version tests/meta tests/main_help_flag.py tests/main_help_shorthand.py
+            description: "Misc commands: clean/cli/completion/docker/errors/help/image/info/mount/monitor/shutdown/snapshot/update/version/meta"
+          - name: misc-config
+            path: tests/config tests/health tests/limits tests/schema
+            description: "Config, health, limits, and schema tests"
           - name: monitoring-nft
             path: tests/integration/test_nft_monitoring.py
-            description: "NFT network monitoring tests (17 tests)"
+            description: "NFT network monitoring tests"
           - name: monitoring-threats
             path: tests/integration/test_security_monitoring.py
             pytest_args: "-k 'TestThreatDetection or TestEnvironmentScanningPatterns or TestReverseShellPatterns or TestNetworkThreats or TestPromptInjectionScenario or TestMonitoringFeature'"
-            description: "Threat detection tests (20 tests)"
+            description: "Threat detection tests"
           - name: monitoring-response
             path: tests/integration/test_security_monitoring.py
             pytest_args: "-k 'TestAutomatedResponse or TestHighLevelThreats or TestLargeWriteDetection or TestMonitoringConfiguration or TestMultipleThreats or TestAuditLogValidation or TestFalsePositives or TestThresholdBoundaries or TestConcurrentThreats'"
-            description: "Response and threshold tests (22 tests)"
+            description: "Response and threshold tests"
           - name: uid-mapping
             path: tests/container/uid_mapping_shift_true.py tests/container/uid_mapping_raw_idmap.py
-            description: "UID mapping integration tests (2 tests)"
+            description: "UID mapping integration tests"
           - name: git-hooks
             path: tests/git_hooks
-            description: "Git hooks and security protection tests (32 tests)"
+            description: "Git hooks and security protection tests"
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 

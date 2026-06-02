@@ -30,6 +30,7 @@ count = "{cpu_count}"
             capture_output=True,
             text=True,
             timeout=120,
+            cwd=workspace_dir,
         )
 
         assert result.returncode == 0, (
@@ -56,6 +57,7 @@ count = "{cpu_count}"
             capture_output=True,
             text=True,
             timeout=30,
+            cwd=workspace_dir,
         )
 
         assert result.returncode != 0, f"CPU count '{cpu_count}' should be invalid"
@@ -83,6 +85,7 @@ limit = "{memory}"
             capture_output=True,
             text=True,
             timeout=120,
+            cwd=workspace_dir,
         )
 
         assert result.returncode == 0, f"Memory '{memory}' should be valid. stderr: {result.stderr}"
@@ -107,6 +110,7 @@ limit = "{memory}"
             capture_output=True,
             text=True,
             timeout=30,
+            cwd=workspace_dir,
         )
 
         assert result.returncode != 0, f"Memory '{memory}' should be invalid"
@@ -134,6 +138,7 @@ allowance = "{allowance}"
             capture_output=True,
             text=True,
             timeout=120,
+            cwd=workspace_dir,
         )
 
         assert result.returncode == 0, (
@@ -160,6 +165,7 @@ allowance = "{allowance}"
             capture_output=True,
             text=True,
             timeout=30,
+            cwd=workspace_dir,
         )
 
         assert result.returncode != 0, f"CPU allowance '{allowance}' should be invalid"
@@ -170,7 +176,7 @@ allowance = "{allowance}"
 
 def test_valid_disk_io_formats(coi_binary, workspace_dir, cleanup_containers):
     """Test that valid disk I/O formats are accepted."""
-    valid_formats = ["10MiB/s", "100KiB/s", "1GiB/s", "1000iops"]
+    valid_formats = ["10MB", "100kB", "1GB", "1000iops"]
 
     for io_rate in valid_formats:
         config_dir = Path(workspace_dir) / ".coi"
@@ -187,6 +193,7 @@ read = "{io_rate}"
             capture_output=True,
             text=True,
             timeout=120,
+            cwd=workspace_dir,
         )
 
         assert result.returncode == 0, (
@@ -196,7 +203,7 @@ read = "{io_rate}"
 
 def test_invalid_disk_io_formats(coi_binary, workspace_dir):
     """Test that invalid disk I/O formats are rejected."""
-    invalid_formats = ["fast", "10MB", "1000", "abc"]
+    invalid_formats = ["fast", "10MB/s", "1000", "abc"]
 
     for io_rate in invalid_formats:
         config_dir = Path(workspace_dir) / ".coi"
@@ -213,6 +220,7 @@ read = "{io_rate}"
             capture_output=True,
             text=True,
             timeout=30,
+            cwd=workspace_dir,
         )
 
         assert result.returncode != 0, f"Disk I/O '{io_rate}' should be invalid"
@@ -240,6 +248,7 @@ max_duration = "{duration}"
             capture_output=True,
             text=True,
             timeout=120,
+            cwd=workspace_dir,
         )
 
         assert result.returncode == 0, (
@@ -266,6 +275,7 @@ max_duration = "{duration}"
             capture_output=True,
             text=True,
             timeout=30,
+            cwd=workspace_dir,
         )
 
         assert result.returncode != 0, f"Duration '{duration}' should be invalid"
@@ -292,6 +302,7 @@ priority = {priority}
             capture_output=True,
             text=True,
             timeout=120,
+            cwd=workspace_dir,
         )
 
         assert result.returncode == 0, (
@@ -314,6 +325,7 @@ priority = {priority}
             capture_output=True,
             text=True,
             timeout=30,
+            cwd=workspace_dir,
         )
 
         assert result.returncode != 0, f"Priority {priority} should be invalid"

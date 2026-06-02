@@ -200,13 +200,15 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 
 		if running {
 			// Container is running - this is an active session!
-			if opts.Persistent || opts.ContainerName != "" {
-				// Reuse running container if: persistent mode OR --container flag specified
+			if opts.Persistent || opts.ContainerName != "" || opts.ResumeFromID != "" {
+				// Reuse running container if: persistent mode, --container flag, or explicit resume.
+				// The resume case covers post-reboot Incus stateful restore: a non-persistent
+				// container may be Running because Incus restored it; --resume should reuse it.
 				opts.Logger("Container already running, reusing...")
 				skipLaunch = true
 			} else {
-				// ERROR: A running container exists for this slot, but we're not in persistent mode
-				// This means AllocateSlot() gave us a slot that's already in use!
+				// A running container exists for this slot but we're not resuming or in
+				// persistent mode — AllocateSlot() should have avoided this slot.
 				return nil, fmt.Errorf("slot %d is already in use by a running container %s - this should not happen (bug in slot allocation)", opts.Slot, containerName)
 			}
 		} else {

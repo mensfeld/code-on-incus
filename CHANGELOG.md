@@ -24,7 +24,19 @@
 
 - **Sudo ownership guidance in SANDBOX_CONTEXT.md** — The sandbox context file now instructs AI tools to fix workspace file ownership after `sudo` operations. Files created by `sudo` in the workspace are owned by root, blocking host-side access. The guidance tells tools to run `chown` after any sudo command that touches workspace files (#368).
 
+### Tests
+
+- **Integration tests for post-reboot container resume bug (#413)** — Added `tests/shell/persistent/resume_running_container_bug.py` with two tests covering issue #413. The tests simulate the post-reboot state without rebooting: start a persistent session (container stays Running after coi exits), then modify the session metadata to mark it as non-persistent. `test_resume_running_container_succeeds` confirms that `coi shell --resume=<id>` successfully reuses the already-running container (this test confirmed the bug before the fix, and now passes). `test_workaround_attach_bash_works_when_container_running` verifies the `coi attach <container> --bash` workaround also works.
+
 ### Bug Fixes
+
+- **Disk I/O limits now work correctly** — `coi run` and `coi shell` were attempting to apply disk I/O limits (`limits.read`, `limits.write`, `limits.max`) via container-level config (`incus config set`), but Incus only exposes these as device-level keys on the root disk. The applier now uses `incus config device set container root limits.read=...` instead, which is the correct API. `RemoveLimits()` also updated to unset device-level keys.
+
+- **Negative and zero `max_duration` values are now rejected** — `ValidateDuration()` and `ParseDuration()` previously accepted negative durations like `"-1h"` (Go's `time.ParseDuration` accepts them) and zero, which make no sense as container lifetimes. Both functions now return an error for non-positive durations.
+
+- **`coi run` now enforces `max_duration` at runtime** — The `max_duration` config key was only respected in `coi shell` (interactive) sessions. `coi run` silently ignored it: invalid values were never validated and valid values never caused the container to stop. Fixed: invalid values are now caught before container launch, and a `TimeoutMonitor` goroutine is started before the blocking `incus exec` call so the container is stopped when the limit elapses.
+
+- **`coi shell --resume` now works when container is already Running (#413)** — After a host reboot, Incus may restore non-persistent containers via stateful restore, leaving them in a Running state. When the user then ran `coi shell --resume=<session-id>`, COI failed with "slot N is already in use by a running container — this should not happen (bug in slot allocation)". The check in `setup.go` only allowed reusing a running container for persistent sessions or explicit `--container` overrides; resume was not included. Fixed by also allowing reuse when `ResumeFromID` is set: the slot in that path comes from saved session metadata, not from `AllocateSlot()`, so a running container at that slot is the expected container to reconnect to.
 
 - **Error messages no longer suggest removed CLI flags** — Several user-facing error messages referenced flags that were removed in an earlier refactor (replaced by config.toml settings). Following the suggestions produced `Error: unknown flag`. Fixed: (1) `--network=open` in `network/manager.go` and three `health/checks.go` messages — now points to `mode = "open"` in `[network]` section of `config.toml`; (2) `--monitor` in the monitoring health check — now points to `monitoring.enabled = true` in `[monitoring]` section. Wiki: corrected the opencode resume description which incorrectly implied `--resume` and `--continue` behave differently (they are identical aliases). Closes #398.
 
