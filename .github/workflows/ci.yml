@@ -128,9 +128,15 @@ jobs:
           - name: core-build
             path: tests/build tests/run
             description: "Build and run command tests"
-          - name: misc
-            path: tests/clean tests/cli tests/completion tests/docker tests/errors tests/help tests/image tests/info tests/mount tests/monitor tests/shutdown tests/snapshot tests/update tests/version tests/meta tests/main_help_flag.py tests/main_help_shorthand.py
-            description: "Misc commands: clean/cli/completion/docker/errors/help/image/info/mount/monitor/shutdown/snapshot/update/version/meta"
+          - name: misc-cli
+            path: tests/cli
+            description: "CLI flag/format/output tests"
+          - name: misc-snapshot
+            path: tests/meta tests/snapshot tests/image
+            description: "Snapshot, image, and meta command tests"
+          - name: misc-commands
+            path: tests/clean tests/completion tests/docker tests/errors tests/help tests/info tests/mount tests/monitor tests/shutdown tests/update tests/version tests/main_help_flag.py tests/main_help_shorthand.py
+            description: "Misc commands: clean/docker/errors/help/info/mount/monitor/shutdown/update/version"
           - name: misc-config
             path: tests/config tests/health tests/limits tests/schema
             description: "Config, health, limits, and schema tests"
