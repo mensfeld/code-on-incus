@@ -102,7 +102,7 @@ jobs:
           go tool cover -func=coverage.out | tail -1  # Show total coverage
 
   # Integration tests run in parallel with unit tests (after build passes)
-  # Split into 13 test groups for parallel execution
+  # Split into 15 test groups for parallel execution
   # Network isolation uses nftables (ip coi forward chain)
   integration:
     name: Integration Tests (${{ matrix.test_group.name }})
@@ -139,7 +139,7 @@ jobs:
             description: "Snapshot, image, and meta command tests"
           - name: misc-commands
             path: tests/clean tests/completion tests/docker tests/errors tests/help tests/info tests/mount tests/monitor tests/shutdown tests/update tests/version tests/main_help_flag.py tests/main_help_shorthand.py
-            description: "Misc commands: clean/docker/errors/help/info/mount/monitor/shutdown/update/version"
+            description: "Misc commands: clean/completion/docker/errors/help/info/mount/monitor/shutdown/update/version + root help files"
           - name: misc-config
             path: tests/config tests/health tests/limits tests/schema
             description: "Config, health, limits, and schema tests"
