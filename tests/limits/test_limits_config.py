@@ -41,7 +41,7 @@ max_processes = 100
 
     # Launch container with coi run (quick test)
     result = subprocess.run(
-        [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
+        [coi_binary, "run", "--persistent", "--workspace", workspace_dir, "echo", "test"],
         capture_output=True,
         text=True,
         timeout=120,
@@ -100,7 +100,7 @@ limit = "512MiB"
 
     # Launch with profile
     result = subprocess.run(
-        [coi_binary, "run", "--workspace", workspace_dir, "--profile", "limited", "echo", "test"],
+        [coi_binary, "run", "--persistent", "--workspace", workspace_dir, "--profile", "limited", "echo", "test"],
         capture_output=True,
         text=True,
         timeout=120,
@@ -131,7 +131,7 @@ def test_environment_variables_work(coi_binary, workspace_dir, cleanup_container
     env["COI_LIMIT_MEMORY"] = "2GiB"
 
     result = subprocess.run(
-        [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
+        [coi_binary, "run", "--persistent", "--workspace", workspace_dir, "echo", "test"],
         capture_output=True,
         text=True,
         timeout=120,
@@ -160,7 +160,7 @@ def test_empty_limits_means_unlimited(coi_binary, workspace_dir, cleanup_contain
 
     # Launch without any limits configured
     result = subprocess.run(
-        [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
+        [coi_binary, "run", "--persistent", "--workspace", workspace_dir, "echo", "test"],
         capture_output=True,
         text=True,
         timeout=120,

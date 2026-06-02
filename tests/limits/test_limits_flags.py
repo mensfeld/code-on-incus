@@ -34,7 +34,7 @@ limit = "2GiB"
 
     # Launch without any extra flags -- config should be applied
     result = subprocess.run(
-        [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
+        [coi_binary, "run", "--persistent", "--workspace", workspace_dir, "echo", "test"],
         capture_output=True,
         text=True,
         timeout=120,
@@ -94,6 +94,7 @@ limit = "512MiB"
         [
             coi_binary,
             "run",
+            "--persistent",
             "--workspace",
             workspace_dir,
             "--profile",
@@ -136,7 +137,7 @@ def test_env_vars_alongside_config(coi_binary, workspace_dir, cleanup_containers
 
     # Launch with env vars, no config file
     result = subprocess.run(
-        [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
+        [coi_binary, "run", "--persistent", "--workspace", workspace_dir, "echo", "test"],
         capture_output=True,
         text=True,
         timeout=120,
@@ -182,7 +183,7 @@ limit = "4GiB"
 
     # Launch with both config and env vars
     result = subprocess.run(
-        [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
+        [coi_binary, "run", "--persistent", "--workspace", workspace_dir, "echo", "test"],
         capture_output=True,
         text=True,
         timeout=120,
@@ -231,7 +232,7 @@ max_processes = 100
 
     # Launch without any extra flags
     result = subprocess.run(
-        [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
+        [coi_binary, "run", "--persistent", "--workspace", workspace_dir, "echo", "test"],
         capture_output=True,
         text=True,
         timeout=120,
@@ -292,6 +293,7 @@ count = "2"
         [
             coi_binary,
             "run",
+            "--persistent",
             "--workspace",
             workspace_dir,
             "--profile",

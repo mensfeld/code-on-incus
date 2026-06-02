@@ -29,7 +29,7 @@ count = "2"
     )
 
     result = subprocess.run(
-        [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
+        [coi_binary, "run", "--persistent", "--workspace", workspace_dir, "echo", "test"],
         capture_output=True,
         text=True,
         timeout=120,
@@ -66,7 +66,7 @@ allowance = "50%"
     )
 
     result = subprocess.run(
-        [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
+        [coi_binary, "run", "--persistent", "--workspace", workspace_dir, "echo", "test"],
         capture_output=True,
         text=True,
         timeout=120,
@@ -102,7 +102,7 @@ limit = "2GiB"
     )
 
     result = subprocess.run(
-        [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
+        [coi_binary, "run", "--persistent", "--workspace", workspace_dir, "echo", "test"],
         capture_output=True,
         text=True,
         timeout=120,
@@ -139,7 +139,7 @@ swap = "false"
     )
 
     result = subprocess.run(
-        [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
+        [coi_binary, "run", "--persistent", "--workspace", workspace_dir, "echo", "test"],
         capture_output=True,
         text=True,
         timeout=120,
@@ -176,7 +176,7 @@ write = "5MiB/s"
     )
 
     result = subprocess.run(
-        [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
+        [coi_binary, "run", "--persistent", "--workspace", workspace_dir, "echo", "test"],
         capture_output=True,
         text=True,
         timeout=120,
@@ -215,7 +215,7 @@ max_processes = 100
     )
 
     result = subprocess.run(
-        [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
+        [coi_binary, "run", "--persistent", "--workspace", workspace_dir, "echo", "test"],
         capture_output=True,
         text=True,
         timeout=120,
@@ -260,7 +260,7 @@ max_processes = 100
     )
 
     result = subprocess.run(
-        [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
+        [coi_binary, "run", "--persistent", "--workspace", workspace_dir, "echo", "test"],
         capture_output=True,
         text=True,
         timeout=120,
@@ -300,7 +300,7 @@ priority = 5
     )
 
     result = subprocess.run(
-        [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
+        [coi_binary, "run", "--persistent", "--workspace", workspace_dir, "echo", "test"],
         capture_output=True,
         text=True,
         timeout=120,

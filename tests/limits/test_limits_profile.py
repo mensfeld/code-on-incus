@@ -48,6 +48,7 @@ max_processes = 50
         [
             coi_binary,
             "run",
+            "--persistent",
             "--workspace",
             workspace_dir,
             "--profile",
@@ -107,6 +108,7 @@ limit = "{memory}"
         [
             coi_binary,
             "run",
+            "--persistent",
             "--workspace",
             workspace_dir,
             "--slot=1",
@@ -147,6 +149,7 @@ limit = "{memory}"
         [
             coi_binary,
             "run",
+            "--persistent",
             "--workspace",
             workspace_dir,
             "--slot=2",
@@ -197,6 +200,7 @@ count = "2"
         [
             coi_binary,
             "run",
+            "--persistent",
             "--workspace",
             workspace_dir,
             "--profile",
@@ -269,6 +273,7 @@ count = "1"
         [
             coi_binary,
             "run",
+            "--persistent",
             "--workspace",
             workspace_dir,
             "--profile",
@@ -340,6 +345,7 @@ limit = "4GiB"
         [
             coi_binary,
             "run",
+            "--persistent",
             "--workspace",
             workspace_dir,
             "--profile",
@@ -406,6 +412,7 @@ persistent = false
         [
             coi_binary,
             "run",
+            "--persistent",
             "--workspace",
             workspace_dir,
             "--profile",
