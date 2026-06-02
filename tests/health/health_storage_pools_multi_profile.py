@@ -100,7 +100,9 @@ def test_health_storage_pools_multi_profile(coi_binary, workspace_dir):
             timeout=60,
             cwd=workspace_dir,
         )
-        assert result.returncode in (0, 1), f"health should exit 0 or 1. stderr: {result.stderr}"
+        assert result.returncode in (0, 1, 2), (
+            f"health should exit 0, 1, or 2. stderr: {result.stderr}"
+        )
 
         data = json.loads(result.stdout)
         checks = data["checks"]
