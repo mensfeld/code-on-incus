@@ -353,7 +353,9 @@ class TestNFTRuleManagement:
                 time.sleep(1)
 
             if not nft_ready:
-                pytest.skip("NFT rules not fully created - monitoring may not be properly initialized")
+                pytest.skip(
+                    "NFT rules not fully created - monitoring may not be properly initialized"
+                )
 
             # Should have general and suspicious rules (DNS is optional config)
             assert f"NFT_COI[{container_ip}]" in ruleset, "General traffic rule not found"
