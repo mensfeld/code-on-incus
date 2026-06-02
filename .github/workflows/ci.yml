@@ -52,6 +52,9 @@ jobs:
       - name: Build
         run: go build -v ./...
 
+      - name: Verify all test paths are assigned to a CI group
+        run: python3 scripts/check-ci-coverage.py
+
   # Go unit tests run in parallel with integration tests (after build passes)
   unit-tests:
     name: Unit Tests
