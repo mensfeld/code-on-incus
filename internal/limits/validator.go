@@ -111,14 +111,17 @@ func ValidateDiskIO(io string) error {
 
 // ValidateDuration validates duration format
 // Valid formats: "2h", "30m", "1h30m", "" (empty = unlimited)
-// Uses Go's time.ParseDuration
+// Uses Go's time.ParseDuration; negative or zero durations are rejected.
 func ValidateDuration(duration string) error {
 	if duration == "" {
 		return nil // Empty = unlimited
 	}
-	_, err := time.ParseDuration(duration)
+	d, err := time.ParseDuration(duration)
 	if err != nil {
 		return fmt.Errorf("invalid duration: %s (examples: '2h', '30m', '1h30m')", duration)
+	}
+	if d <= 0 {
+		return fmt.Errorf("invalid duration: %s (must be a positive value)", duration)
 	}
 	return nil
 }
@@ -132,13 +135,20 @@ func ValidateMaxProcesses(maxProc int) error {
 	return nil
 }
 
-// ParseDuration parses a duration string and returns the duration
-// Returns 0 if the string is empty (unlimited)
+// ParseDuration parses a duration string and returns the duration.
+// Returns 0 if the string is empty (unlimited). Negative durations are rejected.
 func ParseDuration(duration string) (time.Duration, error) {
 	if duration == "" {
 		return 0, nil
 	}
-	return time.ParseDuration(duration)
+	d, err := time.ParseDuration(duration)
+	if err != nil {
+		return 0, err
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf("duration must be positive, got %s", duration)
+	}
+	return d, nil
 }
 
 // NormalizeBoolString converts "true"/"false" strings to proper boolean strings

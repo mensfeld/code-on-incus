@@ -12,10 +12,12 @@ import os
 import subprocess
 from pathlib import Path
 
+from support.helpers import calculate_container_name
+
 
 def test_config_values_applied(coi_binary, workspace_dir, cleanup_containers):
     """Test that config file limit values are applied correctly."""
-    container_name = f"coi-{Path(workspace_dir).name}-1"
+    container_name = calculate_container_name(workspace_dir, 1)
 
     # Create project config with limits
     project_config_dir = Path(workspace_dir) / ".coi"
@@ -36,6 +38,7 @@ limit = "2GiB"
         capture_output=True,
         text=True,
         timeout=120,
+        cwd=workspace_dir,
     )
 
     assert result.returncode == 0, f"Command should succeed. stderr: {result.stderr}"
@@ -55,7 +58,7 @@ limit = "2GiB"
 
 def test_profile_overrides_config(coi_binary, workspace_dir, cleanup_containers):
     """Test that profile settings override global config."""
-    container_name = f"coi-{Path(workspace_dir).name}-1"
+    container_name = calculate_container_name(workspace_dir, 1)
 
     # Create project config with global limits
     project_config_dir = Path(workspace_dir) / ".coi"
@@ -101,6 +104,7 @@ limit = "512MiB"
         capture_output=True,
         text=True,
         timeout=120,
+        cwd=workspace_dir,
     )
 
     assert result.returncode == 0, f"Command should succeed. stderr: {result.stderr}"
@@ -124,7 +128,7 @@ limit = "512MiB"
 
 def test_env_vars_alongside_config(coi_binary, workspace_dir, cleanup_containers):
     """Test that environment variables work alongside config."""
-    container_name = f"coi-{Path(workspace_dir).name}-1"
+    container_name = calculate_container_name(workspace_dir, 1)
 
     env = os.environ.copy()
     env["COI_LIMIT_CPU"] = "1"
@@ -137,6 +141,7 @@ def test_env_vars_alongside_config(coi_binary, workspace_dir, cleanup_containers
         text=True,
         timeout=120,
         env=env,
+        cwd=workspace_dir,
     )
 
     assert result.returncode == 0, f"Command should succeed. stderr: {result.stderr}"
@@ -156,7 +161,7 @@ def test_env_vars_alongside_config(coi_binary, workspace_dir, cleanup_containers
 
 def test_config_overrides_env_vars(coi_binary, workspace_dir, cleanup_containers):
     """Test that config file settings override environment variables."""
-    container_name = f"coi-{Path(workspace_dir).name}-1"
+    container_name = calculate_container_name(workspace_dir, 1)
 
     # Create project config with limits
     project_config_dir = Path(workspace_dir) / ".coi"
@@ -182,6 +187,7 @@ limit = "4GiB"
         text=True,
         timeout=120,
         env=env,
+        cwd=workspace_dir,
     )
 
     assert result.returncode == 0, f"Command should succeed. stderr: {result.stderr}"
@@ -205,7 +211,7 @@ limit = "4GiB"
 
 def test_config_with_multiple_limit_sections(coi_binary, workspace_dir, cleanup_containers):
     """Test that config with multiple limit sections is applied correctly."""
-    container_name = f"coi-{Path(workspace_dir).name}-1"
+    container_name = calculate_container_name(workspace_dir, 1)
 
     # Create project config with multiple limit sections
     project_config_dir = Path(workspace_dir) / ".coi"
@@ -229,6 +235,7 @@ max_processes = 100
         capture_output=True,
         text=True,
         timeout=120,
+        cwd=workspace_dir,
     )
 
     assert result.returncode == 0, f"Command should succeed. stderr: {result.stderr}"
@@ -249,7 +256,7 @@ max_processes = 100
 
 def test_profile_partial_override_of_config(coi_binary, workspace_dir, cleanup_containers):
     """Test that profile can partially override config (only specified values override)."""
-    container_name = f"coi-{Path(workspace_dir).name}-1"
+    container_name = calculate_container_name(workspace_dir, 1)
 
     # Create project config with multiple limits
     project_config_dir = Path(workspace_dir) / ".coi"
@@ -295,6 +302,7 @@ count = "2"
         capture_output=True,
         text=True,
         timeout=120,
+        cwd=workspace_dir,
     )
 
     assert result.returncode == 0, f"Command should succeed. stderr: {result.stderr}"

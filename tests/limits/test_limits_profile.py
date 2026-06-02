@@ -11,10 +11,12 @@ Tests that:
 import subprocess
 from pathlib import Path
 
+from support.helpers import calculate_container_name
+
 
 def test_profile_with_limits(coi_binary, workspace_dir, cleanup_containers):
     """Test that profile limits are applied when using a profile."""
-    container_name = f"coi-{Path(workspace_dir).name}-1"
+    container_name = calculate_container_name(workspace_dir, 1)
 
     # Create directory profile with limits
     profile_dir = Path(workspace_dir) / ".coi" / "profiles" / "limited"
@@ -56,6 +58,7 @@ max_processes = 50
         capture_output=True,
         text=True,
         timeout=120,
+        cwd=workspace_dir,
     )
 
     assert result.returncode == 0, f"Command should succeed. stderr: {result.stderr}"
@@ -99,7 +102,7 @@ limit = "{memory}"
         )
 
     # Test small profile
-    container_name_1 = f"coi-{Path(workspace_dir).name}-1"
+    container_name_1 = calculate_container_name(workspace_dir, 1)
     result = subprocess.run(
         [
             coi_binary,
@@ -115,6 +118,7 @@ limit = "{memory}"
         capture_output=True,
         text=True,
         timeout=120,
+        cwd=workspace_dir,
     )
 
     assert result.returncode == 0, f"Small profile should succeed. stderr: {result.stderr}"
@@ -138,7 +142,7 @@ limit = "{memory}"
     )
 
     # Test large profile
-    container_name_2 = f"coi-{Path(workspace_dir).name}-2"
+    container_name_2 = calculate_container_name(workspace_dir, 2)
     result = subprocess.run(
         [
             coi_binary,
@@ -154,6 +158,7 @@ limit = "{memory}"
         capture_output=True,
         text=True,
         timeout=120,
+        cwd=workspace_dir,
     )
 
     assert result.returncode == 0, f"Large profile should succeed. stderr: {result.stderr}"
@@ -172,7 +177,7 @@ limit = "{memory}"
 
 def test_profile_partial_limits(coi_binary, workspace_dir, cleanup_containers):
     """Test that profile can define only some limits (others remain unset)."""
-    container_name = f"coi-{Path(workspace_dir).name}-1"
+    container_name = calculate_container_name(workspace_dir, 1)
 
     # Create profile with only CPU limit
     profile_dir = Path(workspace_dir) / ".coi" / "profiles" / "cpu_only"
@@ -202,6 +207,7 @@ count = "2"
         capture_output=True,
         text=True,
         timeout=120,
+        cwd=workspace_dir,
     )
 
     assert result.returncode == 0, f"Command should succeed. stderr: {result.stderr}"
@@ -224,7 +230,7 @@ count = "2"
 
 def test_profile_limits_with_global_config(coi_binary, workspace_dir, cleanup_containers):
     """Test interaction between global config limits and profile limits."""
-    container_name = f"coi-{Path(workspace_dir).name}-1"
+    container_name = calculate_container_name(workspace_dir, 1)
 
     # Create config with global limits
     project_config_dir = Path(workspace_dir) / ".coi"
@@ -273,6 +279,7 @@ count = "1"
         capture_output=True,
         text=True,
         timeout=120,
+        cwd=workspace_dir,
     )
 
     assert result.returncode == 0, f"Command should succeed. stderr: {result.stderr}"
@@ -297,7 +304,7 @@ count = "1"
 
 def test_profile_overrides_global_config_limits(coi_binary, workspace_dir, cleanup_containers):
     """Test that profile limits override global config limits."""
-    container_name = f"coi-{Path(workspace_dir).name}-1"
+    container_name = calculate_container_name(workspace_dir, 1)
 
     # Create global config with limits
     project_config_dir = Path(workspace_dir) / ".coi"
@@ -343,6 +350,7 @@ limit = "4GiB"
         capture_output=True,
         text=True,
         timeout=120,
+        cwd=workspace_dir,
     )
 
     assert result.returncode == 0, f"Command should succeed. stderr: {result.stderr}"
@@ -366,7 +374,7 @@ limit = "4GiB"
 
 def test_profile_without_limits_uses_global(coi_binary, workspace_dir, cleanup_containers):
     """Test that profile without limits falls back to global config."""
-    container_name = f"coi-{Path(workspace_dir).name}-1"
+    container_name = calculate_container_name(workspace_dir, 1)
 
     # Create config with global limits
     project_config_dir = Path(workspace_dir) / ".coi"
@@ -408,6 +416,7 @@ persistent = false
         capture_output=True,
         text=True,
         timeout=120,
+        cwd=workspace_dir,
     )
 
     assert result.returncode == 0, f"Command should succeed. stderr: {result.stderr}"

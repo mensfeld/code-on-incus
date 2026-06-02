@@ -12,29 +12,21 @@ import os
 import subprocess
 from pathlib import Path
 
+from support.helpers import calculate_container_name
+
 
 def test_config_file_limits_loaded(coi_binary, workspace_dir, cleanup_containers):
     """Test that limits from config file are loaded and applied."""
-    container_name = f"coi-{Path(workspace_dir).name}-1"
+    container_name = calculate_container_name(workspace_dir, 1)
 
-    # Create config file with limits
-    config_dir = Path.home() / ".config" / "coi"
+    # Write limits config into the workspace's project config
+    config_dir = Path(workspace_dir) / ".coi"
     config_dir.mkdir(parents=True, exist_ok=True)
     config_file = config_dir / "config.toml"
-
-    # Backup existing config if present
-    backup_file = None
-    if config_file.exists():
-        backup_file = config_file.with_suffix(".toml.backup")
-        config_file.rename(backup_file)
-
-    try:
-        config_content = """
+    config_file.write_text(
+        """
 [container]
 image = "coi-default"
-
-[incus]
-project = "default"
 
 [limits.cpu]
 count = "2"
@@ -45,37 +37,31 @@ limit = "1GiB"
 [limits.runtime]
 max_processes = 100
 """
-        config_file.write_text(config_content)
+    )
 
-        # Launch container with coi run (quick test)
-        result = subprocess.run(
-            [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
+    # Launch container with coi run (quick test)
+    result = subprocess.run(
+        [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        cwd=workspace_dir,
+    )
 
-        assert result.returncode == 0, f"Command should succeed. stderr: {result.stderr}"
+    assert result.returncode == 0, f"Command should succeed. stderr: {result.stderr}"
 
-        # Check that limits were applied by inspecting container config
-        result = subprocess.run(
-            ["incus", "config", "show", container_name],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
+    # Check that limits were applied by inspecting container config
+    result = subprocess.run(
+        ["incus", "config", "show", container_name],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
 
-        config_output = result.stdout
-        assert 'limits.cpu: "2"' in config_output, "CPU limit should be applied"
-        assert "limits.memory: 1GiB" in config_output, "Memory limit should be applied"
-        assert 'limits.processes: "100"' in config_output, "Process limit should be applied"
-
-    finally:
-        # Restore original config
-        if config_file.exists():
-            config_file.unlink()
-        if backup_file and backup_file.exists():
-            backup_file.rename(config_file)
+    config_output = result.stdout
+    assert 'limits.cpu: "2"' in config_output, "CPU limit should be applied"
+    assert "limits.memory: 1GiB" in config_output, "Memory limit should be applied"
+    assert 'limits.processes: "100"' in config_output, "Process limit should be applied"
 
 
 def test_profile_limits_override_global(coi_binary, workspace_dir, cleanup_containers):
@@ -110,7 +96,7 @@ limit = "512MiB"
 """
     )
 
-    container_name = f"coi-{Path(workspace_dir).name}-1"
+    container_name = calculate_container_name(workspace_dir, 1)
 
     # Launch with profile
     result = subprocess.run(
@@ -118,6 +104,7 @@ limit = "512MiB"
         capture_output=True,
         text=True,
         timeout=120,
+        cwd=workspace_dir,
     )
 
     assert result.returncode == 0, f"Command should succeed. stderr: {result.stderr}"
@@ -137,7 +124,7 @@ limit = "512MiB"
 
 def test_environment_variables_work(coi_binary, workspace_dir, cleanup_containers):
     """Test that environment variables set limits."""
-    container_name = f"coi-{Path(workspace_dir).name}-1"
+    container_name = calculate_container_name(workspace_dir, 1)
 
     env = os.environ.copy()
     env["COI_LIMIT_CPU"] = "2"
@@ -149,6 +136,7 @@ def test_environment_variables_work(coi_binary, workspace_dir, cleanup_container
         text=True,
         timeout=120,
         env=env,
+        cwd=workspace_dir,
     )
 
     assert result.returncode == 0, f"Command should succeed. stderr: {result.stderr}"
@@ -168,7 +156,7 @@ def test_environment_variables_work(coi_binary, workspace_dir, cleanup_container
 
 def test_empty_limits_means_unlimited(coi_binary, workspace_dir, cleanup_containers):
     """Test that empty/missing limits result in unlimited (no limits applied)."""
-    container_name = f"coi-{Path(workspace_dir).name}-1"
+    container_name = calculate_container_name(workspace_dir, 1)
 
     # Launch without any limits configured
     result = subprocess.run(
@@ -176,6 +164,7 @@ def test_empty_limits_means_unlimited(coi_binary, workspace_dir, cleanup_contain
         capture_output=True,
         text=True,
         timeout=120,
+        cwd=workspace_dir,
     )
 
     assert result.returncode == 0, f"Command should succeed. stderr: {result.stderr}"

@@ -48,6 +48,13 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Validate max_duration early so the user gets a clear error before any container work.
+	if cfg.Limits.Runtime.MaxDuration != "" {
+		if _, err := limits.ParseDuration(cfg.Limits.Runtime.MaxDuration); err != nil {
+			return fmt.Errorf("invalid max_duration: %w", err)
+		}
+	}
+
 	// Check if Incus is available
 	if !container.Available() {
 		return container.IncusNotAvailableError()
@@ -296,6 +303,23 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	session.SetupMiseTrust(mgr, containerWorkspacePath, func(msg string) {
 		fmt.Fprintf(os.Stderr, "%s\n", msg)
 	})
+
+	// Start timeout monitor if max_duration is configured.
+	// The monitor runs in a background goroutine and stops the container when
+	// the duration elapses, which causes the blocking incus exec below to return.
+	var timeoutMon *limits.TimeoutMonitor
+	if cfg.Limits.Runtime.MaxDuration != "" {
+		maxDur, _ := limits.ParseDuration(cfg.Limits.Runtime.MaxDuration) // already validated above
+		autoStop := config.BoolVal(cfg.Limits.Runtime.AutoStop)
+		if cfg.Limits.Runtime.AutoStop == nil {
+			autoStop = true // default: auto-stop when limit reached
+		}
+		stopGraceful := config.BoolVal(cfg.Limits.Runtime.StopGraceful)
+		runLog := logger.NewDiscard()
+		timeoutMon = limits.NewTimeoutMonitor(containerName, maxDur, autoStop, stopGraceful, cfg.Incus.Project, runLog)
+		timeoutMon.Start()
+		defer timeoutMon.Stop()
+	}
 
 	// Execute command directly (args are already the full command to run)
 	fmt.Fprintf(os.Stderr, "Executing: %s\n", strings.Join(args, " "))

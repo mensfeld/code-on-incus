@@ -100,32 +100,30 @@ func applyMemoryLimits(containerName string, memory MemoryLimits, project string
 	return nil
 }
 
-// applyDiskLimits applies disk I/O limits to a container
+// applyDiskLimits applies disk I/O limits to the root device of a container.
+// Disk I/O limits in Incus are device-level config on the root disk, not
+// container-level config keys, so we use `incus config device set`.
 func applyDiskLimits(containerName string, disk DiskLimits, project string) error {
-	// Apply disk read limit
 	if disk.Read != "" {
-		if err := setIncusConfig(containerName, "limits.read", disk.Read, project); err != nil {
+		if err := setIncusDeviceConfig(containerName, "root", "limits.read", disk.Read, project); err != nil {
 			return err
 		}
 	}
 
-	// Apply disk write limit
 	if disk.Write != "" {
-		if err := setIncusConfig(containerName, "limits.write", disk.Write, project); err != nil {
+		if err := setIncusDeviceConfig(containerName, "root", "limits.write", disk.Write, project); err != nil {
 			return err
 		}
 	}
 
-	// Apply combined disk limit (overrides read/write)
 	if disk.Max != "" {
-		if err := setIncusConfig(containerName, "limits.max", disk.Max, project); err != nil {
+		if err := setIncusDeviceConfig(containerName, "root", "limits.max", disk.Max, project); err != nil {
 			return err
 		}
 	}
 
-	// Apply disk priority
 	if disk.Priority != 0 {
-		if err := setIncusConfig(containerName, "limits.disk.priority", fmt.Sprintf("%d", disk.Priority), project); err != nil {
+		if err := setIncusDeviceConfig(containerName, "root", "limits.disk.priority", fmt.Sprintf("%d", disk.Priority), project); err != nil {
 			return err
 		}
 	}
@@ -140,6 +138,25 @@ func applyProcessLimits(containerName string, maxProcesses int, project string) 
 			return err
 		}
 	}
+	return nil
+}
+
+// setIncusDeviceConfig sets a device-level configuration key using `incus config device set`.
+func setIncusDeviceConfig(containerName, device, key, value, project string) error {
+	args := []string{"config", "device", "set"}
+
+	if project != "" && project != "default" {
+		args = append(args, "--project", project)
+	}
+
+	args = append(args, containerName, device, fmt.Sprintf("%s=%s", key, value))
+
+	cmd := exec.Command("incus", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("incus config device set %s=%s failed: %w (output: %s)", key, value, err, string(output))
+	}
+
 	return nil
 }
 
@@ -165,24 +182,52 @@ func setIncusConfig(containerName, key, value, project string) error {
 
 // RemoveLimits removes all limits from a container
 func RemoveLimits(containerName, project string) error {
-	limits := []string{
+	// Container-level limits
+	containerLimits := []string{
 		"limits.cpu",
 		"limits.cpu.allowance",
 		"limits.cpu.priority",
 		"limits.memory",
 		"limits.memory.enforce",
 		"limits.memory.swap",
+		"limits.processes",
+	}
+	for _, limit := range containerLimits {
+		_ = unsetIncusConfig(containerName, limit, project)
+	}
+
+	// Device-level disk I/O limits on the root device
+	deviceLimits := []string{
 		"limits.read",
 		"limits.write",
 		"limits.max",
 		"limits.disk.priority",
-		"limits.processes",
+	}
+	for _, limit := range deviceLimits {
+		_ = unsetIncusDeviceConfig(containerName, "root", limit, project)
 	}
 
-	for _, limit := range limits {
-		// Continue even if unsetting fails (limit might not be set)
-		// We intentionally ignore errors here to allow cleanup to proceed
-		_ = unsetIncusConfig(containerName, limit, project)
+	return nil
+}
+
+// unsetIncusDeviceConfig unsets a device-level configuration key.
+func unsetIncusDeviceConfig(containerName, device, key, project string) error {
+	args := []string{"config", "device", "set"}
+
+	if project != "" && project != "default" {
+		args = append(args, "--project", project)
+	}
+
+	// Setting to empty string effectively removes the limit from the device
+	args = append(args, containerName, device, fmt.Sprintf("%s=", key))
+
+	cmd := exec.Command("incus", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		if strings.Contains(string(output), "not found") || strings.Contains(string(output), "doesn't exist") {
+			return nil
+		}
+		return fmt.Errorf("incus config device set %s= failed: %w (output: %s)", key, err, string(output))
 	}
 
 	return nil
