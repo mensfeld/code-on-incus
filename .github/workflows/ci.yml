@@ -52,6 +52,9 @@ jobs:
       - name: Build
         run: go build -v ./...
 
+      - name: Verify all test paths are assigned to a CI group
+        run: python3 scripts/check-ci-coverage.py
+
   # Go unit tests run in parallel with integration tests (after build passes)
   unit-tests:
     name: Unit Tests
@@ -99,7 +102,7 @@ jobs:
           go tool cover -func=coverage.out | tail -1  # Show total coverage
 
   # Integration tests run in parallel with unit tests (after build passes)
-  # Split into 13 test groups for parallel execution
+  # Split into 15 test groups for parallel execution
   # Network isolation uses nftables (ip coi forward chain)
   integration:
     name: Integration Tests (${{ matrix.test_group.name }})
@@ -128,9 +131,15 @@ jobs:
           - name: core-build
             path: tests/build tests/run
             description: "Build and run command tests"
-          - name: misc
-            path: tests/clean tests/cli tests/completion tests/docker tests/errors tests/help tests/image tests/info tests/mount tests/monitor tests/shutdown tests/snapshot tests/update tests/version tests/meta tests/main_help_flag.py tests/main_help_shorthand.py
-            description: "Misc commands: clean/cli/completion/docker/errors/help/image/info/mount/monitor/shutdown/snapshot/update/version/meta"
+          - name: misc-cli
+            path: tests/cli
+            description: "CLI flag/format/output tests"
+          - name: misc-snapshot
+            path: tests/meta tests/snapshot tests/image
+            description: "Snapshot, image, and meta command tests"
+          - name: misc-commands
+            path: tests/clean tests/completion tests/docker tests/errors tests/help tests/info tests/mount tests/monitor tests/shutdown tests/update tests/version tests/main_help_flag.py tests/main_help_shorthand.py
+            description: "Misc commands: clean/completion/docker/errors/help/info/mount/monitor/shutdown/update/version + root help files"
           - name: misc-config
             path: tests/config tests/health tests/limits tests/schema
             description: "Config, health, limits, and schema tests"
