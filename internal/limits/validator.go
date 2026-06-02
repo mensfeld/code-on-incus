@@ -24,7 +24,8 @@ var (
 	// diskIORegex matches disk I/O byte rates and IOPS.
 	// Incus expects a size value (e.g. "10MB", "10MiB") meaning bytes-per-second,
 	// NOT "10MB/s". The /s suffix is documentation-only; the config value omits it.
-	diskIORegex = regexp.MustCompile(`^(\d+[KMGT]i?B|\d+iops)$`)
+	// SI units use lowercase k (kB); IEC units use uppercase K (KiB).
+	diskIORegex = regexp.MustCompile(`^(\d+[KMGT]iB|\d+[kMGT]B|\d+iops)$`)
 )
 
 // ValidateCPUCount validates CPU count format

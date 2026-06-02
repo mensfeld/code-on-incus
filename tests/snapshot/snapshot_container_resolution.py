@@ -90,7 +90,7 @@ def test_snapshot_no_container_for_workspace(coi_binary, cleanup_containers, wor
     )
     assert result.returncode != 0, "Should fail when no containers exist for workspace"
     assert (
-        "no COI containers found" in result.stderr.lower() or "not found" in result.stderr.lower()
+        "no coi containers found" in result.stderr.lower() or "not found" in result.stderr.lower()
     ), "Should mention no containers found"
 
 
