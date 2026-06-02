@@ -170,8 +170,8 @@ def test_disk_io_limits_applied(coi_binary, workspace_dir, cleanup_containers):
     (config_dir / "config.toml").write_text(
         """
 [limits.disk]
-read = "10MB/s"
-write = "5MB/s"
+read = "10MB"
+write = "5MB"
 """
     )
 
@@ -193,10 +193,10 @@ write = "5MB/s"
     )
 
     assert result.returncode == 0, "Should be able to read container config"
-    assert "limits.read: 10MB/s" in result.stdout, (
+    assert "limits.read: 10MB" in result.stdout, (
         f"Disk read limit should be set. Config: {result.stdout}"
     )
-    assert "limits.write: 5MB/s" in result.stdout, (
+    assert "limits.write: 5MB" in result.stdout, (
         f"Disk write limit should be set. Config: {result.stdout}"
     )
 
@@ -252,7 +252,7 @@ count = "2"
 limit = "2GiB"
 
 [limits.disk]
-read = "10MB/s"
+read = "10MB"
 
 [limits.runtime]
 max_processes = 100
@@ -281,7 +281,7 @@ max_processes = 100
 
     assert 'limits.cpu: "2"' in config, "CPU limit should be set"
     assert "limits.memory: 2GiB" in config, "Memory limit should be set"
-    assert "limits.read: 10MB/s" in config, "Disk read limit should be set"
+    assert "limits.read: 10MB" in config, "Disk read limit should be set"
     assert 'limits.processes: "100"' in config, "Process limit should be set"
 
 

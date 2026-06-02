@@ -21,9 +21,10 @@ var (
 	// memoryRegex matches memory sizes: "512MiB", "2GiB", "50%"
 	memoryRegex = regexp.MustCompile(`^\d+(%|[KMGT]i?B)$`)
 
-	// diskIORegex matches disk I/O rates: "10MB/s", "1000iops"
-	// Incus only accepts SI (non-IEC) suffixes (MB/s, not MiB/s) for disk I/O throttling.
-	diskIORegex = regexp.MustCompile(`^(\d+[KMGT]B/s|\d+iops)$`)
+	// diskIORegex matches disk I/O byte rates and IOPS.
+	// Incus expects a size value (e.g. "10MB", "10MiB") meaning bytes-per-second,
+	// NOT "10MB/s". The /s suffix is documentation-only; the config value omits it.
+	diskIORegex = regexp.MustCompile(`^(\d+[KMGT]i?B|\d+iops)$`)
 )
 
 // ValidateCPUCount validates CPU count format
@@ -99,13 +100,14 @@ func ValidateMemorySwap(swap string) error {
 }
 
 // ValidateDiskIO validates disk I/O rate format
-// Valid formats: "10MB/s", "1000iops", "" (empty = unlimited)
+// Valid formats: "10MB", "10MiB", "1000iops", "" (empty = unlimited)
+// Note: Incus uses size values (e.g. "10MB") as bytes-per-second, not "10MB/s".
 func ValidateDiskIO(io string) error {
 	if io == "" {
 		return nil // Empty = unlimited
 	}
 	if !diskIORegex.MatchString(io) {
-		return fmt.Errorf("invalid disk I/O rate: %s (examples: '10MB/s', '1000iops')", io)
+		return fmt.Errorf("invalid disk I/O rate: %s (examples: '10MB', '10MiB', '1000iops')", io)
 	}
 	return nil
 }
