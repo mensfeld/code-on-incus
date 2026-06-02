@@ -161,7 +161,7 @@ def test_env_vars_alongside_config(coi_binary, workspace_dir, cleanup_containers
 
 
 def test_config_overrides_env_vars(coi_binary, workspace_dir, cleanup_containers):
-    """Test that config file settings override environment variables."""
+    """Test that env vars override config file settings (env vars have higher priority)."""
     container_name = calculate_container_name(workspace_dir, 1)
 
     # Create project config with limits
@@ -193,7 +193,9 @@ limit = "4GiB"
 
     assert result.returncode == 0, f"Command should succeed. stderr: {result.stderr}"
 
-    # Verify config took precedence over env vars
+    # Env vars have higher priority than config files (12-factor app convention).
+    # COI applies env overrides after config file loading, so COI_LIMIT_CPU=1 wins
+    # over the config file's count = "4".
     result = subprocess.run(
         ["incus", "config", "show", container_name],
         capture_output=True,
@@ -202,11 +204,11 @@ limit = "4GiB"
     )
 
     config_output = result.stdout
-    assert 'limits.cpu: "4"' in config_output, (
-        "Config CPU limit should override env var (should be 4, not 1)"
+    assert 'limits.cpu: "1"' in config_output, (
+        "Env var CPU limit should override config (should be 1, not 4)"
     )
-    assert "limits.memory: 4GiB" in config_output, (
-        "Config memory limit should override env var (should be 4GiB, not 512MiB)"
+    assert "limits.memory: 512MiB" in config_output, (
+        "Env var memory limit should override config (should be 512MiB, not 4GiB)"
     )
 
 

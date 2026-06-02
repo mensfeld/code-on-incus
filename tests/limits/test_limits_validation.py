@@ -176,7 +176,7 @@ allowance = "{allowance}"
 
 def test_valid_disk_io_formats(coi_binary, workspace_dir, cleanup_containers):
     """Test that valid disk I/O formats are accepted."""
-    valid_formats = ["10MiB/s", "100KiB/s", "1GiB/s", "1000iops"]
+    valid_formats = ["10MB/s", "100KB/s", "1GB/s", "1000iops"]
 
     for io_rate in valid_formats:
         config_dir = Path(workspace_dir) / ".coi"

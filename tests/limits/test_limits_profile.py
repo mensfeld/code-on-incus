@@ -36,7 +36,7 @@ limit = "2GiB"
 enforce = "hard"
 
 [limits.disk]
-read = "10MiB/s"
+read = "10MB/s"
 
 [limits.runtime]
 max_processes = 50
@@ -79,7 +79,7 @@ max_processes = 50
     assert "limits.memory.enforce: hard" in config_output, (
         "Profile memory enforce should be applied"
     )
-    assert "limits.read: 10MiB/s" in config_output, "Profile disk read limit should be applied"
+    assert "limits.read: 10MB/s" in config_output, "Profile disk read limit should be applied"
     assert 'limits.processes: "50"' in config_output, "Profile process limit should be applied"
 
 
