@@ -1,24 +1,21 @@
 """
-Integration test for issue #413: coi shell --resume fails when container is already running.
+Regression tests for issue #413: coi shell --resume=<id> when container is already Running.
 
 After a host reboot, Incus may restore containers to their pre-reboot Running state via
-stateful restore. When the user then runs `coi shell --resume`, it fails with:
+stateful restore. Before the fix, running `coi shell --resume=<id>` in that situation
+failed with:
 
   failed to setup session: slot 1 is already in use by a running container
   coi-<id>-1 - this should not happen (bug in slot allocation)
 
-This is because:
-1. The session was non-persistent (metadata.persistent = false)
-2. The container is Running (Incus restored it)
-3. setup.go line ~210: sees running container + not persistent → error
+Fix (internal/session/setup.go): allow reusing a Running container when ResumeFromID is
+set. The slot in the resume path comes from saved session metadata, not AllocateSlot(),
+so a running container at that slot is the expected container to reconnect to.
 
 Simulated without rebooting by:
 1. Starting a persistent session (container stays Running after coi exits)
 2. Modifying the saved session metadata to set persistent=false
-3. Attempting to resume
-
-Expected correct behavior: resume succeeds by reusing the running container.
-Current (buggy) behavior: resume fails with "slot already in use" error.
+3. Running coi shell --resume=<id> — now succeeds
 
 See: https://github.com/mensfeld/code-on-incus/issues/413
 """
