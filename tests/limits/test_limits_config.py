@@ -100,7 +100,17 @@ limit = "512MiB"
 
     # Launch with profile
     result = subprocess.run(
-        [coi_binary, "run", "--persistent", "--workspace", workspace_dir, "--profile", "limited", "echo", "test"],
+        [
+            coi_binary,
+            "run",
+            "--persistent",
+            "--workspace",
+            workspace_dir,
+            "--profile",
+            "limited",
+            "echo",
+            "test",
+        ],
         capture_output=True,
         text=True,
         timeout=120,
