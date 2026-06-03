@@ -407,15 +407,20 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		// Now start the container
 		opts.Logger("Starting container...")
 		if err := result.Manager.Start(); err != nil {
-			// If isolation was applied, some environments (CI, nested containers)
-			// lack enough subuid/subgid space to honour isolated ID mappings and
-			// the container fails to start. Unset it and retry once.
 			if idmapIsolated {
-				_ = container.IncusExecQuiet("config", "unset", result.ContainerName, "security.idmap.isolated")
-				if retryErr := result.Manager.Start(); retryErr != nil {
-					return nil, fmt.Errorf("failed to start container: %w", err)
+				// forkstart can exit non-zero transiently even when the container
+				// boots successfully. Check first before unsetting isolation.
+				if running, _ := result.Manager.Running(); running {
+					opts.Logger("Warning: container start reported an error but container is running, continuing")
+				} else {
+					// Container is not running; isolated ID mapping likely failed
+					// due to insufficient subuid/subgid space. Unset and retry.
+					_ = container.IncusExecQuiet("config", "unset", result.ContainerName, "security.idmap.isolated")
+					if retryErr := result.Manager.Start(); retryErr != nil {
+						return nil, fmt.Errorf("failed to start container: %w", err)
+					}
+					opts.Logger("Warning: UID namespace isolation not available in this environment, disabled")
 				}
-				opts.Logger("Warning: UID namespace isolation not available in this environment, disabled")
 			} else {
 				return nil, fmt.Errorf("failed to start container: %w", err)
 			}

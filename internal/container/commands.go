@@ -231,13 +231,18 @@ func IncusFilePush(source, destination string) error {
 	return IncusFilePushContext(context.Background(), source, destination)
 }
 
-// startWithIsolationFallback starts a container and, if start fails, clears
-// security.idmap.isolated and retries once. Some environments (CI runners,
-// nested containers) lack enough subuid/subgid space to honour the isolated
-// ID-mapping allocation; the retry lets the container start without it.
-// If the retry also fails, the original start error is returned.
+// startWithIsolationFallback starts a container and, on failure, checks
+// whether the container is actually running (forkstart can exit non-zero
+// transiently while the container boots). If it is running, the error is
+// ignored. If it is not running, security.idmap.isolated is unset and the
+// start is retried once — some environments (CI runners, nested containers)
+// lack enough subuid/subgid space to honour isolated ID-mapping allocations.
+// The original start error is returned if the retry also fails.
 func startWithIsolationFallback(containerName string) error {
 	if err := IncusExec("start", containerName); err != nil {
+		if running, _ := ContainerRunning(containerName); running {
+			return nil
+		}
 		_ = IncusExecQuiet("config", "unset", containerName, "security.idmap.isolated")
 		if retryErr := IncusExec("start", containerName); retryErr != nil {
 			return err
