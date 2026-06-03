@@ -91,20 +91,31 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 	pipeline := &session.Pipeline{}
 	defer pipeline.Teardown()
 
-	// Signal handler: call pipeline.Teardown on SIGINT/SIGTERM so session
-	// cleanup runs even while runCLI is blocking on an interactive incus exec.
-	// pipeline.Teardown is idempotent — the defer above is a safe no-op second
-	// call. We do NOT os.Exit here: stopping the container (inside Teardown)
-	// causes incus exec to return, which unblocks runCLI and lets the normal
-	// return path complete.
+	// Signal handler: explicitly trigger cleanup when SIGINT/SIGTERM arrives
+	// while runCLI is blocking on an interactive incus exec.
+	//
+	// We cannot use ctx.Done() as the "signal received" branch because
+	// signal.NotifyContext cancels ctx AND delivers to sigChan at the same
+	// time — a select over both is non-deterministic. If ctx.Done() is chosen,
+	// the goroutine exits without calling Teardown, leaving cleanup to the
+	// deferred call, which won't run until the blocking incus exec returns.
+	//
+	// Instead we use a dedicated `done` channel closed when shellCommand
+	// returns. On signal, cleanup is always called. On normal return, the
+	// goroutine exits via the done branch without a second cleanup attempt
+	// (pipeline.Teardown is idempotent). signal.Stop ensures no further
+	// signals are queued after shellCommand returns.
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigChan)
+	done := make(chan struct{})
+	defer close(done)
 	go func() {
 		select {
 		case <-sigChan:
 			fmt.Fprintf(os.Stderr, "\nReceived interrupt signal, cleaning up...\n")
 			pipeline.Teardown()
-		case <-ctx.Done():
+		case <-done:
 		}
 	}()
 
