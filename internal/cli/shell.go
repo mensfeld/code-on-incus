@@ -147,6 +147,13 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 		useTmux = useTmuxDefault
 	}
 
+	// Create a context that is cancelled on SIGINT/SIGTERM.
+	// This propagates cancellation to session.Setup so that Ctrl+C during
+	// container launch unblocks the provisioning sequence rather than leaving
+	// orphaned containers.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	// Check if Incus is available
 	if !container.Available() {
 		return container.IncusNotAvailableError()
@@ -390,7 +397,7 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Fprintf(os.Stderr, "Setting up session %s...\n", sessionID)
-	result, err := session.Setup(setupOpts)
+	result, err := session.Setup(ctx, setupOpts)
 	if err != nil {
 		return fmt.Errorf("failed to setup session: %w", err)
 	}

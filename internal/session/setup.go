@@ -72,7 +72,7 @@ type SetupResult struct {
 // This configures the container with workspace mounting and user setup
 //
 //nolint:gocyclo // Sequential initialization with many configuration paths
-func Setup(opts SetupOptions) (*SetupResult, error) {
+func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 	result := &SetupResult{}
 
 	// Default logger
@@ -502,6 +502,7 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 		}
 		if duration > 0 {
 			result.TimeoutMonitor = limits.NewTimeoutMonitor(
+				ctx,
 				result.ContainerName,
 				duration,
 				config.BoolVal(opts.LimitsConfig.Runtime.AutoStop),
@@ -516,7 +517,7 @@ func Setup(opts SetupOptions) (*SetupResult, error) {
 	// 8. Setup network isolation (after container is running and has IP)
 	if opts.NetworkConfig != nil {
 		result.NetworkManager = network.NewManager(opts.NetworkConfig, result.Logger)
-		if err := result.NetworkManager.SetupForContainer(context.Background(), result.ContainerName); err != nil {
+		if err := result.NetworkManager.SetupForContainer(ctx, result.ContainerName); err != nil {
 			return nil, fmt.Errorf("failed to setup network isolation: %w", err)
 		}
 	}
