@@ -13,7 +13,7 @@ import (
 // injectContextFile creates ~/SANDBOX_CONTEXT.md inside the container.
 // If customPath is provided, it reads the file from the host and uses its content.
 // Otherwise, it renders the default embedded template with dynamic environment info.
-func injectContextFile(mgr *container.Manager, info tool.ContextInfo, customPath, homeDir string, logger func(string)) error {
+func injectContextFile(mgr container.ContainerManager, info tool.ContextInfo, customPath, homeDir string, logger func(string)) error {
 	destPath := filepath.Join(homeDir, "SANDBOX_CONTEXT.md")
 
 	var content string
@@ -65,7 +65,7 @@ func resolveContextContent(info tool.ContextInfo, customPath string, logger func
 // file (e.g., ~/.claude/CLAUDE.md). If the file already exists (e.g., copied from
 // host), the sandbox context is appended with a separator. Otherwise, the file is
 // created with just the sandbox context.
-func injectAutoContextFile(mgr *container.Manager, acf tool.ToolWithAutoContextFile, contextContent, homeDir string, logger func(string)) error {
+func injectAutoContextFile(mgr container.ContainerManager, acf tool.ToolWithAutoContextFile, contextContent, homeDir string, logger func(string)) error {
 	relPath := acf.AutoContextFile()
 	destPath := filepath.Join(homeDir, relPath)
 	destDir := filepath.Dir(destPath)

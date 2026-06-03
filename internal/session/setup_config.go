@@ -10,7 +10,7 @@ import (
 )
 
 // readContainerFile reads a file from inside the container via cat
-func readContainerFile(mgr *container.Manager, path string) ([]byte, error) {
+func readContainerFile(mgr container.ContainerManager, path string) ([]byte, error) {
 	content, err := mgr.ExecCommand(fmt.Sprintf("cat %s", path), container.ExecCommandOptions{Capture: true})
 	if err != nil {
 		return nil, fmt.Errorf("failed to read %s from container: %w", path, err)
@@ -20,7 +20,7 @@ func readContainerFile(mgr *container.Manager, path string) ([]byte, error) {
 
 // restoreSessionData restores tool config directory from a saved session
 // Used when resuming a non-persistent session (container was deleted and recreated)
-func restoreSessionData(mgr *container.Manager, resumeID, homeDir, sessionsDir string, t tool.Tool, logger func(string)) error {
+func restoreSessionData(mgr container.ContainerManager, resumeID, homeDir, sessionsDir string, t tool.Tool, logger func(string)) error {
 	configDirName := t.ConfigDirName()
 	sourceConfigDir := filepath.Join(sessionsDir, resumeID, configDirName)
 
@@ -54,7 +54,7 @@ func restoreSessionData(mgr *container.Manager, resumeID, homeDir, sessionsDir s
 // injectCredentials copies essential config files and sandbox settings from host to container when resuming.
 // This ensures fresh authentication while preserving the session conversation history.
 // Uses the ToolWithConfigDirFiles interface so each tool declares its own files and layout.
-func injectCredentials(mgr *container.Manager, hostCLIConfigPath, homeDir string, tcf tool.ToolWithConfigDirFiles, logger func(string)) error {
+func injectCredentials(mgr container.ContainerManager, hostCLIConfigPath, homeDir string, tcf tool.ToolWithConfigDirFiles, logger func(string)) error {
 	logger("Injecting fresh credentials and config for session resume...")
 
 	configDirName := tcf.ConfigDirName()
@@ -152,7 +152,7 @@ func injectCredentials(mgr *container.Manager, hostCLIConfigPath, homeDir string
 }
 
 // setupCLIConfig copies tool config directory and injects sandbox settings
-func setupCLIConfig(mgr *container.Manager, hostCLIConfigPath, homeDir string, tcf tool.ToolWithConfigDirFiles, logger func(string)) error {
+func setupCLIConfig(mgr container.ContainerManager, hostCLIConfigPath, homeDir string, tcf tool.ToolWithConfigDirFiles, logger func(string)) error {
 	configDirName := tcf.ConfigDirName()
 	stateDir := filepath.Join(homeDir, configDirName)
 

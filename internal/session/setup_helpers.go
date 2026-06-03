@@ -102,7 +102,7 @@ func mergeJSONSettings(existingContent []byte, settings map[string]interface{}) 
 // The env var is written to both /etc/profile.d/ (login shells) and prepended
 // to /etc/bash.bashrc (non-login interactive shells, sourced before ~/.bashrc
 // where mise activates). Non-fatal: logs a warning on failure.
-func SetupMiseTrust(mgr *container.Manager, containerWorkspacePath string, logger func(string)) {
+func SetupMiseTrust(mgr container.ContainerManager, containerWorkspacePath string, logger func(string)) {
 	exportLine := fmt.Sprintf(`export MISE_TRUSTED_CONFIG_PATHS="%s"`, containerWorkspacePath)
 	trustCmd := fmt.Sprintf(
 		`printf '%%s\n' '%s' > /etc/profile.d/coi-mise-trust.sh && `+
@@ -120,7 +120,7 @@ func SetupMiseTrust(mgr *container.Manager, containerWorkspacePath string, logge
 // as the container's default "code" user. The setting is applied globally
 // (--global) so it covers all repos inside the container.
 // Non-fatal: logs a warning on failure.
-func SetupGitIdentityGuard(mgr *container.Manager, homeDir string, logger func(string)) {
+func SetupGitIdentityGuard(mgr container.ContainerManager, homeDir string, logger func(string)) {
 	cmd := fmt.Sprintf(
 		`HOME=%s git config --global user.useConfigOnly true`,
 		homeDir,
@@ -135,7 +135,7 @@ func SetupGitIdentityGuard(mgr *container.Manager, homeDir string, logger func(s
 // Claude Code versions show at startup. The managed-settings path is the only
 // way to set disableAutoMode — it cannot be set via user settings.
 // Non-fatal: logs a warning on failure.
-func SetupClaudeManagedSettings(mgr *container.Manager, logger func(string)) {
+func SetupClaudeManagedSettings(mgr container.ContainerManager, logger func(string)) {
 	mkdirCmd := "mkdir -p /etc/claude-code"
 	if _, err := mgr.ExecCommand(mkdirCmd, container.ExecCommandOptions{Capture: true}); err != nil {
 		logger(fmt.Sprintf("Warning: Failed to create Claude managed settings directory: %v", err))

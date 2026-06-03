@@ -24,7 +24,7 @@ type CleanupOptions struct {
 	SaveSession    bool      // Whether to save tool config directory
 	Workspace      string    // Workspace directory path
 	Tool           tool.Tool // AI coding tool being used
-	NetworkManager *network.Manager
+	NetworkManager network.NetworkManager
 	SessionLogger  *logger.SessionLogger
 	Logger         func(string)
 }
@@ -65,7 +65,7 @@ func Cleanup(opts CleanupOptions) error {
 	// error it waits for the container to fully stop, then retries using incus's
 	// direct file-access path (no SFTP) so the save succeeds in every exit scenario.
 	if opts.SaveSession && exists && opts.SessionID != "" && opts.SessionsDir != "" && opts.Tool != nil && opts.Tool.ConfigDirName() != "" {
-		if err := saveSessionData(mgr, opts.SessionID, opts.Persistent, opts.ProfileName, opts.Workspace, opts.SessionsDir, opts.Tool, opts.Logger); err != nil {
+		if err := saveSessionData(mgr, opts.ContainerName, opts.SessionID, opts.Persistent, opts.ProfileName, opts.Workspace, opts.SessionsDir, opts.Tool, opts.Logger); err != nil {
 			opts.Logger(fmt.Sprintf("Warning: Failed to save session data: %v", err))
 		}
 	}
@@ -131,7 +131,7 @@ func Cleanup(opts CleanupOptions) error {
 }
 
 // saveSessionData saves the tool config directory from the container
-func saveSessionData(mgr *container.Manager, sessionID string, persistent bool, profileName string, workspace string, sessionsDir string, t tool.Tool, logger func(string)) error {
+func saveSessionData(mgr container.ContainerManager, containerName string, sessionID string, persistent bool, profileName string, workspace string, sessionsDir string, t tool.Tool, logger func(string)) error {
 	// Determine home directory
 	// For coi images, we always use /home/code
 	// For other images, we use /root
@@ -206,7 +206,7 @@ func saveSessionData(mgr *container.Manager, sessionID string, persistent bool, 
 	// Save metadata
 	metadata := SessionMetadata{
 		SessionID:     sessionID,
-		ContainerName: mgr.ContainerName,
+		ContainerName: containerName,
 		Persistent:    persistent,
 		ProfileName:   profileName,
 		Workspace:     workspace,

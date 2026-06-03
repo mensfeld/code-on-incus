@@ -87,7 +87,7 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// Get absolute workspace path
-	absWorkspace, err := filepath.Abs(workspace)
+	absWorkspace, err := filepath.Abs(app.workspace)
 	if err != nil {
 		return fmt.Errorf("invalid workspace path: %w", err)
 	}
@@ -100,10 +100,10 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 	if aliasArg == "" {
 		if cwd, err := os.Getwd(); err == nil {
 			if absCWD, err := filepath.Abs(cwd); err == nil && absWorkspace != absCWD {
-				if err := cfg.OverlayProjectConfig(absWorkspace); err != nil && !os.IsNotExist(err) {
+				if err := app.cfg.OverlayProjectConfig(absWorkspace); err != nil && !os.IsNotExist(err) {
 					return fmt.Errorf("failed to load project config from %s: %w", absWorkspace, err)
 				}
-				container.Configure(cfg.Incus.Project, cfg.Incus.CodeUser, cfg.Incus.CodeUID)
+				container.Configure(app.cfg.Incus.Project, app.cfg.Incus.CodeUser, app.cfg.Incus.CodeUID)
 			}
 		}
 	}
@@ -120,28 +120,28 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 		// Reload project config from the resolved workspace so that mounts,
 		// network, storage_pool, alias, and other project-level settings from
 		// the target workspace are applied instead of the caller's CWD config.
-		if err := cfg.OverlayProjectConfig(absWorkspace); err != nil && !os.IsNotExist(err) {
+		if err := app.cfg.OverlayProjectConfig(absWorkspace); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("failed to load project config from %s: %w", absWorkspace, err)
 		}
 
 		// Apply profile if registry specifies one and user didn't override
 		if resolved.Profile != "" && !cmd.Flags().Changed("profile") {
-			profile = resolved.Profile
-			if err := cfg.ApplyProfile(profile); err != nil {
+			app.profile = resolved.Profile
+			if err := app.cfg.ApplyProfile(app.profile); err != nil {
 				return err
 			}
 		}
 		// Re-apply Incus configuration after config reload
-		container.Configure(cfg.Incus.Project, cfg.Incus.CodeUser, cfg.Incus.CodeUID)
+		container.Configure(app.cfg.Incus.Project, app.cfg.Incus.CodeUser, app.cfg.Incus.CodeUID)
 		if resolved.Slot > 0 && !cmd.Flags().Changed("slot") {
-			slot = resolved.Slot
+			app.slot = resolved.Slot
 		}
 	}
 
 	// Determine useTmux: config default, overridden by explicit --tmux flag
 	useTmuxDefault := true
-	if cfg.Shell.UseTmux != nil {
-		useTmuxDefault = *cfg.Shell.UseTmux
+	if app.cfg.Shell.UseTmux != nil {
+		useTmuxDefault = *app.cfg.Shell.UseTmux
 	}
 	if !cmd.Flags().Changed("tmux") {
 		useTmux = useTmuxDefault
@@ -172,9 +172,9 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 	// Get configured tool (needed to determine tool-specific sessions directory)
 	// --tool flag overrides whatever is in .coi/config.toml or global config
 	if toolFlag != "" {
-		cfg.Tool.Name = toolFlag
+		app.cfg.Tool.Name = toolFlag
 	}
-	toolInstance, err := getConfiguredTool(cfg)
+	toolInstance, err := getConfiguredTool(app.cfg)
 	if err != nil {
 		return err
 	}
@@ -191,9 +191,9 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// Handle resume flag (--resume or --continue)
-	resumeID := resume
-	if continueSession != "" {
-		resumeID = continueSession // --continue takes precedence if both are provided
+	resumeID := app.resume
+	if app.continueSession != "" {
+		resumeID = app.continueSession // --continue takes precedence if both are provided
 	}
 
 	// Check if resume/continue flag was explicitly set
@@ -242,21 +242,21 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 		if metadata, err := session.LoadSessionMetadata(metadataPath); err == nil {
 			// Inherit profile if not explicitly set by user
 			if !cmd.Flags().Changed("profile") && metadata.ProfileName != "" {
-				profile = metadata.ProfileName
-				if err := cfg.ApplyProfile(profile); err != nil {
-					return fmt.Errorf("failed to apply saved profile '%s': %w", profile, err)
+				app.profile = metadata.ProfileName
+				if err := app.cfg.ApplyProfile(app.profile); err != nil {
+					return fmt.Errorf("failed to apply saved profile '%s': %w", app.profile, err)
 				}
 				// Re-apply persistent from config since profile may override it
 				if !cmd.Flags().Changed("persistent") {
-					persistent = config.BoolVal(cfg.Container.Persistent)
+					app.persistent = config.BoolVal(app.cfg.Container.Persistent)
 				}
-				fmt.Fprintf(os.Stderr, "Inherited profile '%s' from session\n", profile)
+				fmt.Fprintf(os.Stderr, "Inherited profile '%s' from session\n", app.profile)
 			}
 
 			// Inherit persistent flag if not explicitly set by user
 			if !cmd.Flags().Changed("persistent") {
-				persistent = metadata.Persistent
-				if persistent {
+				app.persistent = metadata.Persistent
+				if app.persistent {
 					fmt.Fprintf(os.Stderr, "Inherited persistent mode from session\n")
 				}
 			}
@@ -283,7 +283,7 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// Allocate slot - always check for availability and auto-increment if needed
-	slotNum := slot
+	slotNum := app.slot
 	if resumeSlot > 0 && slotNum == 0 {
 		// Resuming a session: reuse the original slot so the stopped container is restarted
 		slotNum = resumeSlot
@@ -315,7 +315,7 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// Prepare network configuration from config
-	networkConfig := cfg.Network
+	networkConfig := app.cfg.Network
 
 	// Determine CLI config path based on tool
 	// For directory-based tools (ConfigDirName != ""), point at the config directory.
@@ -326,26 +326,26 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// Use limits directly from config
-	limitsConfig := &cfg.Limits
+	limitsConfig := &app.cfg.Limits
 
 	// Determine protected paths for security mounts from config
 	var protectedPaths []string
-	if !cfg.Security.DisableProtection {
-		protectedPaths = cfg.Security.GetEffectiveProtectedPaths()
+	if !app.cfg.Security.DisableProtection {
+		protectedPaths = app.cfg.Security.GetEffectiveProtectedPaths()
 	}
 
-	protectedPaths = filterWritableGitHooks(protectedPaths, cfg)
+	protectedPaths = filterWritableGitHooks(protectedPaths, app.cfg)
 
 	// Resolve which forwarded env vars are actually set on the host.
 	// This list is passed to the context file so AI tools know what's available.
-	resolvedForwardedEnvVars := resolveForwardedEnvVarNames(cfg.Defaults.ForwardEnv)
+	resolvedForwardedEnvVars := resolveForwardedEnvVarNames(app.cfg.Defaults.ForwardEnv)
 
 	// Resolve timezone from config
-	resolvedTimezone := resolveTimezone(cfg)
+	resolvedTimezone := resolveTimezone(app.cfg)
 
 	// Determine image: CLI --image flag > config defaults.image > "coi"
-	img := ResolveImageName(imageName, cfg)
-	if err := AutoBuildIfNeeded(cfg, img); err != nil {
+	img := ResolveImageName(app.imageName, app.cfg)
+	if err := AutoBuildIfNeeded(app.cfg, img); err != nil {
 		return err
 	}
 
@@ -353,31 +353,31 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 	setupOpts := session.SetupOptions{
 		WorkspacePath:         absWorkspace,
 		Image:                 img,
-		Persistent:            persistent,
+		Persistent:            app.persistent,
 		ResumeFromID:          resumeID,
 		Slot:                  slotNum,
 		SessionsDir:           sessionsDir,
 		CLIConfigPath:         cliConfigPath,
 		Tool:                  toolInstance,
 		NetworkConfig:         &networkConfig,
-		DisableShift:          cfg.Incus.DisableShift,
+		DisableShift:          app.cfg.Incus.DisableShift,
 		LimitsConfig:          limitsConfig,
-		IncusProject:          cfg.Incus.Project,
+		IncusProject:          app.cfg.Incus.Project,
 		ProtectedPaths:        protectedPaths,
-		HostImmutable:         cfg.Security.IsHostImmutableEnabled(),
-		PreserveWorkspacePath: cfg.Paths.PreserveWorkspacePath,
-		ForwardSSHAgent:       config.BoolVal(cfg.SSH.ForwardAgent),
+		HostImmutable:         app.cfg.Security.IsHostImmutableEnabled(),
+		PreserveWorkspacePath: app.cfg.Paths.PreserveWorkspacePath,
+		ForwardSSHAgent:       config.BoolVal(app.cfg.SSH.ForwardAgent),
 		ForwardedEnvVars:      resolvedForwardedEnvVars,
-		ContextFilePath:       cfg.Tool.ContextFile,
-		ProfileContextFile:    cfg.ProfileContextFile,
-		AutoContext:           cfg.Tool.AutoContext,
+		ContextFilePath:       app.cfg.Tool.ContextFile,
+		ProfileContextFile:    app.cfg.ProfileContextFile,
+		AutoContext:           app.cfg.Tool.AutoContext,
 		ContainerName:         containerName,
 		Timezone:              resolvedTimezone,
-		Alias:                 cfg.Container.Alias,
+		Alias:                 app.cfg.Container.Alias,
 	}
 
 	// Parse and validate mount configuration
-	mountConfig, err := ParseMountConfig(cfg)
+	mountConfig, err := ParseMountConfig(app.cfg)
 	if err != nil {
 		return fmt.Errorf("invalid mount configuration: %w", err)
 	}
@@ -390,8 +390,8 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 	setupOpts.MountConfig = mountConfig
 
 	// Validate alias before proceeding with setup
-	if cfg.Container.Alias != "" {
-		if err := alias.ValidateAlias(cfg.Container.Alias); err != nil {
+	if app.cfg.Container.Alias != "" {
+		if err := alias.ValidateAlias(app.cfg.Container.Alias); err != nil {
 			return fmt.Errorf("invalid container alias: %w", err)
 		}
 	}
@@ -403,14 +403,14 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// Save metadata early so coi list shows correct persistent/ephemeral status
-	if err := session.SaveMetadataEarly(sessionsDir, sessionID, result.ContainerName, absWorkspace, persistent, profile); err != nil {
+	if err := session.SaveMetadataEarly(sessionsDir, sessionID, result.ContainerName, absWorkspace, app.persistent, app.profile); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: Failed to save early metadata: %v\n", err)
 	}
 
 	// Register alias in global registry for cross-directory resolution
-	if effectiveAlias := cfg.Container.Alias; effectiveAlias != "" {
+	if effectiveAlias := app.cfg.Container.Alias; effectiveAlias != "" {
 		if reg, err := alias.Load(); err == nil {
-			if err := reg.Register(effectiveAlias, absWorkspace, profile); err != nil {
+			if err := reg.Register(effectiveAlias, absWorkspace, app.profile); err != nil {
 				return fmt.Errorf("alias conflict: %w", err)
 			}
 			if err := reg.Save(); err != nil {
@@ -422,16 +422,16 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 	// Start monitoring daemons if enabled via config
 	var monitorDaemon *monitor.Daemon
 	var nftDaemon *nftmonitor.Daemon
-	if config.BoolVal(cfg.Monitoring.Enabled) {
+	if config.BoolVal(app.cfg.Monitoring.Enabled) {
 		// Start traditional monitoring (process/filesystem)
-		if err := startMonitoringDaemon(result.ContainerName, absWorkspace, cfg, result.Logger, &monitorDaemon); err != nil {
+		if err := startMonitoringDaemon(result.ContainerName, absWorkspace, app.cfg, result.Logger, &monitorDaemon); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: Failed to start monitoring daemon: %v\n", err)
 			// Don't fail the session if monitoring fails
 		}
 
 		// Start nftables monitoring (network only)
-		if config.BoolVal(cfg.Monitoring.NFT.Enabled) {
-			if err := startNFTMonitoringDaemon(result.ContainerName, cfg, result.Logger, &nftDaemon); err != nil {
+		if config.BoolVal(app.cfg.Monitoring.NFT.Enabled) {
+			if err := startNFTMonitoringDaemon(result.ContainerName, app.cfg, result.Logger, &nftDaemon); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: Failed to start NFT monitoring: %v\n", err)
 				// Don't fail the session if NFT monitoring fails
 			}
@@ -467,8 +467,8 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 			cleanupOpts := session.CleanupOptions{
 				ContainerName:  result.ContainerName,
 				SessionID:      sessionID,
-				Persistent:     persistent,
-				ProfileName:    profile,
+				Persistent:     app.persistent,
+				ProfileName:    app.profile,
 				SessionsDir:    sessionsDir,
 				SaveSession:    true, // Always save session data
 				Workspace:      absWorkspace,
@@ -508,8 +508,8 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 	//
 	// For persistent containers resuming: pass --resume flag with tool's session ID
 	// For ephemeral containers resuming: just restore config, tool will auto-detect from restored data
-	useResumeFlag := (resumeID != "") && persistent
-	restoreOnly := (resumeID != "") && !persistent
+	useResumeFlag := (resumeID != "") && app.persistent
+	restoreOnly := (resumeID != "") && !app.persistent
 
 	// Choose execution mode
 	if useTmux {
@@ -652,12 +652,12 @@ func buildContainerEnv(result *session.SetupResult) (map[string]string, *int) {
 	}
 
 	// Apply static environment from config (defaults.environment + profile environment)
-	for k, v := range cfg.Defaults.Environment {
+	for k, v := range app.cfg.Defaults.Environment {
 		containerEnv[k] = v
 	}
 
 	// Resolve forward_env from config, deduplicate, then look up host values
-	for _, name := range cfg.Defaults.ForwardEnv {
+	for _, name := range app.cfg.Defaults.ForwardEnv {
 		if val, ok := os.LookupEnv(name); ok {
 			containerEnv[name] = val
 		} else {
@@ -687,7 +687,7 @@ func resolveForwardedEnvVarNames(names []string) []string {
 
 // ensureTmuxServer starts the tmux server and polls until it is ready (up to 2 seconds).
 // This is critical in CI and for newly started containers where the tmux server might not be running yet.
-func ensureTmuxServer(mgr *container.Manager, userPtr *int) {
+func ensureTmuxServer(mgr container.ContainerManager, userPtr *int) {
 	serverStartCmd := "tmux start-server 2>/dev/null || true; sleep 0.1"
 	serverOpts := container.ExecCommandOptions{
 		Capture: true,

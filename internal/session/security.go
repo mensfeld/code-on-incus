@@ -16,7 +16,7 @@ import (
 // containerWorkspacePath is the path where the workspace is mounted inside the container
 // (either /workspace or the preserved host path).
 // Returns nil if no paths need protection.
-func SetupSecurityMounts(mgr *container.Manager, workspacePath, containerWorkspacePath string, protectedPaths []string, useShift bool) error {
+func SetupSecurityMounts(mgr container.ContainerManager, workspacePath, containerWorkspacePath string, protectedPaths []string, useShift bool) error {
 	if len(protectedPaths) == 0 {
 		return nil
 	}
@@ -39,7 +39,7 @@ func SetupSecurityMounts(mgr *container.Manager, workspacePath, containerWorkspa
 }
 
 // setupProtectedPath mounts a single path as read-only
-func setupProtectedPath(mgr *container.Manager, workspacePath, containerWorkspacePath, relPath string, useShift bool) error {
+func setupProtectedPath(mgr container.ContainerManager, workspacePath, containerWorkspacePath, relPath string, useShift bool) error {
 	if err := validateRelPath(relPath); err != nil {
 		return err
 	}
@@ -259,7 +259,7 @@ func pathToDeviceName(path string) string {
 // SetupGitHooksMount is a convenience function for backwards compatibility
 // It mounts .git/hooks as read-only for security.
 // Deprecated: Use SetupSecurityMounts with config.Security.GetEffectiveProtectedPaths() instead
-func SetupGitHooksMount(mgr *container.Manager, workspacePath string, useShift bool) error {
+func SetupGitHooksMount(mgr container.ContainerManager, workspacePath string, useShift bool) error {
 	// Use /workspace as the default container path for backwards compatibility
 	return SetupSecurityMounts(mgr, workspacePath, "/workspace", []string{".git/hooks"}, useShift)
 }

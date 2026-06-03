@@ -55,8 +55,8 @@ type SetupOptions struct {
 // SetupResult contains the result of setup
 type SetupResult struct {
 	ContainerName          string
-	Manager                *container.Manager
-	NetworkManager         *network.Manager
+	Manager                container.ContainerManager
+	NetworkManager         network.NetworkManager
 	TimeoutMonitor         *limits.TimeoutMonitor
 	Logger                 *logger.SessionLogger
 	HomeDir                string
@@ -675,7 +675,7 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 }
 
 // waitForReady waits for container to be ready
-func waitForReady(mgr *container.Manager, maxRetries int, logger func(string)) error {
+func waitForReady(mgr container.ContainerManager, maxRetries int, logger func(string)) error {
 	for i := 0; i < maxRetries; i++ {
 		running, err := mgr.Running()
 		if err != nil {
@@ -716,7 +716,7 @@ func waitForReady(mgr *container.Manager, maxRetries int, logger func(string)) e
 // not present" and returns (false, nil). Any other error (e.g. incus
 // connectivity failure) is surfaced to the caller so it can decide
 // whether to warn or fall back.
-func DetectCodeUser(mgr *container.Manager, codeUser string) (bool, error) {
+func DetectCodeUser(mgr container.ContainerManager, codeUser string) (bool, error) {
 	_, err := mgr.ExecArgsCapture(
 		[]string{"id", "-u", codeUser},
 		container.ExecCommandOptions{Capture: true},

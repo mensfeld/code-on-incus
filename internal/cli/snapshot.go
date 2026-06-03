@@ -200,7 +200,7 @@ func resolveContainer() (string, error) {
 	}
 
 	// 3. Find container for current workspace
-	absWorkspace, err := filepath.Abs(workspace)
+	absWorkspace, err := filepath.Abs(app.workspace)
 	if err != nil {
 		return "", fmt.Errorf("failed to resolve workspace path: %w", err)
 	}

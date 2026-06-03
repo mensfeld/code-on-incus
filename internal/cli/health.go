@@ -48,7 +48,7 @@ func healthCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// Use package-level cfg from PersistentPreRunE, fall back to defaults
-	healthCfg := cfg
+	healthCfg := app.cfg
 	if healthCfg == nil {
 		healthCfg = config.GetDefaultConfig()
 	}

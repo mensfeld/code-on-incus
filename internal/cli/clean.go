@@ -63,7 +63,7 @@ func init() {
 
 func cleanCommand(cmd *cobra.Command, args []string) error {
 	// Get configured tool to determine tool-specific sessions directory
-	toolInstance, err := getConfiguredTool(cfg)
+	toolInstance, err := getConfiguredTool(app.cfg)
 	if err != nil {
 		return err
 	}
@@ -494,11 +494,11 @@ func cleanUnreferencedPools() (int, bool, error) {
 // the global entry itself is empty (meaning "use Incus default pool").
 func referencedPoolSet() map[string]bool {
 	set := map[string]bool{}
-	if cfg == nil {
+	if app.cfg == nil {
 		return set
 	}
-	set[cfg.Container.StoragePool] = true
-	for _, profile := range cfg.Profiles {
+	set[app.cfg.Container.StoragePool] = true
+	for _, profile := range app.cfg.Profiles {
 		if profile.Container.StoragePool != "" {
 			set[profile.Container.StoragePool] = true
 		}

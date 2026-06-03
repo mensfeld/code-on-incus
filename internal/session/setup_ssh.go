@@ -14,11 +14,11 @@ import (
 // container to use the host's SSH keys without copying them.
 // Returns the container socket path if forwarding was successfully configured,
 // or an empty string if forwarding was skipped (no SSH_AUTH_SOCK, invalid socket).
-func SetupSSHAgentForwarding(mgr *container.Manager, containerName string, logger func(string)) (string, error) {
+func SetupSSHAgentForwarding(mgr container.ContainerManager, containerName string, logger func(string)) (string, error) {
 	return setupSSHAgentForwarding(mgr, containerName, logger)
 }
 
-func setupSSHAgentForwarding(mgr *container.Manager, containerName string, logger func(string)) (string, error) {
+func setupSSHAgentForwarding(mgr container.ContainerManager, containerName string, logger func(string)) (string, error) {
 	hostSocket := filepath.Clean(os.Getenv("SSH_AUTH_SOCK"))
 	if hostSocket == "." || hostSocket == "" {
 		logger("SSH agent forwarding skipped: SSH_AUTH_SOCK not set on host")
@@ -69,7 +69,7 @@ func setupSSHAgentForwarding(mgr *container.Manager, containerName string, logge
 }
 
 // addSSHAgentProxyDevice adds the proxy device for SSH agent forwarding.
-func addSSHAgentProxyDevice(mgr *container.Manager, hostSocket, containerSocket string) error {
+func addSSHAgentProxyDevice(mgr container.ContainerManager, hostSocket, containerSocket string) error {
 	return mgr.AddProxyDevice(
 		"ssh-agent",
 		fmt.Sprintf("unix:%s", hostSocket),
@@ -80,7 +80,7 @@ func addSSHAgentProxyDevice(mgr *container.Manager, hostSocket, containerSocket 
 }
 
 // waitForContainerSocket polls for a Unix socket to appear inside the container.
-func waitForContainerSocket(mgr *container.Manager, socketPath string, timeout time.Duration) bool {
+func waitForContainerSocket(mgr container.ContainerManager, socketPath string, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	checkCmd := fmt.Sprintf("test -S %s", socketPath)
 	for time.Now().Before(deadline) {
