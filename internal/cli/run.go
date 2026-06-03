@@ -241,7 +241,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		}
 		stopGraceful := config.BoolVal(cfg.Limits.Runtime.StopGraceful)
 		runLog := logger.NewDiscard()
-		timeoutMon = limits.NewTimeoutMonitor(containerName, maxDur, autoStop, stopGraceful, cfg.Incus.Project, runLog)
+		timeoutMon = limits.NewTimeoutMonitor(cmd.Context(), containerName, maxDur, autoStop, stopGraceful, cfg.Incus.Project, runLog)
 		timeoutMon.Start()
 		defer timeoutMon.Stop()
 	}

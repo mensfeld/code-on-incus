@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -521,6 +522,49 @@ func shellQuote(s string) string {
 	// Otherwise, single-quote and escape any single quotes
 	escaped := strings.ReplaceAll(s, "'", "'\"'\"'")
 	return "'" + escaped + "'"
+}
+
+// ConfigSet sets a configuration key on a container.
+func ConfigSet(ctx context.Context, containerName, key, value string) error {
+	return IncusExecContext(ctx, "config", "set", containerName, key+"="+value)
+}
+
+// ConfigUnset removes a configuration key from a container.
+// Returns the combined stdout+stderr output (useful for error inspection) and any error.
+func ConfigUnset(ctx context.Context, containerName, key string) (string, error) {
+	return IncusOutputWithStderrContext(ctx, "config", "unset", containerName, key)
+}
+
+// ConfigShow returns the container's YAML configuration.
+// If expanded is true, profile-inherited devices and config are included.
+func ConfigShow(ctx context.Context, containerName string, expanded bool) (string, error) {
+	args := []string{"config", "show"}
+	if expanded {
+		args = append(args, "--expanded")
+	}
+	args = append(args, containerName)
+	return IncusOutputContext(ctx, args...)
+}
+
+// DeviceAdd adds a device to a container.
+// Returns the combined stdout+stderr output and a nil error.
+// If the device already exists, a nil error is returned (idempotent).
+func DeviceAdd(ctx context.Context, containerName string, deviceArgs ...string) (string, error) {
+	args := append([]string{"config", "device", "add", containerName}, deviceArgs...)
+	out, err := IncusOutputWithStderrContext(ctx, args...)
+	if err != nil {
+		var exitErr *ExitError
+		if errors.As(err, &exitErr) && strings.Contains(strings.ToLower(out), "already") {
+			return out, nil
+		}
+	}
+	return out, err
+}
+
+// DeviceSet sets a device-level configuration key on a container.
+// Returns the combined stdout+stderr output (useful for error inspection) and any error.
+func DeviceSet(ctx context.Context, containerName, device, keyValue string) (string, error) {
+	return IncusOutputWithStderrContext(ctx, "config", "device", "set", containerName, device, keyValue)
 }
 
 // SnapshotCreate creates a snapshot of a container
