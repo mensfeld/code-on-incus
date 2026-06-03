@@ -121,6 +121,12 @@ func TestPipeline_CancelledContextSkipsPhase(t *testing.T) {
 	}
 }
 
+func TestPipeline_AddTeardown_NilIsIgnored(t *testing.T) {
+	p := &Pipeline{}
+	p.AddTeardown(nil) // must not panic at Teardown time
+	p.Teardown()       // would panic if nil was stored and called
+}
+
 func TestPipeline_TeardownRunsForCompletedPhasesOnError(t *testing.T) {
 	var torn []string
 	p := &Pipeline{}

@@ -61,15 +61,22 @@ func (p *Pipeline) Run(ctx context.Context, phases ...Phase) error {
 
 // AddTeardown registers a teardown function directly, outside of a phase.
 // Useful when the caller accumulates teardowns incrementally (e.g. each step
-// adds its own cleanup before the next step runs).
+// adds its own cleanup before the next step runs). Nil teardowns are silently
+// ignored, matching the behaviour of Pipeline.Run.
 func (p *Pipeline) AddTeardown(td Teardown) {
+	if td == nil {
+		return
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.teardowns = append(p.teardowns, td)
 }
 
 // Teardown invokes all registered teardowns in reverse order (LIFO). It is
-// safe to call concurrently and multiple times; only the first call executes.
+// safe to call from multiple goroutines simultaneously; only the first call
+// executes — subsequent calls are no-ops. Callers must not call Teardown
+// concurrently with Run: teardowns registered after Teardown's snapshot is
+// taken will not be executed.
 func (p *Pipeline) Teardown() {
 	p.teardownOnce.Do(func() {
 		p.mu.Lock()
