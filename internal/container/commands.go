@@ -231,74 +231,41 @@ func IncusFilePush(source, destination string) error {
 	return IncusFilePushContext(context.Background(), source, destination)
 }
 
-// waitForStableState polls the container's status until it reaches Running or
-// a terminal stopped state (Stopped, Error, Frozen, or deleted). Returns true
-// if the container is Running, false otherwise. Polls every 500 ms; times out
-// after maxWait and returns false.
+// StartWithIsolationFallback starts a container that has security.idmap.isolated
+// set, with automatic fallback if the host doesn't support it.
 //
-// This is needed because when forkstart exits non-zero, Incus concurrently
-// runs its own async cleanup (a "stop" operation). The container may briefly
-// be in a transitional status (Starting, Stopping, Aborting) before settling.
-// Callers must not act on the container until it reaches a stable state.
-// WaitForStableState is the exported form of waitForStableState, for callers
-// outside this package that need to poll after a start error.
-func WaitForStableState(containerName string, maxWait time.Duration) bool {
-	return waitForStableState(containerName, maxWait)
-}
-
-func waitForStableState(containerName string, maxWait time.Duration) bool {
-	deadline := time.Now().Add(maxWait)
-	for time.Now().Before(deadline) {
-		output, err := IncusOutput("list", "^"+containerName+"$", "--format=json")
-		if err == nil {
-			var items []struct {
-				Name   string `json:"name"`
-				Status string `json:"status"`
-			}
-			if json.Unmarshal([]byte(output), &items) == nil {
-				if len(items) == 0 {
-					return false // deleted (ephemeral containers disappear on stop)
-				}
-				for _, c := range items {
-					if c.Name == containerName {
-						switch c.Status {
-						case "Running":
-							return true
-						case "Stopped", "Error", "Frozen":
-							return false
-							// "Starting", "Stopping", "Aborting" — keep polling
-						}
-					}
-				}
-			}
-		}
-		time.Sleep(500 * time.Millisecond)
+// On some hosts (nested containers, CI runners), forkstart exits non-zero even
+// though the LXC process started successfully. We poll ContainerRunning for up
+// to 30 s — if the container comes up we return nil (success). Only if the
+// container never becomes Running do we unset security.idmap.isolated and retry.
+// A final ContainerRunning check handles the race where the container comes up
+// between the retry call and its error return.
+func StartWithIsolationFallback(containerName string) error {
+	if err := IncusExec("start", containerName); err == nil {
+		return nil
 	}
-	return false // timed out
-}
-
-// startWithIsolationFallback starts a container and, if start fails, waits for
-// Incus to finish its own async cleanup before deciding how to recover.
-//
-// When security.idmap.isolated causes forkstart to exit non-zero, two outcomes
-// are possible:
-//   - The LXC process is running (Incus reports Running after cleanup): treat
-//     as success — forkstart had a soft/transient error.
-//   - Incus completed its cleanup and the container is Stopped: unset
-//     security.idmap.isolated and retry — the host lacks enough subuid/subgid
-//     space to allocate an isolated UID range.
-//
-// Polling avoids racing against Incus's concurrent stop operation, which
-// previously caused "Instance is busy running a 'stop' operation" errors.
-func startWithIsolationFallback(containerName string) error {
-	if err := IncusExec("start", containerName); err != nil {
-		if waitForStableState(containerName, 10*time.Second) {
-			return nil // container is Running despite the forkstart error
+	// Poll using ContainerRunning (the same check used by waitForReady).
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		time.Sleep(500 * time.Millisecond)
+		if running, _ := ContainerRunning(containerName); running {
+			return nil
 		}
-		_ = IncusExecQuiet("config", "unset", containerName, "security.idmap.isolated")
-		return IncusExec("start", containerName)
+	}
+	// Container didn't come up; unset isolation and retry.
+	_ = IncusExecQuiet("config", "unset", containerName, "security.idmap.isolated")
+	if retryErr := IncusExec("start", containerName); retryErr != nil {
+		// Handle the race: container may have come up during the unset+retry window.
+		if running, _ := ContainerRunning(containerName); running {
+			return nil
+		}
+		return retryErr
 	}
 	return nil
+}
+
+func startWithIsolationFallback(containerName string) error {
+	return StartWithIsolationFallback(containerName)
 }
 
 // LaunchContainer launches an ephemeral container on the given storage pool.
