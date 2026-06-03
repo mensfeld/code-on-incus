@@ -238,7 +238,10 @@ class TestNFTRuleManagement:
             assert nft_ready, f"NFT monitoring rules not found for IP {container_ip}"
         finally:
             proc.terminate()
-            proc.wait(timeout=10)
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
             cleanup_container(container_name, coi_binary, env=coi_monitoring_env)
 
     def test_rules_removed_on_session_end(self, test_workspace, coi_binary, coi_monitoring_env):
@@ -281,7 +284,10 @@ class TestNFTRuleManagement:
 
             # Stop session
             proc.terminate()
-            proc.wait(timeout=10)
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
             time.sleep(3)
 
             # Check rules are gone
@@ -364,7 +370,10 @@ class TestNFTRuleManagement:
 
         finally:
             proc.terminate()
-            proc.wait(timeout=10)
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
             cleanup_container(container_name, coi_binary, env=coi_monitoring_env)
 
 
@@ -451,7 +460,10 @@ class TestNetworkThreatDetection:
 
         finally:
             proc.terminate()
-            proc.wait(timeout=10)
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
             cleanup_container(container_name, coi_binary, env=coi_monitoring_env)
 
     def test_container_killed_on_metadata_access(
@@ -586,7 +598,10 @@ class TestNetworkThreatDetection:
 
         finally:
             proc.terminate()
-            proc.wait(timeout=10)
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
             cleanup_container(container_name, coi_binary, env=coi_monitoring_env)
 
 
@@ -672,7 +687,10 @@ class TestAuditLogging:
 
             finally:
                 proc.terminate()
-                proc.wait(timeout=10)
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
                 cleanup_container(container_name, coi_binary, env=coi_monitoring_env)
 
 
@@ -724,7 +742,10 @@ class TestDaemonLifecycle:
 
             finally:
                 proc.terminate()
-                proc.wait(timeout=10)
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
                 cleanup_container(container_name, coi_binary, env=coi_monitoring_env)
                 stderr_file.unlink(missing_ok=True)
 
