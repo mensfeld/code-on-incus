@@ -52,12 +52,12 @@ func buildCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// Determine which profile to use
-	profileName := profile // from --profile flag
+	profileName := app.profile // from --profile flag
 	if profileName == "" {
 		profileName = "default"
 	}
 
-	p := cfg.GetProfile(profileName)
+	p := app.cfg.GetProfile(profileName)
 	if p == nil {
 		return fmt.Errorf("profile '%s' not found", profileName)
 	}
@@ -72,7 +72,7 @@ func buildCommand(cmd *cobra.Command, args []string) error {
 	// pool and let the selected profile override it only when it sets a
 	// non-empty storage_pool value. Validate before any container work so a
 	// missing pool fails loud and early.
-	buildPool := cfg.Container.StoragePool
+	buildPool := app.cfg.Container.StoragePool
 	if p.Container.StoragePool != "" {
 		buildPool = p.Container.StoragePool
 	}

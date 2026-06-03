@@ -8,6 +8,28 @@ import (
 	"github.com/mensfeld/code-on-incus/internal/container"
 )
 
+// LimitsApplier is the interface for applying and removing resource limits.
+// The default implementation delegates to the package-level functions.
+type LimitsApplier interface {
+	Apply(ctx context.Context, opts ApplyOptions) error
+	Remove(ctx context.Context, containerName, project string) error
+}
+
+// Applier is the zero-value implementation of LimitsApplier that delegates to
+// the package-level Apply/Remove functions.
+type Applier struct{}
+
+func (Applier) Apply(ctx context.Context, opts ApplyOptions) error {
+	return ApplyResourceLimitsContext(ctx, opts)
+}
+
+func (Applier) Remove(ctx context.Context, containerName, project string) error {
+	return RemoveLimitsContext(ctx, containerName, project)
+}
+
+// Compile-time assertion: Applier must satisfy LimitsApplier.
+var _ LimitsApplier = Applier{}
+
 // ApplyOptions contains options for applying limits
 type ApplyOptions struct {
 	ContainerName string

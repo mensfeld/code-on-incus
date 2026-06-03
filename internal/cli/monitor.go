@@ -83,7 +83,7 @@ func monitorCommand(cmd *cobra.Command, args []string) error {
 
 	// Get allowed CIDRs from network config
 	allowedCIDRs := []string{}
-	if cfg.Network.Mode == config.NetworkModeAllowlist {
+	if app.cfg.Network.Mode == config.NetworkModeAllowlist {
 		// Convert allowed domains to CIDRs (simplified - in full implementation would resolve)
 		// For now, just pass empty list
 		allowedCIDRs = []string{}
@@ -91,7 +91,7 @@ func monitorCommand(cmd *cobra.Command, args []string) error {
 
 	// Create collector
 	collector := monitor.NewCollector(containerName, "", "", allowedCIDRs)
-	detector := monitor.NewDetector(cfg.Monitoring.FileReadThresholdMB, cfg.Monitoring.FileReadRateMBPerSec)
+	detector := monitor.NewDetector(app.cfg.Monitoring.FileReadThresholdMB, app.cfg.Monitoring.FileReadRateMBPerSec)
 
 	// Watch mode or one-shot
 	if monitorWatch > 0 {
@@ -159,7 +159,7 @@ func resolveMonitorContainer(args []string) (string, error) {
 	}
 
 	// 3. Find container for current workspace
-	absWorkspace, err := filepath.Abs(workspace)
+	absWorkspace, err := filepath.Abs(app.workspace)
 	if err != nil {
 		return "", fmt.Errorf("failed to resolve workspace path: %w", err)
 	}

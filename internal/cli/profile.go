@@ -39,7 +39,7 @@ Examples:
 			return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid format '%s': must be 'text' or 'json'", profileFormat)}
 		}
 
-		if len(cfg.Profiles) == 0 {
+		if len(app.cfg.Profiles) == 0 {
 			if profileFormat == "json" {
 				fmt.Println("[]")
 				return nil
@@ -49,8 +49,8 @@ Examples:
 		}
 
 		// Sort profile names for consistent output
-		names := make([]string, 0, len(cfg.Profiles))
-		for name := range cfg.Profiles {
+		names := make([]string, 0, len(app.cfg.Profiles))
+		for name := range app.cfg.Profiles {
 			names = append(names, name)
 		}
 		sort.Strings(names)
@@ -66,7 +66,7 @@ Examples:
 			}
 			entries := make([]profileEntry, 0, len(names))
 			for _, name := range names {
-				p := cfg.Profiles[name]
+				p := app.cfg.Profiles[name]
 				entries = append(entries, profileEntry{
 					Name:        name,
 					Image:       p.Container.Image,
@@ -86,7 +86,7 @@ Examples:
 
 		tbl := NewTable("NAME", "IMAGE", "PERSISTENT", "INHERITS", "SOURCE")
 		for _, name := range names {
-			p := cfg.Profiles[name]
+			p := app.cfg.Profiles[name]
 			image := p.Container.Image
 			if image == "" {
 				image = "(default)"
@@ -125,7 +125,7 @@ Examples:
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
-		p := cfg.GetProfile(name)
+		p := app.cfg.GetProfile(name)
 		if p == nil {
 			return fmt.Errorf("profile '%s' not found", name)
 		}
@@ -418,7 +418,7 @@ func resolveProfileDir(name string, forceUser, forceProject bool) (string, error
 	}
 
 	if forceProject {
-		absWorkspace, err := filepath.Abs(workspace)
+		absWorkspace, err := filepath.Abs(app.workspace)
 		if err != nil {
 			return "", fmt.Errorf("cannot resolve workspace: %w", err)
 		}
@@ -426,7 +426,7 @@ func resolveProfileDir(name string, forceUser, forceProject bool) (string, error
 	}
 
 	// Default: project if .coi/ exists, otherwise user home
-	absWorkspace, err := filepath.Abs(workspace)
+	absWorkspace, err := filepath.Abs(app.workspace)
 	if err != nil {
 		return "", fmt.Errorf("cannot resolve workspace: %w", err)
 	}
@@ -484,7 +484,7 @@ Examples:
 		}
 
 		// Check if a profile with this name already exists in any config source
-		if existing := cfg.GetProfile(name); existing != nil {
+		if existing := app.cfg.GetProfile(name); existing != nil {
 			return fmt.Errorf("profile '%s' already exists (source: %s)", name, existing.Source)
 		}
 
@@ -508,7 +508,7 @@ Examples:
 			topLines = append(topLines, fmt.Sprintf("inherits = %q", inherits))
 		}
 		if cmd.Flags().Changed("image") {
-			containerLines = append(containerLines, fmt.Sprintf("image = %q", imageName))
+			containerLines = append(containerLines, fmt.Sprintf("image = %q", app.imageName))
 		}
 		if cmd.Flags().Changed("persistent") {
 			containerLines = append(containerLines, "persistent = true")
@@ -558,7 +558,7 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 
-		p := cfg.GetProfile(name)
+		p := app.cfg.GetProfile(name)
 		if p == nil {
 			return fmt.Errorf("profile '%s' not found", name)
 		}
@@ -616,7 +616,7 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 
-		p := cfg.GetProfile(name)
+		p := app.cfg.GetProfile(name)
 		if p == nil {
 			return fmt.Errorf("profile '%s' not found", name)
 		}

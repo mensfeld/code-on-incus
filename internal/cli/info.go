@@ -25,7 +25,7 @@ Examples:
 
 func infoCommand(cmd *cobra.Command, args []string) error {
 	// Get configured tool to determine tool-specific sessions directory
-	toolInstance, err := getConfiguredTool(cfg)
+	toolInstance, err := getConfiguredTool(app.cfg)
 	if err != nil {
 		return err
 	}

@@ -95,7 +95,7 @@ func persistCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// Get tool instance to determine sessions directory
-	toolInstance, err := getConfiguredTool(cfg)
+	toolInstance, err := getConfiguredTool(app.cfg)
 	if err != nil {
 		return err
 	}
