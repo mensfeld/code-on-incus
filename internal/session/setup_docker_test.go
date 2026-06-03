@@ -11,11 +11,27 @@ func TestDockerDaemonJSON_ValidJSON(t *testing.T) {
 		t.Fatalf("dockerDaemonJSON is not valid JSON: %v", err)
 	}
 
-	if _, ok := parsed["bip"]; !ok {
-		t.Error("dockerDaemonJSON missing 'bip' key")
+	for _, key := range []string{"bip", "default-address-pools", "group"} {
+		if _, ok := parsed[key]; !ok {
+			t.Errorf("dockerDaemonJSON missing %q key", key)
+		}
 	}
-	if _, ok := parsed["default-address-pools"]; !ok {
-		t.Error("dockerDaemonJSON missing 'default-address-pools' key")
+}
+
+func TestDockerDaemonJSON_PreservesGroupSetting(t *testing.T) {
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(dockerDaemonJSON), &parsed); err != nil {
+		t.Fatalf("dockerDaemonJSON is not valid JSON: %v", err)
+	}
+
+	// "group": "code" must be present so the non-root `code` user retains
+	// access to /var/run/docker.sock after container reboot (base-image setting).
+	group, ok := parsed["group"]
+	if !ok {
+		t.Fatal("dockerDaemonJSON missing 'group' key — non-root Docker access will break")
+	}
+	if group != "code" {
+		t.Errorf("dockerDaemonJSON group = %q, want %q", group, "code")
 	}
 }
 

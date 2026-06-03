@@ -386,7 +386,7 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		// Isolate UID/GID namespace so each container gets a unique host-side UID
 		// range, preventing cross-container file access via shared host UIDs.
 		if err := container.IsolateUIDNamespace(result.ContainerName); err != nil {
-			opts.Logger(fmt.Sprintf("Warning: Failed to isolate UID namespace: %v", err))
+			return nil, fmt.Errorf("failed to isolate UID namespace: %w", err)
 		}
 
 		// Disable guest API to prevent host topology leaks (FLAWS Finding 3)
@@ -688,13 +688,19 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 	return result, nil
 }
 
-// dockerDaemonJSON is the daemon.json written to new containers to prevent
-// Docker bridge IP conflicts with the host network or other containers.
-// The bip CIDR sets the docker0 bridge address; default-address-pools covers
-// user-defined networks created by Docker Compose and `docker network create`.
-// These ranges (172.30.x and 172.31.x) are outside Docker's default pool
-// (172.17–172.29) and the standard RFC 1918 ranges commonly used on the host.
+// dockerDaemonJSON is the daemon.json written to new containers.
+// It merges two concerns:
+//   - "group": "code" — preserves the base-image setting that gives the
+//     non-root `code` user access to /var/run/docker.sock (also enforced
+//     via a systemd socket drop-in written in build.sh). Omitting this
+//     regresses non-root Docker access after a container reboot.
+//   - "bip" / "default-address-pools" — avoid Docker bridge IP conflicts.
+//     Docker's built-in pool (172.17–172.29) overlaps with many corporate
+//     VPNs and cloud subnets. The chosen ranges (172.30.x, 172.31.x) sit
+//     at the far end of RFC 1918's 172.16.0.0/12 block where conflicts are
+//     rare in practice.
 const dockerDaemonJSON = `{
+  "group": "code",
   "bip": "172.30.0.1/24",
   "default-address-pools": [
     {"base": "172.31.0.0/16", "size": 24}
