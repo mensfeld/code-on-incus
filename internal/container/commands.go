@@ -231,21 +231,20 @@ func IncusFilePush(source, destination string) error {
 	return IncusFilePushContext(context.Background(), source, destination)
 }
 
-// StartWithIsolationFallback starts a container that has security.idmap.isolated
-// set, with automatic fallback if the host doesn't support it.
+// StartWithIsolationFallback starts a non-ephemeral container that has
+// security.idmap.isolated set, with automatic fallback if the host doesn't
+// support it. Intended for non-ephemeral containers (setup.go path) — stopped
+// containers are not deleted, so a simple unset+retry is sufficient.
 //
 // On some hosts (nested containers, CI runners), forkstart exits non-zero even
 // though the LXC process started successfully. We poll ContainerRunning for up
-// to 30 s — if the container comes up we return nil (success). Only if the
-// container never becomes Running do we unset security.idmap.isolated and retry.
-// A final ContainerRunning check handles the race where the container comes up
-// between the retry call and its error return.
+// to 5 s before deciding the container failed to start.
 func StartWithIsolationFallback(containerName string) error {
 	if err := IncusExec("start", containerName); err == nil {
 		return nil
 	}
-	// Poll using ContainerRunning (the same check used by waitForReady).
-	deadline := time.Now().Add(30 * time.Second)
+	// Poll: maybe it came up despite the forkstart error (soft error on some hosts).
+	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		time.Sleep(500 * time.Millisecond)
 		if running, _ := ContainerRunning(containerName); running {
@@ -256,7 +255,6 @@ func StartWithIsolationFallback(containerName string) error {
 	fmt.Fprintf(os.Stderr, "Warning: UID namespace isolation not available in this environment, disabling and retrying\n")
 	_ = IncusExecQuiet("config", "unset", containerName, "security.idmap.isolated")
 	if retryErr := IncusExec("start", containerName); retryErr != nil {
-		// Handle the race: container may have come up during the unset+retry window.
 		if running, _ := ContainerRunning(containerName); running {
 			return nil
 		}
@@ -273,32 +271,60 @@ func startWithIsolationFallback(containerName string) error {
 // An empty pool means "use Incus's default pool".
 // Uses init+configure+start (not launch) so security flags are set before first boot.
 func LaunchContainer(imageAlias, containerName, pool string) error {
-	args := []string{"init", imageAlias, containerName, "--ephemeral"}
-	if pool != "" {
-		args = append(args, "-s", pool)
-	}
-	if err := IncusExec(args...); err != nil {
-		return err
-	}
-	if err := EnableDockerSupport(containerName); err != nil {
+	if err := initAndConfigureContainer(imageAlias, containerName, pool, true); err != nil {
 		return err
 	}
 	// Non-fatal: unset and retry at start time if the environment lacks subuid space.
 	_ = IsolateUIDNamespace(containerName)
-	if err := DisableGuestAPI(containerName); err != nil {
-		return err
+	if err := IncusExec("start", containerName); err == nil {
+		return nil
 	}
-	if err := CheckNotPrivileged(containerName); err != nil {
-		return err
+	// Start failed. Poll briefly to distinguish a soft forkstart error (container
+	// comes up anyway) from Incus async cleanup (ephemeral container gets deleted).
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		time.Sleep(500 * time.Millisecond)
+		if running, _ := ContainerRunning(containerName); running {
+			return nil // soft forkstart error; container is up
+		}
+		// Check for deletion: stopped ephemeral containers are deleted by Incus.
+		out, err := IncusOutput("list", "^"+containerName+"$", "--format=csv", "--columns=n")
+		if err == nil && strings.TrimSpace(out) == "" {
+			// Recreate without isolation and start fresh.
+			fmt.Fprintf(os.Stderr, "Warning: UID namespace isolation not supported in this environment\n")
+			return initConfigureAndStart(imageAlias, containerName, pool, true)
+		}
 	}
-	return startWithIsolationFallback(containerName)
+	// Container exists but didn't start; unset isolation and retry.
+	fmt.Fprintf(os.Stderr, "Warning: UID namespace isolation not supported in this environment, retrying\n")
+	_ = IncusExecQuiet("config", "unset", containerName, "security.idmap.isolated")
+	if retryErr := IncusExec("start", containerName); retryErr != nil {
+		if running, _ := ContainerRunning(containerName); running {
+			return nil
+		}
+		return retryErr
+	}
+	return nil
 }
 
 // LaunchContainerPersistent launches a non-ephemeral container on the given
 // storage pool. An empty pool means "use Incus's default pool".
 // Uses init+configure+start (not launch) so security flags are set before first boot.
 func LaunchContainerPersistent(imageAlias, containerName, pool string) error {
+	if err := initAndConfigureContainer(imageAlias, containerName, pool, false); err != nil {
+		return err
+	}
+	// Non-fatal: unset and retry at start time if the environment lacks subuid space.
+	_ = IsolateUIDNamespace(containerName)
+	return startWithIsolationFallback(containerName)
+}
+
+// initAndConfigureContainer creates a container and applies the required config flags.
+func initAndConfigureContainer(imageAlias, containerName, pool string, ephemeral bool) error {
 	args := []string{"init", imageAlias, containerName}
+	if ephemeral {
+		args = append(args, "--ephemeral")
+	}
 	if pool != "" {
 		args = append(args, "-s", pool)
 	}
@@ -308,15 +334,19 @@ func LaunchContainerPersistent(imageAlias, containerName, pool string) error {
 	if err := EnableDockerSupport(containerName); err != nil {
 		return err
 	}
-	// Non-fatal: unset and retry at start time if the environment lacks subuid space.
-	_ = IsolateUIDNamespace(containerName)
 	if err := DisableGuestAPI(containerName); err != nil {
 		return err
 	}
-	if err := CheckNotPrivileged(containerName); err != nil {
+	return CheckNotPrivileged(containerName)
+}
+
+// initConfigureAndStart creates, configures, and starts a container without
+// security.idmap.isolated — used as the isolation-unsupported fallback path.
+func initConfigureAndStart(imageAlias, containerName, pool string, ephemeral bool) error {
+	if err := initAndConfigureContainer(imageAlias, containerName, pool, ephemeral); err != nil {
 		return err
 	}
-	return startWithIsolationFallback(containerName)
+	return IncusExec("start", containerName)
 }
 
 // EnableDockerSupport configures the container to support Docker/nested containers.
