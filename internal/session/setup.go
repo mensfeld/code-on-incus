@@ -408,17 +408,20 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		opts.Logger("Starting container...")
 		if err := result.Manager.Start(); err != nil {
 			if idmapIsolated {
-				// Force-stop before retrying. When security.idmap.isolated causes
-				// forkstart to exit non-zero, Incus may run an async cleanup (stop)
-				// while the LXC process is still alive. A synchronous force-stop
-				// puts the container in a known stopped state so the retry starts
-				// clean, avoiding "Instance is busy running a 'stop' operation".
-				_ = container.IncusExecQuiet("stop", result.ContainerName, "--force")
-				_ = container.IncusExecQuiet("config", "unset", result.ContainerName, "security.idmap.isolated")
-				if retryErr := result.Manager.Start(); retryErr != nil {
-					return nil, fmt.Errorf("failed to start container: %w", err)
+				// When security.idmap.isolated causes forkstart to exit non-zero,
+				// two outcomes are possible after Incus finishes its async cleanup:
+				//   Running  — forkstart had a soft error; container is up, continue.
+				//   Stopped  — host lacks subuid/subgid space; unset isolation and retry.
+				// Polling avoids racing against Incus's concurrent stop operation.
+				if container.WaitForStableState(result.ContainerName, 10*time.Second) {
+					opts.Logger("Warning: container start reported error but container is running, continuing")
+				} else {
+					_ = container.IncusExecQuiet("config", "unset", result.ContainerName, "security.idmap.isolated")
+					if retryErr := result.Manager.Start(); retryErr != nil {
+						return nil, fmt.Errorf("failed to start container: %w", err)
+					}
+					opts.Logger("Warning: UID namespace isolation not available in this environment, disabled")
 				}
-				opts.Logger("Warning: UID namespace isolation not available in this environment, disabled")
 			} else {
 				return nil, fmt.Errorf("failed to start container: %w", err)
 			}

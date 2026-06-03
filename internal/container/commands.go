@@ -231,21 +231,70 @@ func IncusFilePush(source, destination string) error {
 	return IncusFilePushContext(context.Background(), source, destination)
 }
 
-// startWithIsolationFallback starts a container and, on failure, force-stops
-// it, unsets security.idmap.isolated, and retries once.
+// waitForStableState polls the container's status until it reaches Running or
+// a terminal stopped state (Stopped, Error, Frozen, or deleted). Returns true
+// if the container is Running, false otherwise. Polls every 500 ms; times out
+// after maxWait and returns false.
 //
-// When security.idmap.isolated causes forkstart to exit non-zero, the LXC
-// process may already be running while Incus concurrently runs an async stop
-// (cleanup) operation. Attempting a plain retry races against that stop and
-// produces "Instance is busy running a 'stop' operation" errors downstream.
-// A synchronous force-stop first guarantees a clean stopped state before the
-// second start attempt.
+// This is needed because when forkstart exits non-zero, Incus concurrently
+// runs its own async cleanup (a "stop" operation). The container may briefly
+// be in a transitional status (Starting, Stopping, Aborting) before settling.
+// Callers must not act on the container until it reaches a stable state.
+// WaitForStableState is the exported form of waitForStableState, for callers
+// outside this package that need to poll after a start error.
+func WaitForStableState(containerName string, maxWait time.Duration) bool {
+	return waitForStableState(containerName, maxWait)
+}
+
+func waitForStableState(containerName string, maxWait time.Duration) bool {
+	deadline := time.Now().Add(maxWait)
+	for time.Now().Before(deadline) {
+		output, err := IncusOutput("list", "^"+containerName+"$", "--format=json")
+		if err == nil {
+			var items []struct {
+				Name   string `json:"name"`
+				Status string `json:"status"`
+			}
+			if json.Unmarshal([]byte(output), &items) == nil {
+				if len(items) == 0 {
+					return false // deleted (ephemeral containers disappear on stop)
+				}
+				for _, c := range items {
+					if c.Name == containerName {
+						switch c.Status {
+						case "Running":
+							return true
+						case "Stopped", "Error", "Frozen":
+							return false
+							// "Starting", "Stopping", "Aborting" — keep polling
+						}
+					}
+				}
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return false // timed out
+}
+
+// startWithIsolationFallback starts a container and, if start fails, waits for
+// Incus to finish its own async cleanup before deciding how to recover.
+//
+// When security.idmap.isolated causes forkstart to exit non-zero, two outcomes
+// are possible:
+//   - The LXC process is running (Incus reports Running after cleanup): treat
+//     as success — forkstart had a soft/transient error.
+//   - Incus completed its cleanup and the container is Stopped: unset
+//     security.idmap.isolated and retry — the host lacks enough subuid/subgid
+//     space to allocate an isolated UID range.
+//
+// Polling avoids racing against Incus's concurrent stop operation, which
+// previously caused "Instance is busy running a 'stop' operation" errors.
 func startWithIsolationFallback(containerName string) error {
 	if err := IncusExec("start", containerName); err != nil {
-		// Force-stop ensures a known stopped state (no-op if already stopped,
-		// kills the LXC process if it started despite the forkstart error, and
-		// waits for any concurrent Incus stop operation to complete).
-		_ = IncusExecQuiet("stop", containerName, "--force")
+		if waitForStableState(containerName, 10*time.Second) {
+			return nil // container is Running despite the forkstart error
+		}
 		_ = IncusExecQuiet("config", "unset", containerName, "security.idmap.isolated")
 		return IncusExec("start", containerName)
 	}
