@@ -245,6 +245,9 @@ func LaunchContainer(imageAlias, containerName, pool string) error {
 	if err := EnableDockerSupport(containerName); err != nil {
 		return err
 	}
+	if err := IsolateUIDNamespace(containerName); err != nil {
+		return err
+	}
 	if err := DisableGuestAPI(containerName); err != nil {
 		return err
 	}
@@ -266,6 +269,9 @@ func LaunchContainerPersistent(imageAlias, containerName, pool string) error {
 		return err
 	}
 	if err := EnableDockerSupport(containerName); err != nil {
+		return err
+	}
+	if err := IsolateUIDNamespace(containerName); err != nil {
 		return err
 	}
 	if err := DisableGuestAPI(containerName); err != nil {
@@ -327,6 +333,17 @@ func EnableDockerSupport(containerName string) error {
 // admin socket and does not need the guest API.
 func DisableGuestAPI(containerName string) error {
 	return IncusExec("config", "set", containerName, "security.guestapi=false")
+}
+
+// IsolateUIDNamespace enables UID/GID namespace isolation for the container.
+// When multiple containers run simultaneously, each gets a unique, non-overlapping
+// slice of the host UID/GID space. Without this flag all unprivileged containers
+// share the same host-side UID range (typically 100000–165535), so a file
+// written by one container as host UID 100000 is readable by another container
+// whose UID 0 maps to the same host UID. This must be set before the container
+// starts — changing it on a running container has no effect.
+func IsolateUIDNamespace(containerName string) error {
+	return IncusExec("config", "set", containerName, "security.idmap.isolated=true")
 }
 
 // StopContainer stops a container

@@ -383,6 +383,12 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 			return nil, fmt.Errorf("failed to enable Docker support: %w", err)
 		}
 
+		// Isolate UID/GID namespace so each container gets a unique host-side UID
+		// range, preventing cross-container file access via shared host UIDs.
+		if err := container.IsolateUIDNamespace(result.ContainerName); err != nil {
+			opts.Logger(fmt.Sprintf("Warning: Failed to isolate UID namespace: %v", err))
+		}
+
 		// Disable guest API to prevent host topology leaks (FLAWS Finding 3)
 		if err := container.DisableGuestAPI(result.ContainerName); err != nil {
 			return nil, fmt.Errorf("failed to disable guest API: %w", err)
@@ -413,6 +419,14 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 	opts.Logger("Waiting for container to be ready...")
 	if err := waitForReady(result.Manager, 30, opts.Logger); err != nil {
 		return nil, err
+	}
+
+	// 6.1. Configure Docker bridge CIDR to prevent IP conflicts with the host
+	// network or other containers. Only applied to newly launched containers.
+	if !skipLaunch {
+		if err := configureDockerDaemon(result.Manager, opts.Logger); err != nil {
+			opts.Logger(fmt.Sprintf("Warning: Failed to configure Docker daemon: %v", err))
+		}
 	}
 
 	// 6.4. Finalize execution context by probing the container for the
@@ -672,6 +686,39 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 
 	opts.Logger("Container setup complete!")
 	return result, nil
+}
+
+// dockerDaemonJSON is the daemon.json written to new containers to prevent
+// Docker bridge IP conflicts with the host network or other containers.
+// The bip CIDR sets the docker0 bridge address; default-address-pools covers
+// user-defined networks created by Docker Compose and `docker network create`.
+// These ranges (172.30.x and 172.31.x) are outside Docker's default pool
+// (172.17–172.29) and the standard RFC 1918 ranges commonly used on the host.
+const dockerDaemonJSON = `{
+  "bip": "172.30.0.1/24",
+  "default-address-pools": [
+    {"base": "172.31.0.0/16", "size": 24}
+  ]
+}`
+
+// configureDockerDaemon writes /etc/docker/daemon.json inside the container
+// to configure bridge CIDRs that don't overlap with the host network.
+func configureDockerDaemon(mgr container.ContainerManager, logFn func(string)) error {
+	cmd := fmt.Sprintf(
+		"mkdir -p /etc/docker && printf '%%s' %s > /etc/docker/daemon.json",
+		shellEscape(dockerDaemonJSON),
+	)
+	if _, err := mgr.ExecCommand(cmd, container.ExecCommandOptions{Capture: true}); err != nil {
+		return fmt.Errorf("write /etc/docker/daemon.json: %w", err)
+	}
+	logFn("Configured Docker bridge CIDRs (172.30.0.0/24, 172.31.0.0/16)")
+	return nil
+}
+
+// shellEscape single-quotes a string for safe interpolation in a shell command.
+func shellEscape(s string) string {
+	escaped := strings.ReplaceAll(s, "'", "'\"'\"'")
+	return "'" + escaped + "'"
 }
 
 // waitForReady waits for container to be ready
