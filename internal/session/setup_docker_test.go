@@ -21,7 +21,7 @@ func TestDockerDaemonJSON_ValidJSON(t *testing.T) {
 
 func TestDockerDaemonJSON_BridgeCIDR(t *testing.T) {
 	var parsed struct {
-		BIP                string `json:"bip"`
+		BIP                 string `json:"bip"`
 		DefaultAddressPools []struct {
 			Base string `json:"base"`
 			Size int    `json:"size"`
