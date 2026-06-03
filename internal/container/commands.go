@@ -231,6 +231,21 @@ func IncusFilePush(source, destination string) error {
 	return IncusFilePushContext(context.Background(), source, destination)
 }
 
+// startWithIsolationFallback starts a container and, if start fails, clears
+// security.idmap.isolated and retries once. Some environments (CI runners,
+// nested containers) lack enough subuid/subgid space to honour the isolated
+// ID-mapping allocation; the retry lets the container start without it.
+// If the retry also fails, the original start error is returned.
+func startWithIsolationFallback(containerName string) error {
+	if err := IncusExec("start", containerName); err != nil {
+		_ = IncusExecQuiet("config", "unset", containerName, "security.idmap.isolated")
+		if retryErr := IncusExec("start", containerName); retryErr != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // LaunchContainer launches an ephemeral container on the given storage pool.
 // An empty pool means "use Incus's default pool".
 // Uses init+configure+start (not launch) so security flags are set before first boot.
@@ -245,16 +260,15 @@ func LaunchContainer(imageAlias, containerName, pool string) error {
 	if err := EnableDockerSupport(containerName); err != nil {
 		return err
 	}
-	if err := IsolateUIDNamespace(containerName); err != nil {
-		return err
-	}
+	// Non-fatal: unset and retry at start time if the environment lacks subuid space.
+	_ = IsolateUIDNamespace(containerName)
 	if err := DisableGuestAPI(containerName); err != nil {
 		return err
 	}
 	if err := CheckNotPrivileged(containerName); err != nil {
 		return err
 	}
-	return IncusExec("start", containerName)
+	return startWithIsolationFallback(containerName)
 }
 
 // LaunchContainerPersistent launches a non-ephemeral container on the given
@@ -271,16 +285,15 @@ func LaunchContainerPersistent(imageAlias, containerName, pool string) error {
 	if err := EnableDockerSupport(containerName); err != nil {
 		return err
 	}
-	if err := IsolateUIDNamespace(containerName); err != nil {
-		return err
-	}
+	// Non-fatal: unset and retry at start time if the environment lacks subuid space.
+	_ = IsolateUIDNamespace(containerName)
 	if err := DisableGuestAPI(containerName); err != nil {
 		return err
 	}
 	if err := CheckNotPrivileged(containerName); err != nil {
 		return err
 	}
-	return IncusExec("start", containerName)
+	return startWithIsolationFallback(containerName)
 }
 
 // EnableDockerSupport configures the container to support Docker/nested containers.

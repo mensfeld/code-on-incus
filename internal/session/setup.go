@@ -385,8 +385,13 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 
 		// Isolate UID/GID namespace so each container gets a unique host-side UID
 		// range, preventing cross-container file access via shared host UIDs.
+		// Non-fatal: some environments (nested containers, CI runners) don't have
+		// enough subuid/subgid space. The fallback at start time handles this.
+		idmapIsolated := false
 		if err := container.IsolateUIDNamespace(result.ContainerName); err != nil {
-			return nil, fmt.Errorf("failed to isolate UID namespace: %w", err)
+			opts.Logger(fmt.Sprintf("Warning: UID namespace isolation unavailable: %v", err))
+		} else {
+			idmapIsolated = true
 		}
 
 		// Disable guest API to prevent host topology leaks (FLAWS Finding 3)
@@ -402,7 +407,18 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		// Now start the container
 		opts.Logger("Starting container...")
 		if err := result.Manager.Start(); err != nil {
-			return nil, fmt.Errorf("failed to start container: %w", err)
+			// If isolation was applied, some environments (CI, nested containers)
+			// lack enough subuid/subgid space to honour isolated ID mappings and
+			// the container fails to start. Unset it and retry once.
+			if idmapIsolated {
+				_ = container.IncusExecQuiet("config", "unset", result.ContainerName, "security.idmap.isolated")
+				if retryErr := result.Manager.Start(); retryErr != nil {
+					return nil, fmt.Errorf("failed to start container: %w", err)
+				}
+				opts.Logger("Warning: UID namespace isolation not available in this environment, disabled")
+			} else {
+				return nil, fmt.Errorf("failed to start container: %w", err)
+			}
 		}
 	}
 
