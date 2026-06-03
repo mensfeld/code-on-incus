@@ -435,7 +435,7 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 	// 6.1. Configure Docker bridge CIDR to prevent IP conflicts with the host
 	// network or other containers. Only applied to newly launched containers.
 	if !skipLaunch {
-		if err := configureDockerDaemon(result.Manager, opts.Logger); err != nil {
+		if err := ConfigureDockerDaemon(result.Manager, opts.Logger); err != nil {
 			opts.Logger(fmt.Sprintf("Warning: Failed to configure Docker daemon: %v", err))
 		}
 	}
@@ -718,9 +718,9 @@ const dockerDaemonJSON = `{
   ]
 }`
 
-// configureDockerDaemon writes /etc/docker/daemon.json inside the container
+// ConfigureDockerDaemon writes /etc/docker/daemon.json inside the container
 // to configure bridge CIDRs that don't overlap with the host network.
-func configureDockerDaemon(mgr container.ContainerManager, logFn func(string)) error {
+func ConfigureDockerDaemon(mgr container.ContainerManager, logFn func(string)) error {
 	cmd := fmt.Sprintf(
 		"mkdir -p /etc/docker && printf '%%s' %s > /etc/docker/daemon.json",
 		shellEscape(dockerDaemonJSON),

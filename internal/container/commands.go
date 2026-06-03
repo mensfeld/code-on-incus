@@ -253,6 +253,7 @@ func StartWithIsolationFallback(containerName string) error {
 		}
 	}
 	// Container didn't come up; unset isolation and retry.
+	fmt.Fprintf(os.Stderr, "Warning: UID namespace isolation not available in this environment, disabling and retrying\n")
 	_ = IncusExecQuiet("config", "unset", containerName, "security.idmap.isolated")
 	if retryErr := IncusExec("start", containerName); retryErr != nil {
 		// Handle the race: container may have come up during the unset+retry window.
