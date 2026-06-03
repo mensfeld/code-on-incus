@@ -231,21 +231,32 @@ func IncusFilePush(source, destination string) error {
 	return IncusFilePushContext(context.Background(), source, destination)
 }
 
-// startWithIsolationFallback starts a container and, on failure, checks
-// whether the container is actually running (forkstart can exit non-zero
-// transiently while the container boots). If it is running, the error is
-// ignored. If it is not running, security.idmap.isolated is unset and the
-// start is retried once — some environments (CI runners, nested containers)
-// lack enough subuid/subgid space to honour isolated ID-mapping allocations.
-// The original start error is returned if the retry also fails.
+// startWithIsolationFallback starts a container and, on failure, unsets
+// security.idmap.isolated and retries once.
+//
+// Two scenarios are handled:
+//  1. The container failed to start because the host lacks subuid/subgid space
+//     for isolated ID mappings (CI runners, nested containers). Unsetting the
+//     flag and retrying lets the container start without isolation.
+//  2. forkstart exits non-zero transiently even though the container booted —
+//     the container is not yet in "Running" state when checked immediately after
+//     the failure. The retry will then report "already running"; we treat that
+//     as success.
+//
+// If the retry fails for any reason other than "already running", the original
+// start error is returned.
 func startWithIsolationFallback(containerName string) error {
 	if err := IncusExec("start", containerName); err != nil {
-		if running, _ := ContainerRunning(containerName); running {
-			return nil
-		}
+		// Always unset isolation before retrying. If the container is actually
+		// running (scenario 2), the unset is a no-op for the live process.
 		_ = IncusExecQuiet("config", "unset", containerName, "security.idmap.isolated")
-		if retryErr := IncusExec("start", containerName); retryErr != nil {
-			return err
+		out, retryErr := IncusOutputWithStderr("start", containerName)
+		if retryErr != nil {
+			if strings.Contains(strings.ToLower(out), "already running") {
+				// Container started on the first attempt despite the forkstart error.
+				return nil
+			}
+			return err // return the original start error
 		}
 	}
 	return nil
