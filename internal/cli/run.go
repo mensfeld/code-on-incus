@@ -126,35 +126,45 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// networkMgr holds the network.Manager when isolation is active; set after
-	// applyNetworkIsolation so the defer below can call Teardown before deletion.
+	// networkMgr is assigned by applyNetworkIsolation below. Declared here so
+	// the teardown closures can capture it by reference.
 	var networkMgr *network.Manager
 
-	// Cleanup container on exit (only if ephemeral)
-	defer func() {
-		// Clear immutable bits before container deletion (must happen first)
-		logger := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
-		session.RemoveImmutable(containerName, logger)
+	// Teardowns run LIFO. Register in reverse of desired execution order so
+	// the actual sequence is: immutable → network → container.
+	pipeline := &session.Pipeline{}
+	defer pipeline.Teardown()
 
-		// Teardown network isolation before deleting the container so that
-		// firewall rules are removed while the container IP is still resolvable.
-		if networkMgr != nil {
-			if err := networkMgr.Teardown(context.Background(), containerName); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to teardown network isolation: %v\n", err)
-			}
-		}
-
+	// 1. Container (registered first → executes last in LIFO)
+	pipeline.AddTeardown(func() {
 		if !app.persistent {
 			fmt.Fprintf(os.Stderr, "Cleaning up container %s...\n", containerName)
-			_ = mgr.Delete(true) // Best effort cleanup
+			_ = mgr.Delete(true)
 		} else {
-			// Only stop if container is running (avoids spurious error messages)
 			if running, _ := mgr.Running(); running {
 				fmt.Fprintf(os.Stderr, "Stopping persistent container %s...\n", containerName)
-				_ = mgr.Stop(false) // Best effort stop
+				_ = mgr.Stop(false)
 			}
 		}
-	}()
+	})
+
+	// 2. Network (registered second → executes second; runs before container
+	// deletion so firewall rules are removed while the IP is still resolvable)
+	pipeline.AddTeardown(func() {
+		if networkMgr == nil {
+			return
+		}
+		if err := networkMgr.Teardown(context.Background(), containerName); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to teardown network isolation: %v\n", err)
+		}
+	})
+
+	// 3. Immutable (registered last → executes first; clears host-side bits
+	// before any container or network operation so protected files are writable)
+	pipeline.AddTeardown(func() {
+		logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
+		session.RemoveImmutable(containerName, logFn)
+	})
 
 	// Apply resource limits (only for new containers, not restarted persistent ones)
 	wasRestarted := containerExists && app.persistent
