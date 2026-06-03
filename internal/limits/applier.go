@@ -15,7 +15,10 @@ type ApplyOptions struct {
 	Memory        MemoryLimits
 	Disk          DiskLimits
 	Runtime       RuntimeLimits
-	Project       string // Incus project name
+	// Project is informational. The actual Incus project used by the container
+	// helpers is container.IncusProject (set globally via container.Configure).
+	// Both are always sourced from cfg.Incus.Project so they remain in sync.
+	Project string
 }
 
 // ApplyResourceLimits applies all resource limits to a container
@@ -229,11 +232,9 @@ func RemoveLimitsContext(ctx context.Context, containerName, project string) err
 		"limits.processes",
 	}
 	for _, limit := range containerLimits {
-		out, err := container.ConfigUnset(ctx, containerName, limit)
-		if err != nil && !isNotFoundError(out) {
-			// Ignore not-found errors; log others as best-effort
-			_ = err
-		}
+		// Best-effort: ignore not-found errors (limit was never set).
+		out, _ := container.ConfigUnset(ctx, containerName, limit)
+		_ = out
 	}
 
 	// Device-level disk I/O limits on the root device (set to empty to remove)
@@ -244,10 +245,9 @@ func RemoveLimitsContext(ctx context.Context, containerName, project string) err
 		"limits.disk.priority",
 	}
 	for _, limit := range deviceLimits {
-		out, err := container.DeviceSet(ctx, containerName, "root", limit+"=")
-		if err != nil && !isNotFoundError(out) && !isProfileDeviceError(out) {
-			_ = err
-		}
+		// Best-effort: ignore not-found and profile-inherited-device errors.
+		out, _ := container.DeviceSet(ctx, containerName, "root", limit+"=")
+		_ = out
 	}
 
 	return nil
@@ -282,12 +282,3 @@ func GetCurrentLimitsContext(ctx context.Context, containerName, project string)
 	return limits, nil
 }
 
-// isNotFoundError returns true if the output indicates a key/device was not found.
-func isNotFoundError(output string) bool {
-	return strings.Contains(output, "not found") || strings.Contains(output, "doesn't exist")
-}
-
-// isProfileDeviceError returns true if the output indicates the device is profile-inherited.
-func isProfileDeviceError(output string) bool {
-	return strings.Contains(output, "Device from profile")
-}

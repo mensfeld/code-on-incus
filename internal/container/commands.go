@@ -547,8 +547,8 @@ func ConfigShow(ctx context.Context, containerName string, expanded bool) (strin
 }
 
 // DeviceAdd adds a device to a container.
-// Returns the combined stdout+stderr output (useful for error inspection) and any error.
-// If the device already exists, nil is returned.
+// Returns the combined stdout+stderr output and a nil error.
+// If the device already exists, a nil error is returned (idempotent).
 func DeviceAdd(ctx context.Context, containerName string, deviceArgs ...string) (string, error) {
 	args := append([]string{"config", "device", "add", containerName}, deviceArgs...)
 	out, err := IncusOutputWithStderrContext(ctx, args...)
