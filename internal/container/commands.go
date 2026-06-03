@@ -231,33 +231,23 @@ func IncusFilePush(source, destination string) error {
 	return IncusFilePushContext(context.Background(), source, destination)
 }
 
-// startWithIsolationFallback starts a container and, on failure, unsets
-// security.idmap.isolated and retries once.
+// startWithIsolationFallback starts a container and, on failure, force-stops
+// it, unsets security.idmap.isolated, and retries once.
 //
-// Two scenarios are handled:
-//  1. The container failed to start because the host lacks subuid/subgid space
-//     for isolated ID mappings (CI runners, nested containers). Unsetting the
-//     flag and retrying lets the container start without isolation.
-//  2. forkstart exits non-zero transiently even though the container booted —
-//     the container is not yet in "Running" state when checked immediately after
-//     the failure. The retry will then report "already running"; we treat that
-//     as success.
-//
-// If the retry fails for any reason other than "already running", the original
-// start error is returned.
+// When security.idmap.isolated causes forkstart to exit non-zero, the LXC
+// process may already be running while Incus concurrently runs an async stop
+// (cleanup) operation. Attempting a plain retry races against that stop and
+// produces "Instance is busy running a 'stop' operation" errors downstream.
+// A synchronous force-stop first guarantees a clean stopped state before the
+// second start attempt.
 func startWithIsolationFallback(containerName string) error {
 	if err := IncusExec("start", containerName); err != nil {
-		// Always unset isolation before retrying. If the container is actually
-		// running (scenario 2), the unset is a no-op for the live process.
+		// Force-stop ensures a known stopped state (no-op if already stopped,
+		// kills the LXC process if it started despite the forkstart error, and
+		// waits for any concurrent Incus stop operation to complete).
+		_ = IncusExecQuiet("stop", containerName, "--force")
 		_ = IncusExecQuiet("config", "unset", containerName, "security.idmap.isolated")
-		out, retryErr := IncusOutputWithStderr("start", containerName)
-		if retryErr != nil {
-			if strings.Contains(strings.ToLower(out), "already running") {
-				// Container started on the first attempt despite the forkstart error.
-				return nil
-			}
-			return err // return the original start error
-		}
+		return IncusExec("start", containerName)
 	}
 	return nil
 }
