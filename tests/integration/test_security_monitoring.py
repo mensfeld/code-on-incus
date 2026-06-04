@@ -1594,7 +1594,7 @@ time.sleep(60)
         loopback_script = Path(test_workspace) / "loopback_c2port.py"
         loopback_script.write_text(
             """#!/usr/bin/env python3
-import socket, subprocess, threading, time
+import socket, time
 
 # Start a listener on the suspicious port 1234
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
