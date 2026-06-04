@@ -179,9 +179,17 @@ func collectDiskSpaceViaStatfs(ctx context.Context, containerName string) (tmpUs
 		return 0, 0, 0, err
 	}
 
-	bsize := uint64(stat.Bsize) //nolint:gosec // Bsize is always positive
+	if stat.Bsize <= 0 {
+		return 0, 0, 0, fmt.Errorf("statfs returned unexpected Bsize %d", stat.Bsize)
+	}
+	bsize := uint64(stat.Bsize) //nolint:gosec // checked positive above
 	totalBytes := stat.Blocks * bsize
 	freeBytes := stat.Bfree * bsize
+	if freeBytes > totalBytes {
+		// Should not happen on a well-formed filesystem, but guard against
+		// uint underflow producing a wildly incorrect used-space value.
+		return 0, 0, 0, fmt.Errorf("statfs: freeBytes (%d) > totalBytes (%d)", freeBytes, totalBytes)
+	}
 	usedBytes := totalBytes - freeBytes
 
 	total := float64(totalBytes) / 1024 / 1024
