@@ -1578,7 +1578,9 @@ time.sleep(60)
             elif config_path.exists():
                 config_path.unlink()
 
-    def test_container_internal_connection_visible(self, test_workspace, enable_monitoring, coi_binary):
+    def test_container_internal_connection_visible(
+        self, test_workspace, enable_monitoring, coi_binary
+    ):
         """Monitoring must see container-internal (127.0.0.1) connections.
 
         Reading /proc/<container-init-pid>/net/tcp from the host scopes the
