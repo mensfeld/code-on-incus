@@ -43,10 +43,16 @@ func GetContainerInitPID(ctx context.Context, containerName string) (int, error)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get container info: %w", err)
 	}
+	return parseInitPIDFromIncusInfo(output)
+}
 
+// parseInitPIDFromIncusInfo extracts the container init PID from `incus info`
+// output. Exported for testing; production callers use GetContainerInitPID.
+func parseInitPIDFromIncusInfo(output string) (int, error) {
 	for _, line := range strings.Split(output, "\n") {
-		if strings.Contains(line, "PID:") || strings.Contains(line, "Pid:") {
-			parts := strings.Fields(line)
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "PID:") || strings.HasPrefix(trimmed, "Pid:") {
+			parts := strings.Fields(trimmed)
 			if len(parts) >= 2 {
 				pid, err := strconv.Atoi(parts[1])
 				if err == nil && pid > 0 {
@@ -55,7 +61,6 @@ func GetContainerInitPID(ctx context.Context, containerName string) (int, error)
 			}
 		}
 	}
-
 	return 0, fmt.Errorf("could not find container PID in incus info output")
 }
 

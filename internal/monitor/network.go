@@ -11,9 +11,11 @@ import (
 )
 
 // CollectNetworkStats collects network statistics and flags suspicious connections.
-// It reads /proc/<container-init-pid>/net/tcp[6] from the host so the data is
-// scoped to the container's network namespace and cannot be tampered with from
-// inside the container.
+// It attempts to read /proc/<container-init-pid>/net/tcp[6] from the host so the
+// data is scoped to the container's network namespace. If PID resolution or the
+// namespaced reads fail, it falls back to host /proc/net/tcp[6] filtered by
+// containerIP (best-effort; requires a non-empty containerIP to avoid returning
+// all host connections).
 func CollectNetworkStats(ctx context.Context, containerName, containerIP string, allowedCIDRs []string) (NetworkStats, error) {
 	connections, err := parseConnections(ctx, containerName, containerIP)
 	if err != nil {
@@ -69,6 +71,11 @@ func parseConnections(ctx context.Context, containerName, containerIP string) ([
 	}
 
 	// Fallback: host /proc/net/tcp[6] filtered by containerIP.
+	// Require containerIP to avoid returning all host connections.
+	if containerIP == "" {
+		return nil, nil
+	}
+
 	var connections []Connection
 
 	tcp4Conns, err := parseProcNetTCP("/proc/net/tcp", "tcp")
@@ -81,17 +88,13 @@ func parseConnections(ctx context.Context, containerName, containerIP string) ([
 		connections = append(connections, tcp6Conns...)
 	}
 
-	if containerIP != "" {
-		filtered := make([]Connection, 0, len(connections))
-		for _, conn := range connections {
-			if strings.HasPrefix(conn.LocalAddr, containerIP+":") {
-				filtered = append(filtered, conn)
-			}
+	filtered := make([]Connection, 0, len(connections))
+	for _, conn := range connections {
+		if strings.HasPrefix(conn.LocalAddr, containerIP+":") {
+			filtered = append(filtered, conn)
 		}
-		connections = filtered
 	}
-
-	return connections, nil
+	return filtered, nil
 }
 
 // parseProcNetTCP parses /proc/net/tcp or /proc/net/tcp6
