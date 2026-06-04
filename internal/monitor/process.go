@@ -3,15 +3,139 @@ package monitor
 import (
 	"context"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 
 	"github.com/mensfeld/code-on-incus/internal/container"
 )
 
-// CollectProcessStats collects running processes from the container
+// CollectProcessStats collects running processes from the container.
+// It first attempts to walk the host /proc filtered by the container's PID
+// namespace, which is tamper-resistant because it runs outside the container.
+// If that fails it falls back to incus exec ps aux.
 func CollectProcessStats(ctx context.Context, containerName string) (ProcessStats, error) {
-	// Execute: incus exec <container> -- ps aux
+	processes, err := collectProcessesViaHostProc(ctx, containerName)
+	if err != nil {
+		// Fallback: run ps inside the container.
+		return collectProcessesViaIncusExec(ctx, containerName)
+	}
+
+	for i := range processes {
+		processes[i].EnvAccess = checkEnvAccess(processes[i].Command)
+	}
+	return ProcessStats{
+		Available:  true,
+		TotalCount: len(processes),
+		Processes:  processes,
+	}, nil
+}
+
+// collectProcessesViaHostProc walks the host /proc directory and returns all
+// processes whose PID namespace matches the container's init process. Reading
+// from the host means an attacker inside the container cannot hide processes by
+// manipulating their own /proc or killing ps.
+func collectProcessesViaHostProc(ctx context.Context, containerName string) ([]Process, error) {
+	initPID, err := GetContainerInitPID(ctx, containerName)
+	if err != nil {
+		return nil, fmt.Errorf("could not resolve container init PID: %w", err)
+	}
+
+	// The namespace symlink looks like "pid:[4026532456]". All processes in the
+	// container share the same value.
+	containerNS, err := os.Readlink(fmt.Sprintf("/proc/%d/ns/pid", initPID))
+	if err != nil {
+		return nil, fmt.Errorf("could not read pid namespace of init PID %d: %w", initPID, err)
+	}
+
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return nil, fmt.Errorf("could not read /proc: %w", err)
+	}
+
+	var processes []Process
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil {
+			continue // not a PID directory
+		}
+
+		ns, err := os.Readlink(fmt.Sprintf("/proc/%d/ns/pid", pid))
+		if err != nil || ns != containerNS {
+			continue
+		}
+
+		proc, err := readProcessFromProc(pid)
+		if err != nil {
+			continue
+		}
+		processes = append(processes, proc)
+	}
+
+	return processes, nil
+}
+
+// readProcessFromProc reads /proc/<pid>/status and /proc/<pid>/cmdline to build
+// a Process. The PID here is the host-side PID.
+func readProcessFromProc(pid int) (Process, error) {
+	statusData, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", pid))
+	if err != nil {
+		return Process{}, err
+	}
+
+	name, ppid, uid := parseStatusFields(string(statusData))
+
+	command := name
+	if cmdlineData, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid)); err == nil && len(cmdlineData) > 0 {
+		command = parseCmdline(cmdlineData)
+	}
+
+	return Process{
+		PID:     pid,
+		PPID:    ppid,
+		User:    strconv.Itoa(uid),
+		Command: command,
+	}, nil
+}
+
+// parseStatusFields extracts Name, PPid, and real Uid from /proc/<pid>/status
+// content. Kept separate so it can be unit-tested without a live /proc.
+func parseStatusFields(status string) (name string, ppid, uid int) {
+	for _, line := range strings.Split(status, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		switch fields[0] {
+		case "Name:":
+			name = fields[1]
+		case "PPid:":
+			ppid, _ = strconv.Atoi(fields[1])
+		case "Uid:":
+			uid, _ = strconv.Atoi(fields[1]) // real UID is the first field
+		}
+	}
+	return
+}
+
+// parseCmdline converts null-delimited /proc/<pid>/cmdline bytes to a
+// space-joined command string. Kept separate so it can be unit-tested.
+func parseCmdline(data []byte) string {
+	trimmed := strings.TrimRight(string(data), "\x00")
+	if trimmed == "" {
+		return ""
+	}
+	return strings.Join(strings.Split(trimmed, "\x00"), " ")
+}
+
+// collectProcessesViaIncusExec is the fallback path: runs ps aux inside the
+// container via incus exec. An attacker inside the container can manipulate
+// this view, but it remains available in environments where host /proc walks
+// are not possible.
+func collectProcessesViaIncusExec(ctx context.Context, containerName string) (ProcessStats, error) {
 	output, err := container.IncusOutputContext(ctx, "exec", containerName, "--", "ps", "aux")
 	if err != nil {
 		return ProcessStats{Available: false}, fmt.Errorf("failed to execute ps: %w", err)
@@ -22,11 +146,9 @@ func CollectProcessStats(ctx context.Context, containerName string) (ProcessStat
 		return ProcessStats{Available: false}, fmt.Errorf("failed to parse process list: %w", err)
 	}
 
-	// For each process, check if it has accessed environment variables
 	for i := range processes {
 		processes[i].EnvAccess = checkEnvAccess(processes[i].Command)
 	}
-
 	return ProcessStats{
 		Available:  true,
 		TotalCount: len(processes),
