@@ -207,6 +207,14 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Configure Docker bridge CIDRs for new containers (not restarted persistent ones)
+	if !wasRestarted {
+		logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
+		if err := session.ConfigureDockerDaemon(mgr, logFn); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to configure Docker daemon: %v\n", err)
+		}
+	}
+
 	// Remap container user UID/GID if configured UID differs from image default (1000)
 	if err := remapContainerUserIfNeeded(mgr, wasRestarted); err != nil {
 		return err

@@ -383,6 +383,17 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 			return nil, fmt.Errorf("failed to enable Docker support: %w", err)
 		}
 
+		// Isolate UID/GID namespace so each container gets a unique host-side UID
+		// range, preventing cross-container file access via shared host UIDs.
+		// Non-fatal: some environments (nested containers, CI runners) don't have
+		// enough subuid/subgid space. The fallback at start time handles this.
+		idmapIsolated := false
+		if err := container.IsolateUIDNamespace(result.ContainerName); err != nil {
+			opts.Logger(fmt.Sprintf("Warning: UID namespace isolation unavailable: %v", err))
+		} else {
+			idmapIsolated = true
+		}
+
 		// Disable guest API to prevent host topology leaks (FLAWS Finding 3)
 		if err := container.DisableGuestAPI(result.ContainerName); err != nil {
 			return nil, fmt.Errorf("failed to disable guest API: %w", err)
@@ -395,8 +406,14 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 
 		// Now start the container
 		opts.Logger("Starting container...")
-		if err := result.Manager.Start(); err != nil {
-			return nil, fmt.Errorf("failed to start container: %w", err)
+		if idmapIsolated {
+			if err := container.StartWithIsolationFallback(result.ContainerName); err != nil {
+				return nil, fmt.Errorf("failed to start container: %w", err)
+			}
+		} else {
+			if err := result.Manager.Start(); err != nil {
+				return nil, fmt.Errorf("failed to start container: %w", err)
+			}
 		}
 	}
 
@@ -413,6 +430,14 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 	opts.Logger("Waiting for container to be ready...")
 	if err := waitForReady(result.Manager, 30, opts.Logger); err != nil {
 		return nil, err
+	}
+
+	// 6.1. Configure Docker bridge CIDR to prevent IP conflicts with the host
+	// network or other containers. Only applied to newly launched containers.
+	if !skipLaunch {
+		if err := ConfigureDockerDaemon(result.Manager, opts.Logger); err != nil {
+			opts.Logger(fmt.Sprintf("Warning: Failed to configure Docker daemon: %v", err))
+		}
 	}
 
 	// 6.4. Finalize execution context by probing the container for the
@@ -672,6 +697,45 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 
 	opts.Logger("Container setup complete!")
 	return result, nil
+}
+
+// dockerDaemonJSON is the daemon.json written to new containers.
+// It merges two concerns:
+//   - "group": "code" — preserves the base-image setting that gives the
+//     non-root `code` user access to /var/run/docker.sock (also enforced
+//     via a systemd socket drop-in written in build.sh). Omitting this
+//     regresses non-root Docker access after a container reboot.
+//   - "bip" / "default-address-pools" — avoid Docker bridge IP conflicts.
+//     Docker's built-in pool (172.17–172.29) overlaps with many corporate
+//     VPNs and cloud subnets. The chosen ranges (172.30.x, 172.31.x) sit
+//     at the far end of RFC 1918's 172.16.0.0/12 block where conflicts are
+//     rare in practice.
+const dockerDaemonJSON = `{
+  "group": "code",
+  "bip": "172.30.0.1/24",
+  "default-address-pools": [
+    {"base": "172.31.0.0/16", "size": 24}
+  ]
+}`
+
+// ConfigureDockerDaemon writes /etc/docker/daemon.json inside the container
+// to configure bridge CIDRs that don't overlap with the host network.
+func ConfigureDockerDaemon(mgr container.ContainerManager, logFn func(string)) error {
+	cmd := fmt.Sprintf(
+		"mkdir -p /etc/docker && printf '%%s' %s > /etc/docker/daemon.json",
+		shellEscape(dockerDaemonJSON),
+	)
+	if _, err := mgr.ExecCommand(cmd, container.ExecCommandOptions{Capture: true}); err != nil {
+		return fmt.Errorf("write /etc/docker/daemon.json: %w", err)
+	}
+	logFn("Configured Docker bridge CIDRs (172.30.0.0/24, 172.31.0.0/16)")
+	return nil
+}
+
+// shellEscape single-quotes a string for safe interpolation in a shell command.
+func shellEscape(s string) string {
+	escaped := strings.ReplaceAll(s, "'", "'\"'\"'")
+	return "'" + escaped + "'"
 }
 
 // waitForReady waits for container to be ready
