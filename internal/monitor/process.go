@@ -6,19 +6,16 @@ import (
 	"os"
 	"strconv"
 	"strings"
-
-	"github.com/mensfeld/code-on-incus/internal/container"
 )
 
-// CollectProcessStats collects running processes from the container.
-// It first attempts to walk the host /proc filtered by the container's PID
-// namespace, which is tamper-resistant because it runs outside the container.
-// If that fails it falls back to incus exec ps aux.
+// CollectProcessStats collects running processes by walking the host /proc
+// filtered to the container's PID namespace. Because the read happens outside
+// the container, an attacker inside cannot hide processes by manipulating their
+// own /proc, replacing ps, or pausing incus exec.
 func CollectProcessStats(ctx context.Context, containerName string) (ProcessStats, error) {
 	processes, err := collectProcessesViaHostProc(ctx, containerName)
 	if err != nil {
-		// Fallback: run ps inside the container.
-		return collectProcessesViaIncusExec(ctx, containerName)
+		return ProcessStats{Available: false}, fmt.Errorf("process monitoring unavailable: %w", err)
 	}
 
 	for i := range processes {
@@ -131,75 +128,6 @@ func parseCmdline(data []byte) string {
 	return strings.Join(strings.Split(trimmed, "\x00"), " ")
 }
 
-// collectProcessesViaIncusExec is the fallback path: runs ps aux inside the
-// container via incus exec. An attacker inside the container can manipulate
-// this view, but it remains available in environments where host /proc walks
-// are not possible.
-func collectProcessesViaIncusExec(ctx context.Context, containerName string) (ProcessStats, error) {
-	output, err := container.IncusOutputContext(ctx, "exec", containerName, "--", "ps", "aux")
-	if err != nil {
-		return ProcessStats{Available: false}, fmt.Errorf("failed to execute ps: %w", err)
-	}
-
-	processes, err := parseProcessList(output)
-	if err != nil {
-		return ProcessStats{Available: false}, fmt.Errorf("failed to parse process list: %w", err)
-	}
-
-	for i := range processes {
-		processes[i].EnvAccess = checkEnvAccess(processes[i].Command)
-	}
-	return ProcessStats{
-		Available:  true,
-		TotalCount: len(processes),
-		Processes:  processes,
-	}, nil
-}
-
-// parseProcessList parses output from 'ps aux'
-func parseProcessList(output string) ([]Process, error) {
-	lines := strings.Split(output, "\n")
-	if len(lines) < 2 {
-		return nil, fmt.Errorf("invalid ps output: too few lines")
-	}
-
-	// Skip header line
-	lines = lines[1:]
-
-	var processes []Process
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-
-		// Parse ps aux output format:
-		// USER       PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
-		fields := strings.Fields(line)
-		if len(fields) < 11 {
-			continue
-		}
-
-		pid, err := strconv.Atoi(fields[1])
-		if err != nil {
-			continue
-		}
-
-		// COMMAND is everything from field 10 onwards
-		command := strings.Join(fields[10:], " ")
-
-		// Try to extract PPID (not available in 'ps aux', so we'll use 0)
-		// In a full implementation, we could use 'ps -eo pid,ppid,user,comm,args'
-		processes = append(processes, Process{
-			PID:     pid,
-			PPID:    0, // Not available in 'ps aux'
-			User:    fields[0],
-			Command: command,
-		})
-	}
-
-	return processes, nil
-}
 
 // checkEnvAccess checks if a command is likely accessing environment variables
 func checkEnvAccess(command string) bool {
