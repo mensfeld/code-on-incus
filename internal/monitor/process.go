@@ -128,7 +128,6 @@ func parseCmdline(data []byte) string {
 	return strings.Join(strings.Split(trimmed, "\x00"), " ")
 }
 
-
 // checkEnvAccess checks if a command is likely accessing environment variables
 func checkEnvAccess(command string) bool {
 	// Check for common environment-scanning commands

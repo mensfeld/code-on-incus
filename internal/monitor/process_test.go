@@ -76,18 +76,18 @@ func TestParseStatusFields(t *testing.T) {
 		wantUID  int
 	}{
 		{
-			name: "typical process",
-			input: "Name:\tbash\nPid:\t42\nPPid:\t1\nUid:\t1000\t1000\t1000\t1000\n",
+			name:     "typical process",
+			input:    "Name:\tbash\nPid:\t42\nPPid:\t1\nUid:\t1000\t1000\t1000\t1000\n",
 			wantName: "bash", wantPPID: 1, wantUID: 1000,
 		},
 		{
-			name: "root process",
-			input: "Name:\tinit\nPPid:\t0\nUid:\t0\t0\t0\t0\n",
+			name:     "root process",
+			input:    "Name:\tinit\nPPid:\t0\nUid:\t0\t0\t0\t0\n",
 			wantName: "init", wantPPID: 0, wantUID: 0,
 		},
 		{
-			name: "missing fields",
-			input: "Name:\tsleep\n",
+			name:     "missing fields",
+			input:    "Name:\tsleep\n",
 			wantName: "sleep", wantPPID: 0, wantUID: 0,
 		},
 	}
@@ -169,4 +169,3 @@ func TestParseCmdline_KernelThread(t *testing.T) {
 		t.Errorf("expected empty string for kernel thread, got %q", got)
 	}
 }
-
