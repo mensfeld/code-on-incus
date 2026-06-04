@@ -226,3 +226,53 @@ func runMonitorWatch(ctx context.Context, collector *monitor.Collector, detector
 		}
 	}
 }
+
+// Audit log command - TODO: Implement or remove
+// var monitorAuditCmd = &cobra.Command{
+// 	Use:   "audit [container]",
+// 	Short: "View audit log for a container",
+// 	Long: `View audit log entries for a container.
+//
+// The audit log contains all monitoring events, threats, and security alerts
+// recorded during container sessions.
+//
+// Examples:
+//   coi monitor audit                          # Last 100 entries
+//   coi monitor audit coi-abc-1                # Specific container
+//   coi monitor audit --export=report.json     # Export to file`,
+// 	RunE: monitorAuditCommand,
+// }
+
+func monitorAuditCommand(cmd *cobra.Command, args []string) error { //nolint:unused // TODO: Implement or remove
+	// Determine container name
+	var containerName string
+	if len(args) > 0 {
+		containerName = args[0]
+	} else {
+		return fmt.Errorf("container name required")
+	}
+
+	// Get audit log path
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get home directory: %w", err)
+	}
+
+	auditLogPath := filepath.Join(homeDir, ".coi", "audit", containerName+".jsonl")
+
+	// Check if audit log exists
+	if _, err := os.Stat(auditLogPath); os.IsNotExist(err) {
+		return fmt.Errorf("no audit log found for container %s", containerName)
+	}
+
+	// Read audit log
+	data, err := os.ReadFile(auditLogPath)
+	if err != nil {
+		return fmt.Errorf("failed to read audit log: %w", err)
+	}
+
+	// Display (simplified - just output raw JSON lines for now)
+	fmt.Println(string(data))
+
+	return nil
+}
