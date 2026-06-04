@@ -32,9 +32,17 @@ func CollectProcessStats(ctx context.Context, containerName string) (ProcessStat
 // processes whose PID namespace matches the container's init process. Reading
 // from the host means an attacker inside the container cannot hide processes by
 // manipulating their own /proc or killing ps.
+//
+// Limitation: processes that create a nested PID namespace inside the container
+// (e.g. via unshare -p) will have a different /proc/<pid>/ns/pid inode and will
+// not be matched. This is an accepted trade-off; the technique still defeats the
+// common attacks of replacing ps or bind-mounting a fake /proc.
 func collectProcessesViaHostProc(ctx context.Context, containerName string) ([]Process, error) {
 	initPID, err := GetContainerInitPID(ctx, containerName)
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return nil, fmt.Errorf("could not resolve container init PID: %w", err)
 	}
 
@@ -52,6 +60,9 @@ func collectProcessesViaHostProc(ctx context.Context, containerName string) ([]P
 
 	var processes []Process
 	for _, entry := range entries {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		if !entry.IsDir() {
 			continue
 		}
@@ -70,6 +81,13 @@ func collectProcessesViaHostProc(ctx context.Context, containerName string) ([]P
 			continue
 		}
 		processes = append(processes, proc)
+	}
+
+	// A running container must have at least its init process visible. Zero
+	// results indicate a permissions problem (e.g. hidepid) rather than a
+	// genuinely empty container.
+	if len(processes) == 0 {
+		return nil, fmt.Errorf("no processes found in container namespace (pid ns: %s) — possible hidepid or permission error", containerNS)
 	}
 
 	return processes, nil
@@ -91,8 +109,10 @@ func readProcessFromProc(pid int) (Process, error) {
 	}
 
 	return Process{
-		PID:     pid,
-		PPID:    ppid,
+		PID:  pid,
+		PPID: ppid,
+		// User is the real (host-side) UID as a decimal string. Unlike the
+		// old incus exec ps aux path, this is numeric rather than a username.
 		User:    strconv.Itoa(uid),
 		Command: command,
 	}, nil
