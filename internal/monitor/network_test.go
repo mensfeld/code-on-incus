@@ -2,7 +2,6 @@ package monitor
 
 import (
 	"context"
-	"strings"
 	"testing"
 )
 
@@ -75,16 +74,9 @@ func TestParseConnections_FallbackEmptyContainerIP(t *testing.T) {
 	}
 }
 
-func TestParseProcNetTCP_ValidContent(t *testing.T) {
-	// Verify the parser handles well-formed /proc/net/tcp content.
-	content := `  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
-   0: 00000000:0050 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 12345 1 0000000000000000 100 0 0 10 0
-   1: 0F02000A:C4E0 08080808:0035 01 00000000:00000000 00:00000000 00000000  1000        0 23456 1 0000000000000000 20 4 24 10 -1`
-
-	r := strings.NewReader(content)
-	_ = r // parseProcNetTCP takes a file path, so we test via the exported parse indirectly
-	// Verify hex-to-IP conversion (Linux /proc/net/tcp uses little-endian byte order).
-	// 10.0.0.2 is stored as 0200000A (bytes reversed).
+func TestParseHexIP_LittleEndian(t *testing.T) {
+	// Linux /proc/net/tcp stores IPs in little-endian byte order.
+	// 10.0.0.2 is encoded as 0200000A (bytes reversed).
 	ip, err := parseHexIP("0200000A")
 	if err != nil {
 		t.Fatalf("parseHexIP error: %v", err)

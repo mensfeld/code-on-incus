@@ -47,7 +47,8 @@ func GetContainerInitPID(ctx context.Context, containerName string) (int, error)
 }
 
 // parseInitPIDFromIncusInfo extracts the container init PID from `incus info`
-// output. Exported for testing; production callers use GetContainerInitPID.
+// output. Kept as a separate function so it can be unit-tested without a live
+// Incus daemon; production callers use GetContainerInitPID.
 func parseInitPIDFromIncusInfo(output string) (int, error) {
 	for _, line := range strings.Split(output, "\n") {
 		trimmed := strings.TrimSpace(line)

@@ -45,7 +45,10 @@ func CollectNetworkStats(ctx context.Context, containerName, containerIP string,
 // host's /proc/net/tcp + containerIP filter when PID resolution fails or when
 // the namespaced paths cannot be read.
 func parseConnections(ctx context.Context, containerName, containerIP string) ([]Connection, error) {
-	pid, _ := GetContainerInitPID(ctx, containerName)
+	pid, pidErr := GetContainerInitPID(ctx, containerName)
+	if pidErr != nil && ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 
 	if pid > 0 {
 		// Prefer namespaced paths scoped to the container's network namespace.
