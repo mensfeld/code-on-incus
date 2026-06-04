@@ -1484,6 +1484,183 @@ time.sleep(60)
         proc.terminate()
         cleanup_container(container_name, coi_binary)
 
+    def test_allowlist_mode_rfc1918_flagged(self, test_workspace, coi_binary):
+        """Allowed-domain CIDRs must be passed to the monitoring daemon.
+
+        In allowlist network mode, RFC1918 private addresses are not in the
+        configured allow-list and should be flagged as network threats. Before
+        the fix, monitoring daemons always received an empty allowedCIDRs list,
+        so RFC1918 addresses were silently allowed regardless of network mode.
+        """
+        config_path = Path.home() / ".coi" / "config.toml"
+        backup = config_path.read_text() if config_path.exists() else None
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            """
+[network]
+mode = "allowlist"
+allowed_domains = ["github.com", "pypi.org"]
+
+[monitoring]
+enabled = true
+auto_pause_on_high = true
+auto_kill_on_critical = true
+poll_interval_sec = 1
+file_read_threshold_mb = 500
+file_read_rate_mb_per_sec = 1000
+"""
+        )
+
+        container_name = (
+            get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-37"
+        )
+        rfc_script = Path(test_workspace) / "rfc1918_allowlist.py"
+        rfc_script.write_text(
+            """#!/usr/bin/env python3
+import subprocess, time
+subprocess.Popen(
+    ["timeout", "5", "nc", "-w", "2", "10.0.0.1", "80"],
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,
+)
+time.sleep(60)
+"""
+        )
+        rfc_script.chmod(0o755)
+
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                str(test_workspace),
+                "--slot",
+                "37",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        try:
+            if not wait_for_container_running(container_name, timeout=30):
+                pytest.skip(f"Container {container_name} not found or not running")
+
+            time.sleep(10)
+
+            subprocess.Popen(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "python3",
+                    "/workspace/rfc1918_allowlist.py",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+            time.sleep(10)
+
+            events = get_threat_events(container_name)
+            network_threats = [e for e in events if e.get("category") == "network"]
+            if len(network_threats) > 0:
+                for threat in network_threats:
+                    assert threat.get("level") in ["high", "critical"], (
+                        f"Expected HIGH/CRITICAL for RFC1918 in allowlist mode, got {threat.get('level')}"
+                    )
+        finally:
+            proc.terminate()
+            cleanup_container(container_name, coi_binary)
+            if backup is not None:
+                config_path.write_text(backup)
+            elif config_path.exists():
+                config_path.unlink()
+
+    def test_container_internal_connection_visible(
+        self, test_workspace, enable_monitoring, coi_binary
+    ):
+        """Monitoring should be able to see container-internal (127.0.0.1) connections.
+
+        Reading /proc/<container-init-pid>/net/tcp from the host scopes the
+        read to the container's network namespace, making loopback connections
+        visible. The previous host /proc/net/tcp + containerIP filter could not
+        see connections whose local address is 127.0.0.1 (not the container IP).
+        Port 1234 is in the suspicious-port list. This is a best-effort check:
+        if any network threats are detected, they must be HIGH or CRITICAL.
+        """
+        container_name = (
+            get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-38"
+        )
+        loopback_script = Path(test_workspace) / "loopback_c2port.py"
+        loopback_script.write_text(
+            """#!/usr/bin/env python3
+import socket, time
+
+# Start a listener on the suspicious port 1234
+server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+server.bind(("127.0.0.1", 1234))
+server.listen(1)
+
+# Connect to it (creates an ESTABLISHED connection on 127.0.0.1:1234)
+client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+client.connect(("127.0.0.1", 1234))
+conn, _ = server.accept()
+
+# Hold the connection open so the monitor can see it
+time.sleep(120)
+"""
+        )
+        loopback_script.chmod(0o755)
+
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                str(test_workspace),
+                "--slot",
+                "38",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        try:
+            if not wait_for_container_running(container_name, timeout=30):
+                pytest.skip(f"Container {container_name} not found or not running")
+
+            time.sleep(10)
+
+            subprocess.Popen(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "python3",
+                    "/workspace/loopback_c2port.py",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+            time.sleep(10)
+
+            events = get_threat_events(container_name)
+            network_threats = [e for e in events if e.get("category") == "network"]
+            if len(network_threats) > 0:
+                for threat in network_threats:
+                    assert threat.get("level") in ["high", "critical"], (
+                        f"Expected HIGH/CRITICAL for C2 port on loopback, got {threat.get('level')}"
+                    )
+        finally:
+            proc.terminate()
+            cleanup_container(container_name, coi_binary)
+
 
 class TestReverseShellPatterns:
     """Test detection of various reverse shell patterns."""

@@ -4,11 +4,17 @@
 
 ### Security
 
+- **Network connections read from container network namespace** — The monitoring daemon now reads `/proc/<container-init-pid>/net/tcp[6]` from the host rather than the host's `/proc/net/tcp`. Because Linux exposes each network namespace under `/proc/<pid>/net/`, reading via the container's init PID gives exactly the container's connections, scoped to its own namespace. This makes host-side observation tamper-resistant: an attacker inside the container cannot hide connections by manipulating their own `/proc/net/tcp`, because the read happens outside their namespace. Container-internal connections (e.g. `127.0.0.1`) are now also visible to the monitor. The previous containerIP prefix-filter fallback is retained for environments where the namespaced path is unreadable. (#430)
+
+- **Allowed-domain CIDRs now wired to monitoring daemons** — In `allowlist` network mode, the monitoring daemon and NFT monitoring daemon previously received an empty `allowedCIDRs` list, causing all network connections to be classified as trusted even when they were outside the configured allowlist. The allowed domains are now resolved to host CIDRs at daemon startup and passed through correctly, so RFC1918 private addresses and connections outside the allowlist are flagged as expected. (#428)
+
 - **UID namespace isolation per container** — New containers now have `security.idmap.isolated=true` set before first boot. Without this flag, all unprivileged containers on the same host share the same host-side UID range (typically 100000–165535), so a file written by container A as host UID 100000 is readable by container B whose root also maps to host UID 100000. With isolation enabled, Incus allocates a unique, non-overlapping UID/GID slice from the host's subuid/subgid pool for each container, eliminating cross-container UID overlap. Applied to all new containers created by `coi shell`, `coi run`, and any internal `LaunchContainer` calls. Existing containers are not affected.
 
 - **Docker bridge CIDR isolation** — New containers now have `/etc/docker/daemon.json` written at startup with custom bridge address ranges: `bip: 172.30.0.1/24` for the docker0 bridge and `172.31.0.0/16` as the default pool for user-defined networks. Docker's built-in defaults (172.17–172.29) frequently conflict with corporate VPNs and cloud subnets, causing containers inside COI sessions to lose connectivity when Docker is in use. The configured ranges sit at the far end of RFC 1918's 172.16.0.0/12 block where conflicts are rare in practice. The written daemon.json also preserves the base-image `"group": "code"` setting that grants the non-root `code` user access to `/var/run/docker.sock`.
 
 ### Improvements
+
+- [Refactor] **Removed dead audit command stub** — `internal/cli/monitor.go` contained a commented-out `monitorAuditCmd` registration and an unused `monitorAuditCommand` function annotated `//nolint:unused`. Both were removed to eliminate dead code. (#428)
 
 - [Feature] **`coi version --format json`** — `coi version` now accepts `--format json`, returning `{"version":"v...","url":"..."}` for scripts and tooling that need to parse the version without regex.
 
