@@ -44,7 +44,7 @@ func (c *Collector) Collect(ctx context.Context) (MonitorSnapshot, error) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		networkStats, err := CollectNetworkStats(ctx, c.containerIP, c.allowedCIDRs)
+		networkStats, err := CollectNetworkStats(ctx, c.containerName, c.containerIP, c.allowedCIDRs)
 		mu.Lock()
 		defer mu.Unlock()
 		if err != nil {

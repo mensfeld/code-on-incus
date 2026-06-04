@@ -10,9 +10,12 @@ import (
 	"strings"
 )
 
-// CollectNetworkStats collects network statistics and flags suspicious connections
-func CollectNetworkStats(ctx context.Context, containerIP string, allowedCIDRs []string) (NetworkStats, error) {
-	connections, err := parseConnections(containerIP)
+// CollectNetworkStats collects network statistics and flags suspicious connections.
+// It reads /proc/<container-init-pid>/net/tcp[6] from the host so the data is
+// scoped to the container's network namespace and cannot be tampered with from
+// inside the container.
+func CollectNetworkStats(ctx context.Context, containerName, containerIP string, allowedCIDRs []string) (NetworkStats, error) {
+	connections, err := parseConnections(ctx, containerName, containerIP)
 	if err != nil {
 		return NetworkStats{}, err
 	}
@@ -35,25 +38,35 @@ func CollectNetworkStats(ctx context.Context, containerIP string, allowedCIDRs [
 	}, nil
 }
 
-// parseConnections reads /proc/net/tcp and /proc/net/tcp6
-func parseConnections(containerIP string) ([]Connection, error) {
+// parseConnections reads the container's /proc/net/tcp[6] via the host-side
+// namespaced path /proc/<container-init-pid>/net/tcp[6].  If PID resolution
+// fails it falls back to the host's /proc/net/tcp filtered by containerIP.
+func parseConnections(ctx context.Context, containerName, containerIP string) ([]Connection, error) {
+	tcp4Path := "/proc/net/tcp"
+	tcp6Path := "/proc/net/tcp6"
+
+	pid, err := GetContainerInitPID(ctx, containerName)
+	if err == nil && pid > 0 {
+		tcp4Path = fmt.Sprintf("/proc/%d/net/tcp", pid)
+		tcp6Path = fmt.Sprintf("/proc/%d/net/tcp6", pid)
+	}
+
 	var connections []Connection
 
-	// Parse IPv4 connections
-	tcp4Conns, err := parseProcNetTCP("/proc/net/tcp", "tcp")
+	tcp4Conns, err := parseProcNetTCP(tcp4Path, "tcp")
 	if err == nil {
 		connections = append(connections, tcp4Conns...)
 	}
 
-	// Parse IPv6 connections
-	tcp6Conns, err := parseProcNetTCP("/proc/net/tcp6", "tcp6")
+	tcp6Conns, err := parseProcNetTCP(tcp6Path, "tcp6")
 	if err == nil {
 		connections = append(connections, tcp6Conns...)
 	}
 
-	// Filter to only connections from this container
-	if containerIP != "" {
-		filtered := make([]Connection, 0)
+	// When falling back to host /proc/net/tcp (no PID), filter by containerIP
+	// so we only return the container's connections.
+	if pid == 0 && containerIP != "" {
+		filtered := make([]Connection, 0, len(connections))
 		for _, conn := range connections {
 			if strings.HasPrefix(conn.LocalAddr, containerIP+":") {
 				filtered = append(filtered, conn)
