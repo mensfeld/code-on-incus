@@ -36,42 +36,51 @@ func GetCgroupPath(ctx context.Context, containerName string) (string, error) {
 	return findCgroupPathViaIncus(ctx, containerName)
 }
 
-// findCgroupPathViaIncus uses incus info to find the cgroup path
-func findCgroupPathViaIncus(ctx context.Context, containerName string) (string, error) {
-	// Get container info
+// GetContainerInitPID returns the host PID of the container's init process by
+// parsing `incus info` output.
+func GetContainerInitPID(ctx context.Context, containerName string) (int, error) {
 	output, err := container.IncusOutputContext(ctx, "info", containerName)
 	if err != nil {
-		return "", fmt.Errorf("failed to get container info: %w", err)
+		return 0, fmt.Errorf("failed to get container info: %w", err)
 	}
+	return parseInitPIDFromIncusInfo(output)
+}
 
-	// Look for PID in the output (format: "PID: 12345")
-	var pid string
-	lines := strings.Split(output, "\n")
-	for _, line := range lines {
-		// Match both "PID:" and "Pid:" for compatibility
-		if strings.Contains(line, "PID:") || strings.Contains(line, "Pid:") {
-			parts := strings.Fields(line)
+// parseInitPIDFromIncusInfo extracts the container init PID from `incus info`
+// output. Kept as a separate function so it can be unit-tested without a live
+// Incus daemon; production callers use GetContainerInitPID.
+func parseInitPIDFromIncusInfo(output string) (int, error) {
+	for _, line := range strings.Split(output, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "PID:") || strings.HasPrefix(trimmed, "Pid:") {
+			parts := strings.Fields(trimmed)
 			if len(parts) >= 2 {
-				pid = parts[1]
-				break
+				pid, err := strconv.Atoi(parts[1])
+				if err == nil && pid > 0 {
+					return pid, nil
+				}
 			}
 		}
 	}
+	return 0, fmt.Errorf("could not find container PID in incus info output")
+}
 
-	if pid == "" {
-		return "", fmt.Errorf("could not find container PID")
+// findCgroupPathViaIncus uses incus info to find the cgroup path
+func findCgroupPathViaIncus(ctx context.Context, containerName string) (string, error) {
+	pid, err := GetContainerInitPID(ctx, containerName)
+	if err != nil {
+		return "", err
 	}
 
 	// Read cgroup from /proc/<pid>/cgroup
-	cgroupFile := fmt.Sprintf("/proc/%s/cgroup", pid)
+	cgroupFile := fmt.Sprintf("/proc/%d/cgroup", pid)
 	data, err := os.ReadFile(cgroupFile)
 	if err != nil {
 		return "", fmt.Errorf("failed to read cgroup file: %w", err)
 	}
 
 	// Parse cgroup v2 format: 0::/path/to/cgroup
-	lines = strings.Split(string(data), "\n")
-	for _, line := range lines {
+	for _, line := range strings.Split(string(data), "\n") {
 		if strings.HasPrefix(line, "0::") {
 			cgroupPath := strings.TrimPrefix(line, "0::")
 			cgroupPath = strings.TrimSpace(cgroupPath)
