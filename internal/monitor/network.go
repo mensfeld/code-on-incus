@@ -41,7 +41,7 @@ func CollectNetworkStats(ctx context.Context, containerName, containerIP string,
 }
 
 // parseConnections reads the container's /proc/net/tcp[6] via the host-side
-// namespaced path /proc/<container-init-pid>/net/tcp[6].  Falls back to the
+// namespaced path /proc/<container-init-pid>/net/tcp[6]. Falls back to the
 // host's /proc/net/tcp + containerIP filter when PID resolution fails or when
 // the namespaced paths cannot be read.
 func parseConnections(ctx context.Context, containerName, containerIP string) ([]Connection, error) {

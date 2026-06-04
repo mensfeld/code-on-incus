@@ -64,8 +64,9 @@ func TestParseConnections_FallbackEmptyContainerIP(t *testing.T) {
 	// When PID resolution fails and containerIP is empty the fallback must
 	// return nil rather than all host connections.
 	ctx := context.Background()
-	// Use a container name that will never resolve via incus info.
-	conns, err := parseConnections(ctx, "nonexistent-container-xyz", "")
+	// Use a syntactically invalid container name so Incus always errors out,
+	// guaranteeing the fallback path is exercised regardless of the environment.
+	conns, err := parseConnections(ctx, "INVALID/CONTAINER/NAME", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
