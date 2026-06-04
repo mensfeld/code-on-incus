@@ -535,9 +535,10 @@ func startMonitoringDaemon(containerName, workspacePath string, cfg *config.Conf
 
 	auditLogPath := filepath.Join(homeDir, ".coi", "audit", containerName+".jsonl")
 
-	// Get allowed CIDRs from network config
-	allowedCIDRs := []string{}
-	// TODO: Convert allowed domains to CIDRs if in allowlist mode
+	var allowedCIDRs []string
+	if cfg.Network.Mode == config.NetworkModeAllowlist {
+		allowedCIDRs = resolveDomainsToHostCIDRs(cfg.Network.AllowedDomains)
+	}
 
 	// Create daemon config
 	daemonCfg := monitor.DaemonConfig{
@@ -598,9 +599,10 @@ func startNFTMonitoringDaemon(containerName string, cfg *config.Config, log *log
 
 	auditLogPath := filepath.Join(homeDir, ".coi", "audit", containerName+"-nft.jsonl")
 
-	// Get allowed CIDRs from network config
-	allowedCIDRs := []string{}
-	// TODO: Convert allowed domains to CIDRs if in allowlist mode
+	var allowedCIDRs []string
+	if cfg.Network.Mode == config.NetworkModeAllowlist {
+		allowedCIDRs = resolveDomainsToHostCIDRs(cfg.Network.AllowedDomains)
+	}
 
 	// Create NFT daemon config
 	nftCfg := nftmonitor.Config{
@@ -635,4 +637,25 @@ func startNFTMonitoringDaemon(containerName string, cfg *config.Config, log *log
 	*daemon = d
 	fmt.Fprintf(os.Stderr, "[security] NFT network monitoring started (audit log: %s)\n", auditLogPath)
 	return nil
+}
+
+func resolveDomainsToHostCIDRs(domains []string) []string {
+	if len(domains) == 0 {
+		return nil
+	}
+	resolver := network.NewResolver(&network.IPCache{})
+	resolved, err := resolver.ResolveAll(domains)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: some allowed domains failed to resolve for monitoring: %v\n", err)
+	}
+	if len(resolved) == 0 {
+		return nil
+	}
+	var cidrs []string
+	for _, ips := range resolved {
+		for _, ip := range ips {
+			cidrs = append(cidrs, ip+"/32")
+		}
+	}
+	return cidrs
 }

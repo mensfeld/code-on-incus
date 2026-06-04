@@ -5,6 +5,28 @@ import (
 	"testing"
 )
 
+func TestResolveDomainsToHostCIDRs_EmptyInput(t *testing.T) {
+	if got := resolveDomainsToHostCIDRs(nil); got != nil {
+		t.Errorf("expected nil for nil input, got %v", got)
+	}
+	if got := resolveDomainsToHostCIDRs([]string{}); got != nil {
+		t.Errorf("expected nil for empty slice, got %v", got)
+	}
+}
+
+func TestResolveDomainsToHostCIDRs_IPv4Input(t *testing.T) {
+	// Raw IPv4 addresses resolve immediately without DNS and return /32 CIDRs.
+	got := resolveDomainsToHostCIDRs([]string{"1.2.3.4", "5.6.7.8"})
+	if len(got) == 0 {
+		t.Fatal("expected non-empty CIDRs for IPv4 inputs")
+	}
+	for _, cidr := range got {
+		if !strings.HasSuffix(cidr, "/32") {
+			t.Errorf("expected /32 CIDR, got %q", cidr)
+		}
+	}
+}
+
 func TestBuildTmuxNewSessionCmd_PassesEnvViaDashE(t *testing.T) {
 	env := map[string]string{
 		"GITHUB_TOKEN": "ghp_secret",
