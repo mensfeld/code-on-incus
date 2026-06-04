@@ -29,28 +29,34 @@ func CollectProcessStats(ctx context.Context, containerName string) (ProcessStat
 }
 
 // collectProcessesViaHostProc walks the host /proc directory and returns all
-// processes whose PID namespace matches the container's init process. Reading
-// from the host means an attacker inside the container cannot hide processes by
-// manipulating their own /proc or killing ps.
-//
-// Limitation: processes that create a nested PID namespace inside the container
-// (e.g. via unshare -p) will have a different /proc/<pid>/ns/pid inode and will
-// not be matched. This is an accepted trade-off; the technique still defeats the
-// common attacks of replacing ps or bind-mounting a fake /proc.
+// processes that belong to the container's cgroup subtree. Using cgroup
+// membership avoids the ptrace permission required to read /proc/<pid>/ns/pid
+// symlinks (which restricts namespace-inode comparison to root or
+// CAP_SYS_PTRACE). /proc/<pid>/cgroup is world-readable on Linux. This also
+// naturally covers processes that create nested PID namespaces inside the
+// container via unshare -p.
 func collectProcessesViaHostProc(ctx context.Context, containerName string) ([]Process, error) {
-	initPID, err := GetContainerInitPID(ctx, containerName)
+	cgroupPath, err := GetCgroupPath(ctx, containerName)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		return nil, fmt.Errorf("could not resolve container init PID: %w", err)
+		return nil, fmt.Errorf("could not resolve container cgroup path: %w", err)
 	}
 
-	// The namespace symlink looks like "pid:[4026532456]". All processes in the
-	// container share the same value.
-	containerNS, err := os.Readlink(fmt.Sprintf("/proc/%d/ns/pid", initPID))
-	if err != nil {
-		return nil, fmt.Errorf("could not read pid namespace of init PID %d: %w", initPID, err)
+	// /proc/<pid>/cgroup lines use paths relative to /sys/fs/cgroup.
+	// e.g. "0::/incus.monitor/coi-abc123-1/init.scope"
+	const cgroupMount = "/sys/fs/cgroup"
+	relCgroup := strings.TrimPrefix(cgroupPath, cgroupMount)
+	if relCgroup == cgroupPath {
+		return nil, fmt.Errorf("unexpected cgroup path format (no %s prefix): %s", cgroupMount, cgroupPath)
+	}
+
+	// GetCgroupPath may return the init process's sub-scope (e.g. /init.scope)
+	// when falling back to incus info. Strip known systemd scope/service suffixes
+	// so the prefix match covers all processes in the container, not just init.scope.
+	if last := relCgroup[strings.LastIndex(relCgroup, "/")+1:]; strings.HasSuffix(last, ".scope") || strings.HasSuffix(last, ".service") {
+		relCgroup = relCgroup[:strings.LastIndex(relCgroup, "/")]
 	}
 
 	entries, err := os.ReadDir("/proc")
@@ -71,8 +77,8 @@ func collectProcessesViaHostProc(ctx context.Context, containerName string) ([]P
 			continue // not a PID directory
 		}
 
-		ns, err := os.Readlink(fmt.Sprintf("/proc/%d/ns/pid", pid))
-		if err != nil || ns != containerNS {
+		cgroupData, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", pid))
+		if err != nil || !processBelongsToContainerCgroup(string(cgroupData), relCgroup) {
 			continue
 		}
 
@@ -84,13 +90,29 @@ func collectProcessesViaHostProc(ctx context.Context, containerName string) ([]P
 	}
 
 	// A running container must have at least its init process visible. Zero
-	// results indicate a permissions problem (e.g. hidepid) rather than a
+	// results indicate a cgroup mismatch or permission problem rather than a
 	// genuinely empty container.
 	if len(processes) == 0 {
-		return nil, fmt.Errorf("no processes found in container namespace (pid ns: %s) — possible hidepid or permission error", containerNS)
+		return nil, fmt.Errorf("no processes found in container cgroup %s — cgroup path mismatch or hidepid", relCgroup)
 	}
 
 	return processes, nil
+}
+
+// processBelongsToContainerCgroup reports whether the /proc/<pid>/cgroup
+// content places the process inside the container's cgroup subtree.
+// Cgroup v2 format: "0::<relative-path>"
+func processBelongsToContainerCgroup(cgroupContent, containerRelCgroup string) bool {
+	for _, line := range strings.Split(cgroupContent, "\n") {
+		if !strings.HasPrefix(line, "0::") {
+			continue
+		}
+		procCgroup := strings.TrimSpace(strings.TrimPrefix(line, "0::"))
+		if procCgroup == containerRelCgroup || strings.HasPrefix(procCgroup, containerRelCgroup+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // readProcessFromProc reads /proc/<pid>/status and /proc/<pid>/cmdline to build
