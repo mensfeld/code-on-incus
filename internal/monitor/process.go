@@ -3,30 +3,24 @@ package monitor
 import (
 	"context"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
-
-	"github.com/mensfeld/code-on-incus/internal/container"
 )
 
-// CollectProcessStats collects running processes from the container
+// CollectProcessStats collects running processes by walking the host /proc
+// filtered to the container's PID namespace. Because the read happens outside
+// the container, an attacker inside cannot hide processes by manipulating their
+// own /proc, replacing ps, or pausing incus exec.
 func CollectProcessStats(ctx context.Context, containerName string) (ProcessStats, error) {
-	// Execute: incus exec <container> -- ps aux
-	output, err := container.IncusOutputContext(ctx, "exec", containerName, "--", "ps", "aux")
+	processes, err := collectProcessesViaHostProc(ctx, containerName)
 	if err != nil {
-		return ProcessStats{Available: false}, fmt.Errorf("failed to execute ps: %w", err)
+		return ProcessStats{Available: false}, fmt.Errorf("process monitoring unavailable: %w", err)
 	}
 
-	processes, err := parseProcessList(output)
-	if err != nil {
-		return ProcessStats{Available: false}, fmt.Errorf("failed to parse process list: %w", err)
-	}
-
-	// For each process, check if it has accessed environment variables
 	for i := range processes {
 		processes[i].EnvAccess = checkEnvAccess(processes[i].Command)
 	}
-
 	return ProcessStats{
 		Available:  true,
 		TotalCount: len(processes),
@@ -34,49 +28,146 @@ func CollectProcessStats(ctx context.Context, containerName string) (ProcessStat
 	}, nil
 }
 
-// parseProcessList parses output from 'ps aux'
-func parseProcessList(output string) ([]Process, error) {
-	lines := strings.Split(output, "\n")
-	if len(lines) < 2 {
-		return nil, fmt.Errorf("invalid ps output: too few lines")
+// collectProcessesViaHostProc walks the host /proc directory and returns all
+// processes that belong to the container's cgroup subtree. Using cgroup
+// membership avoids the ptrace permission required to read /proc/<pid>/ns/pid
+// symlinks (which restricts namespace-inode comparison to root or
+// CAP_SYS_PTRACE). /proc/<pid>/cgroup is world-readable on Linux. This also
+// naturally covers processes that create nested PID namespaces inside the
+// container via unshare -p.
+func collectProcessesViaHostProc(ctx context.Context, containerName string) ([]Process, error) {
+	cgroupPath, err := GetCgroupPath(ctx, containerName)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return nil, fmt.Errorf("could not resolve container cgroup path: %w", err)
 	}
 
-	// Skip header line
-	lines = lines[1:]
+	// /proc/<pid>/cgroup lines use paths relative to /sys/fs/cgroup.
+	// e.g. "0::/incus.monitor/coi-abc123-1/init.scope"
+	const cgroupMount = "/sys/fs/cgroup"
+	relCgroup := strings.TrimPrefix(cgroupPath, cgroupMount)
+	if relCgroup == cgroupPath {
+		return nil, fmt.Errorf("unexpected cgroup path format (no %s prefix): %s", cgroupMount, cgroupPath)
+	}
+
+	// GetCgroupPath may return the init process's sub-scope (e.g. /init.scope)
+	// when falling back to incus info. Strip known systemd scope/service suffixes
+	// so the prefix match covers all processes in the container, not just init.scope.
+	if last := relCgroup[strings.LastIndex(relCgroup, "/")+1:]; strings.HasSuffix(last, ".scope") || strings.HasSuffix(last, ".service") {
+		relCgroup = relCgroup[:strings.LastIndex(relCgroup, "/")]
+	}
+
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return nil, fmt.Errorf("could not read /proc: %w", err)
+	}
 
 	var processes []Process
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
+	for _, entry := range entries {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if !entry.IsDir() {
+			continue
+		}
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil {
+			continue // not a PID directory
+		}
+
+		cgroupData, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", pid))
+		if err != nil || !processBelongsToContainerCgroup(string(cgroupData), relCgroup) {
 			continue
 		}
 
-		// Parse ps aux output format:
-		// USER       PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
-		fields := strings.Fields(line)
-		if len(fields) < 11 {
-			continue
-		}
-
-		pid, err := strconv.Atoi(fields[1])
+		proc, err := readProcessFromProc(pid)
 		if err != nil {
 			continue
 		}
+		processes = append(processes, proc)
+	}
 
-		// COMMAND is everything from field 10 onwards
-		command := strings.Join(fields[10:], " ")
-
-		// Try to extract PPID (not available in 'ps aux', so we'll use 0)
-		// In a full implementation, we could use 'ps -eo pid,ppid,user,comm,args'
-		processes = append(processes, Process{
-			PID:     pid,
-			PPID:    0, // Not available in 'ps aux'
-			User:    fields[0],
-			Command: command,
-		})
+	// A running container must have at least its init process visible. Zero
+	// results indicate a cgroup mismatch or permission problem rather than a
+	// genuinely empty container.
+	if len(processes) == 0 {
+		return nil, fmt.Errorf("no processes found in container cgroup %s — cgroup path mismatch or hidepid", relCgroup)
 	}
 
 	return processes, nil
+}
+
+// processBelongsToContainerCgroup reports whether the /proc/<pid>/cgroup
+// content places the process inside the container's cgroup subtree.
+// Cgroup v2 format: "0::<relative-path>"
+func processBelongsToContainerCgroup(cgroupContent, containerRelCgroup string) bool {
+	for _, line := range strings.Split(cgroupContent, "\n") {
+		if !strings.HasPrefix(line, "0::") {
+			continue
+		}
+		procCgroup := strings.TrimSpace(strings.TrimPrefix(line, "0::"))
+		if procCgroup == containerRelCgroup || strings.HasPrefix(procCgroup, containerRelCgroup+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// readProcessFromProc reads /proc/<pid>/status and /proc/<pid>/cmdline to build
+// a Process. The PID here is the host-side PID.
+func readProcessFromProc(pid int) (Process, error) {
+	statusData, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", pid))
+	if err != nil {
+		return Process{}, err
+	}
+
+	name, ppid, uid := parseStatusFields(string(statusData))
+
+	command := name
+	if cmdlineData, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid)); err == nil && len(cmdlineData) > 0 {
+		command = parseCmdline(cmdlineData)
+	}
+
+	return Process{
+		PID:  pid,
+		PPID: ppid,
+		// User is the real (host-side) UID as a decimal string. Unlike the
+		// old incus exec ps aux path, this is numeric rather than a username.
+		User:    strconv.Itoa(uid),
+		Command: command,
+	}, nil
+}
+
+// parseStatusFields extracts Name, PPid, and real Uid from /proc/<pid>/status
+// content. Kept separate so it can be unit-tested without a live /proc.
+func parseStatusFields(status string) (name string, ppid, uid int) {
+	for _, line := range strings.Split(status, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		switch fields[0] {
+		case "Name:":
+			name = fields[1]
+		case "PPid:":
+			ppid, _ = strconv.Atoi(fields[1])
+		case "Uid:":
+			uid, _ = strconv.Atoi(fields[1]) // real UID is the first field
+		}
+	}
+	return
+}
+
+// parseCmdline converts null-delimited /proc/<pid>/cmdline bytes to a
+// space-joined command string. Kept separate so it can be unit-tested.
+func parseCmdline(data []byte) string {
+	trimmed := strings.TrimRight(string(data), "\x00")
+	if trimmed == "" {
+		return ""
+	}
+	return strings.Join(strings.Split(trimmed, "\x00"), " ")
 }
 
 // checkEnvAccess checks if a command is likely accessing environment variables

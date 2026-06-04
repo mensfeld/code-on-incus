@@ -77,6 +77,13 @@ func (d *Daemon) run() {
 				continue
 			}
 
+			// Surface any per-source collection errors so they appear in logs.
+			for _, collErr := range snapshot.Errors {
+				if d.config.OnError != nil {
+					d.config.OnError(fmt.Errorf("collection: %s", collErr))
+				}
+			}
+
 			// Detect threats
 			threats := d.detector.Analyze(snapshot)
 			snapshot.Threats = threats
