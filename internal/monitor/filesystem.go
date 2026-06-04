@@ -2,9 +2,11 @@ package monitor
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/mensfeld/code-on-incus/internal/container"
@@ -151,34 +153,74 @@ func DetectLargeWrites(stats FilesystemStats, thresholdMB float64, rateThreshold
 	return nil
 }
 
-// CollectDiskSpace gathers disk space stats for /tmp and other critical paths
+// CollectDiskSpace gathers disk space stats for /tmp in the container.
+// It first attempts a host-side syscall.Statfs via /proc/<initPID>/root/tmp,
+// which avoids running code inside the container but requires the monitor to
+// have read access to the container's root fs (typically root or same UID).
+// If that fails, it falls back to incus exec df -BM /tmp.
 func CollectDiskSpace(ctx context.Context, containerName string) (tmpUsedMB, tmpTotalMB, tmpUsedPercent float64, err error) {
-	// Execute df command in container to get /tmp usage
-	output, err := container.IncusOutputContext(ctx, "exec", containerName, "--", "df", "-BM", "/tmp")
+	if used, total, pct, statErr := collectDiskSpaceViaStatfs(ctx, containerName); statErr == nil {
+		return used, total, pct, nil
+	}
+	return collectDiskSpaceViaIncusExec(ctx, containerName)
+}
+
+// collectDiskSpaceViaStatfs reads /tmp disk usage from the host side using
+// /proc/<initPID>/root/tmp. This requires the monitor process to have
+// dereference permission on the container's /proc/<pid>/root (root or same UID).
+func collectDiskSpaceViaStatfs(ctx context.Context, containerName string) (tmpUsedMB, tmpTotalMB, tmpUsedPercent float64, err error) {
+	initPID, err := GetContainerInitPID(ctx, containerName)
 	if err != nil {
 		return 0, 0, 0, err
 	}
 
-	// Parse df output (format: Filesystem 1M-blocks Used Available Use% Mounted on)
-	// Example: tmpfs        2048M  100M   1948M   5% /tmp
+	var stat syscall.Statfs_t
+	if err := syscall.Statfs(fmt.Sprintf("/proc/%d/root/tmp", initPID), &stat); err != nil {
+		return 0, 0, 0, err
+	}
+
+	bsize := uint64(stat.Bsize) //nolint:gosec // Bsize is always positive
+	totalBytes := stat.Blocks * bsize
+	freeBytes := stat.Bfree * bsize
+	usedBytes := totalBytes - freeBytes
+
+	total := float64(totalBytes) / 1024 / 1024
+	used := float64(usedBytes) / 1024 / 1024
+	var pct float64
+	if totalBytes > 0 {
+		pct = float64(usedBytes) / float64(totalBytes) * 100
+	}
+	return used, total, pct, nil
+}
+
+// collectDiskSpaceViaIncusExec falls back to running df inside the container.
+func collectDiskSpaceViaIncusExec(ctx context.Context, containerName string) (tmpUsedMB, tmpTotalMB, tmpUsedPercent float64, err error) {
+	output, err := container.IncusOutputContext(ctx, "exec", containerName, "--", "df", "-BM", "/tmp")
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	used, total, pct := parseDfBMOutput(output)
+	return used, total, pct, nil
+}
+
+// parseDfBMOutput parses the output of `df -BM <path>`.
+// Format: Filesystem 1M-blocks Used Available Use% Mounted on
+// Example: tmpfs        2048M  100M   1948M   5% /tmp
+// Kept separate so it can be unit-tested without a live container.
+func parseDfBMOutput(output string) (usedMB, totalMB, usedPercent float64) {
 	lines := strings.Split(output, "\n")
 	if len(lines) < 2 {
-		return 0, 0, 0, nil // No data
+		return
 	}
-
 	fields := strings.Fields(lines[1])
 	if len(fields) < 5 {
-		return 0, 0, 0, nil // Unexpected format
+		return
 	}
-
-	// Parse size (remove 'M' suffix)
 	totalStr := strings.TrimSuffix(fields[1], "M")
 	usedStr := strings.TrimSuffix(fields[2], "M")
-	usedPercentStr := strings.TrimSuffix(fields[4], "%")
-
-	total, _ := strconv.ParseFloat(totalStr, 64)
-	used, _ := strconv.ParseFloat(usedStr, 64)
-	usedPercent, _ := strconv.ParseFloat(usedPercentStr, 64)
-
-	return used, total, usedPercent, nil
+	pctStr := strings.TrimSuffix(fields[4], "%")
+	totalMB, _ = strconv.ParseFloat(totalStr, 64)
+	usedMB, _ = strconv.ParseFloat(usedStr, 64)
+	usedPercent, _ = strconv.ParseFloat(pctStr, 64)
+	return
 }
