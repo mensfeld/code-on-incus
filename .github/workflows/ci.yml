@@ -154,6 +154,10 @@ jobs:
             path: tests/integration/test_security_monitoring.py
             pytest_args: "-k 'TestAutomatedResponse or TestHighLevelThreats or TestLargeWriteDetection or TestMonitoringConfiguration or TestMultipleThreats or TestAuditLogValidation or TestFalsePositives or TestThresholdBoundaries or TestConcurrentThreats'"
             description: "Response and threshold tests"
+          - name: monitoring-advanced
+            path: tests/integration/test_security_monitoring.py
+            pytest_args: "-k 'TestExpandedEnvScanningPatterns or TestProcessHostProcWalk or TestForkBombDetection or TestProcessSpawnRateDetection or TestAuthLogWatcher or TestProcEventWatcher'"
+            description: "Host-side monitoring: env scan, process walk, fork bomb, spawn rate, auth log, proc events"
           - name: uid-mapping
             path: tests/container/uid_mapping_shift_true.py tests/container/uid_mapping_raw_idmap.py
             description: "UID mapping integration tests"
