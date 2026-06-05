@@ -136,7 +136,7 @@ func (lw *LogWatcher) Run(ctx context.Context) {
 		unix.Close(ifd)
 	}()
 
-	wdToFile := make(map[int32]*watchedFile)
+	wdToFile := make(map[int]*watchedFile)
 	watchedPaths := make(map[string]bool)
 
 	tryWatch := func(rel string) {
@@ -155,7 +155,7 @@ func (lw *LogWatcher) Run(ctx context.Context) {
 			return
 		}
 		name := rel[strings.LastIndex(rel, "/")+1:]
-		wdToFile[int32(wd)] = &watchedFile{name: name, f: f, offset: off}
+		wdToFile[wd] = &watchedFile{name: name, f: f, offset: off}
 		watchedPaths[path] = true
 	}
 
@@ -171,7 +171,8 @@ func (lw *LogWatcher) Run(ctx context.Context) {
 	}()
 
 	// Read inotify events in a background goroutine and forward watch descriptors.
-	eventCh := make(chan int32, 32)
+	// ev.Wd is int32; widening to int is always safe.
+	eventCh := make(chan int, 32)
 	go func() {
 		buf := make([]byte, 4096)
 		for {
@@ -182,7 +183,7 @@ func (lw *LogWatcher) Run(ctx context.Context) {
 			for off := 0; off+unix.SizeofInotifyEvent <= n; {
 				ev := (*unix.InotifyEvent)(unsafe.Pointer(&buf[off]))
 				select {
-				case eventCh <- ev.Wd:
+				case eventCh <- int(ev.Wd): // widening int32 → int, always safe
 				default:
 				}
 				off += unix.SizeofInotifyEvent + int(ev.Len)
