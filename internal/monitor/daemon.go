@@ -8,14 +8,15 @@ import (
 
 // Daemon runs the monitoring loop in the background
 type Daemon struct {
-	ctx       context.Context
-	cancel    context.CancelFunc
-	config    DaemonConfig
-	collector *Collector
-	detector  *Detector
-	responder *Responder
-	auditLog  *AuditLog
-	done      chan struct{}
+	ctx         context.Context
+	cancel      context.CancelFunc
+	config      DaemonConfig
+	collector   *Collector
+	detector    *Detector
+	responder   *Responder
+	auditLog    *AuditLog
+	logThreatCh chan ThreatEvent
+	done        chan struct{}
 }
 
 // StartDaemon creates and starts a monitoring daemon
@@ -42,16 +43,27 @@ func StartDaemon(ctx context.Context, cfg DaemonConfig) (*Daemon, error) {
 		responder.SetOnAction(cfg.OnAction)
 	}
 
+	logThreatCh := make(chan ThreatEvent, 32)
+	logWatcher := NewLogWatcher(cfg.ContainerName, func(t ThreatEvent) {
+		select {
+		case logThreatCh <- t:
+		default: // drop if buffer full rather than blocking
+		}
+	}, cfg.OnError)
+
 	daemon := &Daemon{
-		ctx:       daemonCtx,
-		cancel:    cancel,
-		config:    cfg,
-		collector: collector,
-		detector:  detector,
-		responder: responder,
-		auditLog:  auditLog,
-		done:      make(chan struct{}),
+		ctx:         daemonCtx,
+		cancel:      cancel,
+		config:      cfg,
+		collector:   collector,
+		detector:    detector,
+		responder:   responder,
+		auditLog:    auditLog,
+		logThreatCh: logThreatCh,
+		done:        make(chan struct{}),
 	}
+
+	go logWatcher.Run(daemonCtx)
 
 	// Start monitoring loop in background
 	go daemon.run()
@@ -108,6 +120,13 @@ func (d *Daemon) run() {
 				// If container was killed, stop monitoring
 				if threat.Action == "killed" {
 					return
+				}
+			}
+
+		case threat := <-d.logThreatCh:
+			if err := d.responder.Handle(d.ctx, threat); err != nil {
+				if d.config.OnError != nil {
+					d.config.OnError(fmt.Errorf("log threat response: %w", err))
 				}
 			}
 

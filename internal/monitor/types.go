@@ -66,6 +66,13 @@ type ProcessCountThreat struct {
 	Delta     int `json:"delta,omitempty"` // Processes spawned since last poll (spawn-rate check only)
 }
 
+// AuthLogThreat records a security-relevant line from auth.log or syslog.
+type AuthLogThreat struct {
+	LogFile string `json:"log_file"` // "auth.log" or "syslog"
+	Line    string `json:"line"`     // matched log line (truncated at 300 chars)
+	Pattern string `json:"pattern"`  // name of matched pattern
+}
+
 // Evidence holds threat-specific supporting data.
 // Exactly one field will be non-nil per threat event.
 type Evidence struct {
@@ -75,6 +82,7 @@ type Evidence struct {
 	FileWrite    *FilesystemWriteThreat `json:"file_write,omitempty"`
 	DiskSpace    *DiskSpaceInfo         `json:"disk_space,omitempty"`
 	ProcessCount *ProcessCountThreat    `json:"process_count,omitempty"`
+	AuthLog      *AuthLogThreat         `json:"auth_log,omitempty"`
 }
 
 // String returns a summary of the evidence for deduplication keys
@@ -95,6 +103,8 @@ func (e Evidence) String() string {
 			return fmt.Sprintf("spawn-delta:%d", e.ProcessCount.Delta)
 		}
 		return fmt.Sprintf("procs:%d", e.ProcessCount.Count)
+	case e.AuthLog != nil:
+		return fmt.Sprintf("auth:%s:%s", e.AuthLog.LogFile, e.AuthLog.Pattern)
 	default:
 		return ""
 	}
