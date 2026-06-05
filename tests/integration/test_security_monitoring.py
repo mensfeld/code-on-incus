@@ -4756,7 +4756,9 @@ process_spawn_rate_threshold = 9999
                 auth_events = [
                     e
                     for e in events
-                    if e.get("category") == "auth" and "failed" in e.get("title", "").lower()
+                    if e.get("category") == "auth"
+                    and e.get("evidence", {}).get("auth_log", {}).get("pattern")
+                    == "ssh_failed_password"
                 ]
                 if auth_events:
                     break
