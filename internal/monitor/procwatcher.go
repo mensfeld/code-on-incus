@@ -78,9 +78,9 @@ func NewProcEventWatcher(containerName string, onThreat func(ThreatEvent), onErr
 	}
 }
 
-// Run listens for process events until ctx is cancelled. It returns silently
-// if the container cgroup cannot be resolved or the NETLINK_CONNECTOR socket
-// is unavailable (e.g. insufficient privileges or missing kernel support).
+// Run listens for process events until ctx is cancelled. Setup errors (cgroup
+// resolution failures, NETLINK_CONNECTOR unavailability) are surfaced via
+// onError and cause Run to return early.
 func (pw *ProcEventWatcher) Run(ctx context.Context) {
 	cgroupPath, err := GetCgroupPath(ctx, pw.containerName)
 	if err != nil {
@@ -98,10 +98,14 @@ func (pw *ProcEventWatcher) Run(ctx context.Context) {
 		}
 		return
 	}
-	// Strip trailing .scope/.service so the prefix matches all container processes,
-	// not just those in the init.scope sub-cgroup.
-	if last := relCgroup[strings.LastIndex(relCgroup, "/")+1:]; strings.HasSuffix(last, ".scope") || strings.HasSuffix(last, ".service") {
-		relCgroup = relCgroup[:strings.LastIndex(relCgroup, "/")]
+	// Strip the trailing init.scope or init.service sub-cgroup so the prefix
+	// matches all container processes, not only those under the init slice.
+	// Guard against producing an empty relCgroup (would match every process).
+	if idx := strings.LastIndex(relCgroup, "/"); idx > 0 {
+		last := relCgroup[idx+1:]
+		if strings.HasSuffix(last, ".scope") || strings.HasSuffix(last, ".service") {
+			relCgroup = relCgroup[:idx]
+		}
 	}
 
 	sock, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_DGRAM, unix.NETLINK_CONNECTOR)
@@ -297,12 +301,15 @@ func (pw *ProcEventWatcher) handleUIDToRoot(pid int, relCgroup string) {
 
 // procInContainerCgroup returns true if /proc/<pid>/cgroup shows membership in
 // the container's cgroup subtree (relCgroup is relative to /sys/fs/cgroup).
+// It delegates to processBelongsToContainerCgroup for boundary-safe matching,
+// preventing false positives when container names share a common prefix
+// (e.g. "coi-1" must not match "coi-11").
 func procInContainerCgroup(pid int, relCgroup string) bool {
 	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/cgroup", pid))
 	if err != nil {
 		return false
 	}
-	return strings.Contains(string(data), relCgroup)
+	return processBelongsToContainerCgroup(string(data), relCgroup)
 }
 
 // procReadCmdline reads /proc/<pid>/cmdline, replacing NUL delimiters with
