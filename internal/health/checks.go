@@ -2076,7 +2076,7 @@ func parseDefaultGatewayFromProcRoute(content string) (string, error) {
 		minFields  = 7
 	)
 
-	bestMetric := uint64(^uint64(0)) // max uint64
+	bestMetric := ^uint64(0) // max uint64
 	bestGateway := ""
 
 	for i, line := range strings.Split(content, "\n") {
