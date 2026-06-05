@@ -239,8 +239,17 @@ func (lw *LogWatcher) Run(ctx context.Context) {
 			}
 
 		case <-rescanTicker.C:
+			// Discover new log files.
 			for _, rel := range logCandidates {
 				tryWatch(rel)
+			}
+			// Also poll all already-watched files for new content. inotify
+			// IN_MODIFY is unreliable on overlayfs-backed container rootfs
+			// paths (e.g. /proc/<pid>/root/…), so this acts as a fallback
+			// that guarantees at most a 5 s detection lag regardless of
+			// whether kernel events are delivered.
+			for _, wf := range wdToFile {
+				lw.readNewLines(wf)
 			}
 		}
 	}
