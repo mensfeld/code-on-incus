@@ -5,10 +5,12 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/BurntSushi/toml"
 	"github.com/google/uuid"
 	"golang.org/x/sys/unix"
 )
@@ -29,30 +31,89 @@ const (
 // (e.g. "bash -c '... python -c socket.socket ...'").
 // All keywords must also appear in the full cmdline (case-insensitive).
 type execPattern struct {
-	name     string
-	arg0     string // argv[0] basename must start with this prefix (case-insensitive)
-	keywords []string
+	Name     string   `toml:"name"`
+	Arg0     string   `toml:"arg0"`
+	Keywords []string `toml:"keywords"`
 }
 
-var execPatterns = []execPattern{
+// execPatternFile is the on-disk representation of ~/.coi/exec-patterns.toml.
+type execPatternFile struct {
+	Patterns []execPattern `toml:"exec_pattern"`
+}
+
+// defaultExecPatterns is the compiled-in fallback set used when
+// ~/.coi/exec-patterns.toml does not exist. loadExecPatterns() merges
+// any file-based patterns on top of these defaults.
+var defaultExecPatterns = []execPattern{
 	// Netcat reverse shells — requires argv[0] to be nc/ncat so that
 	// shell scripts that mention nc in arguments don't trigger.
-	{name: "nc-exec", arg0: "nc", keywords: []string{"-e"}},
-	{name: "ncat-exec", arg0: "ncat", keywords: []string{"-e"}},
+	{Name: "nc-exec", Arg0: "nc", Keywords: []string{"-e"}},
+	{Name: "ncat-exec", Arg0: "ncat", Keywords: []string{"-e"}},
 	// Bash TCP/UDP redirect — /dev/tcp appearing in bash's own argument
 	// string is the canonical reverse-shell one-liner indicator.
-	{name: "bash-tcp-redirect", arg0: "bash", keywords: []string{"/dev/tcp/"}},
-	{name: "bash-udp-redirect", arg0: "bash", keywords: []string{"/dev/udp/"}},
+	{Name: "bash-tcp-redirect", Arg0: "bash", Keywords: []string{"/dev/tcp/"}},
+	{Name: "bash-udp-redirect", Arg0: "bash", Keywords: []string{"/dev/udp/"}},
 	// Python reverse shells — python3 must be checked before python (substring).
 	// arg0 scoping prevents "bash -c 'python3 -c socket.socket'" from matching.
-	{name: "python3-socket", arg0: "python3", keywords: []string{"socket.socket"}},
-	{name: "python-socket", arg0: "python", keywords: []string{"socket.socket"}},
+	{Name: "python3-socket", Arg0: "python3", Keywords: []string{"socket.socket"}},
+	{Name: "python-socket", Arg0: "python", Keywords: []string{"socket.socket"}},
 	// Perl reverse shells
-	{name: "perl-socket", arg0: "perl", keywords: []string{"-mio"}},
+	{Name: "perl-socket", Arg0: "perl", Keywords: []string{"-mio"}},
+	{Name: "perl-socket-connect", Arg0: "perl", Keywords: []string{"sockaddr_in"}},
 	// Socat reverse shells
-	{name: "socat-exec", arg0: "socat", keywords: []string{"exec:"}},
+	{Name: "socat-exec", Arg0: "socat", Keywords: []string{"exec:"}},
+	// PHP reverse shell via fsockopen (GTFOBins)
+	{Name: "php-fsockopen", Arg0: "php", Keywords: []string{"fsockopen"}},
+	// Ruby reverse shell via TCPSocket (GTFOBins)
+	{Name: "ruby-socket", Arg0: "ruby", Keywords: []string{"-rsocket"}},
+	// Node.js reverse shell: child_process + net.connect (GTFOBins)
+	{Name: "node-reverse-shell", Arg0: "node", Keywords: []string{"child_process", "net"}},
+	// Lua reverse shell via lua-socket (GTFOBins)
+	{Name: "lua-socket", Arg0: "lua", Keywords: []string{"require(\"socket\")", ":connect("}},
+	// gawk reverse shell via /inet/tcp built-in (GTFOBins)
+	{Name: "gawk-inet", Arg0: "gawk", Keywords: []string{"/inet/tcp/"}},
+	// zsh reverse shell via zsh/net/tcp module (GTFOBins)
+	{Name: "zsh-net-tcp", Arg0: "zsh", Keywords: []string{"ztcp"}},
+	// busybox nc reverse shell (GTFOBins)
+	{Name: "busybox-nc-exec", Arg0: "busybox", Keywords: []string{"nc", "-e"}},
 	// Crypto miners — presence of the binary name is sufficient.
-	{name: "xmrig", arg0: "xmrig", keywords: []string{}},
+	{Name: "xmrig", Arg0: "xmrig", Keywords: []string{}},
+}
+
+// loadExecPatterns reads ~/.coi/exec-patterns.toml if it exists and merges
+// its entries with the compiled-in defaults. File-based patterns take priority
+// (matched by Name); defaults not present in the file are appended. If the file
+// is absent or unreadable, the compiled-in defaults are returned as-is.
+func loadExecPatterns() []execPattern {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return defaultExecPatterns
+	}
+	path := filepath.Join(home, ".coi", "exec-patterns.toml")
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return defaultExecPatterns // file absent — use defaults
+	}
+
+	var pf execPatternFile
+	if _, err := toml.Decode(string(data), &pf); err != nil {
+		return defaultExecPatterns // malformed file — use defaults
+	}
+
+	// Build name set from external file.
+	seen := make(map[string]bool, len(pf.Patterns))
+	for _, p := range pf.Patterns {
+		seen[p.Name] = true
+	}
+	// Append compiled-in defaults not overridden by the file.
+	merged := pf.Patterns
+	for _, p := range defaultExecPatterns {
+		if !seen[p.Name] {
+			merged = append(merged, p)
+		}
+	}
+	return merged
 }
 
 // ProcEventWatcher monitors container process exec events via the kernel's
@@ -67,6 +128,7 @@ type ProcEventWatcher struct {
 	containerName string
 	onThreat      func(ThreatEvent)
 	onError       func(error)
+	patterns      []execPattern // loaded once at Run() start from ~/.coi/exec-patterns.toml
 }
 
 // NewProcEventWatcher creates a ProcEventWatcher for the named container.
@@ -82,6 +144,8 @@ func NewProcEventWatcher(containerName string, onThreat func(ThreatEvent), onErr
 // resolution failures, NETLINK_CONNECTOR unavailability) are surfaced via
 // onError and cause Run to return early.
 func (pw *ProcEventWatcher) Run(ctx context.Context) {
+	pw.patterns = loadExecPatterns()
+
 	cgroupPath, err := GetCgroupPath(ctx, pw.containerName)
 	if err != nil {
 		if ctx.Err() == nil && pw.onError != nil {
@@ -244,7 +308,7 @@ func (pw *ProcEventWatcher) handleExec(pid int, relCgroup string) {
 	if cmd == "" {
 		return
 	}
-	pattern := matchSuspiciousExec(cmd)
+	pattern := matchSuspiciousExec(cmd, pw.patterns)
 	if pattern == "" {
 		return
 	}
@@ -324,8 +388,9 @@ func procReadCmdline(pid int) string {
 }
 
 // matchSuspiciousExec returns the name of the first matching execPattern for
-// the given command, or "" if none match.
-func matchSuspiciousExec(cmd string) string {
+// the given command, or "" if none match. patterns must be pre-loaded by the
+// caller (e.g. via loadExecPatterns) to avoid a file read on every invocation.
+func matchSuspiciousExec(cmd string, patterns []execPattern) string {
 	if cmd == "" {
 		return ""
 	}
@@ -337,19 +402,19 @@ func matchSuspiciousExec(cmd string) string {
 	arg0Base := strings.ToLower(arg0[strings.LastIndex(arg0, "/")+1:])
 
 	lower := strings.ToLower(cmd)
-	for _, p := range execPatterns {
-		if p.arg0 != "" && !strings.HasPrefix(arg0Base, p.arg0) {
+	for _, p := range patterns {
+		if p.Arg0 != "" && !strings.HasPrefix(arg0Base, p.Arg0) {
 			continue
 		}
 		matched := true
-		for _, kw := range p.keywords {
+		for _, kw := range p.Keywords {
 			if !strings.Contains(lower, kw) {
 				matched = false
 				break
 			}
 		}
 		if matched {
-			return p.name
+			return p.Name
 		}
 	}
 	return ""

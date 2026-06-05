@@ -138,6 +138,7 @@ func init() {
 	rootCmd.AddCommand(snapshotCmd)
 	rootCmd.AddCommand(unfreezeCmd)
 	rootCmd.AddCommand(updateCmd)
+	rootCmd.AddCommand(updatePatternsCmd)
 	rootCmd.AddCommand(profileCmd)
 	rootCmd.AddCommand(schemaCmd)
 	rootCmd.AddCommand(validateCmd)
