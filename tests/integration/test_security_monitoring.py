@@ -4739,15 +4739,20 @@ process_spawn_rate_threshold = 9999
                 stderr=subprocess.DEVNULL,
             ).wait()
 
-            # Wait for the rescan ticker (5 s) to discover the file plus inotify processing.
-            time.sleep(8)
+            # Poll until the auth threat appears (rescan ticker fires within 5 s,
+            # then inotify delivers near-instantly). 30 s timeout avoids CI flakes.
+            auth_events = []
+            for _ in range(30):
+                events = get_threat_events(container_name)
+                auth_events = [
+                    e
+                    for e in events
+                    if e.get("category") == "auth" and "failed" in e.get("title", "").lower()
+                ]
+                if auth_events:
+                    break
+                time.sleep(1)
 
-            events = get_threat_events(container_name)
-            auth_events = [
-                e
-                for e in events
-                if e.get("category") == "auth" and "failed" in e.get("title", "").lower()
-            ]
             assert len(auth_events) > 0, (
                 f"Expected auth threat for failed SSH login, got events: {events}"
             )
@@ -4825,12 +4830,17 @@ process_spawn_rate_threshold = 9999
                 stderr=subprocess.DEVNULL,
             ).wait()
 
-            time.sleep(8)
+            # Poll until the HIGH auth threat appears (30 s timeout).
+            auth_events = []
+            for _ in range(30):
+                events = get_threat_events(container_name)
+                auth_events = [
+                    e for e in events if e.get("category") == "auth" and e.get("level") == "high"
+                ]
+                if auth_events:
+                    break
+                time.sleep(1)
 
-            events = get_threat_events(container_name)
-            auth_events = [
-                e for e in events if e.get("category") == "auth" and e.get("level") == "high"
-            ]
             assert len(auth_events) > 0, (
                 f"Expected HIGH auth threat for sudoers violation, got events: {events}"
             )

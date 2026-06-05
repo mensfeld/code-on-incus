@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"syscall"
 	"time"
+	"unicode/utf8"
 	"unsafe"
 
 	"github.com/google/uuid"
@@ -81,19 +83,26 @@ var authLogPatterns = []logPattern{
 	},
 }
 
-// watchedFile tracks an open log file and the read offset within it.
+// watchedFile tracks an open log file, its host-side path, and the read offset.
 type watchedFile struct {
-	name   string // short name, e.g. "auth.log"
+	name   string // short filename, e.g. "auth.log"
+	path   string // full host-side path, needed to clean up watchedPaths on rotation
 	f      *os.File
 	offset int64
 }
 
+// inotifyEv carries the watch descriptor and event mask from the kernel.
+type inotifyEv struct {
+	wd   int
+	mask uint32
+}
+
 // LogWatcher tails auth.log and syslog from the container rootfs via the
-// host-side path /proc/<initPID>/root/... using inotify. Because the read
-// happens outside the container, code running inside the container cannot
-// blind the observer by manipulating /var/log or replacing log binaries.
+// host-side path /proc/<initPID>/root/... using inotify. Because the reads
+// happen outside the container, code running inside cannot blind the observer
+// by manipulating /var/log or replacing log binaries.
 // The watcher rescans for missing files every 5 seconds so files created
-// after daemon startup are picked up automatically.
+// after daemon startup (or after log rotation) are picked up automatically.
 type LogWatcher struct {
 	containerName string
 	onThreat      func(ThreatEvent)
@@ -113,9 +122,15 @@ func NewLogWatcher(containerName string, onThreat func(ThreatEvent), onError fun
 // container's init PID cannot be resolved or inotify is unavailable.
 func (lw *LogWatcher) Run(ctx context.Context) {
 	initPID, err := GetContainerInitPID(ctx, lw.containerName)
-	if err != nil || initPID <= 0 {
+	if err != nil {
 		if ctx.Err() == nil && lw.onError != nil {
 			lw.onError(fmt.Errorf("logwatcher: could not resolve init PID: %w", err))
+		}
+		return
+	}
+	if initPID <= 0 {
+		if lw.onError != nil {
+			lw.onError(fmt.Errorf("logwatcher: invalid init PID %d for container %s", initPID, lw.containerName))
 		}
 		return
 	}
@@ -149,13 +164,14 @@ func (lw *LogWatcher) Run(ctx context.Context) {
 			return
 		}
 		off, _ := f.Seek(0, 2) // start at EOF — don't replay history
-		wd, err := unix.InotifyAddWatch(ifd, path, unix.IN_MODIFY)
+		// Watch for modifications and for rotation/deletion so we can re-open the new inode.
+		wd, err := unix.InotifyAddWatch(ifd, path, unix.IN_MODIFY|unix.IN_MOVE_SELF|unix.IN_DELETE_SELF)
 		if err != nil {
 			f.Close()
 			return
 		}
 		name := rel[strings.LastIndex(rel, "/")+1:]
-		wdToFile[wd] = &watchedFile{name: name, f: f, offset: off}
+		wdToFile[wd] = &watchedFile{name: name, path: path, f: f, offset: off}
 		watchedPaths[path] = true
 	}
 
@@ -170,20 +186,27 @@ func (lw *LogWatcher) Run(ctx context.Context) {
 		}
 	}()
 
-	// Read inotify events in a background goroutine and forward watch descriptors.
+	// Read inotify events in a background goroutine. Retries on EINTR so a
+	// transient signal does not permanently stop log monitoring.
 	// ev.Wd is int32; widening to int is always safe.
-	eventCh := make(chan int, 32)
+	eventCh := make(chan inotifyEv, 32)
 	go func() {
 		buf := make([]byte, 4096)
 		for {
 			n, err := unix.Read(ifd, buf)
-			if err != nil || n < unix.SizeofInotifyEvent {
-				return // fd closed on ctx cancellation
+			if err != nil {
+				if err == syscall.EINTR {
+					continue // transient signal — retry
+				}
+				return // fd closed (ctx cancelled) or unrecoverable error
+			}
+			if n < unix.SizeofInotifyEvent {
+				continue
 			}
 			for off := 0; off+unix.SizeofInotifyEvent <= n; {
 				ev := (*unix.InotifyEvent)(unsafe.Pointer(&buf[off]))
 				select {
-				case eventCh <- int(ev.Wd): // widening int32 → int, always safe
+				case eventCh <- inotifyEv{wd: int(ev.Wd), mask: ev.Mask}: // widening int32→int, always safe
 				default:
 				}
 				off += unix.SizeofInotifyEvent + int(ev.Len)
@@ -198,11 +221,23 @@ func (lw *LogWatcher) Run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case wd := <-eventCh:
-			wf, ok := wdToFile[wd]
-			if ok {
+
+		case ev := <-eventCh:
+			wf, ok := wdToFile[ev.wd]
+			if !ok {
+				continue
+			}
+			if ev.mask&(unix.IN_DELETE_SELF|unix.IN_MOVE_SELF) != 0 {
+				// File rotated or deleted. Remove from tracking so the rescan ticker
+				// can re-open the new inode. The kernel removes the watch automatically
+				// on IN_DELETE_SELF, so no explicit InotifyRmWatch is needed.
+				wf.f.Close()
+				delete(wdToFile, ev.wd)
+				delete(watchedPaths, wf.path)
+			} else if ev.mask&unix.IN_MODIFY != 0 {
 				lw.readNewLines(wf)
 			}
+
 		case <-rescanTicker.C:
 			for _, rel := range logCandidates {
 				tryWatch(rel)
@@ -211,27 +246,35 @@ func (lw *LogWatcher) Run(ctx context.Context) {
 	}
 }
 
-// readNewLines reads lines appended since the last offset and emits threats.
+// readNewLines reads complete lines appended since the last offset and emits threats.
+// It uses bufio.Reader.ReadString so offset tracking is byte-accurate and lines of
+// any length are handled without the 64 KB ErrTooLong limit of bufio.Scanner.
 func (lw *LogWatcher) readNewLines(wf *watchedFile) {
 	if _, err := wf.f.Seek(wf.offset, 0); err != nil {
 		return
 	}
-	scanner := bufio.NewScanner(wf.f)
-	for scanner.Scan() {
-		line := scanner.Text()
-		if line == "" {
+	reader := bufio.NewReader(wf.f)
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			// Incomplete line (no newline yet) or read error — don't advance offset.
+			break
+		}
+		// line includes the trailing '\n' (possibly '\r\n'), so len(line) is the
+		// exact byte count consumed from the file.
+		wf.offset += int64(len(line))
+		trimmed := strings.TrimRight(line, "\r\n")
+		if trimmed == "" {
 			continue
 		}
-		wf.offset += int64(len(line)) + 1 // +1 for the newline byte
-
-		if threat := parseAuthLogLine(wf.name, line); threat != nil && lw.onThreat != nil {
+		if threat := parseAuthLogLine(wf.name, trimmed); threat != nil && lw.onThreat != nil {
 			lw.onThreat(*threat)
 		}
 	}
 }
 
-// parseAuthLogLine matches a single log line against known patterns and
-// returns a ThreatEvent if it matches, nil otherwise. Exported for testing.
+// parseAuthLogLine checks a single log line against known auth patterns and
+// returns a ThreatEvent if it matches, nil otherwise.
 func parseAuthLogLine(logFile, line string) *ThreatEvent {
 	lower := strings.ToLower(line)
 	for _, p := range authLogPatterns {
@@ -246,10 +289,7 @@ func parseAuthLogLine(logFile, line string) *ThreatEvent {
 			continue
 		}
 
-		evLine := line
-		if len(evLine) > 300 {
-			evLine = evLine[:300] + "…"
-		}
+		evLine := truncateToRunes(line, 300)
 
 		return &ThreatEvent{
 			ID:          uuid.New().String(),
@@ -269,4 +309,14 @@ func parseAuthLogLine(logFile, line string) *ThreatEvent {
 		}
 	}
 	return nil
+}
+
+// truncateToRunes truncates s to at most max Unicode code points, appending
+// "…" if truncation occurs. This avoids splitting UTF-8 sequences mid-byte.
+func truncateToRunes(s string, max int) string {
+	if utf8.RuneCountInString(s) <= max {
+		return s
+	}
+	runes := []rune(s)
+	return string(runes[:max]) + "…"
 }
