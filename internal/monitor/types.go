@@ -59,14 +59,21 @@ type DiskSpaceInfo struct {
 	TmpUsedPercent float64 `json:"tmp_used_percent"`
 }
 
+// ProcessCountThreat represents a process-count spike (fork bomb or runaway spawner)
+type ProcessCountThreat struct {
+	Count     int `json:"count"`     // Observed process count
+	Threshold int `json:"threshold"` // Configured limit
+}
+
 // Evidence holds threat-specific supporting data.
 // Exactly one field will be non-nil per threat event.
 type Evidence struct {
-	Process    *ProcessThreat         `json:"process,omitempty"`
-	Network    *NetworkThreat         `json:"network,omitempty"`
-	Filesystem *FilesystemThreat      `json:"filesystem,omitempty"`
-	FileWrite  *FilesystemWriteThreat `json:"file_write,omitempty"`
-	DiskSpace  *DiskSpaceInfo         `json:"disk_space,omitempty"`
+	Process      *ProcessThreat         `json:"process,omitempty"`
+	Network      *NetworkThreat         `json:"network,omitempty"`
+	Filesystem   *FilesystemThreat      `json:"filesystem,omitempty"`
+	FileWrite    *FilesystemWriteThreat `json:"file_write,omitempty"`
+	DiskSpace    *DiskSpaceInfo         `json:"disk_space,omitempty"`
+	ProcessCount *ProcessCountThreat    `json:"process_count,omitempty"`
 }
 
 // String returns a summary of the evidence for deduplication keys
@@ -82,6 +89,8 @@ func (e Evidence) String() string {
 		return fmt.Sprintf("write:%.2fMB", e.FileWrite.WriteBytesMB)
 	case e.DiskSpace != nil:
 		return fmt.Sprintf("tmp:%.1f%%", e.DiskSpace.TmpUsedPercent)
+	case e.ProcessCount != nil:
+		return fmt.Sprintf("procs:%d", e.ProcessCount.Count)
 	default:
 		return ""
 	}
@@ -174,6 +183,7 @@ type DaemonConfig struct {
 	FileReadRateMBPerSec  float64 // MB/sec sustained rate
 	FileWriteThresholdMB  float64 // MB written in poll interval
 	FileWriteRateMBPerSec float64 // MB/sec sustained write rate
+	ProcessCountThreshold int     // Max processes before fork-bomb alert (0 = disabled)
 
 	// Response configuration
 	AutoPauseOnHigh    bool

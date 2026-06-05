@@ -340,6 +340,23 @@ func containsIPPattern(cmd string) bool {
 	return false
 }
 
+// DetectProcessCountSpike checks whether the total number of processes in the
+// container exceeds the configured threshold. A sudden spike is the primary
+// indicator of a fork bomb (:(){:|:&};:) or runaway process spawner.
+// Returns nil when threshold is 0 (disabled) or not exceeded.
+func DetectProcessCountSpike(stats ProcessStats, threshold int) *ProcessCountThreat {
+	if threshold <= 0 || !stats.Available {
+		return nil
+	}
+	if stats.TotalCount > threshold {
+		return &ProcessCountThreat{
+			Count:     stats.TotalCount,
+			Threshold: threshold,
+		}
+	}
+	return nil
+}
+
 // DetectEnvScanning checks processes for environment variable scanning
 func DetectEnvScanning(processes []Process) []ProcessThreat {
 	var threats []ProcessThreat

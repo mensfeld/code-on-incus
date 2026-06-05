@@ -31,7 +31,8 @@ func StartDaemon(ctx context.Context, cfg DaemonConfig) (*Daemon, error) {
 
 	// Create components
 	collector := NewCollector(cfg.ContainerName, "", cfg.WorkspacePath, cfg.AllowedCIDRs)
-	detector := NewDetector(cfg.FileReadThresholdMB, cfg.FileReadRateMBPerSec)
+	detector := NewDetector(cfg.FileReadThresholdMB, cfg.FileReadRateMBPerSec).
+		WithProcessCountThreshold(cfg.ProcessCountThreshold)
 	responder := NewResponder(cfg.ContainerName, cfg.AutoPauseOnHigh, cfg.AutoKillOnCritical,
 		auditLog, cfg.OnThreat)
 
