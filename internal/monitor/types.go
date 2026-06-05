@@ -73,6 +73,14 @@ type AuthLogThreat struct {
 	Pattern string `json:"pattern"`  // name of matched pattern
 }
 
+// ProcEventThreat records a suspicious process execution or privilege
+// escalation detected via the PROC_EVENTS netlink interface.
+type ProcEventThreat struct {
+	PID     int    `json:"pid"`
+	Command string `json:"command"` // cmdline (truncated at 300 chars)
+	Pattern string `json:"pattern"` // matched pattern name, e.g. "bash-interactive"
+}
+
 // Evidence holds threat-specific supporting data.
 // Exactly one field will be non-nil per threat event.
 type Evidence struct {
@@ -83,6 +91,7 @@ type Evidence struct {
 	DiskSpace    *DiskSpaceInfo         `json:"disk_space,omitempty"`
 	ProcessCount *ProcessCountThreat    `json:"process_count,omitempty"`
 	AuthLog      *AuthLogThreat         `json:"auth_log,omitempty"`
+	ProcEvent    *ProcEventThreat       `json:"proc_event,omitempty"`
 }
 
 // String returns a summary of the evidence for deduplication keys
@@ -105,6 +114,8 @@ func (e Evidence) String() string {
 		return fmt.Sprintf("procs:%d", e.ProcessCount.Count)
 	case e.AuthLog != nil:
 		return fmt.Sprintf("auth:%s:%s", e.AuthLog.LogFile, e.AuthLog.Pattern)
+	case e.ProcEvent != nil:
+		return fmt.Sprintf("proc:%d:%s", e.ProcEvent.PID, e.ProcEvent.Pattern)
 	default:
 		return ""
 	}
