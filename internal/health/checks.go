@@ -2076,7 +2076,7 @@ func parseDefaultGatewayFromProcRoute(content string) (string, error) {
 		if err != nil {
 			continue
 		}
-		ip := net.IP{byte(n), byte(n >> 8), byte(n >> 16), byte(n >> 24)}
+		ip := net.IP{byte(n), byte(n >> 8), byte(n >> 16), byte(n >> 24)} //nolint:gosec // G115: n fits in uint32 (ParseUint bitSize=32)
 		return ip.String(), nil
 	}
 	return "", fmt.Errorf("no default route found in /proc/net/route")
