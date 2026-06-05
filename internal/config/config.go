@@ -276,15 +276,16 @@ type NFTMonitoringConfig struct {
 
 // MonitoringConfig contains security monitoring settings
 type MonitoringConfig struct {
-	Enabled               *bool               `toml:"enabled"`                   // Enable background monitoring
-	AutoPauseOnHigh       *bool               `toml:"auto_pause_on_high"`        // Pause container on high-severity threats
-	AutoKillOnCritical    *bool               `toml:"auto_kill_on_critical"`     // Kill container on critical threats
-	PollIntervalSec       int                 `toml:"poll_interval_sec"`         // How often to collect stats
-	FileReadThresholdMB   float64             `toml:"file_read_threshold_mb"`    // MB read in poll interval before alert
-	FileReadRateMBPerSec  float64             `toml:"file_read_rate_mb_per_sec"` // MB/sec sustained rate before alert
-	ProcessCountThreshold int                 `toml:"process_count_threshold"`   // Max processes before fork-bomb alert (0 = disabled)
-	AuditLogRetentionDays int                 `toml:"audit_log_retention_days"`  // How long to keep audit logs
-	NFT                   NFTMonitoringConfig `toml:"nft"`                       // nftables network monitoring
+	Enabled                   *bool               `toml:"enabled"`                      // Enable background monitoring
+	AutoPauseOnHigh           *bool               `toml:"auto_pause_on_high"`           // Pause container on high-severity threats
+	AutoKillOnCritical        *bool               `toml:"auto_kill_on_critical"`        // Kill container on critical threats
+	PollIntervalSec           int                 `toml:"poll_interval_sec"`            // How often to collect stats
+	FileReadThresholdMB       float64             `toml:"file_read_threshold_mb"`       // MB read in poll interval before alert
+	FileReadRateMBPerSec      float64             `toml:"file_read_rate_mb_per_sec"`    // MB/sec sustained rate before alert
+	ProcessCountThreshold     int                 `toml:"process_count_threshold"`      // Max processes before fork-bomb alert (0 = disabled)
+	ProcessSpawnRateThreshold *int                `toml:"process_spawn_rate_threshold"` // Max processes spawned per poll interval (0 = disabled, nil = inherit default)
+	AuditLogRetentionDays     int                 `toml:"audit_log_retention_days"`     // How long to keep audit logs
+	NFT                       NFTMonitoringConfig `toml:"nft"`                          // nftables network monitoring
 }
 
 // GetDefaultConfig returns the default configuration by parsing the embedded default config TOML.
@@ -457,6 +458,14 @@ func ptrBool(b bool) *bool {
 func BoolVal(p *bool) bool {
 	if p == nil {
 		return false
+	}
+	return *p
+}
+
+// IntVal dereferences a *int config pointer, returning 0 if nil.
+func IntVal(p *int) int {
+	if p == nil {
+		return 0
 	}
 	return *p
 }
@@ -721,6 +730,9 @@ func mergeMonitoring(base *MonitoringConfig, other *MonitoringConfig) {
 	}
 	if other.ProcessCountThreshold != 0 {
 		base.ProcessCountThreshold = other.ProcessCountThreshold
+	}
+	if other.ProcessSpawnRateThreshold != nil {
+		base.ProcessSpawnRateThreshold = other.ProcessSpawnRateThreshold
 	}
 	if other.AuditLogRetentionDays != 0 {
 		base.AuditLogRetentionDays = other.AuditLogRetentionDays

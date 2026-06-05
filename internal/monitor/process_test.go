@@ -170,6 +170,51 @@ func TestParseCmdline_KernelThread(t *testing.T) {
 	}
 }
 
+func TestDetectProcessSpawnRate(t *testing.T) {
+	tests := []struct {
+		name      string
+		current   int
+		previous  int
+		threshold int
+		wantNil   bool
+		wantDelta int
+		wantCount int
+	}{
+		{"delta below threshold", 60, 50, 20, true, 0, 0},
+		{"delta at threshold", 70, 50, 20, true, 0, 0},
+		{"delta one above threshold", 71, 50, 20, false, 21, 71},
+		{"large burst", 200, 10, 20, false, 190, 200},
+		{"threshold zero disables", 9999, 0, 0, true, 0, 0},
+		{"first poll skipped (previous -1)", 100, -1, 10, true, 0, 0},
+		{"processes exited (negative delta)", 40, 60, 20, true, 0, 0},
+		{"baseline zero", 25, 0, 20, false, 25, 25},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := DetectProcessSpawnRate(tt.current, tt.previous, tt.threshold)
+			if tt.wantNil {
+				if got != nil {
+					t.Errorf("expected nil, got %+v", got)
+				}
+				return
+			}
+			if got == nil {
+				t.Fatal("expected non-nil threat, got nil")
+			}
+			if got.Delta != tt.wantDelta {
+				t.Errorf("Delta: got %d want %d", got.Delta, tt.wantDelta)
+			}
+			if got.Count != tt.wantCount {
+				t.Errorf("Count: got %d want %d", got.Count, tt.wantCount)
+			}
+			if got.Threshold != tt.threshold {
+				t.Errorf("Threshold: got %d want %d", got.Threshold, tt.threshold)
+			}
+		})
+	}
+}
+
 func TestDetectProcessCountSpike(t *testing.T) {
 	makeStats := func(count int) ProcessStats {
 		procs := make([]Process, count)

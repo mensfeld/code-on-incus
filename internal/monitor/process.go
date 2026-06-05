@@ -357,6 +357,24 @@ func DetectProcessCountSpike(stats ProcessStats, threshold int) *ProcessCountThr
 	return nil
 }
 
+// DetectProcessSpawnRate checks whether processes spawned faster than threshold
+// since the last poll. Returns nil when threshold is 0 (disabled) or when
+// previous is negative (first poll — no baseline yet).
+func DetectProcessSpawnRate(current, previous, threshold int) *ProcessCountThreat {
+	if threshold <= 0 || previous < 0 {
+		return nil
+	}
+	delta := current - previous
+	if delta > threshold {
+		return &ProcessCountThreat{
+			Count:     current,
+			Threshold: threshold,
+			Delta:     delta,
+		}
+	}
+	return nil
+}
+
 // DetectEnvScanning checks processes for environment variable scanning
 func DetectEnvScanning(processes []Process) []ProcessThreat {
 	var threats []ProcessThreat

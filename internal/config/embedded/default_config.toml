@@ -85,6 +85,7 @@ poll_interval_sec = 2
 file_read_threshold_mb = 50.0
 file_read_rate_mb_per_sec = 10.0
 process_count_threshold = 100
+process_spawn_rate_threshold = 50
 audit_log_retention_days = 30
 
 [monitoring.nft]
