@@ -1,6 +1,7 @@
 package health
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
+	"github.com/mensfeld/code-on-incus/internal/monitor"
 	"github.com/mensfeld/code-on-incus/internal/network"
 	"github.com/mensfeld/code-on-incus/internal/nftmonitor"
 	"github.com/mensfeld/code-on-incus/internal/session"
@@ -1104,20 +1106,10 @@ func CheckNetworkRestriction(imageName string) HealthCheck {
 		}
 	}
 
-	// Get gateway IP for firewall rules
-	gatewayIP := ""
-	// Try to extract gateway from container's route
-	routeOutput, err := container.IncusOutput("exec", containerName, "--", "ip", "route", "show", "default")
-	if err == nil {
-		// Parse "default via 10.128.178.1 dev eth0"
-		parts := strings.Fields(routeOutput)
-		for i, part := range parts {
-			if part == "via" && i+1 < len(parts) {
-				gatewayIP = parts[i+1]
-				break
-			}
-		}
-	}
+	// Get gateway IP for firewall rules from the host-side /proc/<pid>/net/route.
+	// This avoids running ip route inside the container, where the output could
+	// be spoofed by a compromised binary or bind-mount.
+	gatewayIP, _ := getContainerGatewayIPFromProc(containerName)
 
 	// Apply restricted mode firewall rules
 	nftManager = network.NewNftManager(containerIP, gatewayIP)
@@ -1976,9 +1968,10 @@ func CheckAuditLogDirectory() HealthCheck {
 	}
 }
 
-// CheckProcessMonitoringCapability checks if we can run ps aux in containers
+// CheckProcessMonitoringCapability checks that host-side process collection works.
+// Process monitoring reads /proc on the host filtered by container cgroup membership,
+// so this check verifies the host walk succeeds — not that ps runs inside the container.
 func CheckProcessMonitoringCapability(imageName string) HealthCheck {
-	// Check if there's any running container we can test with
 	output, err := container.IncusOutput("list", "--format=json")
 	if err != nil {
 		return HealthCheck{
@@ -2003,7 +1996,6 @@ func CheckProcessMonitoringCapability(imageName string) HealthCheck {
 		}
 	}
 
-	// Find a running container
 	var testContainer string
 	for _, c := range containers {
 		if status, ok := c["status"].(string); ok && status == "Running" {
@@ -2015,51 +2007,25 @@ func CheckProcessMonitoringCapability(imageName string) HealthCheck {
 	}
 
 	if testContainer == "" {
-		// No running container to test with - create a temporary one
-		testContainer = "coi-health-test-" + fmt.Sprintf("%d", time.Now().Unix())
-
-		// Launch test container
-		if err := container.IncusExec("launch", imageName, testContainer); err != nil {
-			return HealthCheck{
-				Name:    "process_monitoring",
-				Status:  StatusWarning,
-				Message: "Cannot test process monitoring (no running containers)",
-				Details: map[string]interface{}{
-					"hint": "Start a container with 'coi shell' to enable this check",
-				},
-			}
-		}
-		defer func() {
-			_ = container.IncusExec("delete", testContainer, "--force")
-		}()
-
-		// Wait for container to start
-		time.Sleep(2 * time.Second)
-	}
-
-	// Try to run ps aux in the container
-	psOutput, err := container.IncusOutput("exec", testContainer, "--", "ps", "aux")
-	if err != nil {
 		return HealthCheck{
 			Name:    "process_monitoring",
-			Status:  StatusFailed,
-			Message: "Cannot run 'ps aux' in containers",
+			Status:  StatusWarning,
+			Message: "No running containers to verify process monitoring",
 			Details: map[string]interface{}{
-				"container": testContainer,
-				"error":     err.Error(),
-				"hint":      "Process monitoring requires ps command in containers",
+				"hint": "Start a container with 'coi shell' to enable this check",
 			},
 		}
 	}
 
-	// Verify output contains expected header
-	if !strings.Contains(psOutput, "PID") && !strings.Contains(psOutput, "USER") {
+	stats, err := monitor.CollectProcessStats(context.Background(), testContainer)
+	if err != nil {
 		return HealthCheck{
 			Name:    "process_monitoring",
-			Status:  StatusWarning,
-			Message: "ps command output format unexpected",
+			Status:  StatusFailed,
+			Message: fmt.Sprintf("Host-side process collection failed: %v", err),
 			Details: map[string]interface{}{
 				"container": testContainer,
+				"hint":      "Ensure cgroup v2 is available and the monitor has read access to /proc",
 			},
 		}
 	}
@@ -2067,12 +2033,53 @@ func CheckProcessMonitoringCapability(imageName string) HealthCheck {
 	return HealthCheck{
 		Name:    "process_monitoring",
 		Status:  StatusOK,
-		Message: "Process monitoring is functional",
+		Message: "Process monitoring is functional (host-side /proc walk)",
 		Details: map[string]interface{}{
 			"container":     testContainer,
-			"process_count": strings.Count(psOutput, "\n") - 1,
+			"process_count": stats.TotalCount,
 		},
 	}
+}
+
+// getContainerGatewayIPFromProc reads the container's default gateway from
+// /proc/<init-pid>/net/route on the host. This avoids running ip route inside
+// the container, where the output could be influenced by a compromised binary.
+func getContainerGatewayIPFromProc(containerName string) (string, error) {
+	initPID, err := monitor.GetContainerInitPID(context.Background(), containerName)
+	if err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/net/route", initPID))
+	if err != nil {
+		return "", err
+	}
+	return parseDefaultGatewayFromProcRoute(string(data))
+}
+
+// parseDefaultGatewayFromProcRoute extracts the default gateway IP from the
+// content of /proc/<pid>/net/route. Gateway addresses are stored as
+// little-endian hex 32-bit integers, e.g. "010080AC" → 172.128.0.1.
+// Kept separate so it can be unit-tested without a live container.
+func parseDefaultGatewayFromProcRoute(content string) (string, error) {
+	for i, line := range strings.Split(content, "\n") {
+		if i == 0 {
+			continue // skip header
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		if fields[1] != "00000000" {
+			continue // not the default route
+		}
+		n, err := strconv.ParseUint(fields[2], 16, 32)
+		if err != nil {
+			continue
+		}
+		ip := net.IP{byte(n), byte(n >> 8), byte(n >> 16), byte(n >> 24)}
+		return ip.String(), nil
+	}
+	return "", fmt.Errorf("no default route found in /proc/net/route")
 }
 
 // CheckCgroupAvailability checks if cgroup v2 is available for resource monitoring
