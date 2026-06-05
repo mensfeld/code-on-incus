@@ -4256,12 +4256,15 @@ class TestProcessHostProcWalk:
     def test_reverse_shell_detected_via_host_proc_walk(
         self, test_workspace, enable_monitoring, coi_binary
     ):
-        """A reverse-shell process in the container must trigger a CRITICAL.
+        """A reverse-shell process in the container must trigger a HIGH or CRITICAL threat.
 
         The process is injected with exec -a to make its argv[0] look like
         'python -c socket.socket'. The host /proc walk reads cmdline from
         outside the container's mount namespace, so the pattern is visible
         regardless of what /proc looks like inside the container.
+
+        ProcEventWatcher may fire a HIGH threat immediately via PROC_EVENT_EXEC
+        before the polling detector has a chance to escalate to CRITICAL.
         """
         container_name = (
             get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-57"
@@ -4307,11 +4310,15 @@ class TestProcessHostProcWalk:
                     killed = True
                     break
 
-            assert killed, "Container should be killed on CRITICAL reverse-shell via host proc walk"
+            assert killed, (
+                "Container should be paused/killed on reverse-shell detection via host proc walk"
+            )
 
             events = get_threat_events(container_name)
-            critical = [e for e in events if e.get("level") == "critical"]
-            assert len(critical) > 0, "Expected CRITICAL threat event for reverse-shell pattern"
+            high_or_critical = [e for e in events if e.get("level") in ("high", "critical")]
+            assert len(high_or_critical) > 0, (
+                "Expected HIGH or CRITICAL threat event for reverse-shell pattern"
+            )
         finally:
             proc.terminate()
             cleanup_container(container_name, coi_binary)
@@ -4721,9 +4728,10 @@ process_spawn_rate_threshold = 9999
             # Allow monitoring daemon to start.
             time.sleep(3)
 
-            # Create auth.log with a suspicious line.
-            # The log watcher picks up the file on the next 5-second rescan.
-            subprocess.Popen(
+            # Write the suspicious line into the container's auth.log.
+            # The LogWatcher polls via incus file pull every 5 seconds, so the
+            # threat will be detected within one polling interval.
+            subprocess.run(
                 [
                     "incus",
                     "exec",
@@ -4737,7 +4745,8 @@ process_spawn_rate_threshold = 9999
                 ],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-            ).wait()
+                check=False,
+            )
 
             # Poll until the auth threat appears (rescan ticker fires within 5 s,
             # then inotify delivers near-instantly). 30 s timeout avoids CI flakes.
@@ -4747,7 +4756,9 @@ process_spawn_rate_threshold = 9999
                 auth_events = [
                     e
                     for e in events
-                    if e.get("category") == "auth" and "failed" in e.get("title", "").lower()
+                    if e.get("category") == "auth"
+                    and e.get("evidence", {}).get("auth_log", {}).get("pattern")
+                    == "ssh_failed_password"
                 ]
                 if auth_events:
                     break
@@ -4814,7 +4825,9 @@ process_spawn_rate_threshold = 9999
 
             time.sleep(3)
 
-            subprocess.Popen(
+            # Write the suspicious line into the container's auth.log.
+            # The LogWatcher polls via incus file pull every 5 seconds.
+            subprocess.run(
                 [
                     "incus",
                     "exec",
@@ -4828,7 +4841,8 @@ process_spawn_rate_threshold = 9999
                 ],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-            ).wait()
+                check=False,
+            )
 
             # Poll until the HIGH auth threat appears (30 s timeout).
             auth_events = []
@@ -4843,6 +4857,205 @@ process_spawn_rate_threshold = 9999
 
             assert len(auth_events) > 0, (
                 f"Expected HIGH auth threat for sudoers violation, got events: {events}"
+            )
+        finally:
+            proc.terminate()
+            if backup:
+                config_path.write_text(backup)
+            elif config_path.exists():
+                config_path.unlink()
+            cleanup_container(container_name, coi_binary)
+
+
+class TestProcEventWatcher:
+    """End-to-end tests for host-side PROC_EVENTS monitoring via NETLINK_CONNECTOR."""
+
+    def test_bash_tcp_redirect_exec_detected(self, test_workspace, coi_binary):
+        """Executing 'bash -c /dev/tcp/...' inside a container triggers a HIGH proc_event threat.
+
+        The bash-tcp-redirect pattern matches when bash itself (argv[0]) opens a
+        /dev/tcp/ redirect — a canonical reverse-shell one-liner technique.
+        bash -i alone is intentionally NOT detected to avoid false positives from
+        legitimate interactive shells started by the host tooling.
+        """
+        config_path = Path.home() / ".coi" / "config.toml"
+        backup = config_path.read_text() if config_path.exists() else None
+
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            """
+[network]
+mode = "open"
+
+[monitoring]
+enabled = true
+auto_pause_on_high = false
+auto_kill_on_critical = true
+poll_interval_sec = 1
+file_read_threshold_mb = 500
+file_read_rate_mb_per_sec = 1000
+process_count_threshold = 9999
+process_spawn_rate_threshold = 9999
+"""
+        )
+
+        container_name = (
+            get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-66"
+        )
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                str(test_workspace),
+                "--slot",
+                "66",
+                "--debug",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        try:
+            assert wait_for_container_running(container_name), (
+                f"Container {container_name} did not start"
+            )
+
+            # Allow monitoring daemon and PROC_EVENTS subscription to initialise.
+            time.sleep(3)
+
+            # Run bash with a /dev/tcp/ redirect — the canonical bash reverse-shell
+            # pattern. The connection to 10.255.255.1:9999 will fail (no listener),
+            # but PROC_EVENT_EXEC fires on execve before the shell tries to connect.
+            subprocess.Popen(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "bash",
+                    "-c",
+                    "bash -c 'exec 3>/dev/tcp/10.255.255.1/9999' 2>/dev/null; true",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            ).wait(timeout=15)
+
+            # Poll until the proc_event threat appears (30 s timeout).
+            proc_events = []
+            events = []
+            for _ in range(30):
+                events = get_threat_events(container_name)
+                proc_events = [
+                    e
+                    for e in events
+                    if e.get("category") == "proc_event"
+                    and e.get("evidence", {}).get("proc_event", {}).get("pattern")
+                    == "bash-tcp-redirect"
+                ]
+                if proc_events:
+                    break
+                time.sleep(1)
+
+            assert len(proc_events) > 0, (
+                f"Expected proc_event threat for bash /dev/tcp redirect, got events: {events}"
+            )
+            assert proc_events[0].get("level") == "high", (
+                f"Expected high level, got: {proc_events[0].get('level')}"
+            )
+        finally:
+            proc.terminate()
+            if backup:
+                config_path.write_text(backup)
+            elif config_path.exists():
+                config_path.unlink()
+            cleanup_container(container_name, coi_binary)
+
+    def test_python_socket_exec_detected(self, test_workspace, coi_binary):
+        """Executing a Python reverse-shell one-liner triggers a HIGH proc_event threat."""
+        config_path = Path.home() / ".coi" / "config.toml"
+        backup = config_path.read_text() if config_path.exists() else None
+
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            """
+[network]
+mode = "open"
+
+[monitoring]
+enabled = true
+auto_pause_on_high = false
+auto_kill_on_critical = true
+poll_interval_sec = 1
+file_read_threshold_mb = 500
+file_read_rate_mb_per_sec = 1000
+process_count_threshold = 9999
+process_spawn_rate_threshold = 9999
+"""
+        )
+
+        container_name = (
+            get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-67"
+        )
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                str(test_workspace),
+                "--slot",
+                "67",
+                "--debug",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        try:
+            assert wait_for_container_running(container_name), (
+                f"Container {container_name} did not start"
+            )
+
+            # Allow monitoring daemon and PROC_EVENTS subscription to initialise.
+            time.sleep(3)
+
+            # Run a Python one-liner whose cmdline contains "python3" and
+            # "socket.socket", matching the python3-socket exec pattern.
+            subprocess.Popen(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "python3",
+                    "-c",
+                    "import socket; s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.close()",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            ).wait(timeout=10)
+
+            # Poll until the proc_event threat appears (30 s timeout).
+            proc_events = []
+            events = []
+            for _ in range(30):
+                events = get_threat_events(container_name)
+                proc_events = [
+                    e
+                    for e in events
+                    if e.get("category") == "proc_event"
+                    and e.get("evidence", {}).get("proc_event", {}).get("pattern")
+                    == "python3-socket"
+                ]
+                if proc_events:
+                    break
+                time.sleep(1)
+
+            assert len(proc_events) > 0, (
+                f"Expected proc_event threat for python socket one-liner, got events: {events}"
+            )
+            assert proc_events[0].get("level") == "high", (
+                f"Expected high level, got: {proc_events[0].get('level')}"
             )
         finally:
             proc.terminate()
