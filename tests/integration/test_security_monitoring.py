@@ -4670,6 +4670,179 @@ process_spawn_rate_threshold = 0
             cleanup_container(container_name, coi_binary)
 
 
+class TestAuthLogWatcher:
+    """End-to-end tests for host-side auth.log / syslog monitoring."""
+
+    def test_failed_ssh_login_detected(self, test_workspace, coi_binary):
+        """Writing a 'Failed password' line to auth.log triggers a WARNING auth threat."""
+        config_path = Path.home() / ".coi" / "config.toml"
+        backup = config_path.read_text() if config_path.exists() else None
+
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            """
+[network]
+mode = "open"
+
+[monitoring]
+enabled = true
+auto_pause_on_high = true
+auto_kill_on_critical = true
+poll_interval_sec = 1
+file_read_threshold_mb = 500
+file_read_rate_mb_per_sec = 1000
+process_count_threshold = 9999
+process_spawn_rate_threshold = 9999
+"""
+        )
+
+        container_name = (
+            get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-64"
+        )
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                str(test_workspace),
+                "--slot",
+                "64",
+                "--debug",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        try:
+            assert wait_for_container_running(container_name), (
+                f"Container {container_name} did not start"
+            )
+
+            # Allow monitoring daemon to start.
+            time.sleep(3)
+
+            # Create auth.log with a suspicious line.
+            # The log watcher picks up the file on the next 5-second rescan.
+            subprocess.Popen(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "bash",
+                    "-c",
+                    "mkdir -p /var/log && "
+                    "echo 'Jun  5 12:00:00 coi sshd[1234]: Failed password for invalid user attacker from 1.2.3.4 port 22222 ssh2'"
+                    " >> /var/log/auth.log",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            ).wait()
+
+            # Wait for the rescan ticker (5 s) to discover the file plus inotify processing.
+            time.sleep(8)
+
+            events = get_threat_events(container_name)
+            auth_events = [
+                e
+                for e in events
+                if e.get("category") == "auth" and "failed" in e.get("title", "").lower()
+            ]
+            assert len(auth_events) > 0, (
+                f"Expected auth threat for failed SSH login, got events: {events}"
+            )
+            assert auth_events[0].get("level") == "warning", (
+                f"Expected warning level, got: {auth_events[0].get('level')}"
+            )
+        finally:
+            proc.terminate()
+            if backup:
+                config_path.write_text(backup)
+            elif config_path.exists():
+                config_path.unlink()
+            cleanup_container(container_name, coi_binary)
+
+    def test_sudo_not_in_sudoers_triggers_high(self, test_workspace, coi_binary):
+        """Writing a 'not in the sudoers file' line triggers a HIGH auth threat."""
+        config_path = Path.home() / ".coi" / "config.toml"
+        backup = config_path.read_text() if config_path.exists() else None
+
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            """
+[network]
+mode = "open"
+
+[monitoring]
+enabled = true
+auto_pause_on_high = false
+auto_kill_on_critical = true
+poll_interval_sec = 1
+file_read_threshold_mb = 500
+file_read_rate_mb_per_sec = 1000
+process_count_threshold = 9999
+process_spawn_rate_threshold = 9999
+"""
+        )
+
+        container_name = (
+            get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-65"
+        )
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                str(test_workspace),
+                "--slot",
+                "65",
+                "--debug",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        try:
+            assert wait_for_container_running(container_name), (
+                f"Container {container_name} did not start"
+            )
+
+            time.sleep(3)
+
+            subprocess.Popen(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "bash",
+                    "-c",
+                    "mkdir -p /var/log && "
+                    "echo 'Jun  5 12:00:01 coi sudo: hacker is not in the sudoers file. This incident will be reported.'"
+                    " >> /var/log/auth.log",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            ).wait()
+
+            time.sleep(8)
+
+            events = get_threat_events(container_name)
+            auth_events = [
+                e for e in events if e.get("category") == "auth" and e.get("level") == "high"
+            ]
+            assert len(auth_events) > 0, (
+                f"Expected HIGH auth threat for sudoers violation, got events: {events}"
+            )
+        finally:
+            proc.terminate()
+            if backup:
+                config_path.write_text(backup)
+            elif config_path.exists():
+                config_path.unlink()
+            cleanup_container(container_name, coi_binary)
+
+
 # These end-to-end tests verify all monitoring aspects:
 # - Threat detection (reverse shells, env scanning, large file reads, network connections)
 # - Reverse shell patterns (netcat, bash, python, perl, php)
