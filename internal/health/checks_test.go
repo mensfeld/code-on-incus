@@ -26,10 +26,30 @@ func TestParseDefaultGatewayFromProcRoute(t *testing.T) {
 			wantIP: "172.128.0.1",
 		},
 		{
-			name: "10.x gateway",
+			name: "192.168.x gateway",
 			input: "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT\n" +
 				"eth0\t00000000\t0101A8C0\t0003\t0\t0\t0\t00000000\t0\t0\t0\n",
 			wantIP: "192.168.1.1",
+		},
+		{
+			name: "multiple default routes picks lowest metric",
+			input: "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT\n" +
+				"eth0\t00000000\t010080AC\t0003\t0\t0\t64\t00000000\t0\t0\t0\n" +
+				"eth0\t00000000\t0201A8C0\t0003\t0\t0\t0A\t00000000\t0\t0\t0\n",
+			wantIP: "192.168.1.2",
+		},
+		{
+			name: "zero gateway skipped",
+			input: "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT\n" +
+				"eth0\t00000000\t00000000\t0001\t0\t0\t0\t00000000\t0\t0\t0\n" +
+				"eth0\t00000000\t010080AC\t0003\t0\t0\t64\t00000000\t0\t0\t0\n",
+			wantIP: "172.128.0.1",
+		},
+		{
+			name: "only zero gateway returns error",
+			input: "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT\n" +
+				"eth0\t00000000\t00000000\t0001\t0\t0\t0\t00000000\t0\t0\t0\n",
+			wantErr: true,
 		},
 		{
 			name:    "no default route",

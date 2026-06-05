@@ -1109,7 +1109,7 @@ func CheckNetworkRestriction(imageName string) HealthCheck {
 	// Get gateway IP for firewall rules from the host-side /proc/<pid>/net/route.
 	// This avoids running ip route inside the container, where the output could
 	// be spoofed by a compromised binary or bind-mount.
-	gatewayIP, _ := getContainerGatewayIPFromProc(containerName)
+	gatewayIP, gwErr := getContainerGatewayIPFromProc(containerName)
 
 	// Apply restricted mode firewall rules
 	nftManager = network.NewNftManager(containerIP, gatewayIP)
@@ -1148,10 +1148,14 @@ func CheckNetworkRestriction(imageName string) HealthCheck {
 
 	details := map[string]interface{}{
 		"container_ip":        containerIP,
+		"gateway_ip":          gatewayIP,
 		"external_access":     externalOK,
 		"private_blocked":     privateBlocked,
 		"private_10_blocked":  privateBlocked,
 		"private_192_blocked": private2Blocked,
+	}
+	if gwErr != nil {
+		details["gateway_read_error"] = gwErr.Error()
 	}
 
 	if externalOK {
@@ -2059,27 +2063,52 @@ func getContainerGatewayIPFromProc(containerName string) (string, error) {
 // parseDefaultGatewayFromProcRoute extracts the default gateway IP from the
 // content of /proc/<pid>/net/route. Gateway addresses are stored as
 // little-endian hex 32-bit integers, e.g. "010080AC" → 172.128.0.1.
+// When multiple default routes exist the one with the lowest metric is used.
+// Routes with a zero gateway (direct/connected routes) are skipped.
 // Kept separate so it can be unit-tested without a live container.
 func parseDefaultGatewayFromProcRoute(content string) (string, error) {
+	// fields indices: 0=Iface 1=Destination 2=Gateway 3=Flags 4=RefCnt
+	//                 5=Use 6=Metric 7=Mask ...
+	const (
+		colDest    = 1
+		colGateway = 2
+		colMetric  = 6
+		minFields  = 7
+	)
+
+	bestMetric := uint64(^uint64(0)) // max uint64
+	bestGateway := ""
+
 	for i, line := range strings.Split(content, "\n") {
 		if i == 0 {
 			continue // skip header
 		}
 		fields := strings.Fields(line)
-		if len(fields) < 3 {
+		if len(fields) < minFields {
 			continue
 		}
-		if fields[1] != "00000000" {
-			continue // not the default route
+		if fields[colDest] != "00000000" {
+			continue // not a default route
 		}
-		n, err := strconv.ParseUint(fields[2], 16, 32)
+		if fields[colGateway] == "00000000" {
+			continue // direct-link default, no usable gateway
+		}
+		n, err := strconv.ParseUint(fields[colGateway], 16, 32)
 		if err != nil {
 			continue
 		}
-		ip := net.IP{byte(n), byte(n >> 8), byte(n >> 16), byte(n >> 24)} //nolint:gosec // G115: n fits in uint32 (ParseUint bitSize=32)
-		return ip.String(), nil
+		metric, _ := strconv.ParseUint(fields[colMetric], 16, 32)
+		if bestGateway == "" || metric < bestMetric {
+			bestMetric = metric
+			ip := net.IP{byte(n), byte(n >> 8), byte(n >> 16), byte(n >> 24)} //nolint:gosec // G115: n fits in uint32 (ParseUint bitSize=32)
+			bestGateway = ip.String()
+		}
 	}
-	return "", fmt.Errorf("no default route found in /proc/net/route")
+
+	if bestGateway == "" {
+		return "", fmt.Errorf("no usable default gateway found in /proc/net/route")
+	}
+	return bestGateway, nil
 }
 
 // CheckCgroupAvailability checks if cgroup v2 is available for resource monitoring
