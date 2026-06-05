@@ -61,8 +61,9 @@ type DiskSpaceInfo struct {
 
 // ProcessCountThreat represents a process-count spike (fork bomb or runaway spawner)
 type ProcessCountThreat struct {
-	Count     int `json:"count"`     // Observed process count
-	Threshold int `json:"threshold"` // Configured limit
+	Count     int `json:"count"`          // Observed process count
+	Threshold int `json:"threshold"`      // Configured limit
+	Delta     int `json:"delta,omitempty"` // Processes spawned since last poll (spawn-rate check only)
 }
 
 // Evidence holds threat-specific supporting data.
@@ -90,6 +91,9 @@ func (e Evidence) String() string {
 	case e.DiskSpace != nil:
 		return fmt.Sprintf("tmp:%.1f%%", e.DiskSpace.TmpUsedPercent)
 	case e.ProcessCount != nil:
+		if e.ProcessCount.Delta > 0 {
+			return fmt.Sprintf("spawn-delta:%d", e.ProcessCount.Delta)
+		}
 		return fmt.Sprintf("procs:%d", e.ProcessCount.Count)
 	default:
 		return ""
@@ -184,6 +188,9 @@ type DaemonConfig struct {
 	FileWriteThresholdMB  float64 // MB written in poll interval
 	FileWriteRateMBPerSec float64 // MB/sec sustained write rate
 	ProcessCountThreshold int     // Max processes before fork-bomb alert (0 = disabled)
+
+	// Threat detection thresholds (continued)
+	ProcessSpawnRateThreshold int // Max processes spawned per poll interval before alert (0 = disabled)
 
 	// Response configuration
 	AutoPauseOnHigh    bool

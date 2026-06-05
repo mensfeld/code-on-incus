@@ -8,11 +8,13 @@ import (
 
 // Detector analyzes monitoring snapshots for security threats
 type Detector struct {
-	fileReadThresholdMB   float64
-	fileReadRateMBPerSec  float64
-	fileWriteThresholdMB  float64
-	fileWriteRateMBPerSec float64
-	processCountThreshold int
+	fileReadThresholdMB       float64
+	fileReadRateMBPerSec      float64
+	fileWriteThresholdMB      float64
+	fileWriteRateMBPerSec     float64
+	processCountThreshold     int
+	processSpawnRateThreshold int
+	previousProcessCount      int // -1 = first poll (no baseline yet)
 }
 
 // NewDetector creates a new threat detector
@@ -22,6 +24,7 @@ func NewDetector(fileReadThresholdMB, fileReadRateMBPerSec float64) *Detector {
 		fileReadRateMBPerSec:  fileReadRateMBPerSec,
 		fileWriteThresholdMB:  fileReadThresholdMB,  // Default: same as read threshold
 		fileWriteRateMBPerSec: fileReadRateMBPerSec, // Default: same as read rate threshold
+		previousProcessCount:  -1,
 	}
 }
 
@@ -32,12 +35,20 @@ func NewDetectorWithWriteThresholds(fileReadThresholdMB, fileReadRateMBPerSec, f
 		fileReadRateMBPerSec:  fileReadRateMBPerSec,
 		fileWriteThresholdMB:  fileWriteThresholdMB,
 		fileWriteRateMBPerSec: fileWriteRateMBPerSec,
+		previousProcessCount:  -1,
 	}
 }
 
 // WithProcessCountThreshold sets the process count threshold for fork-bomb detection.
 func (d *Detector) WithProcessCountThreshold(threshold int) *Detector {
 	d.processCountThreshold = threshold
+	return d
+}
+
+// WithProcessSpawnRateThreshold sets the per-poll process-spawn-rate threshold.
+// A delta exceeding this value between consecutive polls triggers a CRITICAL alert.
+func (d *Detector) WithProcessSpawnRateThreshold(threshold int) *Detector {
+	d.processSpawnRateThreshold = threshold
 	return d
 }
 
@@ -163,6 +174,22 @@ func (d *Detector) Analyze(snapshot MonitorSnapshot) []ThreatEvent {
 				Action:   "pending",
 			})
 		}
+
+		// 5b. Detect process spawn rate (delta-based fork-bomb detection)
+		if rate := DetectProcessSpawnRate(snapshot.Processes.TotalCount, d.previousProcessCount, d.processSpawnRateThreshold); rate != nil {
+			threats = append(threats, ThreatEvent{
+				ID:        uuid.New().String(),
+				Timestamp: snapshot.Timestamp,
+				Level:     ThreatLevelCritical,
+				Category:  "process",
+				Title:     "Process spawn rate spike detected",
+				Description: fmt.Sprintf("Container spawned %d new processes in one poll interval (threshold: %d)",
+					rate.Delta, rate.Threshold),
+				Evidence: Evidence{ProcessCount: rate},
+				Action:   "pending",
+			})
+		}
+		d.previousProcessCount = snapshot.Processes.TotalCount
 	}
 
 	// 6. Detect low disk space (WARNING level)
