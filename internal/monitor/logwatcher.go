@@ -2,17 +2,15 @@ package monitor
 
 import (
 	"bufio"
+	"bytes"
 	"context"
-	"fmt"
 	"os"
 	"strings"
-	"syscall"
 	"time"
 	"unicode/utf8"
-	"unsafe"
 
 	"github.com/google/uuid"
-	"golang.org/x/sys/unix"
+	"github.com/mensfeld/code-on-incus/internal/container"
 )
 
 // logCandidates are log paths (relative to container rootfs) that the watcher tails.
@@ -83,26 +81,10 @@ var authLogPatterns = []logPattern{
 	},
 }
 
-// watchedFile tracks an open log file, its host-side path, and the read offset.
-type watchedFile struct {
-	name   string // short filename, e.g. "auth.log"
-	path   string // full host-side path, needed to clean up watchedPaths on rotation
-	f      *os.File
-	offset int64
-}
-
-// inotifyEv carries the watch descriptor and event mask from the kernel.
-type inotifyEv struct {
-	wd   int
-	mask uint32
-}
-
-// LogWatcher tails auth.log and syslog from the container rootfs via the
-// host-side path /proc/<initPID>/root/... using inotify. Because the reads
-// happen outside the container, code running inside cannot blind the observer
-// by manipulating /var/log or replacing log binaries.
-// The watcher rescans for missing files every 5 seconds so files created
-// after daemon startup (or after log rotation) are picked up automatically.
+// LogWatcher tails auth.log and syslog from the container via the Incus file
+// API. Reading is performed through the Incus daemon (which runs as root), so
+// no CAP_SYS_PTRACE is required on the monitoring daemon side. The watcher
+// polls every 5 seconds and processes only lines appended since the last read.
 type LogWatcher struct {
 	containerName string
 	onThreat      func(ThreatEvent)
@@ -118,165 +100,70 @@ func NewLogWatcher(containerName string, onThreat func(ThreatEvent), onError fun
 	}
 }
 
-// Run tails log files until ctx is cancelled. It returns silently if the
-// container's init PID cannot be resolved or inotify is unavailable.
+// Run tails log files until ctx is cancelled. It polls every 5 seconds using
+// incus file pull, which reads through the Incus daemon and does not require
+// direct filesystem access to /proc/<pid>/root/.
 func (lw *LogWatcher) Run(ctx context.Context) {
-	initPID, err := GetContainerInitPID(ctx, lw.containerName)
-	if err != nil {
-		if ctx.Err() == nil && lw.onError != nil {
-			lw.onError(fmt.Errorf("logwatcher: could not resolve init PID: %w", err))
-		}
-		return
-	}
-	if initPID <= 0 {
-		if lw.onError != nil {
-			lw.onError(fmt.Errorf("logwatcher: invalid init PID %d for container %s", initPID, lw.containerName))
-		}
-		return
-	}
+	offsets := make(map[string]int64) // log candidate path → bytes consumed
 
-	rootfs := fmt.Sprintf("/proc/%d/root", initPID)
-
-	ifd, err := unix.InotifyInit1(unix.IN_CLOEXEC)
-	if err != nil {
-		if lw.onError != nil {
-			lw.onError(fmt.Errorf("logwatcher: inotify_init: %w", err))
-		}
-		return
-	}
-
-	// Unblock the Read goroutine when the context is cancelled.
-	go func() {
-		<-ctx.Done()
-		unix.Close(ifd)
-	}()
-
-	wdToFile := make(map[int]*watchedFile)
-	watchedPaths := make(map[string]bool)
-
-	tryWatch := func(rel string) {
-		path := rootfs + "/" + rel
-		if watchedPaths[path] {
-			return
-		}
-		f, err := os.Open(path)
-		if err != nil {
-			return
-		}
-		off, _ := f.Seek(0, 2) // start at EOF — don't replay history
-		// Watch for modifications and for rotation/deletion so we can re-open the new inode.
-		wd, err := unix.InotifyAddWatch(ifd, path, unix.IN_MODIFY|unix.IN_MOVE_SELF|unix.IN_DELETE_SELF)
-		if err != nil {
-			f.Close()
-			return
-		}
-		name := rel[strings.LastIndex(rel, "/")+1:]
-		wdToFile[wd] = &watchedFile{name: name, path: path, f: f, offset: off}
-		watchedPaths[path] = true
-	}
-
-	// Initial scan.
-	for _, rel := range logCandidates {
-		tryWatch(rel)
-	}
-
-	defer func() {
-		for _, wf := range wdToFile {
-			wf.f.Close()
-		}
-	}()
-
-	// Read inotify events in a background goroutine. Retries on EINTR so a
-	// transient signal does not permanently stop log monitoring.
-	// ev.Wd is int32; widening to int is always safe.
-	eventCh := make(chan inotifyEv, 32)
-	go func() {
-		buf := make([]byte, 4096)
-		for {
-			n, err := unix.Read(ifd, buf)
-			if err != nil {
-				if err == syscall.EINTR {
-					continue // transient signal — retry
-				}
-				return // fd closed (ctx cancelled) or unrecoverable error
-			}
-			if n < unix.SizeofInotifyEvent {
-				continue
-			}
-			for off := 0; off+unix.SizeofInotifyEvent <= n; {
-				ev := (*unix.InotifyEvent)(unsafe.Pointer(&buf[off]))
-				select {
-				case eventCh <- inotifyEv{wd: int(ev.Wd), mask: ev.Mask}: // widening int32→int, always safe
-				default:
-				}
-				off += unix.SizeofInotifyEvent + int(ev.Len)
-			}
-		}
-	}()
-
-	rescanTicker := time.NewTicker(5 * time.Second)
-	defer rescanTicker.Stop()
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-
-		case ev := <-eventCh:
-			wf, ok := wdToFile[ev.wd]
-			if !ok {
-				continue
-			}
-			if ev.mask&(unix.IN_DELETE_SELF|unix.IN_MOVE_SELF) != 0 {
-				// File rotated or deleted. Remove from tracking so the rescan ticker
-				// can re-open the new inode. The kernel removes the watch automatically
-				// on IN_DELETE_SELF, so no explicit InotifyRmWatch is needed.
-				wf.f.Close()
-				delete(wdToFile, ev.wd)
-				delete(watchedPaths, wf.path)
-			} else if ev.mask&unix.IN_MODIFY != 0 {
-				lw.readNewLines(wf)
-			}
-
-		case <-rescanTicker.C:
-			// Discover new log files.
+		case <-ticker.C:
 			for _, rel := range logCandidates {
-				tryWatch(rel)
-			}
-			// Also poll all already-watched files for new content. inotify
-			// IN_MODIFY is unreliable on overlayfs-backed container rootfs
-			// paths (e.g. /proc/<pid>/root/…), so this acts as a fallback
-			// that guarantees at most a 5 s detection lag regardless of
-			// whether kernel events are delivered.
-			for _, wf := range wdToFile {
-				lw.readNewLines(wf)
+				lw.pollFile(ctx, rel, offsets)
 			}
 		}
 	}
 }
 
-// readNewLines reads complete lines appended since the last offset and emits threats.
-// It uses bufio.Reader.ReadString so offset tracking is byte-accurate and lines of
-// any length are handled without the 64 KB ErrTooLong limit of bufio.Scanner.
-func (lw *LogWatcher) readNewLines(wf *watchedFile) {
-	if _, err := wf.f.Seek(wf.offset, 0); err != nil {
+// pollFile fetches the named log file from the container via incus file pull,
+// processes lines that have appeared since the last poll, and updates offsets.
+func (lw *LogWatcher) pollFile(ctx context.Context, rel string, offsets map[string]int64) {
+	// Pull to a temp file via the Incus daemon (no ptrace needed).
+	tmp, err := os.CreateTemp("", "coi-log-*")
+	if err != nil {
 		return
 	}
-	reader := bufio.NewReader(wf.f)
+	tmpPath := tmp.Name()
+	tmp.Close()
+	defer os.Remove(tmpPath)
+
+	// incus file pull <container>/<path> <local-dest>
+	src := lw.containerName + "/" + rel
+	if _, err := container.IncusOutputContext(ctx, "file", "pull", src, tmpPath); err != nil {
+		return // file absent or container not running — benign
+	}
+
+	content, err := os.ReadFile(tmpPath)
+	if err != nil {
+		return
+	}
+
+	offset := offsets[rel]
+	if int64(len(content)) <= offset {
+		return // no new content
+	}
+
+	newData := content[offset:]
+	offsets[rel] = int64(len(content))
+
+	logFile := rel[strings.LastIndex(rel, "/")+1:]
+	reader := bufio.NewReader(bytes.NewReader(newData))
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
-			// Incomplete line (no newline yet) or read error — don't advance offset.
-			break
+			break // incomplete line or EOF — wait for more data next tick
 		}
-		// line includes the trailing '\n' (possibly '\r\n'), so len(line) is the
-		// exact byte count consumed from the file.
-		wf.offset += int64(len(line))
 		trimmed := strings.TrimRight(line, "\r\n")
 		if trimmed == "" {
 			continue
 		}
-		if threat := parseAuthLogLine(wf.name, trimmed); threat != nil && lw.onThreat != nil {
+		if threat := parseAuthLogLine(logFile, trimmed); threat != nil && lw.onThreat != nil {
 			lw.onThreat(*threat)
 		}
 	}

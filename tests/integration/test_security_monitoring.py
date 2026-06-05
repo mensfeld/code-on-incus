@@ -4728,9 +4728,9 @@ process_spawn_rate_threshold = 9999
             # Allow monitoring daemon to start.
             time.sleep(3)
 
-            # Create an empty auth.log so the LogWatcher can latch onto it on
-            # the next 5-second rescan tick. The watcher opens files at EOF, so
-            # content must arrive *after* the watch is established.
+            # Write the suspicious line into the container's auth.log.
+            # The LogWatcher polls via incus file pull every 5 seconds, so the
+            # threat will be detected within one polling interval.
             subprocess.run(
                 [
                     "incus",
@@ -4739,26 +4739,7 @@ process_spawn_rate_threshold = 9999
                     "--",
                     "bash",
                     "-c",
-                    "mkdir -p /var/log && touch /var/log/auth.log",
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-            )
-
-            # Wait for the LogWatcher 5-second rescan to open the file.
-            time.sleep(7)
-
-            # Append the suspicious line — now inotify IN_MODIFY fires and the
-            # watcher reads the new content from the current EOF.
-            subprocess.run(
-                [
-                    "incus",
-                    "exec",
-                    container_name,
-                    "--",
-                    "bash",
-                    "-c",
+                    "mkdir -p /var/log && "
                     "echo 'Jun  5 12:00:00 coi sshd[1234]: Failed password for invalid user attacker from 1.2.3.4 port 22222 ssh2'"
                     " >> /var/log/auth.log",
                 ],
@@ -4842,8 +4823,8 @@ process_spawn_rate_threshold = 9999
 
             time.sleep(3)
 
-            # Create empty auth.log so the LogWatcher can latch onto it before
-            # the suspicious line is appended (watcher opens files at EOF).
+            # Write the suspicious line into the container's auth.log.
+            # The LogWatcher polls via incus file pull every 5 seconds.
             subprocess.run(
                 [
                     "incus",
@@ -4852,24 +4833,7 @@ process_spawn_rate_threshold = 9999
                     "--",
                     "bash",
                     "-c",
-                    "mkdir -p /var/log && touch /var/log/auth.log",
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-            )
-
-            # Wait for the 5-second rescan tick to open the file.
-            time.sleep(7)
-
-            subprocess.run(
-                [
-                    "incus",
-                    "exec",
-                    container_name,
-                    "--",
-                    "bash",
-                    "-c",
+                    "mkdir -p /var/log && "
                     "echo 'Jun  5 12:00:01 coi sudo: hacker is not in the sudoers file. This incident will be reported.'"
                     " >> /var/log/auth.log",
                 ],
