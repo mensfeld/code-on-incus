@@ -190,6 +190,10 @@ func (d *Detector) Analyze(snapshot MonitorSnapshot) []ThreatEvent {
 			})
 		}
 		d.previousProcessCount = snapshot.Processes.TotalCount
+	} else {
+		// Reset baseline so the next successful poll is treated as the first,
+		// preventing a false spawn-rate alert after a gap in process collection.
+		d.previousProcessCount = -1
 	}
 
 	// 6. Detect low disk space (WARNING level)

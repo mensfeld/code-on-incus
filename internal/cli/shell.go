@@ -551,7 +551,7 @@ func startMonitoringDaemon(containerName, workspacePath string, cfg *config.Conf
 		FileReadThresholdMB:       cfg.Monitoring.FileReadThresholdMB,
 		FileReadRateMBPerSec:      cfg.Monitoring.FileReadRateMBPerSec,
 		ProcessCountThreshold:     cfg.Monitoring.ProcessCountThreshold,
-		ProcessSpawnRateThreshold: cfg.Monitoring.ProcessSpawnRateThreshold,
+		ProcessSpawnRateThreshold: config.IntVal(cfg.Monitoring.ProcessSpawnRateThreshold),
 		AutoPauseOnHigh:           config.BoolVal(cfg.Monitoring.AutoPauseOnHigh),
 		AutoKillOnCritical:        config.BoolVal(cfg.Monitoring.AutoKillOnCritical),
 		OnThreat: func(threat monitor.ThreatEvent) {
