@@ -22,32 +22,37 @@ const (
 	procEventUID  = 0x00000004
 )
 
-// execPattern defines a set of keywords that must all appear (case-insensitive)
-// in a process cmdline for it to be flagged as a suspicious exec.
+// execPattern defines how to detect a suspicious process exec.
+// arg0 (if non-empty) restricts the match to processes whose argv[0] basename
+// starts with the given prefix (case-insensitive), preventing false positives
+// from shell scripts whose argument strings happen to contain suspicious words
+// (e.g. "bash -c '... python -c socket.socket ...'").
+// All keywords must also appear in the full cmdline (case-insensitive).
 type execPattern struct {
 	name     string
+	arg0     string // argv[0] basename must start with this prefix (case-insensitive)
 	keywords []string
 }
 
 var execPatterns = []execPattern{
-	// Netcat reverse shells
-	{name: "nc-exec", keywords: []string{"nc", "-e"}},
-	{name: "ncat-exec", keywords: []string{"ncat", "-e"}},
-	// Interactive shell spawns (classic reverse shell indicator)
-	{name: "bash-interactive", keywords: []string{"bash", "-i"}},
-	{name: "sh-interactive", keywords: []string{"sh", "-i"}},
-	// Bash TCP/UDP redirects
-	{name: "bash-tcp-redirect", keywords: []string{"/dev/tcp/"}},
-	{name: "bash-udp-redirect", keywords: []string{"/dev/udp/"}},
-	// Python reverse shells — python3 must be checked before python (it's a substring)
-	{name: "python3-socket", keywords: []string{"python3", "socket.socket"}},
-	{name: "python-socket", keywords: []string{"python", "socket.socket"}},
+	// Netcat reverse shells — requires argv[0] to be nc/ncat so that
+	// shell scripts that mention nc in arguments don't trigger.
+	{name: "nc-exec", arg0: "nc", keywords: []string{"-e"}},
+	{name: "ncat-exec", arg0: "ncat", keywords: []string{"-e"}},
+	// Bash TCP/UDP redirect — /dev/tcp appearing in bash's own argument
+	// string is the canonical reverse-shell one-liner indicator.
+	{name: "bash-tcp-redirect", arg0: "bash", keywords: []string{"/dev/tcp/"}},
+	{name: "bash-udp-redirect", arg0: "bash", keywords: []string{"/dev/udp/"}},
+	// Python reverse shells — python3 must be checked before python (substring).
+	// arg0 scoping prevents "bash -c 'python3 -c socket.socket'" from matching.
+	{name: "python3-socket", arg0: "python3", keywords: []string{"socket.socket"}},
+	{name: "python-socket", arg0: "python", keywords: []string{"socket.socket"}},
 	// Perl reverse shells
-	{name: "perl-socket", keywords: []string{"perl", "-mio"}},
+	{name: "perl-socket", arg0: "perl", keywords: []string{"-mio"}},
 	// Socat reverse shells
-	{name: "socat-exec", keywords: []string{"socat", "exec:"}},
-	// Crypto miners
-	{name: "xmrig", keywords: []string{"xmrig"}},
+	{name: "socat-exec", arg0: "socat", keywords: []string{"exec:"}},
+	// Crypto miners — presence of the binary name is sufficient.
+	{name: "xmrig", arg0: "xmrig", keywords: []string{}},
 }
 
 // ProcEventWatcher monitors container process exec events via the kernel's
@@ -314,8 +319,21 @@ func procReadCmdline(pid int) string {
 // matchSuspiciousExec returns the name of the first matching execPattern for
 // the given command, or "" if none match.
 func matchSuspiciousExec(cmd string) string {
+	if cmd == "" {
+		return ""
+	}
+	// Extract argv[0] (first space-delimited token) then its basename.
+	arg0 := cmd
+	if idx := strings.Index(cmd, " "); idx >= 0 {
+		arg0 = cmd[:idx]
+	}
+	arg0Base := strings.ToLower(arg0[strings.LastIndex(arg0, "/")+1:])
+
 	lower := strings.ToLower(cmd)
 	for _, p := range execPatterns {
+		if p.arg0 != "" && !strings.HasPrefix(arg0Base, p.arg0) {
+			continue
+		}
 		matched := true
 		for _, kw := range p.keywords {
 			if !strings.Contains(lower, kw) {

