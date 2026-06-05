@@ -4369,9 +4369,9 @@ process_count_threshold = 15
         )
 
         try:
-            assert wait_for_container_running(
-                container_name
-            ), f"Container {container_name} did not start"
+            assert wait_for_container_running(container_name), (
+                f"Container {container_name} did not start"
+            )
 
             # Give monitoring a couple of seconds to establish baseline
             time.sleep(3)
@@ -4406,8 +4406,7 @@ process_count_threshold = 15
             critical = [
                 e
                 for e in events
-                if e.get("level") == "critical"
-                and "process count" in e.get("title", "").lower()
+                if e.get("level") == "critical" and "process count" in e.get("title", "").lower()
             ]
             assert len(critical) > 0, "Expected CRITICAL process-count threat event"
 
@@ -4464,19 +4463,15 @@ process_count_threshold = 100
         )
 
         try:
-            assert wait_for_container_running(
-                container_name
-            ), f"Container {container_name} did not start"
+            assert wait_for_container_running(container_name), (
+                f"Container {container_name} did not start"
+            )
 
             # Let the monitor run for a few cycles without spawning extra processes
             time.sleep(6)
 
             events = get_threat_events(container_name)
-            count_threats = [
-                e
-                for e in events
-                if "process count" in e.get("title", "").lower()
-            ]
+            count_threats = [e for e in events if "process count" in e.get("title", "").lower()]
             assert len(count_threats) == 0, (
                 f"Unexpected process-count threat with high threshold: {count_threats}"
             )
