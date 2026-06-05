@@ -313,10 +313,10 @@ func parseAuthLogLine(logFile, line string) *ThreatEvent {
 
 // truncateToRunes truncates s to at most max Unicode code points, appending
 // "…" if truncation occurs. This avoids splitting UTF-8 sequences mid-byte.
-func truncateToRunes(s string, max int) string {
-	if utf8.RuneCountInString(s) <= max {
+func truncateToRunes(s string, limit int) string {
+	if utf8.RuneCountInString(s) <= limit {
 		return s
 	}
 	runes := []rune(s)
-	return string(runes[:max]) + "…"
+	return string(runes[:limit]) + "…"
 }
