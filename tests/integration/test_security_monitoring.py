@@ -4930,7 +4930,8 @@ process_spawn_rate_threshold = 9999
                     e
                     for e in events
                     if e.get("category") == "proc_event"
-                    and e.get("evidence", {}).get("proc_event", {}).get("pattern") == "bash-interactive"
+                    and e.get("evidence", {}).get("proc_event", {}).get("pattern")
+                    == "bash-interactive"
                 ]
                 if proc_events:
                     break
@@ -5023,7 +5024,8 @@ process_spawn_rate_threshold = 9999
                     e
                     for e in events
                     if e.get("category") == "proc_event"
-                    and e.get("evidence", {}).get("proc_event", {}).get("pattern") == "python3-socket"
+                    and e.get("evidence", {}).get("proc_event", {}).get("pattern")
+                    == "python3-socket"
                 ]
                 if proc_events:
                     break
