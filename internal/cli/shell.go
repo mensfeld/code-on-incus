@@ -542,18 +542,18 @@ func startMonitoringDaemon(containerName, workspacePath string, cfg *config.Conf
 
 	// Create daemon config
 	daemonCfg := monitor.DaemonConfig{
-		ContainerName:         containerName,
-		WorkspacePath:         workspacePath,
-		PollInterval:          time.Duration(cfg.Monitoring.PollIntervalSec) * time.Second,
-		AuditLogPath:          auditLogPath,
-		AllowedCIDRs:          allowedCIDRs,
-		AllowedDomains:        cfg.Network.AllowedDomains,
-		FileReadThresholdMB:   cfg.Monitoring.FileReadThresholdMB,
-		FileReadRateMBPerSec:  cfg.Monitoring.FileReadRateMBPerSec,
+		ContainerName:             containerName,
+		WorkspacePath:             workspacePath,
+		PollInterval:              time.Duration(cfg.Monitoring.PollIntervalSec) * time.Second,
+		AuditLogPath:              auditLogPath,
+		AllowedCIDRs:              allowedCIDRs,
+		AllowedDomains:            cfg.Network.AllowedDomains,
+		FileReadThresholdMB:       cfg.Monitoring.FileReadThresholdMB,
+		FileReadRateMBPerSec:      cfg.Monitoring.FileReadRateMBPerSec,
 		ProcessCountThreshold:     cfg.Monitoring.ProcessCountThreshold,
 		ProcessSpawnRateThreshold: cfg.Monitoring.ProcessSpawnRateThreshold,
-		AutoPauseOnHigh:       config.BoolVal(cfg.Monitoring.AutoPauseOnHigh),
-		AutoKillOnCritical:    config.BoolVal(cfg.Monitoring.AutoKillOnCritical),
+		AutoPauseOnHigh:           config.BoolVal(cfg.Monitoring.AutoPauseOnHigh),
+		AutoKillOnCritical:        config.BoolVal(cfg.Monitoring.AutoKillOnCritical),
 		OnThreat: func(threat monitor.ThreatEvent) {
 			log.Printf("[monitor] threat detected: %s severity=%s", threat.Title, threat.Level)
 		},

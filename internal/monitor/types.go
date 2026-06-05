@@ -61,8 +61,8 @@ type DiskSpaceInfo struct {
 
 // ProcessCountThreat represents a process-count spike (fork bomb or runaway spawner)
 type ProcessCountThreat struct {
-	Count     int `json:"count"`          // Observed process count
-	Threshold int `json:"threshold"`      // Configured limit
+	Count     int `json:"count"`           // Observed process count
+	Threshold int `json:"threshold"`       // Configured limit
 	Delta     int `json:"delta,omitempty"` // Processes spawned since last poll (spawn-rate check only)
 }
 
