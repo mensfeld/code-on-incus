@@ -169,3 +169,49 @@ func TestParseCmdline_KernelThread(t *testing.T) {
 		t.Errorf("expected empty string for kernel thread, got %q", got)
 	}
 }
+
+func TestDetectProcessCountSpike(t *testing.T) {
+	makeStats := func(count int) ProcessStats {
+		procs := make([]Process, count)
+		for i := range procs {
+			procs[i] = Process{PID: i + 1, Command: "sh"}
+		}
+		return ProcessStats{Available: true, TotalCount: count, Processes: procs}
+	}
+
+	tests := []struct {
+		name      string
+		stats     ProcessStats
+		threshold int
+		wantNil   bool
+		wantCount int
+	}{
+		{"below threshold", makeStats(50), 100, true, 0},
+		{"at threshold", makeStats(100), 100, true, 0},
+		{"one above threshold", makeStats(101), 100, false, 101},
+		{"far above threshold", makeStats(500), 100, false, 500},
+		{"threshold zero disables check", makeStats(9999), 0, true, 0},
+		{"unavailable stats skipped", ProcessStats{Available: false, TotalCount: 9999}, 100, true, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := DetectProcessCountSpike(tt.stats, tt.threshold)
+			if tt.wantNil {
+				if got != nil {
+					t.Errorf("expected nil, got %+v", got)
+				}
+				return
+			}
+			if got == nil {
+				t.Fatal("expected non-nil threat, got nil")
+			}
+			if got.Count != tt.wantCount {
+				t.Errorf("Count: got %d want %d", got.Count, tt.wantCount)
+			}
+			if got.Threshold != tt.threshold {
+				t.Errorf("Threshold: got %d want %d", got.Threshold, tt.threshold)
+			}
+		})
+	}
+}

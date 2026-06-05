@@ -12,6 +12,7 @@ type Detector struct {
 	fileReadRateMBPerSec  float64
 	fileWriteThresholdMB  float64
 	fileWriteRateMBPerSec float64
+	processCountThreshold int
 }
 
 // NewDetector creates a new threat detector
@@ -32,6 +33,12 @@ func NewDetectorWithWriteThresholds(fileReadThresholdMB, fileReadRateMBPerSec, f
 		fileWriteThresholdMB:  fileWriteThresholdMB,
 		fileWriteRateMBPerSec: fileWriteRateMBPerSec,
 	}
+}
+
+// WithProcessCountThreshold sets the process count threshold for fork-bomb detection.
+func (d *Detector) WithProcessCountThreshold(threshold int) *Detector {
+	d.processCountThreshold = threshold
+	return d
 }
 
 // Analyze examines a snapshot and returns detected threats
@@ -141,7 +148,24 @@ func (d *Detector) Analyze(snapshot MonitorSnapshot) []ThreatEvent {
 		}
 	}
 
-	// 5. Detect low disk space (WARNING level)
+	// 5. Detect process count spike (fork bomb / runaway spawner)
+	if snapshot.Processes.Available {
+		if spike := DetectProcessCountSpike(snapshot.Processes, d.processCountThreshold); spike != nil {
+			threats = append(threats, ThreatEvent{
+				ID:        uuid.New().String(),
+				Timestamp: snapshot.Timestamp,
+				Level:     ThreatLevelCritical,
+				Category:  "process",
+				Title:     "Process count spike detected",
+				Description: fmt.Sprintf("Container has %d processes (threshold: %d) — possible fork bomb or runaway spawner",
+					spike.Count, spike.Threshold),
+				Evidence: Evidence{ProcessCount: spike},
+				Action:   "pending",
+			})
+		}
+	}
+
+	// 6. Detect low disk space (WARNING level)
 	if snapshot.Filesystem.Available && snapshot.Filesystem.TmpTotalMB > 0 {
 		// Warn if /tmp is >80% full
 		if snapshot.Filesystem.TmpUsedPercent > 80 {
