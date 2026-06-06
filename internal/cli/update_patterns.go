@@ -17,7 +17,7 @@ var (
 )
 
 var updatePatternsCmd = &cobra.Command{
-	Use:   "update-patterns",
+	Use:   "patterns",
 	Short: "Clone or update the GTFOBins reverse-shell database",
 	Long: `Clone (or update) the GTFOBins database used by the PROC_EVENTS monitoring daemon.
 
@@ -31,12 +31,12 @@ To switch to a different source (e.g. a fork), delete ~/.coi/gtfobins/ and
 re-run with --source pointing at the new URL.
 
 To use your own fork or a customised copy:
-  coi update-patterns --source https://github.com/you/GTFOBins.github.io.git
+  coi update patterns --source https://github.com/you/GTFOBins.github.io.git
 
 Examples:
-  coi update-patterns                        # clone/update from official GTFOBins
-  coi update-patterns --dry-run              # show what would be done, don't execute
-  coi update-patterns --source <url>         # use a custom / forked repository
+  coi update patterns                        # clone/update from official GTFOBins
+  coi update patterns --dry-run              # show what would be done, don't execute
+  coi update patterns --source <url>         # use a custom / forked repository
 `,
 	RunE: updatePatternsCommand,
 }
