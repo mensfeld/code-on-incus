@@ -21,7 +21,7 @@ def test_update_check_shows_versions(coi_binary):
     4. Verify output shows latest release version
     """
     result = subprocess.run(
-        [coi_binary, "update", "--check"],
+        [coi_binary, "update", "core", "--check"],
         capture_output=True,
         text=True,
         timeout=30,
@@ -61,7 +61,7 @@ def test_update_check_dev_build(coi_binary):
     is_dev = "dev" in version_result.stdout.lower()
 
     result = subprocess.run(
-        [coi_binary, "update", "--check"],
+        [coi_binary, "update", "core", "--check"],
         capture_output=True,
         text=True,
         timeout=30,
