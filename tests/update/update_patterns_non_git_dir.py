@@ -2,12 +2,13 @@
 Test that coi update patterns refuses to clobber an existing non-git directory.
 """
 
+import os
 import subprocess
 
 
 def test_update_patterns_rejects_non_git_directory(coi_binary, tmp_path):
     """
-    Running update patterns on a non-git directory fails with a clear error.
+    Running update patterns on an existing non-git directory fails with a clear error.
 
     The safety guard prevents clobbering directories that exist but have no .git,
     so users cannot accidentally overwrite their own data. The check runs before
@@ -21,12 +22,14 @@ def test_update_patterns_rejects_non_git_directory(coi_binary, tmp_path):
     """
     non_git_dir = tmp_path / "not-a-repo"
     non_git_dir.mkdir()
+    env = {**os.environ, "HOME": str(tmp_path)}
 
     result = subprocess.run(
         [coi_binary, "update", "patterns", "--gtfobins-dir", str(non_git_dir)],
         capture_output=True,
         text=True,
         timeout=10,
+        env=env,
     )
 
     assert result.returncode != 0, "Should fail when target directory exists but is not a git repo"

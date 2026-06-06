@@ -2,6 +2,7 @@
 Test that coi update patterns --dry-run on a nonexistent directory shows a git clone command.
 """
 
+import os
 import subprocess
 
 
@@ -16,12 +17,14 @@ def test_update_patterns_dry_run_fresh_clone(coi_binary, tmp_path):
     4. Verify stdout contains [dry-run], "clone", and the target path
     """
     target_dir = str(tmp_path / "gtfobins-fresh")
+    env = {**os.environ, "HOME": str(tmp_path)}
 
     result = subprocess.run(
         [coi_binary, "update", "patterns", "--dry-run", "--gtfobins-dir", target_dir],
         capture_output=True,
         text=True,
         timeout=10,
+        env=env,
     )
 
     assert result.returncode == 0, (

@@ -2,6 +2,7 @@
 Test that coi update patterns --dry-run --source <url> includes the custom URL in output.
 """
 
+import os
 import subprocess
 
 
@@ -17,6 +18,7 @@ def test_update_patterns_dry_run_custom_source(coi_binary, tmp_path):
     """
     target_dir = str(tmp_path / "gtfobins-custom")
     custom_url = "https://github.com/example/custom-gtfobins.git"
+    env = {**os.environ, "HOME": str(tmp_path)}
 
     result = subprocess.run(
         [
@@ -32,6 +34,7 @@ def test_update_patterns_dry_run_custom_source(coi_binary, tmp_path):
         capture_output=True,
         text=True,
         timeout=10,
+        env=env,
     )
 
     assert result.returncode == 0, (

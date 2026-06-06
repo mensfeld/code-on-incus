@@ -2,6 +2,7 @@
 Test that coi update patterns --dry-run on an existing clone shows a git pull command.
 """
 
+import os
 import subprocess
 
 
@@ -18,6 +19,7 @@ def test_update_patterns_dry_run_existing_clone(coi_binary, tmp_path):
     clone_dir = tmp_path / "gtfobins-existing"
     clone_dir.mkdir()
     (clone_dir / ".git").mkdir()
+    env = {**os.environ, "HOME": str(tmp_path)}
 
     result = subprocess.run(
         [
@@ -31,6 +33,7 @@ def test_update_patterns_dry_run_existing_clone(coi_binary, tmp_path):
         capture_output=True,
         text=True,
         timeout=10,
+        env=env,
     )
 
     assert result.returncode == 0, (
