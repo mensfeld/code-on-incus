@@ -10,7 +10,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/BurntSushi/toml"
 	"github.com/google/uuid"
 	"golang.org/x/sys/unix"
 )
@@ -31,19 +30,14 @@ const (
 // (e.g. "bash -c '... python -c socket.socket ...'").
 // All keywords must also appear in the full cmdline (case-insensitive).
 type execPattern struct {
-	Name     string   `toml:"name"`
-	Arg0     string   `toml:"arg0"`
-	Keywords []string `toml:"keywords"`
+	Name     string
+	Arg0     string
+	Keywords []string
 }
 
-// execPatternFile is the on-disk representation of ~/.coi/exec-patterns.toml.
-type execPatternFile struct {
-	Patterns []execPattern `toml:"exec_pattern"`
-}
-
-// defaultExecPatterns is the compiled-in fallback set used when
-// ~/.coi/exec-patterns.toml does not exist. loadExecPatterns() merges
-// any file-based patterns on top of these defaults.
+// defaultExecPatterns is the compiled-in fallback set used when no GTFOBins
+// clone is present at ~/.coi/gtfobins/. loadExecPatterns() merges GTFOBins-
+// derived patterns on top, with compiled-in entries filling any gaps.
 var defaultExecPatterns = []execPattern{
 	// Netcat reverse shells — requires argv[0] to be nc/ncat so that
 	// shell scripts that mention nc in arguments don't trigger.
@@ -80,34 +74,30 @@ var defaultExecPatterns = []execPattern{
 	{Name: "xmrig", Arg0: "xmrig", Keywords: []string{}},
 }
 
-// loadExecPatterns reads ~/.coi/exec-patterns.toml if it exists and merges
-// its entries with the compiled-in defaults. File-based patterns take priority
-// (matched by Name); defaults not present in the file are appended. If the file
-// is absent or unreadable, the compiled-in defaults are returned as-is.
+// loadExecPatterns loads exec patterns from the GTFOBins clone at
+// ~/.coi/gtfobins/ (if present) and merges them with the compiled-in defaults.
+// GTFOBins-derived patterns take priority (matched by Name); compiled-in
+// entries not covered by the clone are appended as fallback. If the clone
+// directory does not exist, the compiled-in defaults are returned as-is.
 func loadExecPatterns() []execPattern {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return defaultExecPatterns
 	}
-	path := filepath.Join(home, ".coi", "exec-patterns.toml")
+	cloneDir := filepath.Join(home, ".coi", "gtfobins")
 
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return defaultExecPatterns // file absent — use defaults
+	external := loadExecPatternsFromGTFOBins(cloneDir)
+	if len(external) == 0 {
+		return defaultExecPatterns
 	}
 
-	var pf execPatternFile
-	if _, err := toml.Decode(string(data), &pf); err != nil {
-		return defaultExecPatterns // malformed file — use defaults
-	}
-
-	// Build name set from external file.
-	seen := make(map[string]bool, len(pf.Patterns))
-	for _, p := range pf.Patterns {
+	// Build name set from GTFOBins-derived patterns.
+	seen := make(map[string]bool, len(external))
+	for _, p := range external {
 		seen[p.Name] = true
 	}
-	// Append compiled-in defaults not overridden by the file.
-	merged := pf.Patterns
+	// Append compiled-in defaults not covered by GTFOBins derivation.
+	merged := external
 	for _, p := range defaultExecPatterns {
 		if !seen[p.Name] {
 			merged = append(merged, p)
