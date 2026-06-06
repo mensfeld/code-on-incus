@@ -119,7 +119,7 @@ type ProcEventWatcher struct {
 	containerName string
 	onThreat      func(ThreatEvent)
 	onError       func(error)
-	patterns      []execPattern // loaded once at Run() start from ~/.coi/exec-patterns.toml
+	patterns      []execPattern // loaded once at Run() start via loadExecPatterns()
 }
 
 // NewProcEventWatcher creates a ProcEventWatcher for the named container.

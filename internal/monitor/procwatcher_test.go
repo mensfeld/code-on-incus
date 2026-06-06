@@ -225,3 +225,27 @@ functions:
 		t.Error("compiled-in nc-exec pattern missing from merged result")
 	}
 }
+
+func TestGTFOBinsStripPlaceholders(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		// Trailing slash preserved after stripping attacker placeholder + port.
+		{"/dev/tcp/attacker.com/12345", "/dev/tcp/"},
+		// Trailing slash preserved after stripping a numeric local-port component.
+		{"/inet/tcp/0/attacker.com/12345", "/inet/tcp/"},
+		// Pure placeholder token returns empty.
+		{"attacker.com", ""},
+		// Non-placeholder token passes through unchanged.
+		{"fsockopen", "fsockopen"},
+		// Numeric suffix without slash is stripped correctly.
+		{"socat/12345", "socat"},
+	}
+	for _, tc := range cases {
+		got := gtfobinsStripPlaceholders(tc.in)
+		if got != tc.want {
+			t.Errorf("gtfobinsStripPlaceholders(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
