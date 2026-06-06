@@ -21,14 +21,10 @@ def test_update_patterns_help(coi_binary):
         timeout=10,
     )
 
-    assert result.returncode == 0, (
-        f"Update patterns help should succeed. stderr: {result.stderr}"
-    )
+    assert result.returncode == 0, f"Update patterns help should succeed. stderr: {result.stderr}"
 
     output = result.stdout
     assert "Usage:" in output, f"Should contain Usage section. Got:\n{output}"
     assert "--source" in output, f"Should document --source flag. Got:\n{output}"
     assert "--dry-run" in output, f"Should document --dry-run flag. Got:\n{output}"
-    assert "--gtfobins-dir" in output, (
-        f"Should document --gtfobins-dir flag. Got:\n{output}"
-    )
+    assert "--gtfobins-dir" in output, f"Should document --gtfobins-dir flag. Got:\n{output}"

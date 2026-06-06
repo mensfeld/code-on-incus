@@ -29,9 +29,7 @@ def test_update_patterns_rejects_non_git_directory(coi_binary, tmp_path):
         timeout=10,
     )
 
-    assert result.returncode != 0, (
-        "Should fail when target directory exists but is not a git repo"
-    )
+    assert result.returncode != 0, "Should fail when target directory exists but is not a git repo"
 
     combined = result.stdout + result.stderr
     assert "not a git repository" in combined, (

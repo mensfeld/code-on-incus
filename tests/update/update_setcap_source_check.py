@@ -27,21 +27,15 @@ def test_update_go_contains_setcap_restore(coi_binary):
     with open(update_go) as f:
         source = f.read()
 
-    assert "func restoreCapability(" in source, (
-        "restoreCapability function not found in update.go"
-    )
+    assert "func restoreCapability(" in source, "restoreCapability function not found in update.go"
     assert "restoreCapability(binaryPath)" in source, (
         "restoreCapability(binaryPath) call not found in update.go"
     )
     assert "Restored cap_linux_immutable capability" in source, (
         "Success message for setcap restore not found"
     )
-    assert "sudo setcap cap_linux_immutable=ep" in source, (
-        "Manual setcap command hint not found"
-    )
+    assert "sudo setcap cap_linux_immutable=ep" in source, "Manual setcap command hint not found"
     assert 'runtime.GOOS != "linux"' in source, (
         "Linux platform check not found in restoreCapability"
     )
-    assert 'sudo", "-n"' in source, (
-        "Non-interactive sudo (-n) not used in restoreCapability"
-    )
+    assert 'sudo", "-n"' in source, "Non-interactive sudo (-n) not used in restoreCapability"

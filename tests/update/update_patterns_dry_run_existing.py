@@ -39,6 +39,4 @@ def test_update_patterns_dry_run_existing_clone(coi_binary, tmp_path):
 
     output = result.stdout
     assert "[dry-run]" in output, f"Should show [dry-run] marker. Got:\n{output}"
-    assert "pull" in output, (
-        f"Existing clone should trigger pull, not clone. Got:\n{output}"
-    )
+    assert "pull" in output, f"Existing clone should trigger pull, not clone. Got:\n{output}"
