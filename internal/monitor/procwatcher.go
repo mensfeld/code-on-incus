@@ -77,8 +77,9 @@ var defaultExecPatterns = []execPattern{
 // loadExecPatterns loads exec patterns from the GTFOBins clone at
 // ~/.coi/gtfobins/ (if present) and merges them with the compiled-in defaults.
 // GTFOBins-derived patterns take priority (matched by Name); compiled-in
-// entries not covered by the clone are appended as fallback. If the clone
-// directory does not exist, the compiled-in defaults are returned as-is.
+// entries not covered by the clone are appended as fallback. The compiled-in
+// defaults are returned as-is when the clone directory is absent, unreadable,
+// or contains no parseable reverse-shell entries.
 func loadExecPatterns() []execPattern {
 	home, err := os.UserHomeDir()
 	if err != nil {

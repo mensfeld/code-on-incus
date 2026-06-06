@@ -45,9 +45,15 @@ func loadExecPatternsFromGTFOBins(cloneDir string) []execPattern {
 		return nil
 	}
 
+	const maxFileSize = 1 << 20 // 1 MiB — guard against malicious/accidental large files
+
 	var patterns []execPattern
 	for _, entry := range entries {
 		if entry.IsDir() {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil || info.Size() > maxFileSize {
 			continue
 		}
 		binaryName := entry.Name()
@@ -142,17 +148,23 @@ func gtfobinsStripPlaceholders(token string) string {
 			return ""
 		}
 	}
-	// Strip pure-numeric path suffixes that look like ports.
+	// Strip pure-numeric path segments (e.g. port numbers), working from the
+	// end. A trailing slash is preserved so that "/dev/tcp/" stays intact even
+	// after removing a numeric component like the local port in "/inet/tcp/0/".
 	parts := strings.Split(token, "/")
-	for len(parts) > 0 {
-		last := parts[len(parts)-1]
-		if last == "" || gtfobinsIsNumeric(last) {
-			parts = parts[:len(parts)-1]
-		} else {
-			break
-		}
+	hasTrailingSlash := len(parts) > 0 && parts[len(parts)-1] == ""
+	end := len(parts)
+	if hasTrailingSlash {
+		end-- // exclude the trailing empty segment while stripping
 	}
-	return strings.Join(parts, "/")
+	for end > 0 && gtfobinsIsNumeric(parts[end-1]) {
+		end--
+	}
+	result := strings.Join(parts[:end], "/")
+	if hasTrailingSlash {
+		result += "/" // re-attach the trailing slash
+	}
+	return result
 }
 
 // gtfobinsTokenise splits a GTFOBins code block into tokens on whitespace and

@@ -42,7 +42,7 @@ Examples:
 }
 
 func init() {
-	updatePatternsCmd.Flags().StringVar(&upGtfobinsDir, "gtfobins-dir", "", "Override clone directory (default: ~/.coi/gtfobins)")
+	updatePatternsCmd.Flags().StringVar(&upGtfobinsDir, "gtfobins-dir", "", "Override clone directory for this operation (default: ~/.coi/gtfobins; the daemon always reads from ~/.coi/gtfobins)")
 	updatePatternsCmd.Flags().StringVar(&upSource, "source", defaultGTFOBinsURL, "Git URL to clone from (used only on first clone)")
 	updatePatternsCmd.Flags().Bool("dry-run", false, "Print git command that would run, without executing it")
 }
@@ -70,6 +70,12 @@ func updatePatternsCommand(cmd *cobra.Command, _ []string) error {
 		// so the user's chosen source persists across runs.
 		gitArgs = []string{"-C", cloneDir, "pull", "--ff-only", "--depth=1"}
 		fmt.Printf("Updating GTFOBins database at %s...\n", cloneDir)
+	} else if _, err := os.Stat(cloneDir); err == nil {
+		// Directory exists but is not a git repo — refuse to clobber it.
+		return fmt.Errorf(
+			"%s exists but is not a git repository; remove it and re-run to clone fresh",
+			cloneDir,
+		)
 	} else {
 		// Fresh clone.
 		gitArgs = []string{"clone", "--depth=1", upSource, cloneDir}
