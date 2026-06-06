@@ -5065,7 +5065,6 @@ process_spawn_rate_threshold = 9999
                 config_path.unlink()
             cleanup_container(container_name, coi_binary)
 
-
     def test_php_fsockopen_exec_detected(self, test_workspace, coi_binary):
         """Executing a PHP fsockopen reverse-shell one-liner triggers a HIGH proc_event threat.
 
@@ -5117,7 +5116,17 @@ process_spawn_rate_threshold = 9999
 
             # Install php-cli inside the container.
             subprocess.run(
-                ["incus", "exec", container_name, "--", "apt-get", "install", "-y", "-q", "php-cli"],
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "apt-get",
+                    "install",
+                    "-y",
+                    "-q",
+                    "php-cli",
+                ],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 timeout=60,
