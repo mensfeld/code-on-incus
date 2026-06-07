@@ -2,7 +2,7 @@
 Integration test: a GTFOBins DB-derived pattern is loaded and detected at runtime.
 
 Sets up a synthetic GTFOBins clone, starts the monitoring daemon with HOME pointing
-at that clone, exec's a process whose name matches the DB-only pattern
+at that clone, execs a process whose name matches the DB-only pattern
 "frobnicator-reverse-shell", and asserts the daemon raises a HIGH threat event
 referencing that pattern name.
 
@@ -36,7 +36,8 @@ functions:
 def _container_name(workspace):
     abs_path = os.path.abspath(workspace)
     h = hashlib.sha256(abs_path.encode()).hexdigest()[:8]
-    return f"coi-{h}-1"
+    prefix = os.getenv("COI_CONTAINER_PREFIX", "coi-")
+    return f"{prefix}{h}-1"
 
 
 def _container_state(name):
@@ -105,12 +106,16 @@ file_read_rate_mb_per_sec = 1000
     )
 
     container_name = _container_name(str(workspace))
-    ready = any(
-        _container_state(container_name) == "Running" or time.sleep(1)  # type: ignore[func-returns-value]
-        for _ in range(30)
-    )
+    ready = False
+    for _ in range(30):
+        if _container_state(container_name) == "Running":
+            ready = True
+            break
+        time.sleep(1)
+
     if not ready:
         proc.terminate()
+        proc.wait(timeout=5)
         pytest.skip(f"Container {container_name} did not reach Running state")
 
     # argv[0] = "frobnicator --frobsocket" satisfies:
@@ -152,6 +157,7 @@ file_read_rate_mb_per_sec = 1000
             break
 
     proc.terminate()
+    proc.wait(timeout=5)
     _cleanup(container_name, coi_binary)
 
     assert detected, (
