@@ -58,6 +58,8 @@
 
 ### Tests
 
+- **Integration tests for `coi update patterns`** — Added `tests/update/update_patterns.py` with four tests covering the `coi update patterns` subcommand without requiring network access or a real GTFOBins clone: dry-run output for a fresh clone, dry-run with a custom `--source` URL, dry-run detection of an existing clone (shows `pull` instead of `clone`), and the safety guard that refuses to clobber a non-git directory. Also extended `tests/update/update_help.py` with `test_update_patterns_help` to verify the subcommand documents its `--source`, `--dry-run`, and `--gtfobins-dir` flags correctly.
+
 - **Integration tests for post-reboot container resume bug (#413)** — Added `tests/shell/persistent/resume_running_container_bug.py` with two tests covering issue #413. The tests simulate the post-reboot state without rebooting: start a persistent session (container stays Running after coi exits), then modify the session metadata to mark it as non-persistent. `test_resume_running_container_succeeds` confirms that `coi shell --resume=<id>` successfully reuses the already-running container (this test confirmed the bug before the fix, and now passes). `test_workaround_attach_bash_works_when_container_running` verifies the `coi attach <container> --bash` workaround also works.
 
 ### Bug Fixes
