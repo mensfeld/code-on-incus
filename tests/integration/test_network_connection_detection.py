@@ -101,7 +101,8 @@ class TestNetworkConnectionDetection:
                 "--image",
                 dummy_image,
             ],
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             env=env,
         )
@@ -170,7 +171,8 @@ class TestNetworkConnectionDetection:
                 "--image",
                 dummy_image,
             ],
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             env=env,
         )
@@ -239,7 +241,8 @@ class TestNetworkConnectionDetection:
                 "--image",
                 dummy_image,
             ],
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
             env=env,
         )
