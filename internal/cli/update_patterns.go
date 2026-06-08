@@ -9,42 +9,38 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const defaultGTFOBinsURL = "https://github.com/GTFOBins/GTFOBins.github.io.git"
-
-var (
-	upGtfobinsDir string
-	upSource      string
-)
-
 var updatePatternsCmd = &cobra.Command{
 	Use:   "patterns",
-	Short: "Clone or update the GTFOBins reverse-shell database",
-	Long: `Clone (or update) the GTFOBins database used by the PROC_EVENTS monitoring daemon.
+	Short: "Clone or update the GTFOBins and Sigma detection databases",
+	Long: `Clone (or update) the GTFOBins reverse-shell database and the Sigma
+linux/process_creation rule database used by the PROC_EVENTS monitoring daemon.
 
-The database is stored at ~/.coi/gtfobins/ and read directly by the daemon at
-startup — no intermediate files are generated. Restart the monitoring daemon
-after running this command to pick up new patterns.
+Both databases are stored locally and read directly by the daemon at startup.
+Restart the monitoring daemon after running this command to pick up changes.
 
-On first run the repository is cloned from the configured source URL. On
-subsequent runs git pull is used, so the remote URL is remembered automatically.
-To switch to a different source (e.g. a fork), delete ~/.coi/gtfobins/ and
-re-run with --source pointing at the new URL.
+Source URLs and local directories are configured in ~/.coi/config.toml under
+the [detection] section:
 
-To use your own fork or a customised copy:
-  coi update patterns --source https://github.com/you/GTFOBins.github.io.git
+  [detection]
+  gtfobins_source = "https://github.com/GTFOBins/GTFOBins.github.io.git"
+  gtfobins_dir    = "~/.coi/gtfobins"
+  sigma_source    = "https://github.com/SigmaHQ/sigma.git"
+  sigma_dir       = "~/.coi/sigma"
+
+On first run each repository is cloned from the configured source URL. On
+subsequent runs git pull (GTFOBins) or git pull (Sigma) updates the existing
+clone. The Sigma clone uses a sparse, blobless checkout that fetches only the
+rules/linux/process_creation/ subtree (~300 KB).
 
 Examples:
-  coi update patterns                        # clone/update from official GTFOBins
-  coi update patterns --dry-run              # show what would be done, don't execute
-  coi update patterns --source <url>         # use a custom / forked repository
+  coi update patterns            # clone/update both databases
+  coi update patterns --dry-run  # show what would be done, don't execute
 `,
 	RunE: updatePatternsCommand,
 }
 
 func init() {
-	updatePatternsCmd.Flags().StringVar(&upGtfobinsDir, "gtfobins-dir", "", "Override clone directory for this operation (default: ~/.coi/gtfobins; the daemon always reads from ~/.coi/gtfobins)")
-	updatePatternsCmd.Flags().StringVar(&upSource, "source", defaultGTFOBinsURL, "Git URL to clone from (used only on first clone)")
-	updatePatternsCmd.Flags().Bool("dry-run", false, "Print git command that would run, without executing it")
+	updatePatternsCmd.Flags().Bool("dry-run", false, "Print git commands that would run, without executing them")
 }
 
 func updatePatternsCommand(cmd *cobra.Command, _ []string) error {
@@ -58,44 +54,111 @@ func updatePatternsCommand(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("could not create ~/.coi: %w", err)
 	}
 
-	cloneDir := upGtfobinsDir
-	if cloneDir == "" {
-		cloneDir = filepath.Join(home, ".coi", "gtfobins")
+	gtfobinsSource := app.cfg.Detection.GTFOBinsSource
+	gtfobinsDir := app.cfg.Detection.GTFOBinsDir
+	sigmaSource := app.cfg.Detection.SigmaSource
+	sigmaDir := app.cfg.Detection.SigmaDir
+
+	fmt.Println("=== GTFOBins ===")
+	if err := updateGTFOBins(gtfobinsDir, gtfobinsSource, dryRun); err != nil {
+		return err
 	}
 
-	var gitArgs []string
+	fmt.Println()
+	fmt.Println("=== Sigma ===")
+	if err := updateSigma(sigmaDir, sigmaSource, dryRun); err != nil {
+		return err
+	}
+
+	if !dryRun {
+		fmt.Println()
+		fmt.Println("Done. Restart the monitoring daemon to apply new patterns and rules.")
+	}
+	return nil
+}
+
+func updateGTFOBins(cloneDir, sourceURL string, dryRun bool) error {
 	if _, err := os.Stat(filepath.Join(cloneDir, ".git")); err == nil {
-		// Existing clone — update in-place. The remote URL is already recorded
-		// in .git/config; --source is intentionally ignored after the first clone
-		// so the user's chosen source persists across runs.
-		gitArgs = []string{"-C", cloneDir, "pull", "--ff-only", "--depth=1"}
+		gitArgs := []string{"-C", cloneDir, "pull", "--ff-only", "--depth=1"}
 		fmt.Printf("Updating GTFOBins database at %s...\n", cloneDir)
+		if dryRun {
+			fmt.Printf("[dry-run] git %v\n", gitArgs)
+			return nil
+		}
+		out, err := runGit(gitArgs...)
+		if out != "" {
+			fmt.Print(out)
+		}
+		if err != nil {
+			return fmt.Errorf("git failed: %w", err)
+		}
 	} else if _, err := os.Stat(cloneDir); err == nil {
-		// Directory exists but is not a git repo — refuse to clobber it.
 		return fmt.Errorf(
 			"%s exists but is not a git repository; remove it and re-run to clone fresh",
 			cloneDir,
 		)
 	} else {
-		// Fresh clone.
-		gitArgs = []string{"clone", "--depth=1", upSource, cloneDir}
-		fmt.Printf("Cloning GTFOBins database from %s to %s...\n", upSource, cloneDir)
+		gitArgs := []string{"clone", "--depth=1", sourceURL, cloneDir}
+		fmt.Printf("Cloning GTFOBins database from %s to %s...\n", sourceURL, cloneDir)
+		if dryRun {
+			fmt.Printf("[dry-run] git %v\n", gitArgs)
+			return nil
+		}
+		out, err := runGit(gitArgs...)
+		if out != "" {
+			fmt.Print(out)
+		}
+		if err != nil {
+			return fmt.Errorf("git failed: %w", err)
+		}
 	}
+	return nil
+}
 
-	if dryRun {
-		fmt.Printf("[dry-run] git %v\n", gitArgs)
-		return nil
+func updateSigma(cloneDir, sourceURL string, dryRun bool) error {
+	if _, err := os.Stat(filepath.Join(cloneDir, ".git")); err == nil {
+		gitArgs := []string{"-C", cloneDir, "pull", "--ff-only", "--depth=1"}
+		fmt.Printf("Updating Sigma database at %s...\n", cloneDir)
+		if dryRun {
+			fmt.Printf("[dry-run] git %v\n", gitArgs)
+			return nil
+		}
+		out, err := runGit(gitArgs...)
+		if out != "" {
+			fmt.Print(out)
+		}
+		if err != nil {
+			return fmt.Errorf("git failed: %w", err)
+		}
+	} else if _, err := os.Stat(cloneDir); err == nil {
+		return fmt.Errorf(
+			"%s exists but is not a git repository; remove it and re-run to clone fresh",
+			cloneDir,
+		)
+	} else {
+		cloneArgs := []string{"clone", "--depth=1", "--filter=blob:none", "--sparse", sourceURL, cloneDir}
+		sparseArgs := []string{"-C", cloneDir, "sparse-checkout", "set", "rules/linux/process_creation"}
+		fmt.Printf("Cloning Sigma database from %s to %s...\n", sourceURL, cloneDir)
+		if dryRun {
+			fmt.Printf("[dry-run] git %v\n", cloneArgs)
+			fmt.Printf("[dry-run] git %v\n", sparseArgs)
+			return nil
+		}
+		out, err := runGit(cloneArgs...)
+		if out != "" {
+			fmt.Print(out)
+		}
+		if err != nil {
+			return fmt.Errorf("git clone failed: %w", err)
+		}
+		out, err = runGit(sparseArgs...)
+		if out != "" {
+			fmt.Print(out)
+		}
+		if err != nil {
+			return fmt.Errorf("git sparse-checkout failed: %w", err)
+		}
 	}
-
-	out, err := runGit(gitArgs...)
-	if out != "" {
-		fmt.Print(out)
-	}
-	if err != nil {
-		return fmt.Errorf("git failed: %w", err)
-	}
-
-	fmt.Println("Done. Restart the monitoring daemon to apply new patterns.")
 	return nil
 }
 

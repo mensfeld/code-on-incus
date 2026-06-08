@@ -13,6 +13,14 @@ type ShellConfig struct {
 	UseTmux *bool `toml:"use_tmux"` // Use tmux for session management (default: true)
 }
 
+// DetectionConfig holds source URLs and local directories for threat-detection databases.
+type DetectionConfig struct {
+	GTFOBinsSource string `toml:"gtfobins_source"` // Git URL for GTFOBins repo
+	GTFOBinsDir    string `toml:"gtfobins_dir"`    // Local clone directory (~/.coi/gtfobins)
+	SigmaSource    string `toml:"sigma_source"`    // Git URL for SigmaHQ/sigma repo
+	SigmaDir       string `toml:"sigma_dir"`       // Local clone directory (~/.coi/sigma)
+}
+
 // Config represents the complete configuration
 type Config struct {
 	Container          ContainerConfig          `toml:"container"`
@@ -29,6 +37,7 @@ type Config struct {
 	Security           SecurityConfig           `toml:"security"`
 	Monitoring         MonitoringConfig         `toml:"monitoring"`
 	Timezone           TimezoneConfig           `toml:"timezone"`
+	Detection          DetectionConfig          `toml:"detection"`
 	Profiles           map[string]ProfileConfig `toml:"-"` // Populated by loadProfileDirectories, not from TOML
 	ProfileContextFile string                   `toml:"-"` // Set by ApplyProfile, read by session setup
 }
@@ -319,6 +328,8 @@ func expandConfigPaths(cfg *Config) {
 	cfg.Paths.StorageDir = ExpandPath(cfg.Paths.StorageDir)
 	cfg.Paths.LogsDir = ExpandPath(cfg.Paths.LogsDir)
 	cfg.Network.Logging.Path = ExpandPath(cfg.Network.Logging.Path)
+	cfg.Detection.GTFOBinsDir = ExpandPath(cfg.Detection.GTFOBinsDir)
+	cfg.Detection.SigmaDir = ExpandPath(cfg.Detection.SigmaDir)
 }
 
 // cloneSlice returns a shallow copy of a slice (nil-safe).
@@ -647,6 +658,20 @@ func (c *Config) Merge(other *Config) {
 	}
 	if other.Timezone.Name != "" {
 		c.Timezone.Name = other.Timezone.Name
+	}
+
+	// Merge detection
+	if other.Detection.GTFOBinsSource != "" {
+		c.Detection.GTFOBinsSource = other.Detection.GTFOBinsSource
+	}
+	if other.Detection.GTFOBinsDir != "" {
+		c.Detection.GTFOBinsDir = ExpandPath(other.Detection.GTFOBinsDir)
+	}
+	if other.Detection.SigmaSource != "" {
+		c.Detection.SigmaSource = other.Detection.SigmaSource
+	}
+	if other.Detection.SigmaDir != "" {
+		c.Detection.SigmaDir = ExpandPath(other.Detection.SigmaDir)
 	}
 }
 

@@ -8,24 +8,28 @@ import subprocess
 
 def test_update_patterns_rejects_non_git_directory(coi_binary, tmp_path):
     """
-    Running update patterns on an existing non-git directory fails with a clear error.
+    Running update patterns on a HOME where the GTFOBins directory exists but
+    has no .git fails with a clear error.
 
     The safety guard prevents clobbering directories that exist but have no .git,
     so users cannot accidentally overwrite their own data. The check runs before
-    any git command, so no network access or --dry-run flag is needed.
+    any git command, so no network access is needed.
 
     Flow:
-    1. Create a plain (non-git) directory
-    2. Run coi update patterns --gtfobins-dir <path>
+    1. Create a plain (non-git) directory at the default GTFOBins location
+    2. Run coi update patterns (without --dry-run so it checks the directory)
     3. Verify exit code is non-zero
     4. Verify output mentions "not a git repository"
     """
-    non_git_dir = tmp_path / "not-a-repo"
-    non_git_dir.mkdir()
+    # Create a non-git directory at the default GTFOBins location
+    gtfobins_dir = tmp_path / ".coi" / "gtfobins"
+    gtfobins_dir.mkdir(parents=True)
+    # No .git subdirectory — this is a plain directory
+
     env = {**os.environ, "HOME": str(tmp_path)}
 
     result = subprocess.run(
-        [coi_binary, "update", "patterns", "--gtfobins-dir", str(non_git_dir)],
+        [coi_binary, "update", "patterns"],
         capture_output=True,
         text=True,
         timeout=10,

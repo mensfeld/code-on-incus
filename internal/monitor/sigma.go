@@ -67,16 +67,6 @@ func loadSigmaPatterns(cloneDir string) []sigmaPattern {
 	return patterns
 }
 
-// loadSigmaPatternsDefault loads Sigma patterns from the default location
-// (~/.coi/sigma/). Returns nil when the directory has not been populated yet.
-func loadSigmaPatternsDefault() []sigmaPattern {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil
-	}
-	return loadSigmaPatterns(filepath.Join(home, ".coi", "sigma"))
-}
-
 // compileSigmaFile parses raw YAML and compiles it to a sigmaPattern.
 // Returns (_, false) when the rule should be skipped: wrong log source,
 // unsupported condition syntax, or severity below high.

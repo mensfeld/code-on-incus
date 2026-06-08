@@ -58,7 +58,7 @@ func StartDaemon(ctx context.Context, cfg DaemonConfig) (*Daemon, error) {
 		case procThreatCh <- t:
 		default: // drop if buffer full rather than blocking
 		}
-	}, cfg.OnError)
+	}, cfg.OnError, cfg.GTFOBinsDir, cfg.SigmaDir)
 
 	daemon := &Daemon{
 		ctx:          daemonCtx,

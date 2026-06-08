@@ -163,10 +163,9 @@ func TestEvidenceString_ProcEvent(t *testing.T) {
 }
 
 func TestLoadExecPatterns_CloneAbsent(t *testing.T) {
-	// Point home to a temp dir with no gtfobins clone — should return defaults.
+	// Pass a nonexistent dir — should return defaults.
 	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	patterns := loadExecPatterns()
+	patterns := loadExecPatterns(filepath.Join(tmp, "nonexistent-gtfobins"))
 	if len(patterns) == 0 {
 		t.Fatal("loadExecPatterns returned empty slice when clone is absent")
 	}
@@ -185,7 +184,8 @@ func TestLoadExecPatterns_CloneAbsent(t *testing.T) {
 func TestLoadExecPatterns_ClonePresent(t *testing.T) {
 	// Set up a minimal fake GTFOBins clone with one binary YAML file.
 	tmp := t.TempDir()
-	binDir := filepath.Join(tmp, ".coi", "gtfobins", "_gtfobins")
+	cloneDir := filepath.Join(tmp, "gtfobins")
+	binDir := filepath.Join(cloneDir, "_gtfobins")
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -199,9 +199,8 @@ functions:
 	if err := os.WriteFile(filepath.Join(binDir, "frobnicator"), []byte(yaml), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("HOME", tmp)
 
-	patterns := loadExecPatterns()
+	patterns := loadExecPatterns(cloneDir)
 
 	// The GTFOBins-derived pattern must be present.
 	foundDerived := false

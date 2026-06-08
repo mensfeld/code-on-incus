@@ -203,6 +203,10 @@ type DaemonConfig struct {
 	AllowedCIDRs   []string // CIDR ranges for allowed networks
 	AllowedDomains []string // Domains from network allowlist
 
+	// Detection database directories (populated from config.Detection)
+	GTFOBinsDir string // Local GTFOBins clone directory
+	SigmaDir    string // Local Sigma clone directory
+
 	// Threat detection thresholds
 	FileReadThresholdMB   float64 // MB read in poll interval
 	FileReadRateMBPerSec  float64 // MB/sec sustained rate

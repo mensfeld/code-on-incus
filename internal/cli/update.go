@@ -25,26 +25,23 @@ var (
 )
 
 // updateCmd is the parent command. With no subcommand it updates the coi
-// binary, the GTFOBins pattern database, and the Sigma rule database.
+// binary and both detection databases (GTFOBins + Sigma).
 var updateCmd = &cobra.Command{
 	Use:   "update",
 	Short: "Update coi and its detection databases",
-	Long: `Update the coi binary, the GTFOBins reverse-shell pattern database, and the
-Sigma linux/process_creation rule database.
+	Long: `Update the coi binary and both threat-detection databases (GTFOBins and Sigma).
 
-Running without a subcommand performs all three updates in sequence. Use a
-subcommand when you only want one:
+Running without a subcommand performs all updates in sequence. Use a subcommand
+when you only want one:
 
   coi update core      – update only the coi binary
-  coi update patterns  – update only the GTFOBins pattern database
-  coi update sigma     – update only the Sigma rule database
+  coi update patterns  – update GTFOBins and Sigma detection databases
 
 Examples:
-  coi update           # update binary, GTFOBins patterns, and Sigma rules
+  coi update           # update binary and detection databases
   coi update --force   # same, skip binary-update confirmation
   coi update core      # update binary only
-  coi update patterns  # pull latest GTFOBins only
-  coi update sigma     # pull latest Sigma rules only
+  coi update patterns  # pull latest GTFOBins and Sigma rules
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Propagate --force from parent to the core update.
@@ -54,11 +51,7 @@ Examples:
 			return err
 		}
 		fmt.Println()
-		if err := updatePatternsCommand(updatePatternsCmd, args); err != nil {
-			return err
-		}
-		fmt.Println()
-		return updateSigmaCommand(updateSigmaCmd, args)
+		return updatePatternsCommand(updatePatternsCmd, args)
 	},
 }
 
@@ -91,7 +84,6 @@ func init() {
 
 	updateCmd.AddCommand(updateCoreCmd)
 	updateCmd.AddCommand(updatePatternsCmd)
-	updateCmd.AddCommand(updateSigmaCmd)
 }
 
 // githubRelease represents the relevant fields from the GitHub releases API

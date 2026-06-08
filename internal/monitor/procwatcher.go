@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -75,19 +74,13 @@ var defaultExecPatterns = []execPattern{
 	{Name: "xmrig", Arg0: "xmrig", Keywords: []string{}},
 }
 
-// loadExecPatterns loads exec patterns from the GTFOBins clone at
-// ~/.coi/gtfobins/ (if present) and merges them with the compiled-in defaults.
+// loadExecPatterns loads exec patterns from the GTFOBins clone at cloneDir
+// (if present) and merges them with the compiled-in defaults.
 // GTFOBins-derived patterns take priority (matched by Name); compiled-in
 // entries not covered by the clone are appended as fallback. The compiled-in
 // defaults are returned as-is when the clone directory is absent, unreadable,
 // or contains no parseable reverse-shell entries.
-func loadExecPatterns() []execPattern {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return defaultExecPatterns
-	}
-	cloneDir := filepath.Join(home, ".coi", "gtfobins")
-
+func loadExecPatterns(cloneDir string) []execPattern {
 	external := loadExecPatternsFromGTFOBins(cloneDir)
 	if len(external) == 0 {
 		return defaultExecPatterns
@@ -120,16 +113,22 @@ type ProcEventWatcher struct {
 	containerName string
 	onThreat      func(ThreatEvent)
 	onError       func(error)
-	patterns      []execPattern  // loaded once at Run() start via loadExecPatterns()
-	sigmaPatterns []sigmaPattern // loaded once at Run() start via loadSigmaPatternsDefault()
+	gtfobinsDir   string         // local GTFOBins clone directory
+	sigmaDir      string         // local Sigma clone directory
+	patterns      []execPattern  // loaded once at Run() start
+	sigmaPatterns []sigmaPattern // loaded once at Run() start
 }
 
 // NewProcEventWatcher creates a ProcEventWatcher for the named container.
-func NewProcEventWatcher(containerName string, onThreat func(ThreatEvent), onError func(error)) *ProcEventWatcher {
+// gtfobinsDir and sigmaDir are the local clone directories for the threat
+// detection databases; pass empty strings to use the built-in defaults.
+func NewProcEventWatcher(containerName string, onThreat func(ThreatEvent), onError func(error), gtfobinsDir, sigmaDir string) *ProcEventWatcher {
 	return &ProcEventWatcher{
 		containerName: containerName,
 		onThreat:      onThreat,
 		onError:       onError,
+		gtfobinsDir:   gtfobinsDir,
+		sigmaDir:      sigmaDir,
 	}
 }
 
@@ -137,8 +136,8 @@ func NewProcEventWatcher(containerName string, onThreat func(ThreatEvent), onErr
 // resolution failures, NETLINK_CONNECTOR unavailability) are surfaced via
 // onError and cause Run to return early.
 func (pw *ProcEventWatcher) Run(ctx context.Context) {
-	pw.patterns = loadExecPatterns()
-	pw.sigmaPatterns = loadSigmaPatternsDefault()
+	pw.patterns = loadExecPatterns(pw.gtfobinsDir)
+	pw.sigmaPatterns = loadSigmaPatterns(pw.sigmaDir)
 
 	cgroupPath, err := GetCgroupPath(ctx, pw.containerName)
 	if err != nil {
