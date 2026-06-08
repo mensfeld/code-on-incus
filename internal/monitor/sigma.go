@@ -173,6 +173,30 @@ func parseSigmaCondition(condition string, selections map[string]sigmaSelection,
 		parts := strings.Split(condition, " and ")
 		p.ConditionOp = "and"
 		for _, part := range parts {
+			sels, op, err := parseSigmaSelectionExpr(strings.TrimSpace(part), selections)
+			if err != nil {
+				return err
+			}
+			if op == "or" {
+				// "1 of X_*" sub-expression: merge all matched selections into one
+				// OR-group so the overall AND semantics is preserved correctly.
+				merged := make(sigmaSelection, 0)
+				for _, sel := range sels {
+					merged = append(merged, sel...)
+				}
+				p.Required = append(p.Required, merged)
+			} else {
+				p.Required = append(p.Required, sels...)
+			}
+		}
+		return nil
+	}
+
+	// Handle "X or Y" between named selections.
+	if strings.Contains(condition, " or ") {
+		parts := strings.Split(condition, " or ")
+		p.ConditionOp = "or"
+		for _, part := range parts {
 			sels, _, err := parseSigmaSelectionExpr(strings.TrimSpace(part), selections)
 			if err != nil {
 				return err
@@ -232,11 +256,9 @@ func matchSigmaGlob(pattern string, selections map[string]sigmaSelection) []sigm
 		}
 		return sels
 	}
-	prefix := strings.TrimSuffix(pattern, "_*")
-	prefix = strings.TrimSuffix(prefix, "*")
 	var sels []sigmaSelection
 	for name, sel := range selections {
-		if strings.HasPrefix(name, prefix) {
+		if matched, err := filepath.Match(pattern, name); err == nil && matched {
 			sels = append(sels, sel)
 		}
 	}
@@ -306,10 +328,10 @@ func compileSigmaFieldCheck(fieldKey string, raw interface{}) (sigmaFieldCheck, 
 		return sigmaFieldCheck{}, false
 	}
 
-	modifier := "contains"
+	modifier := "glob"
 	switch len(modifiers) {
 	case 0:
-		// no modifier — default to contains
+		// no modifier — Sigma spec: exact match (case-insensitive), wildcards (* ?) allowed
 	case 1:
 		switch strings.ToLower(modifiers[0]) {
 		case "contains":
@@ -359,12 +381,12 @@ func sigmaToStringList(raw interface{}) ([]string, bool) {
 }
 
 // matchSigmaPattern returns true if the given process fields match the compiled rule.
-func matchSigmaPattern(image, cmdline, parentImage string, p sigmaPattern) bool {
+func matchSigmaPattern(image, cmdline, parentImage, parentCmdline string, p sigmaPattern) bool {
 	fields := map[string]string{
 		"Image":             strings.ToLower(image),
 		"CommandLine":       strings.ToLower(cmdline),
 		"ParentImage":       strings.ToLower(parentImage),
-		"ParentCommandLine": "",
+		"ParentCommandLine": strings.ToLower(parentCmdline),
 	}
 
 	// A matching forbidden selection disqualifies this rule.
@@ -419,6 +441,14 @@ func evalSigmaAlternative(fields map[string]string, alt sigmaAlternative) bool {
 // evalSigmaFieldCheck evaluates a field check against an already-lowercased value.
 func evalSigmaFieldCheck(lowerVal string, check sigmaFieldCheck) bool {
 	switch check.Modifier {
+	case "glob":
+		// No-modifier Sigma field: exact equality when no wildcards, glob when * or ? present.
+		for _, v := range check.Values {
+			if sigmaGlobMatch(strings.ToLower(v), lowerVal) {
+				return true
+			}
+		}
+		return false
 	case "contains":
 		for _, v := range check.Values {
 			if strings.Contains(lowerVal, strings.ToLower(v)) {
@@ -449,4 +479,33 @@ func evalSigmaFieldCheck(lowerVal string, check sigmaFieldCheck) bool {
 		return true
 	}
 	return false
+}
+
+// sigmaGlobMatch performs glob matching where * matches any sequence of
+// characters and ? matches exactly one character. Both args must be lowercased.
+func sigmaGlobMatch(pattern, text string) bool {
+	p, t := 0, 0
+	lastStar, matchStart := -1, 0
+
+	for t < len(text) {
+		if p < len(pattern) && (pattern[p] == '?' || pattern[p] == text[t]) {
+			p++
+			t++
+		} else if p < len(pattern) && pattern[p] == '*' {
+			lastStar = p
+			matchStart = t
+			p++
+		} else if lastStar >= 0 {
+			p = lastStar + 1
+			matchStart++
+			t = matchStart
+		} else {
+			return false
+		}
+	}
+
+	for p < len(pattern) && pattern[p] == '*' {
+		p++
+	}
+	return p == len(pattern)
 }

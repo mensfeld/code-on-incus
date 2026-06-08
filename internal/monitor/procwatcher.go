@@ -329,10 +329,12 @@ func (pw *ProcEventWatcher) handleExec(pid int, relCgroup string) {
 
 	// Sigma rule matching — only when rules have been loaded.
 	if len(pw.sigmaPatterns) > 0 {
+		ppid := procReadPPID(pid)
 		image := procReadExe(pid)
-		parentImage := procReadExe(procReadPPID(pid))
+		parentImage := procReadExe(ppid)
+		parentCmdline := procReadCmdline(ppid)
 		for _, sp := range pw.sigmaPatterns {
-			if matchSigmaPattern(image, cmd, parentImage, sp) {
+			if matchSigmaPattern(image, cmd, parentImage, parentCmdline, sp) {
 				level := ThreatLevelHigh
 				if sp.Level == "critical" {
 					level = ThreatLevelCritical
