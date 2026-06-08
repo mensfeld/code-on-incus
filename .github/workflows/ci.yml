@@ -158,6 +158,9 @@ jobs:
             path: tests/integration/test_security_monitoring.py
             pytest_args: "-k 'TestExpandedEnvScanningPatterns or TestProcessHostProcWalk or TestForkBombDetection or TestProcessSpawnRateDetection or TestAuthLogWatcher or TestProcEventWatcher'"
             description: "Host-side monitoring: env scan, process walk, fork bomb, spawn rate, auth log, proc events"
+          - name: monitoring-network-detection
+            path: tests/integration/test_network_connection_detection.py
+            description: "Host-side /proc/<pid>/net TCP/UDP suspicious connection detection"
           - name: uid-mapping
             path: tests/container/uid_mapping_shift_true.py tests/container/uid_mapping_raw_idmap.py
             description: "UID mapping integration tests"
