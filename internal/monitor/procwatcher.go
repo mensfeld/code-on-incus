@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -119,7 +120,8 @@ type ProcEventWatcher struct {
 	containerName string
 	onThreat      func(ThreatEvent)
 	onError       func(error)
-	patterns      []execPattern // loaded once at Run() start via loadExecPatterns()
+	patterns      []execPattern  // loaded once at Run() start via loadExecPatterns()
+	sigmaPatterns []sigmaPattern // loaded once at Run() start via loadSigmaPatternsDefault()
 }
 
 // NewProcEventWatcher creates a ProcEventWatcher for the named container.
@@ -136,6 +138,7 @@ func NewProcEventWatcher(containerName string, onThreat func(ThreatEvent), onErr
 // onError and cause Run to return early.
 func (pw *ProcEventWatcher) Run(ctx context.Context) {
 	pw.patterns = loadExecPatterns()
+	pw.sigmaPatterns = loadSigmaPatternsDefault()
 
 	cgroupPath, err := GetCgroupPath(ctx, pw.containerName)
 	if err != nil {
@@ -290,7 +293,7 @@ func (pw *ProcEventWatcher) processMessages(buf []byte, relCgroup string) {
 }
 
 // handleExec checks whether the exec'd process belongs to the container and
-// whether its cmdline matches a suspicious pattern.
+// whether its cmdline matches a suspicious exec pattern or Sigma rule.
 func (pw *ProcEventWatcher) handleExec(pid int, relCgroup string) {
 	if !procInContainerCgroup(pid, relCgroup) {
 		return
@@ -299,29 +302,64 @@ func (pw *ProcEventWatcher) handleExec(pid int, relCgroup string) {
 	if cmd == "" {
 		return
 	}
-	pattern := matchSuspiciousExec(cmd, pw.patterns)
-	if pattern == "" {
-		return
-	}
-	ev := ThreatEvent{
-		ID:        uuid.New().String(),
-		Timestamp: time.Now(),
-		Level:     ThreatLevelHigh,
-		Category:  "proc_event",
-		Title:     "Suspicious process execution detected",
-		Description: fmt.Sprintf("Process (PID %d) matched suspicious exec pattern '%s': %s",
-			pid, pattern, truncateToRunes(cmd, 200)),
-		Evidence: Evidence{
-			ProcEvent: &ProcEventThreat{
-				PID:     pid,
-				Command: truncateToRunes(cmd, 300),
-				Pattern: pattern,
+
+	// GTFOBins / compiled-in pattern matching.
+	if pattern := matchSuspiciousExec(cmd, pw.patterns); pattern != "" {
+		ev := ThreatEvent{
+			ID:        uuid.New().String(),
+			Timestamp: time.Now(),
+			Level:     ThreatLevelHigh,
+			Category:  "proc_event",
+			Title:     "Suspicious process execution detected",
+			Description: fmt.Sprintf("Process (PID %d) matched suspicious exec pattern '%s': %s",
+				pid, pattern, truncateToRunes(cmd, 200)),
+			Evidence: Evidence{
+				ProcEvent: &ProcEventThreat{
+					PID:     pid,
+					Command: truncateToRunes(cmd, 300),
+					Pattern: pattern,
+				},
 			},
-		},
-		Action: "pending",
+			Action: "pending",
+		}
+		if pw.onThreat != nil {
+			pw.onThreat(ev)
+		}
 	}
-	if pw.onThreat != nil {
-		pw.onThreat(ev)
+
+	// Sigma rule matching — only when rules have been loaded.
+	if len(pw.sigmaPatterns) > 0 {
+		image := procReadExe(pid)
+		parentImage := procReadExe(procReadPPID(pid))
+		for _, sp := range pw.sigmaPatterns {
+			if matchSigmaPattern(image, cmd, parentImage, sp) {
+				level := ThreatLevel(ThreatLevelHigh)
+				if sp.Level == "critical" {
+					level = ThreatLevelCritical
+				}
+				ev := ThreatEvent{
+					ID:        uuid.New().String(),
+					Timestamp: time.Now(),
+					Level:     level,
+					Category:  "proc_event",
+					Title:     fmt.Sprintf("Sigma rule matched: %s", sp.Title),
+					Description: fmt.Sprintf("Process (PID %d) matched Sigma rule '%s': %s",
+						pid, sp.Title, truncateToRunes(cmd, 200)),
+					Evidence: Evidence{
+						ProcEvent: &ProcEventThreat{
+							PID:     pid,
+							Command: truncateToRunes(cmd, 300),
+							Pattern: sp.Title,
+						},
+					},
+					Action: "pending",
+				}
+				if pw.onThreat != nil {
+					pw.onThreat(ev)
+				}
+				break // emit at most one Sigma threat per exec event
+			}
+		}
 	}
 }
 
@@ -376,6 +414,38 @@ func procReadCmdline(pid int) string {
 		return ""
 	}
 	return strings.TrimRight(strings.ReplaceAll(string(data), "\x00", " "), " ")
+}
+
+// procReadExe resolves the /proc/<pid>/exe symlink to the binary's full path.
+// Returns "" if the process has already exited or the link is unreadable.
+func procReadExe(pid int) string {
+	if pid <= 0 {
+		return ""
+	}
+	exe, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid))
+	if err != nil {
+		return ""
+	}
+	return exe
+}
+
+// procReadPPID reads the parent PID from /proc/<pid>/status.
+// Returns 0 on any error (process exited, permission denied, etc.).
+func procReadPPID(pid int) int {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", pid))
+	if err != nil {
+		return 0
+	}
+	for _, line := range strings.SplitAfter(string(data), "\n") {
+		if strings.HasPrefix(line, "PPid:") {
+			fields := strings.Fields(line)
+			if len(fields) >= 2 {
+				ppid, _ := strconv.Atoi(fields[1])
+				return ppid
+			}
+		}
+	}
+	return 0
 }
 
 // matchSuspiciousExec returns the name of the first matching execPattern for
