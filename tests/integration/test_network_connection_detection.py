@@ -12,8 +12,9 @@ For C2-port tests (TCP/UDP to port 4444) we use the container's own IP so
 there is always a reachable route and the connection reaches ESTABLISHED
 state without relying on external network policy.
 
-For the metadata-endpoint test we add a link-local route inside the
-container so connect() enters SYN_SENT instead of failing with EHOSTUNREACH.
+For the metadata-endpoint test we assign 169.254.169.254/32 to the loopback
+interface inside the container and run a server there, then connect to it so
+the socket reaches ESTABLISHED state (stable) rather than SYN_SENT (fragile).
 """
 
 import hashlib
@@ -68,6 +69,20 @@ def _get_container_ip(container_name: str) -> str:
         return ""
     parts = result.stdout.strip().split()
     return parts[0] if parts else ""
+
+
+def _wait_for_ip(container_name: str, timeout: int = 30) -> str:
+    """Wait until the container has a routable IPv4 address and return it.
+
+    A container can reach Running state before DHCP completes, so polling
+    once immediately after _wait_running often returns an empty string.
+    """
+    for _ in range(timeout):
+        ip = _get_container_ip(container_name)
+        if ip:
+            return ip
+        time.sleep(1)
+    return ""
 
 
 def _get_threat_events(container_name: str) -> list[dict]:
@@ -168,7 +183,9 @@ class TestNetworkConnectionDetection:
 
         try:
             # Get container's own IP so we can create a routable connection.
-            container_ip = _get_container_ip(container_name)
+            # Use _wait_for_ip because DHCP may not have completed yet even
+            # though the container is already in Running state.
+            container_ip = _wait_for_ip(container_name)
             if not container_ip:
                 pytest.skip(f"Could not get IP for {container_name}")
 
@@ -242,7 +259,7 @@ class TestNetworkConnectionDetection:
             pytest.skip(f"Container {container_name} not ready")
 
         try:
-            container_ip = _get_container_ip(container_name)
+            container_ip = _wait_for_ip(container_name)
             if not container_ip:
                 pytest.skip(f"Could not get IP for {container_name}")
 
@@ -277,11 +294,12 @@ class TestNetworkConnectionDetection:
             _cleanup(container_name, coi_binary)
 
     def test_metadata_endpoint_detected(self, coi_binary, tmp_path, _monitoring_enabled):
-        """TCP SYN to 169.254.169.254 triggers critical network threat.
+        """TCP ESTABLISHED connection to 169.254.169.254 triggers critical threat.
 
-        Adds a link-local route inside the container so connect_ex() enters
-        SYN_SENT (visible in /proc/net/tcp) instead of failing with
-        EHOSTUNREACH when there is no default route for 169.254.0.0/16.
+        Assigns 169.254.169.254/32 to the container's loopback interface and
+        starts an HTTP server there so the client socket reaches ESTABLISHED
+        state (stable across poll cycles) rather than SYN_SENT (fragile — the
+        SYN is dropped at the Incus bridge and the state times out quickly).
         """
         workspace = str(tmp_path / "workspace")
         os.makedirs(workspace, exist_ok=True)
@@ -299,10 +317,8 @@ class TestNetworkConnectionDetection:
             pytest.skip(f"Container {container_name} not ready")
 
         try:
-            # Add a host route for the link-local range so the kernel enters
-            # SYN_SENT instead of returning EHOSTUNREACH immediately.
-            # The route via eth0 is enough; the SYN will be dropped at the
-            # gateway but the socket stays in SYN_SENT long enough to be seen.
+            # Assign the metadata endpoint IP to the loopback interface so we
+            # can bind a server there and create a stable ESTABLISHED connection.
             subprocess.run(
                 [
                     "incus",
@@ -310,22 +326,40 @@ class TestNetworkConnectionDetection:
                     container_name,
                     "--",
                     "ip",
-                    "route",
+                    "addr",
                     "add",
-                    "169.254.0.0/16",
+                    "169.254.169.254/32",
                     "dev",
-                    "eth0",
+                    "lo",
                 ],
                 capture_output=True,
                 timeout=10,
             )
 
+            # Start an HTTP server bound to the metadata endpoint IP.
+            subprocess.run(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "bash",
+                    "-c",
+                    "nohup python3 -m http.server 8080 --bind 169.254.169.254 </dev/null &>/dev/null &",
+                ],
+                capture_output=True,
+                timeout=10,
+            )
+            # Give the server a moment to start listening.
+            time.sleep(2)
+
+            # Connect TCP to 169.254.169.254:8080 → ESTABLISHED, stable in
+            # /proc/<init_pid>/net/tcp for the full duration of the test.
             meta_cmd = (
                 'python3 -c "'
                 "import socket, time; "
                 "s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); "
-                "s.setblocking(False); "
-                "s.connect_ex(('169.254.169.254', 80)); "
+                "s.connect(('169.254.169.254', 8080)); "
                 'time.sleep(120)"'
             )
             subprocess.Popen(
