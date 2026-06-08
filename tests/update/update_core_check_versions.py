@@ -4,6 +4,8 @@ Test that coi update core --check displays current and latest version numbers.
 
 import subprocess
 
+import pytest
+
 
 def test_update_check_shows_versions(coi_binary):
     """
@@ -20,6 +22,13 @@ def test_update_check_shows_versions(coi_binary):
         text=True,
         timeout=30,
     )
+
+    # GitHub API rate-limiting (403) or network unavailability is outside our
+    # control in CI; skip rather than fail so the suite stays green.
+    if result.returncode != 0 and (
+        "403" in result.stderr or "rate" in result.stderr.lower() or "network" in result.stderr.lower()
+    ):
+        pytest.skip(f"GitHub API unavailable: {result.stderr.strip()}")
 
     assert result.returncode == 0, f"Update check should succeed. stderr: {result.stderr}"
 
