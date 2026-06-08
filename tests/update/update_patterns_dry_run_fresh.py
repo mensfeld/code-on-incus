@@ -1,5 +1,6 @@
 """
-Test that coi update patterns --dry-run on a nonexistent directory shows a git clone command.
+Test that `coi update patterns --dry-run` on a fresh (nonexistent) HOME shows
+both the GTFOBins clone command and the Sigma sparse-clone commands.
 """
 
 import os
@@ -8,30 +9,35 @@ import subprocess
 
 def test_update_patterns_dry_run_fresh_clone(coi_binary, tmp_path):
     """
-    Dry-run on a nonexistent target directory prints a git clone command.
-
-    Flow:
-    1. Pick a path that does not yet exist inside tmp_path
-    2. Run coi update patterns --dry-run --gtfobins-dir <path>
-    3. Verify exit code is 0
-    4. Verify stdout contains [dry-run], "clone", and the target path
+    Dry-run with no existing databases shows clone commands for both GTFOBins
+    and Sigma (sparse + sparse-checkout), and exits 0 without creating files.
     """
-    target_dir = str(tmp_path / "gtfobins-fresh")
     env = {**os.environ, "HOME": str(tmp_path)}
 
     result = subprocess.run(
-        [coi_binary, "update", "patterns", "--dry-run", "--gtfobins-dir", target_dir],
+        [coi_binary, "update", "patterns", "--dry-run"],
         capture_output=True,
         text=True,
         timeout=10,
         env=env,
     )
 
-    assert result.returncode == 0, (
-        f"Dry-run on fresh directory should succeed. stderr: {result.stderr}"
-    )
-
+    assert result.returncode == 0, f"Dry-run on fresh HOME should succeed. stderr: {result.stderr}"
     output = result.stdout
-    assert "[dry-run]" in output, f"Should show [dry-run] marker. Got:\n{output}"
-    assert "clone" in output, f"Should show clone command. Got:\n{output}"
-    assert target_dir in output, f"Should show target directory. Got:\n{output}"
+    assert "[dry-run]" in output, f"Expected '[dry-run]' marker. Got:\n{output}"
+    # GTFOBins clone
+    assert "clone" in output, f"Expected 'clone' command for GTFOBins. Got:\n{output}"
+    # Sigma sparse-checkout step
+    assert "sparse-checkout" in output, (
+        f"Expected 'sparse-checkout' command for Sigma. Got:\n{output}"
+    )
+    # Both default dirs should appear
+    gtfobins_dir = str(tmp_path / ".coi" / "gtfobins")
+    sigma_dir = str(tmp_path / ".coi" / "sigma")
+    assert gtfobins_dir in output, f"Expected GTFOBins dir in output. Got:\n{output}"
+    assert sigma_dir in output, f"Expected Sigma dir in output. Got:\n{output}"
+    # Dry-run must not create either directory
+    assert not (tmp_path / ".coi" / "gtfobins").exists(), (
+        "Dry-run must not create the GTFOBins directory"
+    )
+    assert not (tmp_path / ".coi" / "sigma").exists(), "Dry-run must not create the Sigma directory"

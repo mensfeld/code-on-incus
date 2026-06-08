@@ -24,24 +24,24 @@ var (
 	updateVersion  string // hidden flag: skip GitHub query when re-execing under sudo
 )
 
-// updateCmd is the parent command. With no subcommand it updates both the
-// coi binary and the GTFOBins pattern database.
+// updateCmd is the parent command. With no subcommand it updates the coi
+// binary and both detection databases (GTFOBins + Sigma).
 var updateCmd = &cobra.Command{
 	Use:   "update",
-	Short: "Update coi and its GTFOBins pattern database",
-	Long: `Update the coi binary and the GTFOBins reverse-shell pattern database.
+	Short: "Update coi and its detection databases",
+	Long: `Update the coi binary and both threat-detection databases (GTFOBins and Sigma).
 
-Running without a subcommand performs both updates in sequence. Use a
-subcommand when you only want one:
+Running without a subcommand performs all updates in sequence. Use a subcommand
+when you only want one:
 
   coi update core      – update only the coi binary
-  coi update patterns  – update only the GTFOBins pattern database
+  coi update patterns  – update GTFOBins and Sigma detection databases
 
 Examples:
-  coi update           # update binary and GTFOBins patterns
+  coi update           # update binary and detection databases
   coi update --force   # same, skip binary-update confirmation
   coi update core      # update binary only
-  coi update patterns  # pull latest GTFOBins only
+  coi update patterns  # pull latest GTFOBins and Sigma rules
 `,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Propagate --force from parent to the core update.

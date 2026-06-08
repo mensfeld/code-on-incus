@@ -548,6 +548,8 @@ func startMonitoringDaemon(containerName, workspacePath string, cfg *config.Conf
 		AuditLogPath:              auditLogPath,
 		AllowedCIDRs:              allowedCIDRs,
 		AllowedDomains:            cfg.Network.AllowedDomains,
+		GTFOBinsDir:               cfg.Detection.GTFOBinsDir,
+		SigmaDir:                  cfg.Detection.SigmaDir,
 		FileReadThresholdMB:       cfg.Monitoring.FileReadThresholdMB,
 		FileReadRateMBPerSec:      cfg.Monitoring.FileReadRateMBPerSec,
 		ProcessCountThreshold:     cfg.Monitoring.ProcessCountThreshold,

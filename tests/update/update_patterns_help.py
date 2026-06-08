@@ -12,7 +12,7 @@ def test_update_patterns_help(coi_binary):
     Flow:
     1. Run coi update patterns --help
     2. Verify exit code is 0
-    3. Verify --source, --dry-run, and --gtfobins-dir flags are present
+    3. Verify --dry-run flag is present and location/source flags are absent
     """
     result = subprocess.run(
         [coi_binary, "update", "patterns", "--help"],
@@ -25,6 +25,9 @@ def test_update_patterns_help(coi_binary):
 
     output = result.stdout
     assert "Usage:" in output, f"Should contain Usage section. Got:\n{output}"
-    assert "--source" in output, f"Should document --source flag. Got:\n{output}"
     assert "--dry-run" in output, f"Should document --dry-run flag. Got:\n{output}"
-    assert "--gtfobins-dir" in output, f"Should document --gtfobins-dir flag. Got:\n{output}"
+    assert "GTFOBins" in output, f"Should mention GTFOBins. Got:\n{output}"
+    assert "Sigma" in output, f"Should mention Sigma. Got:\n{output}"
+    # Location/source are now config-only — no flags for them
+    assert "--gtfobins-dir" not in output, f"Should not expose --gtfobins-dir flag. Got:\n{output}"
+    assert "--source" not in output, f"Should not expose --source flag. Got:\n{output}"

@@ -97,3 +97,9 @@ use_tmux = true
 
 [timezone]
 mode = "host"
+
+[detection]
+gtfobins_source = "https://github.com/GTFOBins/GTFOBins.github.io.git"
+gtfobins_dir = "~/.coi/gtfobins"
+sigma_source = "https://github.com/SigmaHQ/sigma.git"
+sigma_dir = "~/.coi/sigma"

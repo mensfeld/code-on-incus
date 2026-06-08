@@ -537,6 +537,25 @@ setup_zfs_storage() {
     fi
 }
 
+# Fetch detection databases (GTFOBins + Sigma)
+fetch_detection_databases() {
+    if ! command -v coi &> /dev/null; then
+        return
+    fi
+
+    echo ""
+    echo -e "${BLUE}→ Fetching detection databases (GTFOBins + Sigma)...${NC}"
+    echo "  This clones the GTFOBins reverse-shell database and Sigma linux/process_creation"
+    echo "  rules used by the monitoring daemon. The Sigma clone is sparse (~300 KB)."
+    echo ""
+    if coi update patterns; then
+        echo -e "${GREEN}✓ Detection databases fetched${NC}"
+    else
+        echo -e "${YELLOW}⚠ Detection database fetch failed (requires git and network access)${NC}"
+        echo "  Run manually later: ${BLUE}coi update patterns${NC}"
+    fi
+}
+
 # Post-install setup
 post_install() {
     ensure_incus_service || true
@@ -545,6 +564,9 @@ post_install() {
 
     # Try to set up ZFS storage (best-effort, don't abort installer on failure)
     setup_zfs_storage || true
+
+    # Fetch GTFOBins and Sigma detection databases
+    fetch_detection_databases || true
 
     echo ""
     echo -e "${GREEN}✓ Installation complete!${NC}"
