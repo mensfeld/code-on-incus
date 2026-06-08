@@ -333,7 +333,7 @@ func (pw *ProcEventWatcher) handleExec(pid int, relCgroup string) {
 		parentImage := procReadExe(procReadPPID(pid))
 		for _, sp := range pw.sigmaPatterns {
 			if matchSigmaPattern(image, cmd, parentImage, sp) {
-				level := ThreatLevel(ThreatLevelHigh)
+				level := ThreatLevelHigh
 				if sp.Level == "critical" {
 					level = ThreatLevelCritical
 				}
