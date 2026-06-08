@@ -11,10 +11,10 @@ monitoring daemon emits a "network" category threat event.
 """
 
 import json
+import os
 import subprocess
 import time
 from pathlib import Path
-
 
 # Fast poll so tests don't wait long; must match the config written below.
 _POLL_INTERVAL_SEC = 2
@@ -73,9 +73,8 @@ def _poll_for_network_threat(container_name: str, extra_check=None) -> list[dict
     while time.time() < deadline:
         events = _get_threat_events(container_name)
         network_events = [e for e in events if e.get("category") == "network"]
-        if network_events:
-            if extra_check is None or extra_check(network_events):
-                return network_events
+        if network_events and (extra_check is None or extra_check(network_events)):
+            return network_events
         time.sleep(_POLL_INTERVAL_SEC)
     return []
 
@@ -90,10 +89,7 @@ class TestNetworkConnectionDetection:
         config_file = tmp_path / "config.toml"
         config_file.write_text(_MONITORING_CONFIG)
 
-        env_extra = {"COI_CONFIG": str(config_file)}
-        import os
-
-        env = {**os.environ, **env_extra}
+        env = {**os.environ, "COI_CONFIG": str(config_file)}
 
         proc = subprocess.Popen(
             [
@@ -161,8 +157,6 @@ class TestNetworkConnectionDetection:
         workspace.mkdir()
         config_file = tmp_path / "config.toml"
         config_file.write_text(_MONITORING_CONFIG)
-
-        import os
 
         env = {**os.environ, "COI_CONFIG": str(config_file)}
 
@@ -232,8 +226,6 @@ class TestNetworkConnectionDetection:
         workspace.mkdir()
         config_file = tmp_path / "config.toml"
         config_file.write_text(_MONITORING_CONFIG)
-
-        import os
 
         env = {**os.environ, "COI_CONFIG": str(config_file)}
 
