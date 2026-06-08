@@ -1,6 +1,8 @@
 package monitor
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -143,5 +145,135 @@ func TestEvidenceString_AuthLog(t *testing.T) {
 	s := e.String()
 	if s != "auth:auth.log:ssh_failed_password" {
 		t.Errorf("Evidence.String() = %q, want auth:auth.log:ssh_failed_password", s)
+	}
+}
+
+func TestReadFileChunk_ReadsFromBeginning(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "test.log")
+	content := "line one\nline two\n"
+	if err := os.WriteFile(f, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	data, base, inode, err := readFileChunk(f, logState{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(data) != content {
+		t.Errorf("want %q got %q", content, string(data))
+	}
+	if base != 0 {
+		t.Errorf("want base 0 got %d", base)
+	}
+	if inode == 0 {
+		t.Error("want non-zero inode")
+	}
+}
+
+func TestReadFileChunk_RespectsOffset(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "test.log")
+	first := "already read\n"
+	second := "new line\n"
+	if err := os.WriteFile(f, []byte(first+second), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	data, base, _, err := readFileChunk(f, logState{offset: int64(len(first))})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(data) != second {
+		t.Errorf("want %q got %q", second, string(data))
+	}
+	if base != int64(len(first)) {
+		t.Errorf("want base %d got %d", len(first), base)
+	}
+}
+
+func TestReadFileChunk_NoNewContent(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "test.log")
+	content := "existing\n"
+	if err := os.WriteFile(f, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	data, base, _, err := readFileChunk(f, logState{offset: int64(len(content))})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if data != nil {
+		t.Errorf("want nil data when no new content, got %q", string(data))
+	}
+	if base != int64(len(content)) {
+		t.Errorf("offset should not change, want %d got %d", len(content), base)
+	}
+}
+
+func TestReadFileChunk_FileNotFound(t *testing.T) {
+	_, _, _, err := readFileChunk("/nonexistent/path/file.log", logState{})
+	if err == nil {
+		t.Error("expected error for non-existent file, got nil")
+	}
+}
+
+func TestReadFileChunk_RotationByTruncation(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "test.log")
+	original := "old content\n"
+	if err := os.WriteFile(f, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate rotation: overwrite with shorter content so size < offset.
+	rotated := "new\n"
+	if err := os.WriteFile(f, []byte(rotated), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// State has offset past end of new file — should reset to 0.
+	data, base, _, err := readFileChunk(f, logState{offset: int64(len(original))})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if base != 0 {
+		t.Errorf("want base 0 after rotation, got %d", base)
+	}
+	if string(data) != rotated {
+		t.Errorf("want rotated content %q got %q", rotated, string(data))
+	}
+}
+
+func TestReadFileChunk_RotationByInodeChange(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "test.log")
+	original := "line one\nline two\n"
+	if err := os.WriteFile(f, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Read first to capture the real inode.
+	_, _, inode, err := readFileChunk(f, logState{})
+	if err != nil {
+		t.Fatalf("unexpected error on first read: %v", err)
+	}
+
+	// Simulate log rotation: remove and recreate (new inode).
+	if err := os.Remove(f); err != nil {
+		t.Fatal(err)
+	}
+	rotated := "fresh log\n"
+	if err := os.WriteFile(f, []byte(rotated), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// State has old inode and offset at end of original file.
+	data, base, _, err := readFileChunk(f, logState{offset: int64(len(original)), inode: inode})
+	if err != nil {
+		t.Fatalf("unexpected error after rotation: %v", err)
+	}
+	if base != 0 {
+		t.Errorf("want base 0 after inode change, got %d", base)
+	}
+	if string(data) != rotated {
+		t.Errorf("want rotated content %q got %q", rotated, string(data))
 	}
 }
