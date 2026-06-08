@@ -5,9 +5,15 @@ connection detection for suspicious outbound connections.
 The monitor reads /proc/<container-init-pid>/net/tcp[6] and udp[6] from the
 host (namespaced via init PID), so an in-container attacker cannot blind it.
 
-Tests open long-lived sockets inside the container so the connection stays
-visible in /proc/net/* across multiple poll cycles, then assert that the
-monitoring daemon emits a "network" category threat event.
+Tests create long-lived ESTABLISHED connections inside the container so the
+connection is stable and visible in /proc/net/* across multiple poll cycles.
+
+For C2-port tests (TCP/UDP to port 4444) we use the container's own IP so
+there is always a reachable route and the connection reaches ESTABLISHED
+state without relying on external network policy.
+
+For the metadata-endpoint test we add a link-local route inside the
+container so connect() enters SYN_SENT instead of failing with EHOSTUNREACH.
 """
 
 import hashlib
@@ -48,6 +54,20 @@ def _wait_running(name: str, timeout: int = 60) -> bool:
             return True
         time.sleep(1)
     return False
+
+
+def _get_container_ip(container_name: str) -> str:
+    """Return the container's primary IPv4 address (eth0)."""
+    result = subprocess.run(
+        ["incus", "exec", container_name, "--", "hostname", "-I"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    if result.returncode != 0:
+        return ""
+    parts = result.stdout.strip().split()
+    return parts[0] if parts else ""
 
 
 def _get_threat_events(container_name: str) -> list[dict]:
@@ -125,7 +145,12 @@ class TestNetworkConnectionDetection:
     """Host-side /proc/<pid>/net detection of suspicious outbound connections."""
 
     def test_suspicious_tcp_port_detected(self, coi_binary, tmp_path, _monitoring_enabled):
-        """TCP socket to C2 port 4444 held in SYN_SENT triggers network threat."""
+        """TCP ESTABLISHED connection to C2 port 4444 triggers network threat.
+
+        Uses the container's own IP to guarantee a routable destination and
+        start an in-container server so the connection stays ESTABLISHED (not
+        SYN_SENT which can disappear quickly if the network rejects the SYN).
+        """
         workspace = str(tmp_path / "workspace")
         os.makedirs(workspace, exist_ok=True)
         container_name = _container_name(workspace)
@@ -142,17 +167,38 @@ class TestNetworkConnectionDetection:
             pytest.skip(f"Container {container_name} not ready")
 
         try:
-            # Open a non-blocking TCP socket to 8.8.8.8:4444 and keep it alive.
-            # The socket stays in SYN_SENT and remains visible in /proc/net/tcp
-            # across poll cycles even though the connection never completes.
+            # Get container's own IP so we can create a routable connection.
+            container_ip = _get_container_ip(container_name)
+            if not container_ip:
+                pytest.skip(f"Could not get IP for {container_name}")
+
+            # Start a TCP server on port 4444 inside the container (background).
+            # Using python3 -m http.server so no extra packages are needed.
+            subprocess.run(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "bash",
+                    "-c",
+                    "nohup python3 -m http.server 4444 --bind 0.0.0.0 </dev/null &>/dev/null &",
+                ],
+                capture_output=True,
+                timeout=10,
+            )
+            # Give the server a moment to start listening.
+            time.sleep(2)
+
+            # Connect from inside the container to container_ip:4444.
+            # The connection becomes ESTABLISHED and stays visible in
+            # /proc/<init_pid>/net/tcp across every 2-second poll cycle.
             tcp_cmd = (
                 'python3 -c "'
                 "import socket, time; "
-                "s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); "
-                "s.setblocking(False); "
-                "s.connect_ex(('8.8.8.8', 4444)); "
-                "time.sleep(120)"
-                '"'
+                f"s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); "
+                f"s.connect(('{container_ip}', 4444)); "
+                'time.sleep(120)"'
             )
             subprocess.Popen(
                 ["incus", "exec", container_name, "--", "bash", "-c", tcp_cmd],
@@ -164,6 +210,7 @@ class TestNetworkConnectionDetection:
 
             assert len(net_events) > 0, (
                 f"Expected network threat for TCP:4444, got none.\n"
+                f"Container IP: {container_ip}\n"
                 f"All events: {_get_threat_events(container_name)}"
             )
             assert "4444" in json.dumps(net_events), (
@@ -173,7 +220,12 @@ class TestNetworkConnectionDetection:
             _cleanup(container_name, coi_binary)
 
     def test_suspicious_udp_port_detected(self, coi_binary, tmp_path, _monitoring_enabled):
-        """UDP socket connected to port 4444 triggers network threat."""
+        """UDP socket connected to container's own port 4444 triggers network threat.
+
+        Uses the container's own IP so connect() succeeds immediately (UDP
+        connect just sets the peer address) and the socket is stable in
+        /proc/net/udp for the duration of the test.
+        """
         workspace = str(tmp_path / "workspace")
         os.makedirs(workspace, exist_ok=True)
         container_name = _container_name(workspace)
@@ -190,17 +242,20 @@ class TestNetworkConnectionDetection:
             pytest.skip(f"Container {container_name} not ready")
 
         try:
-            # UDP connect() sets the kernel peer address so the socket appears
-            # in /proc/net/udp with the remote addr set; send() sends a packet
-            # so the entry stays active.
+            container_ip = _get_container_ip(container_name)
+            if not container_ip:
+                pytest.skip(f"Could not get IP for {container_name}")
+
+            # UDP connect() just sets the peer address; no server needed.
+            # The socket appears in /proc/net/udp with remote = container_ip:4444
+            # for the lifetime of the python process.
             udp_cmd = (
                 'python3 -c "'
                 "import socket, time; "
                 "s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); "
-                "s.connect(('8.8.8.8', 4444)); "
+                f"s.connect(('{container_ip}', 4444)); "
                 "s.send(b'x'); "
-                "time.sleep(120)"
-                '"'
+                'time.sleep(120)"'
             )
             subprocess.Popen(
                 ["incus", "exec", container_name, "--", "bash", "-c", udp_cmd],
@@ -212,6 +267,7 @@ class TestNetworkConnectionDetection:
 
             assert len(net_events) > 0, (
                 f"Expected network threat for UDP:4444, got none.\n"
+                f"Container IP: {container_ip}\n"
                 f"All events: {_get_threat_events(container_name)}"
             )
             assert "4444" in json.dumps(net_events), (
@@ -221,7 +277,12 @@ class TestNetworkConnectionDetection:
             _cleanup(container_name, coi_binary)
 
     def test_metadata_endpoint_detected(self, coi_binary, tmp_path, _monitoring_enabled):
-        """TCP SYN to 169.254.169.254 triggers critical network threat."""
+        """TCP SYN to 169.254.169.254 triggers critical network threat.
+
+        Adds a link-local route inside the container so connect_ex() enters
+        SYN_SENT (visible in /proc/net/tcp) instead of failing with
+        EHOSTUNREACH when there is no default route for 169.254.0.0/16.
+        """
         workspace = str(tmp_path / "workspace")
         os.makedirs(workspace, exist_ok=True)
         container_name = _container_name(workspace)
@@ -238,14 +299,34 @@ class TestNetworkConnectionDetection:
             pytest.skip(f"Container {container_name} not ready")
 
         try:
+            # Add a host route for the link-local range so the kernel enters
+            # SYN_SENT instead of returning EHOSTUNREACH immediately.
+            # The route via eth0 is enough; the SYN will be dropped at the
+            # gateway but the socket stays in SYN_SENT long enough to be seen.
+            subprocess.run(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "ip",
+                    "route",
+                    "add",
+                    "169.254.0.0/16",
+                    "dev",
+                    "eth0",
+                ],
+                capture_output=True,
+                timeout=10,
+            )
+
             meta_cmd = (
                 'python3 -c "'
                 "import socket, time; "
                 "s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); "
                 "s.setblocking(False); "
                 "s.connect_ex(('169.254.169.254', 80)); "
-                "time.sleep(120)"
-                '"'
+                'time.sleep(120)"'
             )
             subprocess.Popen(
                 ["incus", "exec", container_name, "--", "bash", "-c", meta_cmd],
