@@ -22,9 +22,7 @@ def test_update_patterns_dry_run_fresh_clone(coi_binary, tmp_path):
         env=env,
     )
 
-    assert result.returncode == 0, (
-        f"Dry-run on fresh HOME should succeed. stderr: {result.stderr}"
-    )
+    assert result.returncode == 0, f"Dry-run on fresh HOME should succeed. stderr: {result.stderr}"
     output = result.stdout
     assert "[dry-run]" in output, f"Expected '[dry-run]' marker. Got:\n{output}"
     # GTFOBins clone
@@ -42,6 +40,4 @@ def test_update_patterns_dry_run_fresh_clone(coi_binary, tmp_path):
     assert not (tmp_path / ".coi" / "gtfobins").exists(), (
         "Dry-run must not create the GTFOBins directory"
     )
-    assert not (tmp_path / ".coi" / "sigma").exists(), (
-        "Dry-run must not create the Sigma directory"
-    )
+    assert not (tmp_path / ".coi" / "sigma").exists(), "Dry-run must not create the Sigma directory"

@@ -19,7 +19,7 @@ def test_update_patterns_dry_run_custom_source_via_config(coi_binary, tmp_path):
     coi_dir.mkdir()
     config_file = coi_dir / "config.toml"
     config_file.write_text(
-        f'[detection]\n'
+        f"[detection]\n"
         f'gtfobins_source = "{custom_gtfobins_url}"\n'
         f'sigma_source = "{custom_sigma_url}"\n'
     )
