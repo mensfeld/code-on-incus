@@ -67,6 +67,18 @@ func parseConnections(ctx context.Context, containerName, containerIP string) ([
 			namespacedOK = true
 		}
 
+		udpConns, err := parseProcNetTCP(fmt.Sprintf("/proc/%d/net/udp", pid), "udp")
+		if err == nil {
+			connections = append(connections, udpConns...)
+			namespacedOK = true
+		}
+
+		udp6Conns, err := parseProcNetTCP(fmt.Sprintf("/proc/%d/net/udp6", pid), "udp6")
+		if err == nil {
+			connections = append(connections, udp6Conns...)
+			namespacedOK = true
+		}
+
 		if namespacedOK {
 			return connections, nil
 		}
@@ -89,6 +101,16 @@ func parseConnections(ctx context.Context, containerName, containerIP string) ([
 	tcp6Conns, err := parseProcNetTCP("/proc/net/tcp6", "tcp6")
 	if err == nil {
 		connections = append(connections, tcp6Conns...)
+	}
+
+	udpConns, err := parseProcNetTCP("/proc/net/udp", "udp")
+	if err == nil {
+		connections = append(connections, udpConns...)
+	}
+
+	udp6Conns, err := parseProcNetTCP("/proc/net/udp6", "udp6")
+	if err == nil {
+		connections = append(connections, udp6Conns...)
 	}
 
 	filtered := make([]Connection, 0, len(connections))
