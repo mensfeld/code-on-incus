@@ -1,6 +1,8 @@
 package monitor
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -143,5 +145,70 @@ func TestEvidenceString_AuthLog(t *testing.T) {
 	s := e.String()
 	if s != "auth:auth.log:ssh_failed_password" {
 		t.Errorf("Evidence.String() = %q, want auth:auth.log:ssh_failed_password", s)
+	}
+}
+
+func TestReadFileChunk_ReadsFromBeginning(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "test.log")
+	content := "line one\nline two\n"
+	if err := os.WriteFile(f, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	data, newOffset, err := readFileChunk(f, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(data) != content {
+		t.Errorf("want %q got %q", content, string(data))
+	}
+	if newOffset != int64(len(content)) {
+		t.Errorf("want offset %d got %d", len(content), newOffset)
+	}
+}
+
+func TestReadFileChunk_RespectsOffset(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "test.log")
+	first := "already read\n"
+	second := "new line\n"
+	if err := os.WriteFile(f, []byte(first+second), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	data, newOffset, err := readFileChunk(f, int64(len(first)))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(data) != second {
+		t.Errorf("want %q got %q", second, string(data))
+	}
+	if newOffset != int64(len(first)+len(second)) {
+		t.Errorf("want offset %d got %d", len(first)+len(second), newOffset)
+	}
+}
+
+func TestReadFileChunk_NoNewContent(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "test.log")
+	content := "existing\n"
+	if err := os.WriteFile(f, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	data, newOffset, err := readFileChunk(f, int64(len(content)))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if data != nil {
+		t.Errorf("want nil data when no new content, got %q", string(data))
+	}
+	if newOffset != int64(len(content)) {
+		t.Errorf("offset should not change, want %d got %d", len(content), newOffset)
+	}
+}
+
+func TestReadFileChunk_FileNotFound(t *testing.T) {
+	_, _, err := readFileChunk("/nonexistent/path/file.log", 0)
+	if err == nil {
+		t.Error("expected error for non-existent file, got nil")
 	}
 }

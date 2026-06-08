@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -81,14 +83,18 @@ var authLogPatterns = []logPattern{
 	},
 }
 
-// LogWatcher tails auth.log and syslog from the container via the Incus file
-// API. Reading is performed through the Incus daemon (which runs as root), so
-// no CAP_SYS_PTRACE is required on the monitoring daemon side. The watcher
-// polls every 5 seconds and processes only lines appended since the last read.
+// LogWatcher tails auth.log and syslog from the container. On each tick it
+// first attempts a host-side read via /proc/<initPID>/root/<rel> (tamper-proof:
+// an attacker inside the container cannot hide lines by manipulating their own
+// /var/log). If that path is unreadable (e.g. the monitor lacks ptrace
+// permission in the container's user-namespace), it falls back to incus file
+// pull via the Incus daemon. Only lines appended since the last poll are
+// processed.
 type LogWatcher struct {
 	containerName string
 	onThreat      func(ThreatEvent)
 	onError       func(error)
+	initPID       int // cached init PID; 0 = not yet resolved
 }
 
 // NewLogWatcher creates a LogWatcher for the named container.
@@ -100,9 +106,7 @@ func NewLogWatcher(containerName string, onThreat func(ThreatEvent), onError fun
 	}
 }
 
-// Run tails log files until ctx is cancelled. It polls every 5 seconds using
-// incus file pull, which reads through the Incus daemon and does not require
-// direct filesystem access to /proc/<pid>/root/.
+// Run tails log files until ctx is cancelled, polling every 5 seconds.
 func (lw *LogWatcher) Run(ctx context.Context) {
 	offsets := make(map[string]int64) // log candidate path → bytes consumed
 
@@ -114,6 +118,13 @@ func (lw *LogWatcher) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			// Lazily resolve and cache the init PID so subsequent polls use a
+			// direct file read without spawning incus info each time.
+			if lw.initPID == 0 {
+				if pid, err := GetContainerInitPID(ctx, lw.containerName); err == nil {
+					lw.initPID = pid
+				}
+			}
 			for _, rel := range logCandidates {
 				lw.pollFile(ctx, rel, offsets)
 			}
@@ -121,36 +132,37 @@ func (lw *LogWatcher) Run(ctx context.Context) {
 	}
 }
 
-// pollFile fetches the named log file from the container via incus file pull,
-// processes lines that have appeared since the last poll, and updates offsets.
+// pollFile reads new lines from rel (relative to container rootfs), processes
+// them, and advances the offset. It tries a direct host-side read first and
+// falls back to incus file pull if that fails.
 func (lw *LogWatcher) pollFile(ctx context.Context, rel string, offsets map[string]int64) {
-	// Pull to a temp file via the Incus daemon (no ptrace needed).
-	tmp, err := os.CreateTemp("", "coi-log-*")
-	if err != nil {
+	var newData []byte
+	hostOK := false
+
+	// Primary path: host-side read via /proc/<initPID>/root/<rel>.
+	if lw.initPID > 0 {
+		hostPath := fmt.Sprintf("/proc/%d/root/%s", lw.initPID, rel)
+		data, newOffset, err := readFileChunk(hostPath, offsets[rel])
+		if err == nil {
+			hostOK = true
+			newData = data
+			offsets[rel] = newOffset
+		}
+	}
+
+	// Fallback: incus file pull via the Incus daemon.
+	if !hostOK {
+		data, newOffset, ok := lw.pullFileChunk(ctx, rel, offsets[rel])
+		if !ok {
+			return
+		}
+		newData = data
+		offsets[rel] = newOffset
+	}
+
+	if len(newData) == 0 {
 		return
 	}
-	tmpPath := tmp.Name()
-	tmp.Close()
-	defer os.Remove(tmpPath)
-
-	// incus file pull <container>/<path> <local-dest>
-	src := lw.containerName + "/" + rel
-	if _, err := container.IncusOutputContext(ctx, "file", "pull", src, tmpPath); err != nil {
-		return // file absent or container not running — benign
-	}
-
-	content, err := os.ReadFile(tmpPath)
-	if err != nil {
-		return
-	}
-
-	offset := offsets[rel]
-	if int64(len(content)) <= offset {
-		return // no new content
-	}
-
-	newData := content[offset:]
-	offsets[rel] = int64(len(content))
 
 	logFile := rel[strings.LastIndex(rel, "/")+1:]
 	reader := bufio.NewReader(bytes.NewReader(newData))
@@ -167,6 +179,64 @@ func (lw *LogWatcher) pollFile(ctx context.Context, rel string, offsets map[stri
 			lw.onThreat(*threat)
 		}
 	}
+}
+
+// readFileChunk opens path, seeks to offset, and reads all bytes appended
+// since that offset. Returns (nil, offset, nil) when the file has not grown.
+func readFileChunk(path string, offset int64) ([]byte, int64, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, offset, err
+	}
+	defer f.Close()
+
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, offset, err
+	}
+	if fi.Size() <= offset {
+		return nil, offset, nil // no new data
+	}
+
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+		return nil, offset, err
+	}
+
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return nil, offset, err
+	}
+
+	return data, offset + int64(len(data)), nil
+}
+
+// pullFileChunk fetches the log file from the container via incus file pull
+// and returns bytes appended since offset. Returns (nil, offset, true) when
+// there is no new content, and (nil, offset, false) on error.
+func (lw *LogWatcher) pullFileChunk(ctx context.Context, rel string, offset int64) ([]byte, int64, bool) {
+	tmp, err := os.CreateTemp("", "coi-log-*")
+	if err != nil {
+		return nil, offset, false
+	}
+	tmpPath := tmp.Name()
+	tmp.Close()
+	defer os.Remove(tmpPath)
+
+	src := lw.containerName + "/" + rel
+	if _, err := container.IncusOutputContext(ctx, "file", "pull", src, tmpPath); err != nil {
+		return nil, offset, false // file absent or container not running — benign
+	}
+
+	content, err := os.ReadFile(tmpPath)
+	if err != nil {
+		return nil, offset, false
+	}
+
+	if int64(len(content)) <= offset {
+		return nil, offset, true // no new content
+	}
+
+	return content[offset:], int64(len(content)), true
 }
 
 // parseAuthLogLine checks a single log line against known auth patterns and
