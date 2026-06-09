@@ -162,6 +162,14 @@ def get_threat_events(container_name):
     return events
 
 
+def _find_container_cgroup_path(container_name: str) -> str | None:
+    """Discover the cgroup v2 path for a container by searching /sys/fs/cgroup."""
+    import glob
+
+    matches = glob.glob(f"/sys/fs/cgroup/**/{container_name}", recursive=True)
+    return next((m for m in matches if os.path.isdir(m)), None)
+
+
 def cleanup_container(name, coi_binary):
     """Force cleanup container."""
     subprocess.run(
@@ -5453,16 +5461,12 @@ class TestCgroupInitPID:
             if not wait_for_container_running(container_name, timeout=30):
                 pytest.skip(f"Container {container_name} not ready")
 
-            candidates = [
-                f"/sys/fs/cgroup/incus.monitor/{container_name}",
-                f"/sys/fs/cgroup/lxc.monitor/{container_name}",
-                f"/sys/fs/cgroup/lxc/{container_name}",
-                f"/sys/fs/cgroup/incus/{container_name}",
-            ]
-            found = next((p for p in candidates if os.path.isdir(p)), None)
-            assert found is not None, (
-                f"No well-known cgroup path found for {container_name}. Checked: {candidates}"
-            )
+            cgroup_path = _find_container_cgroup_path(container_name)
+            if cgroup_path is None:
+                pytest.skip(
+                    f"Container cgroup path not found under /sys/fs/cgroup for {container_name}"
+                )
+            assert os.path.isdir(cgroup_path), f"cgroup path {cgroup_path} is not a directory"
         finally:
             proc.terminate()
             subprocess.run(
@@ -5488,16 +5492,11 @@ class TestCgroupInitPID:
             if not wait_for_container_running(container_name, timeout=30):
                 pytest.skip(f"Container {container_name} not ready")
 
-            # Find cgroup path.
-            candidates = [
-                f"/sys/fs/cgroup/incus.monitor/{container_name}",
-                f"/sys/fs/cgroup/lxc.monitor/{container_name}",
-                f"/sys/fs/cgroup/lxc/{container_name}",
-                f"/sys/fs/cgroup/incus/{container_name}",
-            ]
-            cgroup_path = next((p for p in candidates if os.path.isdir(p)), None)
+            cgroup_path = _find_container_cgroup_path(container_name)
             if cgroup_path is None:
-                pytest.skip(f"No well-known cgroup path found for {container_name}")
+                pytest.skip(
+                    f"Container cgroup path not found under /sys/fs/cgroup for {container_name}"
+                )
 
             # Collect minimum PID from all cgroup.procs files in the tree.
             procs_files = glob.glob(f"{cgroup_path}/**/cgroup.procs", recursive=True)
