@@ -2,6 +2,10 @@
 
 ## 0.9.0 (Unreleased)
 
+### Performance
+
+- **Container init PID resolved host-side via cgroup.procs** — `GetContainerInitPID` now reads the container's init PID directly from `/sys/fs/cgroup/incus.monitor/<name>/cgroup.procs` (walking the full cgroup subtree to handle systemd containers where PID 1 lives in `init.scope`) instead of spawning `incus info` on every poll tick. Because all monitors — network, process, logwatcher, filesystem, health checks — call `GetContainerInitPID` once per poll cycle, this eliminates a subprocess invocation per monitor per tick with no behavioral change. The `incus info` path is retained as a fallback for environments where the well-known cgroup paths are unavailable.
+
 ### Security
 
 - **Sigma `linux/process_creation` rules as a second detection source** — The PROC_EVENTS monitoring daemon now optionally loads community-maintained Sigma rules alongside GTFOBins patterns. Run `coi update sigma` to sparse-clone `SigmaHQ/sigma` (only the `rules/linux/process_creation/` subtree, ~300 KB) to `~/.coi/sigma/`. The daemon reads the rules at startup; if the directory is absent it runs on GTFOBins patterns only. Only `high` and `critical` severity rules are loaded; rules that use `|re` modifiers, aggregation conditions, or unsupported fields are skipped silently. The evaluator supports `|contains`, `|endswith`, `|startswith`, `|contains|all` modifiers and `all of selection_*` / `1 of selection_*` / `selection and not filter` condition forms without any external library dependency. Matching uses the real binary path from `/proc/<pid>/exe` (Image) and the parent binary path from `/proc/<ppid>/exe` (ParentImage) in addition to the existing cmdline field.
