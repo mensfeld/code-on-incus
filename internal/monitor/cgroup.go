@@ -82,7 +82,7 @@ func initPIDFromCgroupProcs(cgroupPath string) (int, error) {
 		if err != nil || d.IsDir() || d.Name() != "cgroup.procs" {
 			return nil
 		}
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(path) //nolint:gosec // path is under /sys/fs/cgroup, a kernel-managed vfs where symlink TOCTOU is not possible
 		if err != nil {
 			return nil
 		}

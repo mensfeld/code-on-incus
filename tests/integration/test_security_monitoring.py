@@ -5429,6 +5429,124 @@ process_spawn_rate_threshold = 9999
         )
 
 
+class TestCgroupInitPID:
+    """Verify that the host-side cgroup.procs init-PID resolution works.
+
+    GetContainerInitPID now reads the minimum PID from cgroup.procs files
+    under the container's well-known cgroup path instead of calling
+    `incus info`. These tests confirm that the cgroup path exists and that
+    the PID found there matches the value reported by `incus info`.
+    """
+
+    def test_cgroup_path_exists_for_running_container(self, test_workspace, coi_binary):
+        """A running container's cgroup directory must exist at a well-known path."""
+        container_name = (
+            get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-90"
+        )
+        proc = subprocess.Popen(
+            [coi_binary, "shell", "--workspace", str(test_workspace), "--slot", "90"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        try:
+            if not wait_for_container_running(container_name, timeout=30):
+                pytest.skip(f"Container {container_name} not ready")
+
+            candidates = [
+                f"/sys/fs/cgroup/incus.monitor/{container_name}",
+                f"/sys/fs/cgroup/lxc.monitor/{container_name}",
+                f"/sys/fs/cgroup/lxc/{container_name}",
+                f"/sys/fs/cgroup/incus/{container_name}",
+            ]
+            found = next((p for p in candidates if os.path.isdir(p)), None)
+            assert found is not None, (
+                f"No well-known cgroup path found for {container_name}. Checked: {candidates}"
+            )
+        finally:
+            proc.terminate()
+            subprocess.run(
+                [coi_binary, "container", "delete", container_name, "--force"],
+                check=False,
+                timeout=30,
+            )
+
+    def test_cgroup_procs_pid_matches_incus_info(self, test_workspace, coi_binary):
+        """The minimum PID in cgroup.procs must match the PID reported by incus info."""
+        import glob
+
+        container_name = (
+            get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-91"
+        )
+        proc = subprocess.Popen(
+            [coi_binary, "shell", "--workspace", str(test_workspace), "--slot", "91"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        try:
+            if not wait_for_container_running(container_name, timeout=30):
+                pytest.skip(f"Container {container_name} not ready")
+
+            # Find cgroup path.
+            candidates = [
+                f"/sys/fs/cgroup/incus.monitor/{container_name}",
+                f"/sys/fs/cgroup/lxc.monitor/{container_name}",
+                f"/sys/fs/cgroup/lxc/{container_name}",
+                f"/sys/fs/cgroup/incus/{container_name}",
+            ]
+            cgroup_path = next((p for p in candidates if os.path.isdir(p)), None)
+            if cgroup_path is None:
+                pytest.skip(f"No well-known cgroup path found for {container_name}")
+
+            # Collect minimum PID from all cgroup.procs files in the tree.
+            procs_files = glob.glob(f"{cgroup_path}/**/cgroup.procs", recursive=True)
+            procs_files.append(f"{cgroup_path}/cgroup.procs")
+            all_pids = []
+            for pf in procs_files:
+                try:
+                    with open(pf) as fh:
+                        for line in fh:
+                            line = line.strip()
+                            if line.isdigit():
+                                all_pids.append(int(line))
+                except OSError:
+                    pass
+            assert all_pids, f"No PIDs found under {cgroup_path}"
+            cgroup_pid = min(all_pids)
+
+            # Get PID from incus info.
+            result = subprocess.run(
+                ["incus", "info", container_name],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            assert result.returncode == 0, f"incus info failed: {result.stderr}"
+            incus_pid = None
+            for line in result.stdout.splitlines():
+                stripped = line.strip()
+                if stripped.startswith("PID:") or stripped.startswith("Pid:"):
+                    parts = stripped.split()
+                    if len(parts) >= 2 and parts[1].isdigit():
+                        incus_pid = int(parts[1])
+                        break
+            assert incus_pid is not None, (
+                f"Could not parse PID from incus info output:\n{result.stdout}"
+            )
+
+            assert cgroup_pid == incus_pid, (
+                f"cgroup.procs min PID {cgroup_pid} != incus info PID {incus_pid}"
+            )
+        finally:
+            proc.terminate()
+            subprocess.run(
+                [coi_binary, "container", "delete", container_name, "--force"],
+                check=False,
+                timeout=30,
+            )
+
+
 # These end-to-end tests verify all monitoring aspects:
 # - Threat detection (reverse shells, env scanning, large file reads, network connections)
 # - Reverse shell patterns (netcat, bash, python, perl, php)

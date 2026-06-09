@@ -156,8 +156,8 @@ jobs:
             description: "Response and threshold tests"
           - name: monitoring-advanced
             path: tests/integration/test_security_monitoring.py
-            pytest_args: "-k 'TestExpandedEnvScanningPatterns or TestProcessHostProcWalk or TestForkBombDetection or TestProcessSpawnRateDetection or TestAuthLogWatcher or TestProcEventWatcher'"
-            description: "Host-side monitoring: env scan, process walk, fork bomb, spawn rate, auth log, proc events"
+            pytest_args: "-k 'TestExpandedEnvScanningPatterns or TestProcessHostProcWalk or TestForkBombDetection or TestProcessSpawnRateDetection or TestAuthLogWatcher or TestProcEventWatcher or TestCgroupInitPID'"
+            description: "Host-side monitoring: env scan, process walk, fork bomb, spawn rate, auth log, proc events, cgroup init PID"
           - name: monitoring-network-detection
             path: tests/integration/test_network_connection_detection.py
             description: "Host-side /proc/<pid>/net TCP/UDP suspicious connection detection"
