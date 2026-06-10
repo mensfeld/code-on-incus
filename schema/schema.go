@@ -11,7 +11,6 @@
 package schema
 
 import (
-	"bytes"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -19,7 +18,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/santhosh-tekuri/jsonschema/v5"
+	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
 //go:embed profile.schema.json
@@ -72,8 +71,13 @@ func ValidateProfileMap(data map[string]any) error {
 			return
 		}
 		compiler := jsonschema.NewCompiler()
-		compiler.Draft = jsonschema.Draft2020
-		if err := compiler.AddResource("profile.schema.json", bytes.NewReader(bundled)); err != nil {
+		compiler.DefaultDraft(jsonschema.Draft2020)
+		var bundledDoc any
+		if err := json.Unmarshal(bundled, &bundledDoc); err != nil {
+			errCompiled = fmt.Errorf("failed to parse bundled schema: %w", err)
+			return
+		}
+		if err := compiler.AddResource("profile.schema.json", bundledDoc); err != nil {
 			errCompiled = fmt.Errorf("failed to register profile schema: %w", err)
 			return
 		}
@@ -117,16 +121,20 @@ func ExtractErrors(err error) []ValidationIssue {
 	if !errors.As(err, &ve) {
 		return []ValidationIssue{{Path: "", Message: err.Error()}}
 	}
-	return flattenVE(ve)
+	return flattenOutputUnit(ve.BasicOutput())
 }
 
-func flattenVE(ve *jsonschema.ValidationError) []ValidationIssue {
-	if len(ve.Causes) == 0 {
-		return []ValidationIssue{{Path: ve.InstanceLocation, Message: ve.Message}}
+func flattenOutputUnit(u *jsonschema.OutputUnit) []ValidationIssue {
+	if len(u.Errors) == 0 {
+		msg := ""
+		if u.Error != nil {
+			msg = u.Error.String()
+		}
+		return []ValidationIssue{{Path: u.InstanceLocation, Message: msg}}
 	}
 	var issues []ValidationIssue
-	for _, c := range ve.Causes {
-		issues = append(issues, flattenVE(c)...)
+	for i := range u.Errors {
+		issues = append(issues, flattenOutputUnit(&u.Errors[i])...)
 	}
 	return issues
 }
