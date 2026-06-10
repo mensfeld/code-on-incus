@@ -42,6 +42,8 @@
 
 ### Improvements
 
+- [Refactor] **Completed nft naming cleanup in `network.Manager`** — The `firewall` private field on `Manager` was missed when `FirewallManager` → `NftManager` was renamed in an earlier refactor. Renamed to `nft` throughout `internal/network/manager.go`; updated matching log messages and comments to use "nft rules" consistently. No behaviour change.
+
 - [Refactor] **Removed dead audit command stub** — `internal/cli/monitor.go` contained a commented-out `monitorAuditCmd` registration and an unused `monitorAuditCommand` function annotated `//nolint:unused`. Both were removed to eliminate dead code. (#428)
 
 - [Feature] **`coi version --format json`** — `coi version` now accepts `--format json`, returning `{"version":"v...","url":"..."}` for scripts and tooling that need to parse the version without regex.

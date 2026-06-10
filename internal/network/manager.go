@@ -35,7 +35,7 @@ config.toml):
 // Manager provides high-level network isolation management for containers
 type Manager struct {
 	config        *config.NetworkConfig
-	firewall      *NftManager
+	nft           *NftManager
 	resolver      *Resolver
 	cacheManager  *CacheManager
 	containerName string
@@ -80,7 +80,7 @@ func (m *Manager) SetupForContainer(ctx context.Context, containerName string) e
 				return nil
 			}
 			m.containerIP = containerIP
-			m.firewall = NewNftManager(containerIP, "")
+			m.nft = NewNftManager(containerIP, "")
 			if err := EnsureOpenModeRules(containerIP); err != nil {
 				m.logger.Errorf("Warning: could not add open mode rules: %v", err)
 			}
@@ -135,20 +135,20 @@ func (m *Manager) setupRestricted(ctx context.Context, containerName string) err
 		m.logger.Printf("Gateway IP: %s", gatewayIP)
 	}
 
-	// Disable IPv6 to prevent bypass of IPv4-only firewall rules
+	// Disable IPv6 to prevent bypass of IPv4-only nft rules
 	if err := DisableIPv6ForContainer(containerName); err != nil {
 		m.logger.Errorf("Warning: failed to disable IPv6: %v", err)
 	}
 
-	// Create firewall manager
-	m.firewall = NewNftManager(containerIP, gatewayIP)
+	// Create nft manager
+	m.nft = NewNftManager(containerIP, gatewayIP)
 
 	// Apply restricted mode rules
-	if err := m.firewall.ApplyRestricted(m.config); err != nil {
-		return fmt.Errorf("failed to apply firewall rules: %w", err)
+	if err := m.nft.ApplyRestricted(m.config); err != nil {
+		return fmt.Errorf("failed to apply nft rules: %w", err)
 	}
 
-	m.logger.Printf("Firewall rules applied for container %s", containerName)
+	m.logger.Printf("nft rules applied for container %s", containerName)
 
 	// Log what is blocked
 	if config.BoolVal(m.config.BlockPrivateNetworks) {
@@ -191,13 +191,13 @@ func (m *Manager) setupAllowlist(ctx context.Context, containerName string) erro
 		m.logger.Printf("Gateway IP: %s", gatewayIP)
 	}
 
-	// Disable IPv6 to prevent bypass of IPv4-only firewall rules
+	// Disable IPv6 to prevent bypass of IPv4-only nft rules
 	if err := DisableIPv6ForContainer(containerName); err != nil {
 		m.logger.Errorf("Warning: failed to disable IPv6: %v", err)
 	}
 
-	// Create firewall manager
-	m.firewall = NewNftManager(containerIP, gatewayIP)
+	// Create nft manager
+	m.nft = NewNftManager(containerIP, gatewayIP)
 
 	// Load IP cache
 	cache, err := m.cacheManager.Load(containerName)
@@ -237,11 +237,11 @@ func (m *Manager) setupAllowlist(ctx context.Context, containerName string) erro
 	allowedIPs := collectUniqueIPs(domainIPs)
 
 	// Apply allowlist mode rules
-	if err := m.firewall.ApplyAllowlist(m.config, allowedIPs); err != nil {
-		return fmt.Errorf("failed to apply firewall rules: %w", err)
+	if err := m.nft.ApplyAllowlist(m.config, allowedIPs); err != nil {
+		return fmt.Errorf("failed to apply nft rules: %w", err)
 	}
 
-	m.logger.Printf("Firewall rules applied for container %s", containerName)
+	m.logger.Printf("nft rules applied for container %s", containerName)
 	m.logger.Println("  Allowing only specified domains")
 	m.logger.Println("  Blocking all RFC1918 private networks")
 	m.logger.Println("  Blocking cloud metadata endpoints")
@@ -338,7 +338,7 @@ func (m *Manager) stopRefresher() {
 	}
 }
 
-// refreshAllowedIPs refreshes domain IPs and updates firewall rules if changed.
+// refreshAllowedIPs refreshes domain IPs and updates nft rules if changed.
 // Returns the minimum TTL from the new resolution for rescheduling.
 func (m *Manager) refreshAllowedIPs() (uint32, error) {
 	// Resolve all domains again
@@ -355,22 +355,22 @@ func (m *Manager) refreshAllowedIPs() (uint32, error) {
 		return newMinTTL, nil
 	}
 
-	// Update firewall rules with new IPs
+	// Update nft rules with new IPs
 	totalIPs := countIPs(newIPs)
-	m.logger.Printf("IP refresh: updating firewall with %d IPs", totalIPs)
+	m.logger.Printf("IP refresh: updating nft rules with %d IPs", totalIPs)
 
 	// Apply new rules BEFORE removing old ones to avoid a gap where no rules exist.
 	// nft add rule is idempotent by handle; applying new rules before removing old avoids gaps.
 	allowedIPs := collectUniqueIPs(newIPs)
-	if err := m.firewall.ApplyAllowlist(m.config, allowedIPs); err != nil {
-		return newMinTTL, fmt.Errorf("failed to update firewall rules: %w", err)
+	if err := m.nft.ApplyAllowlist(m.config, allowedIPs); err != nil {
+		return newMinTTL, fmt.Errorf("failed to update nft rules: %w", err)
 	}
 
 	// Now remove all rules (including stale ones) and reapply to clean up
-	if err := m.firewall.RemoveRules(); err != nil {
+	if err := m.nft.RemoveRules(); err != nil {
 		m.logger.Errorf("Warning: failed to remove old rules: %v", err)
 	}
-	if err := m.firewall.ApplyAllowlist(m.config, allowedIPs); err != nil {
+	if err := m.nft.ApplyAllowlist(m.config, allowedIPs); err != nil {
 		m.logger.Errorf("Warning: failed to reapply rules after cleanup: %v", err)
 	}
 
@@ -380,7 +380,7 @@ func (m *Manager) refreshAllowedIPs() (uint32, error) {
 		m.logger.Errorf("Warning: Failed to save cache: %v", err)
 	}
 
-	m.logger.Printf("IP refresh: successfully updated firewall rules")
+	m.logger.Printf("IP refresh: successfully updated nft rules")
 	return newMinTTL, nil
 }
 
@@ -447,18 +447,18 @@ func (m *Manager) Teardown(ctx context.Context, containerName string) error {
 			m.containerIP = containerIP
 		}
 
-		// Create firewall manager if not already created
-		if m.firewall == nil {
-			m.firewall = NewNftManager(m.containerIP, "")
+		// Create nft manager if not already created
+		if m.nft == nil {
+			m.nft = NewNftManager(m.containerIP, "")
 		}
 	}
 
-	// Remove firewall rules for ALL modes
-	if m.firewall != nil {
-		if err := m.firewall.RemoveRules(); err != nil {
-			m.logger.Errorf("Warning: failed to remove firewall rules: %v", err)
+	// Remove nft rules for ALL modes
+	if m.nft != nil {
+		if err := m.nft.RemoveRules(); err != nil {
+			m.logger.Errorf("Warning: failed to remove nft rules: %v", err)
 		} else {
-			m.logger.Printf("Firewall rules removed for container %s", containerName)
+			m.logger.Printf("nft rules removed for container %s", containerName)
 		}
 	}
 
