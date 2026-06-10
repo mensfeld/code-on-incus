@@ -514,6 +514,14 @@ jobs:
           path: /tmp/coi-image.tar.gz
           key: ${{ runner.os }}-coi-image-${{ hashFiles('internal/image/**', 'testdata/dummy/**', 'profiles/default/**') }}
 
+      - name: Free disk space for image-intensive tests
+        if: matrix.test_group.name == 'core-build'
+        run: |
+          # core-build publishes many full images; free up space to avoid "no space left on device"
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/hostedtoolcache/CodeQL
+          sudo apt-get clean
+          df -h
+
       - name: Debug iptables/nft state before tests
         run: |
           echo "=== FORWARD chain policy and rules ==="
