@@ -8,14 +8,16 @@ import (
 
 // Daemon runs the monitoring loop in the background
 type Daemon struct {
-	ctx       context.Context
-	cancel    context.CancelFunc
-	config    DaemonConfig
-	collector *Collector
-	detector  *Detector
-	responder *Responder
-	auditLog  *AuditLog
-	done      chan struct{}
+	ctx          context.Context
+	cancel       context.CancelFunc
+	config       DaemonConfig
+	collector    *Collector
+	detector     *Detector
+	responder    *Responder
+	auditLog     *AuditLog
+	logThreatCh  chan ThreatEvent
+	procThreatCh chan ThreatEvent
+	done         chan struct{}
 }
 
 // StartDaemon creates and starts a monitoring daemon
@@ -31,7 +33,9 @@ func StartDaemon(ctx context.Context, cfg DaemonConfig) (*Daemon, error) {
 
 	// Create components
 	collector := NewCollector(cfg.ContainerName, "", cfg.WorkspacePath, cfg.AllowedCIDRs)
-	detector := NewDetector(cfg.FileReadThresholdMB, cfg.FileReadRateMBPerSec)
+	detector := NewDetector(cfg.FileReadThresholdMB, cfg.FileReadRateMBPerSec).
+		WithProcessCountThreshold(cfg.ProcessCountThreshold).
+		WithProcessSpawnRateThreshold(cfg.ProcessSpawnRateThreshold)
 	responder := NewResponder(cfg.ContainerName, cfg.AutoPauseOnHigh, cfg.AutoKillOnCritical,
 		auditLog, cfg.OnThreat)
 
@@ -40,16 +44,37 @@ func StartDaemon(ctx context.Context, cfg DaemonConfig) (*Daemon, error) {
 		responder.SetOnAction(cfg.OnAction)
 	}
 
+	logThreatCh := make(chan ThreatEvent, 32)
+	logWatcher := NewLogWatcher(cfg.ContainerName, func(t ThreatEvent) {
+		select {
+		case logThreatCh <- t:
+		default: // drop if buffer full rather than blocking
+		}
+	}, cfg.OnError)
+
+	procThreatCh := make(chan ThreatEvent, 32)
+	procWatcher := NewProcEventWatcher(cfg.ContainerName, func(t ThreatEvent) {
+		select {
+		case procThreatCh <- t:
+		default: // drop if buffer full rather than blocking
+		}
+	}, cfg.OnError, cfg.GTFOBinsDir, cfg.SigmaDir)
+
 	daemon := &Daemon{
-		ctx:       daemonCtx,
-		cancel:    cancel,
-		config:    cfg,
-		collector: collector,
-		detector:  detector,
-		responder: responder,
-		auditLog:  auditLog,
-		done:      make(chan struct{}),
+		ctx:          daemonCtx,
+		cancel:       cancel,
+		config:       cfg,
+		collector:    collector,
+		detector:     detector,
+		responder:    responder,
+		auditLog:     auditLog,
+		logThreatCh:  logThreatCh,
+		procThreatCh: procThreatCh,
+		done:         make(chan struct{}),
 	}
+
+	go logWatcher.Run(daemonCtx)
+	go procWatcher.Run(daemonCtx)
 
 	// Start monitoring loop in background
 	go daemon.run()
@@ -77,6 +102,13 @@ func (d *Daemon) run() {
 				continue
 			}
 
+			// Surface any per-source collection errors so they appear in logs.
+			for _, collErr := range snapshot.Errors {
+				if d.config.OnError != nil {
+					d.config.OnError(fmt.Errorf("collection: %s", collErr))
+				}
+			}
+
 			// Detect threats
 			threats := d.detector.Analyze(snapshot)
 			snapshot.Threats = threats
@@ -99,6 +131,20 @@ func (d *Daemon) run() {
 				// If container was killed, stop monitoring
 				if threat.Action == "killed" {
 					return
+				}
+			}
+
+		case threat := <-d.logThreatCh:
+			if err := d.responder.Handle(d.ctx, threat); err != nil {
+				if d.config.OnError != nil {
+					d.config.OnError(fmt.Errorf("log threat response: %w", err))
+				}
+			}
+
+		case threat := <-d.procThreatCh:
+			if err := d.responder.Handle(d.ctx, threat); err != nil {
+				if d.config.OnError != nil {
+					d.config.OnError(fmt.Errorf("proc event threat response: %w", err))
 				}
 			}
 

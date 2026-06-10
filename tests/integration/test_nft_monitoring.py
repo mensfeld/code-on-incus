@@ -238,7 +238,10 @@ class TestNFTRuleManagement:
             assert nft_ready, f"NFT monitoring rules not found for IP {container_ip}"
         finally:
             proc.terminate()
-            proc.wait(timeout=10)
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
             cleanup_container(container_name, coi_binary, env=coi_monitoring_env)
 
     def test_rules_removed_on_session_end(self, test_workspace, coi_binary, coi_monitoring_env):
@@ -281,7 +284,10 @@ class TestNFTRuleManagement:
 
             # Stop session
             proc.terminate()
-            proc.wait(timeout=10)
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
             time.sleep(3)
 
             # Check rules are gone
@@ -329,33 +335,45 @@ class TestNFTRuleManagement:
             if not container_ip:
                 pytest.skip("Container has no IP address")
 
-            # Wait for NFT rules to be created (monitoring daemon may take time to set up)
+            # Wait until BOTH NFT_COI and NFT_SUSPICIOUS rules are present in the
+            # same ruleset snapshot. Using a single snapshot eliminates the race where
+            # check_nft_rules_exist() returns True on the first rule to appear (OR
+            # condition), we break, then the second nft list call sees only one rule.
+            ruleset = ""
             nft_ready = False
-            for _ in range(15):
-                if check_nft_rules_exist(container_ip):
-                    nft_ready = True
-                    break
+            for _ in range(20):
+                result = subprocess.run(
+                    ["sudo", "-n", "nft", "list", "ruleset"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                if result.returncode == 0:
+                    ruleset = result.stdout
+                    if (
+                        f"NFT_COI[{container_ip}]" in ruleset
+                        and f"NFT_SUSPICIOUS[{container_ip}]" in ruleset
+                    ):
+                        nft_ready = True
+                        break
                 time.sleep(1)
 
             if not nft_ready:
-                pytest.skip("NFT rules not created - monitoring may not be properly initialized")
-
-            # Get ruleset
-            result = subprocess.run(
-                ["sudo", "-n", "nft", "list", "ruleset"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
+                pytest.skip(
+                    "NFT rules not fully created - monitoring may not be properly initialized"
+                )
 
             # Should have general and suspicious rules (DNS is optional config)
-            assert "NFT_COI[" in result.stdout, "General traffic rule not found"
-            assert "NFT_SUSPICIOUS[" in result.stdout, "Suspicious traffic rule not found"
+            assert f"NFT_COI[{container_ip}]" in ruleset, "General traffic rule not found"
+            assert f"NFT_SUSPICIOUS[{container_ip}]" in ruleset, "Suspicious traffic rule not found"
             # NFT_DNS is optional (depends on log_dns_queries config)
 
         finally:
             proc.terminate()
-            proc.wait(timeout=10)
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
             cleanup_container(container_name, coi_binary, env=coi_monitoring_env)
 
 
@@ -442,7 +460,10 @@ class TestNetworkThreatDetection:
 
         finally:
             proc.terminate()
-            proc.wait(timeout=10)
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
             cleanup_container(container_name, coi_binary, env=coi_monitoring_env)
 
     def test_container_killed_on_metadata_access(
@@ -577,7 +598,10 @@ class TestNetworkThreatDetection:
 
         finally:
             proc.terminate()
-            proc.wait(timeout=10)
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
             cleanup_container(container_name, coi_binary, env=coi_monitoring_env)
 
 
@@ -663,7 +687,10 @@ class TestAuditLogging:
 
             finally:
                 proc.terminate()
-                proc.wait(timeout=10)
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
                 cleanup_container(container_name, coi_binary, env=coi_monitoring_env)
 
 
@@ -715,7 +742,10 @@ class TestDaemonLifecycle:
 
             finally:
                 proc.terminate()
-                proc.wait(timeout=10)
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
                 cleanup_container(container_name, coi_binary, env=coi_monitoring_env)
                 stderr_file.unlink(missing_ok=True)
 

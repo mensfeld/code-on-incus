@@ -10,9 +10,14 @@ import (
 	"strings"
 )
 
-// CollectNetworkStats collects network statistics and flags suspicious connections
-func CollectNetworkStats(ctx context.Context, containerIP string, allowedCIDRs []string) (NetworkStats, error) {
-	connections, err := parseConnections(containerIP)
+// CollectNetworkStats collects network statistics and flags suspicious connections.
+// It attempts to read /proc/<container-init-pid>/net/tcp[6] from the host so the
+// data is scoped to the container's network namespace. If PID resolution or the
+// namespaced reads fail, it falls back to host /proc/net/tcp[6] filtered by
+// containerIP (best-effort; requires a non-empty containerIP to avoid returning
+// all host connections).
+func CollectNetworkStats(ctx context.Context, containerName, containerIP string, allowedCIDRs []string) (NetworkStats, error) {
+	connections, err := parseConnections(ctx, containerName, containerIP)
 	if err != nil {
 		return NetworkStats{}, err
 	}
@@ -35,34 +40,86 @@ func CollectNetworkStats(ctx context.Context, containerIP string, allowedCIDRs [
 	}, nil
 }
 
-// parseConnections reads /proc/net/tcp and /proc/net/tcp6
-func parseConnections(containerIP string) ([]Connection, error) {
+// parseConnections reads the container's /proc/net/tcp[6] via the host-side
+// namespaced path /proc/<container-init-pid>/net/tcp[6]. Falls back to the
+// host's /proc/net/tcp + containerIP filter when PID resolution fails or when
+// the namespaced paths cannot be read.
+func parseConnections(ctx context.Context, containerName, containerIP string) ([]Connection, error) {
+	pid, pidErr := GetContainerInitPID(ctx, containerName)
+	if pidErr != nil && ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
+	if pid > 0 {
+		// Prefer namespaced paths scoped to the container's network namespace.
+		var connections []Connection
+		namespacedOK := false
+
+		tcp4Conns, err := parseProcNetTCP(fmt.Sprintf("/proc/%d/net/tcp", pid), "tcp")
+		if err == nil {
+			connections = append(connections, tcp4Conns...)
+			namespacedOK = true
+		}
+
+		tcp6Conns, err := parseProcNetTCP(fmt.Sprintf("/proc/%d/net/tcp6", pid), "tcp6")
+		if err == nil {
+			connections = append(connections, tcp6Conns...)
+			namespacedOK = true
+		}
+
+		udpConns, err := parseProcNetTCP(fmt.Sprintf("/proc/%d/net/udp", pid), "udp")
+		if err == nil {
+			connections = append(connections, udpConns...)
+			namespacedOK = true
+		}
+
+		udp6Conns, err := parseProcNetTCP(fmt.Sprintf("/proc/%d/net/udp6", pid), "udp6")
+		if err == nil {
+			connections = append(connections, udp6Conns...)
+			namespacedOK = true
+		}
+
+		if namespacedOK {
+			return connections, nil
+		}
+		// Namespaced paths unreadable — fall through to host fallback below.
+	}
+
+	// Fallback: host /proc/net/tcp[6] filtered by containerIP.
+	// Require containerIP to avoid returning all host connections.
+	if containerIP == "" {
+		return nil, nil
+	}
+
 	var connections []Connection
 
-	// Parse IPv4 connections
 	tcp4Conns, err := parseProcNetTCP("/proc/net/tcp", "tcp")
 	if err == nil {
 		connections = append(connections, tcp4Conns...)
 	}
 
-	// Parse IPv6 connections
 	tcp6Conns, err := parseProcNetTCP("/proc/net/tcp6", "tcp6")
 	if err == nil {
 		connections = append(connections, tcp6Conns...)
 	}
 
-	// Filter to only connections from this container
-	if containerIP != "" {
-		filtered := make([]Connection, 0)
-		for _, conn := range connections {
-			if strings.HasPrefix(conn.LocalAddr, containerIP+":") {
-				filtered = append(filtered, conn)
-			}
-		}
-		connections = filtered
+	udpConns, err := parseProcNetTCP("/proc/net/udp", "udp")
+	if err == nil {
+		connections = append(connections, udpConns...)
 	}
 
-	return connections, nil
+	udp6Conns, err := parseProcNetTCP("/proc/net/udp6", "udp6")
+	if err == nil {
+		connections = append(connections, udp6Conns...)
+	}
+
+	filtered := make([]Connection, 0, len(connections))
+	for _, conn := range connections {
+		if strings.HasPrefix(conn.LocalAddr, containerIP+":") {
+			filtered = append(filtered, conn)
+		}
+	}
+	return filtered, nil
 }
 
 // parseProcNetTCP parses /proc/net/tcp or /proc/net/tcp6

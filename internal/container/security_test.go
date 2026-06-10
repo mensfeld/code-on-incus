@@ -34,6 +34,43 @@ func TestContainsPrivilegedValue(t *testing.T) {
 	}
 }
 
+// TestIsolateUIDNamespace verifies that IsolateUIDNamespace sets
+// security.idmap.isolated=true on a real Incus container.
+// Skipped when Incus prerequisites are unavailable.
+func TestIsolateUIDNamespace(t *testing.T) {
+	if _, err := exec.LookPath("incus"); err != nil {
+		t.Skip("incus not found in PATH, skipping integration test")
+	}
+	if !Available() {
+		t.Skip("Incus daemon not available, skipping integration test")
+	}
+	exists, err := ImageExists("coi-default")
+	if err != nil || !exists {
+		t.Skip("Incus image alias \"coi-default\" not available, skipping integration test")
+	}
+
+	name := fmt.Sprintf("coi-test-idmap-%d", time.Now().UnixNano())
+
+	if err := IncusExec("init", "coi-default", name); err != nil {
+		t.Fatalf("could not init test container %q: %v", name, err)
+	}
+	defer func() {
+		_ = IncusExecQuiet("delete", name, "--force")
+	}()
+
+	if err := IsolateUIDNamespace(name); err != nil {
+		t.Fatalf("IsolateUIDNamespace() returned error: %v", err)
+	}
+
+	output, err := IncusOutput("config", "get", name, "security.idmap.isolated")
+	if err != nil {
+		t.Fatalf("failed to read security.idmap.isolated: %v", err)
+	}
+	if output != "true" {
+		t.Errorf("security.idmap.isolated = %q, want %q", output, "true")
+	}
+}
+
 // TestDisableGuestAPI verifies that DisableGuestAPI sets security.guestapi=false
 // on a real Incus container. Skipped when Incus prerequisites are unavailable.
 func TestDisableGuestAPI(t *testing.T) {

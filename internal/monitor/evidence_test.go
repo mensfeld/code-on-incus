@@ -51,6 +51,22 @@ func TestEvidenceString_DiskSpace(t *testing.T) {
 	}
 }
 
+func TestEvidenceString_ProcessCountAbsolute(t *testing.T) {
+	e := Evidence{ProcessCount: &ProcessCountThreat{Count: 150, Threshold: 100}}
+	s := e.String()
+	if s != "procs:150" {
+		t.Errorf("Evidence.String() = %q, want procs:150", s)
+	}
+}
+
+func TestEvidenceString_ProcessCountDelta(t *testing.T) {
+	e := Evidence{ProcessCount: &ProcessCountThreat{Count: 80, Threshold: 50, Delta: 60}}
+	s := e.String()
+	if s != "spawn-delta:60" {
+		t.Errorf("Evidence.String() = %q, want spawn-delta:60", s)
+	}
+}
+
 func TestEvidenceString_Empty(t *testing.T) {
 	e := Evidence{}
 	if s := e.String(); s != "" {

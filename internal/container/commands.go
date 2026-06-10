@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -230,34 +231,100 @@ func IncusFilePush(source, destination string) error {
 	return IncusFilePushContext(context.Background(), source, destination)
 }
 
+// StartWithIsolationFallback starts a non-ephemeral container that has
+// security.idmap.isolated set, with automatic fallback if the host doesn't
+// support it. Intended for non-ephemeral containers (setup.go path) — stopped
+// containers are not deleted, so a simple unset+retry is sufficient.
+//
+// On some hosts (nested containers, CI runners), forkstart exits non-zero even
+// though the LXC process started successfully. We poll ContainerRunning for up
+// to 5 s before deciding the container failed to start.
+func StartWithIsolationFallback(containerName string) error {
+	if err := IncusExec("start", containerName); err == nil {
+		return nil
+	}
+	// Poll: maybe it came up despite the forkstart error (soft error on some hosts).
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		time.Sleep(500 * time.Millisecond)
+		if running, _ := ContainerRunning(containerName); running {
+			return nil
+		}
+	}
+	// Container didn't come up; unset isolation and retry.
+	fmt.Fprintf(os.Stderr, "Warning: UID namespace isolation not available in this environment, disabling and retrying\n")
+	_ = IncusExecQuiet("config", "unset", containerName, "security.idmap.isolated")
+	if retryErr := IncusExec("start", containerName); retryErr != nil {
+		if running, _ := ContainerRunning(containerName); running {
+			return nil
+		}
+		return retryErr
+	}
+	return nil
+}
+
+func startWithIsolationFallback(containerName string) error {
+	return StartWithIsolationFallback(containerName)
+}
+
 // LaunchContainer launches an ephemeral container on the given storage pool.
 // An empty pool means "use Incus's default pool".
 // Uses init+configure+start (not launch) so security flags are set before first boot.
 func LaunchContainer(imageAlias, containerName, pool string) error {
-	args := []string{"init", imageAlias, containerName, "--ephemeral"}
-	if pool != "" {
-		args = append(args, "-s", pool)
-	}
-	if err := IncusExec(args...); err != nil {
+	if err := initAndConfigureContainer(imageAlias, containerName, pool, true); err != nil {
 		return err
 	}
-	if err := EnableDockerSupport(containerName); err != nil {
-		return err
+	// Non-fatal: unset and retry at start time if the environment lacks subuid space.
+	_ = IsolateUIDNamespace(containerName)
+	if err := IncusExec("start", containerName); err == nil {
+		return nil
 	}
-	if err := DisableGuestAPI(containerName); err != nil {
-		return err
+	// Start failed. Poll briefly to distinguish a soft forkstart error (container
+	// comes up anyway) from Incus async cleanup (ephemeral container gets deleted).
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		time.Sleep(500 * time.Millisecond)
+		if running, _ := ContainerRunning(containerName); running {
+			return nil // soft forkstart error; container is up
+		}
+		// Check for deletion: stopped ephemeral containers are deleted by Incus.
+		out, err := IncusOutput("list", "^"+containerName+"$", "--format=csv", "--columns=n")
+		if err == nil && strings.TrimSpace(out) == "" {
+			// Recreate without isolation and start fresh.
+			fmt.Fprintf(os.Stderr, "Warning: UID namespace isolation not supported in this environment\n")
+			return initConfigureAndStart(imageAlias, containerName, pool, true)
+		}
 	}
-	if err := CheckNotPrivileged(containerName); err != nil {
-		return err
+	// Container exists but didn't start; unset isolation and retry.
+	fmt.Fprintf(os.Stderr, "Warning: UID namespace isolation not supported in this environment, retrying\n")
+	_ = IncusExecQuiet("config", "unset", containerName, "security.idmap.isolated")
+	if retryErr := IncusExec("start", containerName); retryErr != nil {
+		if running, _ := ContainerRunning(containerName); running {
+			return nil
+		}
+		return retryErr
 	}
-	return IncusExec("start", containerName)
+	return nil
 }
 
 // LaunchContainerPersistent launches a non-ephemeral container on the given
 // storage pool. An empty pool means "use Incus's default pool".
 // Uses init+configure+start (not launch) so security flags are set before first boot.
 func LaunchContainerPersistent(imageAlias, containerName, pool string) error {
+	if err := initAndConfigureContainer(imageAlias, containerName, pool, false); err != nil {
+		return err
+	}
+	// Non-fatal: unset and retry at start time if the environment lacks subuid space.
+	_ = IsolateUIDNamespace(containerName)
+	return startWithIsolationFallback(containerName)
+}
+
+// initAndConfigureContainer creates a container and applies the required config flags.
+func initAndConfigureContainer(imageAlias, containerName, pool string, ephemeral bool) error {
 	args := []string{"init", imageAlias, containerName}
+	if ephemeral {
+		args = append(args, "--ephemeral")
+	}
 	if pool != "" {
 		args = append(args, "-s", pool)
 	}
@@ -270,7 +337,13 @@ func LaunchContainerPersistent(imageAlias, containerName, pool string) error {
 	if err := DisableGuestAPI(containerName); err != nil {
 		return err
 	}
-	if err := CheckNotPrivileged(containerName); err != nil {
+	return CheckNotPrivileged(containerName)
+}
+
+// initConfigureAndStart creates, configures, and starts a container without
+// security.idmap.isolated — used as the isolation-unsupported fallback path.
+func initConfigureAndStart(imageAlias, containerName, pool string, ephemeral bool) error {
+	if err := initAndConfigureContainer(imageAlias, containerName, pool, ephemeral); err != nil {
 		return err
 	}
 	return IncusExec("start", containerName)
@@ -326,6 +399,17 @@ func EnableDockerSupport(containerName string) error {
 // admin socket and does not need the guest API.
 func DisableGuestAPI(containerName string) error {
 	return IncusExec("config", "set", containerName, "security.guestapi=false")
+}
+
+// IsolateUIDNamespace enables UID/GID namespace isolation for the container.
+// When multiple containers run simultaneously, each gets a unique, non-overlapping
+// slice of the host UID/GID space. Without this flag all unprivileged containers
+// share the same host-side UID range (typically 100000–165535), so a file
+// written by one container as host UID 100000 is readable by another container
+// whose UID 0 maps to the same host UID. This must be set before the container
+// starts — changing it on a running container has no effect.
+func IsolateUIDNamespace(containerName string) error {
+	return IncusExec("config", "set", containerName, "security.idmap.isolated=true")
 }
 
 // StopContainer stops a container
@@ -521,6 +605,49 @@ func shellQuote(s string) string {
 	// Otherwise, single-quote and escape any single quotes
 	escaped := strings.ReplaceAll(s, "'", "'\"'\"'")
 	return "'" + escaped + "'"
+}
+
+// ConfigSet sets a configuration key on a container.
+func ConfigSet(ctx context.Context, containerName, key, value string) error {
+	return IncusExecContext(ctx, "config", "set", containerName, key+"="+value)
+}
+
+// ConfigUnset removes a configuration key from a container.
+// Returns the combined stdout+stderr output (useful for error inspection) and any error.
+func ConfigUnset(ctx context.Context, containerName, key string) (string, error) {
+	return IncusOutputWithStderrContext(ctx, "config", "unset", containerName, key)
+}
+
+// ConfigShow returns the container's YAML configuration.
+// If expanded is true, profile-inherited devices and config are included.
+func ConfigShow(ctx context.Context, containerName string, expanded bool) (string, error) {
+	args := []string{"config", "show"}
+	if expanded {
+		args = append(args, "--expanded")
+	}
+	args = append(args, containerName)
+	return IncusOutputContext(ctx, args...)
+}
+
+// DeviceAdd adds a device to a container.
+// Returns the combined stdout+stderr output and a nil error.
+// If the device already exists, a nil error is returned (idempotent).
+func DeviceAdd(ctx context.Context, containerName string, deviceArgs ...string) (string, error) {
+	args := append([]string{"config", "device", "add", containerName}, deviceArgs...)
+	out, err := IncusOutputWithStderrContext(ctx, args...)
+	if err != nil {
+		var exitErr *ExitError
+		if errors.As(err, &exitErr) && strings.Contains(strings.ToLower(out), "already") {
+			return out, nil
+		}
+	}
+	return out, err
+}
+
+// DeviceSet sets a device-level configuration key on a container.
+// Returns the combined stdout+stderr output (useful for error inspection) and any error.
+func DeviceSet(ctx context.Context, containerName, device, keyValue string) (string, error) {
+	return IncusOutputWithStderrContext(ctx, "config", "device", "set", containerName, device, keyValue)
 }
 
 // SnapshotCreate creates a snapshot of a container

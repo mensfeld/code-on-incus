@@ -1,6 +1,7 @@
 package limits
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -9,7 +10,7 @@ import (
 
 // TestStopGracefulTrue verifies that StopGraceful=true maps to force=false
 func TestStopGracefulTrue(t *testing.T) {
-	tm := NewTimeoutMonitor("test-container", 50*time.Millisecond, true, true, "", logger.NewDiscard())
+	tm := NewTimeoutMonitor(context.Background(), "test-container", 50*time.Millisecond, true, true, "", logger.NewDiscard())
 
 	if tm.StopGraceful != true {
 		t.Errorf("expected StopGraceful=true, got %v", tm.StopGraceful)
@@ -25,7 +26,7 @@ func TestStopGracefulTrue(t *testing.T) {
 
 // TestStopGracefulFalse verifies that StopGraceful=false calls Stop(true) (force)
 func TestStopGracefulFalse(t *testing.T) {
-	tm := NewTimeoutMonitor("test-container", 50*time.Millisecond, true, false, "", logger.NewDiscard())
+	tm := NewTimeoutMonitor(context.Background(), "test-container", 50*time.Millisecond, true, false, "", logger.NewDiscard())
 
 	if tm.StopGraceful != false {
 		t.Errorf("expected StopGraceful=false, got %v", tm.StopGraceful)
@@ -59,7 +60,7 @@ func TestHandleTimeoutStopType(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tm := NewTimeoutMonitor("test-container", time.Hour, true, tt.stopGraceful, "", logger.NewDiscard())
+			tm := NewTimeoutMonitor(context.Background(), "test-container", time.Hour, true, tt.stopGraceful, "", logger.NewDiscard())
 
 			stopType := "gracefully"
 			if !tm.StopGraceful {
@@ -74,7 +75,7 @@ func TestHandleTimeoutStopType(t *testing.T) {
 
 // TestTimeoutMonitorNoLimit verifies that MaxDuration=0 means no monitoring
 func TestTimeoutMonitorNoLimit(t *testing.T) {
-	tm := NewTimeoutMonitor("test-container", 0, true, true, "", logger.NewDiscard())
+	tm := NewTimeoutMonitor(context.Background(), "test-container", 0, true, true, "", logger.NewDiscard())
 	tm.Start()
 
 	// Should complete immediately
@@ -88,7 +89,7 @@ func TestTimeoutMonitorNoLimit(t *testing.T) {
 
 // TestTimeoutMonitorCancel verifies that Stop() cancels the monitor
 func TestTimeoutMonitorCancel(t *testing.T) {
-	tm := NewTimeoutMonitor("test-container", time.Hour, true, true, "", logger.NewDiscard())
+	tm := NewTimeoutMonitor(context.Background(), "test-container", time.Hour, true, true, "", logger.NewDiscard())
 	tm.Start()
 
 	// Cancel immediately

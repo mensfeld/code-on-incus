@@ -11,19 +11,26 @@ import (
 // Version is the current version of coi (injected via ldflags at build time)
 var Version = "dev"
 
-var (
-	// Global flags
+// App holds the shared CLI state that is populated from persistent flags and
+// config loading in PersistentPreRunE. Grouping this in a struct rather than
+// package-level vars makes it easier to construct an isolated instance in
+// tests and clears the path toward a multi-session daemon model.
+type App struct {
 	workspace       string
 	slot            int
 	imageName       string
 	persistent      bool
 	resume          string
-	continueSession string // Alias for resume
+	continueSession string
 	profile         string
+	cfg             *config.Config
+}
 
-	// Loaded config
-	cfg *config.Config
-)
+// app is the singleton used by the cobra command tree. Execute() resets it to
+// a zero value on each call so tests that invoke Execute() multiple times
+// start with clean state (cobra re-parses flags, PersistentPreRunE reloads
+// the config).
+var app = &App{}
 
 // rootCmd represents the base command
 var rootCmd = &cobra.Command{
@@ -51,29 +58,29 @@ Examples:
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		// Load config
 		var err error
-		cfg, err = config.Load()
+		app.cfg, err = config.Load()
 		if err != nil {
 			// Allow health command to run with defaults even if config is broken
 			if cmd.Name() == "health" {
-				cfg = config.GetDefaultConfig()
+				app.cfg = config.GetDefaultConfig()
 			} else {
 				return fmt.Errorf("failed to load config: %w", err)
 			}
 		}
 
 		// Apply profile if specified
-		if profile != "" {
-			if err := cfg.ApplyProfile(profile); err != nil {
+		if app.profile != "" {
+			if err := app.cfg.ApplyProfile(app.profile); err != nil {
 				return err
 			}
 		}
 
 		// Apply Incus configuration from config file
-		container.Configure(cfg.Incus.Project, cfg.Incus.CodeUser, cfg.Incus.CodeUID)
+		container.Configure(app.cfg.Incus.Project, app.cfg.Incus.CodeUser, app.cfg.Incus.CodeUID)
 
 		// Apply config defaults to flags that weren't explicitly set
 		if !cmd.Flags().Changed("persistent") {
-			persistent = config.BoolVal(cfg.Container.Persistent)
+			app.persistent = config.BoolVal(app.cfg.Container.Persistent)
 		}
 
 		// Silence usage output for RunE errors. Setting this here (in
@@ -88,6 +95,11 @@ Examples:
 
 // Execute runs the root command
 func Execute(isCoi bool) error {
+	// Reset app state so that repeated calls (e.g. in tests) start clean.
+	// Cobra re-parses flags on every Execute, so flag-bound fields are
+	// repopulated correctly from the fresh zero value.
+	*app = App{}
+
 	if !isCoi {
 		rootCmd.Use = "claude-on-incus"
 	}
@@ -98,15 +110,15 @@ func Execute(isCoi bool) error {
 
 func init() {
 	// Global flags available to all commands
-	rootCmd.PersistentFlags().StringVarP(&workspace, "workspace", "w", ".", "Workspace directory to mount")
-	rootCmd.PersistentFlags().IntVar(&slot, "slot", 0, "Slot number for parallel sessions (0 = auto-allocate)")
-	rootCmd.PersistentFlags().StringVar(&imageName, "image", "", "Custom image to use (default: coi-default)")
-	rootCmd.PersistentFlags().BoolVar(&persistent, "persistent", false, "Reuse container across sessions")
-	rootCmd.PersistentFlags().StringVar(&resume, "resume", "", "Resume from session ID (omit value to auto-detect)")
+	rootCmd.PersistentFlags().StringVarP(&app.workspace, "workspace", "w", ".", "Workspace directory to mount")
+	rootCmd.PersistentFlags().IntVar(&app.slot, "slot", 0, "Slot number for parallel sessions (0 = auto-allocate)")
+	rootCmd.PersistentFlags().StringVar(&app.imageName, "image", "", "Custom image to use (default: coi-default)")
+	rootCmd.PersistentFlags().BoolVar(&app.persistent, "persistent", false, "Reuse container across sessions")
+	rootCmd.PersistentFlags().StringVar(&app.resume, "resume", "", "Resume from session ID (omit value to auto-detect)")
 	rootCmd.PersistentFlags().Lookup("resume").NoOptDefVal = "auto"
-	rootCmd.PersistentFlags().StringVar(&continueSession, "continue", "", "Alias for --resume")
+	rootCmd.PersistentFlags().StringVar(&app.continueSession, "continue", "", "Alias for --resume")
 	rootCmd.PersistentFlags().Lookup("continue").NoOptDefVal = "auto"
-	rootCmd.PersistentFlags().StringVar(&profile, "profile", "", "Use named profile")
+	rootCmd.PersistentFlags().StringVar(&app.profile, "profile", "", "Use named profile")
 
 	// Add subcommands
 	rootCmd.AddCommand(runCmd)
@@ -137,8 +149,21 @@ func init() {
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print version information",
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
+		format, _ := cmd.Flags().GetString("format")
+		if format != "text" && format != "json" {
+			return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid format %q: must be 'text' or 'json'", format)}
+		}
+		if format == "json" {
+			fmt.Printf(`{"version":%q,"url":"https://github.com/mensfeld/code-on-incus"}`+"\n", "v"+Version)
+			return nil
+		}
 		fmt.Printf("code-on-incus (coi) v%s\n", Version)
 		fmt.Println("https://github.com/mensfeld/code-on-incus")
+		return nil
 	},
+}
+
+func init() {
+	versionCmd.Flags().String("format", "text", "Output format: text or json")
 }

@@ -22,9 +22,11 @@ type TimeoutMonitor struct {
 	done   chan struct{}
 }
 
-// NewTimeoutMonitor creates a new timeout monitor
-func NewTimeoutMonitor(containerName string, maxDuration time.Duration, autoStop, stopGraceful bool, project string, log *logger.SessionLogger) *TimeoutMonitor {
-	ctx, cancel := context.WithCancel(context.Background())
+// NewTimeoutMonitor creates a new timeout monitor.
+// The monitor's internal context is derived from ctx, so cancelling ctx also
+// stops the monitor (in addition to calling Stop explicitly).
+func NewTimeoutMonitor(ctx context.Context, containerName string, maxDuration time.Duration, autoStop, stopGraceful bool, project string, log *logger.SessionLogger) *TimeoutMonitor {
+	monCtx, cancel := context.WithCancel(ctx)
 	return &TimeoutMonitor{
 		ContainerName: containerName,
 		MaxDuration:   maxDuration,
@@ -32,7 +34,7 @@ func NewTimeoutMonitor(containerName string, maxDuration time.Duration, autoStop
 		StopGraceful:  stopGraceful,
 		Project:       project,
 		Logger:        log,
-		ctx:           ctx,
+		ctx:           monCtx,
 		cancel:        cancel,
 		done:          make(chan struct{}),
 	}

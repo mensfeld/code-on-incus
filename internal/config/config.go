@@ -13,6 +13,14 @@ type ShellConfig struct {
 	UseTmux *bool `toml:"use_tmux"` // Use tmux for session management (default: true)
 }
 
+// DetectionConfig holds source URLs and local directories for threat-detection databases.
+type DetectionConfig struct {
+	GTFOBinsSource string `toml:"gtfobins_source"` // Git URL for GTFOBins repo
+	GTFOBinsDir    string `toml:"gtfobins_dir"`    // Local clone directory (~/.coi/gtfobins)
+	SigmaSource    string `toml:"sigma_source"`    // Git URL for SigmaHQ/sigma repo
+	SigmaDir       string `toml:"sigma_dir"`       // Local clone directory (~/.coi/sigma)
+}
+
 // Config represents the complete configuration
 type Config struct {
 	Container          ContainerConfig          `toml:"container"`
@@ -29,6 +37,7 @@ type Config struct {
 	Security           SecurityConfig           `toml:"security"`
 	Monitoring         MonitoringConfig         `toml:"monitoring"`
 	Timezone           TimezoneConfig           `toml:"timezone"`
+	Detection          DetectionConfig          `toml:"detection"`
 	Profiles           map[string]ProfileConfig `toml:"-"` // Populated by loadProfileDirectories, not from TOML
 	ProfileContextFile string                   `toml:"-"` // Set by ApplyProfile, read by session setup
 }
@@ -276,14 +285,16 @@ type NFTMonitoringConfig struct {
 
 // MonitoringConfig contains security monitoring settings
 type MonitoringConfig struct {
-	Enabled               *bool               `toml:"enabled"`                   // Enable background monitoring
-	AutoPauseOnHigh       *bool               `toml:"auto_pause_on_high"`        // Pause container on high-severity threats
-	AutoKillOnCritical    *bool               `toml:"auto_kill_on_critical"`     // Kill container on critical threats
-	PollIntervalSec       int                 `toml:"poll_interval_sec"`         // How often to collect stats
-	FileReadThresholdMB   float64             `toml:"file_read_threshold_mb"`    // MB read in poll interval before alert
-	FileReadRateMBPerSec  float64             `toml:"file_read_rate_mb_per_sec"` // MB/sec sustained rate before alert
-	AuditLogRetentionDays int                 `toml:"audit_log_retention_days"`  // How long to keep audit logs
-	NFT                   NFTMonitoringConfig `toml:"nft"`                       // nftables network monitoring
+	Enabled                   *bool               `toml:"enabled"`                      // Enable background monitoring
+	AutoPauseOnHigh           *bool               `toml:"auto_pause_on_high"`           // Pause container on high-severity threats
+	AutoKillOnCritical        *bool               `toml:"auto_kill_on_critical"`        // Kill container on critical threats
+	PollIntervalSec           int                 `toml:"poll_interval_sec"`            // How often to collect stats
+	FileReadThresholdMB       float64             `toml:"file_read_threshold_mb"`       // MB read in poll interval before alert
+	FileReadRateMBPerSec      float64             `toml:"file_read_rate_mb_per_sec"`    // MB/sec sustained rate before alert
+	ProcessCountThreshold     int                 `toml:"process_count_threshold"`      // Max processes before fork-bomb alert (0 = disabled)
+	ProcessSpawnRateThreshold *int                `toml:"process_spawn_rate_threshold"` // Max processes spawned per poll interval (0 = disabled, nil = inherit default)
+	AuditLogRetentionDays     int                 `toml:"audit_log_retention_days"`     // How long to keep audit logs
+	NFT                       NFTMonitoringConfig `toml:"nft"`                          // nftables network monitoring
 }
 
 // GetDefaultConfig returns the default configuration by parsing the embedded default config TOML.
@@ -317,6 +328,8 @@ func expandConfigPaths(cfg *Config) {
 	cfg.Paths.StorageDir = ExpandPath(cfg.Paths.StorageDir)
 	cfg.Paths.LogsDir = ExpandPath(cfg.Paths.LogsDir)
 	cfg.Network.Logging.Path = ExpandPath(cfg.Network.Logging.Path)
+	cfg.Detection.GTFOBinsDir = ExpandPath(cfg.Detection.GTFOBinsDir)
+	cfg.Detection.SigmaDir = ExpandPath(cfg.Detection.SigmaDir)
 }
 
 // cloneSlice returns a shallow copy of a slice (nil-safe).
@@ -456,6 +469,14 @@ func ptrBool(b bool) *bool {
 func BoolVal(p *bool) bool {
 	if p == nil {
 		return false
+	}
+	return *p
+}
+
+// IntVal dereferences a *int config pointer, returning 0 if nil.
+func IntVal(p *int) int {
+	if p == nil {
+		return 0
 	}
 	return *p
 }
@@ -638,6 +659,20 @@ func (c *Config) Merge(other *Config) {
 	if other.Timezone.Name != "" {
 		c.Timezone.Name = other.Timezone.Name
 	}
+
+	// Merge detection
+	if other.Detection.GTFOBinsSource != "" {
+		c.Detection.GTFOBinsSource = other.Detection.GTFOBinsSource
+	}
+	if other.Detection.GTFOBinsDir != "" {
+		c.Detection.GTFOBinsDir = ExpandPath(other.Detection.GTFOBinsDir)
+	}
+	if other.Detection.SigmaSource != "" {
+		c.Detection.SigmaSource = other.Detection.SigmaSource
+	}
+	if other.Detection.SigmaDir != "" {
+		c.Detection.SigmaDir = ExpandPath(other.Detection.SigmaDir)
+	}
 }
 
 // mergeLimits merges limit configurations (other takes precedence)
@@ -717,6 +752,12 @@ func mergeMonitoring(base *MonitoringConfig, other *MonitoringConfig) {
 	}
 	if other.FileReadRateMBPerSec != 0 {
 		base.FileReadRateMBPerSec = other.FileReadRateMBPerSec
+	}
+	if other.ProcessCountThreshold != 0 {
+		base.ProcessCountThreshold = other.ProcessCountThreshold
+	}
+	if other.ProcessSpawnRateThreshold != nil {
+		base.ProcessSpawnRateThreshold = other.ProcessSpawnRateThreshold
 	}
 	if other.AuditLogRetentionDays != 0 {
 		base.AuditLogRetentionDays = other.AuditLogRetentionDays

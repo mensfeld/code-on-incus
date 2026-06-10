@@ -66,3 +66,197 @@ func TestCheckEnvAccess(t *testing.T) {
 		})
 	}
 }
+
+func TestParseStatusFields(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		wantName string
+		wantPPID int
+		wantUID  int
+	}{
+		{
+			name:     "typical process",
+			input:    "Name:\tbash\nPid:\t42\nPPid:\t1\nUid:\t1000\t1000\t1000\t1000\n",
+			wantName: "bash", wantPPID: 1, wantUID: 1000,
+		},
+		{
+			name:     "root process",
+			input:    "Name:\tinit\nPPid:\t0\nUid:\t0\t0\t0\t0\n",
+			wantName: "init", wantPPID: 0, wantUID: 0,
+		},
+		{
+			name:     "missing fields",
+			input:    "Name:\tsleep\n",
+			wantName: "sleep", wantPPID: 0, wantUID: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotName, gotPPID, gotUID := parseStatusFields(tt.input)
+			if gotName != tt.wantName {
+				t.Errorf("name: got %q want %q", gotName, tt.wantName)
+			}
+			if gotPPID != tt.wantPPID {
+				t.Errorf("ppid: got %d want %d", gotPPID, tt.wantPPID)
+			}
+			if gotUID != tt.wantUID {
+				t.Errorf("uid: got %d want %d", gotUID, tt.wantUID)
+			}
+		})
+	}
+}
+
+func TestParseCmdline(t *testing.T) {
+	tests := []struct {
+		name  string
+		input []byte
+		want  string
+	}{
+		{
+			name:  "simple command",
+			input: []byte("bash\x00"),
+			want:  "bash",
+		},
+		{
+			name:  "command with args",
+			input: []byte("python3\x00-c\x00import os\x00"),
+			want:  "python3 -c import os",
+		},
+		{
+			name:  "no trailing null",
+			input: []byte("sleep\x0030"),
+			want:  "sleep 30",
+		},
+		{
+			name:  "empty",
+			input: []byte("\x00"),
+			want:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseCmdline(tt.input)
+			if got != tt.want {
+				t.Errorf("parseCmdline(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseStatusFields_TabAndSpaceDelimited(t *testing.T) {
+	// /proc/<pid>/status uses a tab between key and value, but be robust.
+	input := "Name:   nginx\nPPid:   7\nUid:    33  33  33  33\n"
+	name, ppid, uid := parseStatusFields(input)
+	if name != "nginx" {
+		t.Errorf("name: got %q want %q", name, "nginx")
+	}
+	if ppid != 7 {
+		t.Errorf("ppid: got %d want 7", ppid)
+	}
+	if uid != 33 {
+		t.Errorf("uid: got %d want 33", uid)
+	}
+}
+
+func TestParseCmdline_KernelThread(t *testing.T) {
+	// Kernel threads have empty cmdline; fall back to Name from status.
+	// parseCmdline returns "" for empty input; caller uses Name as fallback.
+	got := parseCmdline([]byte{})
+	if got != "" {
+		t.Errorf("expected empty string for kernel thread, got %q", got)
+	}
+}
+
+func TestDetectProcessSpawnRate(t *testing.T) {
+	tests := []struct {
+		name      string
+		current   int
+		previous  int
+		threshold int
+		wantNil   bool
+		wantDelta int
+		wantCount int
+	}{
+		{"delta below threshold", 60, 50, 20, true, 0, 0},
+		{"delta at threshold", 70, 50, 20, true, 0, 0},
+		{"delta one above threshold", 71, 50, 20, false, 21, 71},
+		{"large burst", 200, 10, 20, false, 190, 200},
+		{"threshold zero disables", 9999, 0, 0, true, 0, 0},
+		{"first poll skipped (previous -1)", 100, -1, 10, true, 0, 0},
+		{"processes exited (negative delta)", 40, 60, 20, true, 0, 0},
+		{"baseline zero", 25, 0, 20, false, 25, 25},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := DetectProcessSpawnRate(tt.current, tt.previous, tt.threshold)
+			if tt.wantNil {
+				if got != nil {
+					t.Errorf("expected nil, got %+v", got)
+				}
+				return
+			}
+			if got == nil {
+				t.Fatal("expected non-nil threat, got nil")
+			}
+			if got.Delta != tt.wantDelta {
+				t.Errorf("Delta: got %d want %d", got.Delta, tt.wantDelta)
+			}
+			if got.Count != tt.wantCount {
+				t.Errorf("Count: got %d want %d", got.Count, tt.wantCount)
+			}
+			if got.Threshold != tt.threshold {
+				t.Errorf("Threshold: got %d want %d", got.Threshold, tt.threshold)
+			}
+		})
+	}
+}
+
+func TestDetectProcessCountSpike(t *testing.T) {
+	makeStats := func(count int) ProcessStats {
+		procs := make([]Process, count)
+		for i := range procs {
+			procs[i] = Process{PID: i + 1, Command: "sh"}
+		}
+		return ProcessStats{Available: true, TotalCount: count, Processes: procs}
+	}
+
+	tests := []struct {
+		name      string
+		stats     ProcessStats
+		threshold int
+		wantNil   bool
+		wantCount int
+	}{
+		{"below threshold", makeStats(50), 100, true, 0},
+		{"at threshold", makeStats(100), 100, true, 0},
+		{"one above threshold", makeStats(101), 100, false, 101},
+		{"far above threshold", makeStats(500), 100, false, 500},
+		{"threshold zero disables check", makeStats(9999), 0, true, 0},
+		{"unavailable stats skipped", ProcessStats{Available: false, TotalCount: 9999}, 100, true, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := DetectProcessCountSpike(tt.stats, tt.threshold)
+			if tt.wantNil {
+				if got != nil {
+					t.Errorf("expected nil, got %+v", got)
+				}
+				return
+			}
+			if got == nil {
+				t.Fatal("expected non-nil threat, got nil")
+			}
+			if got.Count != tt.wantCount {
+				t.Errorf("Count: got %d want %d", got.Count, tt.wantCount)
+			}
+			if got.Threshold != tt.threshold {
+				t.Errorf("Threshold: got %d want %d", got.Threshold, tt.threshold)
+			}
+		})
+	}
+}

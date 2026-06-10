@@ -18,13 +18,46 @@ import (
 )
 
 var (
-	updateCheck   bool
-	updateForce   bool
-	updateVersion string // hidden flag: skip GitHub query when re-execing under sudo
+	updateCheck    bool
+	updateForce    bool
+	updateAllForce bool
+	updateVersion  string // hidden flag: skip GitHub query when re-execing under sudo
 )
 
+// updateCmd is the parent command. With no subcommand it updates the coi
+// binary and both detection databases (GTFOBins + Sigma).
 var updateCmd = &cobra.Command{
 	Use:   "update",
+	Short: "Update coi and its detection databases",
+	Long: `Update the coi binary and both threat-detection databases (GTFOBins and Sigma).
+
+Running without a subcommand performs all updates in sequence. Use a subcommand
+when you only want one:
+
+  coi update core      – update only the coi binary
+  coi update patterns  – update GTFOBins and Sigma detection databases
+
+Examples:
+  coi update           # update binary and detection databases
+  coi update --force   # same, skip binary-update confirmation
+  coi update core      # update binary only
+  coi update patterns  # pull latest GTFOBins and Sigma rules
+`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		// Propagate --force from parent to the core update.
+		updateForce = updateAllForce
+
+		if err := updateCoreCommand(updateCoreCmd, args); err != nil {
+			return err
+		}
+		fmt.Println()
+		return updatePatternsCommand(updatePatternsCmd, args)
+	},
+}
+
+// updateCoreCmd updates only the coi binary.
+var updateCoreCmd = &cobra.Command{
+	Use:   "core",
 	Short: "Update coi to the latest release",
 	Long: `Download and install the latest coi release from GitHub.
 
@@ -34,18 +67,23 @@ verifies its SHA256 checksum, and replaces the current binary in-place.
 If the binary directory is not writable, suggests re-running with sudo.
 
 Examples:
-  coi update          # Download and install latest release
-  coi update --check  # Only check for updates, don't install
-  coi update --force  # Skip confirmation prompt
+  coi update core          # Download and install latest release
+  coi update core --check  # Only check for updates, don't install
+  coi update core --force  # Skip confirmation prompt
 `,
-	RunE: updateCommand,
+	RunE: updateCoreCommand,
 }
 
 func init() {
-	updateCmd.Flags().BoolVar(&updateCheck, "check", false, "Only check for updates, don't install")
-	updateCmd.Flags().BoolVarP(&updateForce, "force", "f", false, "Skip confirmation prompt")
-	updateCmd.Flags().StringVar(&updateVersion, "version", "", "Install specific version (skips GitHub query)")
-	_ = updateCmd.Flags().MarkHidden("version")
+	updateCmd.Flags().BoolVarP(&updateAllForce, "force", "f", false, "Skip confirmation for binary update")
+
+	updateCoreCmd.Flags().BoolVar(&updateCheck, "check", false, "Only check for updates, don't install")
+	updateCoreCmd.Flags().BoolVarP(&updateForce, "force", "f", false, "Skip confirmation prompt")
+	updateCoreCmd.Flags().StringVar(&updateVersion, "version", "", "Install specific version (skips GitHub query)")
+	_ = updateCoreCmd.Flags().MarkHidden("version")
+
+	updateCmd.AddCommand(updateCoreCmd)
+	updateCmd.AddCommand(updatePatternsCmd)
 }
 
 // githubRelease represents the relevant fields from the GitHub releases API
@@ -60,7 +98,7 @@ type githubAsset struct {
 	BrowserDownloadURL string `json:"browser_download_url"`
 }
 
-func updateCommand(cmd *cobra.Command, args []string) error {
+func updateCoreCommand(cmd *cobra.Command, args []string) error {
 	currentVersion := Version
 	isDev := currentVersion == "dev"
 
@@ -141,7 +179,7 @@ func updateCommand(cmd *cobra.Command, args []string) error {
 	// Check if directory is writable
 	if !isDirWritable(binaryDir) {
 		fmt.Printf("\nPermission denied: %s is not writable.\n", binaryDir)
-		fmt.Printf("Re-run with: sudo %s update --force --version %s\n", os.Args[0], latestTag)
+		fmt.Printf("Re-run with: sudo %s update core --force --version %s\n", os.Args[0], latestTag)
 		return fmt.Errorf("insufficient permissions to update binary in %s", binaryDir)
 	}
 

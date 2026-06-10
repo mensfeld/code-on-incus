@@ -83,7 +83,7 @@ func monitorCommand(cmd *cobra.Command, args []string) error {
 
 	// Get allowed CIDRs from network config
 	allowedCIDRs := []string{}
-	if cfg.Network.Mode == config.NetworkModeAllowlist {
+	if app.cfg.Network.Mode == config.NetworkModeAllowlist {
 		// Convert allowed domains to CIDRs (simplified - in full implementation would resolve)
 		// For now, just pass empty list
 		allowedCIDRs = []string{}
@@ -91,7 +91,7 @@ func monitorCommand(cmd *cobra.Command, args []string) error {
 
 	// Create collector
 	collector := monitor.NewCollector(containerName, "", "", allowedCIDRs)
-	detector := monitor.NewDetector(cfg.Monitoring.FileReadThresholdMB, cfg.Monitoring.FileReadRateMBPerSec)
+	detector := monitor.NewDetector(app.cfg.Monitoring.FileReadThresholdMB, app.cfg.Monitoring.FileReadRateMBPerSec)
 
 	// Watch mode or one-shot
 	if monitorWatch > 0 {
@@ -159,7 +159,7 @@ func resolveMonitorContainer(args []string) (string, error) {
 	}
 
 	// 3. Find container for current workspace
-	absWorkspace, err := filepath.Abs(workspace)
+	absWorkspace, err := filepath.Abs(app.workspace)
 	if err != nil {
 		return "", fmt.Errorf("failed to resolve workspace path: %w", err)
 	}
@@ -225,54 +225,4 @@ func runMonitorWatch(ctx context.Context, collector *monitor.Collector, detector
 			return nil
 		}
 	}
-}
-
-// Audit log command - TODO: Implement or remove
-// var monitorAuditCmd = &cobra.Command{
-// 	Use:   "audit [container]",
-// 	Short: "View audit log for a container",
-// 	Long: `View audit log entries for a container.
-//
-// The audit log contains all monitoring events, threats, and security alerts
-// recorded during container sessions.
-//
-// Examples:
-//   coi monitor audit                          # Last 100 entries
-//   coi monitor audit coi-abc-1                # Specific container
-//   coi monitor audit --export=report.json     # Export to file`,
-// 	RunE: monitorAuditCommand,
-// }
-
-func monitorAuditCommand(cmd *cobra.Command, args []string) error { //nolint:unused // TODO: Implement or remove
-	// Determine container name
-	var containerName string
-	if len(args) > 0 {
-		containerName = args[0]
-	} else {
-		return fmt.Errorf("container name required")
-	}
-
-	// Get audit log path
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("failed to get home directory: %w", err)
-	}
-
-	auditLogPath := filepath.Join(homeDir, ".coi", "audit", containerName+".jsonl")
-
-	// Check if audit log exists
-	if _, err := os.Stat(auditLogPath); os.IsNotExist(err) {
-		return fmt.Errorf("no audit log found for container %s", containerName)
-	}
-
-	// Read audit log
-	data, err := os.ReadFile(auditLogPath)
-	if err != nil {
-		return fmt.Errorf("failed to read audit log: %w", err)
-	}
-
-	// Display (simplified - just output raw JSON lines for now)
-	fmt.Println(string(data))
-
-	return nil
 }

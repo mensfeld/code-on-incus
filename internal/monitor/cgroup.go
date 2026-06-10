@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -12,66 +13,137 @@ import (
 	"github.com/mensfeld/code-on-incus/internal/container"
 )
 
-// GetCgroupPath returns the cgroup v2 path for a container
+// GetCgroupPath returns the cgroup v2 path for a container.
 func GetCgroupPath(ctx context.Context, containerName string) (string, error) {
-	// For Incus containers, cgroup v2 path is typically:
-	// /sys/fs/cgroup/incus.monitor/<container-name>
-	// or /sys/fs/cgroup/lxc.monitor/<container-name>
-	// or /sys/fs/cgroup/lxc/<container-name>
+	for _, path := range wellKnownCgroupPaths(containerName) {
+		if _, err := os.Stat(path); err == nil {
+			return path, nil
+		}
+	}
+	// Fallback: derive path from the init PID via incus info.
+	return findCgroupPathViaIncus(ctx, containerName)
+}
 
-	possiblePaths := []string{
+// GetContainerInitPID returns the host PID of the container's init process.
+// It first attempts a host-side read from the container's cgroup.procs files,
+// which requires no subprocess. Only if that fails does it fall back to
+// parsing `incus info` output.
+//
+// The cgroup path probe uses the well-known paths in GetCgroupPath (no incus
+// subprocess). The incus fallback path is taken only when none of those paths
+// exist — it calls incus info directly rather than going through GetCgroupPath
+// to avoid the mutual recursion that would occur if GetCgroupPath's own
+// fallback (findCgroupPathViaIncus) called back into GetContainerInitPID.
+func GetContainerInitPID(ctx context.Context, containerName string) (int, error) {
+	for _, cgroupPath := range wellKnownCgroupPaths(containerName) {
+		if _, err := os.Stat(cgroupPath); err != nil {
+			continue
+		}
+		if pid, err := initPIDFromCgroupProcs(cgroupPath); err == nil {
+			return pid, nil
+		}
+	}
+	// Fallback: parse PID from incus info output.
+	return getInitPIDViaIncus(ctx, containerName)
+}
+
+// getInitPIDViaIncus calls incus info and parses the PID line. Kept separate
+// from GetContainerInitPID so findCgroupPathViaIncus can call it without
+// creating a call cycle through GetCgroupPath.
+func getInitPIDViaIncus(ctx context.Context, containerName string) (int, error) {
+	output, err := container.IncusOutputContext(ctx, "info", containerName)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get container info: %w", err)
+	}
+	return parseInitPIDFromIncusInfo(output)
+}
+
+// wellKnownCgroupPaths returns the candidate cgroup v2 paths for a container
+// in the order they should be probed. Shared with GetCgroupPath so both
+// functions check exactly the same list without duplicating it.
+func wellKnownCgroupPaths(containerName string) []string {
+	return []string{
 		fmt.Sprintf("/sys/fs/cgroup/incus.monitor/%s", containerName),
 		fmt.Sprintf("/sys/fs/cgroup/lxc.monitor/%s", containerName),
 		fmt.Sprintf("/sys/fs/cgroup/lxc/%s", containerName),
 		fmt.Sprintf("/sys/fs/cgroup/incus/%s", containerName),
 	}
-
-	for _, path := range possiblePaths {
-		if _, err := os.Stat(path); err == nil {
-			return path, nil
-		}
-	}
-
-	// Fallback: try to find it via incus info
-	return findCgroupPathViaIncus(ctx, containerName)
 }
 
-// findCgroupPathViaIncus uses incus info to find the cgroup path
-func findCgroupPathViaIncus(ctx context.Context, containerName string) (string, error) {
-	// Get container info
-	output, err := container.IncusOutputContext(ctx, "info", containerName)
+// initPIDFromCgroupProcs walks all cgroup.procs files under cgroupPath and
+// returns the minimum PID found. In cgroup v2 the container init process is
+// started first and therefore has the lowest host PID among all processes in
+// the container's cgroup hierarchy. Systemd-based containers move PID 1 into
+// init.scope, so walking the full tree (rather than reading only the root
+// cgroup.procs) is necessary.
+func initPIDFromCgroupProcs(cgroupPath string) (int, error) {
+	var minPID int
+	err := filepath.WalkDir(cgroupPath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || d.Name() != "cgroup.procs" {
+			return nil
+		}
+		data, err := os.ReadFile(path) //nolint:gosec // path is under /sys/fs/cgroup, a kernel-managed vfs where symlink TOCTOU is not possible
+		if err != nil {
+			return nil
+		}
+		for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+			pid, err := strconv.Atoi(strings.TrimSpace(line))
+			if err != nil || pid <= 0 {
+				continue
+			}
+			if minPID == 0 || pid < minPID {
+				minPID = pid
+			}
+		}
+		return nil
+	})
 	if err != nil {
-		return "", fmt.Errorf("failed to get container info: %w", err)
+		return 0, err
 	}
+	if minPID == 0 {
+		return 0, fmt.Errorf("no PIDs found in cgroup %s", cgroupPath)
+	}
+	return minPID, nil
+}
 
-	// Look for PID in the output (format: "PID: 12345")
-	var pid string
-	lines := strings.Split(output, "\n")
-	for _, line := range lines {
-		// Match both "PID:" and "Pid:" for compatibility
-		if strings.Contains(line, "PID:") || strings.Contains(line, "Pid:") {
-			parts := strings.Fields(line)
+// parseInitPIDFromIncusInfo extracts the container init PID from `incus info`
+// output. Kept as a separate function so it can be unit-tested without a live
+// Incus daemon; production callers use GetContainerInitPID.
+func parseInitPIDFromIncusInfo(output string) (int, error) {
+	for _, line := range strings.Split(output, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "PID:") || strings.HasPrefix(trimmed, "Pid:") {
+			parts := strings.Fields(trimmed)
 			if len(parts) >= 2 {
-				pid = parts[1]
-				break
+				pid, err := strconv.Atoi(parts[1])
+				if err == nil && pid > 0 {
+					return pid, nil
+				}
 			}
 		}
 	}
+	return 0, fmt.Errorf("could not find container PID in incus info output")
+}
 
-	if pid == "" {
-		return "", fmt.Errorf("could not find container PID")
+// findCgroupPathViaIncus derives the cgroup path from the init PID returned by
+// incus info. It calls getInitPIDViaIncus directly to avoid the mutual
+// recursion that would arise if it called GetContainerInitPID (which itself
+// calls GetCgroupPath).
+func findCgroupPathViaIncus(ctx context.Context, containerName string) (string, error) {
+	pid, err := getInitPIDViaIncus(ctx, containerName)
+	if err != nil {
+		return "", err
 	}
 
 	// Read cgroup from /proc/<pid>/cgroup
-	cgroupFile := fmt.Sprintf("/proc/%s/cgroup", pid)
+	cgroupFile := fmt.Sprintf("/proc/%d/cgroup", pid)
 	data, err := os.ReadFile(cgroupFile)
 	if err != nil {
 		return "", fmt.Errorf("failed to read cgroup file: %w", err)
 	}
 
 	// Parse cgroup v2 format: 0::/path/to/cgroup
-	lines = strings.Split(string(data), "\n")
-	for _, line := range lines {
+	for _, line := range strings.Split(string(data), "\n") {
 		if strings.HasPrefix(line, "0::") {
 			cgroupPath := strings.TrimPrefix(line, "0::")
 			cgroupPath = strings.TrimSpace(cgroupPath)

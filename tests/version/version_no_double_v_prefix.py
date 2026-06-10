@@ -45,7 +45,7 @@ def test_update_check_no_double_v(coi_binary):
     2. Assert "Current version:" line does not contain "vv"
     """
     result = subprocess.run(
-        [coi_binary, "update", "--check"],
+        [coi_binary, "update", "core", "--check"],
         capture_output=True,
         text=True,
         timeout=30,

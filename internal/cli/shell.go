@@ -8,11 +8,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
-	"github.com/mensfeld/code-on-incus/internal/alias"
 	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/logger"
@@ -78,476 +76,57 @@ func init() {
 	shellCmd.Flags().StringVar(&toolFlag, "tool", "", "Override AI tool (e.g. claude, opencode, aider)")
 }
 
-//nolint:gocyclo // Sequential initialization with many configuration paths
 func shellCommand(cmd *cobra.Command, args []string) error {
-	// Handle positional alias argument
-	var aliasArg string
+	// Create a context that is cancelled on SIGINT/SIGTERM so session.Setup
+	// can abort container provisioning on Ctrl+C instead of leaving orphaned
+	// containers.
+	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	s := &shellState{}
 	if len(args) > 0 {
-		aliasArg = args[0]
+		s.aliasArg = args[0]
 	}
 
-	// Get absolute workspace path
-	absWorkspace, err := filepath.Abs(workspace)
-	if err != nil {
-		return fmt.Errorf("invalid workspace path: %w", err)
-	}
+	pipeline := &session.Pipeline{}
+	defer pipeline.Teardown()
 
-	// If workspace differs from CWD and no alias argument overrides it, overlay
-	// the workspace's project config. config.Load() only reads from CWD, so a
-	// --workspace pointing elsewhere would otherwise miss that .coi/config.toml.
-	// Skip when aliasArg is set: alias resolution will reassign absWorkspace and
-	// call OverlayProjectConfig itself, avoiding a double-overlay from the wrong dir.
-	if aliasArg == "" {
-		if cwd, err := os.Getwd(); err == nil {
-			if absCWD, err := filepath.Abs(cwd); err == nil && absWorkspace != absCWD {
-				if err := cfg.OverlayProjectConfig(absWorkspace); err != nil && !os.IsNotExist(err) {
-					return fmt.Errorf("failed to load project config from %s: %w", absWorkspace, err)
-				}
-				container.Configure(cfg.Incus.Project, cfg.Incus.CodeUser, cfg.Incus.CodeUID)
-			}
-		}
-	}
-
-	// If alias argument provided, resolve it from the registry
-	if aliasArg != "" {
-		resolved, err := alias.ResolveAliasForLaunch(aliasArg)
-		if err != nil {
-			return err
-		}
-		// Override workspace from registry
-		absWorkspace = resolved.Workspace
-
-		// Reload project config from the resolved workspace so that mounts,
-		// network, storage_pool, alias, and other project-level settings from
-		// the target workspace are applied instead of the caller's CWD config.
-		if err := cfg.OverlayProjectConfig(absWorkspace); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("failed to load project config from %s: %w", absWorkspace, err)
-		}
-
-		// Apply profile if registry specifies one and user didn't override
-		if resolved.Profile != "" && !cmd.Flags().Changed("profile") {
-			profile = resolved.Profile
-			if err := cfg.ApplyProfile(profile); err != nil {
-				return err
-			}
-		}
-		// Re-apply Incus configuration after config reload
-		container.Configure(cfg.Incus.Project, cfg.Incus.CodeUser, cfg.Incus.CodeUID)
-		if resolved.Slot > 0 && !cmd.Flags().Changed("slot") {
-			slot = resolved.Slot
-		}
-	}
-
-	// Determine useTmux: config default, overridden by explicit --tmux flag
-	useTmuxDefault := true
-	if cfg.Shell.UseTmux != nil {
-		useTmuxDefault = *cfg.Shell.UseTmux
-	}
-	if !cmd.Flags().Changed("tmux") {
-		useTmux = useTmuxDefault
-	}
-
-	// Check if Incus is available
-	if !container.Available() {
-		return container.IncusNotAvailableError()
-	}
-
-	// Check minimum Incus version
-	if err := container.CheckMinimumVersion(); err != nil {
-		return err
-	}
-
-	// Warn if kernel is too old (non-blocking)
-	if warning := container.CheckKernelVersion(); warning != "" {
-		fmt.Fprintf(os.Stderr, "%s\n", warning)
-	}
-
-	// Get configured tool (needed to determine tool-specific sessions directory)
-	// --tool flag overrides whatever is in .coi/config.toml or global config
-	if toolFlag != "" {
-		cfg.Tool.Name = toolFlag
-	}
-	toolInstance, err := getConfiguredTool(cfg)
-	if err != nil {
-		return err
-	}
-
-	// Get sessions directory (tool-specific: sessions-claude, sessions-aider, etc.)
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("failed to get home directory: %w", err)
-	}
-	baseDir := filepath.Join(homeDir, ".coi")
-	sessionsDir := session.GetSessionsDir(baseDir, toolInstance)
-	if err := os.MkdirAll(sessionsDir, 0o755); err != nil {
-		return fmt.Errorf("failed to create sessions directory: %w", err)
-	}
-
-	// Handle resume flag (--resume or --continue)
-	resumeID := resume
-	if continueSession != "" {
-		resumeID = continueSession // --continue takes precedence if both are provided
-	}
-
-	// Check if resume/continue flag was explicitly set
-	resumeFlagSet := cmd.Flags().Changed("resume") || cmd.Flags().Changed("continue")
-
-	// Check if tool uses workspace-based sessions (like opencode stores in .opencode/)
-	// These tools don't need COI session tracking - their data is in the workspace
-	isWorkspaceSessionTool := false
-	if toolInstance.Name() == "opencode" {
-		// opencode stores sessions in workspace .opencode/ SQLite, not ~/.coi/sessions-*
-		workspaceSessionDir := filepath.Join(absWorkspace, ".opencode")
-		if info, err := os.Stat(workspaceSessionDir); err == nil && info.IsDir() {
-			isWorkspaceSessionTool = true
-		}
-	}
-
-	// Auto-detect if flag was set but value is empty or "auto"
-	if resumeFlagSet && (resumeID == "" || resumeID == "auto") {
-		if isWorkspaceSessionTool {
-			// For workspace-session tools, use a synthetic session ID
-			// The actual session data is in the workspace directory
-			resumeID = "workspace-session"
-			fmt.Fprintf(os.Stderr, "Resuming %s session from workspace\n", toolInstance.Name())
-		} else {
-			// Auto-detect latest for workspace (only looks at sessions from the same workspace)
-			resumeID, err = session.GetLatestSessionForWorkspace(sessionsDir, absWorkspace)
-			if err != nil {
-				return fmt.Errorf("no previous session to resume for this workspace: %w", err)
-			}
-			fmt.Fprintf(os.Stderr, "Auto-detected session: %s\n", resumeID)
-		}
-	} else if resumeID != "" && !isWorkspaceSessionTool {
-		// Validate that the explicitly provided session exists (skip for workspace-session tools)
-		if !session.SessionExists(sessionsDir, resumeID) {
-			return fmt.Errorf("session '%s' not found - check available sessions with: coi list --all", resumeID)
-		}
-		fmt.Fprintf(os.Stderr, "Resuming session: %s\n", resumeID)
-	}
-
-	// When resuming, inherit persistent flag and original slot from the session
-	// unless explicitly overridden by the user.
-	// Skip for workspace-session tools (they don't have COI metadata files)
-	var resumeSlot int // Original slot from session metadata (0 = not set)
-	if resumeID != "" && !isWorkspaceSessionTool {
-		metadataPath := filepath.Join(sessionsDir, resumeID, "metadata.json")
-		if metadata, err := session.LoadSessionMetadata(metadataPath); err == nil {
-			// Inherit profile if not explicitly set by user
-			if !cmd.Flags().Changed("profile") && metadata.ProfileName != "" {
-				profile = metadata.ProfileName
-				if err := cfg.ApplyProfile(profile); err != nil {
-					return fmt.Errorf("failed to apply saved profile '%s': %w", profile, err)
-				}
-				// Re-apply persistent from config since profile may override it
-				if !cmd.Flags().Changed("persistent") {
-					persistent = config.BoolVal(cfg.Container.Persistent)
-				}
-				fmt.Fprintf(os.Stderr, "Inherited profile '%s' from session\n", profile)
-			}
-
-			// Inherit persistent flag if not explicitly set by user
-			if !cmd.Flags().Changed("persistent") {
-				persistent = metadata.Persistent
-				if persistent {
-					fmt.Fprintf(os.Stderr, "Inherited persistent mode from session\n")
-				}
-			}
-
-			// Extract original slot from container name so we reuse the same container
-			// instead of allocating a new slot (which would create a fresh container)
-			if !cmd.Flags().Changed("slot") {
-				if _, origSlot, err := session.ParseContainerName(metadata.ContainerName); err == nil {
-					resumeSlot = origSlot
-				}
-			}
-		}
-	}
-
-	// Generate or use session ID
-	var sessionID string
-	if resumeID != "" {
-		sessionID = resumeID // Reuse the same session ID when resuming
-	} else {
-		sessionID, err = session.GenerateSessionID()
-		if err != nil {
-			return err
-		}
-	}
-
-	// Allocate slot - always check for availability and auto-increment if needed
-	slotNum := slot
-	if resumeSlot > 0 && slotNum == 0 {
-		// Resuming a session: reuse the original slot so the stopped container is restarted
-		slotNum = resumeSlot
-		fmt.Fprintf(os.Stderr, "Reusing original slot %d from session\n", slotNum)
-	} else if slotNum == 0 {
-		// No slot specified, find first available
-		slotNum, err = session.AllocateSlot(absWorkspace, 10)
-		if err != nil {
-			return fmt.Errorf("failed to allocate slot: %w", err)
-		}
-		fmt.Fprintf(os.Stderr, "Auto-allocated slot %d\n", slotNum)
-	} else {
-		// Slot specified, but check if it's available
-		// If not, find next available slot starting from the specified one
-		available, err := session.IsSlotAvailable(absWorkspace, slotNum)
-		if err != nil {
-			return fmt.Errorf("failed to check slot availability: %w", err)
-		}
-
-		if !available {
-			// Slot is occupied, find next available starting from slot+1
-			originalSlot := slotNum
-			slotNum, err = session.AllocateSlotFrom(absWorkspace, slotNum+1, 10)
-			if err != nil {
-				return fmt.Errorf("slot %d is occupied and failed to find next available slot: %w", originalSlot, err)
-			}
-			fmt.Fprintf(os.Stderr, "Slot %d is occupied, using slot %d instead\n", originalSlot, slotNum)
-		}
-	}
-
-	// Prepare network configuration from config
-	networkConfig := cfg.Network
-
-	// Determine CLI config path based on tool
-	// For directory-based tools (ConfigDirName != ""), point at the config directory.
-	// For ENV-based tools (returns ""), leave empty.
-	var cliConfigPath string
-	if configDirName := toolInstance.ConfigDirName(); configDirName != "" {
-		cliConfigPath = filepath.Join(homeDir, configDirName)
-	}
-
-	// Use limits directly from config
-	limitsConfig := &cfg.Limits
-
-	// Determine protected paths for security mounts from config
-	var protectedPaths []string
-	if !cfg.Security.DisableProtection {
-		protectedPaths = cfg.Security.GetEffectiveProtectedPaths()
-	}
-
-	protectedPaths = filterWritableGitHooks(protectedPaths, cfg)
-
-	// Resolve which forwarded env vars are actually set on the host.
-	// This list is passed to the context file so AI tools know what's available.
-	resolvedForwardedEnvVars := resolveForwardedEnvVarNames(cfg.Defaults.ForwardEnv)
-
-	// Resolve timezone from config
-	resolvedTimezone := resolveTimezone(cfg)
-
-	// Determine image: CLI --image flag > config defaults.image > "coi"
-	img := ResolveImageName(imageName, cfg)
-	if err := AutoBuildIfNeeded(cfg, img); err != nil {
-		return err
-	}
-
-	// Setup session
-	setupOpts := session.SetupOptions{
-		WorkspacePath:         absWorkspace,
-		Image:                 img,
-		Persistent:            persistent,
-		ResumeFromID:          resumeID,
-		Slot:                  slotNum,
-		SessionsDir:           sessionsDir,
-		CLIConfigPath:         cliConfigPath,
-		Tool:                  toolInstance,
-		NetworkConfig:         &networkConfig,
-		DisableShift:          cfg.Incus.DisableShift,
-		LimitsConfig:          limitsConfig,
-		IncusProject:          cfg.Incus.Project,
-		ProtectedPaths:        protectedPaths,
-		HostImmutable:         cfg.Security.IsHostImmutableEnabled(),
-		PreserveWorkspacePath: cfg.Paths.PreserveWorkspacePath,
-		ForwardSSHAgent:       config.BoolVal(cfg.SSH.ForwardAgent),
-		ForwardedEnvVars:      resolvedForwardedEnvVars,
-		ContextFilePath:       cfg.Tool.ContextFile,
-		ProfileContextFile:    cfg.ProfileContextFile,
-		AutoContext:           cfg.Tool.AutoContext,
-		ContainerName:         containerName,
-		Timezone:              resolvedTimezone,
-		Alias:                 cfg.Container.Alias,
-	}
-
-	// Parse and validate mount configuration
-	mountConfig, err := ParseMountConfig(cfg)
-	if err != nil {
-		return fmt.Errorf("invalid mount configuration: %w", err)
-	}
-
-	// Validate no nested mounts
-	if err := session.ValidateMounts(mountConfig); err != nil {
-		return fmt.Errorf("mount validation failed: %w", err)
-	}
-
-	setupOpts.MountConfig = mountConfig
-
-	// Validate alias before proceeding with setup
-	if cfg.Container.Alias != "" {
-		if err := alias.ValidateAlias(cfg.Container.Alias); err != nil {
-			return fmt.Errorf("invalid container alias: %w", err)
-		}
-	}
-
-	fmt.Fprintf(os.Stderr, "Setting up session %s...\n", sessionID)
-	result, err := session.Setup(setupOpts)
-	if err != nil {
-		return fmt.Errorf("failed to setup session: %w", err)
-	}
-
-	// Save metadata early so coi list shows correct persistent/ephemeral status
-	if err := session.SaveMetadataEarly(sessionsDir, sessionID, result.ContainerName, absWorkspace, persistent, profile); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: Failed to save early metadata: %v\n", err)
-	}
-
-	// Register alias in global registry for cross-directory resolution
-	if effectiveAlias := cfg.Container.Alias; effectiveAlias != "" {
-		if reg, err := alias.Load(); err == nil {
-			if err := reg.Register(effectiveAlias, absWorkspace, profile); err != nil {
-				return fmt.Errorf("alias conflict: %w", err)
-			}
-			if err := reg.Save(); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: Failed to save alias registry: %v\n", err)
-			}
-		}
-	}
-
-	// Start monitoring daemons if enabled via config
-	var monitorDaemon *monitor.Daemon
-	var nftDaemon *nftmonitor.Daemon
-	if config.BoolVal(cfg.Monitoring.Enabled) {
-		// Start traditional monitoring (process/filesystem)
-		if err := startMonitoringDaemon(result.ContainerName, absWorkspace, cfg, result.Logger, &monitorDaemon); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: Failed to start monitoring daemon: %v\n", err)
-			// Don't fail the session if monitoring fails
-		}
-
-		// Start nftables monitoring (network only)
-		if config.BoolVal(cfg.Monitoring.NFT.Enabled) {
-			if err := startNFTMonitoringDaemon(result.ContainerName, cfg, result.Logger, &nftDaemon); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: Failed to start NFT monitoring: %v\n", err)
-				// Don't fail the session if NFT monitoring fails
-			}
-		}
-	}
-
-	// Define cleanup function so it can be called from both defer and signal handler.
-	// sync.Once ensures cleanup runs exactly once even if both paths trigger concurrently
-	// (e.g., signal arrives while the function is already returning normally).
-	// Note: os.Exit() does NOT run deferred functions, so we must call cleanup explicitly.
-	var cleanupOnce sync.Once
-	doCleanup := func() {
-		cleanupOnce.Do(func() {
-			fmt.Fprintf(os.Stderr, "\nCleaning up session...\n")
-
-			// Stop monitoring daemons if they were started
-			if monitorDaemon != nil {
-				if err := monitorDaemon.Stop(); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: Failed to stop monitoring daemon: %v\n", err)
-				}
-			}
-			if nftDaemon != nil {
-				if err := nftDaemon.Stop(); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: Failed to stop NFT monitoring: %v\n", err)
-				}
-			}
-
-			// Stop timeout monitor if it was started
-			if result.TimeoutMonitor != nil {
-				result.TimeoutMonitor.Stop()
-			}
-
-			cleanupOpts := session.CleanupOptions{
-				ContainerName:  result.ContainerName,
-				SessionID:      sessionID,
-				Persistent:     persistent,
-				ProfileName:    profile,
-				SessionsDir:    sessionsDir,
-				SaveSession:    true, // Always save session data
-				Workspace:      absWorkspace,
-				Tool:           toolInstance,
-				NetworkManager: result.NetworkManager,
-				SessionLogger:  result.Logger,
-			}
-			if err := session.Cleanup(cleanupOpts); err != nil {
-				fmt.Fprintf(os.Stderr, "Cleanup error: %v\n", err)
-			}
-		})
-	}
-
-	// Setup cleanup on exit (for normal return paths)
-	defer doCleanup()
-
-	// Handle Ctrl+C gracefully - must call cleanup explicitly since os.Exit skips defers
+	// Signal handler: explicitly trigger cleanup when SIGINT/SIGTERM arrives
+	// while runCLI is blocking on an interactive incus exec.
+	//
+	// We cannot use ctx.Done() as the "signal received" branch because
+	// signal.NotifyContext cancels ctx AND delivers to sigChan at the same
+	// time — a select over both is non-deterministic. If ctx.Done() is chosen,
+	// the goroutine exits without calling Teardown, leaving cleanup to the
+	// deferred call, which won't run until the blocking incus exec returns.
+	//
+	// Instead we use a dedicated `done` channel closed when shellCommand
+	// returns. On signal, cleanup is always called. On normal return, the
+	// goroutine exits via the done branch without a second cleanup attempt
+	// (pipeline.Teardown is idempotent). signal.Stop ensures no further
+	// signals are queued after shellCommand returns.
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigChan)
+	done := make(chan struct{})
+	defer close(done)
 	go func() {
-		<-sigChan
-		fmt.Fprintf(os.Stderr, "\nReceived interrupt signal, cleaning up...\n")
-		doCleanup()
-		os.Exit(0)
+		select {
+		case <-sigChan:
+			fmt.Fprintf(os.Stderr, "\nReceived interrupt signal, cleaning up...\n")
+			pipeline.Teardown()
+		case <-done:
+		}
 	}()
 
-	// Run CLI tool
-	fmt.Fprintf(os.Stderr, "\nStarting session...\n")
-	fmt.Fprintf(os.Stderr, "Session ID: %s\n", sessionID)
-	fmt.Fprintf(os.Stderr, "Container: %s\n", result.ContainerName)
-	fmt.Fprintf(os.Stderr, "Workspace: %s\n", absWorkspace)
-
-	// Determine resume mode
-	// The difference is:
-	// - Persistent: container is reused, tool config stays in container, pass --resume flag
-	// - Ephemeral: container is recreated, we restore config dir, tool auto-detects session
-	//
-	// For persistent containers resuming: pass --resume flag with tool's session ID
-	// For ephemeral containers resuming: just restore config, tool will auto-detect from restored data
-	useResumeFlag := (resumeID != "") && persistent
-	restoreOnly := (resumeID != "") && !persistent
-
-	// Choose execution mode
-	if useTmux {
-		if background {
-			fmt.Fprintf(os.Stderr, "Mode: Background (tmux)\n")
-		} else {
-			fmt.Fprintf(os.Stderr, "Mode: Interactive (tmux)\n")
-		}
-		if restoreOnly {
-			fmt.Fprintf(os.Stderr, "Resume mode: Restored conversation (auto-detect)\n")
-		} else if useResumeFlag {
-			fmt.Fprintf(os.Stderr, "Resume mode: Persistent session\n")
-		}
-		fmt.Fprintf(os.Stderr, "\n")
-		err = runCLIInTmux(result, sessionID, background, useResumeFlag, restoreOnly, sessionsDir, resumeID, toolInstance)
-	} else {
-		fmt.Fprintf(os.Stderr, "Mode: Direct (no tmux)\n")
-		if restoreOnly {
-			fmt.Fprintf(os.Stderr, "Resume mode: Restored conversation (auto-detect)\n")
-		} else if useResumeFlag {
-			fmt.Fprintf(os.Stderr, "Resume mode: Persistent session\n")
-		}
-		fmt.Fprintf(os.Stderr, "\n")
-		err = runCLI(result, sessionID, useResumeFlag, restoreOnly, sessionsDir, resumeID, toolInstance)
-	}
-
-	// Handle expected exit conditions gracefully
-	if err != nil {
-		errStr := err.Error()
-		// Exit status 130 means interrupted by SIGINT (Ctrl+C) - this is normal
-		if errStr == "exit status 130" {
-			return nil
-		}
-		// Container shutdown from within (sudo shutdown 0) causes exec to fail
-		// This can manifest as various errors depending on timing
-		if strings.Contains(errStr, "Failed to retrieve PID") ||
-			strings.Contains(errStr, "server exited") ||
-			strings.Contains(errStr, "connection reset") ||
-			errStr == "exit status 1" {
-			// Don't print anything - cleanup will show appropriate message
-			return nil
-		}
-	}
-
-	return err
+	return pipeline.Run(ctx,
+		resolveWorkspacePhase(cmd, s),
+		validateEnvPhase(cmd, s),
+		configureSessionPhase(cmd, s),
+		setupContainerPhase(s),
+		startMonitoringPhase(s),
+		runToolPhase(s),
+	)
 }
 
 // getConfiguredTool returns the tool to use based on config
@@ -645,12 +224,12 @@ func buildContainerEnv(result *session.SetupResult) (map[string]string, *int) {
 	}
 
 	// Apply static environment from config (defaults.environment + profile environment)
-	for k, v := range cfg.Defaults.Environment {
+	for k, v := range app.cfg.Defaults.Environment {
 		containerEnv[k] = v
 	}
 
 	// Resolve forward_env from config, deduplicate, then look up host values
-	for _, name := range cfg.Defaults.ForwardEnv {
+	for _, name := range app.cfg.Defaults.ForwardEnv {
 		if val, ok := os.LookupEnv(name); ok {
 			containerEnv[name] = val
 		} else {
@@ -680,7 +259,7 @@ func resolveForwardedEnvVarNames(names []string) []string {
 
 // ensureTmuxServer starts the tmux server and polls until it is ready (up to 2 seconds).
 // This is critical in CI and for newly started containers where the tmux server might not be running yet.
-func ensureTmuxServer(mgr *container.Manager, userPtr *int) {
+func ensureTmuxServer(mgr container.ContainerManager, userPtr *int) {
 	serverStartCmd := "tmux start-server 2>/dev/null || true; sleep 0.1"
 	serverOpts := container.ExecCommandOptions{
 		Capture: true,
@@ -995,22 +574,27 @@ func startMonitoringDaemon(containerName, workspacePath string, cfg *config.Conf
 
 	auditLogPath := filepath.Join(homeDir, ".coi", "audit", containerName+".jsonl")
 
-	// Get allowed CIDRs from network config
-	allowedCIDRs := []string{}
-	// TODO: Convert allowed domains to CIDRs if in allowlist mode
+	var allowedCIDRs []string
+	if cfg.Network.Mode == config.NetworkModeAllowlist {
+		allowedCIDRs = resolveDomainsToHostCIDRs(cfg.Network.AllowedDomains)
+	}
 
 	// Create daemon config
 	daemonCfg := monitor.DaemonConfig{
-		ContainerName:        containerName,
-		WorkspacePath:        workspacePath,
-		PollInterval:         time.Duration(cfg.Monitoring.PollIntervalSec) * time.Second,
-		AuditLogPath:         auditLogPath,
-		AllowedCIDRs:         allowedCIDRs,
-		AllowedDomains:       cfg.Network.AllowedDomains,
-		FileReadThresholdMB:  cfg.Monitoring.FileReadThresholdMB,
-		FileReadRateMBPerSec: cfg.Monitoring.FileReadRateMBPerSec,
-		AutoPauseOnHigh:      config.BoolVal(cfg.Monitoring.AutoPauseOnHigh),
-		AutoKillOnCritical:   config.BoolVal(cfg.Monitoring.AutoKillOnCritical),
+		ContainerName:             containerName,
+		WorkspacePath:             workspacePath,
+		PollInterval:              time.Duration(cfg.Monitoring.PollIntervalSec) * time.Second,
+		AuditLogPath:              auditLogPath,
+		AllowedCIDRs:              allowedCIDRs,
+		AllowedDomains:            cfg.Network.AllowedDomains,
+		GTFOBinsDir:               cfg.Detection.GTFOBinsDir,
+		SigmaDir:                  cfg.Detection.SigmaDir,
+		FileReadThresholdMB:       cfg.Monitoring.FileReadThresholdMB,
+		FileReadRateMBPerSec:      cfg.Monitoring.FileReadRateMBPerSec,
+		ProcessCountThreshold:     cfg.Monitoring.ProcessCountThreshold,
+		ProcessSpawnRateThreshold: config.IntVal(cfg.Monitoring.ProcessSpawnRateThreshold),
+		AutoPauseOnHigh:           config.BoolVal(cfg.Monitoring.AutoPauseOnHigh),
+		AutoKillOnCritical:        config.BoolVal(cfg.Monitoring.AutoKillOnCritical),
 		OnThreat: func(threat monitor.ThreatEvent) {
 			log.Printf("[monitor] threat detected: %s severity=%s", threat.Title, threat.Level)
 		},
@@ -1058,9 +642,10 @@ func startNFTMonitoringDaemon(containerName string, cfg *config.Config, log *log
 
 	auditLogPath := filepath.Join(homeDir, ".coi", "audit", containerName+"-nft.jsonl")
 
-	// Get allowed CIDRs from network config
-	allowedCIDRs := []string{}
-	// TODO: Convert allowed domains to CIDRs if in allowlist mode
+	var allowedCIDRs []string
+	if cfg.Network.Mode == config.NetworkModeAllowlist {
+		allowedCIDRs = resolveDomainsToHostCIDRs(cfg.Network.AllowedDomains)
+	}
 
 	// Create NFT daemon config
 	nftCfg := nftmonitor.Config{
@@ -1095,4 +680,25 @@ func startNFTMonitoringDaemon(containerName string, cfg *config.Config, log *log
 	*daemon = d
 	fmt.Fprintf(os.Stderr, "[security] NFT network monitoring started (audit log: %s)\n", auditLogPath)
 	return nil
+}
+
+func resolveDomainsToHostCIDRs(domains []string) []string {
+	if len(domains) == 0 {
+		return nil
+	}
+	resolver := network.NewResolver(&network.IPCache{})
+	resolved, err := resolver.ResolveAll(domains)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: some allowed domains failed to resolve for monitoring: %v\n", err)
+	}
+	if len(resolved) == 0 {
+		return nil
+	}
+	var cidrs []string
+	for _, ips := range resolved {
+		for _, ip := range ips {
+			cidrs = append(cidrs, ip+"/32")
+		}
+	}
+	return cidrs
 }

@@ -59,14 +59,39 @@ type DiskSpaceInfo struct {
 	TmpUsedPercent float64 `json:"tmp_used_percent"`
 }
 
+// ProcessCountThreat represents a process-count spike (fork bomb or runaway spawner)
+type ProcessCountThreat struct {
+	Count     int `json:"count"`           // Observed process count
+	Threshold int `json:"threshold"`       // Configured limit
+	Delta     int `json:"delta,omitempty"` // Processes spawned since last poll (spawn-rate check only)
+}
+
+// AuthLogThreat records a security-relevant line from auth.log or syslog.
+type AuthLogThreat struct {
+	LogFile string `json:"log_file"` // "auth.log" or "syslog"
+	Line    string `json:"line"`     // matched log line (truncated at 300 chars)
+	Pattern string `json:"pattern"`  // name of matched pattern
+}
+
+// ProcEventThreat records a suspicious process execution or privilege
+// escalation detected via the PROC_EVENTS netlink interface.
+type ProcEventThreat struct {
+	PID     int    `json:"pid"`
+	Command string `json:"command"` // cmdline (truncated at 300 chars)
+	Pattern string `json:"pattern"` // matched pattern name, e.g. "bash-interactive"
+}
+
 // Evidence holds threat-specific supporting data.
 // Exactly one field will be non-nil per threat event.
 type Evidence struct {
-	Process    *ProcessThreat         `json:"process,omitempty"`
-	Network    *NetworkThreat         `json:"network,omitempty"`
-	Filesystem *FilesystemThreat      `json:"filesystem,omitempty"`
-	FileWrite  *FilesystemWriteThreat `json:"file_write,omitempty"`
-	DiskSpace  *DiskSpaceInfo         `json:"disk_space,omitempty"`
+	Process      *ProcessThreat         `json:"process,omitempty"`
+	Network      *NetworkThreat         `json:"network,omitempty"`
+	Filesystem   *FilesystemThreat      `json:"filesystem,omitempty"`
+	FileWrite    *FilesystemWriteThreat `json:"file_write,omitempty"`
+	DiskSpace    *DiskSpaceInfo         `json:"disk_space,omitempty"`
+	ProcessCount *ProcessCountThreat    `json:"process_count,omitempty"`
+	AuthLog      *AuthLogThreat         `json:"auth_log,omitempty"`
+	ProcEvent    *ProcEventThreat       `json:"proc_event,omitempty"`
 }
 
 // String returns a summary of the evidence for deduplication keys
@@ -82,6 +107,15 @@ func (e Evidence) String() string {
 		return fmt.Sprintf("write:%.2fMB", e.FileWrite.WriteBytesMB)
 	case e.DiskSpace != nil:
 		return fmt.Sprintf("tmp:%.1f%%", e.DiskSpace.TmpUsedPercent)
+	case e.ProcessCount != nil:
+		if e.ProcessCount.Delta > 0 {
+			return fmt.Sprintf("spawn-delta:%d", e.ProcessCount.Delta)
+		}
+		return fmt.Sprintf("procs:%d", e.ProcessCount.Count)
+	case e.AuthLog != nil:
+		return fmt.Sprintf("auth:%s:%s", e.AuthLog.LogFile, e.AuthLog.Pattern)
+	case e.ProcEvent != nil:
+		return fmt.Sprintf("proc:%d:%s", e.ProcEvent.PID, e.ProcEvent.Pattern)
 	default:
 		return ""
 	}
@@ -90,7 +124,7 @@ func (e Evidence) String() string {
 // MonitorSnapshot represents a point-in-time view of container metrics
 type MonitorSnapshot struct {
 	Timestamp     time.Time       `json:"timestamp"`
-	ContainerName string          `json:"container_name"`
+	ContainerName string          `json:"container"`
 	ContainerIP   string          `json:"container_ip,omitempty"`
 	Network       NetworkStats    `json:"network"`
 	Processes     ProcessStats    `json:"processes"`
@@ -169,11 +203,19 @@ type DaemonConfig struct {
 	AllowedCIDRs   []string // CIDR ranges for allowed networks
 	AllowedDomains []string // Domains from network allowlist
 
+	// Detection database directories (populated from config.Detection)
+	GTFOBinsDir string // Local GTFOBins clone directory
+	SigmaDir    string // Local Sigma clone directory
+
 	// Threat detection thresholds
 	FileReadThresholdMB   float64 // MB read in poll interval
 	FileReadRateMBPerSec  float64 // MB/sec sustained rate
 	FileWriteThresholdMB  float64 // MB written in poll interval
 	FileWriteRateMBPerSec float64 // MB/sec sustained write rate
+	ProcessCountThreshold int     // Max processes before fork-bomb alert (0 = disabled)
+
+	// Threat detection thresholds (continued)
+	ProcessSpawnRateThreshold int // Max processes spawned per poll interval before alert (0 = disabled)
 
 	// Response configuration
 	AutoPauseOnHigh    bool
