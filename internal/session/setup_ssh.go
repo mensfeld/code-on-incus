@@ -69,7 +69,7 @@ func setupSSHAgentForwarding(mgr container.ContainerManager, containerName strin
 }
 
 // addSSHAgentProxyDevice adds the proxy device for SSH agent forwarding.
-func addSSHAgentProxyDevice(mgr container.ContainerManager, hostSocket, containerSocket string) error {
+func addSSHAgentProxyDevice(mgr container.ContainerDevices, hostSocket, containerSocket string) error {
 	return mgr.AddProxyDevice(
 		"ssh-agent",
 		fmt.Sprintf("unix:%s", hostSocket),
@@ -80,7 +80,7 @@ func addSSHAgentProxyDevice(mgr container.ContainerManager, hostSocket, containe
 }
 
 // waitForContainerSocket polls for a Unix socket to appear inside the container.
-func waitForContainerSocket(mgr container.ContainerManager, socketPath string, timeout time.Duration) bool {
+func waitForContainerSocket(mgr container.ContainerExecution, socketPath string, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	checkCmd := fmt.Sprintf("test -S %s", socketPath)
 	for time.Now().Before(deadline) {

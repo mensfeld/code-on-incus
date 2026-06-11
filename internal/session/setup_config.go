@@ -10,7 +10,7 @@ import (
 )
 
 // readContainerFile reads a file from inside the container via cat
-func readContainerFile(mgr container.ContainerManager, path string) ([]byte, error) {
+func readContainerFile(mgr container.ContainerExecution, path string) ([]byte, error) {
 	content, err := mgr.ExecCommand(fmt.Sprintf("cat %s", path), container.ExecCommandOptions{Capture: true})
 	if err != nil {
 		return nil, fmt.Errorf("failed to read %s from container: %w", path, err)
