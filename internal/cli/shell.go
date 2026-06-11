@@ -526,7 +526,7 @@ func detectHostTimezone() string {
 }
 
 // startMonitoringDaemon starts the background monitoring daemon
-func startMonitoringDaemon(containerName, workspacePath string, cfg *config.Config, log *logger.SessionLogger, daemon **monitor.Daemon) error {
+func startMonitoringDaemon(ctx context.Context, containerName, workspacePath string, cfg *config.Config, log *logger.SessionLogger, daemon **monitor.Daemon) error {
 	// Get home directory for audit log
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -569,7 +569,6 @@ func startMonitoringDaemon(containerName, workspacePath string, cfg *config.Conf
 	}
 
 	// Start daemon
-	ctx := context.Background()
 	d, err := monitor.StartDaemon(ctx, daemonCfg)
 	if err != nil {
 		return err
@@ -581,7 +580,7 @@ func startMonitoringDaemon(containerName, workspacePath string, cfg *config.Conf
 }
 
 // startNFTMonitoringDaemon starts the nftables network monitoring daemon
-func startNFTMonitoringDaemon(containerName string, cfg *config.Config, log *logger.SessionLogger, daemon **nftmonitor.Daemon) error {
+func startNFTMonitoringDaemon(ctx context.Context, containerName string, cfg *config.Config, log *logger.SessionLogger, daemon **nftmonitor.Daemon) error {
 	// Get container IP
 	containerIP, err := network.GetContainerIPWithRetries(containerName, 3)
 	if err != nil {
@@ -632,7 +631,6 @@ func startNFTMonitoringDaemon(containerName string, cfg *config.Config, log *log
 	}
 
 	// Start daemon
-	ctx := context.Background()
 	d, err := nftmonitor.StartDaemon(ctx, nftCfg)
 	if err != nil {
 		return err
