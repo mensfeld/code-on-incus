@@ -8,7 +8,6 @@ Tests that:
 """
 
 import subprocess
-from pathlib import Path
 
 
 def test_build_all_builds_configured_profiles(coi_binary, tmp_path):

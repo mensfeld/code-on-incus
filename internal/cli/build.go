@@ -263,7 +263,6 @@ func buildAllProfiles() error {
 				errored++
 				continue
 			}
-			defer cleanup()
 
 			baseImage := p.Container.Build.Base
 			if baseImage == "" {
@@ -281,6 +280,8 @@ func buildAllProfiles() error {
 				Logger:      func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) },
 			}
 			result := image.NewBuilder(opts).Build()
+			cleanup()
+
 			if result.Error != nil {
 				buildErrors = append(buildErrors, fmt.Sprintf("  profile '%s': %v", profileName, result.Error))
 				errored++
