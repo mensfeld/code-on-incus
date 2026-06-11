@@ -69,8 +69,7 @@ def _run_with_config(coi_binary, image_name, stale_base_check, tmp_path):
     config_dir = tmp_path / ".coi"
     config_dir.mkdir(exist_ok=True)
     (config_dir / "config.toml").write_text(
-        f'[container]\nimage = "{image_name}"\n'
-        f'stale_base_check = "{stale_base_check}"\n'
+        f'[container]\nimage = "{image_name}"\nstale_base_check = "{stale_base_check}"\n'
     )
     return subprocess.run(
         [coi_binary, "run", "--", "true"],
@@ -111,7 +110,9 @@ def test_stale_base_check_error(coi_binary, tmp_path):
         )
     finally:
         _remove_meta_entries(image_name, "coi-default")
-        subprocess.run([coi_binary, "image", "delete", image_name], check=False, capture_output=True)
+        subprocess.run(
+            [coi_binary, "image", "delete", image_name], check=False, capture_output=True
+        )
 
 
 def test_stale_base_check_warn(coi_binary, tmp_path):
@@ -136,15 +137,16 @@ def test_stale_base_check_warn(coi_binary, tmp_path):
         result = _run_with_config(coi_binary, image_name, "warn", tmp_path)
 
         assert result.returncode == 0, (
-            "coi run should succeed when stale_base_check=warn. "
-            f"stderr: {result.stderr}"
+            f"coi run should succeed when stale_base_check=warn. stderr: {result.stderr}"
         )
         assert "WARNING" in result.stderr and "older than its base" in result.stderr, (
             f"Warning should be printed. stderr: {result.stderr}"
         )
     finally:
         _remove_meta_entries(image_name, "coi-default")
-        subprocess.run([coi_binary, "image", "delete", image_name], check=False, capture_output=True)
+        subprocess.run(
+            [coi_binary, "image", "delete", image_name], check=False, capture_output=True
+        )
 
 
 def test_stale_base_check_off(coi_binary, tmp_path):
@@ -169,12 +171,13 @@ def test_stale_base_check_off(coi_binary, tmp_path):
         result = _run_with_config(coi_binary, image_name, "off", tmp_path)
 
         assert result.returncode == 0, (
-            "coi run should succeed when stale_base_check=off. "
-            f"stderr: {result.stderr}"
+            f"coi run should succeed when stale_base_check=off. stderr: {result.stderr}"
         )
         assert "older than its base" not in result.stderr, (
             f"No stale warning should be printed. stderr: {result.stderr}"
         )
     finally:
         _remove_meta_entries(image_name, "coi-default")
-        subprocess.run([coi_binary, "image", "delete", image_name], check=False, capture_output=True)
+        subprocess.run(
+            [coi_binary, "image", "delete", image_name], check=False, capture_output=True
+        )
