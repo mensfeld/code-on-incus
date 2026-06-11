@@ -82,7 +82,7 @@ func (a *App) runCommand(cmd *cobra.Command, args []string) error {
 		a.launchContainerRunPhase(s),
 		a.configureContainerRunPhase(s),
 		a.applyNetworkRunPhase(s),
-		a.runCommandPhase(ctx, args, s),
+		a.runCommandPhase(args, s),
 	)
 }
 

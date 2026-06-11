@@ -10,7 +10,6 @@ import (
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/limits"
 	"github.com/mensfeld/code-on-incus/internal/logger"
-	"github.com/mensfeld/code-on-incus/internal/network"
 	"github.com/mensfeld/code-on-incus/internal/session"
 )
 
@@ -21,7 +20,6 @@ type runState struct {
 	absWorkspace string
 
 	// After validate-env
-	slotNum       int
 	containerName string
 	img           string
 	effectiveAlias string
@@ -35,7 +33,6 @@ type runState struct {
 
 	// After apply-network
 	sshAgentSocketPath string
-	networkMgr         network.NetworkManager
 	tz                 string
 }
 
@@ -64,7 +61,6 @@ func (a *App) validateEnvRunPhase(s *runState) session.Phase {
 				}
 				fmt.Fprintf(os.Stderr, "Auto-allocated slot %d\n", slotNum)
 			}
-			s.slotNum = slotNum
 			s.containerName = session.ContainerName(s.absWorkspace, slotNum)
 
 			img := ResolveImageName(a.imageName, a.cfg)
@@ -181,7 +177,7 @@ func (a *App) configureContainerRunPhase(s *runState) session.Phase {
 				if err := session.ConfigureDockerDaemon(s.mgr, logFn); err != nil {
 					fmt.Fprintf(os.Stderr, "Warning: failed to configure Docker daemon: %v\n", err)
 				}
-				if err := remapContainerUserIfNeeded(s.mgr, false); err != nil {
+				if err := remapContainerUserIfNeeded(s.mgr, s.wasRestarted); err != nil {
 					return nil, err
 				}
 			}
@@ -192,6 +188,9 @@ func (a *App) configureContainerRunPhase(s *runState) session.Phase {
 				return nil, err
 			}
 
+			// LIFO teardown: apply-network's teardown runs before this one;
+			// the critical constraint (network before container deletion) is
+			// satisfied by the launch-container teardown running last.
 			teardown := func() {
 				logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
 				session.RemoveImmutable(s.containerName, logFn)
@@ -218,7 +217,6 @@ func (a *App) applyNetworkRunPhase(s *runState) session.Phase {
 			if err != nil {
 				return nil, err
 			}
-			s.networkMgr = nm
 
 			s.tz = a.applyContainerTimezone(s.mgr)
 
@@ -241,10 +239,10 @@ func (a *App) applyNetworkRunPhase(s *runState) session.Phase {
 
 // runCommandPhase starts the optional timeout monitor, executes the user's
 // command inside the container via incus exec, and returns any exit-code error.
-func (a *App) runCommandPhase(ctx context.Context, args []string, s *runState) session.Phase {
+func (a *App) runCommandPhase(args []string, s *runState) session.Phase {
 	return session.PhaseFunc{
 		PhaseName: "run-command",
-		RunFn: func(_ context.Context) (session.Teardown, error) {
+		RunFn: func(ctx context.Context) (session.Teardown, error) {
 			var timeoutMon *limits.TimeoutMonitor
 			if a.cfg.Limits.Runtime.MaxDuration != "" {
 				maxDur, _ := limits.ParseDuration(a.cfg.Limits.Runtime.MaxDuration)
@@ -257,6 +255,11 @@ func (a *App) runCommandPhase(ctx context.Context, args []string, s *runState) s
 				timeoutMon = limits.NewTimeoutMonitor(ctx, s.containerName, maxDur, autoStop, stopGraceful, a.cfg.Incus.Project, runLog)
 				timeoutMon.Start()
 			}
+			defer func() {
+				if timeoutMon != nil {
+					timeoutMon.Stop()
+				}
+			}()
 
 			fmt.Fprintf(os.Stderr, "Executing: %s\n", strings.Join(args, " "))
 
@@ -271,10 +274,6 @@ func (a *App) runCommandPhase(ctx context.Context, args []string, s *runState) s
 			output, err := container.IncusOutputWithArgs(incusArgs...)
 			if output != "" {
 				fmt.Print(output)
-			}
-
-			if timeoutMon != nil {
-				timeoutMon.Stop()
 			}
 
 			if err != nil {
