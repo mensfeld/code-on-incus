@@ -90,6 +90,9 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	if err := AutoBuildIfNeeded(app.cfg, img); err != nil {
 		return err
 	}
+	if err := CheckAndReportStaleBase(app.cfg, img); err != nil {
+		return err
+	}
 
 	// Validate the storage pool exists before doing any container work so the
 	// user gets an actionable "create with `incus storage create`" error

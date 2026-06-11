@@ -6,6 +6,7 @@
 image = "coi-default"
 persistent = false
 storage_pool = ""
+stale_base_check = "warn"
 
 [defaults]
 model = "claude-sonnet-4-5"

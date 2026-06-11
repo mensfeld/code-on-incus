@@ -267,6 +267,9 @@ func configureSessionPhase(cmd *cobra.Command, s *shellState) session.Phase {
 			if err := AutoBuildIfNeeded(app.cfg, img); err != nil {
 				return nil, err
 			}
+			if err := CheckAndReportStaleBase(app.cfg, img); err != nil {
+				return nil, err
+			}
 
 			// Build config-derived options.
 			networkConfig := app.cfg.Network

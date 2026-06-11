@@ -214,6 +214,12 @@ coi build --compression none
 coi profile create my-image --image my-image
 # Edit .coi/profiles/my-image/config.toml to add a [container.build] section
 coi build --profile my-image
+
+# Build images for all profiles that have a [container.build] section
+coi build --all
+
+# Rebuild all profile images from scratch
+coi build --all --force
 ```
 
 **What's included in the `coi-default` image:**
