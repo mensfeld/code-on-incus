@@ -259,7 +259,7 @@ func resolveForwardedEnvVarNames(names []string) []string {
 
 // ensureTmuxServer starts the tmux server and polls until it is ready (up to 2 seconds).
 // This is critical in CI and for newly started containers where the tmux server might not be running yet.
-func ensureTmuxServer(mgr container.ContainerManager, userPtr *int) {
+func ensureTmuxServer(mgr container.ContainerExecution, userPtr *int) {
 	serverStartCmd := "tmux start-server 2>/dev/null || true; sleep 0.1"
 	serverOpts := container.ExecCommandOptions{
 		Capture: true,

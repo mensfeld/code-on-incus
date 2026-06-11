@@ -720,7 +720,7 @@ const dockerDaemonJSON = `{
 
 // ConfigureDockerDaemon writes /etc/docker/daemon.json inside the container
 // to configure bridge CIDRs that don't overlap with the host network.
-func ConfigureDockerDaemon(mgr container.ContainerManager, logFn func(string)) error {
+func ConfigureDockerDaemon(mgr container.ContainerExecution, logFn func(string)) error {
 	cmd := fmt.Sprintf(
 		"mkdir -p /etc/docker && printf '%%s' %s > /etc/docker/daemon.json",
 		shellEscape(dockerDaemonJSON),
@@ -780,7 +780,7 @@ func waitForReady(mgr container.ContainerManager, maxRetries int, logger func(st
 // not present" and returns (false, nil). Any other error (e.g. incus
 // connectivity failure) is surfaced to the caller so it can decide
 // whether to warn or fall back.
-func DetectCodeUser(mgr container.ContainerManager, codeUser string) (bool, error) {
+func DetectCodeUser(mgr container.ContainerExecution, codeUser string) (bool, error) {
 	_, err := mgr.ExecArgsCapture(
 		[]string{"id", "-u", codeUser},
 		container.ExecCommandOptions{Capture: true},
