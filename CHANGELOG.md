@@ -42,6 +42,8 @@
 
 ### Improvements
 
+- [Feature] **`coi build --all`** — Builds images for every profile that has a `[container.build]` section in a single command. The `coi-default` base image (the built-in "default" profile) is always built first so it is available as the base for custom profiles. Profiles without a build configuration are silently skipped. Errors from individual profiles are collected and reported together at the end so that a single failing profile does not prevent other profiles from building. Supports all existing flags: `--force` to rebuild images that already exist, and `--compression` to select the Incus compression algorithm. Resolves #455.
+
 - [Refactor] **Completed nft naming cleanup in `network.Manager`** — The `firewall` private field on `Manager` was missed when `FirewallManager` → `NftManager` was renamed in an earlier refactor. Renamed to `nft` throughout `internal/network/manager.go`; updated matching log messages and comments to use "nft rules" consistently. No behaviour change.
 
 - [Refactor] **Removed dead audit command stub** — `internal/cli/monitor.go` contained a commented-out `monitorAuditCmd` registration and an unused `monitorAuditCommand` function annotated `//nolint:unused`. Both were removed to eliminate dead code. (#428)
