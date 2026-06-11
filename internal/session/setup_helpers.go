@@ -135,6 +135,8 @@ func SetupGitIdentityGuard(mgr container.ContainerExecution, homeDir string, log
 // Claude Code versions show at startup. The managed-settings path is the only
 // way to set disableAutoMode — it cannot be set via user settings.
 // Non-fatal: logs a warning on failure.
+// Accepts ContainerManager (not a sub-interface) because it uses both
+// ExecCommand (ContainerExecution) and CreateFile (ContainerFiles).
 func SetupClaudeManagedSettings(mgr container.ContainerManager, logger func(string)) {
 	mkdirCmd := "mkdir -p /etc/claude-code"
 	if _, err := mgr.ExecCommand(mkdirCmd, container.ExecCommandOptions{Capture: true}); err != nil {

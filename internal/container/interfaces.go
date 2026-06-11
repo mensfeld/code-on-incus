@@ -27,7 +27,9 @@ type ContainerDevices interface {
 	SetTmpfsSize(size string) error
 }
 
-// ContainerFiles covers file and directory transfers between host and container.
+// ContainerFiles covers file operations on the container filesystem: pushing and
+// pulling between host and container, creating files in-container, ownership
+// changes, existence checks, and workspace path resolution.
 type ContainerFiles interface {
 	GetWorkspacePath() string
 	PushFile(source, destination string) error
