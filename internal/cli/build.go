@@ -26,6 +26,11 @@ By default, builds the "coi-default" image using the built-in default profile.
 Use --profile to build from a custom profile's [container.build] section.
 Use --all to build images for all profiles that have a build configuration.
 
+Profile discovery for --all: global profiles (~/.coi/profiles/) are always
+included. Project-local profiles (.coi/profiles/ in the current directory) are
+only loaded when you run coi from inside that project directory. Run coi build
+--all from your project directory to include its profiles.
+
 Examples:
   coi build
   coi build --force
@@ -40,7 +45,7 @@ Examples:
 func init() {
 	buildCmd.Flags().BoolVarP(&buildForce, "force", "f", false, "Force rebuild even if image exists")
 	buildCmd.Flags().StringVar(&buildCompression, "compression", "", "Compression algorithm (e.g., none, gzip, xz; see Incus docs for all options)")
-	buildCmd.Flags().BoolVar(&buildAll, "all", false, "Build images for all profiles that have a build configuration")
+	buildCmd.Flags().BoolVar(&buildAll, "all", false, "Build images for all profiles visible from the current directory (global ~/.coi/profiles + project .coi/profiles)")
 }
 
 func buildCommand(cmd *cobra.Command, args []string) error {
