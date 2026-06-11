@@ -1,13 +1,14 @@
 package session
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 )
 
 func TestConfigureOptions_ContainerNameRequired(t *testing.T) {
 	opts := ConfigureOptions{}
-	_, err := ConfigureContainer(opts)
+	_, err := ConfigureContainer(context.Background(), opts)
 	if err == nil {
 		t.Fatal("expected error when container name is empty")
 	}
@@ -87,7 +88,7 @@ func TestConfigureOptions_DefaultLogger(t *testing.T) {
 
 	// This will fail because the container doesn't exist, but it should
 	// not panic due to nil logger
-	_, err := ConfigureContainer(opts)
+	_, err := ConfigureContainer(context.Background(), opts)
 	if err == nil {
 		t.Fatal("expected error for nonexistent container")
 	}

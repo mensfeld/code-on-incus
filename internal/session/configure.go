@@ -45,7 +45,7 @@ type ConfigureResult struct {
 // container, allowing orchestrators to manage container lifecycle independently
 // while still leveraging coi's network isolation, SSH forwarding, timezone,
 // git identity guard, and managed settings features.
-func ConfigureContainer(opts ConfigureOptions) (*ConfigureResult, error) {
+func ConfigureContainer(ctx context.Context, opts ConfigureOptions) (*ConfigureResult, error) {
 	if opts.ContainerName == "" {
 		return nil, fmt.Errorf("container name is required")
 	}
@@ -135,7 +135,7 @@ func ConfigureContainer(opts ConfigureOptions) (*ConfigureResult, error) {
 		}
 
 		nm := network.NewManager(opts.NetworkConfig, logger.NewDiscard())
-		if err := nm.SetupForContainer(context.Background(), opts.ContainerName); err != nil {
+		if err := nm.SetupForContainer(ctx, opts.ContainerName); err != nil {
 			return nil, fmt.Errorf("failed to setup network isolation: %w", err)
 		}
 		result.NetworkApplied = string(opts.NetworkConfig.Mode)

@@ -394,17 +394,17 @@ func setupContainerPhase(s *shellState) session.Phase {
 func startMonitoringPhase(s *shellState) session.Phase {
 	return session.PhaseFunc{
 		PhaseName: "start-monitoring",
-		RunFn: func(_ context.Context) (session.Teardown, error) {
+		RunFn: func(ctx context.Context) (session.Teardown, error) {
 			if !config.BoolVal(app.cfg.Monitoring.Enabled) {
 				return nil, nil
 			}
 
-			if err := startMonitoringDaemon(s.result.ContainerName, s.absWorkspace, app.cfg, s.result.Logger, &s.monitorDaemon); err != nil {
+			if err := startMonitoringDaemon(ctx, s.result.ContainerName, s.absWorkspace, app.cfg, s.result.Logger, &s.monitorDaemon); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: Failed to start monitoring daemon: %v\n", err)
 			}
 
 			if config.BoolVal(app.cfg.Monitoring.NFT.Enabled) {
-				if err := startNFTMonitoringDaemon(s.result.ContainerName, app.cfg, s.result.Logger, &s.nftDaemon); err != nil {
+				if err := startNFTMonitoringDaemon(ctx, s.result.ContainerName, app.cfg, s.result.Logger, &s.nftDaemon); err != nil {
 					fmt.Fprintf(os.Stderr, "Warning: Failed to start NFT monitoring: %v\n", err)
 				}
 			}
