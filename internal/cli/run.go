@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/mensfeld/code-on-incus/internal/alias"
 	"github.com/mensfeld/code-on-incus/internal/config"
@@ -34,273 +36,54 @@ Examples:
 }
 
 func (a *App) runCommand(cmd *cobra.Command, args []string) error {
-	// Get absolute workspace path
+	// Signal-aware context so phases can abort on Ctrl+C.
+	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	// Resolve workspace and validate max_duration before starting the pipeline
+	// so errors surface before any container work.
 	absWorkspace, err := filepath.Abs(a.workspace)
 	if err != nil {
 		return fmt.Errorf("invalid workspace path: %w", err)
 	}
-
-	// Load workspace-local .coi/config.toml when the workspace differs from the
-	// process CWD. config.Load() already loads <CWD>/.coi/config.toml via
-	// GetConfigPaths, so we only need to overlay when the user pointed --workspace
-	// at a different directory to avoid loading the same file twice.
 	if err := a.overlayWorkspaceConfig(absWorkspace); err != nil {
 		return err
 	}
-
-	// Validate max_duration early so the user gets a clear error before any container work.
 	if a.cfg.Limits.Runtime.MaxDuration != "" {
 		if _, err := limits.ParseDuration(a.cfg.Limits.Runtime.MaxDuration); err != nil {
 			return fmt.Errorf("invalid max_duration: %w", err)
 		}
 	}
 
-	// Check if Incus is available
-	if !container.Available() {
-		return container.IncusNotAvailableError()
-	}
+	s := &runState{absWorkspace: absWorkspace}
 
-	// Check minimum Incus version
-	if err := container.CheckMinimumVersion(); err != nil {
-		return err
-	}
-
-	// Warn if kernel is too old (non-blocking)
-	if warning := container.CheckKernelVersion(); warning != "" {
-		fmt.Fprintf(os.Stderr, "%s\n", warning)
-	}
-
-	// Allocate slot if not specified
-	slotNum := a.slot
-	if slotNum == 0 {
-		slotNum, err = session.AllocateSlot(absWorkspace, 10)
-		if err != nil {
-			return fmt.Errorf("failed to allocate slot: %w", err)
-		}
-		fmt.Fprintf(os.Stderr, "Auto-allocated slot %d\n", slotNum)
-	}
-
-	// Generate container name
-	containerName := session.ContainerName(absWorkspace, slotNum)
-
-	// Determine image: CLI --image flag > config defaults.image > "coi-default"
-	img := ResolveImageName(a.imageName, a.cfg)
-
-	// Check if image exists, auto-build from config if possible
-	if err := AutoBuildIfNeeded(a.cfg, img); err != nil {
-		return err
-	}
-	if err := CheckAndReportStaleBase(a.cfg, img); err != nil {
-		return err
-	}
-
-	// Validate the storage pool exists before doing any container work so the
-	// user gets an actionable "create with `incus storage create`" error
-	// instead of a cryptic Incus failure midway through launch.
-	if err := container.ValidateStoragePool(a.cfg.Container.StoragePool); err != nil {
-		return err
-	}
-
-	// Validate and prepare alias if configured
-	effectiveAlias, err := validateAndPrepareAlias(a.cfg.Container.Alias)
-	if err != nil {
-		return err
-	}
-
-	ensureBridgeTrustedZone()
-
-	fmt.Fprintf(os.Stderr, "Launching container %s from image %s...\n", containerName, img)
-
-	// Create manager
-	mgr := container.NewManager(containerName)
-
-	// Check if persistent container already exists
-	containerExists, err := mgr.Exists()
-	if err != nil {
-		return fmt.Errorf("failed to check if container exists: %w", err)
-	}
-
-	if err := launchOrReuseContainer(mgr, img, a.cfg.Container.StoragePool, containerExists, a.persistent); err != nil {
-		return err
-	}
-
-	// Set alias metadata on container and register in global registry
-	if err := applyContainerAlias(effectiveAlias, containerName, absWorkspace); err != nil {
-		return err
-	}
-
-	// networkMgr is assigned by applyNetworkIsolation below. Declared here so
-	// the teardown closures can capture it by reference.
-	var networkMgr *network.Manager
-
-	// Teardowns run LIFO. Register in reverse of desired execution order so
-	// the actual sequence is: immutable → network → container.
 	pipeline := &session.Pipeline{}
 	defer pipeline.Teardown()
 
-	// 1. Container (registered first → executes last in LIFO)
-	pipeline.AddTeardown(func() {
-		if !a.persistent {
-			fmt.Fprintf(os.Stderr, "Cleaning up container %s...\n", containerName)
-			_ = mgr.Delete(true)
-		} else {
-			if running, _ := mgr.Running(); running {
-				fmt.Fprintf(os.Stderr, "Stopping persistent container %s...\n", containerName)
-				_ = mgr.Stop(false)
-			}
+	// Signal handler: trigger cleanup immediately on SIGINT while incus exec blocks.
+	// Uses a dedicated sigChan (not ctx.Done) to avoid non-determinism when both fire
+	// simultaneously. pipeline.Teardown is idempotent so the deferred call above is safe.
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigChan)
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-sigChan:
+			fmt.Fprintf(os.Stderr, "\nReceived interrupt signal, cleaning up...\n")
+			pipeline.Teardown()
+		case <-done:
 		}
-	})
+	}()
 
-	// 2. Network (registered second → executes second; runs before container
-	// deletion so firewall rules are removed while the IP is still resolvable)
-	pipeline.AddTeardown(func() {
-		if networkMgr == nil {
-			return
-		}
-		if err := networkMgr.Teardown(context.Background(), containerName); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to teardown network isolation: %v\n", err)
-		}
-	})
-
-	// 3. Immutable (registered last → executes first; clears host-side bits
-	// before any container or network operation so protected files are writable)
-	pipeline.AddTeardown(func() {
-		logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
-		session.RemoveImmutable(containerName, logFn)
-	})
-
-	// Apply resource limits (only for new containers, not restarted persistent ones)
-	wasRestarted := containerExists && a.persistent
-	if !wasRestarted {
-		limitsConfig := &a.cfg.Limits
-		if limitsConfig != nil && hasAnyLimits(limitsConfig) {
-			fmt.Fprintf(os.Stderr, "Applying resource limits...\n")
-			applyOpts := limits.ApplyOptions{
-				ContainerName: containerName,
-				CPU: limits.CPULimits{
-					Count:     limitsConfig.CPU.Count,
-					Allowance: limitsConfig.CPU.Allowance,
-					Priority:  limitsConfig.CPU.Priority,
-				},
-				Memory: limits.MemoryLimits{
-					Limit:   limitsConfig.Memory.Limit,
-					Enforce: limitsConfig.Memory.Enforce,
-					Swap:    limitsConfig.Memory.Swap,
-				},
-				Disk: limits.DiskLimits{
-					Read:     limitsConfig.Disk.Read,
-					Write:    limitsConfig.Disk.Write,
-					Max:      limitsConfig.Disk.Max,
-					Priority: limitsConfig.Disk.Priority,
-				},
-				Runtime: limits.RuntimeLimits{
-					MaxProcesses: limitsConfig.Runtime.MaxProcesses,
-				},
-				Project: a.cfg.Incus.Project,
-			}
-			if err := limits.ApplyResourceLimits(applyOpts); err != nil {
-				return fmt.Errorf("failed to apply resource limits: %w", err)
-			}
-		}
-	}
-
-	// Wait for container to be ready
-	fmt.Fprintf(os.Stderr, "Waiting for container to be ready...\n")
-	if err := waitForContainer(mgr, 30); err != nil {
-		return err
-	}
-
-	// Configure Docker bridge CIDRs for new containers (not restarted persistent ones)
-	if !wasRestarted {
-		logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
-		if err := session.ConfigureDockerDaemon(mgr, logFn); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to configure Docker daemon: %v\n", err)
-		}
-	}
-
-	// Remap container user UID/GID if configured UID differs from image default (1000)
-	if err := remapContainerUserIfNeeded(mgr, wasRestarted); err != nil {
-		return err
-	}
-
-	// Determine container workspace path (respects preserve_workspace_path config)
-	containerWorkspacePath := a.resolveContainerWorkspacePath(absWorkspace)
-
-	// Mount workspace (skip if restarting existing persistent container)
-	useShift := !a.cfg.Incus.DisableShift
-	if err := a.applyWorkspaceMounts(mgr, containerName, absWorkspace, &containerWorkspacePath, useShift, wasRestarted); err != nil {
-		return err
-	}
-
-	// Forward SSH agent and apply network isolation if configured
-	sshAgentSocketPath, err := a.applySSHAgentForwarding(mgr, containerName)
-	if err != nil {
-		return err
-	}
-	networkMgr, err = a.applyNetworkIsolation(containerName)
-	if err != nil {
-		return err
-	}
-
-	// Configure timezone in container filesystem
-	tz := a.applyContainerTimezone(mgr)
-
-	// Auto-trust mise config files in the workspace
-	session.SetupMiseTrust(mgr, containerWorkspacePath, func(msg string) {
-		fmt.Fprintf(os.Stderr, "%s\n", msg)
-	})
-
-	// Start timeout monitor if max_duration is configured.
-	// The monitor runs in a background goroutine and stops the container when
-	// the duration elapses, which causes the blocking incus exec below to return.
-	var timeoutMon *limits.TimeoutMonitor
-	if a.cfg.Limits.Runtime.MaxDuration != "" {
-		maxDur, _ := limits.ParseDuration(a.cfg.Limits.Runtime.MaxDuration) // already validated above
-		autoStop := config.BoolVal(a.cfg.Limits.Runtime.AutoStop)
-		if a.cfg.Limits.Runtime.AutoStop == nil {
-			autoStop = true // default: auto-stop when limit reached
-		}
-		stopGraceful := config.BoolVal(a.cfg.Limits.Runtime.StopGraceful)
-		runLog := logger.NewDiscard()
-		timeoutMon = limits.NewTimeoutMonitor(cmd.Context(), containerName, maxDur, autoStop, stopGraceful, a.cfg.Incus.Project, runLog)
-		timeoutMon.Start()
-		defer timeoutMon.Stop()
-	}
-
-	// Execute command directly (args are already the full command to run)
-	fmt.Fprintf(os.Stderr, "Executing: %s\n", strings.Join(args, " "))
-
-	// Build incus exec command directly with proper args
-	incusArgs := []string{
-		"exec", containerName, "--user", fmt.Sprintf("%d", container.CodeUID),
-		"--group", fmt.Sprintf("%d", container.CodeUID), "--cwd", containerWorkspacePath,
-	}
-
-	// Add all environment variables (timezone, config, forward_env)
-	incusArgs = a.appendEnvArgs(incusArgs, tz, sshAgentSocketPath)
-
-	incusArgs = append(incusArgs, "--")
-	incusArgs = append(incusArgs, args...)
-
-	// Execute and capture output and exit code
-	output, err := container.IncusOutputWithArgs(incusArgs...)
-
-	// Print output to stdout (not stderr) so it can be captured
-	if output != "" {
-		fmt.Print(output)
-	}
-
-	// Handle exit codes: if command ran but failed, propagate exit code through cobra
-	if err != nil {
-		if exitErr, ok := err.(*container.ExitError); ok {
-			fmt.Fprintf(os.Stderr, "\nCommand exited with code %d\n", exitErr.ExitCode)
-			return &ExitCodeError{Code: exitErr.ExitCode}
-		}
-		return fmt.Errorf("command failed: %w", err)
-	}
-
-	fmt.Fprintf(os.Stderr, "\nCommand completed successfully\n")
-	return nil
+	return pipeline.Run(ctx,
+		a.validateEnvRunPhase(s),
+		a.launchContainerRunPhase(s),
+		a.configureContainerRunPhase(s),
+		a.applyNetworkRunPhase(s),
+		a.runCommandPhase(ctx, args, s),
+	)
 }
 
 // launchOrReuseContainer restarts an existing persistent container, or
