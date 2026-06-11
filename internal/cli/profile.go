@@ -34,84 +34,86 @@ Profiles are defined as directories under profiles/, each containing a config.to
 Examples:
   coi profile list
   coi profile list --format json`,
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if profileFormat != "text" && profileFormat != "json" {
-			return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid format '%s': must be 'text' or 'json'", profileFormat)}
-		}
+	RunE: app.profileListRunE,
+}
 
-		if len(app.cfg.Profiles) == 0 {
-			if profileFormat == "json" {
-				fmt.Println("[]")
-				return nil
-			}
-			fmt.Fprintln(os.Stderr, "No profiles configured.")
-			return nil
-		}
+func (a *App) profileListRunE(cmd *cobra.Command, args []string) error {
+	if profileFormat != "text" && profileFormat != "json" {
+		return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid format '%s': must be 'text' or 'json'", profileFormat)}
+	}
 
-		// Sort profile names for consistent output
-		names := make([]string, 0, len(app.cfg.Profiles))
-		for name := range app.cfg.Profiles {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-
+	if len(a.cfg.Profiles) == 0 {
 		if profileFormat == "json" {
-			type profileEntry struct {
-				Name        string `json:"name"`
-				Image       string `json:"image"`
-				Persistent  *bool  `json:"persistent"`
-				StoragePool string `json:"storage_pool,omitempty"`
-				Inherits    string `json:"inherits,omitempty"`
-				Source      string `json:"source,omitempty"`
-			}
-			entries := make([]profileEntry, 0, len(names))
-			for _, name := range names {
-				p := app.cfg.Profiles[name]
-				entries = append(entries, profileEntry{
-					Name:        name,
-					Image:       p.Container.Image,
-					Persistent:  p.Container.Persistent,
-					StoragePool: p.Container.StoragePool,
-					Inherits:    p.Inherits,
-					Source:      p.Source,
-				})
-			}
-			jsonData, err := json.MarshalIndent(entries, "", "  ")
-			if err != nil {
-				return fmt.Errorf("failed to marshal JSON: %v", err)
-			}
-			fmt.Println(string(jsonData))
+			fmt.Println("[]")
 			return nil
 		}
-
-		tbl := NewTable("NAME", "IMAGE", "PERSISTENT", "INHERITS", "SOURCE")
-		for _, name := range names {
-			p := app.cfg.Profiles[name]
-			image := p.Container.Image
-			if image == "" {
-				image = "(default)"
-			}
-			persistent := "-"
-			if p.Container.Persistent != nil {
-				if *p.Container.Persistent {
-					persistent = "true"
-				} else {
-					persistent = "false"
-				}
-			}
-			inherits := "-"
-			if p.Inherits != "" {
-				inherits = p.Inherits
-			}
-			source := p.Source
-			if source == "" {
-				source = "(unknown)"
-			}
-			tbl.AddRow(name, image, persistent, inherits, source)
-		}
-		tbl.Render()
+		fmt.Fprintln(os.Stderr, "No profiles configured.")
 		return nil
-	},
+	}
+
+	// Sort profile names for consistent output
+	names := make([]string, 0, len(a.cfg.Profiles))
+	for name := range a.cfg.Profiles {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	if profileFormat == "json" {
+		type profileEntry struct {
+			Name        string `json:"name"`
+			Image       string `json:"image"`
+			Persistent  *bool  `json:"persistent"`
+			StoragePool string `json:"storage_pool,omitempty"`
+			Inherits    string `json:"inherits,omitempty"`
+			Source      string `json:"source,omitempty"`
+		}
+		entries := make([]profileEntry, 0, len(names))
+		for _, name := range names {
+			p := a.cfg.Profiles[name]
+			entries = append(entries, profileEntry{
+				Name:        name,
+				Image:       p.Container.Image,
+				Persistent:  p.Container.Persistent,
+				StoragePool: p.Container.StoragePool,
+				Inherits:    p.Inherits,
+				Source:      p.Source,
+			})
+		}
+		jsonData, err := json.MarshalIndent(entries, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to marshal JSON: %v", err)
+		}
+		fmt.Println(string(jsonData))
+		return nil
+	}
+
+	tbl := NewTable("NAME", "IMAGE", "PERSISTENT", "INHERITS", "SOURCE")
+	for _, name := range names {
+		p := a.cfg.Profiles[name]
+		image := p.Container.Image
+		if image == "" {
+			image = "(default)"
+		}
+		persistent := "-"
+		if p.Container.Persistent != nil {
+			if *p.Container.Persistent {
+				persistent = "true"
+			} else {
+				persistent = "false"
+			}
+		}
+		inherits := "-"
+		if p.Inherits != "" {
+			inherits = p.Inherits
+		}
+		source := p.Source
+		if source == "" {
+			source = "(unknown)"
+		}
+		tbl.AddRow(name, image, persistent, inherits, source)
+	}
+	tbl.Render()
+	return nil
 }
 
 // profileInfoCmd shows details of a specific profile
@@ -123,213 +125,215 @@ var profileInfoCmd = &cobra.Command{
 Examples:
   coi profile info rust-dev`,
 	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		name := args[0]
-		p := app.cfg.GetProfile(name)
-		if p == nil {
-			return fmt.Errorf("profile '%s' not found", name)
-		}
+	RunE: app.profileInfoRunE,
+}
 
-		fmt.Printf("Profile: %s\n", name)
-		if p.Source != "" {
-			fmt.Printf("Source:  %s\n", p.Source)
-		}
+func (a *App) profileInfoRunE(cmd *cobra.Command, args []string) error {
+	name := args[0]
+	p := a.cfg.GetProfile(name)
+	if p == nil {
+		return fmt.Errorf("profile '%s' not found", name)
+	}
+
+	fmt.Printf("Profile: %s\n", name)
+	if p.Source != "" {
+		fmt.Printf("Source:  %s\n", p.Source)
+	}
+	fmt.Println()
+
+	if p.Inherits != "" {
+		fmt.Printf("inherits = %q\n", p.Inherits)
+	}
+	if p.Context != "" {
+		fmt.Printf("context = %q\n", p.Context)
+	}
+	if p.Model != "" {
+		fmt.Printf("model = %q\n", p.Model)
+	}
+	if len(p.ForwardEnv) > 0 {
+		fmt.Printf("forward_env = [%s]\n", formatStringSlice(p.ForwardEnv))
+	}
+
+	if p.Container.HasContainerConfig() {
 		fmt.Println()
+		fmt.Println("[container]")
+		if p.Container.Image != "" {
+			fmt.Printf("image = %q\n", p.Container.Image)
+		}
+		if p.Container.Persistent != nil {
+			fmt.Printf("persistent = %v\n", *p.Container.Persistent)
+		}
+		if p.Container.StoragePool != "" {
+			fmt.Printf("storage_pool = %q\n", p.Container.StoragePool)
+		}
+	}
 
-		if p.Inherits != "" {
-			fmt.Printf("inherits = %q\n", p.Inherits)
+	if len(p.Environment) > 0 {
+		fmt.Println()
+		fmt.Println("[environment]")
+		keys := make([]string, 0, len(p.Environment))
+		for k := range p.Environment {
+			keys = append(keys, k)
 		}
-		if p.Context != "" {
-			fmt.Printf("context = %q\n", p.Context)
+		sort.Strings(keys)
+		for _, k := range keys {
+			fmt.Printf("%s = %q\n", k, p.Environment[k])
 		}
-		if p.Model != "" {
-			fmt.Printf("model = %q\n", p.Model)
-		}
-		if len(p.ForwardEnv) > 0 {
-			fmt.Printf("forward_env = [%s]\n", formatStringSlice(p.ForwardEnv))
-		}
+	}
 
-		if p.Container.HasContainerConfig() {
+	if p.Tool != nil {
+		fmt.Println()
+		fmt.Println("[tool]")
+		if p.Tool.Name != "" {
+			fmt.Printf("name = %q\n", p.Tool.Name)
+		}
+		if p.Tool.Binary != "" {
+			fmt.Printf("binary = %q\n", p.Tool.Binary)
+		}
+		if p.Tool.PermissionMode != "" {
+			fmt.Printf("permission_mode = %q\n", p.Tool.PermissionMode)
+		}
+		if p.Tool.ContextFile != "" {
+			fmt.Printf("context_file = %q\n", p.Tool.ContextFile)
+		}
+		if p.Tool.AutoContext != nil {
+			fmt.Printf("auto_context = %v\n", *p.Tool.AutoContext)
+		}
+		if p.Tool.Claude.EffortLevel != "" {
 			fmt.Println()
-			fmt.Println("[container]")
-			if p.Container.Image != "" {
-				fmt.Printf("image = %q\n", p.Container.Image)
-			}
-			if p.Container.Persistent != nil {
-				fmt.Printf("persistent = %v\n", *p.Container.Persistent)
-			}
-			if p.Container.StoragePool != "" {
-				fmt.Printf("storage_pool = %q\n", p.Container.StoragePool)
-			}
+			fmt.Println("[tool.claude]")
+			fmt.Printf("effort_level = %q\n", p.Tool.Claude.EffortLevel)
 		}
+	}
 
-		if len(p.Environment) > 0 {
+	if p.Container.Build.HasBuildConfig() {
+		fmt.Println()
+		fmt.Println("[container.build]")
+		if p.Container.Build.Base != "" {
+			fmt.Printf("base = %q\n", p.Container.Build.Base)
+		}
+		if p.Container.Build.Script != "" {
+			fmt.Printf("script = %q\n", p.Container.Build.Script)
+		}
+		if len(p.Container.Build.Commands) > 0 {
+			fmt.Printf("commands = [%s]\n", formatStringSlice(p.Container.Build.Commands))
+		}
+	}
+
+	if len(p.Mounts) > 0 {
+		for _, m := range p.Mounts {
 			fmt.Println()
-			fmt.Println("[environment]")
-			keys := make([]string, 0, len(p.Environment))
-			for k := range p.Environment {
-				keys = append(keys, k)
-			}
-			sort.Strings(keys)
-			for _, k := range keys {
-				fmt.Printf("%s = %q\n", k, p.Environment[k])
-			}
+			fmt.Println("[[mounts]]")
+			fmt.Printf("host = %q\n", m.Host)
+			fmt.Printf("container = %q\n", m.Container)
 		}
+	}
 
-		if p.Tool != nil {
-			fmt.Println()
-			fmt.Println("[tool]")
-			if p.Tool.Name != "" {
-				fmt.Printf("name = %q\n", p.Tool.Name)
-			}
-			if p.Tool.Binary != "" {
-				fmt.Printf("binary = %q\n", p.Tool.Binary)
-			}
-			if p.Tool.PermissionMode != "" {
-				fmt.Printf("permission_mode = %q\n", p.Tool.PermissionMode)
-			}
-			if p.Tool.ContextFile != "" {
-				fmt.Printf("context_file = %q\n", p.Tool.ContextFile)
-			}
-			if p.Tool.AutoContext != nil {
-				fmt.Printf("auto_context = %v\n", *p.Tool.AutoContext)
-			}
-			if p.Tool.Claude.EffortLevel != "" {
-				fmt.Println()
-				fmt.Println("[tool.claude]")
-				fmt.Printf("effort_level = %q\n", p.Tool.Claude.EffortLevel)
-			}
+	if p.Network != nil {
+		fmt.Println()
+		fmt.Println("[network]")
+		if p.Network.Mode != "" {
+			fmt.Printf("mode = %q\n", string(p.Network.Mode))
 		}
-
-		if p.Container.Build.HasBuildConfig() {
-			fmt.Println()
-			fmt.Println("[container.build]")
-			if p.Container.Build.Base != "" {
-				fmt.Printf("base = %q\n", p.Container.Build.Base)
-			}
-			if p.Container.Build.Script != "" {
-				fmt.Printf("script = %q\n", p.Container.Build.Script)
-			}
-			if len(p.Container.Build.Commands) > 0 {
-				fmt.Printf("commands = [%s]\n", formatStringSlice(p.Container.Build.Commands))
-			}
+		if len(p.Network.AllowedDomains) > 0 {
+			fmt.Printf("allowed_domains = [%s]\n", formatStringSlice(p.Network.AllowedDomains))
 		}
+	}
 
-		if len(p.Mounts) > 0 {
-			for _, m := range p.Mounts {
-				fmt.Println()
-				fmt.Println("[[mounts]]")
-				fmt.Printf("host = %q\n", m.Host)
-				fmt.Printf("container = %q\n", m.Container)
-			}
+	if p.Limits != nil {
+		printLimits(p.Limits)
+	}
+
+	if p.Paths != nil {
+		fmt.Println()
+		fmt.Println("[paths]")
+		if p.Paths.SessionsDir != "" {
+			fmt.Printf("sessions_dir = %q\n", p.Paths.SessionsDir)
 		}
-
-		if p.Network != nil {
-			fmt.Println()
-			fmt.Println("[network]")
-			if p.Network.Mode != "" {
-				fmt.Printf("mode = %q\n", string(p.Network.Mode))
-			}
-			if len(p.Network.AllowedDomains) > 0 {
-				fmt.Printf("allowed_domains = [%s]\n", formatStringSlice(p.Network.AllowedDomains))
-			}
+		if p.Paths.StorageDir != "" {
+			fmt.Printf("storage_dir = %q\n", p.Paths.StorageDir)
 		}
-
-		if p.Limits != nil {
-			printLimits(p.Limits)
+		if p.Paths.LogsDir != "" {
+			fmt.Printf("logs_dir = %q\n", p.Paths.LogsDir)
 		}
-
-		if p.Paths != nil {
-			fmt.Println()
-			fmt.Println("[paths]")
-			if p.Paths.SessionsDir != "" {
-				fmt.Printf("sessions_dir = %q\n", p.Paths.SessionsDir)
-			}
-			if p.Paths.StorageDir != "" {
-				fmt.Printf("storage_dir = %q\n", p.Paths.StorageDir)
-			}
-			if p.Paths.LogsDir != "" {
-				fmt.Printf("logs_dir = %q\n", p.Paths.LogsDir)
-			}
-			if p.Paths.PreserveWorkspacePath {
-				fmt.Println("preserve_workspace_path = true")
-			}
+		if p.Paths.PreserveWorkspacePath {
+			fmt.Println("preserve_workspace_path = true")
 		}
+	}
 
-		if p.Incus != nil {
-			fmt.Println()
-			fmt.Println("[incus]")
-			if p.Incus.Project != "" {
-				fmt.Printf("project = %q\n", p.Incus.Project)
-			}
-			if p.Incus.Group != "" {
-				fmt.Printf("group = %q\n", p.Incus.Group)
-			}
-			if p.Incus.CodeUID != 0 {
-				fmt.Printf("code_uid = %d\n", p.Incus.CodeUID)
-			}
-			if p.Incus.CodeUser != "" {
-				fmt.Printf("code_user = %q\n", p.Incus.CodeUser)
-			}
+	if p.Incus != nil {
+		fmt.Println()
+		fmt.Println("[incus]")
+		if p.Incus.Project != "" {
+			fmt.Printf("project = %q\n", p.Incus.Project)
 		}
-
-		if p.Git != nil {
-			fmt.Println()
-			fmt.Println("[git]")
-			if p.Git.WritableHooks != nil {
-				fmt.Printf("writable_hooks = %v\n", *p.Git.WritableHooks)
-			}
+		if p.Incus.Group != "" {
+			fmt.Printf("group = %q\n", p.Incus.Group)
 		}
-
-		if p.SSH != nil {
-			fmt.Println()
-			fmt.Println("[ssh]")
-			if p.SSH.ForwardAgent != nil {
-				fmt.Printf("forward_agent = %v\n", *p.SSH.ForwardAgent)
-			}
+		if p.Incus.CodeUID != 0 {
+			fmt.Printf("code_uid = %d\n", p.Incus.CodeUID)
 		}
-
-		if p.Security != nil {
-			fmt.Println()
-			fmt.Println("[security]")
-			if len(p.Security.ProtectedPaths) > 0 {
-				fmt.Printf("protected_paths = [%s]\n", formatStringSlice(p.Security.ProtectedPaths))
-			}
-			if len(p.Security.AdditionalProtectedPaths) > 0 {
-				fmt.Printf("additional_protected_paths = [%s]\n", formatStringSlice(p.Security.AdditionalProtectedPaths))
-			}
-			if p.Security.DisableProtection {
-				fmt.Println("disable_protection = true")
-			}
+		if p.Incus.CodeUser != "" {
+			fmt.Printf("code_user = %q\n", p.Incus.CodeUser)
 		}
+	}
 
-		if p.Monitoring != nil {
-			fmt.Println()
-			fmt.Println("[monitoring]")
-			if p.Monitoring.Enabled != nil {
-				fmt.Printf("enabled = %v\n", *p.Monitoring.Enabled)
-			}
-			if p.Monitoring.AutoPauseOnHigh != nil {
-				fmt.Printf("auto_pause_on_high = %v\n", *p.Monitoring.AutoPauseOnHigh)
-			}
-			if p.Monitoring.AutoKillOnCritical != nil {
-				fmt.Printf("auto_kill_on_critical = %v\n", *p.Monitoring.AutoKillOnCritical)
-			}
+	if p.Git != nil {
+		fmt.Println()
+		fmt.Println("[git]")
+		if p.Git.WritableHooks != nil {
+			fmt.Printf("writable_hooks = %v\n", *p.Git.WritableHooks)
 		}
+	}
 
-		if p.Timezone != nil {
-			fmt.Println()
-			fmt.Println("[timezone]")
-			if p.Timezone.Mode != "" {
-				fmt.Printf("mode = %q\n", p.Timezone.Mode)
-			}
-			if p.Timezone.Name != "" {
-				fmt.Printf("name = %q\n", p.Timezone.Name)
-			}
+	if p.SSH != nil {
+		fmt.Println()
+		fmt.Println("[ssh]")
+		if p.SSH.ForwardAgent != nil {
+			fmt.Printf("forward_agent = %v\n", *p.SSH.ForwardAgent)
 		}
+	}
 
-		return nil
-	},
+	if p.Security != nil {
+		fmt.Println()
+		fmt.Println("[security]")
+		if len(p.Security.ProtectedPaths) > 0 {
+			fmt.Printf("protected_paths = [%s]\n", formatStringSlice(p.Security.ProtectedPaths))
+		}
+		if len(p.Security.AdditionalProtectedPaths) > 0 {
+			fmt.Printf("additional_protected_paths = [%s]\n", formatStringSlice(p.Security.AdditionalProtectedPaths))
+		}
+		if p.Security.DisableProtection {
+			fmt.Println("disable_protection = true")
+		}
+	}
+
+	if p.Monitoring != nil {
+		fmt.Println()
+		fmt.Println("[monitoring]")
+		if p.Monitoring.Enabled != nil {
+			fmt.Printf("enabled = %v\n", *p.Monitoring.Enabled)
+		}
+		if p.Monitoring.AutoPauseOnHigh != nil {
+			fmt.Printf("auto_pause_on_high = %v\n", *p.Monitoring.AutoPauseOnHigh)
+		}
+		if p.Monitoring.AutoKillOnCritical != nil {
+			fmt.Printf("auto_kill_on_critical = %v\n", *p.Monitoring.AutoKillOnCritical)
+		}
+	}
+
+	if p.Timezone != nil {
+		fmt.Println()
+		fmt.Println("[timezone]")
+		if p.Timezone.Mode != "" {
+			fmt.Printf("mode = %q\n", p.Timezone.Mode)
+		}
+		if p.Timezone.Name != "" {
+			fmt.Printf("name = %q\n", p.Timezone.Name)
+		}
+	}
+
+	return nil
 }
 
 // shellQuote wraps a string in single quotes for safe shell interpolation.
@@ -403,12 +407,12 @@ var profileShowCmd = &cobra.Command{
 	Short:  profileInfoCmd.Short,
 	Long:   profileInfoCmd.Long,
 	Args:   profileInfoCmd.Args,
-	RunE:   profileInfoCmd.RunE,
+	RunE:   app.profileInfoRunE,
 	Hidden: true,
 }
 
 // resolveProfileDir determines the target directory for a new profile.
-func resolveProfileDir(name string, forceUser, forceProject bool) (string, error) {
+func (a *App) resolveProfileDir(name string, forceUser, forceProject bool) (string, error) {
 	if forceUser {
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
@@ -418,7 +422,7 @@ func resolveProfileDir(name string, forceUser, forceProject bool) (string, error
 	}
 
 	if forceProject {
-		absWorkspace, err := filepath.Abs(app.workspace)
+		absWorkspace, err := filepath.Abs(a.workspace)
 		if err != nil {
 			return "", fmt.Errorf("cannot resolve workspace: %w", err)
 		}
@@ -426,7 +430,7 @@ func resolveProfileDir(name string, forceUser, forceProject bool) (string, error
 	}
 
 	// Default: project if .coi/ exists, otherwise user home
-	absWorkspace, err := filepath.Abs(app.workspace)
+	absWorkspace, err := filepath.Abs(a.workspace)
 	if err != nil {
 		return "", fmt.Errorf("cannot resolve workspace: %w", err)
 	}
@@ -460,86 +464,88 @@ Examples:
   coi profile create rust-dev --image coi-rust --inherits default
   coi profile create my-profile --persistent --project`,
 	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		name := args[0]
+	RunE: app.profileCreateRunE,
+}
 
-		// Validate name
-		if name == "" {
-			return fmt.Errorf("profile name cannot be empty")
-		}
-		if strings.Contains(name, "/") || strings.Contains(name, "\\") {
-			return fmt.Errorf("profile name cannot contain slashes")
-		}
-		if strings.Trim(name, ".") == "" {
-			return fmt.Errorf("profile name cannot be '.', '..', or consist only of dots")
-		}
-		if name == "default" {
-			return fmt.Errorf("cannot create a profile named 'default' (reserved for built-in profile)")
-		}
+func (a *App) profileCreateRunE(cmd *cobra.Command, args []string) error {
+	name := args[0]
 
-		forceUser, _ := cmd.Flags().GetBool("user")
-		forceProject, _ := cmd.Flags().GetBool("project")
-		if forceUser && forceProject {
-			return fmt.Errorf("--user and --project are mutually exclusive")
-		}
+	// Validate name
+	if name == "" {
+		return fmt.Errorf("profile name cannot be empty")
+	}
+	if strings.Contains(name, "/") || strings.Contains(name, "\\") {
+		return fmt.Errorf("profile name cannot contain slashes")
+	}
+	if strings.Trim(name, ".") == "" {
+		return fmt.Errorf("profile name cannot be '.', '..', or consist only of dots")
+	}
+	if name == "default" {
+		return fmt.Errorf("cannot create a profile named 'default' (reserved for built-in profile)")
+	}
 
-		// Check if a profile with this name already exists in any config source
-		if existing := app.cfg.GetProfile(name); existing != nil {
-			return fmt.Errorf("profile '%s' already exists (source: %s)", name, existing.Source)
-		}
+	forceUser, _ := cmd.Flags().GetBool("user")
+	forceProject, _ := cmd.Flags().GetBool("project")
+	if forceUser && forceProject {
+		return fmt.Errorf("--user and --project are mutually exclusive")
+	}
 
-		profileDir, err := resolveProfileDir(name, forceUser, forceProject)
-		if err != nil {
-			return err
-		}
+	// Check if a profile with this name already exists in any config source
+	if existing := a.cfg.GetProfile(name); existing != nil {
+		return fmt.Errorf("profile '%s' already exists (source: %s)", name, existing.Source)
+	}
 
-		// Check directory doesn't already exist on disk
-		if _, statErr := os.Stat(profileDir); statErr == nil {
-			return fmt.Errorf("profile directory already exists: %s", profileDir)
-		} else if !os.IsNotExist(statErr) {
-			return fmt.Errorf("failed to check profile directory %s: %w", profileDir, statErr)
-		}
+	profileDir, err := a.resolveProfileDir(name, forceUser, forceProject)
+	if err != nil {
+		return err
+	}
 
-		// Build TOML content from flags
-		// Note: --image and --persistent are inherited from root PersistentFlags
-		var topLines []string
-		var containerLines []string
-		if inherits, _ := cmd.Flags().GetString("inherits"); inherits != "" {
-			topLines = append(topLines, fmt.Sprintf("inherits = %q", inherits))
-		}
-		if cmd.Flags().Changed("image") {
-			containerLines = append(containerLines, fmt.Sprintf("image = %q", app.imageName))
-		}
-		if cmd.Flags().Changed("persistent") {
-			containerLines = append(containerLines, "persistent = true")
-		}
+	// Check directory doesn't already exist on disk
+	if _, statErr := os.Stat(profileDir); statErr == nil {
+		return fmt.Errorf("profile directory already exists: %s", profileDir)
+	} else if !os.IsNotExist(statErr) {
+		return fmt.Errorf("failed to check profile directory %s: %w", profileDir, statErr)
+	}
 
-		var content string
-		if len(topLines) > 0 {
-			content += strings.Join(topLines, "\n") + "\n"
-		}
-		if len(containerLines) > 0 {
-			if content != "" {
-				content += "\n"
-			}
-			content += "[container]\n" + strings.Join(containerLines, "\n") + "\n"
-		}
+	// Build TOML content from flags
+	// Note: --image and --persistent are inherited from root PersistentFlags
+	var topLines []string
+	var containerLines []string
+	if inherits, _ := cmd.Flags().GetString("inherits"); inherits != "" {
+		topLines = append(topLines, fmt.Sprintf("inherits = %q", inherits))
+	}
+	if cmd.Flags().Changed("image") {
+		containerLines = append(containerLines, fmt.Sprintf("image = %q", a.imageName))
+	}
+	if cmd.Flags().Changed("persistent") {
+		containerLines = append(containerLines, "persistent = true")
+	}
 
-		// Create directory and write config
-		if err := os.MkdirAll(profileDir, 0o755); err != nil {
-			return fmt.Errorf("failed to create profile directory: %w", err)
+	var content string
+	if len(topLines) > 0 {
+		content += strings.Join(topLines, "\n") + "\n"
+	}
+	if len(containerLines) > 0 {
+		if content != "" {
+			content += "\n"
 		}
+		content += "[container]\n" + strings.Join(containerLines, "\n") + "\n"
+	}
 
-		configPath := filepath.Join(profileDir, "config.toml")
-		if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
-			// Clean up directory on write failure
-			os.RemoveAll(profileDir)
-			return fmt.Errorf("failed to write config.toml: %w", err)
-		}
+	// Create directory and write config
+	if err := os.MkdirAll(profileDir, 0o755); err != nil {
+		return fmt.Errorf("failed to create profile directory: %w", err)
+	}
 
-		fmt.Fprintf(os.Stderr, "Created profile '%s' at %s\n", name, configPath)
-		return nil
-	},
+	configPath := filepath.Join(profileDir, "config.toml")
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		// Clean up directory on write failure
+		os.RemoveAll(profileDir)
+		return fmt.Errorf("failed to write config.toml: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Created profile '%s' at %s\n", name, configPath)
+	return nil
 }
 
 // profileEditCmd opens a profile's config in an editor
@@ -555,50 +561,52 @@ Examples:
   coi profile edit rust-dev
   EDITOR=nano coi profile edit my-profile`,
 	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		name := args[0]
+	RunE: app.profileEditRunE,
+}
 
-		p := app.cfg.GetProfile(name)
-		if p == nil {
-			return fmt.Errorf("profile '%s' not found", name)
-		}
-		if p.Source == "(built-in)" {
-			return fmt.Errorf("cannot edit built-in profile 'default'")
-		}
+func (a *App) profileEditRunE(cmd *cobra.Command, args []string) error {
+	name := args[0]
 
-		sourcePath := p.Source
+	p := a.cfg.GetProfile(name)
+	if p == nil {
+		return fmt.Errorf("profile '%s' not found", name)
+	}
+	if p.Source == "(built-in)" {
+		return fmt.Errorf("cannot edit built-in profile 'default'")
+	}
 
-		// Determine editor
-		editor := os.Getenv("VISUAL")
-		if editor == "" {
-			editor = os.Getenv("EDITOR")
-		}
-		if editor == "" {
-			editor = "vi"
-		}
+	sourcePath := p.Source
 
-		// Use sh -c to support multi-word editor values like "code --wait"
-		editorCmd := exec.Command("sh", "-c", editor+" "+shellQuote(sourcePath))
-		editorCmd.Stdin = os.Stdin
-		editorCmd.Stdout = os.Stdout
-		editorCmd.Stderr = os.Stderr
+	// Determine editor
+	editor := os.Getenv("VISUAL")
+	if editor == "" {
+		editor = os.Getenv("EDITOR")
+	}
+	if editor == "" {
+		editor = "vi"
+	}
 
-		if err := editorCmd.Run(); err != nil {
-			return fmt.Errorf("editor exited with error: %w", err)
-		}
+	// Use sh -c to support multi-word editor values like "code --wait"
+	editorCmd := exec.Command("sh", "-c", editor+" "+shellQuote(sourcePath))
+	editorCmd.Stdin = os.Stdin
+	editorCmd.Stdout = os.Stdout
+	editorCmd.Stderr = os.Stderr
 
-		// Re-parse and validate
-		var profileCfg config.ProfileConfig
-		if _, err := toml.DecodeFile(sourcePath, &profileCfg); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: %s contains invalid TOML: %v\n", sourcePath, err)
-			return nil
-		}
-		if err := profileCfg.Validate(name); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: profile validation failed: %v\n", err)
-		}
+	if err := editorCmd.Run(); err != nil {
+		return fmt.Errorf("editor exited with error: %w", err)
+	}
 
+	// Re-parse and validate
+	var profileCfg config.ProfileConfig
+	if _, err := toml.DecodeFile(sourcePath, &profileCfg); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: %s contains invalid TOML: %v\n", sourcePath, err)
 		return nil
-	},
+	}
+	if err := profileCfg.Validate(name); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: profile validation failed: %v\n", err)
+	}
+
+	return nil
 }
 
 // profileDeleteCmd deletes a profile directory
@@ -613,35 +621,37 @@ Examples:
   coi profile delete rust-dev
   coi profile delete old-profile --force`,
 	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error {
-		name := args[0]
+	RunE: app.profileDeleteRunE,
+}
 
-		p := app.cfg.GetProfile(name)
-		if p == nil {
-			return fmt.Errorf("profile '%s' not found", name)
+func (a *App) profileDeleteRunE(cmd *cobra.Command, args []string) error {
+	name := args[0]
+
+	p := a.cfg.GetProfile(name)
+	if p == nil {
+		return fmt.Errorf("profile '%s' not found", name)
+	}
+	if p.Source == "(built-in)" {
+		return fmt.Errorf("cannot delete built-in profile 'default'")
+	}
+
+	profileDir := filepath.Dir(p.Source)
+	force, _ := cmd.Flags().GetBool("force")
+
+	if !force {
+		fmt.Fprintf(os.Stderr, "This will delete profile '%s' at %s\n", name, profileDir)
+		if !confirmAction("Continue?") {
+			fmt.Fprintln(os.Stderr, "Aborted.")
+			return nil
 		}
-		if p.Source == "(built-in)" {
-			return fmt.Errorf("cannot delete built-in profile 'default'")
-		}
+	}
 
-		profileDir := filepath.Dir(p.Source)
-		force, _ := cmd.Flags().GetBool("force")
+	if err := os.RemoveAll(profileDir); err != nil {
+		return fmt.Errorf("failed to delete profile directory: %w", err)
+	}
 
-		if !force {
-			fmt.Fprintf(os.Stderr, "This will delete profile '%s' at %s\n", name, profileDir)
-			if !confirmAction("Continue?") {
-				fmt.Fprintln(os.Stderr, "Aborted.")
-				return nil
-			}
-		}
-
-		if err := os.RemoveAll(profileDir); err != nil {
-			return fmt.Errorf("failed to delete profile directory: %w", err)
-		}
-
-		fmt.Fprintf(os.Stderr, "Deleted profile '%s' (%s)\n", name, profileDir)
-		return nil
-	},
+	fmt.Fprintf(os.Stderr, "Deleted profile '%s' (%s)\n", name, profileDir)
+	return nil
 }
 
 func init() {

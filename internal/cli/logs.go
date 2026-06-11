@@ -42,7 +42,7 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	containerName, err := resolveMonitorContainer(args)
+	containerName, err := app.resolveMonitorContainer(args)
 	if err != nil {
 		return err
 	}

@@ -40,18 +40,18 @@ type shellState struct {
 	result *session.SetupResult
 
 	// After start-monitoring
-	monitorDaemon *monitor.Daemon
-	nftDaemon     *nftmonitor.Daemon
+	monitorDaemon monitor.MonitorDaemon
+	nftDaemon     nftmonitor.NFTMonitorDaemon
 }
 
 // resolveWorkspacePhase resolves the absolute workspace path from --workspace
 // or alias, overlays the workspace's project config, and applies any alias
 // profile/slot inherited from the registry.
-func resolveWorkspacePhase(cmd *cobra.Command, s *shellState) session.Phase {
+func (a *App) resolveWorkspacePhase(cmd *cobra.Command, s *shellState) session.Phase {
 	return session.PhaseFunc{
 		PhaseName: "resolve-workspace",
 		RunFn: func(_ context.Context) (session.Teardown, error) {
-			absWorkspace, err := filepath.Abs(app.workspace)
+			absWorkspace, err := filepath.Abs(a.workspace)
 			if err != nil {
 				return nil, fmt.Errorf("invalid workspace path: %w", err)
 			}
@@ -61,10 +61,10 @@ func resolveWorkspacePhase(cmd *cobra.Command, s *shellState) session.Phase {
 			if s.aliasArg == "" {
 				if cwd, err := os.Getwd(); err == nil {
 					if absCWD, err := filepath.Abs(cwd); err == nil && absWorkspace != absCWD {
-						if err := app.cfg.OverlayProjectConfig(absWorkspace); err != nil && !os.IsNotExist(err) {
+						if err := a.cfg.OverlayProjectConfig(absWorkspace); err != nil && !os.IsNotExist(err) {
 							return nil, fmt.Errorf("failed to load project config from %s: %w", absWorkspace, err)
 						}
-						container.Configure(app.cfg.Incus.Project, app.cfg.Incus.CodeUser, app.cfg.Incus.CodeUID)
+						container.Configure(a.cfg.Incus.Project, a.cfg.Incus.CodeUser, a.cfg.Incus.CodeUID)
 					}
 				}
 			}
@@ -77,19 +77,19 @@ func resolveWorkspacePhase(cmd *cobra.Command, s *shellState) session.Phase {
 				}
 				absWorkspace = resolved.Workspace
 
-				if err := app.cfg.OverlayProjectConfig(absWorkspace); err != nil && !os.IsNotExist(err) {
+				if err := a.cfg.OverlayProjectConfig(absWorkspace); err != nil && !os.IsNotExist(err) {
 					return nil, fmt.Errorf("failed to load project config from %s: %w", absWorkspace, err)
 				}
 
 				if resolved.Profile != "" && !cmd.Flags().Changed("profile") {
-					app.profile = resolved.Profile
-					if err := app.cfg.ApplyProfile(app.profile); err != nil {
+					a.profile = resolved.Profile
+					if err := a.cfg.ApplyProfile(a.profile); err != nil {
 						return nil, err
 					}
 				}
-				container.Configure(app.cfg.Incus.Project, app.cfg.Incus.CodeUser, app.cfg.Incus.CodeUID)
+				container.Configure(a.cfg.Incus.Project, a.cfg.Incus.CodeUser, a.cfg.Incus.CodeUID)
 				if resolved.Slot > 0 && !cmd.Flags().Changed("slot") {
-					app.slot = resolved.Slot
+					a.slot = resolved.Slot
 				}
 			}
 
@@ -102,14 +102,14 @@ func resolveWorkspacePhase(cmd *cobra.Command, s *shellState) session.Phase {
 // validateEnvPhase determines the effective tmux mode (config default vs
 // explicit flag) and verifies that Incus is available and at the minimum
 // required version.
-func validateEnvPhase(cmd *cobra.Command, s *shellState) session.Phase {
+func (a *App) validateEnvPhase(cmd *cobra.Command, s *shellState) session.Phase {
 	return session.PhaseFunc{
 		PhaseName: "validate-env",
 		RunFn: func(_ context.Context) (session.Teardown, error) {
 			// Config default, overridden by explicit --tmux flag.
 			useTmuxDefault := true
-			if app.cfg.Shell.UseTmux != nil {
-				useTmuxDefault = *app.cfg.Shell.UseTmux
+			if a.cfg.Shell.UseTmux != nil {
+				useTmuxDefault = *a.cfg.Shell.UseTmux
 			}
 			if cmd.Flags().Changed("tmux") {
 				s.useTmux = useTmux // cobra already set the package-level var
@@ -136,15 +136,15 @@ func validateEnvPhase(cmd *cobra.Command, s *shellState) session.Phase {
 // slot, and constructs the SetupOptions for the container.
 //
 //nolint:gocyclo // Many configuration paths — sequential by design
-func configureSessionPhase(cmd *cobra.Command, s *shellState) session.Phase {
+func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.Phase {
 	return session.PhaseFunc{
 		PhaseName: "configure-session",
 		RunFn: func(_ context.Context) (session.Teardown, error) {
 			// Override tool from --tool flag.
 			if toolFlag != "" {
-				app.cfg.Tool.Name = toolFlag
+				a.cfg.Tool.Name = toolFlag
 			}
-			ti, err := getConfiguredTool(app.cfg)
+			ti, err := getConfiguredTool(a.cfg)
 			if err != nil {
 				return nil, err
 			}
@@ -162,9 +162,9 @@ func configureSessionPhase(cmd *cobra.Command, s *shellState) session.Phase {
 			s.sessionsDir = sessionsDir
 
 			// Resolve the resume/continue ID.
-			resumeID := app.resume
-			if app.continueSession != "" {
-				resumeID = app.continueSession
+			resumeID := a.resume
+			if a.continueSession != "" {
+				resumeID = a.continueSession
 			}
 			resumeFlagSet := cmd.Flags().Changed("resume") || cmd.Flags().Changed("continue")
 
@@ -201,18 +201,18 @@ func configureSessionPhase(cmd *cobra.Command, s *shellState) session.Phase {
 				metadataPath := filepath.Join(sessionsDir, resumeID, "metadata.json")
 				if metadata, err := session.LoadSessionMetadata(metadataPath); err == nil {
 					if !cmd.Flags().Changed("profile") && metadata.ProfileName != "" {
-						app.profile = metadata.ProfileName
-						if err := app.cfg.ApplyProfile(app.profile); err != nil {
-							return nil, fmt.Errorf("failed to apply saved profile '%s': %w", app.profile, err)
+						a.profile = metadata.ProfileName
+						if err := a.cfg.ApplyProfile(a.profile); err != nil {
+							return nil, fmt.Errorf("failed to apply saved profile '%s': %w", a.profile, err)
 						}
 						if !cmd.Flags().Changed("persistent") {
-							app.persistent = config.BoolVal(app.cfg.Container.Persistent)
+							a.persistent = config.BoolVal(a.cfg.Container.Persistent)
 						}
-						fmt.Fprintf(os.Stderr, "Inherited profile '%s' from session\n", app.profile)
+						fmt.Fprintf(os.Stderr, "Inherited profile '%s' from session\n", a.profile)
 					}
 					if !cmd.Flags().Changed("persistent") {
-						app.persistent = metadata.Persistent
-						if app.persistent {
+						a.persistent = metadata.Persistent
+						if a.persistent {
 							fmt.Fprintf(os.Stderr, "Inherited persistent mode from session\n")
 						}
 					}
@@ -236,7 +236,7 @@ func configureSessionPhase(cmd *cobra.Command, s *shellState) session.Phase {
 			}
 
 			// Allocate slot.
-			slotNum := app.slot
+			slotNum := a.slot
 			if resumeSlot > 0 && slotNum == 0 {
 				slotNum = resumeSlot
 				fmt.Fprintf(os.Stderr, "Reusing original slot %d from session\n", slotNum)
@@ -263,32 +263,32 @@ func configureSessionPhase(cmd *cobra.Command, s *shellState) session.Phase {
 			s.slotNum = slotNum
 
 			// Resolve image and auto-build if needed.
-			img := ResolveImageName(app.imageName, app.cfg)
-			if err := AutoBuildIfNeeded(app.cfg, img); err != nil {
+			img := ResolveImageName(a.imageName, a.cfg)
+			if err := AutoBuildIfNeeded(a.cfg, img); err != nil {
 				return nil, err
 			}
-			if err := CheckAndReportStaleBase(app.cfg, img); err != nil {
+			if err := CheckAndReportStaleBase(a.cfg, img); err != nil {
 				return nil, err
 			}
 
 			// Build config-derived options.
-			networkConfig := app.cfg.Network
-			limitsConfig := &app.cfg.Limits
+			networkConfig := a.cfg.Network
+			limitsConfig := &a.cfg.Limits
 			var protectedPaths []string
-			if !app.cfg.Security.DisableProtection {
-				protectedPaths = app.cfg.Security.GetEffectiveProtectedPaths()
+			if !a.cfg.Security.DisableProtection {
+				protectedPaths = a.cfg.Security.GetEffectiveProtectedPaths()
 			}
-			protectedPaths = filterWritableGitHooks(protectedPaths, app.cfg)
+			protectedPaths = filterWritableGitHooks(protectedPaths, a.cfg)
 
 			var cliConfigPath string
 			if configDirName := ti.ConfigDirName(); configDirName != "" {
 				cliConfigPath = filepath.Join(homeDir, configDirName)
 			}
 
-			resolvedForwardedEnvVars := resolveForwardedEnvVarNames(app.cfg.Defaults.ForwardEnv)
-			resolvedTimezone := resolveTimezone(app.cfg)
+			resolvedForwardedEnvVars := resolveForwardedEnvVarNames(a.cfg.Defaults.ForwardEnv)
+			resolvedTimezone := resolveTimezone(a.cfg)
 
-			mountConfig, err := ParseMountConfig(app.cfg)
+			mountConfig, err := ParseMountConfig(a.cfg)
 			if err != nil {
 				return nil, fmt.Errorf("invalid mount configuration: %w", err)
 			}
@@ -296,8 +296,8 @@ func configureSessionPhase(cmd *cobra.Command, s *shellState) session.Phase {
 				return nil, fmt.Errorf("mount validation failed: %w", err)
 			}
 
-			if app.cfg.Container.Alias != "" {
-				if err := alias.ValidateAlias(app.cfg.Container.Alias); err != nil {
+			if a.cfg.Container.Alias != "" {
+				if err := alias.ValidateAlias(a.cfg.Container.Alias); err != nil {
 					return nil, fmt.Errorf("invalid container alias: %w", err)
 				}
 			}
@@ -305,7 +305,7 @@ func configureSessionPhase(cmd *cobra.Command, s *shellState) session.Phase {
 			s.setupOpts = session.SetupOptions{
 				WorkspacePath:         s.absWorkspace,
 				Image:                 img,
-				Persistent:            app.persistent,
+				Persistent:            a.persistent,
 				ResumeFromID:          resumeID,
 				Slot:                  slotNum,
 				MountConfig:           mountConfig,
@@ -313,20 +313,20 @@ func configureSessionPhase(cmd *cobra.Command, s *shellState) session.Phase {
 				CLIConfigPath:         cliConfigPath,
 				Tool:                  ti,
 				NetworkConfig:         &networkConfig,
-				DisableShift:          app.cfg.Incus.DisableShift,
+				DisableShift:          a.cfg.Incus.DisableShift,
 				LimitsConfig:          limitsConfig,
-				IncusProject:          app.cfg.Incus.Project,
+				IncusProject:          a.cfg.Incus.Project,
 				ProtectedPaths:        protectedPaths,
-				HostImmutable:         app.cfg.Security.IsHostImmutableEnabled(),
-				PreserveWorkspacePath: app.cfg.Paths.PreserveWorkspacePath,
-				ForwardSSHAgent:       config.BoolVal(app.cfg.SSH.ForwardAgent),
+				HostImmutable:         a.cfg.Security.IsHostImmutableEnabled(),
+				PreserveWorkspacePath: a.cfg.Paths.PreserveWorkspacePath,
+				ForwardSSHAgent:       config.BoolVal(a.cfg.SSH.ForwardAgent),
 				ForwardedEnvVars:      resolvedForwardedEnvVars,
-				ContextFilePath:       app.cfg.Tool.ContextFile,
-				ProfileContextFile:    app.cfg.ProfileContextFile,
-				AutoContext:           app.cfg.Tool.AutoContext,
+				ContextFilePath:       a.cfg.Tool.ContextFile,
+				ProfileContextFile:    a.cfg.ProfileContextFile,
+				AutoContext:           a.cfg.Tool.AutoContext,
 				ContainerName:         containerName,
 				Timezone:              resolvedTimezone,
-				Alias:                 app.cfg.Container.Alias,
+				Alias:                 a.cfg.Container.Alias,
 			}
 			return nil, nil
 		},
@@ -337,7 +337,7 @@ func configureSessionPhase(cmd *cobra.Command, s *shellState) session.Phase {
 // and registers the alias in the global registry. Its teardown calls
 // session.Cleanup so the container and session data are handled correctly on
 // all exit paths.
-func setupContainerPhase(s *shellState) session.Phase {
+func (a *App) setupContainerPhase(s *shellState) session.Phase {
 	return session.PhaseFunc{
 		PhaseName: "setup-container",
 		RunFn: func(ctx context.Context) (session.Teardown, error) {
@@ -348,13 +348,13 @@ func setupContainerPhase(s *shellState) session.Phase {
 			}
 			s.result = result
 
-			if err := session.SaveMetadataEarly(s.sessionsDir, s.sessionID, result.ContainerName, s.absWorkspace, app.persistent, app.profile); err != nil {
+			if err := session.SaveMetadataEarly(s.sessionsDir, s.sessionID, result.ContainerName, s.absWorkspace, a.persistent, a.profile); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: Failed to save early metadata: %v\n", err)
 			}
 
-			if effectiveAlias := app.cfg.Container.Alias; effectiveAlias != "" {
+			if effectiveAlias := a.cfg.Container.Alias; effectiveAlias != "" {
 				if reg, err := alias.Load(); err == nil {
-					if err := reg.Register(effectiveAlias, s.absWorkspace, app.profile); err != nil {
+					if err := reg.Register(effectiveAlias, s.absWorkspace, a.profile); err != nil {
 						return nil, fmt.Errorf("alias conflict: %w", err)
 					}
 					if err := reg.Save(); err != nil {
@@ -371,8 +371,8 @@ func setupContainerPhase(s *shellState) session.Phase {
 				cleanupOpts := session.CleanupOptions{
 					ContainerName:  s.result.ContainerName,
 					SessionID:      s.sessionID,
-					Persistent:     app.persistent,
-					ProfileName:    app.profile,
+					Persistent:     a.persistent,
+					ProfileName:    a.profile,
 					SessionsDir:    s.sessionsDir,
 					SaveSession:    true,
 					Workspace:      s.absWorkspace,
@@ -391,20 +391,20 @@ func setupContainerPhase(s *shellState) session.Phase {
 
 // startMonitoringPhase starts the traditional and NFT monitoring daemons when
 // enabled in config. Its teardown stops both daemons.
-func startMonitoringPhase(s *shellState) session.Phase {
+func (a *App) startMonitoringPhase(s *shellState) session.Phase {
 	return session.PhaseFunc{
 		PhaseName: "start-monitoring",
 		RunFn: func(ctx context.Context) (session.Teardown, error) {
-			if !config.BoolVal(app.cfg.Monitoring.Enabled) {
+			if !config.BoolVal(a.cfg.Monitoring.Enabled) {
 				return nil, nil
 			}
 
-			if err := startMonitoringDaemon(ctx, s.result.ContainerName, s.absWorkspace, app.cfg, s.result.Logger, &s.monitorDaemon); err != nil {
+			if err := startMonitoringDaemon(ctx, s.result.ContainerName, s.absWorkspace, a.cfg, s.result.Logger, &s.monitorDaemon); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: Failed to start monitoring daemon: %v\n", err)
 			}
 
-			if config.BoolVal(app.cfg.Monitoring.NFT.Enabled) {
-				if err := startNFTMonitoringDaemon(ctx, s.result.ContainerName, app.cfg, s.result.Logger, &s.nftDaemon); err != nil {
+			if config.BoolVal(a.cfg.Monitoring.NFT.Enabled) {
+				if err := startNFTMonitoringDaemon(ctx, s.result.ContainerName, a.cfg, s.result.Logger, &s.nftDaemon); err != nil {
 					fmt.Fprintf(os.Stderr, "Warning: Failed to start NFT monitoring: %v\n", err)
 				}
 			}
@@ -428,7 +428,7 @@ func startMonitoringPhase(s *shellState) session.Phase {
 
 // runToolPhase executes the AI coding tool (via tmux or direct mode) and
 // normalises expected exit conditions (SIGINT, container shutdown) to nil.
-func runToolPhase(s *shellState) session.Phase {
+func (a *App) runToolPhase(s *shellState) session.Phase {
 	return session.PhaseFunc{
 		PhaseName: "run-tool",
 		RunFn: func(_ context.Context) (session.Teardown, error) {
@@ -437,8 +437,8 @@ func runToolPhase(s *shellState) session.Phase {
 			fmt.Fprintf(os.Stderr, "Container: %s\n", s.result.ContainerName)
 			fmt.Fprintf(os.Stderr, "Workspace: %s\n", s.absWorkspace)
 
-			useResumeFlag := (s.resumeID != "") && app.persistent
-			restoreOnly := (s.resumeID != "") && !app.persistent
+			useResumeFlag := (s.resumeID != "") && a.persistent
+			restoreOnly := (s.resumeID != "") && !a.persistent
 
 			var runErr error
 			if s.useTmux {
@@ -453,7 +453,7 @@ func runToolPhase(s *shellState) session.Phase {
 					fmt.Fprintf(os.Stderr, "Resume mode: Persistent session\n")
 				}
 				fmt.Fprintf(os.Stderr, "\n")
-				runErr = runCLIInTmux(s.result, s.sessionID, background, useResumeFlag, restoreOnly, s.sessionsDir, s.resumeID, s.toolInstance)
+				runErr = a.runCLIInTmux(s.result, s.sessionID, background, useResumeFlag, restoreOnly, s.sessionsDir, s.resumeID, s.toolInstance)
 			} else {
 				fmt.Fprintf(os.Stderr, "Mode: Direct (no tmux)\n")
 				if restoreOnly {
@@ -462,7 +462,7 @@ func runToolPhase(s *shellState) session.Phase {
 					fmt.Fprintf(os.Stderr, "Resume mode: Persistent session\n")
 				}
 				fmt.Fprintf(os.Stderr, "\n")
-				runErr = runCLI(s.result, s.sessionID, useResumeFlag, restoreOnly, s.sessionsDir, s.resumeID, s.toolInstance)
+				runErr = a.runCLI(s.result, s.sessionID, useResumeFlag, restoreOnly, s.sessionsDir, s.resumeID, s.toolInstance)
 			}
 
 			// Normalise expected exit conditions so the pipeline doesn't log
