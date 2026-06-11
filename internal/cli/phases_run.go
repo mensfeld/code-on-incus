@@ -20,8 +20,8 @@ type runState struct {
 	absWorkspace string
 
 	// After validate-env
-	containerName string
-	img           string
+	containerName  string
+	img            string
 	effectiveAlias string
 
 	// After launch-container
