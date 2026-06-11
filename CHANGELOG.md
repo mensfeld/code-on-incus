@@ -2,6 +2,13 @@
 
 ## 0.9.0 (Unreleased)
 
+### Refactoring
+
+- **Command handlers converted to `App` struct methods** — All CLI command handlers (`shellCommand`, `runCommand`, `buildCommand`, `cleanCommand`, `monitorCommand`, `attachCommand`, and all profile sub-commands) are now methods on `*App` rather than free functions that access the package-level `app` singleton directly. Phase builder functions in `phases_shell.go` are likewise methods on `App`. This enables creating an isolated `App` instance in tests with a controlled config and workspace without relying on global state. The `app` singleton and `Execute()` reset semantics are unchanged for normal operation.
+
+- **Monitor daemon interfaces at subsystem boundaries** — `monitor.MonitorDaemon` and `nftmonitor.NFTMonitorDaemon` interfaces are defined so that callers (`shellState`, `startMonitoringDaemon`, `startNFTMonitoringDaemon`) depend on the interface rather than the concrete `*Daemon` pointer. Combined with the existing `container.ContainerManager`, `network.NetworkManager`, and `limits.LimitsApplier` interfaces, all four major infrastructure subsystems now have stable interface boundaries that enable test stubs without a live Incus environment.
+
+
 ### Performance
 
 - **Container init PID resolved host-side via cgroup.procs** — `GetContainerInitPID` now reads the container's init PID directly from `/sys/fs/cgroup/incus.monitor/<name>/cgroup.procs` (walking the full cgroup subtree to handle systemd containers where PID 1 lives in `init.scope`) instead of spawning `incus info` on every poll tick. Because all monitors — network, process, logwatcher, filesystem, health checks — call `GetContainerInitPID` once per poll cycle, this eliminates a subprocess invocation per monitor per tick with no behavioral change. The `incus info` path is retained as a fallback for environments where the well-known cgroup paths are unavailable.

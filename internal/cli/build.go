@@ -39,7 +39,7 @@ Examples:
   coi build --all --force
 `,
 	Args: cobra.NoArgs,
-	RunE: buildCommand,
+	RunE: app.buildCommand,
 }
 
 func init() {
@@ -48,7 +48,7 @@ func init() {
 	buildCmd.Flags().BoolVar(&buildAll, "all", false, "Build images for all profiles visible from the current directory (global ~/.coi/profiles + project .coi/profiles)")
 }
 
-func buildCommand(cmd *cobra.Command, args []string) error {
+func (a *App) buildCommand(cmd *cobra.Command, args []string) error {
 	// Check if Incus is available
 	if !container.Available() {
 		return container.IncusNotAvailableError()
@@ -65,16 +65,16 @@ func buildCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	if buildAll {
-		return buildAllProfiles()
+		return a.buildAllProfiles()
 	}
 
 	// Determine which profile to use
-	profileName := app.profile // from --profile flag
+	profileName := a.profile // from --profile flag
 	if profileName == "" {
 		profileName = "default"
 	}
 
-	p := app.cfg.GetProfile(profileName)
+	p := a.cfg.GetProfile(profileName)
 	if p == nil {
 		return fmt.Errorf("profile '%s' not found", profileName)
 	}
@@ -89,7 +89,7 @@ func buildCommand(cmd *cobra.Command, args []string) error {
 	// pool and let the selected profile override it only when it sets a
 	// non-empty storage_pool value. Validate before any container work so a
 	// missing pool fails loud and early.
-	buildPool := app.cfg.Container.StoragePool
+	buildPool := a.cfg.Container.StoragePool
 	if p.Container.StoragePool != "" {
 		buildPool = p.Container.StoragePool
 	}
@@ -197,10 +197,10 @@ func buildCommand(cmd *cobra.Command, args []string) error {
 // The "default" profile (coi-default) is always built first; other profiles are
 // processed in alphabetical order. Profiles without a [container.build] section
 // are silently skipped. Errors are collected and reported together at the end.
-func buildAllProfiles() error {
+func (a *App) buildAllProfiles() error {
 	// Collect profile names: "default" first, then the rest alphabetically.
-	others := make([]string, 0, len(app.cfg.Profiles))
-	for name := range app.cfg.Profiles {
+	others := make([]string, 0, len(a.cfg.Profiles))
+	for name := range a.cfg.Profiles {
 		if name != "default" {
 			others = append(others, name)
 		}
@@ -212,7 +212,7 @@ func buildAllProfiles() error {
 	var buildErrors []string
 
 	for _, profileName := range names {
-		p := app.cfg.GetProfile(profileName)
+		p := a.cfg.GetProfile(profileName)
 		if p == nil {
 			continue
 		}
@@ -227,7 +227,7 @@ func buildAllProfiles() error {
 			continue
 		}
 
-		buildPool := app.cfg.Container.StoragePool
+		buildPool := a.cfg.Container.StoragePool
 		if p.Container.StoragePool != "" {
 			buildPool = p.Container.StoragePool
 		}

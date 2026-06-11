@@ -65,7 +65,7 @@ Examples:
   coi shell --debug                 # Launch bash for debugging
 `,
 	Args: cobra.MaximumNArgs(1),
-	RunE: shellCommand,
+	RunE: app.shellCommand,
 }
 
 func init() {
@@ -76,7 +76,7 @@ func init() {
 	shellCmd.Flags().StringVar(&toolFlag, "tool", "", "Override AI tool (e.g. claude, opencode, aider)")
 }
 
-func shellCommand(cmd *cobra.Command, args []string) error {
+func (a *App) shellCommand(cmd *cobra.Command, args []string) error {
 	// Create a context that is cancelled on SIGINT/SIGTERM so session.Setup
 	// can abort container provisioning on Ctrl+C instead of leaving orphaned
 	// containers.
@@ -120,12 +120,12 @@ func shellCommand(cmd *cobra.Command, args []string) error {
 	}()
 
 	return pipeline.Run(ctx,
-		resolveWorkspacePhase(cmd, s),
-		validateEnvPhase(cmd, s),
-		configureSessionPhase(cmd, s),
-		setupContainerPhase(s),
-		startMonitoringPhase(s),
-		runToolPhase(s),
+		a.resolveWorkspacePhase(cmd, s),
+		a.validateEnvPhase(cmd, s),
+		a.configureSessionPhase(cmd, s),
+		a.setupContainerPhase(s),
+		a.startMonitoringPhase(s),
+		a.runToolPhase(s),
 	)
 }
 
@@ -200,7 +200,7 @@ func buildCLICommand(sessionID string, useResumeFlag, restoreOnly bool, sessions
 
 // buildContainerEnv constructs the environment variables map and user pointer for container execution.
 // It sets HOME, TERM (sanitized), IS_SANDBOX, merges config environment, and resolves forward_env from config.
-func buildContainerEnv(result *session.SetupResult) (map[string]string, *int) {
+func (a *App) buildContainerEnv(result *session.SetupResult) (map[string]string, *int) {
 	user := container.CodeUID
 	if result.RunAsRoot {
 		user = 0
@@ -224,12 +224,12 @@ func buildContainerEnv(result *session.SetupResult) (map[string]string, *int) {
 	}
 
 	// Apply static environment from config (defaults.environment + profile environment)
-	for k, v := range app.cfg.Defaults.Environment {
+	for k, v := range a.cfg.Defaults.Environment {
 		containerEnv[k] = v
 	}
 
 	// Resolve forward_env from config, deduplicate, then look up host values
-	for _, name := range app.cfg.Defaults.ForwardEnv {
+	for _, name := range a.cfg.Defaults.ForwardEnv {
 		if val, ok := os.LookupEnv(name); ok {
 			containerEnv[name] = val
 		} else {
@@ -288,9 +288,9 @@ func mergeToolEnv(env map[string]string, t tool.Tool, workspacePath string) {
 }
 
 // runCLI executes the CLI tool in the container interactively
-func runCLI(result *session.SetupResult, sessionID string, useResumeFlag, restoreOnly bool, sessionsDir, resumeID string, t tool.Tool) error {
+func (a *App) runCLI(result *session.SetupResult, sessionID string, useResumeFlag, restoreOnly bool, sessionsDir, resumeID string, t tool.Tool) error {
 	cmdToRun := buildCLICommand(sessionID, useResumeFlag, restoreOnly, sessionsDir, resumeID, t)
-	containerEnv, userPtr := buildContainerEnv(result)
+	containerEnv, userPtr := a.buildContainerEnv(result)
 
 	workspacePath := result.ContainerWorkspacePath
 	if workspacePath == "" {
@@ -357,7 +357,7 @@ func buildTmuxSetEnvironmentCmds(sessionName string, env map[string]string) []st
 }
 
 // runCLIInTmux executes CLI tool in a tmux session for background/monitoring support
-func runCLIInTmux(result *session.SetupResult, sessionID string, detached bool, useResumeFlag, restoreOnly bool, sessionsDir, resumeID string, t tool.Tool) error {
+func (a *App) runCLIInTmux(result *session.SetupResult, sessionID string, detached bool, useResumeFlag, restoreOnly bool, sessionsDir, resumeID string, t tool.Tool) error {
 	tmuxSessionName := fmt.Sprintf("coi-%s", result.ContainerName)
 
 	// Get workspace path (with fallback for backwards compatibility)
@@ -367,7 +367,7 @@ func runCLIInTmux(result *session.SetupResult, sessionID string, detached bool, 
 	}
 
 	cliCmd := buildCLICommand(sessionID, useResumeFlag, restoreOnly, sessionsDir, resumeID, t)
-	containerEnv, userPtr := buildContainerEnv(result)
+	containerEnv, userPtr := a.buildContainerEnv(result)
 	mergeToolEnv(containerEnv, t, workspacePath)
 
 	// Ensure tmux server is running first (critical for CI and new containers)
@@ -526,7 +526,7 @@ func detectHostTimezone() string {
 }
 
 // startMonitoringDaemon starts the background monitoring daemon
-func startMonitoringDaemon(ctx context.Context, containerName, workspacePath string, cfg *config.Config, log *logger.SessionLogger, daemon **monitor.Daemon) error {
+func startMonitoringDaemon(ctx context.Context, containerName, workspacePath string, cfg *config.Config, log *logger.SessionLogger, daemon *monitor.MonitorDaemon) error {
 	// Get home directory for audit log
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -580,7 +580,7 @@ func startMonitoringDaemon(ctx context.Context, containerName, workspacePath str
 }
 
 // startNFTMonitoringDaemon starts the nftables network monitoring daemon
-func startNFTMonitoringDaemon(ctx context.Context, containerName string, cfg *config.Config, log *logger.SessionLogger, daemon **nftmonitor.Daemon) error {
+func startNFTMonitoringDaemon(ctx context.Context, containerName string, cfg *config.Config, log *logger.SessionLogger, daemon *nftmonitor.NFTMonitorDaemon) error {
 	// Get container IP
 	containerIP, err := network.GetContainerIPWithRetries(containerName, 3)
 	if err != nil {

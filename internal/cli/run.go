@@ -30,12 +30,12 @@ Examples:
   coi run --workspace ~/project "make build"
 `,
 	Args: cobra.MinimumNArgs(1),
-	RunE: runCommand,
+	RunE: app.runCommand,
 }
 
-func runCommand(cmd *cobra.Command, args []string) error {
+func (a *App) runCommand(cmd *cobra.Command, args []string) error {
 	// Get absolute workspace path
-	absWorkspace, err := filepath.Abs(app.workspace)
+	absWorkspace, err := filepath.Abs(a.workspace)
 	if err != nil {
 		return fmt.Errorf("invalid workspace path: %w", err)
 	}
@@ -44,13 +44,13 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	// process CWD. config.Load() already loads <CWD>/.coi/config.toml via
 	// GetConfigPaths, so we only need to overlay when the user pointed --workspace
 	// at a different directory to avoid loading the same file twice.
-	if err := overlayWorkspaceConfig(absWorkspace); err != nil {
+	if err := a.overlayWorkspaceConfig(absWorkspace); err != nil {
 		return err
 	}
 
 	// Validate max_duration early so the user gets a clear error before any container work.
-	if app.cfg.Limits.Runtime.MaxDuration != "" {
-		if _, err := limits.ParseDuration(app.cfg.Limits.Runtime.MaxDuration); err != nil {
+	if a.cfg.Limits.Runtime.MaxDuration != "" {
+		if _, err := limits.ParseDuration(a.cfg.Limits.Runtime.MaxDuration); err != nil {
 			return fmt.Errorf("invalid max_duration: %w", err)
 		}
 	}
@@ -71,7 +71,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// Allocate slot if not specified
-	slotNum := app.slot
+	slotNum := a.slot
 	if slotNum == 0 {
 		slotNum, err = session.AllocateSlot(absWorkspace, 10)
 		if err != nil {
@@ -84,25 +84,25 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	containerName := session.ContainerName(absWorkspace, slotNum)
 
 	// Determine image: CLI --image flag > config defaults.image > "coi-default"
-	img := ResolveImageName(app.imageName, app.cfg)
+	img := ResolveImageName(a.imageName, a.cfg)
 
 	// Check if image exists, auto-build from config if possible
-	if err := AutoBuildIfNeeded(app.cfg, img); err != nil {
+	if err := AutoBuildIfNeeded(a.cfg, img); err != nil {
 		return err
 	}
-	if err := CheckAndReportStaleBase(app.cfg, img); err != nil {
+	if err := CheckAndReportStaleBase(a.cfg, img); err != nil {
 		return err
 	}
 
 	// Validate the storage pool exists before doing any container work so the
 	// user gets an actionable "create with `incus storage create`" error
 	// instead of a cryptic Incus failure midway through launch.
-	if err := container.ValidateStoragePool(app.cfg.Container.StoragePool); err != nil {
+	if err := container.ValidateStoragePool(a.cfg.Container.StoragePool); err != nil {
 		return err
 	}
 
 	// Validate and prepare alias if configured
-	effectiveAlias, err := validateAndPrepareAlias(app.cfg.Container.Alias)
+	effectiveAlias, err := validateAndPrepareAlias(a.cfg.Container.Alias)
 	if err != nil {
 		return err
 	}
@@ -120,7 +120,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to check if container exists: %w", err)
 	}
 
-	if err := launchOrReuseContainer(mgr, img, app.cfg.Container.StoragePool, containerExists, app.persistent); err != nil {
+	if err := launchOrReuseContainer(mgr, img, a.cfg.Container.StoragePool, containerExists, a.persistent); err != nil {
 		return err
 	}
 
@@ -140,7 +140,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 
 	// 1. Container (registered first → executes last in LIFO)
 	pipeline.AddTeardown(func() {
-		if !app.persistent {
+		if !a.persistent {
 			fmt.Fprintf(os.Stderr, "Cleaning up container %s...\n", containerName)
 			_ = mgr.Delete(true)
 		} else {
@@ -170,9 +170,9 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	})
 
 	// Apply resource limits (only for new containers, not restarted persistent ones)
-	wasRestarted := containerExists && app.persistent
+	wasRestarted := containerExists && a.persistent
 	if !wasRestarted {
-		limitsConfig := &app.cfg.Limits
+		limitsConfig := &a.cfg.Limits
 		if limitsConfig != nil && hasAnyLimits(limitsConfig) {
 			fmt.Fprintf(os.Stderr, "Applying resource limits...\n")
 			applyOpts := limits.ApplyOptions{
@@ -196,7 +196,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 				Runtime: limits.RuntimeLimits{
 					MaxProcesses: limitsConfig.Runtime.MaxProcesses,
 				},
-				Project: app.cfg.Incus.Project,
+				Project: a.cfg.Incus.Project,
 			}
 			if err := limits.ApplyResourceLimits(applyOpts); err != nil {
 				return fmt.Errorf("failed to apply resource limits: %w", err)
@@ -224,26 +224,26 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// Determine container workspace path (respects preserve_workspace_path config)
-	containerWorkspacePath := resolveContainerWorkspacePath(absWorkspace)
+	containerWorkspacePath := a.resolveContainerWorkspacePath(absWorkspace)
 
 	// Mount workspace (skip if restarting existing persistent container)
-	useShift := !app.cfg.Incus.DisableShift
-	if err := applyWorkspaceMounts(mgr, containerName, absWorkspace, &containerWorkspacePath, useShift, wasRestarted); err != nil {
+	useShift := !a.cfg.Incus.DisableShift
+	if err := a.applyWorkspaceMounts(mgr, containerName, absWorkspace, &containerWorkspacePath, useShift, wasRestarted); err != nil {
 		return err
 	}
 
 	// Forward SSH agent and apply network isolation if configured
-	sshAgentSocketPath, err := applySSHAgentForwarding(mgr, containerName)
+	sshAgentSocketPath, err := a.applySSHAgentForwarding(mgr, containerName)
 	if err != nil {
 		return err
 	}
-	networkMgr, err = applyNetworkIsolation(containerName)
+	networkMgr, err = a.applyNetworkIsolation(containerName)
 	if err != nil {
 		return err
 	}
 
 	// Configure timezone in container filesystem
-	tz := applyContainerTimezone(mgr)
+	tz := a.applyContainerTimezone(mgr)
 
 	// Auto-trust mise config files in the workspace
 	session.SetupMiseTrust(mgr, containerWorkspacePath, func(msg string) {
@@ -254,15 +254,15 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	// The monitor runs in a background goroutine and stops the container when
 	// the duration elapses, which causes the blocking incus exec below to return.
 	var timeoutMon *limits.TimeoutMonitor
-	if app.cfg.Limits.Runtime.MaxDuration != "" {
-		maxDur, _ := limits.ParseDuration(app.cfg.Limits.Runtime.MaxDuration) // already validated above
-		autoStop := config.BoolVal(app.cfg.Limits.Runtime.AutoStop)
-		if app.cfg.Limits.Runtime.AutoStop == nil {
+	if a.cfg.Limits.Runtime.MaxDuration != "" {
+		maxDur, _ := limits.ParseDuration(a.cfg.Limits.Runtime.MaxDuration) // already validated above
+		autoStop := config.BoolVal(a.cfg.Limits.Runtime.AutoStop)
+		if a.cfg.Limits.Runtime.AutoStop == nil {
 			autoStop = true // default: auto-stop when limit reached
 		}
-		stopGraceful := config.BoolVal(app.cfg.Limits.Runtime.StopGraceful)
+		stopGraceful := config.BoolVal(a.cfg.Limits.Runtime.StopGraceful)
 		runLog := logger.NewDiscard()
-		timeoutMon = limits.NewTimeoutMonitor(cmd.Context(), containerName, maxDur, autoStop, stopGraceful, app.cfg.Incus.Project, runLog)
+		timeoutMon = limits.NewTimeoutMonitor(cmd.Context(), containerName, maxDur, autoStop, stopGraceful, a.cfg.Incus.Project, runLog)
 		timeoutMon.Start()
 		defer timeoutMon.Stop()
 	}
@@ -277,7 +277,7 @@ func runCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// Add all environment variables (timezone, config, forward_env)
-	incusArgs = appendEnvArgs(incusArgs, tz, sshAgentSocketPath)
+	incusArgs = a.appendEnvArgs(incusArgs, tz, sshAgentSocketPath)
 
 	incusArgs = append(incusArgs, "--")
 	incusArgs = append(incusArgs, args...)
@@ -399,7 +399,7 @@ func remapContainerUserIfNeeded(mgr container.ContainerManager, wasRestarted boo
 // to an incus exec args slice.
 // tz is the resolved timezone name (may be empty).
 // sshAgentSocketPath is the container-side SSH agent socket (may be empty).
-func appendEnvArgs(incusArgs []string, tz, sshAgentSocketPath string) []string {
+func (a *App) appendEnvArgs(incusArgs []string, tz, sshAgentSocketPath string) []string {
 	// Timezone (lowest priority — user can override with config env)
 	if tz != "" {
 		incusArgs = append(incusArgs, "--env", fmt.Sprintf("TZ=%s", tz))
@@ -411,12 +411,12 @@ func appendEnvArgs(incusArgs []string, tz, sshAgentSocketPath string) []string {
 	}
 
 	// Static environment from config (defaults.environment + profile environment)
-	for k, v := range app.cfg.Defaults.Environment {
+	for k, v := range a.cfg.Defaults.Environment {
 		incusArgs = append(incusArgs, "--env", fmt.Sprintf("%s=%s", k, v))
 	}
 
 	// Resolve forward_env from config, look up host values
-	for _, name := range app.cfg.Defaults.ForwardEnv {
+	for _, name := range a.cfg.Defaults.ForwardEnv {
 		if val, ok := os.LookupEnv(name); ok {
 			incusArgs = append(incusArgs, "--env", fmt.Sprintf("%s=%s", name, val))
 		} else {
@@ -505,7 +505,7 @@ func applyContainerAlias(effectiveAlias, containerName, absWorkspace string) err
 // the global config when --workspace points to a directory other than the CWD.
 // config.Load() already loads <CWD>/.coi/config.toml, so skipping the overlay
 // when they match avoids doubling entries like AdditionalProtectedPaths.
-func overlayWorkspaceConfig(absWorkspace string) error {
+func (a *App) overlayWorkspaceConfig(absWorkspace string) error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("failed to get working directory: %w", err)
@@ -517,18 +517,18 @@ func overlayWorkspaceConfig(absWorkspace string) error {
 	if absWorkspace == absCWD {
 		return nil
 	}
-	if err := app.cfg.OverlayProjectConfig(absWorkspace); err != nil && !os.IsNotExist(err) {
+	if err := a.cfg.OverlayProjectConfig(absWorkspace); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to load project config from %s: %w", absWorkspace, err)
 	}
-	container.Configure(app.cfg.Incus.Project, app.cfg.Incus.CodeUser, app.cfg.Incus.CodeUID)
+	container.Configure(a.cfg.Incus.Project, a.cfg.Incus.CodeUser, a.cfg.Incus.CodeUID)
 	return nil
 }
 
 // resolveContainerWorkspacePath returns the path inside the container where the
 // workspace should be mounted. When preserve_workspace_path is set it mirrors
 // the host path, falling back to /workspace if the path conflicts with system dirs.
-func resolveContainerWorkspacePath(absWorkspace string) string {
-	if !app.cfg.Paths.PreserveWorkspacePath {
+func (a *App) resolveContainerWorkspacePath(absWorkspace string) string {
+	if !a.cfg.Paths.PreserveWorkspacePath {
 		return "/workspace"
 	}
 	cleanPath := filepath.Clean(absWorkspace)
@@ -547,7 +547,7 @@ func resolveContainerWorkspacePath(absWorkspace string) string {
 // applyWorkspaceMounts mounts the workspace and all configured additional directories
 // into the container, then applies security (read-only) mounts. For restarted persistent
 // containers it retrieves the existing workspace path from the container config instead.
-func applyWorkspaceMounts(mgr container.ContainerManager, containerName, absWorkspace string, containerWorkspacePath *string, useShift, wasRestarted bool) error {
+func (a *App) applyWorkspaceMounts(mgr container.ContainerManager, containerName, absWorkspace string, containerWorkspacePath *string, useShift, wasRestarted bool) error {
 	if wasRestarted {
 		fmt.Fprintf(os.Stderr, "Reusing existing workspace mount...\n")
 		*containerWorkspacePath = mgr.GetWorkspacePath()
@@ -563,7 +563,7 @@ func applyWorkspaceMounts(mgr container.ContainerManager, containerName, absWork
 		return fmt.Errorf("failed to mount workspace: %w", err)
 	}
 
-	mountConfig, err := ParseMountConfig(app.cfg)
+	mountConfig, err := ParseMountConfig(a.cfg)
 	if err != nil {
 		return fmt.Errorf("invalid mount configuration: %w", err)
 	}
@@ -578,8 +578,8 @@ func applyWorkspaceMounts(mgr container.ContainerManager, containerName, absWork
 		}
 	}
 
-	if !app.cfg.Security.DisableProtection {
-		if err := applySecurityMounts(mgr, absWorkspace, *containerWorkspacePath, containerName, useShift); err != nil {
+	if !a.cfg.Security.DisableProtection {
+		if err := a.applySecurityMounts(mgr, absWorkspace, *containerWorkspacePath, containerName, useShift); err != nil {
 			return err
 		}
 	}
@@ -610,8 +610,8 @@ func addMount(mgr container.ContainerManager, mount session.MountEntry, useShift
 }
 
 // applySecurityMounts sets up read-only protection mounts and optional host immutable flags.
-func applySecurityMounts(mgr container.ContainerManager, absWorkspace, containerWorkspacePath, containerName string, useShift bool) error {
-	protectedPaths := filterWritableGitHooks(app.cfg.Security.GetEffectiveProtectedPaths(), app.cfg)
+func (a *App) applySecurityMounts(mgr container.ContainerManager, absWorkspace, containerWorkspacePath, containerName string, useShift bool) error {
+	protectedPaths := filterWritableGitHooks(a.cfg.Security.GetEffectiveProtectedPaths(), a.cfg)
 	if len(protectedPaths) == 0 {
 		return nil
 	}
@@ -623,7 +623,7 @@ func applySecurityMounts(mgr container.ContainerManager, absWorkspace, container
 			fmt.Fprintf(os.Stderr, "Protected paths (mounted read-only): %s\n", strings.Join(actualPaths, ", "))
 		}
 	}
-	if app.cfg.Security.IsHostImmutableEnabled() {
+	if a.cfg.Security.IsHostImmutableEnabled() {
 		logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
 		immutablePaths := session.ApplyImmutable(absWorkspace, protectedPaths, containerName, logFn)
 		if len(immutablePaths) > 0 {
@@ -635,8 +635,8 @@ func applySecurityMounts(mgr container.ContainerManager, absWorkspace, container
 
 // applySSHAgentForwarding forwards the host SSH agent into the container when
 // ssh.forward_agent is true in config. Returns the container-side socket path.
-func applySSHAgentForwarding(mgr container.ContainerManager, containerName string) (string, error) {
-	if !config.BoolVal(app.cfg.SSH.ForwardAgent) {
+func (a *App) applySSHAgentForwarding(mgr container.ContainerManager, containerName string) (string, error) {
+	if !config.BoolVal(a.cfg.SSH.ForwardAgent) {
 		return "", nil
 	}
 	logger := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
@@ -654,8 +654,8 @@ func applySSHAgentForwarding(mgr container.ContainerManager, containerName strin
 // applyNetworkIsolation installs firewall rules for the container when
 // network.mode is set to something other than "open" in config.
 // Returns the Manager so the caller can Teardown before container deletion.
-func applyNetworkIsolation(containerName string) (*network.Manager, error) {
-	networkConfig := app.cfg.Network
+func (a *App) applyNetworkIsolation(containerName string) (*network.Manager, error) {
+	networkConfig := a.cfg.Network
 	if networkConfig.Mode == "" || networkConfig.Mode == config.NetworkModeOpen {
 		return nil, nil
 	}
@@ -674,8 +674,8 @@ func applyNetworkIsolation(containerName string) (*network.Manager, error) {
 
 // applyContainerTimezone resolves the timezone and configures it inside the container.
 // Returns the resolved timezone name (empty for UTC).
-func applyContainerTimezone(mgr container.ContainerManager) string {
-	tz := resolveTimezone(app.cfg)
+func (a *App) applyContainerTimezone(mgr container.ContainerManager) string {
+	tz := resolveTimezone(a.cfg)
 	if tz != "" {
 		tzCmd := fmt.Sprintf(
 			"ln -sf /usr/share/zoneinfo/%s /etc/localtime && echo %s > /etc/timezone",
