@@ -128,6 +128,7 @@ Examples:
 	RunE: app.profileInfoRunE,
 }
 
+//nolint:gocyclo // Profile info rendering has many optional fields — sequential by design
 func (a *App) profileInfoRunE(cmd *cobra.Command, args []string) error {
 	name := args[0]
 	p := a.cfg.GetProfile(name)
@@ -586,8 +587,9 @@ func (a *App) profileEditRunE(cmd *cobra.Command, args []string) error {
 		editor = "vi"
 	}
 
-	// Use sh -c to support multi-word editor values like "code --wait"
-	editorCmd := exec.Command("sh", "-c", editor+" "+shellQuote(sourcePath))
+	// Use sh -c to support multi-word editor values like "code --wait".
+	// editor comes from $VISUAL/$EDITOR set by the user — taint is intentional.
+	editorCmd := exec.Command("sh", "-c", editor+" "+shellQuote(sourcePath)) //nolint:gosec
 	editorCmd.Stdin = os.Stdin
 	editorCmd.Stdout = os.Stdout
 	editorCmd.Stderr = os.Stderr
