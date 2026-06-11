@@ -13,6 +13,8 @@
 
 ### Performance
 
+- **`LogWatcher` uses inotify for near-instant auth.log / syslog detection** — The auth-log watcher now registers inotify watches (`IN_MODIFY`) on `/proc/<container-init-pid>/root/var/log/{auth.log,syslog}` directly from the host instead of polling on a 5-second ticker. Events are delivered within ~1 second of a suspicious line being written rather than within 0–5 seconds. A directory watch (`IN_CREATE`) on the parent directory handles log rotation transparently: when `logrotate` renames the file and creates a fresh one the watch is automatically re-registered on the new file. A 30-second backstop ticker covers missed events and container restarts. If `inotify_init` fails (e.g. resource limit reached) the watcher falls back to the previous 5-second polling path. Refs #371.
+
 - **Container init PID resolved host-side via cgroup.procs** — `GetContainerInitPID` now reads the container's init PID directly from `/sys/fs/cgroup/incus.monitor/<name>/cgroup.procs` (walking the full cgroup subtree to handle systemd containers where PID 1 lives in `init.scope`) instead of spawning `incus info` on every poll tick. Because all monitors — network, process, logwatcher, filesystem, health checks — call `GetContainerInitPID` once per poll cycle, this eliminates a subprocess invocation per monitor per tick with no behavioral change. The `incus info` path is retained as a fallback for environments where the well-known cgroup paths are unavailable.
 
 ### Security

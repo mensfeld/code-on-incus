@@ -161,6 +161,9 @@ jobs:
           - name: monitoring-network-detection
             path: tests/integration/test_network_connection_detection.py
             description: "Host-side /proc/<pid>/net TCP/UDP suspicious connection detection"
+          - name: monitoring-log-inotify
+            path: tests/integration/test_log_watcher_inotify.py
+            description: "inotify-driven auth.log/syslog monitoring: syslog coverage, prompt delivery, log rotation"
           - name: uid-mapping
             path: tests/container/uid_mapping_shift_true.py tests/container/uid_mapping_raw_idmap.py
             description: "UID mapping integration tests"
