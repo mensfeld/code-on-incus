@@ -134,6 +134,9 @@ func buildCommand(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "\nImage '%s' built successfully!\n", opts.AliasName)
 		fmt.Fprintf(os.Stderr, "  Version: %s\n", result.VersionAlias)
 		fmt.Fprintf(os.Stderr, "  Fingerprint: %s\n", result.Fingerprint)
+		if dir, err := coiDataDir(); err == nil {
+			image.RecordBuild(dir, opts.AliasName, coiBaseImage)
+		}
 		return nil
 	}
 
@@ -184,6 +187,9 @@ func buildCommand(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintf(os.Stderr, "\nImage '%s' built successfully!\n", imageName)
 	fmt.Fprintf(os.Stderr, "  Fingerprint: %s\n", result.Fingerprint)
+	if dir, err := coiDataDir(); err == nil {
+		image.RecordBuild(dir, imageName, baseImage)
+	}
 	return nil
 }
 
@@ -260,6 +266,9 @@ func buildAllProfiles() error {
 				continue
 			}
 			fmt.Fprintf(os.Stderr, "[%s] Image '%s' built successfully.\n", profileName, imageName)
+			if dir, err := coiDataDir(); err == nil {
+				image.RecordBuild(dir, imageName, coiBaseImage)
+			}
 			built++
 		} else {
 			scriptPath, cleanup, err := resolveBuildScript(&p.Container.Build)
@@ -298,6 +307,9 @@ func buildAllProfiles() error {
 				continue
 			}
 			fmt.Fprintf(os.Stderr, "[%s] Image '%s' built successfully.\n", profileName, imageName)
+			if dir, err := coiDataDir(); err == nil {
+				image.RecordBuild(dir, imageName, baseImage)
+			}
 			built++
 		}
 	}

@@ -60,11 +60,12 @@ func (b *BuildConfig) HasBuildConfig() bool {
 // and top-level [build]. The same struct is embedded in both Config and
 // ProfileConfig so global and profile configs are symmetric.
 type ContainerConfig struct {
-	Image       string      `toml:"image"`
-	Persistent  *bool       `toml:"persistent"`
-	StoragePool string      `toml:"storage_pool"`
-	Alias       string      `toml:"alias"`
-	Build       BuildConfig `toml:"build"`
+	Image          string      `toml:"image"`
+	Persistent     *bool       `toml:"persistent"`
+	StoragePool    string      `toml:"storage_pool"`
+	Alias          string      `toml:"alias"`
+	Build          BuildConfig `toml:"build"`
+	StaleBaseCheck string      `toml:"stale_base_check"` // "error", "warn", "off"
 }
 
 // HasContainerConfig reports whether any field is set.
@@ -73,6 +74,7 @@ func (c *ContainerConfig) HasContainerConfig() bool {
 		c.Persistent != nil ||
 		c.StoragePool != "" ||
 		c.Alias != "" ||
+		c.StaleBaseCheck != "" ||
 		c.Build.HasBuildConfig()
 }
 
@@ -917,6 +919,9 @@ func applyContainerConfig(dst *ContainerConfig, src *ContainerConfig) {
 	}
 	if src.Alias != "" {
 		dst.Alias = src.Alias
+	}
+	if src.StaleBaseCheck != "" {
+		dst.StaleBaseCheck = src.StaleBaseCheck
 	}
 	mergeBuildInto(&dst.Build, &src.Build)
 }
