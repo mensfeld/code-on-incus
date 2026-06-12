@@ -476,8 +476,15 @@ func (a *App) runCLIInTmux(result *session.SetupResult, sessionID string, detach
 				return fmt.Errorf("failed to create tmux session: %w", err)
 			}
 
-			// Give tmux a moment to fully initialize the session
-			time.Sleep(500 * time.Millisecond)
+			// Poll until tmux reports the session is ready (up to 3s).
+			deadline := time.Now().Add(3 * time.Second)
+			for time.Now().Before(deadline) {
+				_, pollErr := result.Manager.ExecCommand(checkCmd, checkOpts)
+				if pollErr == nil {
+					break
+				}
+				time.Sleep(50 * time.Millisecond)
+			}
 		}
 		applyTmuxEnv()
 

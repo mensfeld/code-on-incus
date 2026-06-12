@@ -505,9 +505,7 @@ func (m *Manager) PushDirectory(localPath, containerPath string) error {
 
 // Chown changes ownership of a path in the container
 func (m *Manager) Chown(path string, uid, gid int) error {
-	cmd := fmt.Sprintf("chown -R %d:%d %s", uid, gid, path)
-	_, err := m.ExecCommand(cmd, ExecCommandOptions{})
-	return err
+	return m.ExecArgs([]string{"chown", "-R", fmt.Sprintf("%d:%d", uid, gid), path}, ExecCommandOptions{})
 }
 
 // DirExists checks if a directory exists in the container

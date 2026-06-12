@@ -103,3 +103,51 @@ func TestTimeoutMonitorCancel(t *testing.T) {
 		t.Error("timeout monitor should complete after Stop()")
 	}
 }
+
+// TestRemainingDecreasesOverTime verifies that Remaining() decreases as time passes.
+func TestRemainingDecreasesOverTime(t *testing.T) {
+	const maxDur = 2 * time.Second
+	tm := NewTimeoutMonitor(context.Background(), "test-container", maxDur, false, true, "", logger.NewDiscard())
+	tm.Start()
+	defer tm.Stop()
+
+	r1 := tm.Remaining()
+	if r1 <= 0 || r1 > maxDur {
+		t.Fatalf("Remaining() = %v, expected (0, %v]", r1, maxDur)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	r2 := tm.Remaining()
+	if r2 >= r1 {
+		t.Errorf("Remaining() did not decrease: r1=%v r2=%v", r1, r2)
+	}
+}
+
+// TestRemainingZeroAfterStop verifies that Remaining() returns 0 once the monitor is stopped.
+func TestRemainingZeroAfterStop(t *testing.T) {
+	tm := NewTimeoutMonitor(context.Background(), "test-container", time.Hour, false, true, "", logger.NewDiscard())
+	tm.Start()
+	tm.Stop()
+
+	if r := tm.Remaining(); r != 0 {
+		t.Errorf("Remaining() after Stop = %v, want 0", r)
+	}
+}
+
+// TestRemainingZeroNoLimit verifies that Remaining() returns 0 when MaxDuration=0 (no limit).
+func TestRemainingZeroNoLimit(t *testing.T) {
+	tm := NewTimeoutMonitor(context.Background(), "test-container", 0, false, true, "", logger.NewDiscard())
+	tm.Start()
+
+	// Wait for done to be closed
+	select {
+	case <-tm.done:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("expected done to close immediately for MaxDuration=0")
+	}
+
+	if r := tm.Remaining(); r != 0 {
+		t.Errorf("Remaining() with MaxDuration=0 = %v, want 0", r)
+	}
+}

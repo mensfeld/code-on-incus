@@ -225,6 +225,24 @@ functions:
 	}
 }
 
+// TestMatchSuspiciousExec_Arg0CaseInsensitive verifies that p.Arg0 matching is
+// case-insensitive so upper-case binary names in patterns still match lowercased
+// argv[0] values extracted from real process command lines.
+func TestMatchSuspiciousExec_Arg0CaseInsensitive(t *testing.T) {
+	upperArg0Pattern := execPattern{
+		Name:     "upper-test",
+		Arg0:     "PYTHON3",
+		Keywords: []string{"socket"},
+	}
+	patterns := []execPattern{upperArg0Pattern}
+
+	cmd := "python3 -c import socket; s = socket.socket()"
+	got := matchSuspiciousExec(cmd, patterns)
+	if got != "upper-test" {
+		t.Errorf("matchSuspiciousExec with upper-case Arg0 pattern: got %q, want %q", got, "upper-test")
+	}
+}
+
 func TestGTFOBinsStripPlaceholders(t *testing.T) {
 	cases := []struct {
 		in   string
