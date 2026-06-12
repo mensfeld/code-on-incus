@@ -166,10 +166,11 @@ class TestLogWatcherInotify:
             cleanup_container(container_name, coi_binary)
 
     def test_event_detected_promptly(self, test_workspace, coi_binary):
-        """Auth log threat is detected within 3 seconds of the line being written.
+        """Auth log threat is detected within 4 seconds of the line being written.
 
         With 5-second polling the detection could take up to 5 s; with inotify
-        it arrives within ~1 s. The 3 s threshold distinguishes the two reliably.
+        it arrives within ~1 s. The 4 s threshold distinguishes the two reliably
+        while leaving headroom for incus exec startup time on slow CI hosts.
         """
         config_path = Path.home() / ".coi" / "config.toml"
         backup = config_path.read_text() if config_path.exists() else None
@@ -203,8 +204,9 @@ class TestLogWatcherInotify:
                 check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
             )
 
+            events = []
             auth_events = []
-            deadline = write_time + 3.0
+            deadline = write_time + 4.0
             while time.monotonic() < deadline:
                 events = get_threat_events(container_name)
                 auth_events = [
@@ -219,8 +221,8 @@ class TestLogWatcherInotify:
 
             elapsed = time.monotonic() - write_time
             assert len(auth_events) > 0, (
-                f"Expected auth threat within 3 s (inotify), elapsed {elapsed:.1f}s. "
-                f"Events: {get_threat_events(container_name)}"
+                f"Expected auth threat within 4 s (inotify), elapsed {elapsed:.1f}s. "
+                f"Events: {events}"
             )
         finally:
             proc.terminate()

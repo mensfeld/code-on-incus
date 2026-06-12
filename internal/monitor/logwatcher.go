@@ -148,17 +148,19 @@ func (lw *LogWatcher) Run(ctx context.Context) {
 	var closeOnce sync.Once
 	closeFd := func() { closeOnce.Do(func() { unix.Close(ifd) }) }
 	defer closeFd()
+	// This goroutine may outlive Run when ifd closes due to a read error before
+	// ctx is done; it exits as soon as the session context is cancelled.
 	go func() { <-ctx.Done(); closeFd() }()
 
 	pid, _ := GetContainerInitPID(ctx, lw.containerName)
-	wdToRel, dirWd := lw.addInotifyWatches(ifd, pid)
+	wdToRel, dirWd := addInotifyWatches(ifd, pid)
 
 	// Initial read: catch lines written before the watches were registered.
 	for _, rel := range logCandidates {
 		lw.pollFile(ctx, rel, states, pid)
 	}
 
-	events := lw.inotifyReader(ifd)
+	events := inotifyReader(ifd)
 	// Backstop: re-resolve PID on container restart and fill any missing watches.
 	backstop := time.NewTicker(30 * time.Second)
 	defer backstop.Stop()
@@ -180,7 +182,7 @@ func (lw *LogWatcher) Run(ctx context.Context) {
 				}
 			case ev.wd == dirWd && ev.mask&unix.IN_CREATE != 0:
 				// A file appeared in the log directory (rotation target recreated).
-				newWds, newDir := lw.addInotifyWatches(ifd, pid)
+				newWds, newDir := addInotifyWatches(ifd, pid)
 				for wd, rel := range newWds {
 					wdToRel[wd] = rel
 				}
@@ -211,10 +213,10 @@ func (lw *LogWatcher) Run(ctx context.Context) {
 				if dirWd >= 0 {
 					unix.InotifyRmWatch(ifd, uint32(dirWd)) //nolint:errcheck
 				}
-				wdToRel, dirWd = lw.addInotifyWatches(ifd, pid)
+				wdToRel, dirWd = addInotifyWatches(ifd, pid)
 			} else if len(wdToRel) < len(logCandidates) {
 				// Some log files haven't been created yet; retry.
-				newWds, newDir := lw.addInotifyWatches(ifd, pid)
+				newWds, newDir := addInotifyWatches(ifd, pid)
 				for wd, rel := range newWds {
 					wdToRel[wd] = rel
 				}
@@ -252,7 +254,7 @@ func (lw *LogWatcher) runPolling(ctx context.Context, states map[string]logState
 // addInotifyWatches registers IN_MODIFY/rotate watches on each log candidate
 // and an IN_CREATE watch on their parent directory. Returns a wd→rel map and
 // the directory watch descriptor (-1 if the watch could not be added).
-func (lw *LogWatcher) addInotifyWatches(ifd, pid int) (wdToRel map[int32]string, dirWd int32) {
+func addInotifyWatches(ifd, pid int) (wdToRel map[int32]string, dirWd int32) {
 	wdToRel = make(map[int32]string)
 	dirWd = -1
 	if pid <= 0 {
@@ -275,14 +277,18 @@ func (lw *LogWatcher) addInotifyWatches(ifd, pid int) (wdToRel map[int32]string,
 	return
 }
 
+// inotifyBufSize is large enough for a burst of 16 maximum-sized inotify events
+// (each at most SizeofInotifyEvent + NAME_MAX + 1 bytes).
+const inotifyBufSize = (unix.SizeofInotifyEvent + unix.NAME_MAX + 1) * 16
+
 // inotifyReader spawns a goroutine that polls ifd (non-blocking) and forwards
 // parsed events to the returned channel. The channel is closed when ifd is
 // closed or an unrecoverable read error occurs.
-func (lw *LogWatcher) inotifyReader(ifd int) <-chan inotifyRawEvent {
+func inotifyReader(ifd int) <-chan inotifyRawEvent {
 	ch := make(chan inotifyRawEvent, 64)
 	go func() {
 		defer close(ch)
-		buf := make([]byte, 4096)
+		buf := make([]byte, inotifyBufSize)
 		fds := []unix.PollFd{{Fd: int32(ifd), Events: unix.POLLIN}}
 		for {
 			n, err := unix.Poll(fds, 200) // 200 ms so ctx cancellation is noticed promptly
