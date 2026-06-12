@@ -143,12 +143,12 @@ def test_run_restricted_nft_cleanup_on_sigint(coi_binary, workspace_dir, cleanup
     if not container_ip:
         proc.send_signal(signal.SIGINT)
         proc.wait(timeout=30)
-        pytest.skip("Could not find container IP in nft chain — nft rules may not have been created")
+        pytest.skip(
+            "Could not find container IP in nft chain — nft rules may not have been created"
+        )
 
     rules_before = count_nft_rules_for_ip(container_ip)
-    assert rules_before > 0, (
-        f"Expected nft rules for {container_ip} before SIGINT, found none"
-    )
+    assert rules_before > 0, f"Expected nft rules for {container_ip} before SIGINT, found none"
 
     # Send SIGINT to simulate Ctrl+C.
     proc.send_signal(signal.SIGINT)
