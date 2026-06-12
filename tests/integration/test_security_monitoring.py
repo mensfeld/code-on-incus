@@ -4933,8 +4933,9 @@ process_spawn_rate_threshold = 9999
             time.sleep(3)
 
             # Run bash with a /dev/tcp/ redirect — the canonical bash reverse-shell
-            # pattern. The connection to 10.255.255.1:9999 will fail (no listener),
-            # but PROC_EVENT_EXEC fires on execve before the shell tries to connect.
+            # pattern. PROC_EVENT_EXEC fires on execve before the shell tries to
+            # connect, so we don't wait for the command to complete (the TCP
+            # connection attempt may hang if no RST is returned by the network).
             subprocess.Popen(
                 [
                     "incus",
@@ -4947,7 +4948,7 @@ process_spawn_rate_threshold = 9999
                 ],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-            ).wait(timeout=15)
+            )
 
             # Poll until the proc_event threat appears (30 s timeout).
             proc_events = []
