@@ -4898,7 +4898,7 @@ mode = "open"
 [monitoring]
 enabled = true
 auto_pause_on_high = false
-auto_kill_on_critical = true
+auto_kill_on_critical = false
 poll_interval_sec = 1
 file_read_threshold_mb = 500
 file_read_rate_mb_per_sec = 1000
@@ -4993,7 +4993,7 @@ mode = "open"
 [monitoring]
 enabled = true
 auto_pause_on_high = false
-auto_kill_on_critical = true
+auto_kill_on_critical = false
 poll_interval_sec = 1
 file_read_threshold_mb = 500
 file_read_rate_mb_per_sec = 1000
@@ -5299,7 +5299,7 @@ mode = "open"
 [monitoring]
 enabled = true
 auto_pause_on_high = false
-auto_kill_on_critical = true
+auto_kill_on_critical = false
 poll_interval_sec = 1
 file_read_threshold_mb = 500
 file_read_rate_mb_per_sec = 1000
