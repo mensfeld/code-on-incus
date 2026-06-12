@@ -45,6 +45,26 @@ def count_nft_rules_for_ip(ip):
         return 0
 
 
+def _get_nft_container_ips():
+    """Return the set of container IPs currently present in the nft coi forward chain."""
+    try:
+        result = subprocess.run(
+            ["sudo", "-n", "nft", "-a", "list", "chain", "ip", "coi", "forward"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        ips = set()
+        if result.returncode == 0:
+            for line in result.stdout.splitlines():
+                for part in line.split():
+                    if part.startswith("10.") and "." in part:
+                        ips.add(part)
+        return ips
+    except Exception:
+        return set()
+
+
 def get_container_ip(coi_binary, workspace_dir):
     """Start a container, fetch its IP, then stop it — used for setup only."""
     result = subprocess.run(
@@ -106,6 +126,11 @@ def test_run_restricted_nft_cleanup_on_sigint(coi_binary, workspace_dir, cleanup
     config_dir.mkdir(exist_ok=True)
     (config_dir / "config.toml").write_text('[network]\nmode = "restricted"\n')
 
+    # Snapshot IPs already in the chain before we start coi run. Previous tests
+    # may have left behind rules (e.g. same IP reused by Incus), and we must not
+    # mistake those for rules created by this test.
+    pre_existing_ips = _get_nft_container_ips()
+
     # Start a long-running `coi run` in the background so we can interrupt it.
     proc = subprocess.Popen(
         [
@@ -121,31 +146,27 @@ def test_run_restricted_nft_cleanup_on_sigint(coi_binary, workspace_dir, cleanup
         text=True,
     )
 
-    # Give the container and nft rules time to be created.
-    time.sleep(10)
-
-    # Grab the container's IP from the nft chain while rules still exist.
-    nft_result = subprocess.run(
-        ["sudo", "-n", "nft", "-a", "list", "chain", "ip", "coi", "forward"],
-        capture_output=True,
-        text=True,
-        timeout=10,
-    )
+    # Poll until a NEW IP (one not present before we started) appears in the
+    # nft chain. This confirms applyNetworkIsolation has run and registered its
+    # teardown. A fixed sleep is not used because container startup time varies
+    # widely across CI runners.
+    deadline = time.time() + 60
     container_ip = None
-    for line in nft_result.stdout.splitlines():
-        # Rules are tagged with the container IP as source/dest
-        for part in line.split():
-            if part.startswith("10.") and "." in part:
-                container_ip = part
-                break
-        if container_ip:
+    while time.time() < deadline:
+        new_ips = _get_nft_container_ips() - pre_existing_ips
+        if new_ips:
+            container_ip = next(iter(new_ips))
             break
+        if proc.poll() is not None:
+            break
+        time.sleep(1)
 
     if not container_ip:
         proc.send_signal(signal.SIGINT)
         proc.wait(timeout=30)
         pytest.skip(
-            "Could not find container IP in nft chain — nft rules may not have been created"
+            "Could not find a new container IP in nft chain within 60s"
+            " — container may not have started or network isolation not applied"
         )
 
     rules_before = count_nft_rules_for_ip(container_ip)
