@@ -284,8 +284,18 @@ func deleteNFTRulesByComment(comment string) error {
 		return err
 	}
 	for _, h := range handles {
-		if _, delErr := runNFTCommand("delete", "rule", "ip", "coi", "forward", "handle", h); delErr != nil {
-			log.Printf("Warning: failed to delete nft rule handle %s: %v", h, delErr)
+		var delErr error
+		for attempt := 0; attempt < 3; attempt++ {
+			if attempt > 0 {
+				time.Sleep(100 * time.Millisecond)
+			}
+			_, delErr = runNFTCommand("delete", "rule", "ip", "coi", "forward", "handle", h)
+			if delErr == nil {
+				break
+			}
+		}
+		if delErr != nil {
+			log.Printf("Warning: failed to delete nft rule handle %s after 3 attempts: %v", h, delErr)
 		}
 	}
 	return nil
