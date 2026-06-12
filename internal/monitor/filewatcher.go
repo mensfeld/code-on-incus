@@ -223,12 +223,12 @@ func (w *FileWatcher) Run(ctx context.Context) {
 			if ev.mask&unix.FAN_OPEN != 0 && entry.file.openLevel != "" {
 				w.fire(entry.file.openLevel, entry.file.category,
 					entry.file.openTitle, entry.file.openDesc,
-					entry.file.rel, "read", int(ev.pid))
+					entry.file.rel, "read", ev.pid)
 			}
 			if ev.mask&unix.FAN_CLOSE_WRITE != 0 && entry.file.writeLevel != "" {
 				w.fire(entry.file.writeLevel, entry.file.category,
 					entry.file.writeTitle, entry.file.writeDesc,
-					entry.file.rel, "write", int(ev.pid))
+					entry.file.rel, "write", ev.pid)
 			}
 
 		case <-backstop.C:
@@ -255,7 +255,7 @@ func (w *FileWatcher) Run(ctx context.Context) {
 // cancelled. The caller is responsible for closing each ev.fd after use.
 func (w *FileWatcher) readEvents(ctx context.Context, ifd int, evCh chan<- rawFanEvent) {
 	buf := make([]byte, 4096)
-	pfds := []unix.PollFd{{Fd: int32(ifd), Events: unix.POLLIN}}
+	pfds := []unix.PollFd{{Fd: int32(ifd), Events: unix.POLLIN}} //nolint:gosec // fanotify fd fits in int32
 
 	for {
 		select {

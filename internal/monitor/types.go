@@ -91,12 +91,12 @@ type ProcEventThreat struct {
 // Evidence holds threat-specific supporting data.
 // Exactly one field will be non-nil per threat event.
 type Evidence struct {
-	Process      *ProcessThreat         `json:"process,omitempty"`
-	Network      *NetworkThreat         `json:"network,omitempty"`
-	Filesystem   *FilesystemThreat      `json:"filesystem,omitempty"`
-	FileWrite    *FilesystemWriteThreat `json:"file_write,omitempty"`
-	DiskSpace    *DiskSpaceInfo         `json:"disk_space,omitempty"`
-	ProcessCount *ProcessCountThreat    `json:"process_count,omitempty"`
+	Process       *ProcessThreat         `json:"process,omitempty"`
+	Network       *NetworkThreat         `json:"network,omitempty"`
+	Filesystem    *FilesystemThreat      `json:"filesystem,omitempty"`
+	FileWrite     *FilesystemWriteThreat `json:"file_write,omitempty"`
+	DiskSpace     *DiskSpaceInfo         `json:"disk_space,omitempty"`
+	ProcessCount  *ProcessCountThreat    `json:"process_count,omitempty"`
 	AuthLog       *AuthLogThreat         `json:"auth_log,omitempty"`
 	ProcEvent     *ProcEventThreat       `json:"proc_event,omitempty"`
 	SensitiveFile *SensitiveFileThreat   `json:"sensitive_file,omitempty"`

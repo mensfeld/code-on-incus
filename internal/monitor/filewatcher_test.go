@@ -124,7 +124,7 @@ func TestFileWatcherFireEmitsThreatEvent(t *testing.T) {
 		t.Errorf("access: got %q", sf.Access)
 	}
 	if sf.Pid != 42 {
-		t.Errorf("pid: got %d", sf.Pid) //nolint:gosec // pid fits in int
+		t.Errorf("pid: got %d", sf.Pid)
 	}
 	if got.ID == "" {
 		t.Error("ID should not be empty")
