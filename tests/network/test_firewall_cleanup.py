@@ -339,12 +339,20 @@ mode = "open"
 
         time.sleep(1)
 
-    # Check for any orphaned rules from our containers
+    # Check for any orphaned rules from our containers. On loaded CI runners
+    # the nft rule deletion may lag the kill by a fraction of a second, so
+    # retry for up to 10 seconds before failing.
+    deadline = time.time() + 10
     total_orphaned = 0
-    for ip in collected_ips:
-        orphaned = count_rules_for_ip(ip)
-        if orphaned > 0:
-            total_orphaned += orphaned
+    while True:
+        total_orphaned = 0
+        for ip in collected_ips:
+            orphaned = count_rules_for_ip(ip)
+            if orphaned > 0:
+                total_orphaned += orphaned
+        if total_orphaned == 0 or time.time() >= deadline:
+            break
+        time.sleep(1)
 
     assert total_orphaned == 0, (
         f"Found {total_orphaned} total orphaned nft rules in ip coi forward "
