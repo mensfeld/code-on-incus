@@ -128,6 +128,33 @@ func (f *NftManager) RemoveRules() error {
 	return deleteNFTRulesByComment("coi-" + f.containerIP)
 }
 
+// ReplaceAllowlist atomically replaces the allowlist rules for this container.
+// It snapshots the existing rule handles first, appends the new rules, then
+// deletes only the old handles. The container therefore always has an active
+// rule set during the transition — there is never a window where all rules are
+// absent and the chain's default-accept policy would pass all traffic through.
+func (f *NftManager) ReplaceAllowlist(cfg *config.NetworkConfig, allowedIPs []string) error {
+	// Capture current handles before appending new rules so we can surgically
+	// remove them afterwards without touching the freshly-added entries.
+	oldHandles, err := nftGetHandlesByComment("coi-" + f.containerIP)
+	if err != nil {
+		return fmt.Errorf("failed to list current nft rules: %w", err)
+	}
+
+	if err := f.ApplyAllowlist(cfg, allowedIPs); err != nil {
+		return err
+	}
+
+	// Remove only the old handles. New rules are already in the chain, so the
+	// container is never left without a filtering rule set.
+	for _, h := range oldHandles {
+		if _, delErr := runNFTCommand("delete", "rule", "ip", "coi", "forward", "handle", h); delErr != nil {
+			log.Printf("Warning: failed to delete stale nft rule handle %s: %v", h, delErr)
+		}
+	}
+	return nil
+}
+
 // EnsureBaseRules creates the ip coi table/chain and adds the shared conntrack rule.
 func EnsureBaseRules() error {
 	if err := ensureCOITableAndChain(); err != nil {
