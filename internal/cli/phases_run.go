@@ -206,14 +206,14 @@ func (a *App) configureContainerRunPhase(s *runState) session.Phase {
 func (a *App) applyNetworkRunPhase(s *runState) session.Phase {
 	return session.PhaseFunc{
 		PhaseName: "apply-network",
-		RunFn: func(_ context.Context) (session.Teardown, error) {
+		RunFn: func(ctx context.Context) (session.Teardown, error) {
 			socketPath, err := a.applySSHAgentForwarding(s.mgr, s.containerName)
 			if err != nil {
 				return nil, err
 			}
 			s.sshAgentSocketPath = socketPath
 
-			nm, err := a.applyNetworkIsolation(s.containerName)
+			nm, err := a.applyNetworkIsolation(ctx, s.containerName)
 			if err != nil {
 				return nil, err
 			}
@@ -228,6 +228,9 @@ func (a *App) applyNetworkRunPhase(s *runState) session.Phase {
 				return nil, nil
 			}
 			teardown := func() {
+				// Use a fresh background context for teardown: the run context
+				// may already be cancelled (SIGINT), but we must still remove
+				// the nftables rules before the container is deleted.
 				if err := nm.Teardown(context.Background(), s.containerName); err != nil {
 					fmt.Fprintf(os.Stderr, "Warning: failed to teardown network isolation: %v\n", err)
 				}

@@ -510,15 +510,13 @@ func (m *Manager) Chown(path string, uid, gid int) error {
 
 // DirExists checks if a directory exists in the container
 func (m *Manager) DirExists(path string) (bool, error) {
-	cmd := fmt.Sprintf("[ -d %s ]", path)
-	_, err := m.ExecCommand(cmd, ExecCommandOptions{})
+	err := m.ExecArgs([]string{"test", "-d", path}, ExecCommandOptions{})
 	return err == nil, nil
 }
 
 // FileExists checks if a file exists in the container
 func (m *Manager) FileExists(path string) (bool, error) {
-	cmd := fmt.Sprintf("[ -f %s ]", path)
-	_, err := m.ExecCommand(cmd, ExecCommandOptions{})
+	err := m.ExecArgs([]string{"test", "-f", path}, ExecCommandOptions{})
 	return err == nil, nil
 }
 

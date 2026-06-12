@@ -437,7 +437,7 @@ func (a *App) applySSHAgentForwarding(mgr container.ContainerManager, containerN
 // applyNetworkIsolation installs firewall rules for the container when
 // network.mode is set to something other than "open" in config.
 // Returns the Manager so the caller can Teardown before container deletion.
-func (a *App) applyNetworkIsolation(containerName string) (*network.Manager, error) {
+func (a *App) applyNetworkIsolation(ctx context.Context, containerName string) (*network.Manager, error) {
 	networkConfig := a.cfg.Network
 	if networkConfig.Mode == "" || networkConfig.Mode == config.NetworkModeOpen {
 		return nil, nil
@@ -448,7 +448,7 @@ func (a *App) applyNetworkIsolation(containerName string) (*network.Manager, err
 		fmt.Fprintf(os.Stderr, "Added iptables FORWARD rules for %s\n", bridgeName)
 	}
 	nm := network.NewManager(&networkConfig, logger.NewDiscard())
-	if err := nm.SetupForContainer(context.Background(), containerName); err != nil {
+	if err := nm.SetupForContainer(ctx, containerName); err != nil {
 		return nil, fmt.Errorf("failed to setup network isolation: %w", err)
 	}
 	fmt.Fprintf(os.Stderr, "Network isolation applied: %s\n", networkConfig.Mode)

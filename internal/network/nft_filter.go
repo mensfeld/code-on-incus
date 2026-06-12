@@ -264,7 +264,7 @@ func nftRuleExistsWithComment(comment string) (bool, error) {
 func nftGetHandlesByComment(comment string) ([]string, error) {
 	output, err := runNFTCommand("-a", "list", "chain", "ip", "coi", "forward")
 	if err != nil {
-		return nil, nil
+		return nil, err
 	}
 	var handles []string
 	for _, line := range strings.Split(string(output), "\n") {
@@ -278,14 +278,29 @@ func nftGetHandlesByComment(comment string) ([]string, error) {
 }
 
 // deleteNFTRulesByComment removes all rules in ip coi forward that carry the given comment.
+// It loops up to maxRounds times, re-scanning handles after each pass, so transient nft
+// lock failures and any handles missed in earlier scans are retried automatically.
 func deleteNFTRulesByComment(comment string) error {
-	handles, err := nftGetHandlesByComment(comment)
-	if err != nil {
-		return err
-	}
-	for _, h := range handles {
-		if _, delErr := runNFTCommand("delete", "rule", "ip", "coi", "forward", "handle", h); delErr != nil {
-			log.Printf("Warning: failed to delete nft rule handle %s: %v", h, delErr)
+	const (
+		maxRounds = 8
+		delay     = 300 * time.Millisecond
+	)
+	for round := 0; round < maxRounds; round++ {
+		if round > 0 {
+			time.Sleep(delay)
+		}
+		handles, err := nftGetHandlesByComment(comment)
+		if err != nil {
+			log.Printf("Warning: nft list failed (round %d/%d): %v, retrying...", round+1, maxRounds, err)
+			continue
+		}
+		if len(handles) == 0 {
+			return nil
+		}
+		for _, h := range handles {
+			if _, delErr := runNFTCommand("delete", "rule", "ip", "coi", "forward", "handle", h); delErr != nil {
+				log.Printf("Warning: failed to delete nft rule handle %s (round %d/%d): %v", h, round+1, maxRounds, delErr)
+			}
 		}
 	}
 	return nil

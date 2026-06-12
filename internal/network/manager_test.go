@@ -184,3 +184,62 @@ func TestRefreshAllowedIPs_ReplaceAllowlistCalledOnce(t *testing.T) {
 		t.Errorf("expected ReplaceAllowlist called exactly once, got %d; calls: %v", count, stub.calls)
 	}
 }
+
+// TestOtherContainersRunning covers the bridge-rule teardown decision logic.
+// The fix ensures that on JSON parse failure the function returns true
+// (conservative: keep rules) instead of the former false (remove rules).
+func TestOtherContainersRunning(t *testing.T) {
+	tests := []struct {
+		name       string
+		json       string
+		exclude    string
+		wantResult bool
+	}{
+		{
+			name:       "invalid JSON returns true (conservative)",
+			json:       "not json at all",
+			exclude:    "coi-abc",
+			wantResult: true,
+		},
+		{
+			name:       "empty JSON array returns false",
+			json:       `[]`,
+			exclude:    "coi-abc",
+			wantResult: false,
+		},
+		{
+			name:       "only excluded container running returns false",
+			json:       `[{"name":"coi-abc","state":{"status":"Running"}}]`,
+			exclude:    "coi-abc",
+			wantResult: false,
+		},
+		{
+			name:       "another running container returns true",
+			json:       `[{"name":"coi-abc","state":{"status":"Running"}},{"name":"coi-xyz","state":{"status":"Running"}}]`,
+			exclude:    "coi-abc",
+			wantResult: true,
+		},
+		{
+			name:       "other container stopped returns false",
+			json:       `[{"name":"coi-abc","state":{"status":"Running"}},{"name":"coi-xyz","state":{"status":"Stopped"}}]`,
+			exclude:    "coi-abc",
+			wantResult: false,
+		},
+		{
+			name:       "truncated JSON returns true (conservative)",
+			json:       `[{"name":"coi-xyz","state":`,
+			exclude:    "coi-abc",
+			wantResult: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := otherContainersRunning(tt.json, tt.exclude)
+			if got != tt.wantResult {
+				t.Errorf("otherContainersRunning(%q, %q) = %v, want %v",
+					tt.json, tt.exclude, got, tt.wantResult)
+			}
+		})
+	}
+}
