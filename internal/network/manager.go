@@ -395,22 +395,9 @@ func (m *Manager) Teardown(ctx context.Context, containerName string) error {
 	if m.iptablesBridgeName != "" {
 		// Check if other coi containers are still running before removing
 		output, err := container.IncusOutput("list", "--format=json")
-		hasOtherContainers := false
+		hasOtherContainers := true // conservative default
 		if err == nil {
-			var containers []struct {
-				Name  string `json:"name"`
-				State struct {
-					Status string `json:"status"`
-				} `json:"state"`
-			}
-			if json.Unmarshal([]byte(output), &containers) == nil {
-				for _, c := range containers {
-					if c.Name != containerName && c.State.Status == "Running" {
-						hasOtherContainers = true
-						break
-					}
-				}
-			}
+			hasOtherContainers = otherContainersRunning(output, containerName)
 		}
 
 		if !hasOtherContainers {
@@ -502,4 +489,25 @@ func getContainerGatewayIP(containerName string) (string, error) {
 	}
 
 	return "", fmt.Errorf("could not find ipv4.address in network %s", networkName)
+}
+
+// otherContainersRunning parses the JSON output of `incus list --format=json`
+// and reports whether any container other than excludeName is currently Running.
+// On JSON parse failure it returns true (conservative: keep bridge rules).
+func otherContainersRunning(jsonOutput, excludeName string) bool {
+	var containers []struct {
+		Name  string `json:"name"`
+		State struct {
+			Status string `json:"status"`
+		} `json:"state"`
+	}
+	if err := json.Unmarshal([]byte(jsonOutput), &containers); err != nil {
+		return true // conservative: can't confirm no other containers, keep rules
+	}
+	for _, c := range containers {
+		if c.Name != excludeName && c.State.Status == "Running" {
+			return true
+		}
+	}
+	return false
 }
