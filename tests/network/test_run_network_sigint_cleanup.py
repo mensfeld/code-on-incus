@@ -30,7 +30,7 @@ def nft_available():
 
 
 def count_nft_rules_for_ip(ip):
-    """Count rules in the ip coi forward chain that reference a given IP."""
+    """Count rules in the ip coi forward chain tagged with comment coi-<ip>."""
     try:
         result = subprocess.run(
             ["sudo", "-n", "nft", "-a", "list", "chain", "ip", "coi", "forward"],
@@ -40,13 +40,19 @@ def count_nft_rules_for_ip(ip):
         )
         if result.returncode != 0:
             return 0
-        return sum(1 for line in result.stdout.splitlines() if ip in line)
+        comment = f'comment "coi-{ip}"'
+        return sum(1 for line in result.stdout.splitlines() if comment in line)
     except Exception:
         return 0
 
 
 def _get_nft_container_ips():
-    """Return the set of container IPs currently present in the nft coi forward chain."""
+    """Return the set of container IPs from coi comments in the nft forward chain.
+
+    Extracts IPs from comment "coi-<IP>" tags rather than scanning raw IP
+    fields, so gateway IPs that appear only in daddr rules are not mistaken
+    for container IPs.
+    """
     try:
         result = subprocess.run(
             ["sudo", "-n", "nft", "-a", "list", "chain", "ip", "coi", "forward"],
@@ -56,10 +62,15 @@ def _get_nft_container_ips():
         )
         ips = set()
         if result.returncode == 0:
+            prefix = 'comment "coi-'
             for line in result.stdout.splitlines():
-                for part in line.split():
-                    if part.startswith("10.") and "." in part:
-                        ips.add(part)
+                if prefix not in line:
+                    continue
+                start = line.index(prefix) + len(prefix)
+                end = line.index('"', start)
+                ip = line[start:end]
+                if ip != "base" and "." in ip:
+                    ips.add(ip)
         return ips
     except Exception:
         return set()

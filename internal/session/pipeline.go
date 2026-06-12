@@ -35,6 +35,7 @@ type Pipeline struct {
 	mu           sync.Mutex
 	teardowns    []Teardown
 	teardownOnce sync.Once
+	torn         bool // set to true once Teardown() has fired
 }
 
 // Run executes each phase in order. If ctx is cancelled before a phase starts,
@@ -49,8 +50,15 @@ func (p *Pipeline) Run(ctx context.Context, phases ...Phase) error {
 		td, err := phase.Run(ctx)
 		if td != nil {
 			p.mu.Lock()
-			p.teardowns = append(p.teardowns, td)
-			p.mu.Unlock()
+			if p.torn {
+				// Teardown() already fired and took its snapshot before this
+				// teardown was returned. Run it immediately so it is not lost.
+				p.mu.Unlock()
+				td()
+			} else {
+				p.teardowns = append(p.teardowns, td)
+				p.mu.Unlock()
+			}
 		}
 		if err != nil {
 			return fmt.Errorf("%s: %w", phase.Name(), err)
@@ -80,6 +88,7 @@ func (p *Pipeline) AddTeardown(td Teardown) {
 func (p *Pipeline) Teardown() {
 	p.teardownOnce.Do(func() {
 		p.mu.Lock()
+		p.torn = true
 		tds := make([]Teardown, len(p.teardowns))
 		copy(tds, p.teardowns)
 		p.mu.Unlock()
