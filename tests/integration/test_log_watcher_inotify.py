@@ -20,7 +20,6 @@ from pathlib import Path
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Shared helpers (mirrors test_security_monitoring.py)
 # ---------------------------------------------------------------------------
@@ -35,8 +34,7 @@ def get_container_name_from_workspace(workspace):
 def wait_for_container_running(name, timeout=30):
     for _ in range(timeout):
         result = subprocess.run(
-            ["incus", "list", name, "--format=json"],
-            capture_output=True, text=True, timeout=10
+            ["incus", "list", name, "--format=json"], capture_output=True, text=True, timeout=10
         )
         if result.returncode == 0:
             containers = json.loads(result.stdout)
@@ -64,10 +62,7 @@ def get_threat_events(container_name):
 
 
 def cleanup_container(name, coi_binary):
-    subprocess.run(
-        [coi_binary, "container", "delete", name, "--force"],
-        timeout=30, check=False
-    )
+    subprocess.run([coi_binary, "container", "delete", name, "--force"], timeout=30, check=False)
 
 
 def _monitoring_config(auto_pause=False):
@@ -120,7 +115,7 @@ class TestLogWatcherInotify:
         proc = subprocess.Popen(
             [coi_binary, "shell", "--workspace", str(test_workspace), "--slot", "66"],
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
+            stderr=subprocess.DEVNULL,
         )
 
         try:
@@ -131,20 +126,27 @@ class TestLogWatcherInotify:
 
             subprocess.run(
                 [
-                    "incus", "exec", container_name, "--",
-                    "bash", "-c",
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "bash",
+                    "-c",
                     "mkdir -p /var/log && "
                     "echo 'Jun  5 12:00:00 coi sshd[1234]: Failed password for attacker"
-                    " from 1.2.3.4 port 22222 ssh2' >> /var/log/syslog"
+                    " from 1.2.3.4 port 22222 ssh2' >> /var/log/syslog",
                 ],
-                check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
             )
 
             auth_events = []
             for _ in range(30):
                 events = get_threat_events(container_name)
                 auth_events = [
-                    e for e in events
+                    e
+                    for e in events
                     if e.get("category") == "auth"
                     and e.get("evidence", {}).get("auth_log", {}).get("pattern")
                     == "ssh_failed_password"
@@ -153,9 +155,7 @@ class TestLogWatcherInotify:
                     break
                 time.sleep(1)
 
-            assert len(auth_events) > 0, (
-                f"Expected auth threat from syslog, got events: {events}"
-            )
+            assert len(auth_events) > 0, f"Expected auth threat from syslog, got events: {events}"
             assert auth_events[0].get("level") == "warning"
         finally:
             proc.terminate()
@@ -183,7 +183,7 @@ class TestLogWatcherInotify:
         proc = subprocess.Popen(
             [coi_binary, "shell", "--workspace", str(test_workspace), "--slot", "67"],
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
+            stderr=subprocess.DEVNULL,
         )
 
         try:
@@ -195,13 +195,19 @@ class TestLogWatcherInotify:
             write_time = time.monotonic()
             subprocess.run(
                 [
-                    "incus", "exec", container_name, "--",
-                    "bash", "-c",
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "bash",
+                    "-c",
                     "mkdir -p /var/log && "
                     "echo 'Jun  5 12:00:00 coi sshd[99]: Failed password for attacker"
-                    " from 5.6.7.8 port 22222 ssh2' >> /var/log/auth.log"
+                    " from 5.6.7.8 port 22222 ssh2' >> /var/log/auth.log",
                 ],
-                check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
             )
 
             events = []
@@ -210,7 +216,8 @@ class TestLogWatcherInotify:
             while time.monotonic() < deadline:
                 events = get_threat_events(container_name)
                 auth_events = [
-                    e for e in events
+                    e
+                    for e in events
                     if e.get("category") == "auth"
                     and e.get("evidence", {}).get("auth_log", {}).get("pattern")
                     == "ssh_failed_password"
@@ -251,7 +258,7 @@ class TestLogWatcherInotify:
         proc = subprocess.Popen(
             [coi_binary, "shell", "--workspace", str(test_workspace), "--slot", "68"],
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
+            stderr=subprocess.DEVNULL,
         )
 
         try:
@@ -263,22 +270,26 @@ class TestLogWatcherInotify:
             # Write first suspicious line into the original auth.log.
             subprocess.run(
                 [
-                    "incus", "exec", container_name, "--",
-                    "bash", "-c",
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "bash",
+                    "-c",
                     "mkdir -p /var/log && "
                     "echo 'Jun  5 12:00:00 coi sshd[1]: Failed password for attacker"
-                    " from 1.1.1.1 port 22 ssh2' >> /var/log/auth.log"
+                    " from 1.1.1.1 port 22 ssh2' >> /var/log/auth.log",
                 ],
-                check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
             )
 
             # Wait for the first event before rotating.
             first_events = []
             for _ in range(15):
                 events = get_threat_events(container_name)
-                first_events = [
-                    e for e in events if e.get("category") == "auth"
-                ]
+                first_events = [e for e in events if e.get("category") == "auth"]
                 if first_events:
                     break
                 time.sleep(1)
@@ -290,11 +301,17 @@ class TestLogWatcherInotify:
             # Simulate logrotate: move auth.log aside and create a fresh one.
             subprocess.run(
                 [
-                    "incus", "exec", container_name, "--",
-                    "bash", "-c",
-                    "mv /var/log/auth.log /var/log/auth.log.1 && touch /var/log/auth.log"
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "bash",
+                    "-c",
+                    "mv /var/log/auth.log /var/log/auth.log.1 && touch /var/log/auth.log",
                 ],
-                check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
             )
 
             # Give the inotify directory watch time to re-register the new file.
@@ -303,12 +320,18 @@ class TestLogWatcherInotify:
             # Write a second suspicious line into the rotated-in new auth.log.
             subprocess.run(
                 [
-                    "incus", "exec", container_name, "--",
-                    "bash", "-c",
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "bash",
+                    "-c",
                     "echo 'Jun  5 12:00:01 coi sshd[2]: Failed password for attacker"
-                    " from 2.2.2.2 port 22 ssh2' >> /var/log/auth.log"
+                    " from 2.2.2.2 port 22 ssh2' >> /var/log/auth.log",
                 ],
-                check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
             )
 
             # Poll for a second distinct event (different source IP in evidence).
@@ -316,9 +339,9 @@ class TestLogWatcherInotify:
             for _ in range(30):
                 events = get_threat_events(container_name)
                 second_events = [
-                    e for e in events
-                    if e.get("category") == "auth"
-                    and "2.2.2.2" in e.get("description", "")
+                    e
+                    for e in events
+                    if e.get("category") == "auth" and "2.2.2.2" in e.get("description", "")
                 ]
                 if second_events:
                     break
