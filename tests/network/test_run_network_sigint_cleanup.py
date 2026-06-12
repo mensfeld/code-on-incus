@@ -160,10 +160,14 @@ def test_run_restricted_nft_cleanup_on_sigint(coi_binary, workspace_dir, cleanup
         proc.wait()
         pytest.fail("coi run did not exit within 30s after SIGINT")
 
-    # Allow teardown a moment to run.
-    time.sleep(3)
-
+    # Retry for up to 10s: nft rule deletion may lag slightly behind process exit
+    # on loaded CI runners (same pattern used in test_no_nft_rule_accumulation).
+    deadline = time.time() + 10
     rules_after = count_nft_rules_for_ip(container_ip)
+    while rules_after > 0 and time.time() < deadline:
+        time.sleep(1)
+        rules_after = count_nft_rules_for_ip(container_ip)
+
     assert rules_after == 0, (
         f"Found {rules_after} orphaned nft rules for {container_ip} after SIGINT. "
         "Network teardown did not complete despite context fix."
