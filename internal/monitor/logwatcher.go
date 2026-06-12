@@ -23,6 +23,7 @@ import (
 var logCandidates = []string{
 	"var/log/auth.log",
 	"var/log/syslog",
+	"var/log/audit/audit.log",
 }
 
 // logPattern defines a set of keywords that must all appear in a log line
@@ -85,6 +86,35 @@ var authLogPatterns = []logPattern{
 		title:    "Root session opened",
 		desc:     "A root session was opened inside the container",
 	},
+	// ── auditd patterns (key=value structured lines) ──────────────────────
+	{
+		name:     "auditd_auth_failure",
+		keywords: []string{"type=user_auth", "res=failed"},
+		level:    ThreatLevelHigh,
+		title:    "Auditd: authentication failure",
+		desc:     "auditd recorded a USER_AUTH failure",
+	},
+	{
+		name:     "auditd_user_cmd_failed",
+		keywords: []string{"type=user_cmd", "res=failed"},
+		level:    ThreatLevelHigh,
+		title:    "Auditd: unauthorized command",
+		desc:     "auditd recorded a USER_CMD failure (unauthorized sudo or su)",
+	},
+	{
+		name:     "auditd_login_failure",
+		keywords: []string{"type=user_login", "res=failed"},
+		level:    ThreatLevelWarning,
+		title:    "Auditd: login failure",
+		desc:     "auditd recorded a USER_LOGIN failure",
+	},
+	{
+		name:     "auditd_acct_failure",
+		keywords: []string{"type=user_acct", "res=failed"},
+		level:    ThreatLevelWarning,
+		title:    "Auditd: account action failure",
+		desc:     "auditd recorded a USER_ACCT failure (account modification rejected)",
+	},
 }
 
 // logState tracks the read position and inode for a single log file across
@@ -101,9 +131,9 @@ type inotifyRawEvent struct {
 	mask uint32
 }
 
-// LogWatcher tails auth.log and syslog from the container. It uses inotify
-// for near-instant detection, watching /proc/<initPID>/root/<rel> directly
-// from the host so the incus daemon subprocess is never involved.
+// LogWatcher tails auth.log, syslog, and audit.log from the container. It
+// uses inotify for near-instant detection, watching /proc/<initPID>/root/<rel>
+// directly from the host so the incus daemon subprocess is never involved.
 //
 // The inotify approach watches each log file for IN_MODIFY events and the
 // parent directory for IN_CREATE so log rotation (mv + new file) is handled

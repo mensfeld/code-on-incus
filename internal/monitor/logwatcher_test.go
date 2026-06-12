@@ -148,6 +148,93 @@ func TestEvidenceString_AuthLog(t *testing.T) {
 	}
 }
 
+func TestParseAuthLogLine_AuditdAuthFailure(t *testing.T) {
+	line := `type=USER_AUTH msg=audit(1234567890.123:456): pid=1234 uid=0 auid=1000 ses=1 msg='op=PAM:authentication acct="user" exe="/usr/bin/sshd" res=failed'`
+	ev := parseAuthLogLine("audit.log", line)
+	if ev == nil {
+		t.Fatal("expected threat event, got nil")
+	}
+	if ev.Level != ThreatLevelHigh {
+		t.Errorf("level = %s, want high", ev.Level)
+	}
+	if ev.Evidence.AuthLog.Pattern != "auditd_auth_failure" {
+		t.Errorf("pattern = %s, want auditd_auth_failure", ev.Evidence.AuthLog.Pattern)
+	}
+	if ev.Evidence.AuthLog.LogFile != "audit.log" {
+		t.Errorf("log_file = %s, want audit.log", ev.Evidence.AuthLog.LogFile)
+	}
+}
+
+func TestParseAuthLogLine_AuditdUserCmdFailed(t *testing.T) {
+	line := `type=USER_CMD msg=audit(1234567890.456:789): pid=5678 uid=1000 auid=1000 ses=1 msg='cwd="/home/user" cmd="bash" terminal=pts/0 res=failed'`
+	ev := parseAuthLogLine("audit.log", line)
+	if ev == nil {
+		t.Fatal("expected threat event, got nil")
+	}
+	if ev.Level != ThreatLevelHigh {
+		t.Errorf("level = %s, want high", ev.Level)
+	}
+	if ev.Evidence.AuthLog.Pattern != "auditd_user_cmd_failed" {
+		t.Errorf("pattern = %s, want auditd_user_cmd_failed", ev.Evidence.AuthLog.Pattern)
+	}
+}
+
+func TestParseAuthLogLine_AuditdLoginFailure(t *testing.T) {
+	line := `type=USER_LOGIN msg=audit(1234567890.789:101): pid=1234 uid=0 auid=999 ses=1 msg='op=login id=0 exe="/usr/bin/su" res=failed'`
+	ev := parseAuthLogLine("audit.log", line)
+	if ev == nil {
+		t.Fatal("expected threat event, got nil")
+	}
+	if ev.Level != ThreatLevelWarning {
+		t.Errorf("level = %s, want warning", ev.Level)
+	}
+	if ev.Evidence.AuthLog.Pattern != "auditd_login_failure" {
+		t.Errorf("pattern = %s, want auditd_login_failure", ev.Evidence.AuthLog.Pattern)
+	}
+}
+
+func TestParseAuthLogLine_AuditdAcctFailure(t *testing.T) {
+	line := `type=USER_ACCT msg=audit(1234567890.999:202): pid=9999 uid=0 auid=1000 ses=2 msg='op=PAM:accounting acct="hacker" exe="/usr/bin/sudo" res=failed'`
+	ev := parseAuthLogLine("audit.log", line)
+	if ev == nil {
+		t.Fatal("expected threat event, got nil")
+	}
+	if ev.Level != ThreatLevelWarning {
+		t.Errorf("level = %s, want warning", ev.Level)
+	}
+	if ev.Evidence.AuthLog.Pattern != "auditd_acct_failure" {
+		t.Errorf("pattern = %s, want auditd_acct_failure", ev.Evidence.AuthLog.Pattern)
+	}
+}
+
+func TestParseAuthLogLine_AuditdSuccessNotFlagged(t *testing.T) {
+	// Successful auditd events should not trigger alerts
+	benign := []string{
+		`type=USER_AUTH msg=audit(1234567890.123:456): pid=1234 uid=0 auid=1000 ses=1 msg='op=PAM:authentication acct="user" res=success'`,
+		`type=USER_CMD msg=audit(1234567890.456:789): pid=5678 uid=0 auid=0 ses=1 msg='cwd="/root" cmd="ls" res=success'`,
+		`type=SYSCALL msg=audit(1234567890.789:101): arch=c000003e syscall=59 success=yes`,
+	}
+	for _, line := range benign {
+		ev := parseAuthLogLine("audit.log", line)
+		if ev != nil {
+			t.Errorf("line %q: expected nil, got threat pattern=%s", line, ev.Evidence.AuthLog.Pattern)
+		}
+	}
+}
+
+func TestLogCandidatesIncludesAuditLog(t *testing.T) {
+	found := false
+	for _, c := range logCandidates {
+		if c == "var/log/audit/audit.log" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("logCandidates does not include var/log/audit/audit.log")
+	}
+}
+
 func TestReadFileChunk_ReadsFromBeginning(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "test.log")
 	content := "line one\nline two\n"
