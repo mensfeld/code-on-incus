@@ -782,6 +782,9 @@ class TestAutomatedResponse:
             stderr=subprocess.DEVNULL,
         )
 
+        # Give the monitoring daemon a moment to scan before polling state.
+        time.sleep(5)
+
         # Wait for auto-kill
         killed = False
         for _ in range(15):
@@ -792,10 +795,18 @@ class TestAutomatedResponse:
 
         assert killed, "Container should be auto-killed on CRITICAL threat"
 
-        # Verify action logged
-        events = get_threat_events(container_name)
-        killed_events = [e for e in events if e.get("action") == "killed"]
-        assert len(killed_events) > 0, "Expected action='killed' in audit log"
+        # The daemon writes the kill event and syncs to disk before killing the
+        # container, but retry briefly in case of OS-level flush delay.
+        killed_events = []
+        for _ in range(10):
+            events = get_threat_events(container_name)
+            killed_events = [e for e in events if e.get("action") == "killed"]
+            if killed_events:
+                break
+            time.sleep(1)
+        assert len(killed_events) > 0, (
+            f"Expected action='killed' in audit log. Events: {get_threat_events(container_name)}"
+        )
 
         proc.terminate()
         cleanup_container(container_name, coi_binary)
