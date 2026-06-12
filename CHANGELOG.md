@@ -2,6 +2,10 @@
 
 ## 0.9.0 (Unreleased)
 
+### Bug Fixes
+
+- **Session metadata no longer corrupts on paths or profile names with special characters** — `saveMetadata` previously used `fmt.Sprintf` to hand-build a JSON string, leaving field values unescaped. A workspace path containing a double-quote, backslash, or newline would produce malformed JSON, breaking `coi list` (which reads metadata to show session status) and `--resume` (which reads metadata to locate the session). `LoadSessionMetadata` used a matching hand-rolled line-by-line parser that had no way to recover from the malformed output. Both functions have been replaced with `json.MarshalIndent` / `json.Unmarshal`, and the dead `extractJSONValue` helper has been removed.
+
 ### Refactoring
 
 - **Command handlers converted to `App` struct methods** — All CLI command handlers (`shellCommand`, `runCommand`, `buildCommand`, `cleanCommand`, `monitorCommand`, `attachCommand`, and all profile sub-commands) are now methods on `*App` rather than free functions that access the package-level `app` singleton directly. Phase builder functions in `phases_shell.go` are likewise methods on `App`. This enables creating an isolated `App` instance in tests with a controlled config and workspace without relying on global state. The `app` singleton and `Execute()` reset semantics are unchanged for normal operation.
