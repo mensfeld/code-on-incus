@@ -66,6 +66,13 @@ type ProcessCountThreat struct {
 	Delta     int `json:"delta,omitempty"` // Processes spawned since last poll (spawn-rate check only)
 }
 
+// SensitiveFileThreat records an access to a sensitive file monitored via fanotify.
+type SensitiveFileThreat struct {
+	Path   string `json:"path"`   // container-relative path, e.g. "etc/shadow"
+	Access string `json:"access"` // "read" or "write"
+	Pid    int    `json:"pid"`    // host PID of the accessing process
+}
+
 // AuthLogThreat records a security-relevant line from auth.log or syslog.
 type AuthLogThreat struct {
 	LogFile string `json:"log_file"` // "auth.log" or "syslog"
@@ -90,8 +97,9 @@ type Evidence struct {
 	FileWrite    *FilesystemWriteThreat `json:"file_write,omitempty"`
 	DiskSpace    *DiskSpaceInfo         `json:"disk_space,omitempty"`
 	ProcessCount *ProcessCountThreat    `json:"process_count,omitempty"`
-	AuthLog      *AuthLogThreat         `json:"auth_log,omitempty"`
-	ProcEvent    *ProcEventThreat       `json:"proc_event,omitempty"`
+	AuthLog       *AuthLogThreat         `json:"auth_log,omitempty"`
+	ProcEvent     *ProcEventThreat       `json:"proc_event,omitempty"`
+	SensitiveFile *SensitiveFileThreat   `json:"sensitive_file,omitempty"`
 }
 
 // String returns a summary of the evidence for deduplication keys
@@ -116,6 +124,8 @@ func (e Evidence) String() string {
 		return fmt.Sprintf("auth:%s:%s", e.AuthLog.LogFile, e.AuthLog.Pattern)
 	case e.ProcEvent != nil:
 		return fmt.Sprintf("proc:%d:%s", e.ProcEvent.PID, e.ProcEvent.Pattern)
+	case e.SensitiveFile != nil:
+		return fmt.Sprintf("file:%s:%s", e.SensitiveFile.Path, e.SensitiveFile.Access)
 	default:
 		return ""
 	}

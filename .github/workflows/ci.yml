@@ -164,6 +164,9 @@ jobs:
           - name: monitoring-log-inotify
             path: tests/integration/test_log_watcher_inotify.py
             description: "inotify-driven auth.log/syslog monitoring: syslog coverage, prompt delivery, log rotation"
+          - name: monitoring-file-fanotify
+            path: tests/integration/test_file_watcher_fanotify.py
+            description: "fanotify sensitive file monitoring: shadow read, sudoers write, authorized_keys write"
           - name: uid-mapping
             path: tests/container/uid_mapping_shift_true.py tests/container/uid_mapping_raw_idmap.py
             description: "UID mapping integration tests"
