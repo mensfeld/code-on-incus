@@ -264,7 +264,7 @@ func nftRuleExistsWithComment(comment string) (bool, error) {
 func nftGetHandlesByComment(comment string) ([]string, error) {
 	output, err := runNFTCommand("-a", "list", "chain", "ip", "coi", "forward")
 	if err != nil {
-		return nil, nil
+		return nil, err
 	}
 	var handles []string
 	for _, line := range strings.Split(string(output), "\n") {
@@ -291,7 +291,8 @@ func deleteNFTRulesByComment(comment string) error {
 		}
 		handles, err := nftGetHandlesByComment(comment)
 		if err != nil {
-			return err
+			log.Printf("Warning: nft list failed (round %d/%d): %v, retrying...", round+1, maxRounds, err)
+			continue
 		}
 		if len(handles) == 0 {
 			return nil
