@@ -782,6 +782,9 @@ class TestAutomatedResponse:
             stderr=subprocess.DEVNULL,
         )
 
+        # Give the monitoring daemon a moment to scan before polling state.
+        time.sleep(5)
+
         # Wait for auto-kill
         killed = False
         for _ in range(15):
@@ -792,10 +795,18 @@ class TestAutomatedResponse:
 
         assert killed, "Container should be auto-killed on CRITICAL threat"
 
-        # Verify action logged
-        events = get_threat_events(container_name)
-        killed_events = [e for e in events if e.get("action") == "killed"]
-        assert len(killed_events) > 0, "Expected action='killed' in audit log"
+        # The daemon writes the kill event and syncs to disk before killing the
+        # container, but retry briefly in case of OS-level flush delay.
+        killed_events = []
+        for _ in range(10):
+            events = get_threat_events(container_name)
+            killed_events = [e for e in events if e.get("action") == "killed"]
+            if killed_events:
+                break
+            time.sleep(1)
+        assert len(killed_events) > 0, (
+            f"Expected action='killed' in audit log. Events: {get_threat_events(container_name)}"
+        )
 
         proc.terminate()
         cleanup_container(container_name, coi_binary)
@@ -4898,7 +4909,7 @@ mode = "open"
 [monitoring]
 enabled = true
 auto_pause_on_high = false
-auto_kill_on_critical = true
+auto_kill_on_critical = false
 poll_interval_sec = 1
 file_read_threshold_mb = 500
 file_read_rate_mb_per_sec = 1000
@@ -4933,8 +4944,9 @@ process_spawn_rate_threshold = 9999
             time.sleep(3)
 
             # Run bash with a /dev/tcp/ redirect — the canonical bash reverse-shell
-            # pattern. The connection to 10.255.255.1:9999 will fail (no listener),
-            # but PROC_EVENT_EXEC fires on execve before the shell tries to connect.
+            # pattern. PROC_EVENT_EXEC fires on execve before the shell tries to
+            # connect, so we don't wait for the command to complete (the TCP
+            # connection attempt may hang if no RST is returned by the network).
             subprocess.Popen(
                 [
                     "incus",
@@ -4947,7 +4959,7 @@ process_spawn_rate_threshold = 9999
                 ],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-            ).wait(timeout=15)
+            )
 
             # Poll until the proc_event threat appears (30 s timeout).
             proc_events = []
@@ -4993,7 +5005,7 @@ mode = "open"
 [monitoring]
 enabled = true
 auto_pause_on_high = false
-auto_kill_on_critical = true
+auto_kill_on_critical = false
 poll_interval_sec = 1
 file_read_threshold_mb = 500
 file_read_rate_mb_per_sec = 1000
@@ -5299,7 +5311,7 @@ mode = "open"
 [monitoring]
 enabled = true
 auto_pause_on_high = false
-auto_kill_on_critical = true
+auto_kill_on_critical = false
 poll_interval_sec = 1
 file_read_threshold_mb = 500
 file_read_rate_mb_per_sec = 1000

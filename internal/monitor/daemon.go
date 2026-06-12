@@ -17,6 +17,7 @@ type Daemon struct {
 	auditLog     *AuditLog
 	logThreatCh  chan ThreatEvent
 	procThreatCh chan ThreatEvent
+	fileThreatCh chan ThreatEvent
 	done         chan struct{}
 }
 
@@ -60,6 +61,14 @@ func StartDaemon(ctx context.Context, cfg DaemonConfig) (*Daemon, error) {
 		}
 	}, cfg.OnError, cfg.GTFOBinsDir, cfg.SigmaDir)
 
+	fileThreatCh := make(chan ThreatEvent, 32)
+	fileWatcher := NewFileWatcher(cfg.ContainerName, func(t ThreatEvent) {
+		select {
+		case fileThreatCh <- t:
+		default: // drop if buffer full rather than blocking
+		}
+	}, cfg.OnError)
+
 	daemon := &Daemon{
 		ctx:          daemonCtx,
 		cancel:       cancel,
@@ -70,11 +79,13 @@ func StartDaemon(ctx context.Context, cfg DaemonConfig) (*Daemon, error) {
 		auditLog:     auditLog,
 		logThreatCh:  logThreatCh,
 		procThreatCh: procThreatCh,
+		fileThreatCh: fileThreatCh,
 		done:         make(chan struct{}),
 	}
 
 	go logWatcher.Run(daemonCtx)
 	go procWatcher.Run(daemonCtx)
+	go fileWatcher.Run(daemonCtx)
 
 	// Start monitoring loop in background
 	go daemon.run()
@@ -145,6 +156,13 @@ func (d *Daemon) run() {
 			if err := d.responder.Handle(d.ctx, threat); err != nil {
 				if d.config.OnError != nil {
 					d.config.OnError(fmt.Errorf("proc event threat response: %w", err))
+				}
+			}
+
+		case threat := <-d.fileThreatCh:
+			if err := d.responder.Handle(d.ctx, threat); err != nil {
+				if d.config.OnError != nil {
+					d.config.OnError(fmt.Errorf("file threat response: %w", err))
 				}
 			}
 
