@@ -137,6 +137,9 @@ type rawFanEvent struct {
 // files generate events — CPU overhead is near-zero during normal development
 // work. A 30-second backstop re-marks files to recover from overlayfs copy-up,
 // which replaces the inode on first write, invalidating the original mark.
+// A 30-second startup grace period suppresses events that fire during container
+// boot, when system daemons (PAM, sshd, cron) legitimately access sensitive
+// files as part of normal initialisation.
 type FileWatcher struct {
 	containerName string
 	onThreat      func(ThreatEvent)
@@ -167,14 +170,19 @@ func (w *FileWatcher) Run(ctx context.Context) {
 	defer unix.Close(ifd)
 
 	var (
-		lastPID int
-		inodes  map[inodeKey]inodeEntry
+		lastPID    int
+		inodes     map[inodeKey]inodeEntry
+		graceUntil time.Time // suppress threats until container boot settles
 	)
 
 	// Initial mark pass.
 	if pid, _ := GetContainerInitPID(ctx, w.containerName); pid > 0 {
 		inodes = w.markFiles(ifd, pid)
 		lastPID = pid
+		// System daemons (PAM, sshd, cron) open /etc/shadow and other sensitive
+		// files during container boot. Suppress threats for 30 s so these normal
+		// init reads don't trigger false-positive auto-pause events.
+		graceUntil = time.Now().Add(30 * time.Second)
 	}
 	if inodes == nil {
 		inodes = make(map[inodeKey]inodeEntry)
@@ -200,6 +208,13 @@ func (w *FileWatcher) Run(ctx context.Context) {
 			}
 			// Discard events from our own monitoring process.
 			if ev.pid == selfPID {
+				unix.Close(ev.fd)
+				continue
+			}
+			// Suppress events during the post-boot grace period to avoid
+			// false positives from system daemons accessing sensitive files
+			// as part of normal container initialisation.
+			if time.Now().Before(graceUntil) {
 				unix.Close(ev.fd)
 				continue
 			}
@@ -238,9 +253,10 @@ func (w *FileWatcher) Run(ctx context.Context) {
 			}
 			newInodes := w.markFiles(ifd, pid)
 			if pid != lastPID {
-				// Container restarted — replace the map entirely.
+				// Container restarted — replace the map and reset the grace period.
 				inodes = newInodes
 				lastPID = pid
+				graceUntil = time.Now().Add(30 * time.Second)
 			} else {
 				// Same container — merge to pick up new inodes from copy-up.
 				for k, v := range newInodes {
