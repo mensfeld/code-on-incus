@@ -4,6 +4,8 @@
 
 ### Bug Fixes
 
+- **Allowlist firewall rules no longer drop to zero during DNS refresh** — `refreshAllowedIPs` previously applied the new nftables rules, then called `RemoveRules` (removing everything, including the rules just added), then reapplied them — creating a brief window where all container traffic was unrestricted regardless of the configured allowlist. The three-step sequence is replaced by a new `NftManager.ReplaceAllowlist` method that snapshots the existing rule handles first, appends the new rules, and then deletes only the old handles. At no point during the transition is the rule set empty. A new `nftRuler` interface was introduced to allow the calling logic in `Manager` to be unit-tested without the real `nft` binary.
+
 - **Session metadata no longer corrupts on paths or profile names with special characters** — `saveMetadata` previously used `fmt.Sprintf` to hand-build a JSON string, leaving field values unescaped. A workspace path containing a double-quote, backslash, or newline would produce malformed JSON, breaking `coi list` (which reads metadata to show session status) and `--resume` (which reads metadata to locate the session). `LoadSessionMetadata` used a matching hand-rolled line-by-line parser that had no way to recover from the malformed output. Both functions have been replaced with `json.MarshalIndent` / `json.Unmarshal`, and the dead `extractJSONValue` helper has been removed.
 
 ### Refactoring

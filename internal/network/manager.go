@@ -35,7 +35,7 @@ config.toml):
 // Manager provides high-level network isolation management for containers
 type Manager struct {
 	config        *config.NetworkConfig
-	nft           *NftManager
+	nft           nftRuler
 	resolver      *Resolver
 	cacheManager  *CacheManager
 	containerName string
@@ -359,19 +359,12 @@ func (m *Manager) refreshAllowedIPs() (uint32, error) {
 	totalIPs := countIPs(newIPs)
 	m.logger.Printf("IP refresh: updating nft rules with %d IPs", totalIPs)
 
-	// Apply new rules BEFORE removing old ones to avoid a gap where no rules exist.
-	// nft add rule is idempotent by handle; applying new rules before removing old avoids gaps.
+	// Replace rules atomically: snapshot old handles, append new rules, then
+	// delete only the old handles. This avoids any window where all rules are
+	// absent and the chain's default-accept policy would pass all traffic.
 	allowedIPs := collectUniqueIPs(newIPs)
-	if err := m.nft.ApplyAllowlist(m.config, allowedIPs); err != nil {
+	if err := m.nft.ReplaceAllowlist(m.config, allowedIPs); err != nil {
 		return newMinTTL, fmt.Errorf("failed to update nft rules: %w", err)
-	}
-
-	// Now remove all rules (including stale ones) and reapply to clean up
-	if err := m.nft.RemoveRules(); err != nil {
-		m.logger.Errorf("Warning: failed to remove old rules: %v", err)
-	}
-	if err := m.nft.ApplyAllowlist(m.config, allowedIPs); err != nil {
-		m.logger.Errorf("Warning: failed to reapply rules after cleanup: %v", err)
 	}
 
 	// Update cache
