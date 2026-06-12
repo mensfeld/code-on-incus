@@ -160,15 +160,28 @@ def test_run_restricted_nft_cleanup_on_sigint(coi_binary, workspace_dir, cleanup
         proc.wait()
         pytest.fail("coi run did not exit within 30s after SIGINT")
 
-    # Retry for up to 10s: nft rule deletion may lag slightly behind process exit
-    # on loaded CI runners (same pattern used in test_no_nft_rule_accumulation).
-    deadline = time.time() + 10
+    # Retry for up to 20s: the scan-delete loop in Go can take up to ~2s per
+    # teardown; on loaded CI runners rule deletion may lag further behind
+    # process exit.  20s gives comfortable headroom.
+    deadline = time.time() + 20
     rules_after = count_nft_rules_for_ip(container_ip)
     while rules_after > 0 and time.time() < deadline:
         time.sleep(1)
         rules_after = count_nft_rules_for_ip(container_ip)
 
-    assert rules_after == 0, (
-        f"Found {rules_after} orphaned nft rules for {container_ip} after SIGINT. "
-        "Network teardown did not complete despite context fix."
-    )
+    if rules_after > 0:
+        # Capture the chain state for diagnosis before failing.
+        chain_dump = subprocess.run(
+            ["sudo", "-n", "nft", "-a", "list", "chain", "ip", "coi", "forward"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        coi_stdout = proc.stdout.read() if proc.stdout else ""
+        coi_stderr = proc.stderr.read() if proc.stderr else ""
+        pytest.fail(
+            f"Found {rules_after} orphaned nft rules for {container_ip} after SIGINT.\n"
+            f"nft chain:\n{chain_dump.stdout}\n"
+            f"coi stdout:\n{coi_stdout}\n"
+            f"coi stderr:\n{coi_stderr}"
+        )
