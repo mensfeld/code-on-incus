@@ -2,16 +2,22 @@
 Integration tests for FileWatcher fanotify-based sensitive file monitoring.
 
 These tests verify that the host-side fanotify watcher detects:
-- Reads of credential files (/etc/shadow) — detected immediately via FAN_OPEN.
+- Reads of credential files (/etc/shadow) — detected via FAN_OPEN after the
+  30-second startup grace period expires.
 - Writes to persistence-relevant files (/etc/sudoers, root authorized_keys) —
-  detected after a backstop re-mark cycle because overlayfs copy-up replaces
-  the inode on the first write to a lower-layer file.
+  detected after the grace period AND a backstop re-mark cycle, because overlayfs
+  copy-up replaces the inode on the first write to a lower-layer file.
 
 All access is performed via `incus exec` so the monitor daemon (which runs as
 a host-side process) sees the event from outside the container.
 
-Write-detection tests have a 50-second window to accommodate the 30-second
-backstop ticker that re-marks files after overlayfs copy-up creates a new inode.
+Timing note: the FileWatcher suppresses all events for 30 seconds after the
+container's init PID is first resolved. This prevents false positives from
+system daemons (PAM, sshd, cron) that legitimately access sensitive files
+during container boot. Tests that check FAN_OPEN on /etc/shadow must therefore
+wait at least 35 seconds (30 s grace + margin) before triggering the access.
+Write-detection tests require both the grace period and a backstop cycle (~65 s
+total: 5 s init + 30 s grace/backstop + write + poll).
 """
 
 import hashlib
@@ -140,7 +146,13 @@ class TestFileWatcherFanotify:
 
         The shadow file exists on the lower overlayfs layer from the container
         image. A read (cat) does not trigger copy-up so the fanotify mark placed
-        on the original inode fires immediately via FAN_OPEN.
+        on the original inode fires via FAN_OPEN.
+
+        The FileWatcher suppresses all events for 30 seconds after the container's
+        init PID is first resolved, to avoid false positives from system daemons
+        (PAM, sshd, cron) that access /etc/shadow during normal container boot.
+        The test therefore waits 35 seconds before triggering the read so the
+        access falls outside the grace window.
         """
         workspace = str(tmp_path / "workspace")
         os.makedirs(workspace, exist_ok=True)
@@ -157,8 +169,10 @@ class TestFileWatcherFanotify:
             if not _wait_running(container_name):
                 pytest.skip(f"Container {container_name} not ready")
 
-            # Allow the monitoring daemon and FileWatcher to initialise.
-            time.sleep(5)
+            # Wait for: daemon init (5 s) + 30 s grace period + 2 s safety margin.
+            # Reads during the grace window are silently dropped to avoid triggering
+            # auto-pause from legitimate system-daemon accesses at boot.
+            time.sleep(37)
 
             # Ensure /etc/shadow exists inside the container before reading.
             # Minimal images may not ship it; create a stub if absent.
@@ -166,9 +180,6 @@ class TestFileWatcherFanotify:
                 container_name,
                 "[ -f /etc/shadow ] || (touch /etc/shadow && chmod 640 /etc/shadow)",
             )
-            # Wait a moment so any creation is reflected in the overlayfs before
-            # the next backstop cycle (avoids copy-up races for freshly created files).
-            time.sleep(2)
 
             # Read /etc/shadow — triggers FAN_OPEN on the inode.
             _incus_exec(container_name, "cat /etc/shadow > /dev/null 2>&1 || true")
@@ -197,11 +208,11 @@ class TestFileWatcherFanotify:
 
         The first write to /etc/sudoers triggers overlayfs copy-up, moving the
         file to the upper layer with a new inode. The FileWatcher's 30-second
-        backstop then re-marks the new inode. A second write (after the backstop)
-        is detected and raises the CRITICAL threat.
+        backstop then re-marks the new inode. A second write (after both the
+        backstop and the 30-second startup grace period) is detected.
 
-        Total window: ~50 seconds (5 s init + first write + 35 s backstop wait
-        + second write + poll).
+        Timing: ~55 s total (5 s init + first write + 35 s wait covering both
+        grace period and backstop + second write + 15 s poll).
         """
         workspace = str(tmp_path / "workspace")
         os.makedirs(workspace, exist_ok=True)
@@ -265,8 +276,8 @@ class TestFileWatcherFanotify:
 
         authorized_keys typically does not exist in a fresh container image, so
         the initial mark attempt is silently skipped (ENOENT). The first write
-        creates the file in the overlayfs upper layer. The 30-second backstop
-        then marks the new inode. A second write triggers detection.
+        creates the file in the overlayfs upper layer. After the 30-second backstop
+        (and grace period) the new inode is marked. A second write triggers detection.
         """
         workspace = str(tmp_path / "workspace")
         os.makedirs(workspace, exist_ok=True)
