@@ -195,7 +195,7 @@ func (lw *LogWatcher) Run(ctx context.Context) {
 			case ev.mask&(unix.IN_MOVE_SELF|unix.IN_DELETE_SELF) != 0:
 				// Log file rotated away; the directory watch will fire IN_CREATE
 				// when the replacement appears.
-				unix.InotifyRmWatch(ifd, uint32(ev.wd)) //nolint:errcheck
+				unix.InotifyRmWatch(ifd, uint32(ev.wd)) //nolint:errcheck,gosec // G115: inotify wd fits in uint32
 				delete(wdToRel, ev.wd)
 			case ev.mask&unix.IN_MODIFY != 0:
 				if rel, ok := wdToRel[ev.wd]; ok {
@@ -208,10 +208,10 @@ func (lw *LogWatcher) Run(ctx context.Context) {
 				// Container restarted; all /proc/<old-pid> paths are invalid.
 				pid = newPid
 				for wd := range wdToRel {
-					unix.InotifyRmWatch(ifd, uint32(wd)) //nolint:errcheck
+					unix.InotifyRmWatch(ifd, uint32(wd)) //nolint:errcheck,gosec // G115: inotify wd fits in uint32
 				}
 				if dirWd >= 0 {
-					unix.InotifyRmWatch(ifd, uint32(dirWd)) //nolint:errcheck
+					unix.InotifyRmWatch(ifd, uint32(dirWd)) //nolint:errcheck,gosec // G115: inotify wd fits in uint32
 				}
 				wdToRel, dirWd = addInotifyWatches(ifd, pid)
 			} else if len(wdToRel) < len(logCandidates) {
@@ -265,14 +265,14 @@ func addInotifyWatches(ifd, pid int) (wdToRel map[int32]string, dirWd int32) {
 		wd, err := unix.InotifyAddWatch(ifd, hostPath,
 			unix.IN_MODIFY|unix.IN_MOVE_SELF|unix.IN_DELETE_SELF)
 		if err == nil {
-			wdToRel[int32(wd)] = rel
+			wdToRel[int32(wd)] = rel //nolint:gosec // G115: InotifyAddWatch returns a 32-bit wd
 		}
 	}
 	// Directory watch so we notice when a rotated log file is recreated.
 	dirPath := fmt.Sprintf("/proc/%d/root/var/log", pid)
 	wd, err := unix.InotifyAddWatch(ifd, dirPath, unix.IN_CREATE)
 	if err == nil {
-		dirWd = int32(wd)
+		dirWd = int32(wd) //nolint:gosec // G115: InotifyAddWatch returns a 32-bit wd
 	}
 	return
 }
@@ -289,7 +289,7 @@ func inotifyReader(ifd int) <-chan inotifyRawEvent {
 	go func() {
 		defer close(ch)
 		buf := make([]byte, inotifyBufSize)
-		fds := []unix.PollFd{{Fd: int32(ifd), Events: unix.POLLIN}}
+		fds := []unix.PollFd{{Fd: int32(ifd), Events: unix.POLLIN}} //nolint:gosec // G115: fd values are small non-negative ints
 		for {
 			n, err := unix.Poll(fds, 200) // 200 ms so ctx cancellation is noticed promptly
 			if err != nil || n < 0 {
@@ -304,7 +304,7 @@ func inotifyReader(ifd int) <-chan inotifyRawEvent {
 			}
 			data := buf[:nr]
 			for len(data) >= 16 {
-				wd := int32(binary.NativeEndian.Uint32(data[0:]))
+				wd := int32(binary.NativeEndian.Uint32(data[0:])) //nolint:gosec // G115: inotify wd is a kernel int32 stored as 4 bytes
 				mask := binary.NativeEndian.Uint32(data[4:])
 				// data[8:12] = cookie (unused)
 				nameLen := binary.NativeEndian.Uint32(data[12:])
