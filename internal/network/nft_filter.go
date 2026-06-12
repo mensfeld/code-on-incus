@@ -134,6 +134,10 @@ func (f *NftManager) RemoveRules() error {
 // rule set during the transition — there is never a window where all rules are
 // absent and the chain's default-accept policy would pass all traffic through.
 func (f *NftManager) ReplaceAllowlist(cfg *config.NetworkConfig, allowedIPs []string) error {
+	if f.containerIP == "" {
+		return nil
+	}
+
 	// Capture current handles before appending new rules so we can surgically
 	// remove them afterwards without touching the freshly-added entries.
 	oldHandles, err := nftGetHandlesByComment("coi-" + f.containerIP)

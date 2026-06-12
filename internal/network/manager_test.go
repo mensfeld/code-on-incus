@@ -12,8 +12,9 @@ import (
 // stubNft records which nftRuler methods are called, in order.
 // Set failOn to the method name to make that call return an error.
 type stubNft struct {
-	calls  []string
-	failOn string
+	calls          []string
+	failOn         string
+	lastAllowedIPs []string // IPs passed to the most recent ReplaceAllowlist call
 }
 
 func (s *stubNft) ApplyAllowlist(_ *config.NetworkConfig, allowedIPs []string) error {
@@ -40,8 +41,9 @@ func (s *stubNft) RemoveRules() error {
 	return nil
 }
 
-func (s *stubNft) ReplaceAllowlist(_ *config.NetworkConfig, _ []string) error {
+func (s *stubNft) ReplaceAllowlist(_ *config.NetworkConfig, allowedIPs []string) error {
 	s.calls = append(s.calls, "ReplaceAllowlist")
+	s.lastAllowedIPs = allowedIPs
 	if s.failOn == "ReplaceAllowlist" {
 		return errors.New("stub: ReplaceAllowlist failed")
 	}
@@ -104,6 +106,18 @@ func TestRefreshAllowedIPs_CallsReplaceAllowlistOnChange(t *testing.T) {
 			t.Errorf("ApplyAllowlist should not be called directly from refreshAllowedIPs; calls: %v", stub.calls)
 			break
 		}
+	}
+
+	// The resolved IP for the raw domain "8.8.8.8" must be passed through.
+	found := false
+	for _, ip := range stub.lastAllowedIPs {
+		if ip == "8.8.8.8" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected \"8.8.8.8\" in allowedIPs passed to ReplaceAllowlist, got: %v", stub.lastAllowedIPs)
 	}
 }
 
