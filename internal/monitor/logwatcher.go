@@ -162,7 +162,10 @@ func (lw *LogWatcher) Run(ctx context.Context) {
 
 	events := inotifyReader(ifd)
 	// Backstop: re-resolve PID on container restart and fill any missing watches.
-	backstop := time.NewTicker(30 * time.Second)
+	// 3 s keeps detection latency low when log files don't exist at watch-setup
+	// time (e.g. container using overlayfs where IN_CREATE doesn't cross the
+	// namespace boundary reliably). GetContainerInitPID is fast (cgroup reads).
+	backstop := time.NewTicker(3 * time.Second)
 	defer backstop.Stop()
 
 	for {
