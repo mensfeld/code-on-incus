@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -235,18 +236,11 @@ type SessionMetadata struct {
 
 // saveMetadata saves session metadata to a JSON file
 func saveMetadata(path string, metadata SessionMetadata) error {
-	// Simple JSON marshaling
-	content := fmt.Sprintf(`{
-  "session_id": "%s",
-  "container_name": "%s",
-  "persistent": %t,
-  "profile_name": "%s",
-  "workspace": "%s",
-  "saved_at": "%s"
-}
-`, metadata.SessionID, metadata.ContainerName, metadata.Persistent, metadata.ProfileName, metadata.Workspace, metadata.SavedAt)
-
-	return os.WriteFile(path, []byte(content), 0o644)
+	data, err := json.MarshalIndent(metadata, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal metadata: %w", err)
+	}
+	return os.WriteFile(path, append(data, '\n'), 0o644)
 }
 
 // getCurrentTime returns current time in RFC3339 format
@@ -408,23 +402,8 @@ func LoadSessionMetadata(path string) (*SessionMetadata, error) {
 	}
 
 	var metadata SessionMetadata
-	// Simple JSON parsing
-	lines := strings.Split(string(data), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.Contains(line, "\"session_id\"") {
-			metadata.SessionID = extractJSONValue(line)
-		} else if strings.Contains(line, "\"container_name\"") {
-			metadata.ContainerName = extractJSONValue(line)
-		} else if strings.Contains(line, "\"persistent\"") {
-			metadata.Persistent = strings.Contains(line, "true")
-		} else if strings.Contains(line, "\"profile_name\"") {
-			metadata.ProfileName = extractJSONValue(line)
-		} else if strings.Contains(line, "\"workspace\"") {
-			metadata.Workspace = extractJSONValue(line)
-		} else if strings.Contains(line, "\"saved_at\"") {
-			metadata.SavedAt = extractJSONValue(line)
-		}
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		return nil, fmt.Errorf("failed to parse metadata: %w", err)
 	}
 
 	if metadata.SessionID == "" {
@@ -432,19 +411,6 @@ func LoadSessionMetadata(path string) (*SessionMetadata, error) {
 	}
 
 	return &metadata, nil
-}
-
-// extractJSONValue extracts the value from a JSON line like `"key": "value",`
-func extractJSONValue(line string) string {
-	// Find the value between quotes after the colon
-	parts := strings.SplitN(line, ":", 2)
-	if len(parts) != 2 {
-		return ""
-	}
-
-	value := strings.TrimSpace(parts[1])
-	value = strings.Trim(value, `",`)
-	return value
 }
 
 // GetCLISessionID extracts the CLI tool's session ID from a saved coi session.
