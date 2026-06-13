@@ -4,6 +4,12 @@
 
 ### Bug Fixes
 
+- **`DirExists` and `FileExists` now handle paths with spaces or shell metacharacters** — both methods previously built shell test expressions via `fmt.Sprintf("[ -d %s ]", path)` and executed them through `bash -c`, which split paths containing spaces into multiple tokens causing the check to always return false. They now use `ExecArgs([]string{"test", "-d/-f", path})` so the path is passed verbatim without shell interpretation.
+
+- **Bridge iptables rules are no longer removed when `incus list` output cannot be parsed** — `Teardown` previously defaulted `hasOtherContainers` to `false` (remove rules) and only set it to `true` inside a successful JSON parse. A malformed or empty `incus list` response silently triggered rule removal, potentially breaking other running containers. The default is now `true` (keep rules); rules are only removed when parsing succeeds and confirms no other containers are running. The decision logic is extracted into `otherContainersRunning` for unit-testability.
+
+- **`coi run` network setup now respects context cancellation** — `applyNetworkRunPhase` discarded the `context.Context` passed by the pipeline runner (`func(_ context.Context)`), so `SetupForContainer` always used `context.Background()` and ignored SIGINT during network setup. The phase now forwards the pipeline context to `applyNetworkIsolation`. The teardown closure intentionally retains `context.Background()` so nftables rules are always removed even after the run context is cancelled.
+
 - **`TimeoutMonitor.Remaining()` now returns the actual time left instead of always returning `MaxDuration`** — `Remaining()` previously had a known-incorrect fast path that returned the full `MaxDuration` on every call regardless of how long the monitor had been running. A `startTime` field is now recorded in `Start()` so `Remaining()` can compute `MaxDuration - time.Since(startTime)`, clamped to 0 once elapsed.
 
 - **`Chown()` path argument now passed as a separate exec argument to avoid word-splitting** — `container.Manager.Chown` previously constructed the `chown -R uid:gid path` command string via `fmt.Sprintf` and ran it through `ExecCommand` (which wraps `bash -c`). A container path containing spaces would be split into multiple shell tokens, causing the chown to silently act on the wrong targets. The call now uses `ExecArgs` so the path is passed as a single verbatim argument with no shell involved.
