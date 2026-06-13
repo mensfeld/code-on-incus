@@ -118,7 +118,7 @@ type overviewHeader struct {
 func collectOverview() ([]overviewSession, overviewHeader, error) {
 	header := overviewHeader{Version: Version}
 
-	toolInstance, err := getConfiguredTool(cfg)
+	toolInstance, err := getConfiguredTool(app.cfg)
 	if err != nil {
 		return nil, header, err
 	}
