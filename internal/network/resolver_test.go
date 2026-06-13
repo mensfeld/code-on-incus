@@ -212,11 +212,6 @@ func TestUpdateCache_StoresTTLs(t *testing.T) {
 }
 
 func TestResolveDomain_CIDR(t *testing.T) {
-	resolver := NewResolver(&IPCache{
-		Domains: make(map[string][]string),
-		TTLs:    make(map[string]uint32),
-	})
-
 	tests := []struct {
 		name     string
 		input    string
@@ -249,6 +244,19 @@ func TestResolveDomain_CIDR(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			// ::ffff:0:0/96 is an IPv4-mapped IPv6 CIDR. net.ParseCIDR normalises it
+			// to 0.0.0.0/0 and To4() returns non-nil — the old To4()==nil guard let
+			// this through, producing a nftables accept-all rule. The len check catches it.
+			name:    "IPv4-mapped IPv6 CIDR rejected",
+			input:   "::ffff:0:0/96",
+			wantErr: true,
+		},
+		{
+			name:    "IPv4-mapped IPv6 CIDR partial range rejected",
+			input:   "::ffff:128.0.0.0/97",
+			wantErr: true,
+		},
+		{
 			name:    "invalid CIDR rejected",
 			input:   "not-a-cidr/24",
 			wantErr: true,
@@ -257,6 +265,11 @@ func TestResolveDomain_CIDR(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// Fresh resolver per subtest so DomainTTLs don't accumulate across cases.
+			resolver := NewResolver(&IPCache{
+				Domains: make(map[string][]string),
+				TTLs:    make(map[string]uint32),
+			})
 			got, err := resolver.ResolveDomain(tt.input)
 			if tt.wantErr {
 				if err == nil {

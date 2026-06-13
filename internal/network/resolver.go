@@ -44,7 +44,10 @@ func (r *Resolver) ResolveDomain(domain string) ([]string, error) {
 		if err != nil {
 			return nil, fmt.Errorf("invalid CIDR %q: %w", domain, err)
 		}
-		if ipNet.IP.To4() == nil {
+		// len check is required — To4() returns non-nil for IPv4-mapped IPv6 addresses
+		// like ::ffff:0:0/96, which net.ParseCIDR normalises to 0.0.0.0/0. A 4-byte
+		// net.IP is the only reliable signal that the network is a native IPv4 CIDR.
+		if len(ipNet.IP) != net.IPv4len {
 			return nil, fmt.Errorf("%q is an IPv6 CIDR; only IPv4 is supported", domain)
 		}
 		r.DomainTTLs[domain] = 0
