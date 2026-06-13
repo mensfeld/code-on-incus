@@ -200,6 +200,9 @@ create_code_user() {
     mkdir -p "/home/$CODE_USER/.claude"
     mkdir -p "/home/$CODE_USER/.ssh"
     chmod 700 "/home/$CODE_USER/.ssh"
+    # Pre-populate known_hosts. Try ssh-keyscan first (fresh keys); fall back to
+    # embedded static keys for hosts where the SSH endpoint is unreachable (e.g.
+    # bitbucket.org blocks automated scans, may be in maintenance windows).
     for _host in github.com gitlab.com bitbucket.org; do
         for _attempt in 1 2 3; do
             if ssh-keyscan -T 10 -t ed25519,rsa,ecdsa "$_host" >> "/home/$CODE_USER/.ssh/known_hosts" 2>/dev/null; then
@@ -209,6 +212,17 @@ create_code_user() {
         done
     done
     unset _host _attempt
+
+    # Ensure bitbucket.org is always present — its SSH endpoint is sometimes
+    # unavailable (maintenance, IP rate-limiting). These are the published keys
+    # from https://www.atlassian.com/blog/bitbucket/ssh-host-key-changes
+    if ! grep -q "^bitbucket.org " "/home/$CODE_USER/.ssh/known_hosts" 2>/dev/null; then
+        cat >> "/home/$CODE_USER/.ssh/known_hosts" <<'BBKEYS'
+bitbucket.org ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBPIQmuzMBuKdWeF4+a2sjSSpBK0iqitSQ+5BM9KhpexuGt20JpTVM7u5BDZngncgrqDMbWdxMWWOGtZ9UgbqgZE=
+bitbucket.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIazEu89wgQZ4bqs3d63QSMzYVa0MuJ2e2gKTKqu+UUO
+bitbucket.org ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDQeJzhupRu0u0cdegZIa8e86EG2qOCsIsD1Xw0xSeiPDlCr7kq97NLmMbpKTX6Esc30NuoqEEHCuc7yWtwp8dI76EEEB1VqY9QJq6vk+aySyboD5QF61I/1WeTwu+deCbgKMGbUijeXhtfbxSxm6JwGrXrhBdofTsbKRUsrN1WoNgUa8uqN1Vx6WAJw1JHPhglEGGHea6QICwJOAr/6mrui/oB7pkaWKHj3z7d1IC4KWLtY47elvjbaTlkN04Kc/5LFEirorGYVbt15kAUlqGM65pk6ZBxtaO3+30LVlORZkxOh+LKL/BvbZ/iRNhItLqNyieoQj/uh/7Iv4uyH/cV/0b4WDSd3DptigWq84lJubb9t/DnZlrJazxyDCulTmKdOR7vs9gMTo+uoIrPSb8ScTtvw65+odKAlBj59dhnVp9zd7QUojOpXlL62Aw56U4oO+FALuevvMjiWeavKhJqlR7i5n9srYcrNV7ttmDw7kf/97P5zauIhxcjX+xHv4M=
+BBKEYS
+    fi
     chmod 644 "/home/$CODE_USER/.ssh/known_hosts"
     chown -R "$CODE_USER:$CODE_USER" "/home/$CODE_USER"
 
