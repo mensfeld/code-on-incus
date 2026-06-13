@@ -133,6 +133,14 @@ func (f *NftManager) RemoveRules() error {
 // deletes only the old handles. The container therefore always has an active
 // rule set during the transition — there is never a window where all rules are
 // absent and the chain's default-accept policy would pass all traffic through.
+//
+// Rule-ordering note: nft evaluates rules in append order. During the brief
+// window between ApplyAllowlist (which appends new rules) and the deletion of
+// old handles, the chain contains both old and new rule sets. Because the old
+// default-reject rule precedes the new allow rules, any IP that is only in the
+// new set is unreachable until the old rules are deleted. This is intentional —
+// the transition errs toward denial rather than briefly permitting unintended
+// traffic.
 func (f *NftManager) ReplaceAllowlist(cfg *config.NetworkConfig, allowedIPs []string) error {
 	if f.containerIP == "" {
 		return nil
