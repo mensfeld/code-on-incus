@@ -30,10 +30,10 @@ func TestFormatUptime(t *testing.T) {
 
 func TestShortenID(t *testing.T) {
 	cases := map[string]string{
-		"":                                    "-",
-		"abc":                                 "abc",
-		"123456789012":                        "123456789012",
-		"1234567890123":                       "123456789012",
+		"":                                     "-",
+		"abc":                                  "abc",
+		"123456789012":                         "123456789012",
+		"1234567890123":                        "123456789012",
 		"abcdefghijklmnopqrstuvwxyz1234567890": "abcdefghijkl",
 	}
 	for in, want := range cases {
@@ -112,14 +112,14 @@ func TestRenderOverviewRows(t *testing.T) {
 
 	wantContains := []string{
 		"SESSION", "CONTAINER", "WORKSPACE", "MODE", "STARTED", "UPTIME",
-		"abcdef012345",       // truncated session id
+		"abcdef012345", // truncated session id
 		"coi-aaa-1",
-		"redbot",             // tail of workspace path survives shortenPath
+		"redbot", // tail of workspace path survives shortenPath
 		"persistent",
 		"3h0m",
 		"coi-orphan-2",
-		"-",                  // placeholder for empty fields on orphan row
-		"[Ctrl+C] quit",      // footer present in interactive render
+		"-",             // placeholder for empty fields on orphan row
+		"[Ctrl+C] quit", // footer present in interactive render
 		"sessions=1",
 		"running=2",
 	}

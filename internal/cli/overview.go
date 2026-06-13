@@ -246,14 +246,14 @@ func shortenID(id string) string {
 
 // shortenPath trims long workspace paths from the left so the trailing
 // directory (the part operators recognise) is preserved.
-func shortenPath(p string, max int) string {
+func shortenPath(p string, maxLen int) string {
 	if p == "" {
 		return "-"
 	}
-	if len(p) <= max {
+	if len(p) <= maxLen {
 		return p
 	}
-	return "..." + p[len(p)-(max-3):]
+	return "..." + p[len(p)-(maxLen-3):]
 }
 
 func formatStarted(t time.Time) string {
