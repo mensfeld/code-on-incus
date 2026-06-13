@@ -7,6 +7,7 @@ import (
 	"net"
 	"reflect"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -37,8 +38,34 @@ func (r *Resolver) ResolveDomain(domain string) ([]string, error) {
 		return nil, fmt.Errorf("%s is not a valid IPv4 address", domain)
 	}
 
+	// CIDR passthrough — normalize host bits and skip DNS
+	if strings.Contains(domain, "/") {
+		_, ipNet, err := net.ParseCIDR(domain)
+		if err != nil {
+			return nil, fmt.Errorf("invalid CIDR %q: %w", domain, err)
+		}
+		// len check is required — To4() returns non-nil for IPv4-mapped IPv6 addresses
+		// like ::ffff:0:0/96, which net.ParseCIDR normalises to 0.0.0.0/0. A 4-byte
+		// net.IP is the only reliable signal that the network is a native IPv4 CIDR.
+		if len(ipNet.IP) != net.IPv4len {
+			return nil, fmt.Errorf("%q is an IPv6 CIDR; only IPv4 is supported", domain)
+		}
+		r.DomainTTLs[domain] = 0
+		return []string{ipNet.String()}, nil
+	}
+
+	// Wildcard domain — strip prefix, resolve base domain (best-effort)
+	effectiveDomain := domain
+	if strings.HasPrefix(domain, "*.") {
+		effectiveDomain = domain[2:]
+		if effectiveDomain == "" {
+			return nil, fmt.Errorf("invalid wildcard entry %q: missing base domain", domain)
+		}
+		log.Printf("  %s: wildcard — resolving base domain %q (best-effort, not all IPs guaranteed)", domain, effectiveDomain)
+	}
+
 	// Try TTL-aware DNS query first
-	result, err := QueryDNS(domain)
+	result, err := QueryDNS(effectiveDomain)
 	if err == nil && len(result.IPs) > 0 {
 		r.DomainTTLs[domain] = result.TTL
 		log.Printf("  %s: resolved %d IPs (TTL: %ds)", domain, len(result.IPs), result.TTL)
@@ -53,7 +80,7 @@ func (r *Resolver) ResolveDomain(domain string) ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	addrs, lookupErr := net.DefaultResolver.LookupIP(ctx, "ip4", domain)
+	addrs, lookupErr := net.DefaultResolver.LookupIP(ctx, "ip4", effectiveDomain)
 	if lookupErr != nil {
 		return nil, fmt.Errorf("failed to resolve %s: %w", domain, lookupErr)
 	}

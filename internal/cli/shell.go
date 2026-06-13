@@ -663,7 +663,11 @@ func resolveDomainsToHostCIDRs(domains []string) []string {
 	var cidrs []string
 	for _, ips := range resolved {
 		for _, ip := range ips {
-			cidrs = append(cidrs, ip+"/32")
+			if strings.Contains(ip, "/") {
+				cidrs = append(cidrs, ip)
+			} else {
+				cidrs = append(cidrs, ip+"/32")
+			}
 		}
 	}
 	return cidrs
