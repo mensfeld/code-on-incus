@@ -412,6 +412,65 @@ func IsolateUIDNamespace(containerName string) error {
 	return IncusExec("config", "set", containerName, "security.idmap.isolated=true")
 }
 
+// EnableNICSecurity hardens the container's primary bridge NIC (eth0) against
+// network-isolation bypass. It MUST be applied before the container's first boot
+// — Incus wires the bridge-port filters when the NIC is brought up.
+//
+// COI's egress allowlist is enforced by host nftables rules that match the
+// container's source IP (`ip saddr <containerIP>`) in a chain whose default
+// policy is accept. Without anti-spoofing, in-container root (which holds
+// CAP_NET_ADMIN over its own netns) can add a second source IP or spoof its
+// MAC so packets miss every saddr-keyed rule and fall through to the accept
+// policy. This sets, on eth0:
+//
+//   - security.ipv4_filtering=true : the bridge drops any packet whose source IP
+//     is not the container's DHCP-leased address (defeats source-IP spoofing).
+//   - security.mac_filtering=true  : same for the source MAC (implied by
+//     ipv4_filtering but set explicitly for clarity/robustness).
+//   - security.port_isolation=true : the bridge blocks this port from talking to
+//     OTHER ports on the same bridge (sibling COI containers), preventing L2
+//     lateral movement that the routed-path nft rules never observe.
+//
+// eth0 is inherited from the default profile, so it is first overridden onto the
+// instance (Incus refuses `config device set` on a profile-supplied device).
+// Returns an error if any key cannot be set; callers treat it as non-fatal so
+// unmanaged/static/macvlan NICs degrade to nft-only enforcement.
+func EnableNICSecurity(containerName string) error {
+	const nic = "eth0"
+	// Materialize the profile NIC at the instance level so device keys can be
+	// set on it. Ignored on failure: a re-run (e.g. persistent container that
+	// was already overridden) reports "already exists", and the explicit
+	// `config device set` calls below surface any real problem.
+	_ = IncusExecQuiet("config", "device", "override", containerName, nic)
+	for _, kv := range []string{
+		"security.ipv4_filtering=true",
+		"security.mac_filtering=true",
+		"security.port_isolation=true",
+	} {
+		if err := IncusExec("config", "device", "set", containerName, nic, kv); err != nil {
+			return fmt.Errorf("failed to set %s on %s: %w", kv, nic, err)
+		}
+	}
+	return nil
+}
+
+// DisableIPv6AtBoot disables IPv6 inside the container from the kernel's first
+// instant by setting the disable_ipv6 sysctls as Incus config before boot. This
+// closes the IPv6 egress window that otherwise exists between container start and
+// the host-side IPv6 nft drop being installed by the network manager.
+//
+// It is defence-in-depth only: in-container root can re-enable IPv6 at runtime,
+// which is why the host-side ip6 drop (network.ApplyIPv6BlockForContainer) is the
+// actual enforced boundary. Must be set before first boot.
+func DisableIPv6AtBoot(containerName string) error {
+	if err := IncusExec("config", "set", containerName,
+		"linux.sysctl.net.ipv6.conf.all.disable_ipv6=1"); err != nil {
+		return err
+	}
+	return IncusExec("config", "set", containerName,
+		"linux.sysctl.net.ipv6.conf.default.disable_ipv6=1")
+}
+
 // StopContainer stops a container
 func StopContainer(containerName string) error {
 	return IncusExec("stop", containerName, "--force")

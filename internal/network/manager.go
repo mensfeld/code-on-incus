@@ -159,9 +159,18 @@ func (m *Manager) setupRestricted(ctx context.Context, containerName string) err
 		m.logger.Printf("Gateway IP: %s", gatewayIP)
 	}
 
-	// Disable IPv6 to prevent bypass of IPv4-only nft rules
+	// Disable IPv6 inside the container (defence-in-depth; reversible by
+	// in-container root, so the host-side drop below is the enforced boundary).
 	if err := DisableIPv6ForContainer(containerName); err != nil {
-		m.logger.Errorf("Warning: failed to disable IPv6: %v", err)
+		m.logger.Errorf("Warning: failed to disable IPv6 in container: %v", err)
+	}
+
+	// Enforce the IPv6 egress boundary on the host: drop all forwarded IPv6 from
+	// the container's veth. The COI filter table is IPv4-only, so without this an
+	// agent that re-enables IPv6 escapes the firewall entirely. Fail closed — if
+	// the drop cannot be installed the boot block stays in place and setup aborts.
+	if err := ApplyIPv6BlockForContainer(containerName); err != nil {
+		return fmt.Errorf("failed to enforce IPv6 egress block: %w", err)
 	}
 
 	// Create nft manager
@@ -215,9 +224,18 @@ func (m *Manager) setupAllowlist(ctx context.Context, containerName string) erro
 		m.logger.Printf("Gateway IP: %s", gatewayIP)
 	}
 
-	// Disable IPv6 to prevent bypass of IPv4-only nft rules
+	// Disable IPv6 inside the container (defence-in-depth; reversible by
+	// in-container root, so the host-side drop below is the enforced boundary).
 	if err := DisableIPv6ForContainer(containerName); err != nil {
-		m.logger.Errorf("Warning: failed to disable IPv6: %v", err)
+		m.logger.Errorf("Warning: failed to disable IPv6 in container: %v", err)
+	}
+
+	// Enforce the IPv6 egress boundary on the host: drop all forwarded IPv6 from
+	// the container's veth. The COI filter table is IPv4-only, so without this an
+	// agent that re-enables IPv6 escapes the allowlist entirely. Fail closed — if
+	// the drop cannot be installed the boot block stays in place and setup aborts.
+	if err := ApplyIPv6BlockForContainer(containerName); err != nil {
+		return fmt.Errorf("failed to enforce IPv6 egress block: %w", err)
 	}
 
 	// Create nft manager
@@ -464,6 +482,12 @@ func (m *Manager) Teardown(ctx context.Context, containerName string) error {
 		} else {
 			m.logger.Printf("nft rules removed for container %s", containerName)
 		}
+	}
+
+	// Remove the host-side IPv6 egress block (idempotent — only present for
+	// restricted/allowlist modes, but safe to call for all modes).
+	if err := RemoveIPv6BlockForContainer(containerName); err != nil {
+		m.logger.Errorf("Warning: failed to remove IPv6 block rule for %s: %v", containerName, err)
 	}
 
 	// Clean up any residual boot-block rule (idempotent — no-op if already removed

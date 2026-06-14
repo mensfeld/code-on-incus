@@ -62,6 +62,96 @@ func TestCheckNotPrivilegedIntegration(t *testing.T) {
 	}
 }
 
+// EnableNICSecurity should set the anti-spoofing and port-isolation keys on the
+// container's eth0 NIC. The container only needs to exist (init, no start) for
+// the config to be readable.
+func TestEnableNICSecurityIntegration(t *testing.T) {
+	if _, err := exec.LookPath("incus"); err != nil {
+		t.Skip("incus not found, skipping integration test")
+	}
+	if !Available() {
+		t.Skip("incus daemon not running, skipping integration test")
+	}
+	exists, err := ImageExists("coi-default")
+	if err != nil || !exists {
+		t.Skip("coi image not found, skipping integration test (run 'coi build' first)")
+	}
+
+	containerName := "coi-test-nic-security"
+	_ = IncusExec("delete", containerName, "--force")
+	if err := IncusExec("init", "coi-default", containerName); err != nil {
+		t.Fatalf("Failed to init container: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = IncusExec("delete", containerName, "--force")
+	})
+
+	if err := EnableNICSecurity(containerName); err != nil {
+		t.Fatalf("EnableNICSecurity returned error: %v", err)
+	}
+
+	for _, key := range []string{
+		"security.ipv4_filtering",
+		"security.mac_filtering",
+		"security.port_isolation",
+	} {
+		val, err := IncusOutput("config", "device", "get", containerName, "eth0", key)
+		if err != nil {
+			t.Errorf("could not read %s on eth0: %v", key, err)
+			continue
+		}
+		if strings.TrimSpace(val) != "true" {
+			t.Errorf("eth0 %s = %q, want \"true\"", key, strings.TrimSpace(val))
+		}
+	}
+
+	// Idempotent: a second call (override already materialized) must still succeed.
+	if err := EnableNICSecurity(containerName); err != nil {
+		t.Errorf("second EnableNICSecurity returned error: %v", err)
+	}
+}
+
+// DisableIPv6AtBoot should set the disable_ipv6 sysctls as Incus config before boot.
+func TestDisableIPv6AtBootIntegration(t *testing.T) {
+	if _, err := exec.LookPath("incus"); err != nil {
+		t.Skip("incus not found, skipping integration test")
+	}
+	if !Available() {
+		t.Skip("incus daemon not running, skipping integration test")
+	}
+	exists, err := ImageExists("coi-default")
+	if err != nil || !exists {
+		t.Skip("coi image not found, skipping integration test (run 'coi build' first)")
+	}
+
+	containerName := "coi-test-disable-ipv6"
+	_ = IncusExec("delete", containerName, "--force")
+	if err := IncusExec("init", "coi-default", containerName); err != nil {
+		t.Fatalf("Failed to init container: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = IncusExec("delete", containerName, "--force")
+	})
+
+	if err := DisableIPv6AtBoot(containerName); err != nil {
+		t.Fatalf("DisableIPv6AtBoot returned error: %v", err)
+	}
+
+	for _, key := range []string{
+		"linux.sysctl.net.ipv6.conf.all.disable_ipv6",
+		"linux.sysctl.net.ipv6.conf.default.disable_ipv6",
+	} {
+		val, err := IncusOutput("config", "get", containerName, key)
+		if err != nil {
+			t.Errorf("could not read %s: %v", key, err)
+			continue
+		}
+		if strings.TrimSpace(val) != "1" {
+			t.Errorf("%s = %q, want \"1\"", key, strings.TrimSpace(val))
+		}
+	}
+}
+
 // CheckNotPrivileged should detect security.privileged=true on the default profile.
 func TestCheckNotPrivilegedDefaultProfileIntegration(t *testing.T) {
 	if _, err := exec.LookPath("incus"); err != nil {

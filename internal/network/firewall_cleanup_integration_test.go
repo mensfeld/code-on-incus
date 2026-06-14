@@ -39,6 +39,11 @@ func cleanupTestContainer(t *testing.T, containerName string) {
 		t.Logf("Note: boot block cleanup: %v", err)
 	}
 
+	// Clean up any residual IPv6 egress block (idempotent: no-op if already removed)
+	if err := RemoveIPv6BlockForContainer(containerName); err != nil {
+		t.Logf("Note: IPv6 block cleanup: %v", err)
+	}
+
 	_ = vethName // zone bindings no longer used
 }
 
