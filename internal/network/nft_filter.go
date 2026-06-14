@@ -212,6 +212,75 @@ func RemoveOpenModeRules(containerIP string) error {
 	return deleteNFTRulesByComment("coi-" + containerIP)
 }
 
+// ApplyBootBlockRule installs a temporary iifname-based DROP rule in the
+// ip coi forward chain immediately after a container starts, before any
+// startup scripts can run. This closes the network gap between container boot
+// and SetupForContainer installing proper IP-based isolation rules.
+//
+// The rule is keyed by comment "coi-boot-<containerName>" and must be lifted
+// by RemoveBootBlockRule once proper isolation rules are in place. It is
+// idempotent: calling it twice for the same container is safe.
+//
+// The veth interface is created by the kernel the moment Incus starts the
+// container, before DHCP assigns an IP. We poll for it here so callers do
+// not need to know the timing. Non-fatal path: if the veth does not appear
+// within 5 s (e.g. nft unavailable, unusual networking) the error is returned
+// and the caller should log a warning and continue.
+func ApplyBootBlockRule(containerName string) error {
+	if !NftInstalled() {
+		return fmt.Errorf("nft not installed, boot block skipped")
+	}
+	if err := ensureCOITableAndChain(); err != nil {
+		return fmt.Errorf("failed to ensure coi chain: %w", err)
+	}
+
+	// Poll for the host-side veth — it is created when Incus sets up the
+	// container's network namespace, typically within a few hundred ms.
+	const (
+		pollInterval = 100 * time.Millisecond
+		pollMax      = 50 // 5 s total
+	)
+	var vethName string
+	for i := 0; i < pollMax; i++ {
+		name, err := GetContainerVethName(containerName)
+		if err == nil && name != "" {
+			vethName = name
+			break
+		}
+		time.Sleep(pollInterval)
+	}
+	if vethName == "" {
+		return fmt.Errorf("veth for container %s did not appear within 5s", containerName)
+	}
+
+	comment := bootBlockComment(containerName)
+
+	// Idempotent: skip if already installed.
+	if exists, err := nftRuleExistsWithComment(comment); err == nil && exists {
+		return nil
+	}
+
+	if _, err := runNFTCommand(
+		"add", "rule", "ip", "coi", "forward",
+		"iifname", vethName,
+		"drop",
+		"comment", fmt.Sprintf(`"%s"`, comment),
+	); err != nil {
+		return fmt.Errorf("failed to add boot block rule for %s (veth %s): %w", containerName, vethName, err)
+	}
+	return nil
+}
+
+// RemoveBootBlockRule removes the temporary boot-block rule installed by
+// ApplyBootBlockRule. Safe to call even if no rule was ever installed.
+func RemoveBootBlockRule(containerName string) error {
+	return deleteNFTRulesByComment(bootBlockComment(containerName))
+}
+
+func bootBlockComment(containerName string) string {
+	return "coi-boot-" + containerName
+}
+
 // DisableIPv6ForContainer disables IPv6 in the container to prevent firewall bypass.
 // All network isolation rules are IPv4-only; IPv6 would circumvent them entirely.
 func DisableIPv6ForContainer(containerName string) error {
