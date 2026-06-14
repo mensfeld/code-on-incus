@@ -570,30 +570,47 @@ class TestNetworkThreatDetection:
             if not container_ip:
                 pytest.skip("Container has no IP")
 
-            # Make network request
-            subprocess.run(
-                ["incus", "exec", container_name, "--", "curl", "-m", "5", "https://example.com"],
-                capture_output=True,
-                timeout=30,
-            )
-
-            # Check nft ruleset for counter activity
-            time.sleep(2)
-            result = subprocess.run(
-                ["sudo", "-n", "nft", "list", "ruleset"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-
-            # Find the NFT_COI rule for this container and check packets counter
+            # Generate traffic and poll the NFT_COI counter. The counter rule is
+            # in place from session start, but traffic generation + counting is
+            # timing-sensitive on loaded CI runners, so retry a few times rather
+            # than relying on a single request landing within one sleep window.
             # Rule format: ... log prefix "NFT_COI[IP]: " ... counter packets N bytes M
             import re
 
             pattern = rf"NFT_COI\[{re.escape(container_ip)}\].*counter packets (\d+)"
-            match = re.search(pattern, result.stdout)
+            match = None
+            packets = 0
+            for _ in range(6):
+                subprocess.run(
+                    [
+                        "incus",
+                        "exec",
+                        container_name,
+                        "--",
+                        "curl",
+                        "-m",
+                        "5",
+                        "-s",
+                        "-o",
+                        "/dev/null",
+                        "https://example.com",
+                    ],
+                    capture_output=True,
+                    timeout=30,
+                )
+                time.sleep(2)
+                result = subprocess.run(
+                    ["sudo", "-n", "nft", "list", "ruleset"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+                match = re.search(pattern, result.stdout)
+                if match and int(match.group(1)) > 0:
+                    packets = int(match.group(1))
+                    break
+
             assert match, f"NFT_COI rule not found for {container_ip}"
-            packets = int(match.group(1))
             assert packets > 0, f"No packets counted for {container_ip}"
 
         finally:
