@@ -51,7 +51,7 @@ writable_hooks = false
 forward_agent = false
 
 [security]
-protected_paths = [".git/hooks", ".git/config", ".husky", ".vscode", ".coi"]
+protected_paths = [".git/hooks", ".git/config", ".git/config.worktree", ".git/info/attributes", ".husky", ".vscode", ".coi"]
 host_immutable = true
 
 [limits.cpu]

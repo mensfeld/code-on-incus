@@ -54,8 +54,8 @@ func TestEmbeddedDefaultConfigValues(t *testing.T) {
 	if cfg.SSH.ForwardAgent == nil || *cfg.SSH.ForwardAgent {
 		t.Error("Expected forward_agent=false")
 	}
-	if len(cfg.Security.ProtectedPaths) != 5 {
-		t.Errorf("Expected 5 protected paths, got %d", len(cfg.Security.ProtectedPaths))
+	if len(cfg.Security.ProtectedPaths) != 7 {
+		t.Errorf("Expected 7 protected paths, got %d", len(cfg.Security.ProtectedPaths))
 	}
 	if cfg.Timezone.Mode != "host" {
 		t.Errorf("Expected timezone mode 'host', got %q", cfg.Timezone.Mode)

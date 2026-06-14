@@ -341,7 +341,11 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		}
 
 		// Protect security-sensitive paths by mounting read-only (security feature)
-		// This must be added after the workspace mount for the overlay to work
+		// This must be added after the workspace mount for the overlay to work.
+		// Expand per-worktree git config files (.git/worktrees/*/config.worktree)
+		// into concrete protected entries — the static list cannot glob, and these
+		// are host-code-execution sinks when extensions.worktreeConfig is enabled.
+		opts.ProtectedPaths = ExpandGitWorktreeProtectedPaths(opts.WorkspacePath, opts.ProtectedPaths)
 		if len(opts.ProtectedPaths) > 0 {
 			if err := SetupSecurityMounts(result.Manager, opts.WorkspacePath, containerWorkspacePath, opts.ProtectedPaths, useShift); err != nil {
 				opts.Logger(fmt.Sprintf("Warning: Failed to setup security mounts: %v", err))
