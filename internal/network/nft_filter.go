@@ -238,7 +238,7 @@ func ApplyBootBlockRule(containerName string) error {
 	// container's network namespace, typically within a few hundred ms.
 	const (
 		pollInterval = 100 * time.Millisecond
-		pollMax      = 50 // 5 s total
+		pollMax      = 20 // 2 s total
 	)
 	var vethName string
 	for i := 0; i < pollMax; i++ {
@@ -250,7 +250,7 @@ func ApplyBootBlockRule(containerName string) error {
 		time.Sleep(pollInterval)
 	}
 	if vethName == "" {
-		return fmt.Errorf("veth for container %s did not appear within 5s", containerName)
+		return fmt.Errorf("veth for container %s did not appear within 2s", containerName)
 	}
 
 	comment := bootBlockComment(containerName)
