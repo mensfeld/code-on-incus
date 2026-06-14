@@ -64,7 +64,12 @@ func NewManager(cfg *config.NetworkConfig, log *logger.SessionLogger) *Manager {
 	}
 }
 
-// SetupForContainer configures network isolation for a container
+// SetupForContainer configures network isolation for a container.
+// It always removes the temporary boot-block rule installed by ApplyBootBlockRule
+// once proper isolation rules are in place (or, for open mode, unconditionally —
+// the user has opted into unrestricted access). On error in restricted/allowlist
+// mode the boot block is intentionally left in place so the container stays
+// blocked until the caller tears everything down.
 func (m *Manager) SetupForContainer(ctx context.Context, containerName string) error {
 	m.containerName = containerName
 
@@ -77,12 +82,12 @@ func (m *Manager) SetupForContainer(ctx context.Context, containerName string) e
 			containerIP, err := GetContainerIP(containerName)
 			if err != nil {
 				m.logger.Errorf("Warning: could not get container IP for open mode rules: %v", err)
-				return nil
-			}
-			m.containerIP = containerIP
-			m.nft = NewNftManager(containerIP, "")
-			if err := EnsureOpenModeRules(containerIP); err != nil {
-				m.logger.Errorf("Warning: could not add open mode rules: %v", err)
+			} else {
+				m.containerIP = containerIP
+				m.nft = NewNftManager(containerIP, "")
+				if err := EnsureOpenModeRules(containerIP); err != nil {
+					m.logger.Errorf("Warning: could not add open mode rules: %v", err)
+				}
 			}
 		} else if NeedsIptablesFallback() {
 			bridgeName, err := GetIncusBridgeName()
@@ -97,16 +102,35 @@ func (m *Manager) SetupForContainer(ctx context.Context, containerName string) e
 				}
 			}
 		}
+		// Open mode always lifts the boot block — errors above are non-fatal
+		// and the user has explicitly opted into unrestricted network access.
+		m.removeBootBlock(containerName)
 		return nil
 
 	case config.NetworkModeRestricted:
-		return m.setupRestricted(ctx, containerName)
+		if err := m.setupRestricted(ctx, containerName); err != nil {
+			return err // boot block stays: container remains isolated on error
+		}
 
 	case config.NetworkModeAllowlist:
-		return m.setupAllowlist(ctx, containerName)
+		if err := m.setupAllowlist(ctx, containerName); err != nil {
+			return err // boot block stays: container remains isolated on error
+		}
 
 	default:
 		return fmt.Errorf("unknown network mode: %s", m.config.Mode)
+	}
+
+	// Restricted or allowlist rules are now in place — lift the boot block.
+	m.removeBootBlock(containerName)
+	return nil
+}
+
+// removeBootBlock removes the temporary boot-block nft rule for containerName,
+// logging a warning if removal fails (non-fatal).
+func (m *Manager) removeBootBlock(containerName string) {
+	if err := RemoveBootBlockRule(containerName); err != nil {
+		m.logger.Errorf("Warning: failed to remove boot block rule for %s: %v", containerName, err)
 	}
 }
 
@@ -441,6 +465,10 @@ func (m *Manager) Teardown(ctx context.Context, containerName string) error {
 			m.logger.Printf("nft rules removed for container %s", containerName)
 		}
 	}
+
+	// Clean up any residual boot-block rule (idempotent — no-op if already removed
+	// by SetupForContainer, but handles the case where setup failed mid-way).
+	m.removeBootBlock(containerName)
 
 	return nil
 }

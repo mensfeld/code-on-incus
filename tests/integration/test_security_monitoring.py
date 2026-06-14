@@ -4747,30 +4747,38 @@ process_spawn_rate_threshold = 9999
             # Allow monitoring daemon to start.
             time.sleep(3)
 
-            # Write the suspicious line into the container's auth.log.
-            # The LogWatcher polls via incus file pull every 5 seconds, so the
-            # threat will be detected within one polling interval.
-            subprocess.run(
-                [
-                    "incus",
-                    "exec",
-                    container_name,
-                    "--",
-                    "bash",
-                    "-c",
-                    "mkdir -p /var/log && "
-                    "echo 'Jun  5 12:00:00 coi sshd[1234]: Failed password for invalid user attacker from 1.2.3.4 port 22222 ssh2'"
-                    " >> /var/log/auth.log",
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-            )
+            def inject_ssh_failure():
+                subprocess.run(
+                    [
+                        "incus",
+                        "exec",
+                        container_name,
+                        "--",
+                        "bash",
+                        "-c",
+                        "mkdir -p /var/log && "
+                        "echo 'Jun  5 12:00:00 coi sshd[1234]: Failed password for invalid user attacker from 1.2.3.4 port 22222 ssh2'"
+                        " >> /var/log/auth.log",
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                )
 
-            # Poll until the auth threat appears (rescan ticker fires within 5 s,
-            # then inotify delivers near-instantly). 30 s timeout avoids CI flakes.
+            # Write the suspicious line into the container's auth.log.
+            # The LogWatcher reads from offset 0 on startup so it catches
+            # lines written before the daemon started. Re-inject at 10s and
+            # 20s into the poll loop so a late-starting daemon detects the
+            # event via inotify regardless of container setup time.
+            inject_ssh_failure()
+
+            # Poll until the auth threat appears (inotify delivers near-instantly
+            # once the daemon is running; backstop ticker fires within 3 s).
+            # 30 s timeout with periodic re-injection handles slow CI runners.
             auth_events = []
-            for _ in range(30):
+            for i in range(30):
+                if i in (10, 20):
+                    inject_ssh_failure()
                 events = get_threat_events(container_name)
                 auth_events = [
                     e

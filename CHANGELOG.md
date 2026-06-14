@@ -2,6 +2,10 @@
 
 ## 0.9.0 (Unreleased)
 
+### Security
+
+- **Close startup network gap for persistent containers** — A persistent container that was stopped could have startup scripts planted by a previous AI session (systemd units, cron jobs, shell profile hooks). When the container was restarted these scripts ran during the boot window — before `SetupForContainer` installed nftables isolation rules — and had unrestricted outbound network access. `setup.go` now calls `ApplyBootBlockRule` immediately after `Start()` for both persistent restarts and new container launches. The function polls for the container's host-side veth interface (available before DHCP assigns an IP) and installs an `iifname <veth> drop` rule in the `ip coi forward` chain. `SetupForContainer` removes the rule after proper isolation rules are established, so the container has its configured network access once COI setup completes. New integration tests cover rule presence, traffic blocking, and the full apply→setup→teardown lifecycle.
+
 ### Bug Fixes
 
 - **`DirExists` and `FileExists` now handle paths with spaces or shell metacharacters** — both methods previously built shell test expressions via `fmt.Sprintf("[ -d %s ]", path)` and executed them through `bash -c`, which split paths containing spaces into multiple tokens causing the check to always return false. They now use `ExecArgs([]string{"test", "-d/-f", path})` so the path is passed verbatim without shell interpretation.

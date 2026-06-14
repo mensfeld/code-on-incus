@@ -220,6 +220,17 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 				if err := result.Manager.Start(); err != nil {
 					return nil, fmt.Errorf("failed to start container: %w", err)
 				}
+				// Block network immediately: a previous session's AI agent may have
+				// planted startup scripts (systemd units, cron jobs, shell hooks) that
+				// would otherwise phone home during the boot window before
+				// SetupForContainer installs proper isolation rules.
+				if opts.NetworkConfig != nil {
+					if err := network.ApplyBootBlockRule(result.ContainerName); err != nil {
+						opts.Logger(fmt.Sprintf("Warning: boot block not applied: %v", err))
+					} else {
+						opts.Logger("Boot network block applied (lifted after isolation rules are set up)")
+					}
+				}
 				skipLaunch = true
 			} else {
 				// Delete the stopped leftover container
@@ -413,6 +424,15 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		} else {
 			if err := result.Manager.Start(); err != nil {
 				return nil, fmt.Errorf("failed to start container: %w", err)
+			}
+		}
+		// Block network immediately after first boot as well: defence-in-depth
+		// against a malicious base image that runs something on init.
+		if opts.NetworkConfig != nil {
+			if err := network.ApplyBootBlockRule(result.ContainerName); err != nil {
+				opts.Logger(fmt.Sprintf("Warning: boot block not applied: %v", err))
+			} else {
+				opts.Logger("Boot network block applied (lifted after isolation rules are set up)")
 			}
 		}
 	}
