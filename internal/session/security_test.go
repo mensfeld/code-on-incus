@@ -255,7 +255,7 @@ func TestDefaultProtectedPaths(t *testing.T) {
 	cfg := config.GetDefaultConfig()
 	paths := cfg.Security.ProtectedPaths
 
-	expected := []string{".git/hooks", ".git/config", ".husky", ".vscode"}
+	expected := []string{".git/hooks", ".git/config", ".husky", ".vscode", ".coi"}
 
 	if len(paths) != len(expected) {
 		t.Errorf("Expected %d default paths, got %d", len(expected), len(paths))

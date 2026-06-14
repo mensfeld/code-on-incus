@@ -230,6 +230,15 @@ type MountEntry struct {
 	Host      string `toml:"host"`      // Host path (supports ~ expansion)
 	Container string `toml:"container"` // Container path (must be absolute)
 	Readonly  bool   `toml:"readonly"`  // Mount read-only (default: false)
+
+	// FromProject marks a mount that originated from an untrusted, project-scoped
+	// config file (the workspace's .coi/config.toml) rather than the user's
+	// trusted ~/.coi/config.toml or an explicit COI_CONFIG. It is never
+	// serialized (toml:"-"); it is set during config loading and used to confine
+	// such mounts to the workspace so a repo — or an in-container agent that
+	// planted a config — cannot bind-mount arbitrary host paths into the
+	// container. See ParseMountConfig.
+	FromProject bool `toml:"-"`
 }
 
 // MountsConfig contains mount-related configuration

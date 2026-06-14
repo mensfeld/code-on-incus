@@ -288,7 +288,7 @@ func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.P
 			resolvedForwardedEnvVars := resolveForwardedEnvVarNames(a.cfg.Defaults.ForwardEnv)
 			resolvedTimezone := resolveTimezone(a.cfg)
 
-			mountConfig, err := ParseMountConfig(a.cfg)
+			mountConfig, err := ParseMountConfig(a.cfg, s.absWorkspace)
 			if err != nil {
 				return nil, fmt.Errorf("invalid mount configuration: %w", err)
 			}
