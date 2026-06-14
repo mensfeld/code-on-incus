@@ -4569,27 +4569,35 @@ process_spawn_rate_threshold = 10
                 f"Container {container_name} did not start"
             )
 
-            # Give monitoring a couple of seconds to establish baseline
-            time.sleep(3)
+            # Give monitoring a few seconds to establish a baseline process count.
+            time.sleep(5)
 
-            # Spawn 25 long-lived sleep processes in a single burst.
-            # The delta of ~25 exceeds the threshold of 10 within one 1-second poll.
-            subprocess.Popen(
-                [
-                    "incus",
-                    "exec",
-                    container_name,
-                    "--",
-                    "bash",
-                    "-c",
-                    "for i in $(seq 1 25); do sleep 60 & done",
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            # Spawn bursts of long-lived sleep processes. A burst of ~20 far
+            # exceeds the spawn-rate threshold of 10 within one 1-second poll.
+            # We spawn several bursts over time rather than one: a single burst can
+            # be missed if it coincides with a process-collection gap (which resets
+            # the detector's baseline to "first poll") — repeated bursts make
+            # detection robust, and the longer window absorbs kill latency on
+            # loaded CI runners.
+            def spawn_burst():
+                subprocess.Popen(
+                    [
+                        "incus",
+                        "exec",
+                        container_name,
+                        "--",
+                        "bash",
+                        "-c",
+                        "for i in $(seq 1 20); do sleep 120 & done",
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
 
             killed = False
-            for _ in range(20):
+            for i in range(40):
+                if i % 4 == 0:
+                    spawn_burst()
                 time.sleep(1)
                 if get_container_state(container_name) in ["Stopped", "Frozen", "Unknown"]:
                     killed = True
@@ -5103,6 +5111,13 @@ process_spawn_rate_threshold = 9999
         backup = config_path.read_text() if config_path.exists() else None
 
         config_path.parent.mkdir(parents=True, exist_ok=True)
+        # NOTE: auto_kill_on_critical is intentionally DISABLED here. The cmdline
+        # contains "fsockopen", which is BOTH the proc_event "php-fsockopen"
+        # keyword AND a CRITICAL reverse-shell pattern (process.go). With auto-kill
+        # on, the critical reverse-shell detection races the kill against the
+        # "high" proc_event this test asserts on, killing the container before the
+        # proc_event is observable. This test verifies detection, not killing, so
+        # disabling auto-kill makes it deterministic without weakening the assert.
         config_path.write_text(
             """
 [network]
@@ -5111,7 +5126,7 @@ mode = "open"
 [monitoring]
 enabled = true
 auto_pause_on_high = false
-auto_kill_on_critical = true
+auto_kill_on_critical = false
 poll_interval_sec = 1
 file_read_threshold_mb = 500
 file_read_rate_mb_per_sec = 1000
