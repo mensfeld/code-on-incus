@@ -226,7 +226,14 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 				// SetupForContainer installs proper isolation rules.
 				if opts.NetworkConfig != nil {
 					if err := network.ApplyBootBlockRule(result.ContainerName); err != nil {
-						opts.Logger(fmt.Sprintf("Warning: boot block not applied: %v", err))
+						// Fail closed in restricted/allowlist mode: rather than let
+						// the container run unblocked during the boot window, stop it
+						// and abort. Open mode opts into unrestricted egress.
+						if opts.NetworkConfig.Mode != config.NetworkModeOpen {
+							_ = result.Manager.Stop(true)
+							return nil, fmt.Errorf("boot network block failed in %s mode; stopped container to avoid an unprotected boot window: %w", opts.NetworkConfig.Mode, err)
+						}
+						opts.Logger(fmt.Sprintf("Warning: boot block not applied (open mode): %v", err))
 					} else {
 						opts.Logger("Boot network block applied (lifted after isolation rules are set up)")
 					}
@@ -410,6 +417,23 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 			return nil, fmt.Errorf("failed to disable guest API: %w", err)
 		}
 
+		// Harden the bridge NIC against egress-isolation bypass: anti-spoof the
+		// source IP/MAC (so saddr-keyed nft rules can't be dodged) and isolate the
+		// bridge port (so the container can't reach sibling containers at L2).
+		// Non-fatal: unmanaged/static/macvlan NICs degrade to nft-only enforcement.
+		if err := container.EnableNICSecurity(result.ContainerName); err != nil {
+			opts.Logger(fmt.Sprintf("Warning: NIC security hardening not applied: %v", err))
+		}
+
+		// For restricted/allowlist modes, disable IPv6 from the kernel's first
+		// instant so there is no IPv6 egress window before the host-side ip6 drop
+		// is installed. Open mode opts into unrestricted egress, so skip it.
+		if opts.NetworkConfig != nil && opts.NetworkConfig.Mode != config.NetworkModeOpen {
+			if err := container.DisableIPv6AtBoot(result.ContainerName); err != nil {
+				opts.Logger(fmt.Sprintf("Warning: pre-boot IPv6 disable not applied: %v", err))
+			}
+		}
+
 		// Block privileged containers — they defeat all isolation
 		if err := container.CheckNotPrivileged(result.ContainerName); err != nil {
 			return nil, err
@@ -430,7 +454,14 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		// against a malicious base image that runs something on init.
 		if opts.NetworkConfig != nil {
 			if err := network.ApplyBootBlockRule(result.ContainerName); err != nil {
-				opts.Logger(fmt.Sprintf("Warning: boot block not applied: %v", err))
+				// Fail closed in restricted/allowlist mode: stop the just-started
+				// container and abort rather than leave an unprotected boot window.
+				// Open mode opts into unrestricted egress.
+				if opts.NetworkConfig.Mode != config.NetworkModeOpen {
+					_ = result.Manager.Stop(true)
+					return nil, fmt.Errorf("boot network block failed in %s mode; stopped container to avoid an unprotected boot window: %w", opts.NetworkConfig.Mode, err)
+				}
+				opts.Logger(fmt.Sprintf("Warning: boot block not applied (open mode): %v", err))
 			} else {
 				opts.Logger("Boot network block applied (lifted after isolation rules are set up)")
 			}
