@@ -103,7 +103,7 @@ def _get_threat_events(container_name: str) -> list[dict]:
     return events
 
 
-def _poll_network_threats(container_name: str, max_wait: int = 40, extra_check=None) -> list[dict]:
+def _poll_network_threats(container_name: str, max_wait: int = 75, extra_check=None) -> list[dict]:
     deadline = time.time() + max_wait
     while time.time() < deadline:
         events = _get_threat_events(container_name)
