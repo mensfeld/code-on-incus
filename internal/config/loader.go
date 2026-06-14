@@ -115,11 +115,10 @@ func loadConfigFile(cfg *Config, path string) error {
 // trusted distinguishes config the user explicitly controls (~/.coi/config.toml
 // and an explicit COI_CONFIG) from untrusted, project-scoped config (the
 // workspace's .coi/config.toml). Untrusted config is sanitized before merging:
-// its mounts are tagged FromProject (so ParseMountConfig can confine them to the
-// workspace) and any network setting that would WEAKEN isolation is dropped with
-// a warning. This prevents a malicious repo — or an in-container agent that
-// planted a .coi/config.toml — from mounting arbitrary host paths or silently
-// turning off the private-network / metadata blocks on the next launch.
+// any network setting that would WEAKEN isolation is dropped with a warning.
+// This prevents a malicious repo — or an in-container agent that planted a
+// .coi/config.toml — from silently turning off the private-network / metadata
+// blocks on the next launch.
 func loadConfigFileScoped(cfg *Config, path string, trusted bool) error {
 	// Check if file exists
 	if _, err := os.Stat(path); err != nil {
@@ -155,14 +154,10 @@ func loadConfigFileScoped(cfg *Config, path string, trusted bool) error {
 }
 
 // sanitizeUntrustedConfig hardens a project-scoped (untrusted) config before it
-// is merged. It tags every mount as FromProject and refuses network settings
-// that would weaken isolation relative to the secure defaults, leaving the
-// stronger built-in/user values in place. Strengthening values are left intact.
+// is merged. It refuses network settings that would weaken isolation relative to
+// the secure defaults, leaving the stronger built-in/user values in place.
+// Strengthening values are left intact.
 func sanitizeUntrustedConfig(fileCfg *Config, path string) {
-	for i := range fileCfg.Mounts.Default {
-		fileCfg.Mounts.Default[i].FromProject = true
-	}
-
 	n := &fileCfg.Network
 	refuse := func(what string) {
 		fmt.Fprintf(os.Stderr,

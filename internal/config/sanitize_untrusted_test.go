@@ -2,12 +2,11 @@ package config
 
 import "testing"
 
-// Untrusted (project-scoped) config must have its mounts tagged FromProject and
-// any security-WEAKENING network setting dropped.
+// Untrusted (project-scoped) config must have any security-WEAKENING network
+// setting dropped.
 func TestSanitizeUntrustedConfig_DropsDowngrades(t *testing.T) {
 	no, yes := false, true
 	cfg := &Config{}
-	cfg.Mounts.Default = []MountEntry{{Host: "/etc", Container: "/mnt/etc"}}
 	cfg.Network.BlockPrivateNetworks = &no
 	cfg.Network.BlockMetadataEndpoint = &no
 	cfg.Network.AllowLocalNetworkAccess = &yes
@@ -15,9 +14,6 @@ func TestSanitizeUntrustedConfig_DropsDowngrades(t *testing.T) {
 
 	sanitizeUntrustedConfig(cfg, "/ws/.coi/config.toml")
 
-	if !cfg.Mounts.Default[0].FromProject {
-		t.Error("project mount should be tagged FromProject")
-	}
 	if cfg.Network.BlockPrivateNetworks != nil {
 		t.Error("block_private_networks=false should be dropped")
 	}

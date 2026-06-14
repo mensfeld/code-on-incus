@@ -346,7 +346,7 @@ func (a *App) applyWorkspaceMounts(mgr container.ContainerManager, containerName
 		return fmt.Errorf("failed to mount workspace: %w", err)
 	}
 
-	mountConfig, err := ParseMountConfig(a.cfg, absWorkspace)
+	mountConfig, err := ParseMountConfig(a.cfg)
 	if err != nil {
 		return fmt.Errorf("invalid mount configuration: %w", err)
 	}
