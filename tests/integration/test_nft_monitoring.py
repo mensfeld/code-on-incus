@@ -1273,8 +1273,16 @@ class TestVethZoneCleanupOnAutoKill:
 
             assert killed, f"Container should have been killed but state is {state}"
 
-            # Verify veth zone binding is cleaned up
-            assert not check_veth_in_firewalld_zone(veth_name), (
+            # Verify veth zone binding is cleaned up. Cleanup can lag slightly
+            # behind the container reaching Stopped, so poll rather than checking
+            # once immediately after the kill.
+            cleaned = False
+            for _ in range(15):
+                if not check_veth_in_firewalld_zone(veth_name):
+                    cleaned = True
+                    break
+                time.sleep(1)
+            assert cleaned, (
                 f"Veth zone binding should be cleaned up for {veth_name} after auto-kill"
             )
 
