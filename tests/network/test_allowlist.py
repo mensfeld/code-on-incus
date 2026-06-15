@@ -644,3 +644,55 @@ def test_restricted_allows_host_to_access_container_services(
         f"Host should be able to access container service: {result.stderr}"
     )
     assert "HTTP" in result.stdout, f"Expected HTTP response from container: {result.stdout}"
+
+
+def test_allowlist_rules_are_l4_scoped(coi_binary, workspace_dir, cleanup_containers):
+    """Allowlist accept rules must be scoped to TCP/UDP + rate-limited ICMP echo (M4).
+
+    Without L4 scoping, any protocol (raw IP, ICMP flood, GRE, ...) to an allowed
+    IP is permitted — a covert exfil channel allowlist mode is meant to prevent.
+    This asserts the emitted nft rules carry the L4 constraints; legitimate
+    TCP/UDP egress to allowed hosts is covered by
+    test_allowlist_mode_allows_specified_domains.
+    """
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as f:
+        f.write("""
+[network]
+mode = "allowlist"
+allowed_domains = ["1.1.1.1"]
+refresh_interval_minutes = 30
+""")
+        config_file = f.name
+
+    try:
+        env = os.environ.copy()
+        env["COI_CONFIG"] = config_file
+        result = subprocess.run(
+            [coi_binary, "shell", "--workspace", workspace_dir, "--background"],
+            capture_output=True,
+            text=True,
+            timeout=90,
+            env=env,
+        )
+        assert result.returncode == 0, f"Failed to start container: {result.stderr}"
+
+        container_name = None
+        for line in (result.stdout + result.stderr).split("\n"):
+            if "Container: " in line:
+                container_name = line.split("Container: ")[1].strip()
+                break
+        assert container_name, f"Could not find container name: {result.stdout + result.stderr}"
+
+        chain = subprocess.run(
+            ["sudo", "-n", "nft", "list", "chain", "ip", "coi", "forward"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        rules = chain.stdout
+        assert "1.1.1.1" in rules, f"allowed IP missing from rules:\n{rules}"
+        assert "l4proto" in rules, f"expected TCP/UDP-scoped allow rules (l4proto):\n{rules}"
+        assert "echo-request" in rules, f"expected a rate-limited ICMP echo rule:\n{rules}"
+        assert "limit rate" in rules, f"expected an ICMP rate limit:\n{rules}"
+    finally:
+        os.unlink(config_file)

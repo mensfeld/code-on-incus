@@ -245,3 +245,64 @@ func TestAllowlistModeIPv4MappedIPv6CIDRRejected_Integration(t *testing.T) {
 		t.Logf("SetupForContainer correctly rejected ::ffff:0:0/96: %v", setupErr)
 	}
 }
+
+// TestAllowlistModeL4Filtering_Integration verifies that allowlist-mode accept
+// rules are scoped to TCP/UDP plus a rate-limited ICMP echo rule, so non-TCP/UDP
+// protocols and ICMP tunneling to allowed hosts fall through to the default deny.
+func TestAllowlistModeL4Filtering_Integration(t *testing.T) {
+	skipUnlessAllowlistReady(t)
+
+	const testCIDR = "203.0.113.0/24" // TEST-NET-3 (RFC 5737)
+
+	containerName := "coi-allowlist-l4-test"
+	mgr := container.NewManager(containerName)
+
+	t.Cleanup(func() {
+		cleanupTestContainer(t, containerName)
+	})
+
+	if exists, _ := mgr.Exists(); exists {
+		_ = mgr.Stop(true)
+		_ = mgr.Delete(true)
+	}
+	if err := mgr.Launch("coi-default", false, ""); err != nil {
+		t.Fatalf("Failed to launch container: %v", err)
+	}
+	time.Sleep(3 * time.Second)
+
+	containerIP, err := GetContainerIP(containerName)
+	if err != nil {
+		t.Fatalf("Failed to get container IP: %v", err)
+	}
+
+	netCfg := &config.NetworkConfig{
+		Mode:           config.NetworkModeAllowlist,
+		AllowedDomains: []string{testCIDR},
+	}
+	netMgr := NewManager(netCfg, logger.NewDiscard())
+	if err := netMgr.SetupForContainer(context.Background(), containerName); err != nil {
+		t.Fatalf("SetupForContainer failed: %v", err)
+	}
+
+	output, err := runNFTCommand("-a", "list", "chain", "ip", "coi", "forward")
+	if err != nil {
+		t.Fatalf("Failed to list nft chain: %v", err)
+	}
+	rules := string(output)
+	t.Logf("nft chain:\n%s", rules)
+
+	if !strings.Contains(rules, testCIDR) {
+		t.Errorf("expected allowed CIDR %q in rules:\n%s", testCIDR, rules)
+	}
+	if !strings.Contains(rules, "l4proto") {
+		t.Errorf("expected TCP/UDP-scoped (l4proto) allow rules in allowlist mode:\n%s", rules)
+	}
+	if !strings.Contains(rules, "echo-request") {
+		t.Errorf("expected a rate-limited ICMP echo-request rule in allowlist mode:\n%s", rules)
+	}
+
+	if err := netMgr.Teardown(context.Background(), containerName); err != nil {
+		t.Errorf("Teardown failed: %v", err)
+	}
+	verifyTeardownRemovesRules(t, containerIP)
+}
