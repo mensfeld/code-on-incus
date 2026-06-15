@@ -350,6 +350,7 @@ func (a *App) applyWorkspaceMounts(mgr container.ContainerManager, containerName
 	if err != nil {
 		return fmt.Errorf("invalid mount configuration: %w", err)
 	}
+	mountConfig = gateUntrustedMounts(mountConfig, absWorkspace)
 	if err := session.ValidateMounts(mountConfig); err != nil {
 		return fmt.Errorf("mount validation failed: %w", err)
 	}

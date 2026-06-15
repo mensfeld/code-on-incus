@@ -138,6 +138,14 @@ func loadConfigFileScoped(cfg *Config, path string, trusted bool) error {
 
 	if !trusted {
 		sanitizeUntrustedConfig(&fileCfg, path)
+		// Tag this file's mounts as untrusted so escaping host mounts can be
+		// gated behind explicit trust at apply time (see internal/session/trust.go).
+		if absPath, absErr := filepath.Abs(path); absErr == nil {
+			for i := range fileCfg.Mounts.Default {
+				fileCfg.Mounts.Default[i].Untrusted = true
+				fileCfg.Mounts.Default[i].SourcePath = absPath
+			}
+		}
 	}
 
 	configDir := filepath.Dir(path)
