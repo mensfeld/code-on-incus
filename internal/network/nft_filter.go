@@ -373,6 +373,42 @@ func RemoveIPv6BlockForContainer(containerName string) error {
 	return deleteNFTRulesByCommentFamily("ip6", ipv6BlockComment(containerName))
 }
 
+// ListCOIIP6RuleContainers returns the container names referenced by
+// coi6-<name> comments in the ip6 coi forward chain. Used by orphan detection
+// to find IPv6 drop rules whose containers are no longer running.
+func ListCOIIP6RuleContainers() ([]string, error) {
+	output, err := runNFTCommand("-a", "list", "chain", "ip6", "coi", "forward")
+	if err != nil {
+		return nil, nil // chain doesn't exist yet — no rules
+	}
+	return parseCOIIP6RuleContainers(string(output)), nil
+}
+
+// parseCOIIP6RuleContainers extracts the unique container names from coi6-<name>
+// rule comments in `nft list chain ip6 coi forward` output. Pure, for testing.
+func parseCOIIP6RuleContainers(output string) []string {
+	var names []string
+	seen := make(map[string]bool)
+	for _, line := range strings.Split(output, "\n") {
+		const prefix = `comment "coi6-`
+		idx := strings.Index(line, prefix)
+		if idx == -1 {
+			continue
+		}
+		rest := line[idx+len(prefix):]
+		end := strings.Index(rest, `"`)
+		if end == -1 {
+			continue
+		}
+		name := rest[:end]
+		if name != "" && !seen[name] {
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
 // addRule appends a nftables rule to ip coi forward for this container.
 // Rules are appended in call order, so callers must invoke addRule from most-specific
 // to least-specific (gateway → allowlist → RFC1918 block → default).

@@ -1638,11 +1638,13 @@ func CheckOrphanedResources() HealthCheck {
 	// Check for orphaned firewall rules
 	orphanedRules := 0
 	if network.NftAvailable() {
-		// Get running container IPs
+		// Get running container IPs and names
 		containerIPs := make(map[string]bool)
+		containerNames := make(map[string]bool)
 		output, err := container.IncusOutput("list", "--format=json")
 		if err == nil {
 			var containers []struct {
+				Name  string `json:"name"`
 				State struct {
 					Status  string `json:"status"`
 					Network map[string]struct {
@@ -1656,6 +1658,7 @@ func CheckOrphanedResources() HealthCheck {
 			if json.Unmarshal([]byte(output), &containers) == nil {
 				for _, c := range containers {
 					if c.State.Status == "Running" {
+						containerNames[c.Name] = true
 						if eth0, ok := c.State.Network["eth0"]; ok {
 							for _, addr := range eth0.Addresses {
 								if addr.Family == "inet" {
@@ -1668,10 +1671,19 @@ func CheckOrphanedResources() HealthCheck {
 			}
 		}
 
-		// Check nft coi chain for orphaned rules
+		// Check nft coi chain for orphaned IPv4 rules
 		if ipHandles, err := network.ListCOIFilterRuleIPs(); err == nil {
 			for ip := range ipHandles {
 				if !containerIPs[ip] {
+					orphanedRules++
+				}
+			}
+		}
+
+		// Check ip6 coi chain for orphaned IPv6 drop rules
+		if names, err := network.ListCOIIP6RuleContainers(); err == nil {
+			for _, name := range names {
+				if !containerNames[name] {
 					orphanedRules++
 				}
 			}

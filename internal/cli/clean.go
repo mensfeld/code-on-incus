@@ -296,7 +296,8 @@ func cleanOrphanedResources() (int, bool) {
 
 // printOrphanedResources prints the list of orphaned resources found.
 func printOrphanedResources(orphans *cleanup.OrphanedResources) {
-	totalOrphans := len(orphans.Veths) + len(orphans.NftRules) + len(orphans.NFTMonitorRules) + len(orphans.IptablesBridgeRules)
+	totalOrphans := len(orphans.Veths) + len(orphans.NftRules) + len(orphans.IPv6Rules) +
+		len(orphans.NFTMonitorRules) + len(orphans.IptablesBridgeRules)
 	fmt.Printf("Found %d orphaned resource(s):\n", totalOrphans)
 
 	if len(orphans.Veths) > 0 {
@@ -310,6 +311,13 @@ func printOrphanedResources(orphans *cleanup.OrphanedResources) {
 		fmt.Printf("  Orphaned nft rules (%d):\n", len(orphans.NftRules))
 		for _, rule := range orphans.NftRules {
 			fmt.Printf("    - %s\n", rule)
+		}
+	}
+
+	if len(orphans.IPv6Rules) > 0 {
+		fmt.Printf("  Orphaned ip6 nft rules (%d):\n", len(orphans.IPv6Rules))
+		for _, name := range orphans.IPv6Rules {
+			fmt.Printf("    - %s\n", name)
 		}
 	}
 
@@ -350,6 +358,11 @@ func doCleanOrphanedResources(orphans *cleanup.OrphanedResources) int {
 	if len(orphans.NftRules) > 0 {
 		rulesCleaned, _ := cleanup.CleanupOrphanedNftRules(orphans.NftRules, logger)
 		cleaned += rulesCleaned
+	}
+
+	if len(orphans.IPv6Rules) > 0 {
+		ipv6Cleaned, _ := cleanup.CleanupOrphanedIPv6Rules(orphans.IPv6Rules, logger)
+		cleaned += ipv6Cleaned
 	}
 
 	if len(orphans.NFTMonitorRules) > 0 {
