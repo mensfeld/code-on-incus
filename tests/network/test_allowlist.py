@@ -683,16 +683,28 @@ refresh_interval_minutes = 30
                 break
         assert container_name, f"Could not find container name: {result.stdout + result.stderr}"
 
+        # Rule application is asynchronous; poll like the other allowlist tests.
+        assert wait_for_firewall_rules(container_name, timeout=30), (
+            f"firewall rules not applied for {container_name}"
+        )
+
         chain = subprocess.run(
             ["sudo", "-n", "nft", "list", "chain", "ip", "coi", "forward"],
             capture_output=True,
             text=True,
             timeout=10,
         )
-        rules = chain.stdout
-        assert "1.1.1.1" in rules, f"allowed IP missing from rules:\n{rules}"
-        assert "l4proto" in rules, f"expected TCP/UDP-scoped allow rules (l4proto):\n{rules}"
-        assert "echo-request" in rules, f"expected a rate-limited ICMP echo rule:\n{rules}"
-        assert "limit rate" in rules, f"expected an ICMP rate limit:\n{rules}"
+        # Scope the assertions to the rule line(s) for THIS test's allowed IP, not
+        # the whole shared chain — otherwise a leftover/concurrent allowlist rule
+        # could satisfy the substrings even if 1.1.1.1's rule were emitted unscoped.
+        ip_rules = [ln for ln in chain.stdout.splitlines() if "1.1.1.1" in ln]
+        assert ip_rules, f"no allow rules for 1.1.1.1:\n{chain.stdout}"
+        joined = "\n".join(ip_rules)
+        assert "l4proto" in joined, (
+            f"expected TCP/UDP (l4proto) scoping on the 1.1.1.1 rule:\n{joined}"
+        )
+        assert "echo-request" in joined and "10/second" in joined, (
+            f"expected rate-limited (10/second) ICMP echo on the 1.1.1.1 rule:\n{joined}"
+        )
     finally:
         os.unlink(config_file)

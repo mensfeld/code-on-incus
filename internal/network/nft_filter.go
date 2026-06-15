@@ -106,9 +106,10 @@ func (f *NftManager) ApplyAllowlist(cfg *config.NetworkConfig, allowedIPs []stri
 		if err := f.addRuleWithMatch(f.containerIP, dest, []string{"meta", "l4proto", "{", "tcp,", "udp", "}"}, "accept"); err != nil {
 			return fmt.Errorf("failed to add allowlist L4 rule for %s: %w", ip, err)
 		}
-		// Allow rate-limited ICMP echo-request so ping/diagnostics and container
-		// health checks work, but ICMP cannot be abused as a high-bandwidth covert
-		// channel. Excess echo and all other ICMP types fall through to the deny.
+		// Allow rate-limited ICMP echo-request: ordinary (low-rate) ping and
+		// health checks work, but ICMP is throttled (~10/s, plus nft's default
+		// burst) so it cannot be a high-bandwidth covert channel. Excess echo and
+		// all other ICMP types fall through to the default deny.
 		if err := f.addRuleWithMatch(f.containerIP, dest, []string{"icmp", "type", "echo-request", "limit", "rate", "10/second"}, "accept"); err != nil {
 			return fmt.Errorf("failed to add allowlist ICMP rule for %s: %w", ip, err)
 		}

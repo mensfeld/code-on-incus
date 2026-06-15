@@ -291,14 +291,25 @@ func TestAllowlistModeL4Filtering_Integration(t *testing.T) {
 	rules := string(output)
 	t.Logf("nft chain:\n%s", rules)
 
-	if !strings.Contains(rules, testCIDR) {
-		t.Errorf("expected allowed CIDR %q in rules:\n%s", testCIDR, rules)
+	// Bind the L4-scoping assertions to the rule lines for THIS test's CIDR
+	// (TEST-NET-3, unique to this test), not the whole shared chain — otherwise a
+	// leftover/concurrent allowlist rule could satisfy the substrings even if this
+	// container's accept rule were emitted unscoped.
+	var cidrRules []string
+	for _, line := range strings.Split(rules, "\n") {
+		if strings.Contains(line, testCIDR) {
+			cidrRules = append(cidrRules, line)
+		}
 	}
-	if !strings.Contains(rules, "l4proto") {
-		t.Errorf("expected TCP/UDP-scoped (l4proto) allow rules in allowlist mode:\n%s", rules)
+	if len(cidrRules) == 0 {
+		t.Fatalf("expected allow rules for %q:\n%s", testCIDR, rules)
 	}
-	if !strings.Contains(rules, "echo-request") {
-		t.Errorf("expected a rate-limited ICMP echo-request rule in allowlist mode:\n%s", rules)
+	cidrJoined := strings.Join(cidrRules, "\n")
+	if !strings.Contains(cidrJoined, "l4proto") {
+		t.Errorf("expected TCP/UDP (l4proto) scoping on the %s allow rule:\n%s", testCIDR, cidrJoined)
+	}
+	if !strings.Contains(cidrJoined, "echo-request") || !strings.Contains(cidrJoined, "10/second") {
+		t.Errorf("expected rate-limited (10/second) ICMP echo-request on the %s allow rule:\n%s", testCIDR, cidrJoined)
 	}
 
 	if err := netMgr.Teardown(context.Background(), containerName); err != nil {
