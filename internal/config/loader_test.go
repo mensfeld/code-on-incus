@@ -415,7 +415,7 @@ mode = "restricted"
 	}
 
 	cfg := GetDefaultConfig()
-	if err := loadProfileDirectories(cfg, configDir); err != nil {
+	if err := loadProfileDirectories(cfg, configDir, true); err != nil {
 		t.Fatalf("loadProfileDirectories() failed: %v", err)
 	}
 	if err := loadConfigFile(cfg, filepath.Join(configDir, "config.toml")); err != nil {
@@ -483,7 +483,7 @@ script = "build.sh"
 	}
 
 	cfg := GetDefaultConfig()
-	if err := loadProfileDirectories(cfg, configDir); err != nil {
+	if err := loadProfileDirectories(cfg, configDir, true); err != nil {
 		t.Fatalf("loadProfileDirectories() failed: %v", err)
 	}
 	if err := loadConfigFile(cfg, filepath.Join(configDir, "config.toml")); err != nil {
@@ -521,7 +521,7 @@ script = "/absolute/path/build.sh"
 	}
 
 	cfg := GetDefaultConfig()
-	if err := loadProfileDirectories(cfg, configDir); err != nil {
+	if err := loadProfileDirectories(cfg, configDir, true); err != nil {
 		t.Fatalf("loadProfileDirectories() failed: %v", err)
 	}
 	if err := loadConfigFile(cfg, filepath.Join(configDir, "config.toml")); err != nil {
@@ -551,7 +551,7 @@ func TestProfileDirectoryNoConfigToml(t *testing.T) {
 	}
 
 	cfg := GetDefaultConfig()
-	if err := loadProfileDirectories(cfg, configDir); err != nil {
+	if err := loadProfileDirectories(cfg, configDir, true); err != nil {
 		t.Fatalf("loadProfileDirectories() failed: %v", err)
 	}
 	if err := loadConfigFile(cfg, filepath.Join(configDir, "config.toml")); err != nil {
@@ -583,7 +583,7 @@ func TestProfileDirectoryWithFileNotDir(t *testing.T) {
 	}
 
 	cfg := GetDefaultConfig()
-	if err := loadProfileDirectories(cfg, configDir); err != nil {
+	if err := loadProfileDirectories(cfg, configDir, true); err != nil {
 		t.Fatalf("loadProfileDirectories() failed: %v", err)
 	}
 	if err := loadConfigFile(cfg, filepath.Join(configDir, "config.toml")); err != nil {
@@ -610,7 +610,7 @@ func TestProfileDirectoryInvalidTomlReturnsError(t *testing.T) {
 	}
 
 	cfg := GetDefaultConfig()
-	err := loadProfileDirectories(cfg, configDir)
+	err := loadProfileDirectories(cfg, configDir, true)
 	if err == nil {
 		t.Fatal("Expected error for invalid TOML, got nil")
 	}
@@ -638,7 +638,7 @@ image = "test-image"
 	}
 
 	cfg := GetDefaultConfig()
-	if err := loadProfileDirectories(cfg, configDir); err != nil {
+	if err := loadProfileDirectories(cfg, configDir, true); err != nil {
 		t.Fatalf("loadProfileDirectories() failed: %v", err)
 	}
 	if err := loadConfigFile(cfg, filepath.Join(configDir, "config.toml")); err != nil {
@@ -840,7 +840,7 @@ readonly = true
 	}
 
 	cfg := GetDefaultConfig()
-	if err := loadProfileDirectories(cfg, configDir); err != nil {
+	if err := loadProfileDirectories(cfg, configDir, true); err != nil {
 		t.Fatalf("loadProfileDirectories() failed: %v", err)
 	}
 
@@ -1122,10 +1122,10 @@ func TestLoadProfileDirectoriesDuplicateNameError(t *testing.T) {
 	}
 
 	cfg := GetDefaultConfig()
-	if err := loadProfileDirectories(cfg, dir1); err != nil {
+	if err := loadProfileDirectories(cfg, dir1, true); err != nil {
 		t.Fatalf("First loadProfileDirectories should succeed, got: %v", err)
 	}
-	err := loadProfileDirectories(cfg, dir2)
+	err := loadProfileDirectories(cfg, dir2, true)
 	if err == nil {
 		t.Fatal("Expected error on second load with conflicting profile name")
 	}
@@ -1158,7 +1158,7 @@ func TestMultipleProfileDirectories(t *testing.T) {
 	}
 
 	cfg := GetDefaultConfig()
-	if err := loadProfileDirectories(cfg, configDir); err != nil {
+	if err := loadProfileDirectories(cfg, configDir, true); err != nil {
 		t.Fatalf("loadProfileDirectories() failed: %v", err)
 	}
 	if err := loadConfigFile(cfg, filepath.Join(configDir, "config.toml")); err != nil {
@@ -1194,7 +1194,7 @@ image = "coi"
 	}
 
 	cfg := GetDefaultConfig()
-	if err := loadProfileDirectories(cfg, configDir); err != nil {
+	if err := loadProfileDirectories(cfg, configDir, true); err != nil {
 		t.Fatalf("loadProfileDirectories() failed: %v", err)
 	}
 
@@ -1228,7 +1228,7 @@ image = "coi"
 	}
 
 	cfg := GetDefaultConfig()
-	if err := loadProfileDirectories(cfg, configDir); err != nil {
+	if err := loadProfileDirectories(cfg, configDir, true); err != nil {
 		t.Fatalf("loadProfileDirectories() failed: %v", err)
 	}
 

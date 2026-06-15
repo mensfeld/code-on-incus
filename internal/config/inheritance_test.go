@@ -391,10 +391,10 @@ MY_VAR = "hello"
 
 	// Load profiles from both levels
 	cfg := GetDefaultConfig()
-	if err := loadProfileDirectories(cfg, userConfigDir); err != nil {
+	if err := loadProfileDirectories(cfg, userConfigDir, true); err != nil {
 		t.Fatalf("loadProfileDirectories(user) failed: %v", err)
 	}
-	if err := loadProfileDirectories(cfg, projConfigDir); err != nil {
+	if err := loadProfileDirectories(cfg, projConfigDir, true); err != nil {
 		t.Fatalf("loadProfileDirectories(project) failed: %v", err)
 	}
 

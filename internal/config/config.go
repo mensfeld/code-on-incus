@@ -230,6 +230,15 @@ type MountEntry struct {
 	Host      string `toml:"host"`      // Host path (supports ~ expansion)
 	Container string `toml:"container"` // Container path (must be absolute)
 	Readonly  bool   `toml:"readonly"`  // Mount read-only (default: false)
+
+	// Untrusted is set programmatically (never from TOML) when this mount was
+	// loaded from an untrusted, project-scope config file. Such mounts that
+	// resolve outside the workspace are gated behind explicit trust (`coi trust`)
+	// to prevent a cloned repo from bind-mounting host paths writable (host RCE).
+	Untrusted bool `toml:"-"`
+	// SourcePath is the absolute path of the config file this mount came from.
+	// Only populated for untrusted mounts; used to look up/record trust.
+	SourcePath string `toml:"-"`
 }
 
 // MountsConfig contains mount-related configuration

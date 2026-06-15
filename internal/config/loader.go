@@ -35,7 +35,7 @@ func Load() (*Config, error) {
 	// into a single namespace; duplicate names across locations are rejected
 	// by loadProfileDirectories so it's always clear which profile is used.
 	for _, dir := range GetProfileParentDirs() {
-		if err := loadProfileDirectories(cfg, dir); err != nil {
+		if err := loadProfileDirectories(cfg, dir, isTrustedProfileDir(dir)); err != nil {
 			return nil, err
 		}
 	}
@@ -138,6 +138,7 @@ func loadConfigFileScoped(cfg *Config, path string, trusted bool) error {
 
 	if !trusted {
 		sanitizeUntrustedConfig(&fileCfg, path)
+		markUntrustedMounts(fileCfg.Mounts.Default, path)
 	}
 
 	configDir := filepath.Dir(path)
@@ -158,7 +159,16 @@ func loadConfigFileScoped(cfg *Config, path string, trusted bool) error {
 // the secure defaults, leaving the stronger built-in/user values in place.
 // Strengthening values are left intact.
 func sanitizeUntrustedConfig(fileCfg *Config, path string) {
-	n := &fileCfg.Network
+	sanitizeUntrustedNetwork(&fileCfg.Network, path)
+}
+
+// sanitizeUntrustedNetwork drops security-downgrading network settings from an
+// untrusted source (a project config or a project-scoped profile). nil is a
+// no-op so it can be called directly on a profile's optional *NetworkConfig.
+func sanitizeUntrustedNetwork(n *NetworkConfig, path string) {
+	if n == nil {
+		return
+	}
 	refuse := func(what string) {
 		fmt.Fprintf(os.Stderr,
 			"WARNING: ignoring security-downgrading %q in project config %s; "+
@@ -182,6 +192,39 @@ func sanitizeUntrustedConfig(fileCfg *Config, path string) {
 	}
 }
 
+// markUntrustedMounts tags mounts from an untrusted source so escaping host
+// mounts are gated behind explicit trust at apply time (internal/session/trust.go).
+// SourcePath is the absolute config path; if Abs fails the raw path is used —
+// the mounts are still marked untrusted so a path-resolution error cannot fail
+// open and admit an ungated host mount.
+func markUntrustedMounts(mounts []MountEntry, path string) {
+	src := path
+	if abs, err := filepath.Abs(path); err == nil {
+		src = abs
+	}
+	for i := range mounts {
+		mounts[i].Untrusted = true
+		mounts[i].SourcePath = src
+	}
+}
+
+// isTrustedProfileDir reports whether a profiles parent directory is
+// user-controlled (trusted): the user's ~/.coi or the directory of an explicit
+// $COI_CONFIG. The project workspace's ./.coi is untrusted — a cloned repo can
+// ship profiles under it.
+func isTrustedProfileDir(dir string) bool {
+	clean := filepath.Clean(dir)
+	if home, err := os.UserHomeDir(); err == nil {
+		if clean == filepath.Clean(filepath.Join(home, ".coi")) {
+			return true
+		}
+	}
+	if env := os.Getenv("COI_CONFIG"); env != "" && clean == filepath.Clean(filepath.Dir(env)) {
+		return true
+	}
+	return false
+}
+
 // loadProfileDirectories scans configDir/profiles/ for subdirectories containing config.toml
 // and adds them to cfg.Profiles. Each subdirectory name becomes the profile name.
 //
@@ -190,7 +233,7 @@ func sanitizeUntrustedConfig(fileCfg *Config, path string) {
 // scan locations (e.g. ~/.coi/profiles/ and ./.coi/profiles/) are merged
 // together, and users are expected to use unique names across locations so
 // it's always clear which profile is being used.
-func loadProfileDirectories(cfg *Config, configDir string) error {
+func loadProfileDirectories(cfg *Config, configDir string, trusted bool) error {
 	profilesDir := filepath.Join(configDir, "profiles")
 	entries, err := os.ReadDir(profilesDir)
 	if err != nil {
@@ -253,6 +296,15 @@ func loadProfileDirectories(cfg *Config, configDir string) error {
 
 		// Tag with source location
 		profileCfg.Source = profileConfigPath
+
+		// A project-scoped profile (under the workspace ./.coi) is untrusted — a
+		// cloned repo can ship it. Apply the same hardening as an untrusted
+		// top-level config: refuse network downgrades and tag its mounts so
+		// escaping host mounts are gated behind `coi trust`.
+		if !trusted {
+			sanitizeUntrustedNetwork(profileCfg.Network, profileConfigPath)
+			markUntrustedMounts(profileCfg.Mounts, profileConfigPath)
+		}
 
 		if cfg.Profiles == nil {
 			cfg.Profiles = make(map[string]ProfileConfig)

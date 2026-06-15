@@ -273,7 +273,7 @@ image = "rust-image"
 `)
 
 	cfg := GetDefaultConfig()
-	err := loadProfileDirectories(cfg, dir)
+	err := loadProfileDirectories(cfg, dir, true)
 	if err == nil {
 		t.Fatal("expected loadProfileDirectories to fail on deprecated profile layout")
 	}

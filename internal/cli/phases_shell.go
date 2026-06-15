@@ -292,6 +292,7 @@ func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.P
 			if err != nil {
 				return nil, fmt.Errorf("invalid mount configuration: %w", err)
 			}
+			mountConfig = gateUntrustedMounts(mountConfig, s.absWorkspace)
 			if err := session.ValidateMounts(mountConfig); err != nil {
 				return nil, fmt.Errorf("mount validation failed: %w", err)
 			}

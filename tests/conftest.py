@@ -13,6 +13,13 @@ tests_dir = os.path.dirname(os.path.abspath(__file__))
 if tests_dir not in sys.path:
     sys.path.insert(0, tests_dir)
 
+# Many integration tests intentionally configure out-of-workspace mounts via a
+# project .coi/config.toml (host paths under pytest's tmp_path). Those are gated
+# behind `coi trust` by default; opt the whole suite into the CI bypass so those
+# tests keep working without per-test trust setup. The dedicated trust test
+# (tests/mount/test_untrusted_mount_trust.py) removes this var to exercise the gate.
+os.environ.setdefault("COI_TRUST_ALL", "1")
+
 
 # Load skip list for temporarily disabled tests
 def pytest_collection_modifyitems(config, items):
