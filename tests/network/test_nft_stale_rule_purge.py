@@ -131,6 +131,31 @@ def stop_run(proc):
         proc.wait()
 
 
+def wait_for_stopped(name, timeout=60):
+    """Wait until the container is no longer Running, force-stopping as a fallback.
+
+    The SIGINT teardown stops the persistent container, but the stop can lag the
+    coi process exit; without this, the next `coi run` can race and fail with
+    'instance already running'.
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        result = subprocess.run(
+            ["incus", "list", name, "--format=json"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            return  # container gone / not listable
+        info = json.loads(result.stdout)
+        if not info or info[0].get("status") != "Running":
+            return
+        time.sleep(1)
+    # Fallback: force-stop so the restart in the next phase is deterministic.
+    subprocess.run(["incus", "stop", name, "--force"], capture_output=True, timeout=60)
+
+
 def test_setup_purges_stale_rules_for_reused_ip(coi_binary, workspace_dir, cleanup_containers):
     if not nft_available():
         pytest.skip("nft not available")
@@ -160,6 +185,9 @@ def test_setup_purges_stale_rules_for_reused_ip(coi_binary, workspace_dir, clean
 
         # SIGINT: teardown removes the rules; persistent mode keeps the container.
         stop_run(proc1)
+        # Ensure it is fully stopped before restarting in phase 3 (avoids the
+        # "instance already running" race when the stop lags the process exit).
+        wait_for_stopped(container_name)
 
         # === Phase 2: inject an orphan rule for that IP ===
         inject = subprocess.run(
