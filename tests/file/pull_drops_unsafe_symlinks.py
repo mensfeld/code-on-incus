@@ -57,9 +57,9 @@ def test_pull_drops_unsafe_symlinks(coi_binary, cleanup_containers, workspace_di
     try:
         # Regular files and directories survive (proves the pull actually ran).
         assert os.path.isfile(os.path.join(local_dir, "real.txt")), "regular file should be pulled"
-        assert os.path.isfile(
-            os.path.join(local_dir, "sub", "nested.txt")
-        ), "nested regular file should be pulled"
+        assert os.path.isfile(os.path.join(local_dir, "sub", "nested.txt")), (
+            "nested regular file should be pulled"
+        )
 
         # Every symlink — safe, absolute, escaping, and chained — must be absent
         # on the host (use lexists: check the link itself, not its target). An
