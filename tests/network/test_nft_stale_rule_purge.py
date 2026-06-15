@@ -8,24 +8,30 @@ container's rules were orphaned (unclean teardown), a leftover blanket ACCEPT
 sitting ahead of a restricted successor's rules would let it bypass its filter.
 
 Reproduced deterministically with a persistent container pinned to a fixed slot:
-1. `coi run --persistent --slot 1 -- sleep` (background); once the restricted
-   rules appear in the chain, capture the container IP and SIGINT the run. Its
-   teardown removes the rules; persistent mode keeps the container (stopped).
+1. `coi run --persistent --slot 1 -- sleep` (background); once it reports network
+   isolation applied, capture the container IP, then SIGINT the run. Its teardown
+   removes the rules; persistent mode keeps the container (stopped).
 2. Inject a uniquely fingerprinted ACCEPT rule for that IP (a TEST-NET-3
    destination a real restricted setup never produces) — an orphan stand-in.
-3. `coi run --persistent --slot 1 -- sleep` again. Same persistent container is
-   restarted (same MAC -> same IP) and network setup re-runs. While the run is
-   live (before its teardown), assert the fingerprint rule is gone — i.e. setup
-   purged coi-<IP> before re-applying the restricted policy.
+3. `coi run --persistent --slot 1 -- sleep` again. The same persistent container
+   restarts (same MAC -> same IP) and network setup re-runs. Wait for it to
+   report network isolation applied (so purge + apply have completed) and, while
+   the run is still live (before its teardown), assert the fingerprint rule is
+   gone — i.e. setup purged coi-<IP> before re-applying the restricted policy.
 
-Inspecting while the run is live is what makes this meaningful: checking after
-teardown could not distinguish "purge worked" from "teardown cleaned up", since
-both remove coi-<IP> rules.
+Gating on the "Network isolation applied" log line (printed after
+SetupForContainer returns) is what makes this meaningful: it pins the check to
+*after* the second setup, and distinguishes a real purge from the injected rule
+merely lingering. Inspecting while the run is live distinguishes purge from
+teardown, since both remove coi-<IP> rules.
 """
 
+import json
+import os
 import pathlib
 import signal
 import subprocess
+import tempfile
 import time
 
 import pytest
@@ -35,6 +41,7 @@ from support.helpers import calculate_container_name
 # RFC 5737 TEST-NET-3 — never a real resolved/allowlisted address, so a clean
 # restricted setup never produces a rule referencing it.
 FINGERPRINT = "203.0.113.7"
+NET_APPLIED_MARKER = "Network isolation applied"
 
 
 def nft_available():
@@ -60,27 +67,26 @@ def chain_text():
     return result.stdout if result.returncode == 0 else ""
 
 
-def container_ips_in_chain():
-    """Container IPs from comment "coi-<IP>" tags (ignores coi-base/coi-boot)."""
-    ips = set()
-    prefix = 'comment "coi-'
-    for line in chain_text().splitlines():
-        if prefix not in line:
-            continue
-        start = line.index(prefix) + len(prefix)
-        end = line.index('"', start)
-        ip = line[start:end]
-        if "." in ip:  # skip "base"; boot rules are keyed by container name
-            ips.add(ip)
-    return ips
+def incus_ip(name):
+    result = subprocess.run(
+        ["incus", "list", name, "--format=json"],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    info = json.loads(result.stdout)
+    if not info:
+        return None
+    addrs = info[0].get("state", {}).get("network", {}).get("eth0", {}).get("addresses", [])
+    for addr in addrs:
+        if addr.get("family") == "inet":
+            return addr["address"]
+    return None
 
 
-def count_rules_for_ip(ip):
-    comment = f'comment "coi-{ip}"'
-    return sum(1 for line in chain_text().splitlines() if comment in line)
-
-
-def start_run(coi_binary, workspace_dir):
+def start_run(coi_binary, workspace_dir, stderr_file):
     """Start a long-lived `coi run` on slot 1 so the container stays up to inspect."""
     return subprocess.Popen(
         [
@@ -92,12 +98,28 @@ def start_run(coi_binary, workspace_dir):
             "--workspace",
             str(workspace_dir),
             "sleep",
-            "180",
+            "300",
         ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=stderr_file,
         text=True,
     )
+
+
+def wait_for_marker(stderr_path, proc, timeout=150):
+    """Poll the run's stderr file until the network-applied marker appears."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            text = pathlib.Path(stderr_path).read_text(errors="replace")
+        except FileNotFoundError:
+            text = ""
+        if NET_APPLIED_MARKER in text:
+            return True
+        if proc.poll() is not None:
+            return NET_APPLIED_MARKER in text
+        time.sleep(1)
+    return False
 
 
 def stop_run(proc):
@@ -118,29 +140,23 @@ def test_setup_purges_stale_rules_for_reused_ip(coi_binary, workspace_dir, clean
     config_dir.mkdir(exist_ok=True)
     (config_dir / "config.toml").write_text('[network]\nmode = "restricted"\n')
 
-    pre_ips = container_ips_in_chain()
+    fd1, err1 = tempfile.mkstemp(suffix=".err")
+    fd2, err2 = tempfile.mkstemp(suffix=".err")
+    os.close(fd1)
+    os.close(fd2)
+    fh1 = open(err1, "w")  # noqa: SIM115 — must stay open for the child's stderr
+    fh2 = open(err2, "w")  # noqa: SIM115
 
     try:
         # === Phase 1: bring the container up, capture its IP ===
-        proc1 = start_run(coi_binary, workspace_dir)
-        container_ip = None
-        deadline = time.time() + 90
-        while time.time() < deadline:
-            new_ips = container_ips_in_chain() - pre_ips
-            if new_ips:
-                container_ip = next(iter(new_ips))
-                break
-            if proc1.poll() is not None:
-                break
-            time.sleep(1)
-
-        if not container_ip:
+        proc1 = start_run(coi_binary, workspace_dir, fh1)
+        if not wait_for_marker(err1, proc1):
             stop_run(proc1)
-            pytest.skip("container IP did not appear in nft chain within 90s")
+            pytest.skip(f"network isolation not applied within timeout; stderr:\n{_read(err1)}")
 
-        assert count_rules_for_ip(container_ip) > 0, (
-            "restricted rules should exist after first setup"
-        )
+        container_ip = incus_ip(container_name)
+        assert container_ip, "should resolve the container IP after first setup"
+        assert FINGERPRINT not in chain_text(), "fingerprint must not pre-exist"
 
         # SIGINT: teardown removes the rules; persistent mode keeps the container.
         stop_run(proc1)
@@ -176,24 +192,22 @@ def test_setup_purges_stale_rules_for_reused_ip(coi_binary, workspace_dir, clean
         assert FINGERPRINT in chain_text(), "precondition: injected stale rule must be present"
 
         # === Phase 3: restart the same persistent container -> setup re-runs ===
-        proc2 = start_run(coi_binary, workspace_dir)
-        reapplied = False
-        deadline = time.time() + 90
-        while time.time() < deadline:
-            # Same persistent container -> same IP -> restricted rules reappear
-            # for container_ip once setup has run (purge + apply).
-            if count_rules_for_ip(container_ip) > 0:
-                reapplied = True
-                break
-            if proc2.poll() is not None:
-                break
-            time.sleep(1)
-
+        proc2 = start_run(coi_binary, workspace_dir, fh2)
         try:
-            assert reapplied, (
-                f"restricted policy should be re-applied for reused IP {container_ip} on restart"
-            )
-            # While the run is live (no teardown yet), the stale rule must be gone.
+            applied = wait_for_marker(err2, proc2)
+            assert applied, f"second run should re-apply network isolation; stderr:\n{_read(err2)}"
+
+            # Confirm the persistent container actually reused the same IP — only
+            # then does the second setup target (and purge) container_ip's rules.
+            reused_ip = incus_ip(container_name)
+            if reused_ip != container_ip:
+                pytest.skip(
+                    f"persistent restart did not reuse the IP (was {container_ip}, "
+                    f"got {reused_ip}); cannot exercise the purge"
+                )
+
+            # Setup has completed (purge + apply) and the run is still live (no
+            # teardown). The stale rule must be gone — proving setup purged it.
             current = chain_text()
             assert FINGERPRINT not in current, (
                 f"stale coi-{container_ip} rule ({FINGERPRINT}) survived restart — "
@@ -202,8 +216,22 @@ def test_setup_purges_stale_rules_for_reused_ip(coi_binary, workspace_dir, clean
         finally:
             stop_run(proc2)
     finally:
+        for fh in (fh1, fh2):
+            try:
+                fh.close()
+            except OSError:
+                pass
         subprocess.run(
             [coi_binary, "container", "delete", container_name, "--force"],
             capture_output=True,
             timeout=60,
         )
+        for p in (err1, err2):
+            pathlib.Path(p).unlink(missing_ok=True)
+
+
+def _read(path):
+    try:
+        return pathlib.Path(path).read_text(errors="replace")
+    except OSError:
+        return ""
