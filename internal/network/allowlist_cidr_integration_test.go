@@ -245,3 +245,75 @@ func TestAllowlistModeIPv4MappedIPv6CIDRRejected_Integration(t *testing.T) {
 		t.Logf("SetupForContainer correctly rejected ::ffff:0:0/96: %v", setupErr)
 	}
 }
+
+// TestAllowlistModeL4Filtering_Integration verifies that allowlist-mode accept
+// rules are scoped to TCP/UDP plus a rate-limited ICMP echo rule, so non-TCP/UDP
+// protocols and ICMP tunneling to allowed hosts fall through to the default deny.
+func TestAllowlistModeL4Filtering_Integration(t *testing.T) {
+	skipUnlessAllowlistReady(t)
+
+	const testCIDR = "203.0.113.0/24" // TEST-NET-3 (RFC 5737)
+
+	containerName := "coi-allowlist-l4-test"
+	mgr := container.NewManager(containerName)
+
+	t.Cleanup(func() {
+		cleanupTestContainer(t, containerName)
+	})
+
+	if exists, _ := mgr.Exists(); exists {
+		_ = mgr.Stop(true)
+		_ = mgr.Delete(true)
+	}
+	if err := mgr.Launch("coi-default", false, ""); err != nil {
+		t.Fatalf("Failed to launch container: %v", err)
+	}
+	time.Sleep(3 * time.Second)
+
+	containerIP, err := GetContainerIP(containerName)
+	if err != nil {
+		t.Fatalf("Failed to get container IP: %v", err)
+	}
+
+	netCfg := &config.NetworkConfig{
+		Mode:           config.NetworkModeAllowlist,
+		AllowedDomains: []string{testCIDR},
+	}
+	netMgr := NewManager(netCfg, logger.NewDiscard())
+	if err := netMgr.SetupForContainer(context.Background(), containerName); err != nil {
+		t.Fatalf("SetupForContainer failed: %v", err)
+	}
+
+	output, err := runNFTCommand("-a", "list", "chain", "ip", "coi", "forward")
+	if err != nil {
+		t.Fatalf("Failed to list nft chain: %v", err)
+	}
+	rules := string(output)
+	t.Logf("nft chain:\n%s", rules)
+
+	// Bind the L4-scoping assertions to the rule lines for THIS test's CIDR
+	// (TEST-NET-3, unique to this test), not the whole shared chain — otherwise a
+	// leftover/concurrent allowlist rule could satisfy the substrings even if this
+	// container's accept rule were emitted unscoped.
+	var cidrRules []string
+	for _, line := range strings.Split(rules, "\n") {
+		if strings.Contains(line, testCIDR) {
+			cidrRules = append(cidrRules, line)
+		}
+	}
+	if len(cidrRules) == 0 {
+		t.Fatalf("expected allow rules for %q:\n%s", testCIDR, rules)
+	}
+	cidrJoined := strings.Join(cidrRules, "\n")
+	if !strings.Contains(cidrJoined, "l4proto") {
+		t.Errorf("expected TCP/UDP (l4proto) scoping on the %s allow rule:\n%s", testCIDR, cidrJoined)
+	}
+	if !strings.Contains(cidrJoined, "echo-request") || !strings.Contains(cidrJoined, "10/second") {
+		t.Errorf("expected rate-limited (10/second) ICMP echo-request on the %s allow rule:\n%s", testCIDR, cidrJoined)
+	}
+
+	if err := netMgr.Teardown(context.Background(), containerName); err != nil {
+		t.Errorf("Teardown failed: %v", err)
+	}
+	verifyTeardownRemovesRules(t, containerIP)
+}

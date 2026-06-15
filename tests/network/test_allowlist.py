@@ -644,3 +644,67 @@ def test_restricted_allows_host_to_access_container_services(
         f"Host should be able to access container service: {result.stderr}"
     )
     assert "HTTP" in result.stdout, f"Expected HTTP response from container: {result.stdout}"
+
+
+def test_allowlist_rules_are_l4_scoped(coi_binary, workspace_dir, cleanup_containers):
+    """Allowlist accept rules must be scoped to TCP/UDP + rate-limited ICMP echo (M4).
+
+    Without L4 scoping, any protocol (raw IP, ICMP flood, GRE, ...) to an allowed
+    IP is permitted — a covert exfil channel allowlist mode is meant to prevent.
+    This asserts the emitted nft rules carry the L4 constraints; legitimate
+    TCP/UDP egress to allowed hosts is covered by
+    test_allowlist_mode_allows_specified_domains.
+    """
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as f:
+        f.write("""
+[network]
+mode = "allowlist"
+allowed_domains = ["1.1.1.1"]
+refresh_interval_minutes = 30
+""")
+        config_file = f.name
+
+    try:
+        env = os.environ.copy()
+        env["COI_CONFIG"] = config_file
+        result = subprocess.run(
+            [coi_binary, "shell", "--workspace", workspace_dir, "--background"],
+            capture_output=True,
+            text=True,
+            timeout=90,
+            env=env,
+        )
+        assert result.returncode == 0, f"Failed to start container: {result.stderr}"
+
+        container_name = None
+        for line in (result.stdout + result.stderr).split("\n"):
+            if "Container: " in line:
+                container_name = line.split("Container: ")[1].strip()
+                break
+        assert container_name, f"Could not find container name: {result.stdout + result.stderr}"
+
+        # Rule application is asynchronous; poll like the other allowlist tests.
+        assert wait_for_firewall_rules(container_name, timeout=30), (
+            f"firewall rules not applied for {container_name}"
+        )
+
+        chain = subprocess.run(
+            ["sudo", "-n", "nft", "list", "chain", "ip", "coi", "forward"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        # Scope the assertions to the rule line(s) for THIS test's allowed IP, not
+        # the whole shared chain — otherwise a leftover/concurrent allowlist rule
+        # could satisfy the substrings even if 1.1.1.1's rule were emitted unscoped.
+        ip_rules = [ln for ln in chain.stdout.splitlines() if "1.1.1.1" in ln]
+        assert ip_rules, f"no allow rules for 1.1.1.1:\n{chain.stdout}"
+        joined = "\n".join(ip_rules)
+        assert "l4proto" in joined, (
+            f"expected TCP/UDP (l4proto) scoping on the 1.1.1.1 rule:\n{joined}"
+        )
+        assert "echo-request" in joined and "10/second" in joined, (
+            f"expected rate-limited (10/second) ICMP echo on the 1.1.1.1 rule:\n{joined}"
+        )
+    finally:
+        os.unlink(config_file)

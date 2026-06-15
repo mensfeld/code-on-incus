@@ -99,8 +99,19 @@ func (f *NftManager) ApplyAllowlist(cfg *config.NetworkConfig, allowedIPs []stri
 		if !strings.Contains(ip, "/") {
 			dest = ip + "/32"
 		}
-		if err := f.addRule(f.containerIP, dest, "accept"); err != nil {
-			return fmt.Errorf("failed to add allowlist rule for %s: %w", ip, err)
+		// Allow TCP/UDP to allowlisted hosts — covers HTTPS, git, npm, DNS over
+		// UDP/53, and QUIC/HTTP3 over UDP/443. Other IP protocols (raw IP, GRE,
+		// SCTP, custom proto numbers) are NOT accepted and fall through to the
+		// default deny, closing non-TCP/UDP exfil channels to allowed hosts.
+		if err := f.addRuleWithMatch(f.containerIP, dest, []string{"meta", "l4proto", "{", "tcp,", "udp", "}"}, "accept"); err != nil {
+			return fmt.Errorf("failed to add allowlist L4 rule for %s: %w", ip, err)
+		}
+		// Allow rate-limited ICMP echo-request: ordinary (low-rate) ping and
+		// health checks work, but ICMP is throttled (~10/s, plus nft's default
+		// burst) so it cannot be a high-bandwidth covert channel. Excess echo and
+		// all other ICMP types fall through to the default deny.
+		if err := f.addRuleWithMatch(f.containerIP, dest, []string{"icmp", "type", "echo-request", "limit", "rate", "10/second"}, "accept"); err != nil {
+			return fmt.Errorf("failed to add allowlist ICMP rule for %s: %w", ip, err)
 		}
 	}
 
@@ -366,6 +377,13 @@ func RemoveIPv6BlockForContainer(containerName string) error {
 // Rules are appended in call order, so callers must invoke addRule from most-specific
 // to least-specific (gateway → allowlist → RFC1918 block → default).
 func (f *NftManager) addRule(source, destination, action string) error {
+	return f.addRuleWithMatch(source, destination, nil, action)
+}
+
+// addRuleWithMatch is addRule with an optional extra match clause inserted
+// between the daddr match and the action (e.g. an L4 protocol / ICMP-type
+// constraint). match is a slice of nft tokens; nil/empty behaves like addRule.
+func (f *NftManager) addRuleWithMatch(source, destination string, match []string, action string) error {
 	args := []string{
 		"add", "rule", "ip", "coi", "forward",
 		"ip", "saddr", source,
@@ -374,6 +392,7 @@ func (f *NftManager) addRule(source, destination, action string) error {
 	if destination != "0.0.0.0/0" {
 		args = append(args, "ip", "daddr", destination)
 	}
+	args = append(args, match...)
 	args = append(args, action, "comment", fmt.Sprintf(`"coi-%s"`, f.containerIP))
 	if _, err := runNFTCommand(args...); err != nil {
 		return fmt.Errorf("nft rule add failed: %w", err)
