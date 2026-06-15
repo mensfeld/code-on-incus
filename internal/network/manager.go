@@ -85,6 +85,7 @@ func (m *Manager) SetupForContainer(ctx context.Context, containerName string) e
 			} else {
 				m.containerIP = containerIP
 				m.nft = NewNftManager(containerIP, "")
+				m.purgeStaleRulesForIP(containerIP)
 				if err := EnsureOpenModeRules(containerIP); err != nil {
 					m.logger.Errorf("Warning: could not add open mode rules: %v", err)
 				}
@@ -134,6 +135,25 @@ func (m *Manager) removeBootBlock(containerName string) {
 	}
 }
 
+// purgeStaleRulesForIP removes any coi-<IP> rules left in the forward chain by a
+// previous container that held this IP. Incus DHCP recycles leases, so a new
+// container frequently reuses a prior one's address; if that prior container did
+// not tear down cleanly (kill -9, OOM, host crash, or a teardown that could not
+// resolve the already-deleted container's IP), its IP-keyed rules are orphaned.
+// Because the forward chain is evaluated first-match-wins, an inherited blanket
+// ACCEPT would let a restricted/allowlist successor bypass its filter entirely.
+// Reset-then-apply: purge the IP's rules before installing this container's
+// policy. Best-effort — deleteNFTRulesByComment retries internally and the rule
+// comment is matched exactly, so coi-base and coi-boot-<name> are never touched.
+func (m *Manager) purgeStaleRulesForIP(containerIP string) {
+	if containerIP == "" {
+		return
+	}
+	if err := DeleteCOIFilterRulesForIP(containerIP); err != nil {
+		m.logger.Errorf("Warning: failed to purge stale nft rules for %s: %v", containerIP, err)
+	}
+}
+
 // setupRestricted configures restricted mode using nftables
 func (m *Manager) setupRestricted(ctx context.Context, containerName string) error {
 	m.logger.Println("Network mode: restricted (blocking local/internal networks)")
@@ -175,6 +195,7 @@ func (m *Manager) setupRestricted(ctx context.Context, containerName string) err
 
 	// Create nft manager
 	m.nft = NewNftManager(containerIP, gatewayIP)
+	m.purgeStaleRulesForIP(containerIP)
 
 	// Apply restricted mode rules
 	if err := m.nft.ApplyRestricted(m.config); err != nil {
@@ -240,6 +261,7 @@ func (m *Manager) setupAllowlist(ctx context.Context, containerName string) erro
 
 	// Create nft manager
 	m.nft = NewNftManager(containerIP, gatewayIP)
+	m.purgeStaleRulesForIP(containerIP)
 
 	// Load IP cache
 	cache, err := m.cacheManager.Load(containerName)
