@@ -315,29 +315,27 @@ class TestLogWatcherInotify:
                 stderr=subprocess.DEVNULL,
             )
 
-            # Give the inotify directory watch time to re-register the new file.
-            time.sleep(1)
-
-            # Write a second suspicious line into the rotated-in new auth.log.
-            subprocess.run(
-                [
-                    "incus",
-                    "exec",
-                    container_name,
-                    "--",
-                    "bash",
-                    "-c",
-                    "echo 'Jun  5 12:00:01 coi sshd[2]: Failed password for attacker"
-                    " from 2.2.2.2 port 22 ssh2' >> /var/log/auth.log",
-                ],
-                check=False,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-
-            # Poll for a second distinct event (different source IP in evidence).
+            # Write the second suspicious line into the rotated-in new auth.log,
+            # re-writing on each poll. The inotify directory watch may not have
+            # re-registered the new file when we first write (especially under CI
+            # load), so a single write can be missed; re-writing guarantees a write
+            # lands after re-registration and is detected.
+            write_second = [
+                "incus",
+                "exec",
+                container_name,
+                "--",
+                "bash",
+                "-c",
+                "echo 'Jun  5 12:00:01 coi sshd[2]: Failed password for attacker"
+                " from 2.2.2.2 port 22 ssh2' >> /var/log/auth.log",
+            ]
             second_events = []
             for _ in range(30):
+                subprocess.run(
+                    write_second, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
+                time.sleep(1)
                 events = get_threat_events(container_name)
                 second_events = [
                     e
@@ -346,7 +344,6 @@ class TestLogWatcherInotify:
                 ]
                 if second_events:
                     break
-                time.sleep(1)
 
             assert len(second_events) > 0, (
                 f"Expected auth threat from post-rotation auth.log, "

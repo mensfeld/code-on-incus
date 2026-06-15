@@ -255,7 +255,10 @@ func TestDefaultProtectedPaths(t *testing.T) {
 	cfg := config.GetDefaultConfig()
 	paths := cfg.Security.ProtectedPaths
 
-	expected := []string{".git/hooks", ".git/config", ".husky", ".vscode", ".coi"}
+	expected := []string{
+		".git/hooks", ".git/config", ".git/config.worktree", ".git/info/attributes",
+		".husky", ".vscode", ".coi",
+	}
 
 	if len(paths) != len(expected) {
 		t.Errorf("Expected %d default paths, got %d", len(expected), len(paths))
@@ -763,5 +766,49 @@ func TestSetupProtectedPath_RejectsTraversal(t *testing.T) {
 	}
 	if errors.Is(err, os.ErrNotExist) {
 		t.Errorf("Expected validation error, got ErrNotExist: %v", err)
+	}
+}
+
+// ExpandGitWorktreeProtectedPaths must add an entry for each existing
+// per-worktree config.worktree file, and leave inputs unchanged when there are
+// no worktrees.
+func TestExpandGitWorktreeProtectedPaths(t *testing.T) {
+	tmp := t.TempDir()
+	in := []string{".git/config"}
+
+	// No .git/worktrees → unchanged.
+	if out := ExpandGitWorktreeProtectedPaths(tmp, in); len(out) != len(in) {
+		t.Fatalf("expected no expansion without .git/worktrees, got %v", out)
+	}
+
+	// A real worktree with a config.worktree file.
+	wtDir := filepath.Join(tmp, ".git", "worktrees", "wt")
+	if err := os.MkdirAll(wtDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wtDir, "config.worktree"), []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Noise that must be ignored: a non-dir entry, and a worktree without config.worktree.
+	if err := os.WriteFile(filepath.Join(tmp, ".git", "worktrees", "stray"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(tmp, ".git", "worktrees", "noconfig"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	out := ExpandGitWorktreeProtectedPaths(tmp, in)
+	want := filepath.Join(".git", "worktrees", "wt", "config.worktree")
+	found := false
+	for _, p := range out {
+		if p == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected %q in expanded paths, got %v", want, out)
+	}
+	if len(out) != len(in)+1 {
+		t.Errorf("expected exactly one added path, got %v", out)
 	}
 }
