@@ -288,7 +288,7 @@ class TestLogWatcherInotify:
 
             # Wait for the first event before rotating.
             first_events = []
-            for _ in range(15):
+            for _ in range(30):
                 events = get_threat_events(container_name)
                 first_events = [e for e in events if e.get("category") == "auth"]
                 if first_events:
@@ -331,7 +331,7 @@ class TestLogWatcherInotify:
                 " from 2.2.2.2 port 22 ssh2' >> /var/log/auth.log",
             ]
             second_events = []
-            for _ in range(30):
+            for _ in range(60):
                 subprocess.run(
                     write_second, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
                 )

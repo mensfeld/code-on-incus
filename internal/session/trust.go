@@ -68,15 +68,28 @@ func saveTrustStore(m map[string]string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	// Write to a temp file in the same dir then rename, so a crash mid-write
+	// can't truncate/corrupt the live store (which would silently drop all
+	// approvals on the next launch).
+	tmp, err := os.CreateTemp(dir, ".trust-*.tmp")
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	return toml.NewEncoder(f).Encode(trustStore{Mounts: m})
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op once the rename succeeds
+	// os.CreateTemp already creates the file 0600 on Unix, which is what we want.
+	if err := toml.NewEncoder(tmp).Encode(trustStore{Mounts: m}); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
 }
 
 // isWithinWorkspace reports whether hostPath is the workspace dir or nested in
@@ -183,11 +196,13 @@ func MountFingerprint(mounts []MountEntry) string {
 // (so the caller can warn). Trusted-scope mounts and in-workspace mounts are
 // never gated.
 func FilterTrustedMounts(mc *MountConfig, workspace string) (*MountConfig, []MountEntry) {
-	if mc == nil {
+	// Check the env bypass before the (symlink-resolving) escape scan so the
+	// COI_TRUST_ALL=1 fast path does no filesystem work.
+	if mc == nil || TrustAllViaEnv() {
 		return mc, nil
 	}
 	escaping := escapingUntrustedMounts(mc.Mounts, workspace)
-	if len(escaping) == 0 || TrustAllViaEnv() {
+	if len(escaping) == 0 {
 		return mc, nil
 	}
 
@@ -271,4 +286,24 @@ func UntrustSources(sources []string) (int, error) {
 // ListTrusted returns the current trust store (path -> fingerprint).
 func ListTrusted() (map[string]string, error) {
 	return loadTrustStore()
+}
+
+// UntrustedSourcePaths returns the distinct source config paths of untrusted
+// mounts in mc — the keys under which trust is recorded. `coi untrust` uses this
+// to revoke by the exact stored key (resolved at load) rather than reconstructing
+// it, which would diverge on symlinked/alias/non-default config paths.
+func UntrustedSourcePaths(mc *MountConfig) []string {
+	if mc == nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, m := range mc.Mounts {
+		if m.Untrusted && m.SourcePath != "" && !seen[m.SourcePath] {
+			seen[m.SourcePath] = true
+			out = append(out, m.SourcePath)
+		}
+	}
+	sort.Strings(out)
+	return out
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 
 	"github.com/mensfeld/code-on-incus/internal/session"
@@ -28,7 +29,9 @@ The approval is pinned to a fingerprint of the approved mounts. If those mounts
 later change (host path, container path, or read-only flag), approval is required
 again. Changing unrelated settings (base image, network mode, ...) does not.
 
-For CI/automation, set ` + session.TrustEnvVar + `=1 to bypass the gate.`,
+For CI/automation, set ` + session.TrustEnvVar + `=1 to bypass the gate. A config
+referenced via $COI_CONFIG is trusted, so don't point $COI_CONFIG at an
+untrusted repo's own .coi/config.toml.`,
 	RunE: app.runTrust,
 }
 
@@ -104,15 +107,41 @@ func (a *App) runUntrust(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("invalid workspace path: %w", err)
 	}
-	src := filepath.Join(absWorkspace, ".coi", "config.toml")
-	n, err := session.UntrustSources([]string{src})
+	if err := a.overlayWorkspaceConfig(absWorkspace); err != nil {
+		return err
+	}
+	mc, err := ParseMountConfig(a.cfg)
+	if err != nil {
+		return fmt.Errorf("invalid mount configuration: %w", err)
+	}
+
+	// Revoke by the exact stored keys (the loaded SourcePaths), plus the
+	// conventional project-config path as a fallback for the case where the
+	// config no longer declares the previously-trusted mounts.
+	sources := session.UntrustedSourcePaths(mc)
+	conventional := filepath.Join(absWorkspace, ".coi", "config.toml")
+	if abs, e := filepath.Abs(conventional); e == nil {
+		conventional = abs
+	}
+	if !slices.Contains(sources, conventional) {
+		sources = append(sources, conventional)
+	}
+
+	n, err := session.UntrustSources(sources)
 	if err != nil {
 		return fmt.Errorf("failed to update trust store: %w", err)
 	}
 	if n == 0 {
-		fmt.Fprintf(os.Stderr, "No trust entry found for %s\n", src)
+		fmt.Fprintln(os.Stderr, "No trust entries found for this workspace.")
 		return nil
 	}
-	fmt.Fprintf(os.Stderr, "Revoked trust for %s\n", src)
+	fmt.Fprintf(os.Stderr, "Revoked %d trust entr%s for this workspace.\n", n, plural(n))
 	return nil
+}
+
+func plural(n int) string {
+	if n == 1 {
+		return "y"
+	}
+	return "ies"
 }
