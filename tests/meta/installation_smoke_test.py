@@ -67,8 +67,13 @@ def meta_container():
     )
 
 
-def exec_in_container(container_name, command, timeout=300, check=True):
-    """Execute command in meta container and return result."""
+def exec_in_container(container_name, command, timeout=300, check=False):
+    """Execute command in meta container and return result.
+
+    check defaults to False so callers' assertions (which include stderr) produce
+    a readable failure message instead of a bare CalledProcessError that hides
+    the in-container output.
+    """
     result = subprocess.run(
         ["incus", "exec", container_name, "--", "bash", "-c", command],
         capture_output=True,
@@ -141,12 +146,21 @@ def test_full_installation_process(meta_container, coi_binary):
         f"Failed to install dependencies after {max_retries} attempts: {last_error}"
     )
 
-    # Phase 2: Install Go
+    # Phase 2: Install Go. Use the latest stable release rather than a pinned
+    # version: the repo's go.mod sets a minimum (currently `go 1.25.0`) and a
+    # too-old pinned Go fails the build deterministically with "go.mod requires
+    # go >= ...". Fetching latest keeps this smoke test correct across future
+    # go.mod bumps; fall back to a known-good version if go.dev is unreachable.
     result = exec_in_container(
         container_name,
         """
         set -e
-        GO_VERSION="1.21.13"
+        GO_VERSION="$(wget -qO- https://go.dev/VERSION?m=text | head -1 | sed 's/^go//')"
+        case "$GO_VERSION" in
+            [0-9]*) : ;;                 # looks like a version
+            *) GO_VERSION="1.25.4" ;;    # fallback if the lookup failed
+        esac
+        echo "Installing Go ${GO_VERSION}"
         wget -q https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz
         rm -rf /usr/local/go
         tar -C /usr/local -xzf go${GO_VERSION}.linux-amd64.tar.gz
@@ -156,7 +170,9 @@ def test_full_installation_process(meta_container, coi_binary):
         """,
         timeout=300,
     )
-    assert result.returncode == 0, f"Failed to install Go: {result.stderr}"
+    assert result.returncode == 0, (
+        f"Failed to install Go: stdout={result.stdout} stderr={result.stderr}"
+    )
     assert "go version" in result.stdout, "Go installation verification failed"
 
     # Phase 3: Clone repository and build coi
@@ -195,7 +211,9 @@ def test_full_installation_process(meta_container, coi_binary):
         """,
         timeout=300,
     )
-    assert result.returncode == 0, f"Failed to build coi: {result.stderr}"
+    assert result.returncode == 0, (
+        f"Failed to build coi: stdout={result.stdout} stderr={result.stderr}"
+    )
     assert "code-on-incus (coi) v" in result.stdout, "coi version check failed"
 
     # Phase 4: Test coi --help
