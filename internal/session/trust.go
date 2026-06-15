@@ -81,11 +81,8 @@ func saveTrustStore(m map[string]string) error {
 	}
 	tmpName := tmp.Name()
 	defer os.Remove(tmpName) // no-op once the rename succeeds
+	// os.CreateTemp already creates the file 0600 on Unix, which is what we want.
 	if err := toml.NewEncoder(tmp).Encode(trustStore{Mounts: m}); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Chmod(0o600); err != nil {
 		tmp.Close()
 		return err
 	}
@@ -199,11 +196,13 @@ func MountFingerprint(mounts []MountEntry) string {
 // (so the caller can warn). Trusted-scope mounts and in-workspace mounts are
 // never gated.
 func FilterTrustedMounts(mc *MountConfig, workspace string) (*MountConfig, []MountEntry) {
-	if mc == nil {
+	// Check the env bypass before the (symlink-resolving) escape scan so the
+	// COI_TRUST_ALL=1 fast path does no filesystem work.
+	if mc == nil || TrustAllViaEnv() {
 		return mc, nil
 	}
 	escaping := escapingUntrustedMounts(mc.Mounts, workspace)
-	if len(escaping) == 0 || TrustAllViaEnv() {
+	if len(escaping) == 0 {
 		return mc, nil
 	}
 

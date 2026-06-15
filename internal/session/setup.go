@@ -335,11 +335,14 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 			}
 		}
 
-		// Defense-in-depth: gate untrusted out-of-workspace mounts at the session
-		// chokepoint, so every caller of session.Setup (not just the CLI) is
-		// covered and no future path can forget the trust check. Idempotent with
-		// the CLI-level gate — on the normal CLI flow the mounts are already
-		// filtered, so this drops nothing and emits no duplicate warning.
+		// Defense-in-depth: gate untrusted out-of-workspace mounts here, where a
+		// freshly-launched container's mounts are applied, so a caller of
+		// session.Setup that didn't pre-filter is still covered. (On container
+		// reuse this block is skipped along with the rest of mount setup — the
+		// mounts persist from creation; the run/shell reuse paths warn that
+		// mount-trust changes need a recreate.) Idempotent with the CLI-level
+		// gate: on the normal CLI flow the mounts are already filtered, so this
+		// drops nothing and emits no duplicate warning.
 		if gated, dropped := FilterTrustedMounts(opts.MountConfig, opts.WorkspacePath); len(dropped) > 0 {
 			for _, m := range dropped {
 				opts.Logger(fmt.Sprintf(
