@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 )
 
-// PiTool implements Tool for pi (https://github.com/mariozechner/pi-coding-agent)
+// PiTool implements Tool for pi (https://pi.dev)
 type PiTool struct {
 	permissionMode  string // "bypass" (default) or "interactive" — pi has no permission gate, so this is largely a no-op
 	contextFilePath string // absolute path to sandbox context file inside container (set by SetAutoContextPath)

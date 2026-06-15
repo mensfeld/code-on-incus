@@ -290,7 +290,7 @@ func mergeToolEnv(env map[string]string, t tool.Tool, workspacePath string) {
 // runPreLaunch executes any pre-launch commands for the tool inside the container.
 // Commands are run via ExecArgs (no shell interpretation) to prevent injection.
 // Returns an error if any pre-launch command fails.
-func runPreLaunch(mgr *container.Manager, t tool.Tool, opts container.ExecCommandOptions) error {
+func runPreLaunch(mgr container.ContainerManager, t tool.Tool, opts container.ExecCommandOptions) error {
 	pl, ok := t.(tool.ToolWithPreLaunch)
 	if !ok {
 		return nil

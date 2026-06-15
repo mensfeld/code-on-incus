@@ -65,7 +65,7 @@ Built by developers, for developers who run AI agents and want to know what thos
 Currently supported:
 - **Claude Code** (default) - Anthropic's official CLI tool
 - **opencode** - Open-source AI coding agent (https://opencode.ai)
-- **pi** - AI coding assistant (https://github.com/mariozechner/pi-coding-agent)
+- **pi** - AI coding assistant (https://pi.dev)
 
 Coming soon:
 - Aider - AI pair programming in your terminal
