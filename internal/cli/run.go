@@ -334,6 +334,17 @@ func (a *App) applyWorkspaceMounts(mgr container.ContainerManager, containerName
 	if wasRestarted {
 		fmt.Fprintf(os.Stderr, "Reusing existing workspace mount...\n")
 		*containerWorkspacePath = mgr.GetWorkspacePath()
+		// A reused persistent container keeps the mount devices set at creation,
+		// so mount-trust changes (coi trust/untrust, edited mounts) don't take
+		// effect here. Surface that rather than silently ignoring a revocation.
+		if mc, perr := ParseMountConfig(a.cfg); perr == nil {
+			if _, dropped := session.FilterTrustedMounts(mc, absWorkspace); len(dropped) > 0 {
+				fmt.Fprintf(os.Stderr,
+					"Warning: %d untrusted mount(s) remain attached from when this persistent "+
+						"container was created; recreate it (coi kill + relaunch) to apply mount-trust changes.\n",
+					len(dropped))
+			}
+		}
 		return nil
 	}
 

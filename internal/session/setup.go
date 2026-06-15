@@ -335,6 +335,20 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 			}
 		}
 
+		// Defense-in-depth: gate untrusted out-of-workspace mounts at the session
+		// chokepoint, so every caller of session.Setup (not just the CLI) is
+		// covered and no future path can forget the trust check. Idempotent with
+		// the CLI-level gate — on the normal CLI flow the mounts are already
+		// filtered, so this drops nothing and emits no duplicate warning.
+		if gated, dropped := FilterTrustedMounts(opts.MountConfig, opts.WorkspacePath); len(dropped) > 0 {
+			for _, m := range dropped {
+				opts.Logger(fmt.Sprintf(
+					"Warning: ignoring untrusted mount from %s: %s -> %s (resolves outside the workspace; run 'coi trust' or set %s=1)",
+					m.SourcePath, m.HostPath, m.ContainerPath, TrustEnvVar))
+			}
+			opts.MountConfig = gated
+		}
+
 		// Mount all configured directories
 		if err := setupMounts(result.Manager, opts.MountConfig, useShift, opts.Logger); err != nil {
 			return nil, err

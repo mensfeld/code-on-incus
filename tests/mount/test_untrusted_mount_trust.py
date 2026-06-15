@@ -125,6 +125,65 @@ def test_coi_config_scope_mount_not_gated(coi_binary, workspace_dir, cleanup_con
     )
 
 
+def test_trust_list_and_untrust_roundtrip(coi_binary, workspace_dir, cleanup_containers, tmp_path):
+    """trust -> mount present -> `trust --list` shows it -> untrust -> gated again."""
+    host = make_host_dir(tmp_path)
+    write_config(workspace_dir, host)
+    env = env_gate_active()
+
+    t = subprocess.run(
+        [coi_binary, "trust"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        cwd=workspace_dir,
+        env=env,
+    )
+    assert t.returncode == 0, f"trust failed: {t.stderr}"
+
+    r = probe(coi_binary, workspace_dir, env)
+    assert SENTINEL in r.stdout, "mount should be present after trust"
+
+    listing = subprocess.run(
+        [coi_binary, "trust", "--list"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        cwd=workspace_dir,
+        env=env,
+    )
+    assert listing.returncode == 0
+    assert "config.toml" in listing.stdout, f"trust --list should show the entry: {listing.stdout}"
+
+    u = subprocess.run(
+        [coi_binary, "untrust"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        cwd=workspace_dir,
+        env=env,
+    )
+    assert u.returncode == 0, f"untrust failed: {u.stderr}"
+    assert "revoked" in (u.stdout + u.stderr).lower(), (
+        f"unexpected untrust output: {u.stdout}{u.stderr}"
+    )
+
+    r = probe(coi_binary, workspace_dir, env)
+    assert SENTINEL not in r.stdout, "mount must be gated again after untrust"
+    assert "ignoring untrusted mount" in r.stderr.lower()
+
+
+def test_readonly_escaping_mount_gated(coi_binary, workspace_dir, cleanup_containers, tmp_path):
+    """A read-only out-of-workspace mount still exfiltrates host data, so it is gated too."""
+    host = make_host_dir(tmp_path)
+    write_config(workspace_dir, host, readonly=True)
+    env = env_gate_active()
+
+    r = probe(coi_binary, workspace_dir, env)
+    assert SENTINEL not in r.stdout, f"read-only escaping mount should be gated: {r.stdout}"
+    assert "ignoring untrusted mount" in r.stderr.lower(), f"expected gate warning: {r.stderr}"
+
+
 def test_project_scoped_profile_mount_gated(
     coi_binary, workspace_dir, cleanup_containers, tmp_path
 ):

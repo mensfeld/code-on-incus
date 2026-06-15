@@ -176,6 +176,38 @@ func TestFilterTrustedMounts_SymlinkEscapeGated(t *testing.T) {
 	}
 }
 
+func TestFilterTrustedMounts_GatesReadonlyEscaping(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv(TrustEnvVar, "")
+	ws := t.TempDir()
+	outside := t.TempDir()
+	// A READ-ONLY escaping untrusted mount still exfiltrates host data, so it
+	// must be gated too.
+	mc := &MountConfig{Mounts: []MountEntry{
+		tm(outside, "/c", true, true, filepath.Join(ws, ".coi", "config.toml")),
+	}}
+	if _, dropped := FilterTrustedMounts(mc, ws); len(dropped) != 1 {
+		t.Fatalf("read-only escaping untrusted mount must be gated, dropped=%d", len(dropped))
+	}
+}
+
+func TestUntrustedSourcePaths(t *testing.T) {
+	ws := t.TempDir()
+	srcA := filepath.Join(ws, ".coi", "config.toml")
+	srcB := filepath.Join(ws, ".coi", "profiles", "dev", "config.toml")
+	mc := &MountConfig{Mounts: []MountEntry{
+		tm("/x", "/cx", false, true, srcA),
+		tm("/y", "/cy", false, true, srcA), // dup source
+		tm("/z", "/cz", false, true, srcB),
+		tm("/w", "/cw", false, false, ""), // trusted scope -> excluded
+	}}
+	got := UntrustedSourcePaths(mc)
+	want := []string{srcA, srcB} // sorted: ".coi/config.toml" < ".coi/profiles/..."
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("UntrustedSourcePaths = %v, want sorted distinct %v", got, want)
+	}
+}
+
 func TestFilterTrustedMounts_NoEscapingIsNoop(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv(TrustEnvVar, "")
