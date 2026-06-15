@@ -165,7 +165,11 @@ mode = "restricted"
         )
 
         # === Phase 2: stop (keep for reuse) and inject an orphan rule ===
-        subprocess.run(["incus", "stop", container_name], capture_output=True, timeout=60)
+        # Force-stop: a graceful stop can hang on the backgrounded tmux/tool
+        # session. We only need the container stopped-and-kept for reuse.
+        subprocess.run(
+            ["incus", "stop", container_name, "--force"], capture_output=True, timeout=90
+        )
         assert wait_for(lambda: not container_running(container_name), timeout=60), (
             "container should stop"
         )
