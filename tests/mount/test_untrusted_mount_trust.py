@@ -123,3 +123,42 @@ def test_coi_config_scope_mount_not_gated(coi_binary, workspace_dir, cleanup_con
         f"mount from $COI_CONFIG (trusted scope) must not be gated. "
         f"stdout: {r.stdout} stderr: {r.stderr}"
     )
+
+
+def test_project_scoped_profile_mount_gated(
+    coi_binary, workspace_dir, cleanup_containers, tmp_path
+):
+    """An escaping mount declared by a project-scoped PROFILE (./.coi/profiles/dev)
+    is untrusted too — it must be gated, not silently mounted (the profile bypass
+    of the H4 vector)."""
+    host = make_host_dir(tmp_path)
+    prof = pathlib.Path(workspace_dir) / ".coi" / "profiles" / "dev"
+    prof.mkdir(parents=True)
+    (prof / "config.toml").write_text(
+        f'[[mounts]]\nhost = "{host}"\ncontainer = "{CONTAINER_PATH}"\nreadonly = false\n'
+    )
+    env = env_gate_active()
+
+    r = subprocess.run(
+        [
+            coi_binary,
+            "run",
+            "--profile",
+            "dev",
+            "--",
+            "sh",
+            "-c",
+            f"cat {CONTAINER_PATH}/sentinel.txt 2>/dev/null || true",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        cwd=workspace_dir,
+        env=env,
+    )
+    assert SENTINEL not in r.stdout, (
+        f"profile-declared escaping mount should be gated. stdout: {r.stdout} stderr: {r.stderr}"
+    )
+    assert "ignoring untrusted mount" in r.stderr.lower(), (
+        f"expected the gate warning for the profile mount. stderr: {r.stderr}"
+    )

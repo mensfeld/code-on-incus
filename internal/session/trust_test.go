@@ -1,6 +1,7 @@
 package session
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -119,6 +120,59 @@ func TestUntrustSources(t *testing.T) {
 	}
 	if _, dropped := FilterTrustedMounts(mc, ws); len(dropped) != 1 {
 		t.Fatal("should be gated again after untrust")
+	}
+}
+
+func TestHostEscapesWorkspace_Symlinks(t *testing.T) {
+	ws := t.TempDir()
+	outside := t.TempDir()
+
+	// In-workspace symlink pointing outside the workspace.
+	if err := os.Symlink(outside, filepath.Join(ws, "link")); err != nil {
+		t.Fatal(err)
+	}
+	if !hostEscapesWorkspace(ws, filepath.Join(ws, "link")) {
+		t.Error("in-workspace symlink to an outside dir must be detected as escaping")
+	}
+	if !hostEscapesWorkspace(ws, filepath.Join(ws, "link", "sub")) {
+		t.Error("a path through an in-workspace symlink must be escaping")
+	}
+
+	// Dangling symlink whose target is outside (target does not exist).
+	if err := os.Symlink(filepath.Join(outside, "missing"), filepath.Join(ws, "dangling")); err != nil {
+		t.Fatal(err)
+	}
+	if !hostEscapesWorkspace(ws, filepath.Join(ws, "dangling")) {
+		t.Error("dangling symlink pointing outside must be escaping")
+	}
+
+	// Genuine in-workspace paths (existing and not-yet-existing) are not escaping.
+	realDir := filepath.Join(ws, "realdir")
+	if err := os.Mkdir(realDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if hostEscapesWorkspace(ws, realDir) {
+		t.Error("a real in-workspace dir must not be escaping")
+	}
+	if hostEscapesWorkspace(ws, filepath.Join(ws, "notyet")) {
+		t.Error("a non-existent in-workspace path must not be escaping")
+	}
+}
+
+func TestFilterTrustedMounts_SymlinkEscapeGated(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv(TrustEnvVar, "")
+	ws := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(ws, "link")); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(ws, ".coi", "config.toml")
+	// HostPath is lexically inside the workspace but resolves outside via symlink.
+	mc := &MountConfig{Mounts: []MountEntry{tm(filepath.Join(ws, "link"), "/c", false, true, src)}}
+	_, dropped := FilterTrustedMounts(mc, ws)
+	if len(dropped) != 1 {
+		t.Fatalf("symlink-escaping untrusted mount must be gated, dropped=%d", len(dropped))
 	}
 }
 
