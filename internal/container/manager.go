@@ -366,16 +366,15 @@ func (m *Manager) PullDirectory(containerPath, localPath string) error {
 	// Move the pulled directory to the desired location
 	pulledDir := filepath.Join(tempDir, entries[0].Name())
 
-	// The pulled tree is container-controlled (untrusted). Drop any symlink whose
-	// target escapes the pulled tree (absolute paths, or `..` traversal beyond
-	// root) BEFORE materializing it on the host — otherwise a container-planted
-	// symlink such as `x -> /home/user/.ssh/authorized_keys` would be recreated
-	// on the host, a symlink-extraction (Zip-Slip-class) host-tampering vector.
-	// Done here so it covers both the os.Rename path and the copyDirRecursive
-	// cross-device fallback. Intra-tree relative links are preserved.
-	if err := sanitizePulledSymlinks(pulledDir); err != nil {
-		return fmt.Errorf("failed to sanitize pulled symlinks: %w", err)
-	}
+	// The pulled tree is container-controlled (untrusted). Drop every symlink and
+	// special file (FIFO/socket/device) BEFORE materializing it on the host —
+	// otherwise a container-planted symlink such as
+	// `x -> /home/user/.ssh/authorized_keys` would be recreated on the host, a
+	// symlink-extraction (Zip-Slip-class) host-tampering vector that per-link
+	// target checks cannot fully close (chained symlinks defeat them). Best-effort
+	// and done here so it covers both the os.Rename path and the copyDirRecursive
+	// cross-device fallback.
+	sanitizePulledTree(pulledDir)
 
 	if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
 		return err
@@ -460,77 +459,47 @@ func copyDirRecursive(src, dst string) error {
 	return nil
 }
 
-// sanitizePulledSymlinks removes any symlink under root whose target escapes
-// root — an absolute path, or `..` traversal beyond root. Content pulled from a
-// container is untrusted: a symlink pointing at a host path recreated on the
-// host is a symlink-extraction (Zip-Slip-class) host-tampering vector. Symlinks
-// that resolve within the pulled tree are preserved (they remain valid after the
-// tree is moved to its final location).
-func sanitizePulledSymlinks(root string) error {
-	cleanRoot := filepath.Clean(root)
-
-	// Collect unsafe symlinks during the walk and remove them afterwards — never
-	// mutate the filesystem inside the WalkDir callback (avoids walk/remove races
-	// on a racing tree, gosec G122).
+// sanitizePulledTree drops every entry under root that is not a regular file or
+// a directory — i.e. symlinks, FIFOs, sockets, and device nodes.
+//
+// Content pulled from a container is untrusted. Recreating a container symlink
+// on the host is a symlink-extraction (Zip-Slip-class) host-tampering vector,
+// and per-link target validation is defeatable by chained symlinks (a symlink to
+// the parent plus a link traversing through it both pass a lexical "within root"
+// check yet escape at runtime). Dropping ALL symlinks — and special files, which
+// can hang or confuse the host-side copy — removes the whole class. Only regular
+// files and directories, which cannot point outside the tree, are kept.
+//
+// Best-effort: walk and remove errors are logged, never fatal, so a transient
+// cleanup error cannot turn an otherwise-fine session-state save into a hard
+// failure. Removal happens after the walk (no fs mutation inside the WalkDir
+// callback; gosec G122).
+func sanitizePulledTree(root string) {
 	var toRemove []string
-	err := filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
+	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
-			return walkErr
-		}
-		if d.Type()&os.ModeSymlink == 0 {
+			fmt.Fprintf(os.Stderr, "Warning: skipping unwalkable pulled entry %s: %v\n", path, walkErr)
 			return nil
 		}
-
-		target, rlErr := os.Readlink(path)
-		if rlErr != nil {
-			// Unreadable symlink — drop it to be safe.
-			fmt.Fprintf(os.Stderr, "Warning: dropping unreadable symlink from pulled content: %s\n", path)
-			toRemove = append(toRemove, path)
+		if d.IsDir() || d.Type().IsRegular() {
 			return nil
 		}
-
-		resolved := target
-		if !filepath.IsAbs(resolved) {
-			resolved = filepath.Join(filepath.Dir(path), resolved)
-		}
-		resolved = filepath.Clean(resolved)
-
-		if !isWithinDir(cleanRoot, resolved) {
-			fmt.Fprintf(os.Stderr,
-				"Warning: dropping unsafe symlink from pulled content: %s -> %s (escapes destination)\n",
-				path, target)
-			toRemove = append(toRemove, path)
-		}
+		// symlink / FIFO / socket / device / other irregular type — drop it.
+		fmt.Fprintf(os.Stderr, "Warning: dropping non-regular entry from pulled content: %s\n", path)
+		toRemove = append(toRemove, path)
 		return nil
 	})
-	if err != nil {
-		return err
-	}
 
 	for _, p := range toRemove {
-		if rmErr := os.Remove(p); rmErr != nil && !os.IsNotExist(rmErr) {
-			return rmErr
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "Warning: failed to remove pulled entry %s: %v\n", p, err)
 		}
 	}
-	return nil
 }
 
-// isWithinDir reports whether absPath is dir itself or nested inside it. Both
-// arguments must be absolute and cleaned.
-func isWithinDir(dir, absPath string) bool {
-	if absPath == dir {
-		return true
-	}
-	rel, err := filepath.Rel(dir, absPath)
-	if err != nil {
-		return false
-	}
-	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
-}
-
-// copySymlink copies a symbolic link from src to dst. Callers must ensure the
-// source tree has been sanitized (see sanitizePulledSymlinks) when it originates
-// from an untrusted source such as a container.
+// copySymlink copies a symbolic link from src to dst. Untrusted (container)
+// trees are passed through sanitizePulledTree first, which strips all symlinks,
+// so this is reached only for trusted/internal copies.
 func copySymlink(src, dst string) error {
 	link, err := os.Readlink(src)
 	if err != nil {

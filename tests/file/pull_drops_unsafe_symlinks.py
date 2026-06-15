@@ -1,11 +1,11 @@
 """
-Test that `coi file pull` does not recreate container symlinks whose target
-escapes the pulled tree on the host.
+Test that `coi file pull` does not recreate container symlinks on the host.
 
 Container content is untrusted: a symlink like `x -> /home/user/.ssh/...` or
 `../../../../etc/shadow`, if recreated verbatim on the host, is a symlink-
-extraction (Zip-Slip-class) host-tampering vector. Such symlinks must be dropped;
-intra-tree relative links and regular files must survive.
+extraction (Zip-Slip-class) host-tampering vector. Per-link target validation is
+defeatable by chained symlinks, so ALL symlinks (and special files) are dropped
+from pulled content; only regular files and directories survive.
 """
 
 import os
@@ -30,9 +30,12 @@ def test_pull_drops_unsafe_symlinks(coi_binary, cleanup_containers, workspace_di
     setup = (
         "mkdir -p /tmp/symtest/sub && "
         "echo content > /tmp/symtest/real.txt && "
-        "ln -s real.txt /tmp/symtest/safe-link && "  # safe intra-tree link
+        "echo nested > /tmp/symtest/sub/nested.txt && "
+        "ln -s real.txt /tmp/symtest/safe-link && "  # intra-tree link (also dropped)
         "ln -s /etc/passwd /tmp/symtest/abs-evil && "  # unsafe: absolute host path
-        "ln -s ../../../../etc/shadow /tmp/symtest/sub/esc-evil"  # unsafe: escaping traversal
+        "ln -s ../../../../etc/shadow /tmp/symtest/sub/esc-evil && "  # unsafe: escaping traversal
+        "ln -s . /tmp/symtest/b && "  # chained-bypass component
+        "ln -s b/../../../../etc/hosts /tmp/symtest/chain-evil"  # chained: escapes at runtime
     )
     result = subprocess.run(
         [coi_binary, "container", "exec", container_name, "--", "sh", "-c", setup],
@@ -52,22 +55,27 @@ def test_pull_drops_unsafe_symlinks(coi_binary, cleanup_containers, workspace_di
     assert result.returncode == 0, f"Pull should succeed. stderr: {result.stderr}"
 
     try:
-        # Safe content survives.
-        assert os.path.exists(os.path.join(local_dir, "real.txt")), "regular file should be pulled"
-        assert os.path.islink(os.path.join(local_dir, "safe-link")), (
-            "safe intra-tree symlink should be preserved"
-        )
+        # Regular files and directories survive (proves the pull actually ran).
+        assert os.path.isfile(os.path.join(local_dir, "real.txt")), "regular file should be pulled"
+        assert os.path.isfile(
+            os.path.join(local_dir, "sub", "nested.txt")
+        ), "nested regular file should be pulled"
 
-        # Unsafe symlinks must NOT be recreated on the host (use lexists: check the
-        # link itself, not its target).
-        abs_evil = os.path.join(local_dir, "abs-evil")
-        esc_evil = os.path.join(local_dir, "sub", "esc-evil")
-        assert not os.path.lexists(abs_evil), (
-            f"absolute-target symlink should have been dropped, but exists at {abs_evil}"
-        )
-        assert not os.path.lexists(esc_evil), (
-            f"escaping-traversal symlink should have been dropped, but exists at {esc_evil}"
-        )
+        # Every symlink — safe, absolute, escaping, and chained — must be absent
+        # on the host (use lexists: check the link itself, not its target). An
+        # absolute symlink that incus dereferenced would land as a regular file of
+        # the same name, so this also guards against silent dereferencing.
+        for name in [
+            "safe-link",
+            "abs-evil",
+            "b",
+            "chain-evil",
+            os.path.join("sub", "esc-evil"),
+        ]:
+            path = os.path.join(local_dir, name)
+            assert not os.path.lexists(path), (
+                f"symlink {name} should have been dropped, but exists at {path}"
+            )
     finally:
         subprocess.run(
             [coi_binary, "container", "delete", container_name, "--force"],
