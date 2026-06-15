@@ -221,7 +221,7 @@ coi build --profile my-image
 **What's included in the `coi-default` image:**
 - Ubuntu 22.04 base with Docker (full Docker-in-container support)
 - **mise** (polyglot runtime manager) — Python 3, pnpm, TypeScript, tsx pre-installed; add more with `mise use go@latest`, `mise use ruby@3`, etc.
-- Node.js 20 LTS (system, for Claude CLI) + npm
+- Node.js 22 LTS (system, for Claude CLI) + npm
 - Claude Code CLI (default AI tool) + GitHub CLI (`gh`)
 - tmux, git, curl, build-essential, and common build tools
 - Modern CLI utilities: fd-find, bat, tree

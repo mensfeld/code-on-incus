@@ -96,7 +96,7 @@ install_base_dependencies() {
 install_nodejs() {
     log "Installing Node.js LTS..."
 
-    curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
     apt-get install -y -qq nodejs
 
     log "Node.js $(node --version) installed"
