@@ -468,7 +468,12 @@ func copyDirRecursive(src, dst string) error {
 // tree is moved to its final location).
 func sanitizePulledSymlinks(root string) error {
 	cleanRoot := filepath.Clean(root)
-	return filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
+
+	// Collect unsafe symlinks during the walk and remove them afterwards — never
+	// mutate the filesystem inside the WalkDir callback (avoids walk/remove races
+	// on a racing tree, gosec G122).
+	var toRemove []string
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -476,11 +481,12 @@ func sanitizePulledSymlinks(root string) error {
 			return nil
 		}
 
-		target, err := os.Readlink(path)
-		if err != nil {
+		target, rlErr := os.Readlink(path)
+		if rlErr != nil {
 			// Unreadable symlink — drop it to be safe.
 			fmt.Fprintf(os.Stderr, "Warning: dropping unreadable symlink from pulled content: %s\n", path)
-			return os.Remove(path)
+			toRemove = append(toRemove, path)
+			return nil
 		}
 
 		resolved := target
@@ -493,10 +499,20 @@ func sanitizePulledSymlinks(root string) error {
 			fmt.Fprintf(os.Stderr,
 				"Warning: dropping unsafe symlink from pulled content: %s -> %s (escapes destination)\n",
 				path, target)
-			return os.Remove(path)
+			toRemove = append(toRemove, path)
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+
+	for _, p := range toRemove {
+		if rmErr := os.Remove(p); rmErr != nil && !os.IsNotExist(rmErr) {
+			return rmErr
+		}
+	}
+	return nil
 }
 
 // isWithinDir reports whether absPath is dir itself or nested inside it. Both
