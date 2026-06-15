@@ -52,7 +52,16 @@ def get_container_ip(coi_binary, container_name):
 
 
 def get_nft_rules_for_ip(ip):
-    """Get nft rules from the ip coi forward chain that reference a specific IP."""
+    """Get nft rules in the ip coi forward chain tagged for a specific container IP.
+
+    Matches the full ``comment "coi-<ip>"`` token (including the closing quote)
+    rather than a bare substring of the IP. A substring test is wrong here: every
+    rule for container 10.0.0.2 contains "10.0.0.2", but so does every rule for
+    10.0.0.20 / 10.0.0.25 — so `ip in line` reports a phantom orphan for .2
+    whenever a sibling container with a prefix-overlapping IP still has rules,
+    which is exactly the intermittent failure this test hit. The container's own
+    rules all carry the `coi-<ip>` comment, so the exact token is precise.
+    """
     try:
         result = subprocess.run(
             ["sudo", "-n", "nft", "-a", "list", "chain", "ip", "coi", "forward"],
@@ -63,12 +72,8 @@ def get_nft_rules_for_ip(ip):
         if result.returncode != 0:
             return []
 
-        rules = []
-        for line in result.stdout.strip().split("\n"):
-            line = line.strip()
-            if line and ip in line:
-                rules.append(line)
-        return rules
+        marker = f'comment "coi-{ip}"'
+        return [line.strip() for line in result.stdout.splitlines() if marker in line]
     except Exception:
         return []
 
