@@ -2566,10 +2566,18 @@ class TestAuditLogValidation:
                 f"Invalid threat level: {event['level']}"
             )
 
-            # Verify action is valid
-            assert event["action"] in ["logged", "alerted", "paused", "killed", "pending"], (
-                f"Invalid action: {event['action']}"
-            )
+            # Verify action is valid. "deduplicated" is emitted when the monitor
+            # collapses repeated detections of the same threat (load-dependent, so
+            # it only appears intermittently) — it's a valid action, see the
+            # allowlist in test_threat_deduplication.
+            assert event["action"] in [
+                "logged",
+                "alerted",
+                "paused",
+                "killed",
+                "pending",
+                "deduplicated",
+            ], f"Invalid action: {event['action']}"
 
             # Verify evidence field exists and has content
             assert "evidence" in event, "Missing evidence field"
