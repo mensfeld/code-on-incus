@@ -32,6 +32,8 @@
 
 ### Bug Fixes
 
+- **`coi update` on a dev build no longer fails (or hides its guidance) when the GitHub API is unavailable** — a development build cannot be version-compared, but `update` queried the GitHub releases API *before* printing the dev-build notice, so a transient API error (rate-limit/403/network) returned `failed to check for updates` and suppressed the "use `--force`" guidance entirely. A dev build that isn't `--force`/`--check` now warns and refuses *before* any network call (the API result is irrelevant in that case), so the behavior is deterministic and offline-safe. The `--force`/`--check` dev paths are unchanged.
+
 - **`DirExists` and `FileExists` now handle paths with spaces or shell metacharacters** — both methods previously built shell test expressions via `fmt.Sprintf("[ -d %s ]", path)` and executed them through `bash -c`, which split paths containing spaces into multiple tokens causing the check to always return false. They now use `ExecArgs([]string{"test", "-d/-f", path})` so the path is passed verbatim without shell interpretation.
 
 - **Bridge iptables rules are no longer removed when `incus list` output cannot be parsed** — `Teardown` previously defaulted `hasOtherContainers` to `false` (remove rules) and only set it to `true` inside a successful JSON parse. A malformed or empty `incus list` response silently triggered rule removal, potentially breaking other running containers. The default is now `true` (keep rules); rules are only removed when parsing succeeds and confirms no other containers are running. The decision logic is extracted into `otherContainersRunning` for unit-testability.
