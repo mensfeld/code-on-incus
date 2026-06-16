@@ -56,7 +56,7 @@ func TestGetProfileSchema_AllDefsPresent(t *testing.T) {
 		"BuildConfig", "ContainerConfig",
 		"CPULimits", "MemoryLimits", "DiskLimits", "RuntimeLimits", "LimitsConfig",
 		"ClaudeToolConfig", "ToolConfig",
-		"MountEntry",
+		"MountEntry", "SocketEntry",
 		"NetworkLoggingConfig", "NetworkConfig",
 		"PathsConfig", "IncusConfig",
 		"GitConfig", "SSHConfig",
@@ -125,6 +125,63 @@ func TestGetProfileSchema_MountEntryRequiresHostAndContainer(t *testing.T) {
 		if !required[field] {
 			t.Errorf("MountEntry.required is missing %q in bundled schema", field)
 		}
+	}
+}
+
+func TestGetProfileSchema_SocketEntryRequiresHostAndContainer(t *testing.T) {
+	b := mustGetSchema(t)
+	var doc struct {
+		Defs struct {
+			SocketEntry struct {
+				Required             []string `json:"required"`
+				AdditionalProperties bool     `json:"additionalProperties"`
+				Properties           struct {
+					Env map[string]any `json:"env"`
+				} `json:"properties"`
+			} `json:"SocketEntry"`
+		} `json:"$defs"`
+	}
+	if err := json.Unmarshal(b, &doc); err != nil {
+		t.Fatalf("failed to parse schema: %v", err)
+	}
+	required := make(map[string]bool)
+	for _, f := range doc.Defs.SocketEntry.Required {
+		required[f] = true
+	}
+	for _, field := range []string{"host", "container"} {
+		if !required[field] {
+			t.Errorf("SocketEntry.required is missing %q in bundled schema", field)
+		}
+	}
+	if doc.Defs.SocketEntry.AdditionalProperties {
+		t.Error("SocketEntry should set additionalProperties:false to reject unknown keys")
+	}
+	if doc.Defs.SocketEntry.Properties.Env == nil {
+		t.Error("SocketEntry should declare an optional 'env' property")
+	}
+}
+
+// The profile schema must wire a top-level `sockets` array referencing SocketEntry.
+func TestGetProfileSchema_SocketsArrayWired(t *testing.T) {
+	b := mustGetSchema(t)
+	var doc struct {
+		Properties struct {
+			Sockets struct {
+				Type  string `json:"type"`
+				Items struct {
+					Ref string `json:"$ref"`
+				} `json:"items"`
+			} `json:"sockets"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(b, &doc); err != nil {
+		t.Fatalf("failed to parse schema: %v", err)
+	}
+	if doc.Properties.Sockets.Type != "array" {
+		t.Errorf("profile schema 'sockets' should be an array, got %q", doc.Properties.Sockets.Type)
+	}
+	if doc.Properties.Sockets.Items.Ref != "#/$defs/SocketEntry" {
+		t.Errorf("profile schema 'sockets' items should $ref SocketEntry, got %q", doc.Properties.Sockets.Items.Ref)
 	}
 }
 

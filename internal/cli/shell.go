@@ -213,9 +213,10 @@ func (a *App) buildContainerEnv(result *session.SetupResult) (map[string]string,
 		"IS_SANDBOX": "1",
 	}
 
-	// Set SSH_AUTH_SOCK if SSH agent forwarding was configured
-	if result.SSHAgentSocketPath != "" {
-		containerEnv["SSH_AUTH_SOCK"] = result.SSHAgentSocketPath
+	// Set env vars for every forwarded socket (SSH_AUTH_SOCK for the SSH agent,
+	// plus any configured [[sockets]] entries with an `env` name).
+	for env, path := range result.SocketEnv {
+		containerEnv[env] = path
 	}
 
 	// Set TZ if timezone was configured
