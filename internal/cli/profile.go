@@ -461,9 +461,18 @@ var profileCreateCmd = &cobra.Command{
 By default, creates in .coi/profiles/ if inside a project with .coi/ directory,
 otherwise creates in ~/.coi/profiles/. Use --user or --project to override.
 
+The special name "default" scaffolds the MAIN config (the file that backs the
+built-in default profile) instead of a profile directory: ~/.coi/config.toml,
+or ./.coi/config.toml with --project. It writes a documented starter only when
+no config exists there (it never overwrites), and ignores --image/--persistent/
+--inherits. COI runs fine without any config — this just gives you a commented
+starting point to customize.
+
 Examples:
   coi profile create rust-dev --image coi-rust --inherits default
-  coi profile create my-profile --persistent --project`,
+  coi profile create my-profile --persistent --project
+  coi profile create default              # scaffold ~/.coi/config.toml
+  coi profile create default --project    # scaffold ./.coi/config.toml`,
 	Args: cobra.ExactArgs(1),
 	RunE: app.profileCreateRunE,
 }
@@ -481,8 +490,10 @@ func (a *App) profileCreateRunE(cmd *cobra.Command, args []string) error {
 	if strings.Trim(name, ".") == "" {
 		return fmt.Errorf("profile name cannot be '.', '..', or consist only of dots")
 	}
+	// "default" is the built-in profile; it has no profiles/ directory — its
+	// values are backed by the main config. So scaffold the main config instead.
 	if name == "default" {
-		return fmt.Errorf("cannot create a profile named 'default' (reserved for built-in profile)")
+		return a.scaffoldMainConfig(cmd)
 	}
 
 	forceUser, _ := cmd.Flags().GetBool("user")
@@ -546,6 +557,61 @@ func (a *App) profileCreateRunE(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Fprintf(os.Stderr, "Created profile '%s' at %s\n", name, configPath)
+	return nil
+}
+
+// scaffoldMainConfig handles `coi profile create default`: it writes the main
+// config (the file that backs the built-in default profile) from the curated
+// starter template, but only when no config exists there — it never overwrites.
+func (a *App) scaffoldMainConfig(cmd *cobra.Command) error {
+	// --image/--persistent/--inherits configure a profile, not the main config.
+	for _, f := range []string{"image", "persistent", "inherits"} {
+		if cmd.Flags().Changed(f) {
+			return fmt.Errorf("--%s is not valid for 'coi profile create default'; "+
+				"it scaffolds the main config — edit the generated file to set values", f)
+		}
+	}
+
+	forceUser, _ := cmd.Flags().GetBool("user")
+	forceProject, _ := cmd.Flags().GetBool("project")
+	if forceUser && forceProject {
+		return fmt.Errorf("--user and --project are mutually exclusive")
+	}
+
+	// Resolve the target main config path. Default is the user/global config;
+	// --project targets the workspace. (Not resolveProfileDir, whose project
+	// auto-detection would override the user-default behavior.)
+	var path string
+	if forceProject {
+		absWorkspace, err := filepath.Abs(a.workspace)
+		if err != nil {
+			return fmt.Errorf("invalid workspace path: %w", err)
+		}
+		path = filepath.Join(absWorkspace, ".coi", "config.toml")
+	} else {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("failed to determine home directory: %w", err)
+		}
+		path = filepath.Join(home, ".coi", "config.toml")
+	}
+
+	// Only when absent — never clobber an existing config.
+	if _, err := os.Stat(path); err == nil {
+		return fmt.Errorf("config already exists: %s (refusing to overwrite; edit it directly or remove it first)", path)
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("failed to check %s: %w", path, err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("failed to create config directory: %w", err)
+	}
+	if err := os.WriteFile(path, config.EmbeddedStarterConfig, 0o644); err != nil {
+		return fmt.Errorf("failed to write config: %w", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "Created main config at %s\n", path)
+	fmt.Fprintln(os.Stderr, "It overrides nothing yet — uncomment and edit lines to customize.")
 	return nil
 }
 

@@ -1,0 +1,127 @@
+# COI configuration — starter template
+#
+# COI works with NO config file at all: every setting below has a built-in
+# default, and this file only *overrides* those defaults. Uncomment a line and
+# change its value to override; leave it commented to keep the built-in default
+# (and to automatically pick up future default changes).
+#
+# This is the main config. Scope is decided by location:
+#   ~/.coi/config.toml    — applies to all your sessions (global)
+#   ./.coi/config.toml    — applies to this project (commit it to share with a team)
+# Named profiles live under <dir>/profiles/<name>/config.toml and are opt-in via
+# `--profile <name>`. See `coi profile list` / `coi profile create`.
+#
+# The commented values shown below are COI's current defaults.
+
+[container]
+# image = "coi-default"          # base image to launch (built by `coi build`)
+# persistent = false             # reuse the container across sessions (keeps installed tools/state)
+# storage_pool = ""              # Incus storage pool ("" = Incus default)
+# stale_base_check = "warn"      # warn | error | off — flag when the base image is outdated
+
+[defaults]
+# model = "claude-sonnet-4-5"    # default model for the AI tool
+# Forward host env vars into the container BY NAME (values read at session start, never stored):
+# forward_env = ["ANTHROPIC_API_KEY", "GITHUB_TOKEN"]
+# Inject fixed env vars into the container:
+# [defaults.environment]
+# MY_VAR = "value"
+
+[paths]
+# sessions_dir = "~/.coi/sessions"
+# storage_dir = "~/.coi/storage"
+# logs_dir = "~/.coi/logs"
+
+[incus]
+# project = "default"
+# group = "incus-admin"
+# code_uid = 1000
+# code_user = "code"
+
+[network]
+# mode = "restricted"            # restricted | open | allowlist
+# block_private_networks = true  # block RFC1918 / link-local from the container
+# block_metadata_endpoint = true # block 169.254.169.254 (cloud metadata/IAM)
+# allow_local_network_access = false
+# refresh_interval_minutes = 30  # re-resolve allowlist domains (allowlist mode)
+# allowlist mode only — domains/IPs the container may reach:
+# allowed_domains = ["registry.npmjs.org", "api.anthropic.com"]
+
+[network.logging]
+# enabled = true
+# path = "~/.coi/logs/network.log"
+
+[tool]
+# name = "claude"                # claude | opencode
+# auto_context = true            # inject SANDBOX_CONTEXT.md into the tool
+
+[git]
+# writable_hooks = false         # allow the container to write .git/hooks (security-sensitive)
+
+[ssh]
+# forward_agent = false          # forward the host SSH agent into the container
+
+[security]
+# Paths mounted read-only so the container can't tamper with host-executed files.
+# protected_paths = [".git/hooks", ".git/config", ".git/config.worktree", ".git/info/attributes", ".husky", ".vscode", ".coi"]
+# additional_protected_paths = []   # add to (not replace) the defaults above
+# host_immutable = true             # also set chattr +i on protected paths
+# disable_protection = false        # turn protection off entirely (NOT recommended)
+
+[limits.cpu]
+# count = ""                     # "2", "0-3", "0,1,3" ("" = unlimited)
+# allowance = ""                 # "50%", "25ms/100ms"
+# priority = 0                   # 0-10
+
+[limits.memory]
+# limit = ""                     # "512MiB", "2GiB", "50%"
+# enforce = "soft"               # hard | soft
+# swap = "true"                  # "true" | "false" | size like "1GiB"
+
+[limits.disk]
+# read = ""                      # "10MiB/s", "1000iops"
+# write = ""
+# max = ""                       # combined read+write (overrides read/write)
+# priority = 0
+# tmpfs_size = ""                # "" = /tmp on container disk; "4GiB" = RAM-backed tmpfs
+
+[limits.runtime]
+# max_duration = ""              # "2h", "30m", "1h30m" ("" = unlimited)
+# max_processes = 0              # 0 = unlimited
+# auto_stop = true               # stop the container when max_duration is hit
+# stop_graceful = true           # graceful (true) vs force (false) stop
+
+[monitoring]
+# enabled = false                # background threat monitoring
+# auto_pause_on_high = true
+# auto_kill_on_critical = true
+# poll_interval_sec = 2
+# file_read_threshold_mb = 50.0
+# file_read_rate_mb_per_sec = 10.0
+# audit_log_retention_days = 30
+
+[monitoring.nft]
+# enabled = false                # nftables-based network monitoring
+# rate_limit_per_second = 100
+# dns_query_threshold = 100
+# log_dns_queries = true
+
+[shell]
+# use_tmux = true                # run the tool inside a tmux session
+
+[timezone]
+# mode = "host"                  # host | fixed | utc
+# name = "Europe/Warsaw"         # only when mode = "fixed"
+
+[detection]
+# gtfobins_source = "https://github.com/GTFOBins/GTFOBins.github.io.git"
+# gtfobins_dir = "~/.coi/gtfobins"
+# sigma_source = "https://github.com/SigmaHQ/sigma.git"
+# sigma_dir = "~/.coi/sigma"
+
+# Extra host directories to mount into the container (host paths OUTSIDE the
+# workspace from an untrusted project config require `coi trust`):
+# [[mounts.default]]
+# host = "~/.cargo"
+# container = "/home/code/.cargo"
+# readonly = false
