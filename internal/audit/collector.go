@@ -8,19 +8,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 //go:embed agent/agent.sh
 var agentScript []byte
-
-// AgentScript returns the embedded in-container collector shell script.
-//
-// Callers typically write this to a tempfile, push it into the container with
-// `incus file push`, and exec it via `sh /path/to/agent.sh`.
-func AgentScript() []byte {
-	return agentScript
-}
 
 // WriteAgentScriptTemp writes the embedded agent script to a fresh tempfile
 // and returns its path. The file is mode 0700 so non-root users can run it
@@ -115,11 +106,4 @@ func HostAuditTail(path string, follow bool, sessionID, container string, out io
 	// Tail mode: simple sleep-poll loop over the same fd. We don't pull
 	// in a heavy fsnotify dep just for this.
 	return tailFollow(f, sessionID, container, out)
-}
-
-// IsLikelyAgentLine returns true if line looks like a JSON object the agent
-// would emit. Useful for callers that mux agent stdout with other text.
-func IsLikelyAgentLine(line string) bool {
-	t := strings.TrimSpace(line)
-	return strings.HasPrefix(t, "{") && strings.HasSuffix(t, "}")
 }

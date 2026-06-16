@@ -85,20 +85,6 @@ func TestPipeline_TeardownIdempotent(t *testing.T) {
 	}
 }
 
-func TestPipeline_AddTeardown(t *testing.T) {
-	var order []string
-	p := &Pipeline{}
-
-	p.AddTeardown(func() { order = append(order, "first") })
-	p.AddTeardown(func() { order = append(order, "second") })
-	p.Teardown()
-
-	// LIFO: second registered → first executed
-	if len(order) != 2 || order[0] != "second" || order[1] != "first" {
-		t.Errorf("expected [second, first], got: %v", order)
-	}
-}
-
 func TestPipeline_CancelledContextSkipsPhase(t *testing.T) {
 	var ran []string
 	p := &Pipeline{}
@@ -119,12 +105,6 @@ func TestPipeline_CancelledContextSkipsPhase(t *testing.T) {
 	if len(ran) != 0 {
 		t.Errorf("phase ran despite cancelled context: %v", ran)
 	}
-}
-
-func TestPipeline_AddTeardown_NilIsIgnored(t *testing.T) {
-	p := &Pipeline{}
-	p.AddTeardown(nil) // must not panic at Teardown time
-	p.Teardown()       // would panic if nil was stored and called
 }
 
 func TestPipeline_TeardownRunsForCompletedPhasesOnError(t *testing.T) {

@@ -1,7 +1,6 @@
 package monitor
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -166,35 +165,6 @@ func FormatSnapshot(snapshot MonitorSnapshot) string {
 			fmt.Fprintf(&sb, "  - %s\n", err)
 		}
 	}
-
-	return sb.String()
-}
-
-// FormatSnapshotJSON formats a monitoring snapshot as JSON
-func FormatSnapshotJSON(snapshot MonitorSnapshot) (string, error) {
-	data, err := json.MarshalIndent(snapshot, "", "  ")
-	if err != nil {
-		return "", err
-	}
-	return string(data), nil
-}
-
-// FormatThreatAlert formats a threat event as a colored alert
-func FormatThreatAlert(threat ThreatEvent) string {
-	color := "\033[33m" // Yellow for warning
-	if threat.Level == ThreatLevelCritical || threat.Level == ThreatLevelHigh {
-		color = "\033[31m" // Red for high/critical
-	}
-	reset := "\033[0m"
-
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "\n%s⚠ SECURITY ALERT [%s]%s\n", color, strings.ToUpper(string(threat.Level)), reset)
-	fmt.Fprintf(&sb, "%s%s%s\n", color, threat.Title, reset)
-	fmt.Fprintf(&sb, "%s\n", threat.Description)
-	if threat.Action != "" && threat.Action != "logged" {
-		fmt.Fprintf(&sb, "\n→ Action taken: %s\n", threat.Action)
-	}
-	sb.WriteString("\n")
 
 	return sb.String()
 }

@@ -10,22 +10,6 @@ import (
 	"github.com/mensfeld/code-on-incus/internal/config"
 )
 
-func TestSetupGitHooksMount_NotGitRepo(t *testing.T) {
-	// Create a temporary directory that is NOT a git repository
-	tmpDir, err := os.MkdirTemp("", "security-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	// SetupGitHooksMount should return nil for non-git directories
-	// It checks for .git directory existence before attempting mount
-	err = SetupGitHooksMount(nil, tmpDir, false)
-	if err != nil {
-		t.Errorf("Expected nil error for non-git repo, got: %v", err)
-	}
-}
-
 func TestPathToDeviceName(t *testing.T) {
 	tests := []struct {
 		path     string

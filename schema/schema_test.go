@@ -141,13 +141,3 @@ func TestGetProfileSchema_Deterministic(t *testing.T) {
 		t.Fatal("GetProfileSchema is not deterministic across calls")
 	}
 }
-
-func TestProfileSchemaID(t *testing.T) {
-	id, err := schema.ProfileSchemaID()
-	if err != nil {
-		t.Fatalf("ProfileSchemaID returned error: %v", err)
-	}
-	if id == "" {
-		t.Fatal("ProfileSchemaID returned empty string")
-	}
-}

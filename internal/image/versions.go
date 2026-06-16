@@ -161,15 +161,6 @@ func Cleanup(prefix string, keepCount int) (deleted []string, kept []string, err
 	return deleted, kept, nil
 }
 
-// ValidateVersionedAlias validates that an alias follows the versioned format
-func ValidateVersionedAlias(alias string) error {
-	pattern := regexp.MustCompile(`^.+-\d{8}-\d{6}$`)
-	if !pattern.MatchString(alias) {
-		return fmt.Errorf("invalid format: alias must end with -YYYYMMDD-HHMMSS")
-	}
-	return nil
-}
-
 // ListAllImages returns all images with optional prefix filter
 func ListAllImages(prefix string) ([]ImageInfo, error) {
 	// Get all images

@@ -17,10 +17,9 @@ type TimeoutMonitor struct {
 	Project       string
 	Logger        *logger.SessionLogger
 
-	ctx       context.Context
-	cancel    context.CancelFunc
-	done      chan struct{}
-	startTime time.Time
+	ctx    context.Context
+	cancel context.CancelFunc
+	done   chan struct{}
 }
 
 // NewTimeoutMonitor creates a new timeout monitor.
@@ -50,7 +49,6 @@ func (tm *TimeoutMonitor) Start() {
 		return
 	}
 
-	tm.startTime = time.Now()
 	tm.Logger.Printf("[limits] Container will auto-stop after %s", tm.MaxDuration)
 
 	go tm.run()
@@ -119,24 +117,4 @@ func (tm *TimeoutMonitor) Stop() {
 	tm.cancel()
 	// Wait for the background goroutine to finish
 	<-tm.done
-}
-
-// Wait blocks until the monitor completes (either timeout or cancelled)
-func (tm *TimeoutMonitor) Wait() {
-	<-tm.done
-}
-
-// Remaining returns the remaining time until timeout.
-// Returns 0 if the monitor has already stopped or timed out.
-func (tm *TimeoutMonitor) Remaining() time.Duration {
-	select {
-	case <-tm.done:
-		return 0
-	default:
-		elapsed := time.Since(tm.startTime)
-		if elapsed >= tm.MaxDuration {
-			return 0
-		}
-		return tm.MaxDuration - elapsed
-	}
 }

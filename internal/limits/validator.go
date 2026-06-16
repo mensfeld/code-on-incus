@@ -3,7 +3,6 @@ package limits
 import (
 	"fmt"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -262,42 +261,4 @@ func FormatValidationErrors(errors map[string]error) string {
 		fmt.Fprintf(&sb, "  - %s: %v\n", field, err)
 	}
 	return sb.String()
-}
-
-// ValidateCPUCountValue validates and parses CPU count value
-// Returns error if the count value is invalid (e.g., range end < start)
-func ValidateCPUCountValue(count string) error {
-	if count == "" {
-		return nil
-	}
-
-	// Check basic format
-	if err := ValidateCPUCount(count); err != nil {
-		return err
-	}
-
-	// Parse ranges and check validity
-	parts := strings.Split(count, ",")
-	for _, part := range parts {
-		if strings.Contains(part, "-") {
-			rangeParts := strings.Split(part, "-")
-			if len(rangeParts) != 2 {
-				return fmt.Errorf("invalid CPU range: %s", part)
-			}
-			start, err1 := strconv.Atoi(rangeParts[0])
-			end, err2 := strconv.Atoi(rangeParts[1])
-			if err1 != nil || err2 != nil {
-				return fmt.Errorf("invalid CPU range values: %s", part)
-			}
-			if end < start {
-				return fmt.Errorf("invalid CPU range (end < start): %s", part)
-			}
-		} else {
-			if _, err := strconv.Atoi(part); err != nil {
-				return fmt.Errorf("invalid CPU number: %s", part)
-			}
-		}
-	}
-
-	return nil
 }
