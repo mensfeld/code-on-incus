@@ -109,8 +109,12 @@ def test_profile_create_duplicate_fails(coi_binary, tmp_path):
     assert "already exists" in result.stderr
 
 
-def test_profile_create_default_name_rejected(coi_binary, tmp_path):
-    """Creating a profile named 'default' should be rejected."""
+def test_profile_create_default_scaffolds_main_config(coi_binary, tmp_path):
+    """`coi profile create default` scaffolds the main config (the file backing the
+    built-in default profile), rather than creating a profile directory.
+
+    (Previously this name was rejected as reserved; see #482 and the dedicated
+    tests in test_profile_create_default.py.)"""
     result = subprocess.run(
         [coi_binary, "profile", "create", "default", "--user"],
         capture_output=True,
@@ -119,8 +123,10 @@ def test_profile_create_default_name_rejected(coi_binary, tmp_path):
         env={**os.environ, "HOME": str(tmp_path)},
     )
 
-    assert result.returncode != 0
-    assert "default" in result.stderr.lower()
+    assert result.returncode == 0, f"should scaffold the main config. stderr: {result.stderr}"
+    assert (tmp_path / ".coi" / "config.toml").is_file()
+    # It writes the main config, NOT a profiles/default/ directory.
+    assert not (tmp_path / ".coi" / "profiles" / "default").exists()
 
 
 def test_profile_create_project_flag(coi_binary, tmp_path):
