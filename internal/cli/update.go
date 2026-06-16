@@ -102,6 +102,18 @@ func updateCoreCommand(cmd *cobra.Command, args []string) error {
 	currentVersion := Version
 	isDev := currentVersion == "dev"
 
+	// A dev build cannot be version-compared. Unless the user is forcing the
+	// install or just checking, refuse immediately — before any GitHub query —
+	// so a transient API failure can't suppress this guidance (and we avoid a
+	// pointless network call). Handles the sudo re-exec case (updateVersion set)
+	// too, where a dev build still shouldn't proceed without --force.
+	if isDev && !updateForce && !updateCheck {
+		fmt.Printf("Current version: %s (development build)\n", currentVersion)
+		fmt.Println("\nWarning: Development builds cannot be version-compared.")
+		fmt.Println("Use --force to install the latest release anyway.")
+		return nil
+	}
+
 	// Determine latest version
 	var release *githubRelease
 	var latestTag string
@@ -123,13 +135,10 @@ func updateCoreCommand(cmd *cobra.Command, args []string) error {
 
 	// Show version comparison
 	if isDev {
+		// Reached only with --force or --check (the no-force dev case returned
+		// above, before the GitHub query).
 		fmt.Printf("Current version: %s (development build)\n", currentVersion)
 		fmt.Printf("Latest release:  v%s\n", latestVersion)
-		if !updateForce && !updateCheck {
-			fmt.Println("\nWarning: Development builds cannot be version-compared.")
-			fmt.Println("Use --force to install the latest release anyway.")
-			return nil
-		}
 	} else {
 		fmt.Printf("Current version: v%s\n", currentVersion)
 		fmt.Printf("Latest release:  v%s\n", latestVersion)
