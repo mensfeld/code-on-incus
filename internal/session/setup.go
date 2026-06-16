@@ -220,6 +220,24 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 				if err := result.Manager.Start(); err != nil {
 					return nil, fmt.Errorf("failed to start container: %w", err)
 				}
+				// Block network immediately: a previous session's AI agent may have
+				// planted startup scripts (systemd units, cron jobs, shell hooks) that
+				// would otherwise phone home during the boot window before
+				// SetupForContainer installs proper isolation rules.
+				if opts.NetworkConfig != nil {
+					if err := network.ApplyBootBlockRule(result.ContainerName); err != nil {
+						// Fail closed in restricted/allowlist mode: rather than let
+						// the container run unblocked during the boot window, stop it
+						// and abort. Open mode opts into unrestricted egress.
+						if opts.NetworkConfig.Mode != config.NetworkModeOpen {
+							_ = result.Manager.Stop(true)
+							return nil, fmt.Errorf("boot network block failed in %s mode; stopped container to avoid an unprotected boot window: %w", opts.NetworkConfig.Mode, err)
+						}
+						opts.Logger(fmt.Sprintf("Warning: boot block not applied (open mode): %v", err))
+					} else {
+						opts.Logger("Boot network block applied (lifted after isolation rules are set up)")
+					}
+				}
 				skipLaunch = true
 			} else {
 				// Delete the stopped leftover container
@@ -317,13 +335,34 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 			}
 		}
 
+		// Defense-in-depth: gate untrusted out-of-workspace mounts here, where a
+		// freshly-launched container's mounts are applied, so a caller of
+		// session.Setup that didn't pre-filter is still covered. (On container
+		// reuse this block is skipped along with the rest of mount setup — the
+		// mounts persist from creation; the run/shell reuse paths warn that
+		// mount-trust changes need a recreate.) Idempotent with the CLI-level
+		// gate: on the normal CLI flow the mounts are already filtered, so this
+		// drops nothing and emits no duplicate warning.
+		if gated, dropped := FilterTrustedMounts(opts.MountConfig, opts.WorkspacePath); len(dropped) > 0 {
+			for _, m := range dropped {
+				opts.Logger(fmt.Sprintf(
+					"Warning: ignoring untrusted mount from %s: %s -> %s (resolves outside the workspace; run 'coi trust' or set %s=1)",
+					m.SourcePath, m.HostPath, m.ContainerPath, TrustEnvVar))
+			}
+			opts.MountConfig = gated
+		}
+
 		// Mount all configured directories
 		if err := setupMounts(result.Manager, opts.MountConfig, useShift, opts.Logger); err != nil {
 			return nil, err
 		}
 
 		// Protect security-sensitive paths by mounting read-only (security feature)
-		// This must be added after the workspace mount for the overlay to work
+		// This must be added after the workspace mount for the overlay to work.
+		// Expand per-worktree git config files (.git/worktrees/*/config.worktree)
+		// into concrete protected entries — the static list cannot glob, and these
+		// are host-code-execution sinks when extensions.worktreeConfig is enabled.
+		opts.ProtectedPaths = ExpandGitWorktreeProtectedPaths(opts.WorkspacePath, opts.ProtectedPaths)
 		if len(opts.ProtectedPaths) > 0 {
 			if err := SetupSecurityMounts(result.Manager, opts.WorkspacePath, containerWorkspacePath, opts.ProtectedPaths, useShift); err != nil {
 				opts.Logger(fmt.Sprintf("Warning: Failed to setup security mounts: %v", err))
@@ -399,6 +438,23 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 			return nil, fmt.Errorf("failed to disable guest API: %w", err)
 		}
 
+		// Harden the bridge NIC against egress-isolation bypass: anti-spoof the
+		// source IP/MAC (so saddr-keyed nft rules can't be dodged) and isolate the
+		// bridge port (so the container can't reach sibling containers at L2).
+		// Non-fatal: unmanaged/static/macvlan NICs degrade to nft-only enforcement.
+		if err := container.EnableNICSecurity(result.ContainerName); err != nil {
+			opts.Logger(fmt.Sprintf("Warning: NIC security hardening not applied: %v", err))
+		}
+
+		// For restricted/allowlist modes, disable IPv6 from the kernel's first
+		// instant so there is no IPv6 egress window before the host-side ip6 drop
+		// is installed. Open mode opts into unrestricted egress, so skip it.
+		if opts.NetworkConfig != nil && opts.NetworkConfig.Mode != config.NetworkModeOpen {
+			if err := container.DisableIPv6AtBoot(result.ContainerName); err != nil {
+				opts.Logger(fmt.Sprintf("Warning: pre-boot IPv6 disable not applied: %v", err))
+			}
+		}
+
 		// Block privileged containers — they defeat all isolation
 		if err := container.CheckNotPrivileged(result.ContainerName); err != nil {
 			return nil, err
@@ -413,6 +469,22 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		} else {
 			if err := result.Manager.Start(); err != nil {
 				return nil, fmt.Errorf("failed to start container: %w", err)
+			}
+		}
+		// Block network immediately after first boot as well: defence-in-depth
+		// against a malicious base image that runs something on init.
+		if opts.NetworkConfig != nil {
+			if err := network.ApplyBootBlockRule(result.ContainerName); err != nil {
+				// Fail closed in restricted/allowlist mode: stop the just-started
+				// container and abort rather than leave an unprotected boot window.
+				// Open mode opts into unrestricted egress.
+				if opts.NetworkConfig.Mode != config.NetworkModeOpen {
+					_ = result.Manager.Stop(true)
+					return nil, fmt.Errorf("boot network block failed in %s mode; stopped container to avoid an unprotected boot window: %w", opts.NetworkConfig.Mode, err)
+				}
+				opts.Logger(fmt.Sprintf("Warning: boot block not applied (open mode): %v", err))
+			} else {
+				opts.Logger("Boot network block applied (lifted after isolation rules are set up)")
 			}
 		}
 	}
@@ -720,7 +792,7 @@ const dockerDaemonJSON = `{
 
 // ConfigureDockerDaemon writes /etc/docker/daemon.json inside the container
 // to configure bridge CIDRs that don't overlap with the host network.
-func ConfigureDockerDaemon(mgr container.ContainerManager, logFn func(string)) error {
+func ConfigureDockerDaemon(mgr container.ContainerExecution, logFn func(string)) error {
 	cmd := fmt.Sprintf(
 		"mkdir -p /etc/docker && printf '%%s' %s > /etc/docker/daemon.json",
 		shellEscape(dockerDaemonJSON),
@@ -780,7 +852,7 @@ func waitForReady(mgr container.ContainerManager, maxRetries int, logger func(st
 // not present" and returns (false, nil). Any other error (e.g. incus
 // connectivity failure) is surfaced to the caller so it can decide
 // whether to warn or fall back.
-func DetectCodeUser(mgr container.ContainerManager, codeUser string) (bool, error) {
+func DetectCodeUser(mgr container.ContainerExecution, codeUser string) (bool, error) {
 	_, err := mgr.ExecArgsCapture(
 		[]string{"id", "-u", codeUser},
 		container.ExecCommandOptions{Capture: true},

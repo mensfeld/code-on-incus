@@ -60,7 +60,7 @@ func runAudit(cmd *cobra.Command, args []string) error {
 		return audit.HostAuditTail(auditFile, auditFollow, "", "", os.Stdout)
 	}
 
-	containerName, err := resolveMonitorContainer(args)
+	containerName, err := app.resolveMonitorContainer(args)
 	if err != nil {
 		return err
 	}

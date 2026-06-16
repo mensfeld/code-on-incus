@@ -16,7 +16,7 @@ import (
 // containerWorkspacePath is the path where the workspace is mounted inside the container
 // (either /workspace or the preserved host path).
 // Returns nil if no paths need protection.
-func SetupSecurityMounts(mgr container.ContainerManager, workspacePath, containerWorkspacePath string, protectedPaths []string, useShift bool) error {
+func SetupSecurityMounts(mgr container.ContainerDevices, workspacePath, containerWorkspacePath string, protectedPaths []string, useShift bool) error {
 	if len(protectedPaths) == 0 {
 		return nil
 	}
@@ -39,7 +39,7 @@ func SetupSecurityMounts(mgr container.ContainerManager, workspacePath, containe
 }
 
 // setupProtectedPath mounts a single path as read-only
-func setupProtectedPath(mgr container.ContainerManager, workspacePath, containerWorkspacePath, relPath string, useShift bool) error {
+func setupProtectedPath(mgr container.ContainerDevices, workspacePath, containerWorkspacePath, relPath string, useShift bool) error {
 	if err := validateRelPath(relPath); err != nil {
 		return err
 	}
@@ -129,6 +129,14 @@ func validateRelPath(relPath string) error {
 // when adding new file-type defaults.
 var fileTypeProtectedPaths = map[string]bool{
 	".git/config": true,
+	// .git/config.worktree and .git/info/attributes are additional git
+	// config/attribute sinks that can drive host code execution via
+	// filter/diff/textconv drivers or core.hooksPath when
+	// extensions.worktreeConfig is enabled. They are protected read-only so a
+	// container cannot plant a driver command (config.worktree) or name one
+	// (info/attributes) that runs on the host at the next git operation.
+	".git/config.worktree": true,
+	".git/info/attributes": true,
 }
 
 // directoryTypeProtectedPaths lists entries that are materialized as
@@ -150,6 +158,41 @@ func isFileTypeProtected(relPath string) bool {
 
 func isDirTypeProtected(relPath string) bool {
 	return directoryTypeProtectedPaths[relPath]
+}
+
+// ExpandGitWorktreeProtectedPaths returns paths plus a protected entry for each
+// existing per-worktree git config file (.git/worktrees/<name>/config.worktree).
+//
+// When a repo has extensions.worktreeConfig=true, git reads those per-worktree
+// config files, so they are config sinks that can carry filter/diff/textconv
+// driver commands or core.hooksPath — i.e. host code execution at the next git
+// operation. The static protected_paths list cannot glob, so this discovers the
+// concrete files at setup time. Only files that already exist on disk are added
+// (worktree config files are created by `git worktree`, never synthesized here);
+// symlinks and directories are skipped.
+func ExpandGitWorktreeProtectedPaths(workspacePath string, paths []string) []string {
+	wtRoot := filepath.Join(workspacePath, ".git", "worktrees")
+	entries, err := os.ReadDir(wtRoot)
+	if err != nil {
+		return paths // no worktrees, or .git is a file/symlink — nothing to add
+	}
+
+	out := append([]string(nil), paths...)
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		rel := filepath.Join(".git", "worktrees", e.Name(), "config.worktree")
+		if err := validateRelPath(rel); err != nil {
+			continue
+		}
+		info, err := os.Lstat(filepath.Join(workspacePath, rel))
+		if err != nil || info.Mode()&os.ModeSymlink != 0 || info.IsDir() {
+			continue
+		}
+		out = append(out, rel)
+	}
+	return out
 }
 
 // ensureProtectedExists materializes hostPath so it has a real inode
@@ -259,7 +302,7 @@ func pathToDeviceName(path string) string {
 // SetupGitHooksMount is a convenience function for backwards compatibility
 // It mounts .git/hooks as read-only for security.
 // Deprecated: Use SetupSecurityMounts with config.Security.GetEffectiveProtectedPaths() instead
-func SetupGitHooksMount(mgr container.ContainerManager, workspacePath string, useShift bool) error {
+func SetupGitHooksMount(mgr container.ContainerDevices, workspacePath string, useShift bool) error {
 	// Use /workspace as the default container path for backwards compatibility
 	return SetupSecurityMounts(mgr, workspacePath, "/workspace", []string{".git/hooks"}, useShift)
 }

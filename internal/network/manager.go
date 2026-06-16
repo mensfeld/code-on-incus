@@ -35,7 +35,7 @@ config.toml):
 // Manager provides high-level network isolation management for containers
 type Manager struct {
 	config        *config.NetworkConfig
-	nft           *NftManager
+	nft           nftRuler
 	resolver      *Resolver
 	cacheManager  *CacheManager
 	containerName string
@@ -64,7 +64,12 @@ func NewManager(cfg *config.NetworkConfig, log *logger.SessionLogger) *Manager {
 	}
 }
 
-// SetupForContainer configures network isolation for a container
+// SetupForContainer configures network isolation for a container.
+// It always removes the temporary boot-block rule installed by ApplyBootBlockRule
+// once proper isolation rules are in place (or, for open mode, unconditionally —
+// the user has opted into unrestricted access). On error in restricted/allowlist
+// mode the boot block is intentionally left in place so the container stays
+// blocked until the caller tears everything down.
 func (m *Manager) SetupForContainer(ctx context.Context, containerName string) error {
 	m.containerName = containerName
 
@@ -77,12 +82,13 @@ func (m *Manager) SetupForContainer(ctx context.Context, containerName string) e
 			containerIP, err := GetContainerIP(containerName)
 			if err != nil {
 				m.logger.Errorf("Warning: could not get container IP for open mode rules: %v", err)
-				return nil
-			}
-			m.containerIP = containerIP
-			m.nft = NewNftManager(containerIP, "")
-			if err := EnsureOpenModeRules(containerIP); err != nil {
-				m.logger.Errorf("Warning: could not add open mode rules: %v", err)
+			} else {
+				m.containerIP = containerIP
+				m.nft = NewNftManager(containerIP, "")
+				m.purgeStaleRulesForIP(containerIP)
+				if err := EnsureOpenModeRules(containerIP); err != nil {
+					m.logger.Errorf("Warning: could not add open mode rules: %v", err)
+				}
 			}
 		} else if NeedsIptablesFallback() {
 			bridgeName, err := GetIncusBridgeName()
@@ -97,16 +103,54 @@ func (m *Manager) SetupForContainer(ctx context.Context, containerName string) e
 				}
 			}
 		}
+		// Open mode always lifts the boot block — errors above are non-fatal
+		// and the user has explicitly opted into unrestricted network access.
+		m.removeBootBlock(containerName)
 		return nil
 
 	case config.NetworkModeRestricted:
-		return m.setupRestricted(ctx, containerName)
+		if err := m.setupRestricted(ctx, containerName); err != nil {
+			return err // boot block stays: container remains isolated on error
+		}
 
 	case config.NetworkModeAllowlist:
-		return m.setupAllowlist(ctx, containerName)
+		if err := m.setupAllowlist(ctx, containerName); err != nil {
+			return err // boot block stays: container remains isolated on error
+		}
 
 	default:
 		return fmt.Errorf("unknown network mode: %s", m.config.Mode)
+	}
+
+	// Restricted or allowlist rules are now in place — lift the boot block.
+	m.removeBootBlock(containerName)
+	return nil
+}
+
+// removeBootBlock removes the temporary boot-block nft rule for containerName,
+// logging a warning if removal fails (non-fatal).
+func (m *Manager) removeBootBlock(containerName string) {
+	if err := RemoveBootBlockRule(containerName); err != nil {
+		m.logger.Errorf("Warning: failed to remove boot block rule for %s: %v", containerName, err)
+	}
+}
+
+// purgeStaleRulesForIP removes any coi-<IP> rules left in the forward chain by a
+// previous container that held this IP. Incus DHCP recycles leases, so a new
+// container frequently reuses a prior one's address; if that prior container did
+// not tear down cleanly (kill -9, OOM, host crash, or a teardown that could not
+// resolve the already-deleted container's IP), its IP-keyed rules are orphaned.
+// Because the forward chain is evaluated first-match-wins, an inherited blanket
+// ACCEPT would let a restricted/allowlist successor bypass its filter entirely.
+// Reset-then-apply: purge the IP's rules before installing this container's
+// policy. Best-effort — deleteNFTRulesByComment retries internally and the rule
+// comment is matched exactly, so coi-base and coi-boot-<name> are never touched.
+func (m *Manager) purgeStaleRulesForIP(containerIP string) {
+	if containerIP == "" {
+		return
+	}
+	if err := DeleteCOIFilterRulesForIP(containerIP); err != nil {
+		m.logger.Errorf("Warning: failed to purge stale nft rules for %s: %v", containerIP, err)
 	}
 }
 
@@ -135,13 +179,23 @@ func (m *Manager) setupRestricted(ctx context.Context, containerName string) err
 		m.logger.Printf("Gateway IP: %s", gatewayIP)
 	}
 
-	// Disable IPv6 to prevent bypass of IPv4-only nft rules
+	// Disable IPv6 inside the container (defence-in-depth; reversible by
+	// in-container root, so the host-side drop below is the enforced boundary).
 	if err := DisableIPv6ForContainer(containerName); err != nil {
-		m.logger.Errorf("Warning: failed to disable IPv6: %v", err)
+		m.logger.Errorf("Warning: failed to disable IPv6 in container: %v", err)
+	}
+
+	// Enforce the IPv6 egress boundary on the host: drop all forwarded IPv6 from
+	// the container's veth. The COI filter table is IPv4-only, so without this an
+	// agent that re-enables IPv6 escapes the firewall entirely. Fail closed — if
+	// the drop cannot be installed the boot block stays in place and setup aborts.
+	if err := ApplyIPv6BlockForContainer(containerName); err != nil {
+		return fmt.Errorf("failed to enforce IPv6 egress block: %w", err)
 	}
 
 	// Create nft manager
 	m.nft = NewNftManager(containerIP, gatewayIP)
+	m.purgeStaleRulesForIP(containerIP)
 
 	// Apply restricted mode rules
 	if err := m.nft.ApplyRestricted(m.config); err != nil {
@@ -191,13 +245,23 @@ func (m *Manager) setupAllowlist(ctx context.Context, containerName string) erro
 		m.logger.Printf("Gateway IP: %s", gatewayIP)
 	}
 
-	// Disable IPv6 to prevent bypass of IPv4-only nft rules
+	// Disable IPv6 inside the container (defence-in-depth; reversible by
+	// in-container root, so the host-side drop below is the enforced boundary).
 	if err := DisableIPv6ForContainer(containerName); err != nil {
-		m.logger.Errorf("Warning: failed to disable IPv6: %v", err)
+		m.logger.Errorf("Warning: failed to disable IPv6 in container: %v", err)
+	}
+
+	// Enforce the IPv6 egress boundary on the host: drop all forwarded IPv6 from
+	// the container's veth. The COI filter table is IPv4-only, so without this an
+	// agent that re-enables IPv6 escapes the allowlist entirely. Fail closed — if
+	// the drop cannot be installed the boot block stays in place and setup aborts.
+	if err := ApplyIPv6BlockForContainer(containerName); err != nil {
+		return fmt.Errorf("failed to enforce IPv6 egress block: %w", err)
 	}
 
 	// Create nft manager
 	m.nft = NewNftManager(containerIP, gatewayIP)
+	m.purgeStaleRulesForIP(containerIP)
 
 	// Load IP cache
 	cache, err := m.cacheManager.Load(containerName)
@@ -359,19 +423,12 @@ func (m *Manager) refreshAllowedIPs() (uint32, error) {
 	totalIPs := countIPs(newIPs)
 	m.logger.Printf("IP refresh: updating nft rules with %d IPs", totalIPs)
 
-	// Apply new rules BEFORE removing old ones to avoid a gap where no rules exist.
-	// nft add rule is idempotent by handle; applying new rules before removing old avoids gaps.
+	// Replace rules atomically: snapshot old handles, append new rules, then
+	// delete only the old handles. This avoids any window where all rules are
+	// absent and the chain's default-accept policy would pass all traffic.
 	allowedIPs := collectUniqueIPs(newIPs)
-	if err := m.nft.ApplyAllowlist(m.config, allowedIPs); err != nil {
+	if err := m.nft.ReplaceAllowlist(m.config, allowedIPs); err != nil {
 		return newMinTTL, fmt.Errorf("failed to update nft rules: %w", err)
-	}
-
-	// Now remove all rules (including stale ones) and reapply to clean up
-	if err := m.nft.RemoveRules(); err != nil {
-		m.logger.Errorf("Warning: failed to remove old rules: %v", err)
-	}
-	if err := m.nft.ApplyAllowlist(m.config, allowedIPs); err != nil {
-		m.logger.Errorf("Warning: failed to reapply rules after cleanup: %v", err)
 	}
 
 	// Update cache
@@ -402,22 +459,9 @@ func (m *Manager) Teardown(ctx context.Context, containerName string) error {
 	if m.iptablesBridgeName != "" {
 		// Check if other coi containers are still running before removing
 		output, err := container.IncusOutput("list", "--format=json")
-		hasOtherContainers := false
+		hasOtherContainers := true // conservative default
 		if err == nil {
-			var containers []struct {
-				Name  string `json:"name"`
-				State struct {
-					Status string `json:"status"`
-				} `json:"state"`
-			}
-			if json.Unmarshal([]byte(output), &containers) == nil {
-				for _, c := range containers {
-					if c.Name != containerName && c.State.Status == "Running" {
-						hasOtherContainers = true
-						break
-					}
-				}
-			}
+			hasOtherContainers = otherContainersRunning(output, containerName)
 		}
 
 		if !hasOtherContainers {
@@ -461,6 +505,16 @@ func (m *Manager) Teardown(ctx context.Context, containerName string) error {
 			m.logger.Printf("nft rules removed for container %s", containerName)
 		}
 	}
+
+	// Remove the host-side IPv6 egress block (idempotent — only present for
+	// restricted/allowlist modes, but safe to call for all modes).
+	if err := RemoveIPv6BlockForContainer(containerName); err != nil {
+		m.logger.Errorf("Warning: failed to remove IPv6 block rule for %s: %v", containerName, err)
+	}
+
+	// Clean up any residual boot-block rule (idempotent — no-op if already removed
+	// by SetupForContainer, but handles the case where setup failed mid-way).
+	m.removeBootBlock(containerName)
 
 	return nil
 }
@@ -509,4 +563,25 @@ func getContainerGatewayIP(containerName string) (string, error) {
 	}
 
 	return "", fmt.Errorf("could not find ipv4.address in network %s", networkName)
+}
+
+// otherContainersRunning parses the JSON output of `incus list --format=json`
+// and reports whether any container other than excludeName is currently Running.
+// On JSON parse failure it returns true (conservative: keep bridge rules).
+func otherContainersRunning(jsonOutput, excludeName string) bool {
+	var containers []struct {
+		Name  string `json:"name"`
+		State struct {
+			Status string `json:"status"`
+		} `json:"state"`
+	}
+	if err := json.Unmarshal([]byte(jsonOutput), &containers); err != nil {
+		return true // conservative: can't confirm no other containers, keep rules
+	}
+	for _, c := range containers {
+		if c.Name != excludeName && c.State.Status == "Running" {
+			return true
+		}
+	}
+	return false
 }

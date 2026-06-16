@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"golang.org/x/sys/unix"
@@ -160,6 +161,9 @@ func runInlineBuild(cfg *config.Config, imageName string) error {
 			return nil
 		}
 		fmt.Fprintf(os.Stderr, "\nImage '%s' built successfully!\n", imageName)
+		if dir, err := coiDataDir(); err == nil {
+			image.RecordBuild(dir, imageName, coiBaseImage)
+		}
 		return nil
 	}
 
@@ -200,5 +204,51 @@ func runInlineBuild(cfg *config.Config, imageName string) error {
 		return nil
 	}
 	fmt.Fprintf(os.Stderr, "\nImage '%s' built successfully!\n", imageName)
+	if dir, err := coiDataDir(); err == nil {
+		image.RecordBuild(dir, imageName, baseImage)
+	}
 	return nil
+}
+
+// coiDataDir returns the path to the ~/.coi directory used for COI state files.
+func coiDataDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".coi"), nil
+}
+
+// CheckAndReportStaleBase checks whether imageName's recorded base was rebuilt
+// more recently than imageName itself, and acts according to
+// cfg.Container.StaleBaseCheck: "error" returns an error, "warn" prints to
+// stderr and continues, "off" does nothing. Missing metadata is always silent.
+func CheckAndReportStaleBase(cfg *config.Config, imageName string) error {
+	dir, err := coiDataDir()
+	if err != nil {
+		return nil
+	}
+
+	result, stale := image.CheckStaleBase(dir, imageName)
+	if !stale {
+		return nil
+	}
+
+	msg := fmt.Sprintf(
+		"image '%s' (built %s) is older than its base '%s' (rebuilt %s) — run 'coi build --profile <profile>' to rebuild",
+		result.ChildAlias,
+		result.ChildBuiltAt.Format("2006-01-02 15:04 UTC"),
+		result.BaseAlias,
+		result.BaseBuiltAt.Format("2006-01-02 15:04 UTC"),
+	)
+
+	switch cfg.Container.StaleBaseCheck {
+	case "error":
+		return fmt.Errorf("%s", msg)
+	case "off":
+		return nil
+	default: // "warn" and any unrecognised value
+		fmt.Fprintf(os.Stderr, "WARNING: %s\n", msg)
+		return nil
+	}
 }

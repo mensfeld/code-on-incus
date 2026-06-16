@@ -27,6 +27,61 @@ func TestResolveDomainsToHostCIDRs_IPv4Input(t *testing.T) {
 	}
 }
 
+func TestResolveDomainsToHostCIDRs_CIDRPassthrough(t *testing.T) {
+	// CIDRs must come back unchanged — no /32 appended.
+	got := resolveDomainsToHostCIDRs([]string{"54.231.0.0/17", "10.0.0.0/8"})
+	if len(got) == 0 {
+		t.Fatal("expected non-empty result for CIDR inputs")
+	}
+	want := map[string]bool{
+		"54.231.0.0/17": false,
+		"10.0.0.0/8":    false,
+	}
+	for _, cidr := range got {
+		if _, ok := want[cidr]; ok {
+			want[cidr] = true
+		}
+	}
+	for cidr, found := range want {
+		if !found {
+			t.Errorf("expected %q in output, got %v", cidr, got)
+		}
+	}
+	// Guard against the regression: appending /32 to a CIDR produces "54.231.0.0/17/32"
+	for _, cidr := range got {
+		if strings.Count(cidr, "/") > 1 {
+			t.Errorf("malformed CIDR with double slash: %q", cidr)
+		}
+	}
+}
+
+func TestResolveDomainsToHostCIDRs_MixedInputs(t *testing.T) {
+	// Raw IPs get /32; CIDRs stay as-is.
+	got := resolveDomainsToHostCIDRs([]string{"1.2.3.4", "10.0.0.0/8"})
+	if len(got) == 0 {
+		t.Fatal("expected non-empty result")
+	}
+	hasRaw := false
+	hasCIDR := false
+	for _, cidr := range got {
+		if strings.Count(cidr, "/") > 1 {
+			t.Errorf("malformed CIDR with double slash: %q", cidr)
+		}
+		if cidr == "1.2.3.4/32" {
+			hasRaw = true
+		}
+		if cidr == "10.0.0.0/8" {
+			hasCIDR = true
+		}
+	}
+	if !hasRaw {
+		t.Errorf("expected 1.2.3.4/32 in output, got %v", got)
+	}
+	if !hasCIDR {
+		t.Errorf("expected 10.0.0.0/8 in output, got %v", got)
+	}
+}
+
 func TestBuildTmuxNewSessionCmd_PassesEnvViaDashE(t *testing.T) {
 	env := map[string]string{
 		"GITHUB_TOKEN": "ghp_secret",

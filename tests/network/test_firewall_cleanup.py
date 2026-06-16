@@ -52,7 +52,16 @@ def get_container_ip(coi_binary, container_name):
 
 
 def get_nft_rules_for_ip(ip):
-    """Get nft rules from the ip coi forward chain that reference a specific IP."""
+    """Get nft rules in the ip coi forward chain tagged for a specific container IP.
+
+    Matches the full ``comment "coi-<ip>"`` token (including the closing quote)
+    rather than a bare substring of the IP. A substring test is wrong here: every
+    rule for container 10.0.0.2 contains "10.0.0.2", but so does every rule for
+    10.0.0.20 / 10.0.0.25 — so `ip in line` reports a phantom orphan for .2
+    whenever a sibling container with a prefix-overlapping IP still has rules,
+    which is exactly the intermittent failure this test hit. The container's own
+    rules all carry the `coi-<ip>` comment, so the exact token is precise.
+    """
     try:
         result = subprocess.run(
             ["sudo", "-n", "nft", "-a", "list", "chain", "ip", "coi", "forward"],
@@ -63,12 +72,8 @@ def get_nft_rules_for_ip(ip):
         if result.returncode != 0:
             return []
 
-        rules = []
-        for line in result.stdout.strip().split("\n"):
-            line = line.strip()
-            if line and ip in line:
-                rules.append(line)
-        return rules
+        marker = f'comment "coi-{ip}"'
+        return [line.strip() for line in result.stdout.splitlines() if marker in line]
     except Exception:
         return []
 
@@ -76,6 +81,20 @@ def get_nft_rules_for_ip(ip):
 def count_rules_for_ip(ip):
     """Count nft rules in the ip coi forward chain that reference a specific IP."""
     return len(get_nft_rules_for_ip(ip))
+
+
+def wait_for_no_rules_for_ip(ip, timeout=15):
+    """Poll until no nft rules reference ip (or timeout); return the final count.
+
+    nft cleanup after kill/teardown is asynchronous and can lag on loaded CI
+    runners, so poll rather than asserting once after a fixed sleep.
+    """
+    deadline = time.time() + timeout
+    count = count_rules_for_ip(ip)
+    while count > 0 and time.time() < deadline:
+        time.sleep(1)
+        count = count_rules_for_ip(ip)
+    return count
 
 
 def nft_available():
@@ -166,12 +185,9 @@ mode = "open"
         check=False,
     )
 
-    # Wait for cleanup
-    time.sleep(2)
-
-    # If we have the container IP, check for orphaned rules
+    # Poll for asynchronous nft cleanup to complete.
     if container_ip:
-        orphaned_rules = count_rules_for_ip(container_ip)
+        orphaned_rules = wait_for_no_rules_for_ip(container_ip)
         if orphaned_rules > 0:
             pytest.fail(
                 f"Bug #1: Found {orphaned_rules} orphaned nft rules for IP {container_ip} "
@@ -252,12 +268,9 @@ mode = "restricted"
         check=False,
     )
 
-    # Wait for cleanup
-    time.sleep(2)
-
-    # Check for orphaned rules
+    # Poll for asynchronous nft cleanup to complete.
     if container_ip:
-        orphaned_rules = count_rules_for_ip(container_ip)
+        orphaned_rules = wait_for_no_rules_for_ip(container_ip)
         if orphaned_rules > 0:
             pytest.fail(
                 f"Bug #2: Found {orphaned_rules} orphaned nft rules for IP {container_ip} "
@@ -339,12 +352,20 @@ mode = "open"
 
         time.sleep(1)
 
-    # Check for any orphaned rules from our containers
+    # Check for any orphaned rules from our containers. On loaded CI runners
+    # the nft rule deletion may lag the kill by a fraction of a second, so
+    # retry for up to 20 seconds before failing (cleanup can lag on loaded CI).
+    deadline = time.time() + 20
     total_orphaned = 0
-    for ip in collected_ips:
-        orphaned = count_rules_for_ip(ip)
-        if orphaned > 0:
-            total_orphaned += orphaned
+    while True:
+        total_orphaned = 0
+        for ip in collected_ips:
+            orphaned = count_rules_for_ip(ip)
+            if orphaned > 0:
+                total_orphaned += orphaned
+        if total_orphaned == 0 or time.time() >= deadline:
+            break
+        time.sleep(1)
 
     assert total_orphaned == 0, (
         f"Found {total_orphaned} total orphaned nft rules in ip coi forward "
@@ -426,11 +447,8 @@ mode = "restricted"
         check=False,
     )
 
-    # Wait for cleanup
-    time.sleep(2)
-
-    # Check if rules were cleaned up
-    rules_after_kill = count_rules_for_ip(container_ip)
+    # Poll for asynchronous nft cleanup to complete.
+    rules_after_kill = wait_for_no_rules_for_ip(container_ip)
 
     if rules_after_kill > 0:
         pytest.fail(

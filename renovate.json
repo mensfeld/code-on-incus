@@ -11,12 +11,6 @@
   ],
   "packageRules": [
     {
-      "minimumReleaseAge": "7 days",
-      "matchDepNames": [
-        "/*/"
-      ]
-    },
-    {
       "matchManagers": [
         "github-actions"
       ],

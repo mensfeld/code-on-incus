@@ -60,11 +60,12 @@ func (b *BuildConfig) HasBuildConfig() bool {
 // and top-level [build]. The same struct is embedded in both Config and
 // ProfileConfig so global and profile configs are symmetric.
 type ContainerConfig struct {
-	Image       string      `toml:"image"`
-	Persistent  *bool       `toml:"persistent"`
-	StoragePool string      `toml:"storage_pool"`
-	Alias       string      `toml:"alias"`
-	Build       BuildConfig `toml:"build"`
+	Image          string      `toml:"image"`
+	Persistent     *bool       `toml:"persistent"`
+	StoragePool    string      `toml:"storage_pool"`
+	Alias          string      `toml:"alias"`
+	Build          BuildConfig `toml:"build"`
+	StaleBaseCheck string      `toml:"stale_base_check"` // "error", "warn", "off"
 }
 
 // HasContainerConfig reports whether any field is set.
@@ -73,6 +74,7 @@ func (c *ContainerConfig) HasContainerConfig() bool {
 		c.Persistent != nil ||
 		c.StoragePool != "" ||
 		c.Alias != "" ||
+		c.StaleBaseCheck != "" ||
 		c.Build.HasBuildConfig()
 }
 
@@ -228,6 +230,15 @@ type MountEntry struct {
 	Host      string `toml:"host"`      // Host path (supports ~ expansion)
 	Container string `toml:"container"` // Container path (must be absolute)
 	Readonly  bool   `toml:"readonly"`  // Mount read-only (default: false)
+
+	// Untrusted is set programmatically (never from TOML) when this mount was
+	// loaded from an untrusted, project-scope config file. Such mounts that
+	// resolve outside the workspace are gated behind explicit trust (`coi trust`)
+	// to prevent a cloned repo from bind-mounting host paths writable (host RCE).
+	Untrusted bool `toml:"-"`
+	// SourcePath is the absolute path of the config file this mount came from.
+	// Only populated for untrusted mounts; used to look up/record trust.
+	SourcePath string `toml:"-"`
 }
 
 // MountsConfig contains mount-related configuration
@@ -322,11 +333,14 @@ func GetDefaultConfig() *Config {
 	return cfg
 }
 
-// expandConfigPaths expands ~ in all path fields of the config
+// expandConfigPaths expands ~ in all path fields of the config.
+// Called once at the end of Merge and ApplyProfile so that path-merging
+// helpers can work with raw (unexpanded) strings.
 func expandConfigPaths(cfg *Config) {
 	cfg.Paths.SessionsDir = ExpandPath(cfg.Paths.SessionsDir)
 	cfg.Paths.StorageDir = ExpandPath(cfg.Paths.StorageDir)
 	cfg.Paths.LogsDir = ExpandPath(cfg.Paths.LogsDir)
+	cfg.Tool.ContextFile = ExpandPath(cfg.Tool.ContextFile)
 	cfg.Network.Logging.Path = ExpandPath(cfg.Network.Logging.Path)
 	cfg.Detection.GTFOBinsDir = ExpandPath(cfg.Detection.GTFOBinsDir)
 	cfg.Detection.SigmaDir = ExpandPath(cfg.Detection.SigmaDir)
@@ -499,22 +513,16 @@ func ExpandPath(path string) string {
 	return path
 }
 
-// Merge merges another config into this one (other takes precedence)
+// Merge merges another config into this one (other takes precedence).
 func (c *Config) Merge(other *Config) {
-	// Merge container settings
-	applyContainerConfig(&c.Container, &other.Container)
+	mergeContainerInto(&c.Container, &other.Container)
 
-	// Merge defaults
 	if other.Defaults.Model != "" {
 		c.Defaults.Model = other.Defaults.Model
 	}
-
-	// Merge forward_env (append without duplicates)
 	if len(other.Defaults.ForwardEnv) > 0 {
 		c.Defaults.ForwardEnv = MergeStringSliceUnique(c.Defaults.ForwardEnv, other.Defaults.ForwardEnv)
 	}
-
-	// Merge environment (other takes precedence for overlapping keys)
 	if len(other.Defaults.Environment) > 0 {
 		if c.Defaults.Environment == nil {
 			c.Defaults.Environment = make(map[string]string)
@@ -523,156 +531,24 @@ func (c *Config) Merge(other *Config) {
 			c.Defaults.Environment[k] = v
 		}
 	}
-
-	// Merge paths
-	if other.Paths.SessionsDir != "" {
-		c.Paths.SessionsDir = ExpandPath(other.Paths.SessionsDir)
-	}
-	if other.Paths.StorageDir != "" {
-		c.Paths.StorageDir = ExpandPath(other.Paths.StorageDir)
-	}
-	if other.Paths.LogsDir != "" {
-		c.Paths.LogsDir = ExpandPath(other.Paths.LogsDir)
-	}
-	if other.Paths.PreserveWorkspacePath {
-		c.Paths.PreserveWorkspacePath = true
-	}
-
-	// Merge Incus settings
-	if other.Incus.Project != "" {
-		c.Incus.Project = other.Incus.Project
-	}
-	if other.Incus.Group != "" {
-		c.Incus.Group = other.Incus.Group
-	}
-	if other.Incus.CodeUID != 0 {
-		c.Incus.CodeUID = other.Incus.CodeUID
-	}
-	if other.Incus.CodeUser != "" {
-		c.Incus.CodeUser = other.Incus.CodeUser
-	}
-
-	// Merge Network settings
-	if other.Network.Mode != "" {
-		c.Network.Mode = other.Network.Mode
-	}
-	if other.Network.BlockPrivateNetworks != nil {
-		c.Network.BlockPrivateNetworks = other.Network.BlockPrivateNetworks
-	}
-	if other.Network.BlockMetadataEndpoint != nil {
-		c.Network.BlockMetadataEndpoint = other.Network.BlockMetadataEndpoint
-	}
-	if other.Network.AllowLocalNetworkAccess != nil {
-		c.Network.AllowLocalNetworkAccess = other.Network.AllowLocalNetworkAccess
-	}
-
-	// Merge allowed domains (replace entirely if set)
-	if len(other.Network.AllowedDomains) > 0 {
-		c.Network.AllowedDomains = other.Network.AllowedDomains
-	}
-
-	// Merge refresh interval
-	if other.Network.RefreshIntervalMinutes != 0 {
-		c.Network.RefreshIntervalMinutes = other.Network.RefreshIntervalMinutes
-	}
-
-	if other.Network.Logging.Path != "" {
-		c.Network.Logging.Path = ExpandPath(other.Network.Logging.Path)
-	}
-	if other.Network.Logging.Enabled != nil {
-		c.Network.Logging.Enabled = other.Network.Logging.Enabled
-	}
-
-	// Merge Shell settings
-	if other.Shell.UseTmux != nil {
-		c.Shell.UseTmux = other.Shell.UseTmux
-	}
-
-	// Merge Tool settings
-	if other.Tool.Name != "" {
-		c.Tool.Name = other.Tool.Name
-	}
-	if other.Tool.Binary != "" {
-		c.Tool.Binary = other.Tool.Binary
-	}
-	// Merge permission mode
-	if other.Tool.PermissionMode != "" {
-		c.Tool.PermissionMode = other.Tool.PermissionMode
-	}
-	// Merge context file path
-	if other.Tool.ContextFile != "" {
-		c.Tool.ContextFile = ExpandPath(other.Tool.ContextFile)
-	}
-	// Merge auto-context setting
-	if other.Tool.AutoContext != nil {
-		c.Tool.AutoContext = other.Tool.AutoContext
-	}
-	// Merge Claude-specific settings
-	if other.Tool.Claude.EffortLevel != "" {
-		c.Tool.Claude.EffortLevel = other.Tool.Claude.EffortLevel
-	}
-	// For DisableShift, if the other config sets it to true, use it
-	if other.Incus.DisableShift {
-		c.Incus.DisableShift = true
-	}
-
-	// Merge mounts - append from other config
 	if len(other.Mounts.Default) > 0 {
 		c.Mounts.Default = append(c.Mounts.Default, other.Mounts.Default...)
 	}
 
-	// Merge limits
+	mergePathsInto(&c.Paths, &other.Paths)
+	mergeIncusInto(&c.Incus, &other.Incus)
+	mergeNetworkInto(&c.Network, &other.Network)
+	mergeShellInto(&c.Shell, &other.Shell)
+	mergeToolInto(&c.Tool, &other.Tool)
 	mergeLimits(&c.Limits, &other.Limits)
-
-	// Merge git settings
-	// Only override if explicitly set in the other config (nil means not set)
-	if other.Git.WritableHooks != nil {
-		c.Git.WritableHooks = other.Git.WritableHooks
-	}
-
-	// Merge SSH settings
-	if other.SSH.ForwardAgent != nil {
-		c.SSH.ForwardAgent = other.SSH.ForwardAgent
-	}
-
-	// Merge security settings
-	if len(other.Security.ProtectedPaths) > 0 {
-		c.Security.ProtectedPaths = other.Security.ProtectedPaths
-	}
-	if len(other.Security.AdditionalProtectedPaths) > 0 {
-		c.Security.AdditionalProtectedPaths = append(c.Security.AdditionalProtectedPaths, other.Security.AdditionalProtectedPaths...)
-	}
-	if other.Security.DisableProtection {
-		c.Security.DisableProtection = true
-	}
-	if other.Security.HostImmutable != nil {
-		c.Security.HostImmutable = other.Security.HostImmutable
-	}
-
-	// Merge monitoring
+	mergeGitInto(&c.Git, &other.Git)
+	mergeSSHInto(&c.SSH, &other.SSH)
+	mergeSecurityInto(&c.Security, &other.Security)
 	mergeMonitoring(&c.Monitoring, &other.Monitoring)
+	mergeTimezoneInto(&c.Timezone, &other.Timezone)
+	mergeDetectionInto(&c.Detection, &other.Detection)
 
-	// Merge timezone
-	if other.Timezone.Mode != "" {
-		c.Timezone.Mode = other.Timezone.Mode
-	}
-	if other.Timezone.Name != "" {
-		c.Timezone.Name = other.Timezone.Name
-	}
-
-	// Merge detection
-	if other.Detection.GTFOBinsSource != "" {
-		c.Detection.GTFOBinsSource = other.Detection.GTFOBinsSource
-	}
-	if other.Detection.GTFOBinsDir != "" {
-		c.Detection.GTFOBinsDir = ExpandPath(other.Detection.GTFOBinsDir)
-	}
-	if other.Detection.SigmaSource != "" {
-		c.Detection.SigmaSource = other.Detection.SigmaSource
-	}
-	if other.Detection.SigmaDir != "" {
-		c.Detection.SigmaDir = ExpandPath(other.Detection.SigmaDir)
-	}
+	expandConfigPaths(c)
 }
 
 // mergeLimits merges limit configurations (other takes precedence)
@@ -820,7 +696,7 @@ func (c *Config) ApplyProfile(name string) error {
 	// override it because aliases are workspace-specific and a profile
 	// used across multiple projects must not stamp them with a single name.
 	projectAlias := c.Container.Alias
-	applyContainerConfig(&c.Container, &profile.Container)
+	mergeContainerInto(&c.Container, &profile.Container)
 	if projectAlias != "" {
 		c.Container.Alias = projectAlias
 	}
@@ -854,55 +730,40 @@ func (c *Config) ApplyProfile(name string) error {
 	if profile.Monitoring != nil {
 		mergeMonitoring(&c.Monitoring, profile.Monitoring)
 	}
-	applyToolConfig(&c.Tool, profile.Tool)
-	applyShellConfig(&c.Shell, profile.Shell)
-	applyNetworkConfig(&c.Network, profile.Network)
-	applyPathsConfig(&c.Paths, profile.Paths)
-	applyIncusConfig(&c.Incus, profile.Incus)
-	applyGitConfig(&c.Git, profile.Git)
-	applySSHConfig(&c.SSH, profile.SSH)
-	applySecurityConfig(&c.Security, profile.Security)
-	applyTimezoneConfig(&c.Timezone, profile.Timezone)
+	if profile.Tool != nil {
+		mergeToolInto(&c.Tool, profile.Tool)
+	}
+	if profile.Shell != nil {
+		mergeShellInto(&c.Shell, profile.Shell)
+	}
+	if profile.Network != nil {
+		mergeNetworkInto(&c.Network, profile.Network)
+	}
+	if profile.Paths != nil {
+		mergePathsInto(&c.Paths, profile.Paths)
+	}
+	if profile.Incus != nil {
+		mergeIncusInto(&c.Incus, profile.Incus)
+	}
+	if profile.Git != nil {
+		mergeGitInto(&c.Git, profile.Git)
+	}
+	if profile.SSH != nil {
+		mergeSSHInto(&c.SSH, profile.SSH)
+	}
+	if profile.Security != nil {
+		mergeSecurityInto(&c.Security, profile.Security)
+	}
+	if profile.Timezone != nil {
+		mergeTimezoneInto(&c.Timezone, profile.Timezone)
+	}
 
+	expandConfigPaths(c)
 	return nil
 }
 
-func applyToolConfig(dst *ToolConfig, src *ToolConfig) {
-	if src == nil {
-		return
-	}
-	if src.Name != "" {
-		dst.Name = src.Name
-	}
-	if src.Binary != "" {
-		dst.Binary = src.Binary
-	}
-	if src.PermissionMode != "" {
-		dst.PermissionMode = src.PermissionMode
-	}
-	if src.ContextFile != "" {
-		dst.ContextFile = ExpandPath(src.ContextFile)
-	}
-	if src.AutoContext != nil {
-		dst.AutoContext = src.AutoContext
-	}
-	if src.Claude.EffortLevel != "" {
-		dst.Claude.EffortLevel = src.Claude.EffortLevel
-	}
-}
-
-func applyShellConfig(dst *ShellConfig, src *ShellConfig) {
-	if src == nil {
-		return
-	}
-	if src.UseTmux != nil {
-		dst.UseTmux = src.UseTmux
-	}
-}
-
-// applyContainerConfig merges src into dst for the container-shape section.
-// Used by ApplyProfile and the inheritance resolver.
-func applyContainerConfig(dst *ContainerConfig, src *ContainerConfig) {
+// mergeContainerInto merges src into dst for the container-shape section.
+func mergeContainerInto(dst *ContainerConfig, src *ContainerConfig) {
 	if src == nil {
 		return
 	}
@@ -918,124 +779,10 @@ func applyContainerConfig(dst *ContainerConfig, src *ContainerConfig) {
 	if src.Alias != "" {
 		dst.Alias = src.Alias
 	}
+	if src.StaleBaseCheck != "" {
+		dst.StaleBaseCheck = src.StaleBaseCheck
+	}
 	mergeBuildInto(&dst.Build, &src.Build)
-}
-
-func applyNetworkConfig(dst *NetworkConfig, src *NetworkConfig) {
-	if src == nil {
-		return
-	}
-	if src.Mode != "" {
-		dst.Mode = src.Mode
-	}
-	if src.BlockPrivateNetworks != nil {
-		dst.BlockPrivateNetworks = src.BlockPrivateNetworks
-	}
-	if src.BlockMetadataEndpoint != nil {
-		dst.BlockMetadataEndpoint = src.BlockMetadataEndpoint
-	}
-	if src.AllowLocalNetworkAccess != nil {
-		dst.AllowLocalNetworkAccess = src.AllowLocalNetworkAccess
-	}
-	if len(src.AllowedDomains) > 0 {
-		dst.AllowedDomains = src.AllowedDomains
-	}
-	if src.RefreshIntervalMinutes != 0 {
-		dst.RefreshIntervalMinutes = src.RefreshIntervalMinutes
-	}
-	if src.Logging.Path != "" {
-		dst.Logging.Path = ExpandPath(src.Logging.Path)
-	}
-	if src.Logging.Enabled != nil {
-		dst.Logging.Enabled = src.Logging.Enabled
-	}
-}
-
-func applyPathsConfig(dst *PathsConfig, src *PathsConfig) {
-	if src == nil {
-		return
-	}
-	if src.SessionsDir != "" {
-		dst.SessionsDir = ExpandPath(src.SessionsDir)
-	}
-	if src.StorageDir != "" {
-		dst.StorageDir = ExpandPath(src.StorageDir)
-	}
-	if src.LogsDir != "" {
-		dst.LogsDir = ExpandPath(src.LogsDir)
-	}
-	if src.PreserveWorkspacePath {
-		dst.PreserveWorkspacePath = true
-	}
-}
-
-func applyIncusConfig(dst *IncusConfig, src *IncusConfig) {
-	if src == nil {
-		return
-	}
-	if src.Project != "" {
-		dst.Project = src.Project
-	}
-	if src.Group != "" {
-		dst.Group = src.Group
-	}
-	if src.CodeUID != 0 {
-		dst.CodeUID = src.CodeUID
-	}
-	if src.CodeUser != "" {
-		dst.CodeUser = src.CodeUser
-	}
-	if src.DisableShift {
-		dst.DisableShift = true
-	}
-}
-
-func applyGitConfig(dst *GitConfig, src *GitConfig) {
-	if src == nil {
-		return
-	}
-	if src.WritableHooks != nil {
-		dst.WritableHooks = src.WritableHooks
-	}
-}
-
-func applySSHConfig(dst *SSHConfig, src *SSHConfig) {
-	if src == nil {
-		return
-	}
-	if src.ForwardAgent != nil {
-		dst.ForwardAgent = src.ForwardAgent
-	}
-}
-
-func applySecurityConfig(dst *SecurityConfig, src *SecurityConfig) {
-	if src == nil {
-		return
-	}
-	if len(src.ProtectedPaths) > 0 {
-		dst.ProtectedPaths = src.ProtectedPaths
-	}
-	if len(src.AdditionalProtectedPaths) > 0 {
-		dst.AdditionalProtectedPaths = append(dst.AdditionalProtectedPaths, src.AdditionalProtectedPaths...)
-	}
-	if src.DisableProtection {
-		dst.DisableProtection = true
-	}
-	if src.HostImmutable != nil {
-		dst.HostImmutable = src.HostImmutable
-	}
-}
-
-func applyTimezoneConfig(dst *TimezoneConfig, src *TimezoneConfig) {
-	if src == nil {
-		return
-	}
-	if src.Mode != "" {
-		dst.Mode = src.Mode
-	}
-	if src.Name != "" {
-		dst.Name = src.Name
-	}
 }
 
 // maxInheritanceDepth is the maximum allowed inheritance chain depth
@@ -1049,7 +796,7 @@ func mergeProfiles(parent, child ProfileConfig) ProfileConfig {
 
 	// Container section: deep field-by-field merge starting from parent
 	mergedContainer := parent.Container
-	applyContainerConfig(&mergedContainer, &child.Container)
+	mergeContainerInto(&mergedContainer, &child.Container)
 	result.Container = mergedContainer
 
 	// Scalars: child overrides parent if set
@@ -1235,7 +982,7 @@ func mergeSecurityInto(dst *SecurityConfig, src *SecurityConfig) {
 		dst.ProtectedPaths = src.ProtectedPaths
 	}
 	if len(src.AdditionalProtectedPaths) > 0 {
-		dst.AdditionalProtectedPaths = mergeUniqueStrings(dst.AdditionalProtectedPaths, src.AdditionalProtectedPaths)
+		dst.AdditionalProtectedPaths = MergeStringSliceUnique(dst.AdditionalProtectedPaths, src.AdditionalProtectedPaths)
 	}
 	if src.DisableProtection {
 		dst.DisableProtection = true
@@ -1243,28 +990,6 @@ func mergeSecurityInto(dst *SecurityConfig, src *SecurityConfig) {
 	if src.HostImmutable != nil {
 		dst.HostImmutable = src.HostImmutable
 	}
-}
-
-// mergeUniqueStrings appends src strings to dst, skipping duplicates.
-func mergeUniqueStrings(dst, src []string) []string {
-	if len(src) == 0 {
-		return dst
-	}
-	seen := make(map[string]struct{}, len(dst)+len(src))
-	merged := make([]string, 0, len(dst)+len(src))
-	for _, s := range dst {
-		if _, ok := seen[s]; !ok {
-			seen[s] = struct{}{}
-			merged = append(merged, s)
-		}
-	}
-	for _, s := range src {
-		if _, ok := seen[s]; !ok {
-			seen[s] = struct{}{}
-			merged = append(merged, s)
-		}
-	}
-	return merged
 }
 
 func mergeTimezoneInto(dst *TimezoneConfig, src *TimezoneConfig) {
@@ -1279,6 +1004,21 @@ func mergeTimezoneInto(dst *TimezoneConfig, src *TimezoneConfig) {
 func mergeShellInto(dst *ShellConfig, src *ShellConfig) {
 	if src.UseTmux != nil {
 		dst.UseTmux = src.UseTmux
+	}
+}
+
+func mergeDetectionInto(dst *DetectionConfig, src *DetectionConfig) {
+	if src.GTFOBinsSource != "" {
+		dst.GTFOBinsSource = src.GTFOBinsSource
+	}
+	if src.GTFOBinsDir != "" {
+		dst.GTFOBinsDir = src.GTFOBinsDir
+	}
+	if src.SigmaSource != "" {
+		dst.SigmaSource = src.SigmaSource
+	}
+	if src.SigmaDir != "" {
+		dst.SigmaDir = src.SigmaDir
 	}
 }
 

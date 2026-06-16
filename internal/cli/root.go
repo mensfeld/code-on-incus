@@ -140,6 +140,8 @@ func init() {
 	rootCmd.AddCommand(updateCmd)
 	rootCmd.AddCommand(profileCmd)
 	rootCmd.AddCommand(schemaCmd)
+	rootCmd.AddCommand(trustCmd)
+	rootCmd.AddCommand(untrustCmd)
 	rootCmd.AddCommand(validateCmd)
 	rootCmd.AddCommand(attachCmd)
 	rootCmd.AddCommand(shutdownCmd)

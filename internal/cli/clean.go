@@ -49,7 +49,7 @@ Examples:
   coi clean --all --force      # Clean without confirmation
   coi clean --orphans --dry-run # Show what orphans would be cleaned
 `,
-	RunE: cleanCommand,
+	RunE: app.cleanCommand,
 }
 
 func init() {
@@ -61,9 +61,9 @@ func init() {
 	cleanCmd.Flags().BoolVar(&cleanDryRun, "dry-run", false, "Show what would be cleaned without making changes")
 }
 
-func cleanCommand(cmd *cobra.Command, args []string) error {
+func (a *App) cleanCommand(cmd *cobra.Command, args []string) error {
 	// Get configured tool to determine tool-specific sessions directory
-	toolInstance, err := getConfiguredTool(app.cfg)
+	toolInstance, err := getConfiguredTool(a.cfg)
 	if err != nil {
 		return err
 	}
@@ -113,7 +113,7 @@ func cleanCommand(cmd *cobra.Command, args []string) error {
 
 	// Clean COI containers in unreferenced storage pools
 	if cleanAll || cleanPools {
-		count, cancelled, err := cleanUnreferencedPools()
+		count, cancelled, err := a.cleanUnreferencedPools()
 		if err != nil {
 			return err
 		}
@@ -296,7 +296,8 @@ func cleanOrphanedResources() (int, bool) {
 
 // printOrphanedResources prints the list of orphaned resources found.
 func printOrphanedResources(orphans *cleanup.OrphanedResources) {
-	totalOrphans := len(orphans.Veths) + len(orphans.NftRules) + len(orphans.NFTMonitorRules) + len(orphans.IptablesBridgeRules)
+	totalOrphans := len(orphans.Veths) + len(orphans.NftRules) + len(orphans.IPv6Rules) +
+		len(orphans.NFTMonitorRules) + len(orphans.IptablesBridgeRules)
 	fmt.Printf("Found %d orphaned resource(s):\n", totalOrphans)
 
 	if len(orphans.Veths) > 0 {
@@ -310,6 +311,13 @@ func printOrphanedResources(orphans *cleanup.OrphanedResources) {
 		fmt.Printf("  Orphaned nft rules (%d):\n", len(orphans.NftRules))
 		for _, rule := range orphans.NftRules {
 			fmt.Printf("    - %s\n", rule)
+		}
+	}
+
+	if len(orphans.IPv6Rules) > 0 {
+		fmt.Printf("  Orphaned ip6 nft rules (%d):\n", len(orphans.IPv6Rules))
+		for _, name := range orphans.IPv6Rules {
+			fmt.Printf("    - %s\n", name)
 		}
 	}
 
@@ -352,6 +360,11 @@ func doCleanOrphanedResources(orphans *cleanup.OrphanedResources) int {
 		cleaned += rulesCleaned
 	}
 
+	if len(orphans.IPv6Rules) > 0 {
+		ipv6Cleaned, _ := cleanup.CleanupOrphanedIPv6Rules(orphans.IPv6Rules, logger)
+		cleaned += ipv6Cleaned
+	}
+
 	if len(orphans.NFTMonitorRules) > 0 {
 		nftRulesCleaned, _ := cleanup.CleanupOrphanedNFTMonitorRules(orphans.NFTMonitorRules, logger)
 		cleaned += nftRulesCleaned
@@ -374,11 +387,11 @@ func doCleanOrphanedResources(orphans *cleanup.OrphanedResources) int {
 // root pool.
 //
 // Returns (count cleaned, was cancelled, error).
-func cleanUnreferencedPools() (int, bool, error) {
+func (a *App) cleanUnreferencedPools() (int, bool, error) {
 	fmt.Println("\nScanning storage pools for unreferenced COI containers...")
 
 	// Build referenced pool set from the loaded config + profiles.
-	referenced := referencedPoolSet()
+	referenced := a.referencedPoolSet()
 
 	// List all pools known to Incus.
 	pools, err := container.ListStoragePools()
@@ -492,13 +505,13 @@ func cleanUnreferencedPools() (int, bool, error) {
 // pool as referenced even when the effective pool is a non-empty global
 // cfg.Container.StoragePool. The empty string ("") is only present when
 // the global entry itself is empty (meaning "use Incus default pool").
-func referencedPoolSet() map[string]bool {
+func (a *App) referencedPoolSet() map[string]bool {
 	set := map[string]bool{}
-	if app.cfg == nil {
+	if a.cfg == nil {
 		return set
 	}
-	set[app.cfg.Container.StoragePool] = true
-	for _, profile := range app.cfg.Profiles {
+	set[a.cfg.Container.StoragePool] = true
+	for _, profile := range a.cfg.Profiles {
 		if profile.Container.StoragePool != "" {
 			set[profile.Container.StoragePool] = true
 		}

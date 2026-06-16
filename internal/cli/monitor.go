@@ -50,10 +50,10 @@ Examples:
   coi monitor --format json      # JSON output
   coi monitor --json             # JSON output (backward-compatible alias)
   coi monitor --watch 2          # Update every 2 seconds`,
-	RunE: monitorCommand,
+	RunE: app.monitorCommand,
 }
 
-func monitorCommand(cmd *cobra.Command, args []string) error {
+func (a *App) monitorCommand(cmd *cobra.Command, args []string) error {
 	// Reconcile --json flag with --format flag (backward compatibility)
 	if monitorJSON {
 		monitorFormat = "json"
@@ -75,7 +75,7 @@ func monitorCommand(cmd *cobra.Command, args []string) error {
 	// 1. Positional argument
 	// 2. COI_CONTAINER environment variable
 	// 3. Auto-detect from workspace
-	containerName, err := resolveMonitorContainer(args)
+	containerName, err := a.resolveMonitorContainer(args)
 	if err != nil {
 		return err
 	}
@@ -83,7 +83,7 @@ func monitorCommand(cmd *cobra.Command, args []string) error {
 
 	// Get allowed CIDRs from network config
 	allowedCIDRs := []string{}
-	if app.cfg.Network.Mode == config.NetworkModeAllowlist {
+	if a.cfg.Network.Mode == config.NetworkModeAllowlist {
 		// Convert allowed domains to CIDRs (simplified - in full implementation would resolve)
 		// For now, just pass empty list
 		allowedCIDRs = []string{}
@@ -91,7 +91,7 @@ func monitorCommand(cmd *cobra.Command, args []string) error {
 
 	// Create collector
 	collector := monitor.NewCollector(containerName, "", "", allowedCIDRs)
-	detector := monitor.NewDetector(app.cfg.Monitoring.FileReadThresholdMB, app.cfg.Monitoring.FileReadRateMBPerSec)
+	detector := monitor.NewDetector(a.cfg.Monitoring.FileReadThresholdMB, a.cfg.Monitoring.FileReadRateMBPerSec)
 
 	// Watch mode or one-shot
 	if monitorWatch > 0 {
@@ -125,7 +125,7 @@ func monitorCommand(cmd *cobra.Command, args []string) error {
 // 1. Use positional arg if provided
 // 2. Check COI_CONTAINER environment variable
 // 3. Find container for current workspace
-func resolveMonitorContainer(args []string) (string, error) {
+func (a *App) resolveMonitorContainer(args []string) (string, error) {
 	// 1. Use positional arg if provided (with alias resolution)
 	if len(args) > 0 {
 		name := args[0]
@@ -159,7 +159,7 @@ func resolveMonitorContainer(args []string) (string, error) {
 	}
 
 	// 3. Find container for current workspace
-	absWorkspace, err := filepath.Abs(app.workspace)
+	absWorkspace, err := filepath.Abs(a.workspace)
 	if err != nil {
 		return "", fmt.Errorf("failed to resolve workspace path: %w", err)
 	}

@@ -4,22 +4,26 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"os"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/mensfeld/code-on-incus/internal/container"
+	"golang.org/x/sys/unix"
 )
 
 // logCandidates are log paths (relative to container rootfs) that the watcher tails.
 var logCandidates = []string{
 	"var/log/auth.log",
 	"var/log/syslog",
+	"var/log/audit/audit.log",
 }
 
 // logPattern defines a set of keywords that must all appear in a log line
@@ -82,6 +86,35 @@ var authLogPatterns = []logPattern{
 		title:    "Root session opened",
 		desc:     "A root session was opened inside the container",
 	},
+	// ── auditd patterns (key=value structured lines) ──────────────────────
+	{
+		name:     "auditd_auth_failure",
+		keywords: []string{"type=user_auth", "res=failed"},
+		level:    ThreatLevelHigh,
+		title:    "Auditd: authentication failure",
+		desc:     "auditd recorded a USER_AUTH failure",
+	},
+	{
+		name:     "auditd_user_cmd_failed",
+		keywords: []string{"type=user_cmd", "res=failed"},
+		level:    ThreatLevelHigh,
+		title:    "Auditd: unauthorized command",
+		desc:     "auditd recorded a USER_CMD failure (unauthorized sudo or su)",
+	},
+	{
+		name:     "auditd_login_failure",
+		keywords: []string{"type=user_login", "res=failed"},
+		level:    ThreatLevelWarning,
+		title:    "Auditd: login failure",
+		desc:     "auditd recorded a USER_LOGIN failure",
+	},
+	{
+		name:     "auditd_acct_failure",
+		keywords: []string{"type=user_acct", "res=failed"},
+		level:    ThreatLevelWarning,
+		title:    "Auditd: account action failure",
+		desc:     "auditd recorded a USER_ACCT failure (account modification rejected)",
+	},
 }
 
 // logState tracks the read position and inode for a single log file across
@@ -92,18 +125,26 @@ type logState struct {
 	usingFallback bool   // true while the host-side path is unavailable
 }
 
-// LogWatcher tails auth.log and syslog from the container, polling every
-// 5 seconds. On each tick it resolves the container's init PID fresh (same
-// as the network monitor) and attempts a direct read from
-// /proc/<initPID>/root/<rel>. This avoids the incus daemon subprocess and
-// temp-file overhead of the previous incus file pull approach.
+// inotifyRawEvent is a minimal parsed inotify event.
+type inotifyRawEvent struct {
+	wd   int32
+	mask uint32
+}
+
+// LogWatcher tails auth.log, syslog, and audit.log from the container. It
+// uses inotify for near-instant detection, watching /proc/<initPID>/root/<rel>
+// directly from the host so the incus daemon subprocess is never involved.
 //
-// Note: unlike the network (/proc/<pid>/net/*) and process (cgroup walk)
-// monitors which read kernel-maintained data, auth.log and syslog are
-// regular files inside the container's writable filesystem. A root attacker
-// inside the container could truncate or modify them. What the host-side
-// read buys is independence from the incus daemon/agent, no subprocess or
-// temp-file per tick, and access to the live mount-namespace view.
+// The inotify approach watches each log file for IN_MODIFY events and the
+// parent directory for IN_CREATE so log rotation (mv + new file) is handled
+// transparently. A 30-second backstop ticker covers missed events and
+// container restarts. If inotify is unavailable the watcher falls back to
+// 5-second polling.
+//
+// Note: unlike kernel-maintained sources (network, process, cgroup), auth.log
+// and syslog are regular writable files. A root attacker inside the container
+// could truncate or modify them. The host-side read buys independence from the
+// incus daemon/agent and access to the live mount-namespace view.
 //
 // When the host path is unreadable (e.g. the monitor lacks ptrace permission
 // in the container's user-namespace) the watcher falls back to incus file
@@ -123,15 +164,113 @@ func NewLogWatcher(containerName string, onThreat func(ThreatEvent), onError fun
 	}
 }
 
-// Run tails log files until ctx is cancelled, polling every 5 seconds.
-// The init PID is resolved on every tick (matching the network monitor)
-// so a container restart never leaves a stale or recycled PID in use.
+// Run tails log files until ctx is cancelled. It tries inotify first for
+// low-latency detection and falls back to 5-second polling if unavailable.
 func (lw *LogWatcher) Run(ctx context.Context) {
 	states := make(map[string]logState)
 
+	ifd, err := unix.InotifyInit1(unix.IN_CLOEXEC | unix.IN_NONBLOCK)
+	if err != nil {
+		lw.runPolling(ctx, states)
+		return
+	}
+	// Close ifd exactly once — either when ctx is cancelled or on return.
+	var closeOnce sync.Once
+	closeFd := func() { closeOnce.Do(func() { unix.Close(ifd) }) }
+	defer closeFd()
+	// This goroutine may outlive Run when ifd closes due to a read error before
+	// ctx is done; it exits as soon as the session context is cancelled.
+	go func() { <-ctx.Done(); closeFd() }()
+
+	pid, _ := GetContainerInitPID(ctx, lw.containerName)
+	wdToRel, dirWd := addInotifyWatches(ifd, pid)
+
+	// Initial read: catch lines written before the watches were registered.
+	for _, rel := range logCandidates {
+		lw.pollFile(ctx, rel, states, pid)
+	}
+
+	events := inotifyReader(ifd)
+	// Backstop: re-resolve PID on container restart and fill any missing watches.
+	// 3 s keeps detection latency low when log files don't exist at watch-setup
+	// time (e.g. container using overlayfs where IN_CREATE doesn't cross the
+	// namespace boundary reliably). GetContainerInitPID is fast (cgroup reads).
+	backstop := time.NewTicker(3 * time.Second)
+	defer backstop.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev, ok := <-events:
+			if !ok {
+				return // ifd closed (ctx cancelled or unrecoverable read error)
+			}
+			switch {
+			case ev.mask&unix.IN_IGNORED != 0:
+				// Kernel confirms watch removal (explicit rm or file deleted).
+				delete(wdToRel, ev.wd)
+				if ev.wd == dirWd {
+					dirWd = -1
+				}
+			case ev.wd == dirWd && ev.mask&unix.IN_CREATE != 0:
+				// A file appeared in the log directory (rotation target recreated).
+				newWds, newDir := addInotifyWatches(ifd, pid)
+				for wd, rel := range newWds {
+					wdToRel[wd] = rel
+				}
+				if dirWd < 0 {
+					dirWd = newDir
+				}
+				for _, rel := range logCandidates {
+					lw.pollFile(ctx, rel, states, pid)
+				}
+			case ev.mask&(unix.IN_MOVE_SELF|unix.IN_DELETE_SELF) != 0:
+				// Log file rotated away; the directory watch will fire IN_CREATE
+				// when the replacement appears.
+				unix.InotifyRmWatch(ifd, uint32(ev.wd)) //nolint:errcheck,gosec // G115: inotify wd fits in uint32
+				delete(wdToRel, ev.wd)
+			case ev.mask&unix.IN_MODIFY != 0:
+				if rel, ok := wdToRel[ev.wd]; ok {
+					lw.pollFile(ctx, rel, states, pid)
+				}
+			}
+		case <-backstop.C:
+			newPid, _ := GetContainerInitPID(ctx, lw.containerName)
+			if newPid != pid {
+				// Container restarted; all /proc/<old-pid> paths are invalid.
+				pid = newPid
+				for wd := range wdToRel {
+					unix.InotifyRmWatch(ifd, uint32(wd)) //nolint:errcheck,gosec // G115: inotify wd fits in uint32
+				}
+				if dirWd >= 0 {
+					unix.InotifyRmWatch(ifd, uint32(dirWd)) //nolint:errcheck,gosec // G115: inotify wd fits in uint32
+				}
+				wdToRel, dirWd = addInotifyWatches(ifd, pid)
+			} else if len(wdToRel) < len(logCandidates) {
+				// Some log files haven't been created yet; retry.
+				newWds, newDir := addInotifyWatches(ifd, pid)
+				for wd, rel := range newWds {
+					wdToRel[wd] = rel
+				}
+				if dirWd < 0 {
+					dirWd = newDir
+				}
+			}
+			// Safety-net read to catch any events delivered while inotify fd
+			// was being rebuilt or on the rare missed event.
+			for _, rel := range logCandidates {
+				lw.pollFile(ctx, rel, states, pid)
+			}
+		}
+	}
+}
+
+// runPolling is the fallback 5-second ticker path used when inotify is
+// unavailable (e.g. kernel too old or resource limit reached).
+func (lw *LogWatcher) runPolling(ctx context.Context, states map[string]logState) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
-
 	for {
 		select {
 		case <-ctx.Done():
@@ -143,6 +282,75 @@ func (lw *LogWatcher) Run(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// addInotifyWatches registers IN_MODIFY/rotate watches on each log candidate
+// and an IN_CREATE watch on their parent directory. Returns a wd→rel map and
+// the directory watch descriptor (-1 if the watch could not be added).
+func addInotifyWatches(ifd, pid int) (wdToRel map[int32]string, dirWd int32) {
+	wdToRel = make(map[int32]string)
+	dirWd = -1
+	if pid <= 0 {
+		return
+	}
+	for _, rel := range logCandidates {
+		hostPath := fmt.Sprintf("/proc/%d/root/%s", pid, rel)
+		wd, err := unix.InotifyAddWatch(ifd, hostPath,
+			unix.IN_MODIFY|unix.IN_MOVE_SELF|unix.IN_DELETE_SELF)
+		if err == nil {
+			wdToRel[int32(wd)] = rel //nolint:gosec // G115: InotifyAddWatch returns a 32-bit wd
+		}
+	}
+	// Directory watch so we notice when a rotated log file is recreated.
+	dirPath := fmt.Sprintf("/proc/%d/root/var/log", pid)
+	wd, err := unix.InotifyAddWatch(ifd, dirPath, unix.IN_CREATE)
+	if err == nil {
+		dirWd = int32(wd) //nolint:gosec // G115: InotifyAddWatch returns a 32-bit wd
+	}
+	return
+}
+
+// inotifyBufSize is large enough for a burst of 16 maximum-sized inotify events
+// (each at most SizeofInotifyEvent + NAME_MAX + 1 bytes).
+const inotifyBufSize = (unix.SizeofInotifyEvent + unix.NAME_MAX + 1) * 16
+
+// inotifyReader spawns a goroutine that polls ifd (non-blocking) and forwards
+// parsed events to the returned channel. The channel is closed when ifd is
+// closed or an unrecoverable read error occurs.
+func inotifyReader(ifd int) <-chan inotifyRawEvent {
+	ch := make(chan inotifyRawEvent, 64)
+	go func() {
+		defer close(ch)
+		buf := make([]byte, inotifyBufSize)
+		fds := []unix.PollFd{{Fd: int32(ifd), Events: unix.POLLIN}} //nolint:gosec // G115: fd values are small non-negative ints
+		for {
+			n, err := unix.Poll(fds, 200) // 200 ms so ctx cancellation is noticed promptly
+			if err != nil || n < 0 {
+				return
+			}
+			if n == 0 {
+				continue
+			}
+			nr, err := unix.Read(ifd, buf)
+			if err != nil || nr < 16 {
+				return
+			}
+			data := buf[:nr]
+			for len(data) >= 16 {
+				wd := int32(binary.NativeEndian.Uint32(data[0:])) //nolint:gosec // G115: inotify wd is a kernel int32 stored as 4 bytes
+				mask := binary.NativeEndian.Uint32(data[4:])
+				// data[8:12] = cookie (unused)
+				nameLen := binary.NativeEndian.Uint32(data[12:])
+				data = data[16:]
+				if int(nameLen) > len(data) {
+					break
+				}
+				data = data[nameLen:]
+				ch <- inotifyRawEvent{wd: wd, mask: mask}
+			}
+		}
+	}()
+	return ch
 }
 
 // pollFile reads lines appended to rel since the last poll and fires threat

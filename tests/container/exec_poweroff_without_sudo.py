@@ -69,23 +69,26 @@ def test_exec_poweroff_without_sudo(coi_binary, cleanup_containers, workspace_di
 
     # === Phase 3: Wait for container to stop ===
 
-    # Give container time to shutdown gracefully
-    time.sleep(5)
+    # Poll until the container stops (up to 30s — slow CI runners may take longer than 5s)
+    deadline = time.monotonic() + 30
+    stopped = False
+    while time.monotonic() < deadline:
+        result = subprocess.run(
+            [coi_binary, "container", "running", container_name],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            stopped = True
+            break
+        time.sleep(1)
 
     # === Phase 4: Verify container stopped ===
 
-    # Check if container is still running
-    result = subprocess.run(
-        [coi_binary, "container", "running", container_name],
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-
-    # running command should return non-zero if container is not running
-    assert result.returncode != 0, (
-        "Container should be stopped after poweroff. "
-        f"Exit code: {result.returncode}, Output: {result.stdout + result.stderr}"
+    assert stopped, (
+        "Container should be stopped after poweroff within 30s. "
+        f"Last exit code: {result.returncode}, Output: {result.stdout + result.stderr}"
     )
 
     # === Phase 5: Cleanup ===

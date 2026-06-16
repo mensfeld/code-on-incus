@@ -32,7 +32,7 @@ Examples:
   coi attach --slot=1           # Attach to slot 1 for current workspace
   coi attach --bash             # Attach to bash shell instead of tmux session
   coi attach coi-123 --bash     # Attach to specific container with bash`,
-	RunE: attachCommand,
+	RunE: app.attachCommand,
 }
 
 func init() {
@@ -40,13 +40,13 @@ func init() {
 	attachCmd.Flags().IntVar(&attachSlot, "slot", 0, "Slot number to attach to (requires workspace context)")
 }
 
-func attachCommand(cmd *cobra.Command, args []string) error {
+func (a *App) attachCommand(cmd *cobra.Command, args []string) error {
 	var targetContainer string
 
 	// If --slot is provided, calculate container name from workspace and slot
 	if attachSlot > 0 {
 		// Resolve workspace path
-		workspacePath, err := filepath.Abs(app.workspace)
+		workspacePath, err := filepath.Abs(a.workspace)
 		if err != nil {
 			return fmt.Errorf("failed to resolve workspace path: %w", err)
 		}

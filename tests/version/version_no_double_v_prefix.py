@@ -10,6 +10,8 @@ Tests that:
 
 import subprocess
 
+import pytest
+
 
 def test_version_no_double_v(coi_binary):
     """
@@ -50,6 +52,13 @@ def test_update_check_no_double_v(coi_binary):
         text=True,
         timeout=30,
     )
+
+    # A failed GitHub API call (rate-limit/403, 429, 5xx/504 gateway errors,
+    # network/timeout) is an external dependency outside our control in CI; skip
+    # rather than fail so the suite stays green. coi prints "failed to check for
+    # updates" for any such API error.
+    if result.returncode != 0 and "failed to check for updates" in result.stderr.lower():
+        pytest.skip(f"GitHub API unavailable: {result.stderr.strip()}")
 
     assert result.returncode == 0, f"Update check should succeed. stderr: {result.stderr}"
 

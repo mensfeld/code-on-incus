@@ -8,7 +8,7 @@ import (
 )
 
 // setupMounts mounts all configured directories to the container
-func setupMounts(mgr container.ContainerManager, mountConfig *MountConfig, useShift bool, logger func(string)) error {
+func setupMounts(mgr container.ContainerDevices, mountConfig *MountConfig, useShift bool, logger func(string)) error {
 	if mountConfig == nil || len(mountConfig.Mounts) == 0 {
 		return nil
 	}

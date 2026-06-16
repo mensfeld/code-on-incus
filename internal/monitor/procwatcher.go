@@ -465,7 +465,7 @@ func matchSuspiciousExec(cmd string, patterns []execPattern) string {
 
 	lower := strings.ToLower(cmd)
 	for _, p := range patterns {
-		if p.Arg0 != "" && !strings.HasPrefix(arg0Base, p.Arg0) {
+		if p.Arg0 != "" && !strings.HasPrefix(arg0Base, strings.ToLower(p.Arg0)) {
 			continue
 		}
 		matched := true

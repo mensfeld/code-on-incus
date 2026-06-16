@@ -161,6 +161,12 @@ jobs:
           - name: monitoring-network-detection
             path: tests/integration/test_network_connection_detection.py
             description: "Host-side /proc/<pid>/net TCP/UDP suspicious connection detection"
+          - name: monitoring-log-inotify
+            path: tests/integration/test_log_watcher_inotify.py
+            description: "inotify-driven auth.log/syslog monitoring: syslog coverage, prompt delivery, log rotation"
+          - name: monitoring-file-fanotify
+            path: tests/integration/test_file_watcher_fanotify.py
+            description: "fanotify sensitive file monitoring: shadow read, sudoers write, authorized_keys write"
           - name: uid-mapping
             path: tests/container/uid_mapping_shift_true.py tests/container/uid_mapping_raw_idmap.py
             description: "UID mapping integration tests"
@@ -513,6 +519,14 @@ jobs:
         with:
           path: /tmp/coi-image.tar.gz
           key: ${{ runner.os }}-coi-image-${{ hashFiles('internal/image/**', 'testdata/dummy/**', 'profiles/default/**') }}
+
+      - name: Free disk space for image-intensive tests
+        if: matrix.test_group.name == 'core-build'
+        run: |
+          # core-build publishes many full images; free up space to avoid "no space left on device"
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/hostedtoolcache/CodeQL
+          sudo apt-get clean
+          df -h
 
       - name: Debug iptables/nft state before tests
         run: |

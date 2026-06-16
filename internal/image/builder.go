@@ -393,9 +393,42 @@ func (b *Builder) runBuildSteps() error {
 	}
 }
 
-// buildCoi implements coi image build steps using external script
+// buildCoi implements coi image build steps using the build script.
+//
+// The default coi image is built from the EMBEDDED build script (compiled into
+// the binary) by default — NOT from profiles/default/build.sh on disk, which
+// lives in the agent-writable workspace when COI is run against its own source
+// tree. Preferring the embedded copy means a tampered on-disk build.sh cannot
+// poison the coi-default image that every future container uses. Opt back into
+// the on-disk copy with COI_BUILD_SCRIPT_FROM_DISK=1 (e.g. iterating on build.sh
+// without recompiling the binary). The Makefile/CI re-embed build.sh on every
+// build, so normal dev/CI builds still run the latest script with no change.
 func (b *Builder) buildCoi() error {
-	return b.runBuildScript("profiles/default/build.sh")
+	if os.Getenv("COI_BUILD_SCRIPT_FROM_DISK") == "1" {
+		b.opts.Logger("Using on-disk build script (COI_BUILD_SCRIPT_FROM_DISK=1)")
+		return b.runBuildScript("profiles/default/build.sh")
+	}
+	if len(embeddedCoiBuildScript) == 0 {
+		// No embedded script compiled in — fall back to the on-disk resolver so
+		// builds without the embedded asset still work.
+		return b.runBuildScript("profiles/default/build.sh")
+	}
+
+	tmp, err := os.CreateTemp("", "coi-build-*.sh")
+	if err != nil {
+		return fmt.Errorf("failed to create temp build script: %w", err)
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(embeddedCoiBuildScript); err != nil {
+		tmp.Close()
+		return fmt.Errorf("failed to write embedded build script: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("failed to write embedded build script: %w", err)
+	}
+
+	b.opts.Logger("Using embedded build script (tamper-proof; set COI_BUILD_SCRIPT_FROM_DISK=1 to override)")
+	return b.runBuildScriptResolved(tmp.Name())
 }
 
 // resolveAsset locates an asset file on disk or falls back to embedded content.
@@ -440,7 +473,7 @@ func (b *Builder) resolveAsset(diskPath string, embedded []byte) (string, func()
 	return tmp.Name(), cleanup, nil
 }
 
-// runBuildScript executes a build script from the scripts directory
+// runBuildScript resolves a build script (disk-first, embedded fallback) and runs it.
 func (b *Builder) runBuildScript(scriptPath string) error {
 	// Resolve build script (disk or embedded fallback)
 	resolvedScript, cleanupScript, err := b.resolveAsset(scriptPath, embeddedCoiBuildScript)
@@ -448,7 +481,12 @@ func (b *Builder) runBuildScript(scriptPath string) error {
 		return fmt.Errorf("build script not found: %w", err)
 	}
 	defer cleanupScript()
+	return b.runBuildScriptResolved(resolvedScript)
+}
 
+// runBuildScriptResolved pushes an already-resolved build script into the build
+// container and executes it (the caller owns the script's lifecycle).
+func (b *Builder) runBuildScriptResolved(resolvedScript string) error {
 	b.opts.Logger(fmt.Sprintf("Using build script: %s", resolvedScript))
 
 	// Resolve dummy (disk or embedded fallback)

@@ -782,6 +782,9 @@ class TestAutomatedResponse:
             stderr=subprocess.DEVNULL,
         )
 
+        # Give the monitoring daemon a moment to scan before polling state.
+        time.sleep(5)
+
         # Wait for auto-kill
         killed = False
         for _ in range(15):
@@ -792,10 +795,18 @@ class TestAutomatedResponse:
 
         assert killed, "Container should be auto-killed on CRITICAL threat"
 
-        # Verify action logged
-        events = get_threat_events(container_name)
-        killed_events = [e for e in events if e.get("action") == "killed"]
-        assert len(killed_events) > 0, "Expected action='killed' in audit log"
+        # The daemon writes the kill event and syncs to disk before killing the
+        # container, but retry briefly in case of OS-level flush delay.
+        killed_events = []
+        for _ in range(10):
+            events = get_threat_events(container_name)
+            killed_events = [e for e in events if e.get("action") == "killed"]
+            if killed_events:
+                break
+            time.sleep(1)
+        assert len(killed_events) > 0, (
+            f"Expected action='killed' in audit log. Events: {get_threat_events(container_name)}"
+        )
 
         proc.terminate()
         cleanup_container(container_name, coi_binary)
@@ -2555,10 +2566,18 @@ class TestAuditLogValidation:
                 f"Invalid threat level: {event['level']}"
             )
 
-            # Verify action is valid
-            assert event["action"] in ["logged", "alerted", "paused", "killed", "pending"], (
-                f"Invalid action: {event['action']}"
-            )
+            # Verify action is valid. "deduplicated" is emitted when the monitor
+            # collapses repeated detections of the same threat (load-dependent, so
+            # it only appears intermittently) — it's a valid action, see the
+            # allowlist in test_threat_deduplication.
+            assert event["action"] in [
+                "logged",
+                "alerted",
+                "paused",
+                "killed",
+                "pending",
+                "deduplicated",
+            ], f"Invalid action: {event['action']}"
 
             # Verify evidence field exists and has content
             assert "evidence" in event, "Missing evidence field"
@@ -4558,27 +4577,35 @@ process_spawn_rate_threshold = 10
                 f"Container {container_name} did not start"
             )
 
-            # Give monitoring a couple of seconds to establish baseline
-            time.sleep(3)
+            # Give monitoring a few seconds to establish a baseline process count.
+            time.sleep(5)
 
-            # Spawn 25 long-lived sleep processes in a single burst.
-            # The delta of ~25 exceeds the threshold of 10 within one 1-second poll.
-            subprocess.Popen(
-                [
-                    "incus",
-                    "exec",
-                    container_name,
-                    "--",
-                    "bash",
-                    "-c",
-                    "for i in $(seq 1 25); do sleep 60 & done",
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            # Spawn bursts of long-lived sleep processes. A burst of ~20 far
+            # exceeds the spawn-rate threshold of 10 within one 1-second poll.
+            # We spawn several bursts over time rather than one: a single burst can
+            # be missed if it coincides with a process-collection gap (which resets
+            # the detector's baseline to "first poll") — repeated bursts make
+            # detection robust, and the longer window absorbs kill latency on
+            # loaded CI runners.
+            def spawn_burst():
+                subprocess.Popen(
+                    [
+                        "incus",
+                        "exec",
+                        container_name,
+                        "--",
+                        "bash",
+                        "-c",
+                        "for i in $(seq 1 20); do sleep 120 & done",
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
 
             killed = False
-            for _ in range(20):
+            for i in range(40):
+                if i % 4 == 0:
+                    spawn_burst()
                 time.sleep(1)
                 if get_container_state(container_name) in ["Stopped", "Frozen", "Unknown"]:
                     killed = True
@@ -4736,30 +4763,38 @@ process_spawn_rate_threshold = 9999
             # Allow monitoring daemon to start.
             time.sleep(3)
 
-            # Write the suspicious line into the container's auth.log.
-            # The LogWatcher polls via incus file pull every 5 seconds, so the
-            # threat will be detected within one polling interval.
-            subprocess.run(
-                [
-                    "incus",
-                    "exec",
-                    container_name,
-                    "--",
-                    "bash",
-                    "-c",
-                    "mkdir -p /var/log && "
-                    "echo 'Jun  5 12:00:00 coi sshd[1234]: Failed password for invalid user attacker from 1.2.3.4 port 22222 ssh2'"
-                    " >> /var/log/auth.log",
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-            )
+            def inject_ssh_failure():
+                subprocess.run(
+                    [
+                        "incus",
+                        "exec",
+                        container_name,
+                        "--",
+                        "bash",
+                        "-c",
+                        "mkdir -p /var/log && "
+                        "echo 'Jun  5 12:00:00 coi sshd[1234]: Failed password for invalid user attacker from 1.2.3.4 port 22222 ssh2'"
+                        " >> /var/log/auth.log",
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                )
 
-            # Poll until the auth threat appears (rescan ticker fires within 5 s,
-            # then inotify delivers near-instantly). 30 s timeout avoids CI flakes.
+            # Write the suspicious line into the container's auth.log.
+            # The LogWatcher reads from offset 0 on startup so it catches
+            # lines written before the daemon started. Re-inject at 10s and
+            # 20s into the poll loop so a late-starting daemon detects the
+            # event via inotify regardless of container setup time.
+            inject_ssh_failure()
+
+            # Poll until the auth threat appears (inotify delivers near-instantly
+            # once the daemon is running; backstop ticker fires within 3 s).
+            # 30 s timeout with periodic re-injection handles slow CI runners.
             auth_events = []
-            for _ in range(30):
+            for i in range(30):
+                if i in (10, 20):
+                    inject_ssh_failure()
                 events = get_threat_events(container_name)
                 auth_events = [
                     e
@@ -4898,7 +4933,7 @@ mode = "open"
 [monitoring]
 enabled = true
 auto_pause_on_high = false
-auto_kill_on_critical = true
+auto_kill_on_critical = false
 poll_interval_sec = 1
 file_read_threshold_mb = 500
 file_read_rate_mb_per_sec = 1000
@@ -4933,8 +4968,9 @@ process_spawn_rate_threshold = 9999
             time.sleep(3)
 
             # Run bash with a /dev/tcp/ redirect — the canonical bash reverse-shell
-            # pattern. The connection to 10.255.255.1:9999 will fail (no listener),
-            # but PROC_EVENT_EXEC fires on execve before the shell tries to connect.
+            # pattern. PROC_EVENT_EXEC fires on execve before the shell tries to
+            # connect, so we don't wait for the command to complete (the TCP
+            # connection attempt may hang if no RST is returned by the network).
             subprocess.Popen(
                 [
                     "incus",
@@ -4947,7 +4983,7 @@ process_spawn_rate_threshold = 9999
                 ],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-            ).wait(timeout=15)
+            )
 
             # Poll until the proc_event threat appears (30 s timeout).
             proc_events = []
@@ -4993,7 +5029,7 @@ mode = "open"
 [monitoring]
 enabled = true
 auto_pause_on_high = false
-auto_kill_on_critical = true
+auto_kill_on_critical = false
 poll_interval_sec = 1
 file_read_threshold_mb = 500
 file_read_rate_mb_per_sec = 1000
@@ -5083,6 +5119,13 @@ process_spawn_rate_threshold = 9999
         backup = config_path.read_text() if config_path.exists() else None
 
         config_path.parent.mkdir(parents=True, exist_ok=True)
+        # NOTE: auto_kill_on_critical is intentionally DISABLED here. The cmdline
+        # contains "fsockopen", which is BOTH the proc_event "php-fsockopen"
+        # keyword AND a CRITICAL reverse-shell pattern (process.go). With auto-kill
+        # on, the critical reverse-shell detection races the kill against the
+        # "high" proc_event this test asserts on, killing the container before the
+        # proc_event is observable. This test verifies detection, not killing, so
+        # disabling auto-kill makes it deterministic without weakening the assert.
         config_path.write_text(
             """
 [network]
@@ -5091,7 +5134,7 @@ mode = "open"
 [monitoring]
 enabled = true
 auto_pause_on_high = false
-auto_kill_on_critical = true
+auto_kill_on_critical = false
 poll_interval_sec = 1
 file_read_threshold_mb = 500
 file_read_rate_mb_per_sec = 1000
@@ -5299,7 +5342,7 @@ mode = "open"
 [monitoring]
 enabled = true
 auto_pause_on_high = false
-auto_kill_on_critical = true
+auto_kill_on_critical = false
 poll_interval_sec = 1
 file_read_threshold_mb = 500
 file_read_rate_mb_per_sec = 1000

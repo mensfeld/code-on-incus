@@ -17,6 +17,7 @@ import (
 type OrphanedResources struct {
 	Veths               []string // Orphaned veth interfaces (no master bridge)
 	NftRules            []string // Orphaned nft rules (for non-existent container IPs)
+	IPv6Rules           []string // Orphaned ip6 coi drop rules (container names no longer running)
 	NFTMonitorRules     []string // Orphaned nft monitoring rules (NFT_COI/NFT_DNS/NFT_SUSPICIOUS)
 	IptablesBridgeRules []string // Orphaned iptables coi-bridge-forward rules (no coi containers running)
 }
@@ -76,6 +77,76 @@ func DetectOrphanedNftRules() ([]string, error) {
 		}
 	}
 	return orphaned, nil
+}
+
+// DetectOrphanedIPv6Rules finds container names in the ip6 coi forward chain
+// whose containers are no longer running (e.g. force-killed without teardown).
+func DetectOrphanedIPv6Rules() ([]string, error) {
+	names, err := network.ListCOIIP6RuleContainers()
+	if err != nil || len(names) == 0 {
+		return nil, err
+	}
+
+	runningNames, err := getRunningContainerNames()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get container names: %w", err)
+	}
+	running := make(map[string]bool, len(runningNames))
+	for _, n := range runningNames {
+		running[n] = true
+	}
+
+	var orphaned []string
+	for _, n := range names {
+		if !running[n] {
+			orphaned = append(orphaned, n)
+		}
+	}
+	return orphaned, nil
+}
+
+// CleanupOrphanedIPv6Rules removes the ip6 coi drop rule for each given container
+// name. Returns the number cleaned.
+func CleanupOrphanedIPv6Rules(names []string, logger func(string)) (int, error) {
+	if logger == nil {
+		logger = func(msg string) { log.Println(msg) }
+	}
+	cleaned := 0
+	for _, name := range names {
+		logger(fmt.Sprintf("Removing orphaned ip6 nft rule for container: %s", name))
+		if err := network.RemoveIPv6BlockForContainer(name); err != nil {
+			logger(fmt.Sprintf("  Warning: Failed to remove ip6 rule for %s: %v", name, err))
+			continue
+		}
+		cleaned++
+	}
+	return cleaned, nil
+}
+
+// getRunningContainerNames returns the names of all running containers.
+func getRunningContainerNames() ([]string, error) {
+	output, err := container.IncusOutput("list", "--format=json")
+	if err != nil {
+		return nil, err
+	}
+
+	var containers []struct {
+		Name  string `json:"name"`
+		State struct {
+			Status string `json:"status"`
+		} `json:"state"`
+	}
+	if err := parseJSON(output, &containers); err != nil {
+		return nil, err
+	}
+
+	var names []string
+	for _, c := range containers {
+		if c.State.Status == "Running" {
+			names = append(names, c.Name)
+		}
+	}
+	return names, nil
 }
 
 // getRunningContainerIPs returns IPs of all running containers
@@ -321,6 +392,13 @@ func DetectAll() (*OrphanedResources, error) {
 	}
 	result.NftRules = rules
 
+	ipv6Rules, err := DetectOrphanedIPv6Rules()
+	if err != nil {
+		// Non-fatal - nft/ip6 might not be available
+		log.Printf("Warning: Could not check ip6 nft rules: %v", err)
+	}
+	result.IPv6Rules = ipv6Rules
+
 	nftRules, err := DetectOrphanedNFTMonitorRules()
 	if err != nil {
 		// Non-fatal - nft might not be available
@@ -339,14 +417,14 @@ func DetectAll() (*OrphanedResources, error) {
 }
 
 // CleanupAll cleans up all orphaned resources
-func CleanupAll(logger func(string)) (vethsCleaned, rulesCleaned, nftRulesCleaned, iptablesBridgeRulesCleaned int, err error) {
+func CleanupAll(logger func(string)) (vethsCleaned, rulesCleaned, ipv6RulesCleaned, nftRulesCleaned, iptablesBridgeRulesCleaned int, err error) {
 	if logger == nil {
 		logger = func(msg string) { log.Println(msg) }
 	}
 
 	orphans, err := DetectAll()
 	if err != nil {
-		return 0, 0, 0, 0, err
+		return 0, 0, 0, 0, 0, err
 	}
 
 	if len(orphans.Veths) > 0 {
@@ -357,6 +435,10 @@ func CleanupAll(logger func(string)) (vethsCleaned, rulesCleaned, nftRulesCleane
 		rulesCleaned, _ = CleanupOrphanedNftRules(orphans.NftRules, logger)
 	}
 
+	if len(orphans.IPv6Rules) > 0 {
+		ipv6RulesCleaned, _ = CleanupOrphanedIPv6Rules(orphans.IPv6Rules, logger)
+	}
+
 	if len(orphans.NFTMonitorRules) > 0 {
 		nftRulesCleaned, _ = CleanupOrphanedNFTMonitorRules(orphans.NFTMonitorRules, logger)
 	}
@@ -365,7 +447,7 @@ func CleanupAll(logger func(string)) (vethsCleaned, rulesCleaned, nftRulesCleane
 		iptablesBridgeRulesCleaned, _ = CleanupOrphanedIptablesBridgeRules(orphans.IptablesBridgeRules, logger)
 	}
 
-	return vethsCleaned, rulesCleaned, nftRulesCleaned, iptablesBridgeRulesCleaned, nil
+	return vethsCleaned, rulesCleaned, ipv6RulesCleaned, nftRulesCleaned, iptablesBridgeRulesCleaned, nil
 }
 
 // HasOrphans returns true if there are any orphaned resources
@@ -374,5 +456,6 @@ func HasOrphans() bool {
 	if err != nil {
 		return false
 	}
-	return len(orphans.Veths) > 0 || len(orphans.NftRules) > 0 || len(orphans.NFTMonitorRules) > 0 || len(orphans.IptablesBridgeRules) > 0
+	return len(orphans.Veths) > 0 || len(orphans.NftRules) > 0 || len(orphans.IPv6Rules) > 0 ||
+		len(orphans.NFTMonitorRules) > 0 || len(orphans.IptablesBridgeRules) > 0
 }

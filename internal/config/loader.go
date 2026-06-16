@@ -35,15 +35,17 @@ func Load() (*Config, error) {
 	// into a single namespace; duplicate names across locations are rejected
 	// by loadProfileDirectories so it's always clear which profile is used.
 	for _, dir := range GetProfileParentDirs() {
-		if err := loadProfileDirectories(cfg, dir); err != nil {
+		if err := loadProfileDirectories(cfg, dir, isTrustedProfileDir(dir)); err != nil {
 			return nil, err
 		}
 	}
 
-	// Load from config files (in order)
+	// Load from config files (in order). The user config (~/.coi/config.toml) and
+	// an explicit COI_CONFIG are trusted; the project config (<cwd>/.coi/config.toml)
+	// is untrusted and sanitized before merging.
 	paths := GetConfigPaths()
 	for _, path := range paths {
-		if err := loadConfigFile(cfg, path); err != nil {
+		if err := loadConfigFileScoped(cfg, path, isTrustedConfigPath(path)); err != nil {
 			// Only return error if file exists but can't be parsed
 			if !os.IsNotExist(err) {
 				return nil, fmt.Errorf("failed to load config from %s: %w", path, err)
@@ -76,13 +78,48 @@ func Load() (*Config, error) {
 // OverlayProjectConfig loads the project config from the given workspace directory
 // and merges it into cfg. This is used when launching via alias from a different
 // directory, so the resolved workspace's .coi/config.toml is applied.
+//
+// The workspace .coi/config.toml is always project-scoped and therefore
+// untrusted (it may be supplied by a cloned repo or planted by an in-container
+// agent), so it is loaded with trusted=false and sanitized.
 func (c *Config) OverlayProjectConfig(workspaceDir string) error {
 	path := filepath.Join(workspaceDir, ".coi", "config.toml")
-	return loadConfigFile(c, path)
+	return loadConfigFileScoped(c, path, false)
 }
 
-// loadConfigFile loads a TOML config file and merges it into cfg
+// isTrustedConfigPath reports whether a config path is user-controlled and
+// therefore trusted: the user's ~/.coi/config.toml or an explicit COI_CONFIG.
+// The project config (<cwd>/.coi/config.toml) is untrusted.
+func isTrustedConfigPath(path string) bool {
+	clean := filepath.Clean(path)
+	if home, err := os.UserHomeDir(); err == nil {
+		if clean == filepath.Clean(filepath.Join(home, ".coi", "config.toml")) {
+			return true
+		}
+	}
+	if env := os.Getenv("COI_CONFIG"); env != "" && clean == filepath.Clean(env) {
+		return true
+	}
+	return false
+}
+
+// loadConfigFile loads a trusted config file and merges it into cfg (used by
+// tests and any caller that has already established trust). Production code uses
+// loadConfigFileScoped with an explicit trust decision.
 func loadConfigFile(cfg *Config, path string) error {
+	return loadConfigFileScoped(cfg, path, true)
+}
+
+// loadConfigFileScoped loads a TOML config file and merges it into cfg.
+//
+// trusted distinguishes config the user explicitly controls (~/.coi/config.toml
+// and an explicit COI_CONFIG) from untrusted, project-scoped config (the
+// workspace's .coi/config.toml). Untrusted config is sanitized before merging:
+// any network setting that would WEAKEN isolation is dropped with a warning.
+// This prevents a malicious repo — or an in-container agent that planted a
+// .coi/config.toml — from silently turning off the private-network / metadata
+// blocks on the next launch.
+func loadConfigFileScoped(cfg *Config, path string, trusted bool) error {
 	// Check if file exists
 	if _, err := os.Stat(path); err != nil {
 		return err
@@ -99,6 +136,11 @@ func loadConfigFile(cfg *Config, path string) error {
 		return err
 	}
 
+	if !trusted {
+		sanitizeUntrustedConfig(&fileCfg, path)
+		markUntrustedMounts(fileCfg.Mounts.Default, path)
+	}
+
 	configDir := filepath.Dir(path)
 
 	// Resolve build script path relative to config file location
@@ -112,6 +154,77 @@ func loadConfigFile(cfg *Config, path string) error {
 	return nil
 }
 
+// sanitizeUntrustedConfig hardens a project-scoped (untrusted) config before it
+// is merged. It refuses network settings that would weaken isolation relative to
+// the secure defaults, leaving the stronger built-in/user values in place.
+// Strengthening values are left intact.
+func sanitizeUntrustedConfig(fileCfg *Config, path string) {
+	sanitizeUntrustedNetwork(&fileCfg.Network, path)
+}
+
+// sanitizeUntrustedNetwork drops security-downgrading network settings from an
+// untrusted source (a project config or a project-scoped profile). nil is a
+// no-op so it can be called directly on a profile's optional *NetworkConfig.
+func sanitizeUntrustedNetwork(n *NetworkConfig, path string) {
+	if n == nil {
+		return
+	}
+	refuse := func(what string) {
+		fmt.Fprintf(os.Stderr,
+			"WARNING: ignoring security-downgrading %q in project config %s; "+
+				"move it to ~/.coi/config.toml or set COI_CONFIG to apply it.\n", what, path)
+	}
+	if n.BlockPrivateNetworks != nil && !*n.BlockPrivateNetworks {
+		refuse("network.block_private_networks=false")
+		n.BlockPrivateNetworks = nil
+	}
+	if n.BlockMetadataEndpoint != nil && !*n.BlockMetadataEndpoint {
+		refuse("network.block_metadata_endpoint=false")
+		n.BlockMetadataEndpoint = nil
+	}
+	if n.AllowLocalNetworkAccess != nil && *n.AllowLocalNetworkAccess {
+		refuse("network.allow_local_network_access=true")
+		n.AllowLocalNetworkAccess = nil
+	}
+	if n.Mode == NetworkModeOpen {
+		refuse("network.mode=open")
+		n.Mode = ""
+	}
+}
+
+// markUntrustedMounts tags mounts from an untrusted source so escaping host
+// mounts are gated behind explicit trust at apply time (internal/session/trust.go).
+// SourcePath is the absolute config path; if Abs fails the raw path is used —
+// the mounts are still marked untrusted so a path-resolution error cannot fail
+// open and admit an ungated host mount.
+func markUntrustedMounts(mounts []MountEntry, path string) {
+	src := path
+	if abs, err := filepath.Abs(path); err == nil {
+		src = abs
+	}
+	for i := range mounts {
+		mounts[i].Untrusted = true
+		mounts[i].SourcePath = src
+	}
+}
+
+// isTrustedProfileDir reports whether a profiles parent directory is
+// user-controlled (trusted): the user's ~/.coi or the directory of an explicit
+// $COI_CONFIG. The project workspace's ./.coi is untrusted — a cloned repo can
+// ship profiles under it.
+func isTrustedProfileDir(dir string) bool {
+	clean := filepath.Clean(dir)
+	if home, err := os.UserHomeDir(); err == nil {
+		if clean == filepath.Clean(filepath.Join(home, ".coi")) {
+			return true
+		}
+	}
+	if env := os.Getenv("COI_CONFIG"); env != "" && clean == filepath.Clean(filepath.Dir(env)) {
+		return true
+	}
+	return false
+}
+
 // loadProfileDirectories scans configDir/profiles/ for subdirectories containing config.toml
 // and adds them to cfg.Profiles. Each subdirectory name becomes the profile name.
 //
@@ -120,7 +233,7 @@ func loadConfigFile(cfg *Config, path string) error {
 // scan locations (e.g. ~/.coi/profiles/ and ./.coi/profiles/) are merged
 // together, and users are expected to use unique names across locations so
 // it's always clear which profile is being used.
-func loadProfileDirectories(cfg *Config, configDir string) error {
+func loadProfileDirectories(cfg *Config, configDir string, trusted bool) error {
 	profilesDir := filepath.Join(configDir, "profiles")
 	entries, err := os.ReadDir(profilesDir)
 	if err != nil {
@@ -183,6 +296,15 @@ func loadProfileDirectories(cfg *Config, configDir string) error {
 
 		// Tag with source location
 		profileCfg.Source = profileConfigPath
+
+		// A project-scoped profile (under the workspace ./.coi) is untrusted — a
+		// cloned repo can ship it. Apply the same hardening as an untrusted
+		// top-level config: refuse network downgrades and tag its mounts so
+		// escaping host mounts are gated behind `coi trust`.
+		if !trusted {
+			sanitizeUntrustedNetwork(profileCfg.Network, profileConfigPath)
+			markUntrustedMounts(profileCfg.Mounts, profileConfigPath)
+		}
 
 		if cfg.Profiles == nil {
 			cfg.Profiles = make(map[string]ProfileConfig)

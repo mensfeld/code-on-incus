@@ -99,8 +99,19 @@ func (f *NftManager) ApplyAllowlist(cfg *config.NetworkConfig, allowedIPs []stri
 		if !strings.Contains(ip, "/") {
 			dest = ip + "/32"
 		}
-		if err := f.addRule(f.containerIP, dest, "accept"); err != nil {
-			return fmt.Errorf("failed to add allowlist rule for %s: %w", ip, err)
+		// Allow TCP/UDP to allowlisted hosts — covers HTTPS, git, npm, DNS over
+		// UDP/53, and QUIC/HTTP3 over UDP/443. Other IP protocols (raw IP, GRE,
+		// SCTP, custom proto numbers) are NOT accepted and fall through to the
+		// default deny, closing non-TCP/UDP exfil channels to allowed hosts.
+		if err := f.addRuleWithMatch(f.containerIP, dest, []string{"meta", "l4proto", "{", "tcp,", "udp", "}"}, "accept"); err != nil {
+			return fmt.Errorf("failed to add allowlist L4 rule for %s: %w", ip, err)
+		}
+		// Allow rate-limited ICMP echo-request: ordinary (low-rate) ping and
+		// health checks work, but ICMP is throttled (~10/s, plus nft's default
+		// burst) so it cannot be a high-bandwidth covert channel. Excess echo and
+		// all other ICMP types fall through to the default deny.
+		if err := f.addRuleWithMatch(f.containerIP, dest, []string{"icmp", "type", "echo-request", "limit", "rate", "10/second"}, "accept"); err != nil {
+			return fmt.Errorf("failed to add allowlist ICMP rule for %s: %w", ip, err)
 		}
 	}
 
@@ -126,6 +137,45 @@ func (f *NftManager) RemoveRules() error {
 		return nil
 	}
 	return deleteNFTRulesByComment("coi-" + f.containerIP)
+}
+
+// ReplaceAllowlist atomically replaces the allowlist rules for this container.
+// It snapshots the existing rule handles first, appends the new rules, then
+// deletes only the old handles. The container therefore always has an active
+// rule set during the transition — there is never a window where all rules are
+// absent and the chain's default-accept policy would pass all traffic through.
+//
+// Rule-ordering note: nft evaluates rules in append order. During the brief
+// window between ApplyAllowlist (which appends new rules) and the deletion of
+// old handles, the chain contains both old and new rule sets. Because the old
+// default-reject rule precedes the new allow rules, any IP that is only in the
+// new set is unreachable until the old rules are deleted. This is intentional —
+// the transition errs toward denial rather than briefly permitting unintended
+// traffic.
+func (f *NftManager) ReplaceAllowlist(cfg *config.NetworkConfig, allowedIPs []string) error {
+	if f.containerIP == "" {
+		return nil
+	}
+
+	// Capture current handles before appending new rules so we can surgically
+	// remove them afterwards without touching the freshly-added entries.
+	oldHandles, err := nftGetHandlesByComment("coi-" + f.containerIP)
+	if err != nil {
+		return fmt.Errorf("failed to list current nft rules: %w", err)
+	}
+
+	if err := f.ApplyAllowlist(cfg, allowedIPs); err != nil {
+		return err
+	}
+
+	// Remove only the old handles. New rules are already in the chain, so the
+	// container is never left without a filtering rule set.
+	for _, h := range oldHandles {
+		if _, delErr := runNFTCommand("delete", "rule", "ip", "coi", "forward", "handle", h); delErr != nil {
+			log.Printf("Warning: failed to delete stale nft rule handle %s: %v", h, delErr)
+		}
+	}
+	return nil
 }
 
 // EnsureBaseRules creates the ip coi table/chain and adds the shared conntrack rule.
@@ -173,8 +223,82 @@ func RemoveOpenModeRules(containerIP string) error {
 	return deleteNFTRulesByComment("coi-" + containerIP)
 }
 
+// ApplyBootBlockRule installs a temporary iifname-based DROP rule in the
+// ip coi forward chain immediately after a container starts, before any
+// startup scripts can run. This closes the network gap between container boot
+// and SetupForContainer installing proper IP-based isolation rules.
+//
+// The rule is keyed by comment "coi-boot-<containerName>" and must be lifted
+// by RemoveBootBlockRule once proper isolation rules are in place. It is
+// idempotent: calling it twice for the same container is safe.
+//
+// The veth interface is created by the kernel the moment Incus starts the
+// container, before DHCP assigns an IP. We poll for it here so callers do
+// not need to know the timing. Non-fatal path: if the veth does not appear
+// within 5 s (e.g. nft unavailable, unusual networking) the error is returned
+// and the caller should log a warning and continue.
+func ApplyBootBlockRule(containerName string) error {
+	if !NftInstalled() {
+		return fmt.Errorf("nft not installed, boot block skipped")
+	}
+	if err := ensureCOITableAndChain(); err != nil {
+		return fmt.Errorf("failed to ensure coi chain: %w", err)
+	}
+
+	// Poll for the host-side veth — it is created when Incus sets up the
+	// container's network namespace, typically within a few hundred ms.
+	const (
+		pollInterval = 100 * time.Millisecond
+		pollMax      = 20 // 2 s total
+	)
+	var vethName string
+	for i := 0; i < pollMax; i++ {
+		name, err := GetContainerVethName(containerName)
+		if err == nil && name != "" {
+			vethName = name
+			break
+		}
+		time.Sleep(pollInterval)
+	}
+	if vethName == "" {
+		return fmt.Errorf("veth for container %s did not appear within 2s", containerName)
+	}
+
+	comment := bootBlockComment(containerName)
+
+	// Idempotent: skip if already installed.
+	if exists, err := nftRuleExistsWithComment(comment); err == nil && exists {
+		return nil
+	}
+
+	if _, err := runNFTCommand(
+		"add", "rule", "ip", "coi", "forward",
+		"iifname", vethName,
+		"drop",
+		"comment", fmt.Sprintf(`"%s"`, comment),
+	); err != nil {
+		return fmt.Errorf("failed to add boot block rule for %s (veth %s): %w", containerName, vethName, err)
+	}
+	return nil
+}
+
+// RemoveBootBlockRule removes the temporary boot-block rule installed by
+// ApplyBootBlockRule. Safe to call even if no rule was ever installed.
+func RemoveBootBlockRule(containerName string) error {
+	return deleteNFTRulesByComment(bootBlockComment(containerName))
+}
+
+func bootBlockComment(containerName string) string {
+	return "coi-boot-" + containerName
+}
+
 // DisableIPv6ForContainer disables IPv6 in the container to prevent firewall bypass.
-// All network isolation rules are IPv4-only; IPv6 would circumvent them entirely.
+// All COI IPv4 nft rules are IPv4-only; IPv6 would circumvent them entirely.
+//
+// NOTE: this runs an in-container sysctl, which in-container root can simply set
+// back to 0 (it owns CAP_NET_ADMIN over its own netns). It is therefore
+// defence-in-depth only — the enforced IPv6 egress boundary is the host-side
+// drop installed by ApplyIPv6BlockForContainer, which the container cannot touch.
 func DisableIPv6ForContainer(containerName string) error {
 	mgr := container.NewManager(containerName)
 	cmd := "sysctl -w net.ipv6.conf.all.disable_ipv6=1 net.ipv6.conf.default.disable_ipv6=1"
@@ -182,10 +306,120 @@ func DisableIPv6ForContainer(containerName string) error {
 	return err
 }
 
+// ensureCOIIP6TableAndChain creates the ip6 coi table and forward chain if absent,
+// mirroring ensureCOITableAndChain for IPv6. The chain hooks the forward path at
+// priority 10 with a default-accept policy; the only rules COI adds are
+// per-container iifname drops, so unrelated IPv6 traffic on the host is unaffected.
+func ensureCOIIP6TableAndChain() error {
+	if _, err := runNFTCommand("add", "table", "ip6", "coi"); err != nil {
+		return fmt.Errorf("failed to create nft table ip6 coi: %w", err)
+	}
+	// nft add chain with hook spec fails if the chain already exists — check first.
+	if _, err := runNFTCommand("list", "chain", "ip6", "coi", "forward"); err == nil {
+		return nil
+	}
+	_, err := runNFTCommand("add", "chain", "ip6", "coi", "forward",
+		"{", "type", "filter", "hook", "forward", "priority", "10", ";", "policy", "accept", ";", "}")
+	if err != nil {
+		return fmt.Errorf("failed to create nft chain ip6 coi forward: %w", err)
+	}
+	return nil
+}
+
+func ipv6BlockComment(containerName string) string {
+	return "coi6-" + containerName
+}
+
+// ApplyIPv6BlockForContainer installs a host-side nft rule that drops ALL
+// forwarded IPv6 traffic originating from the container's host-side veth.
+//
+// This is the enforced IPv6 egress boundary. Because the rule lives in the
+// host's ip6 table keyed on the veth interface name (COI never assigns the
+// container an IPv6 address, so address-based matching is impossible anyway),
+// in-container root cannot remove it or bypass it by re-enabling IPv6. It must
+// be called after the container is running so its veth exists. Used in
+// restricted and allowlist modes; open mode skips it by design (the user opted
+// into unrestricted egress).
+func ApplyIPv6BlockForContainer(containerName string) error {
+	if !NftInstalled() {
+		return fmt.Errorf("nft not installed, IPv6 block skipped")
+	}
+	if err := ensureCOIIP6TableAndChain(); err != nil {
+		return err
+	}
+	vethName, err := GetContainerVethName(containerName)
+	if err != nil || vethName == "" {
+		return fmt.Errorf("could not resolve veth for IPv6 block on %s: %w", containerName, err)
+	}
+	comment := ipv6BlockComment(containerName)
+	// Idempotent: skip if already installed.
+	if exists, err := nftRuleExistsWithCommentFamily("ip6", comment); err == nil && exists {
+		return nil
+	}
+	if _, err := runNFTCommand(
+		"add", "rule", "ip6", "coi", "forward",
+		"iifname", vethName,
+		"drop",
+		"comment", fmt.Sprintf(`"%s"`, comment),
+	); err != nil {
+		return fmt.Errorf("failed to add IPv6 block rule for %s (veth %s): %w", containerName, vethName, err)
+	}
+	return nil
+}
+
+// RemoveIPv6BlockForContainer removes the host-side IPv6 egress drop rule installed
+// by ApplyIPv6BlockForContainer. Safe to call even if no rule was ever installed.
+func RemoveIPv6BlockForContainer(containerName string) error {
+	return deleteNFTRulesByCommentFamily("ip6", ipv6BlockComment(containerName))
+}
+
+// ListCOIIP6RuleContainers returns the container names referenced by
+// coi6-<name> comments in the ip6 coi forward chain. Used by orphan detection
+// to find IPv6 drop rules whose containers are no longer running.
+func ListCOIIP6RuleContainers() ([]string, error) {
+	output, err := runNFTCommand("-a", "list", "chain", "ip6", "coi", "forward")
+	if err != nil {
+		return nil, nil // chain doesn't exist yet — no rules
+	}
+	return parseCOIIP6RuleContainers(string(output)), nil
+}
+
+// parseCOIIP6RuleContainers extracts the unique container names from coi6-<name>
+// rule comments in `nft list chain ip6 coi forward` output. Pure, for testing.
+func parseCOIIP6RuleContainers(output string) []string {
+	var names []string
+	seen := make(map[string]bool)
+	for _, line := range strings.Split(output, "\n") {
+		const prefix = `comment "coi6-`
+		idx := strings.Index(line, prefix)
+		if idx == -1 {
+			continue
+		}
+		rest := line[idx+len(prefix):]
+		end := strings.Index(rest, `"`)
+		if end == -1 {
+			continue
+		}
+		name := rest[:end]
+		if name != "" && !seen[name] {
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
 // addRule appends a nftables rule to ip coi forward for this container.
 // Rules are appended in call order, so callers must invoke addRule from most-specific
 // to least-specific (gateway → allowlist → RFC1918 block → default).
 func (f *NftManager) addRule(source, destination, action string) error {
+	return f.addRuleWithMatch(source, destination, nil, action)
+}
+
+// addRuleWithMatch is addRule with an optional extra match clause inserted
+// between the daddr match and the action (e.g. an L4 protocol / ICMP-type
+// constraint). match is a slice of nft tokens; nil/empty behaves like addRule.
+func (f *NftManager) addRuleWithMatch(source, destination string, match []string, action string) error {
 	args := []string{
 		"add", "rule", "ip", "coi", "forward",
 		"ip", "saddr", source,
@@ -194,6 +428,7 @@ func (f *NftManager) addRule(source, destination, action string) error {
 	if destination != "0.0.0.0/0" {
 		args = append(args, "ip", "daddr", destination)
 	}
+	args = append(args, match...)
 	args = append(args, action, "comment", fmt.Sprintf(`"coi-%s"`, f.containerIP))
 	if _, err := runNFTCommand(args...); err != nil {
 		return fmt.Errorf("nft rule add failed: %w", err)
@@ -222,7 +457,13 @@ func ensureCOITableAndChain() error {
 
 // nftRuleExistsWithComment returns true if any rule in ip coi forward carries the given comment.
 func nftRuleExistsWithComment(comment string) (bool, error) {
-	output, err := runNFTCommand("list", "chain", "ip", "coi", "forward")
+	return nftRuleExistsWithCommentFamily("ip", comment)
+}
+
+// nftRuleExistsWithCommentFamily is the family-aware variant of
+// nftRuleExistsWithComment ("ip" for IPv4, "ip6" for IPv6).
+func nftRuleExistsWithCommentFamily(family, comment string) (bool, error) {
+	output, err := runNFTCommand("list", "chain", family, "coi", "forward")
 	if err != nil {
 		return false, nil // chain doesn't exist yet
 	}
@@ -231,9 +472,15 @@ func nftRuleExistsWithComment(comment string) (bool, error) {
 
 // nftGetHandlesByComment returns the handles of rules in ip coi forward that match comment.
 func nftGetHandlesByComment(comment string) ([]string, error) {
-	output, err := runNFTCommand("-a", "list", "chain", "ip", "coi", "forward")
+	return nftGetHandlesByCommentFamily("ip", comment)
+}
+
+// nftGetHandlesByCommentFamily is the family-aware variant of
+// nftGetHandlesByComment ("ip" for IPv4, "ip6" for IPv6).
+func nftGetHandlesByCommentFamily(family, comment string) ([]string, error) {
+	output, err := runNFTCommand("-a", "list", "chain", family, "coi", "forward")
 	if err != nil {
-		return nil, nil
+		return nil, err
 	}
 	var handles []string
 	for _, line := range strings.Split(string(output), "\n") {
@@ -247,14 +494,35 @@ func nftGetHandlesByComment(comment string) ([]string, error) {
 }
 
 // deleteNFTRulesByComment removes all rules in ip coi forward that carry the given comment.
+// It loops up to maxRounds times, re-scanning handles after each pass, so transient nft
+// lock failures and any handles missed in earlier scans are retried automatically.
 func deleteNFTRulesByComment(comment string) error {
-	handles, err := nftGetHandlesByComment(comment)
-	if err != nil {
-		return err
-	}
-	for _, h := range handles {
-		if _, delErr := runNFTCommand("delete", "rule", "ip", "coi", "forward", "handle", h); delErr != nil {
-			log.Printf("Warning: failed to delete nft rule handle %s: %v", h, delErr)
+	return deleteNFTRulesByCommentFamily("ip", comment)
+}
+
+// deleteNFTRulesByCommentFamily is the family-aware variant of
+// deleteNFTRulesByComment ("ip" for IPv4, "ip6" for IPv6).
+func deleteNFTRulesByCommentFamily(family, comment string) error {
+	const (
+		maxRounds = 8
+		delay     = 300 * time.Millisecond
+	)
+	for round := 0; round < maxRounds; round++ {
+		if round > 0 {
+			time.Sleep(delay)
+		}
+		handles, err := nftGetHandlesByCommentFamily(family, comment)
+		if err != nil {
+			log.Printf("Warning: nft list failed (round %d/%d): %v, retrying...", round+1, maxRounds, err)
+			continue
+		}
+		if len(handles) == 0 {
+			return nil
+		}
+		for _, h := range handles {
+			if _, delErr := runNFTCommand("delete", "rule", family, "coi", "forward", "handle", h); delErr != nil {
+				log.Printf("Warning: failed to delete nft rule handle %s (round %d/%d): %v", h, round+1, maxRounds, delErr)
+			}
 		}
 	}
 	return nil
