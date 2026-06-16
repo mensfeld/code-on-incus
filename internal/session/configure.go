@@ -85,7 +85,7 @@ func ConfigureContainer(ctx context.Context, opts ConfigureOptions) (*ConfigureR
 
 	// 1. SSH agent forwarding
 	if opts.ForwardSSH {
-		socketPath, err := setupSSHAgentForwarding(mgr, opts.ContainerName, opts.Logger)
+		socketPath, err := SetupSSHAgentForwarding(mgr, opts.ContainerName, opts.Logger)
 		if err != nil {
 			opts.Logger(fmt.Sprintf("Warning: SSH agent forwarding failed: %v", err))
 		} else if socketPath != "" {

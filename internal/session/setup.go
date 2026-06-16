@@ -30,10 +30,11 @@ type SetupOptions struct {
 	Persistent            bool // Keep container between sessions (don't delete on cleanup)
 	ResumeFromID          string
 	Slot                  int
-	MountConfig           *MountConfig // Multi-mount support
-	SessionsDir           string       // e.g., ~/.coi/sessions-claude
-	CLIConfigPath         string       // e.g., ~/.claude (host CLI config to copy credentials from)
-	Tool                  tool.Tool    // AI coding tool being used
+	MountConfig           *MountConfig  // Multi-mount support
+	SocketConfig          *SocketConfig // Forwarded host unix sockets
+	SessionsDir           string        // e.g., ~/.coi/sessions-claude
+	CLIConfigPath         string        // e.g., ~/.claude (host CLI config to copy credentials from)
+	Tool                  tool.Tool     // AI coding tool being used
 	NetworkConfig         *config.NetworkConfig
 	DisableShift          bool                 // Disable UID shifting (for Colima/Lima environments)
 	LimitsConfig          *config.LimitsConfig // Resource and time limits
@@ -62,10 +63,11 @@ type SetupResult struct {
 	HomeDir                string
 	RunAsRoot              bool
 	Image                  string
-	ContainerWorkspacePath string // Path where workspace is mounted inside container (default: /workspace)
-	SSHAgentSocketPath     string // Path to SSH agent socket inside container (empty if not forwarded)
-	Timezone               string // Resolved timezone applied to the container (empty = UTC)
-	HasImmutableProtection bool   // True if host-side immutable attribute was applied to protected paths
+	ContainerWorkspacePath string            // Path where workspace is mounted inside container (default: /workspace)
+	SSHAgentSocketPath     string            // SSH agent socket path in container (empty if not forwarded)
+	SocketEnv              map[string]string // env var name -> in-container path for all forwarded sockets
+	Timezone               string            // Resolved timezone applied to the container (empty = UTC)
+	HasImmutableProtection bool              // True if host-side immutable attribute was applied to protected paths
 }
 
 // Setup initializes a container for a Claude session
@@ -335,22 +337,26 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 			}
 		}
 
-		// Defense-in-depth: gate untrusted out-of-workspace mounts here, where a
-		// freshly-launched container's mounts are applied, so a caller of
-		// session.Setup that didn't pre-filter is still covered. (On container
-		// reuse this block is skipped along with the rest of mount setup — the
-		// mounts persist from creation; the run/shell reuse paths warn that
-		// mount-trust changes need a recreate.) Idempotent with the CLI-level
-		// gate: on the normal CLI flow the mounts are already filtered, so this
-		// drops nothing and emits no duplicate warning.
-		if gated, dropped := FilterTrustedMounts(opts.MountConfig, opts.WorkspacePath); len(dropped) > 0 {
-			for _, m := range dropped {
-				opts.Logger(fmt.Sprintf(
-					"Warning: ignoring untrusted mount from %s: %s -> %s (resolves outside the workspace; run 'coi trust' or set %s=1)",
-					m.SourcePath, m.HostPath, m.ContainerPath, TrustEnvVar))
-			}
-			opts.MountConfig = gated
+		// Defense-in-depth: gate untrusted out-of-workspace mounts AND untrusted
+		// forwarded sockets here, where a freshly-launched container is set up, so
+		// any caller of session.Setup that didn't pre-filter is still covered.
+		// (On container reuse this block is skipped along with the rest of setup —
+		// resources persist from creation; the run/shell reuse paths warn that
+		// trust changes need a recreate.) Idempotent with the CLI-level gate: on
+		// the normal CLI flow these are already filtered, so this drops nothing.
+		gatedMC, droppedM, gatedSC, droppedS := FilterTrusted(opts.MountConfig, opts.SocketConfig, opts.WorkspacePath)
+		for _, m := range droppedM {
+			opts.Logger(fmt.Sprintf(
+				"Warning: ignoring untrusted mount from %s: %s -> %s (resolves outside the workspace; run 'coi trust' or set %s=1)",
+				m.SourcePath, m.HostPath, m.ContainerPath, TrustEnvVar))
 		}
+		for _, s := range droppedS {
+			opts.Logger(fmt.Sprintf(
+				"Warning: ignoring untrusted socket from %s: %s -> %s (run 'coi trust' or set %s=1)",
+				s.SourcePath, s.HostPath, s.ContainerPath, TrustEnvVar))
+		}
+		opts.MountConfig = gatedMC
+		opts.SocketConfig = gatedSC
 
 		// Mount all configured directories
 		if err := setupMounts(result.Manager, opts.MountConfig, useShift, opts.Logger); err != nil {
@@ -546,15 +552,12 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		}
 	}
 
-	// 6.6. Setup SSH agent forwarding (proxy device must be added to running container)
-	if opts.ForwardSSHAgent {
-		socketPath, err := setupSSHAgentForwarding(result.Manager, result.ContainerName, opts.Logger)
-		if err != nil {
-			opts.Logger(fmt.Sprintf("Warning: SSH agent forwarding failed: %v", err))
-		} else if socketPath != "" {
-			result.SSHAgentSocketPath = socketPath
-		}
-	}
+	// 6.6. Forward host sockets (proxy devices must be added to a running
+	// container). The SSH agent (opts.ForwardSSHAgent) is a built-in entry that
+	// reads the live $SSH_AUTH_SOCK; configured [[sockets]] follow (already
+	// trust-filtered above).
+	result.SocketEnv = ForwardConfiguredSockets(result.Manager, opts.SocketConfig, opts.ForwardSSHAgent, opts.Logger)
+	result.SSHAgentSocketPath = result.SocketEnv["SSH_AUTH_SOCK"]
 
 	// 6.6.1. Prevent git from guessing commit identity from the container user.
 	// Setting user.useConfigOnly=true forces git to refuse commits until

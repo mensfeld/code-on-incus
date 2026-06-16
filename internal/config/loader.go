@@ -132,6 +132,7 @@ func loadConfigFileScoped(cfg *Config, path string, trusted bool) error {
 	if !trusted {
 		sanitizeUntrustedConfig(&fileCfg, path)
 		markUntrustedMounts(fileCfg.Mounts.Default, path)
+		markUntrustedSockets(fileCfg.Sockets, path)
 	}
 
 	configDir := filepath.Dir(path)
@@ -198,6 +199,21 @@ func markUntrustedMounts(mounts []MountEntry, path string) {
 	for i := range mounts {
 		mounts[i].Untrusted = true
 		mounts[i].SourcePath = src
+	}
+}
+
+// markUntrustedSockets tags forwarded sockets from an untrusted source so they
+// are gated behind explicit trust at forward time (internal/session/trust.go).
+// Like markUntrustedMounts, a path-resolution error falls back to the raw path
+// rather than failing open and forwarding an ungated host socket.
+func markUntrustedSockets(sockets []SocketEntry, path string) {
+	src := path
+	if abs, err := filepath.Abs(path); err == nil {
+		src = abs
+	}
+	for i := range sockets {
+		sockets[i].Untrusted = true
+		sockets[i].SourcePath = src
 	}
 }
 
@@ -297,6 +313,7 @@ func loadProfileDirectories(cfg *Config, configDir string, trusted bool) error {
 		if !trusted {
 			sanitizeUntrustedNetwork(profileCfg.Network, profileConfigPath)
 			markUntrustedMounts(profileCfg.Mounts, profileConfigPath)
+			markUntrustedSockets(profileCfg.Sockets, profileConfigPath)
 		}
 
 		if cfg.Profiles == nil {

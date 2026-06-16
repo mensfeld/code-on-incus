@@ -181,16 +181,17 @@ func remapContainerUserIfNeeded(mgr container.ContainerManager, wasRestarted boo
 // appendEnvArgs appends --env flags for config environment and forward_env
 // to an incus exec args slice.
 // tz is the resolved timezone name (may be empty).
-// sshAgentSocketPath is the container-side SSH agent socket (may be empty).
-func (a *App) appendEnvArgs(incusArgs []string, tz, sshAgentSocketPath string) []string {
+// socketEnv maps env var names to container-side socket paths for every
+// forwarded socket (SSH_AUTH_SOCK plus any configured [[sockets]] entries).
+func (a *App) appendEnvArgs(incusArgs []string, tz string, socketEnv map[string]string) []string {
 	// Timezone (lowest priority — user can override with config env)
 	if tz != "" {
 		incusArgs = append(incusArgs, "--env", fmt.Sprintf("TZ=%s", tz))
 	}
 
-	// SSH agent socket
-	if sshAgentSocketPath != "" {
-		incusArgs = append(incusArgs, "--env", fmt.Sprintf("SSH_AUTH_SOCK=%s", sshAgentSocketPath))
+	// Forwarded socket env vars
+	for env, path := range socketEnv {
+		incusArgs = append(incusArgs, "--env", fmt.Sprintf("%s=%s", env, path))
 	}
 
 	// Static environment from config (defaults.environment + profile environment)
@@ -330,21 +331,10 @@ func (a *App) resolveContainerWorkspacePath(absWorkspace string) string {
 // applyWorkspaceMounts mounts the workspace and all configured additional directories
 // into the container, then applies security (read-only) mounts. For restarted persistent
 // containers it retrieves the existing workspace path from the container config instead.
-func (a *App) applyWorkspaceMounts(mgr container.ContainerManager, containerName, absWorkspace string, containerWorkspacePath *string, useShift, wasRestarted bool) error {
+func (a *App) applyWorkspaceMounts(mgr container.ContainerManager, containerName, absWorkspace string, containerWorkspacePath *string, mountConfig *session.MountConfig, useShift, wasRestarted bool) error {
 	if wasRestarted {
 		fmt.Fprintf(os.Stderr, "Reusing existing workspace mount...\n")
 		*containerWorkspacePath = mgr.GetWorkspacePath()
-		// A reused persistent container keeps the mount devices set at creation,
-		// so mount-trust changes (coi trust/untrust, edited mounts) don't take
-		// effect here. Surface that rather than silently ignoring a revocation.
-		if mc, perr := ParseMountConfig(a.cfg); perr == nil {
-			if _, dropped := session.FilterTrustedMounts(mc, absWorkspace); len(dropped) > 0 {
-				fmt.Fprintf(os.Stderr,
-					"Warning: %d untrusted mount(s) remain attached from when this persistent "+
-						"container was created; recreate it (coi kill + relaunch) to apply mount-trust changes.\n",
-					len(dropped))
-			}
-		}
 		return nil
 	}
 
@@ -357,11 +347,6 @@ func (a *App) applyWorkspaceMounts(mgr container.ContainerManager, containerName
 		return fmt.Errorf("failed to mount workspace: %w", err)
 	}
 
-	mountConfig, err := ParseMountConfig(a.cfg)
-	if err != nil {
-		return fmt.Errorf("invalid mount configuration: %w", err)
-	}
-	mountConfig = gateUntrustedMounts(mountConfig, absWorkspace)
 	if err := session.ValidateMounts(mountConfig); err != nil {
 		return fmt.Errorf("mount validation failed: %w", err)
 	}
@@ -428,22 +413,33 @@ func (a *App) applySecurityMounts(mgr container.ContainerManager, absWorkspace, 
 	return nil
 }
 
-// applySSHAgentForwarding forwards the host SSH agent into the container when
-// ssh.forward_agent is true in config. Returns the container-side socket path.
-func (a *App) applySSHAgentForwarding(mgr container.ContainerManager, containerName string) (string, error) {
-	if !config.BoolVal(a.cfg.SSH.ForwardAgent) {
-		return "", nil
+// gateRunForwarding drops untrusted, unapproved mounts and sockets from project
+// config (combined trust fingerprint over both). Sockets are re-forwarded on
+// every launch, so the gate always applies to them; a reused persistent
+// container keeps its creation-time mount devices, so for those we only warn
+// that trust changes won't take effect until the container is recreated.
+func (a *App) gateRunForwarding(mc *session.MountConfig, sc *session.SocketConfig, workspace string, wasRestarted bool) (*session.MountConfig, *session.SocketConfig) {
+	keptMC, droppedM, keptSC, droppedS := session.FilterTrusted(mc, sc, workspace)
+	if wasRestarted {
+		if len(droppedM) > 0 {
+			fmt.Fprintf(os.Stderr,
+				"Warning: %d untrusted mount(s) remain attached from when this persistent "+
+					"container was created; recreate it (coi kill + relaunch) to apply mount-trust changes.\n",
+				len(droppedM))
+		}
+	} else {
+		warnDroppedMounts(droppedM)
 	}
+	warnDroppedSockets(droppedS)
+	return keptMC, keptSC
+}
+
+// applyForwardSockets forwards the host SSH agent (when ssh.forward_agent is
+// true) plus every trust-gated [[sockets]] entry into the container. Returns a
+// map of env var name -> container-side socket path for those that declare one.
+func (a *App) applyForwardSockets(mgr container.ContainerManager, socketConfig *session.SocketConfig) map[string]string {
 	logger := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
-	socketPath, err := session.SetupSSHAgentForwarding(mgr, containerName, logger)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: SSH agent forwarding failed: %v\n", err)
-		return "", nil
-	}
-	if socketPath != "" {
-		fmt.Fprintf(os.Stderr, "SSH agent forwarding configured: %s\n", socketPath)
-	}
-	return socketPath, nil
+	return session.ForwardConfiguredSockets(mgr, socketConfig, config.BoolVal(a.cfg.SSH.ForwardAgent), logger)
 }
 
 // applyNetworkIsolation installs firewall rules for the container when

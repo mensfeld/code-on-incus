@@ -30,10 +30,12 @@ type runState struct {
 
 	// After configure-container
 	containerWorkspace string
+	mountConfig        *session.MountConfig  // trust-gated
+	socketConfig       *session.SocketConfig // trust-gated
 
 	// After apply-network
-	sshAgentSocketPath string
-	tz                 string
+	socketEnv map[string]string
+	tz        string
 }
 
 // validateEnvRunPhase checks Incus availability, allocates a slot, resolves
@@ -182,9 +184,21 @@ func (a *App) configureContainerRunPhase(s *runState) session.Phase {
 				}
 			}
 
+			mc, err := ParseMountConfig(a.cfg)
+			if err != nil {
+				return nil, fmt.Errorf("invalid mount configuration: %w", err)
+			}
+			sc, err := ParseSocketConfig(a.cfg)
+			if err != nil {
+				return nil, fmt.Errorf("invalid socket configuration: %w", err)
+			}
+			// One combined trust gate over mounts + sockets, so the per-source
+			// fingerprint matches what `coi trust` recorded.
+			s.mountConfig, s.socketConfig = a.gateRunForwarding(mc, sc, s.absWorkspace, s.wasRestarted)
+
 			s.containerWorkspace = a.resolveContainerWorkspacePath(s.absWorkspace)
 			useShift := !a.cfg.Incus.DisableShift
-			if err := a.applyWorkspaceMounts(s.mgr, s.containerName, s.absWorkspace, &s.containerWorkspace, useShift, s.wasRestarted); err != nil {
+			if err := a.applyWorkspaceMounts(s.mgr, s.containerName, s.absWorkspace, &s.containerWorkspace, s.mountConfig, useShift, s.wasRestarted); err != nil {
 				return nil, err
 			}
 
@@ -200,18 +214,14 @@ func (a *App) configureContainerRunPhase(s *runState) session.Phase {
 	}
 }
 
-// applyNetworkRunPhase forwards the SSH agent, installs network isolation
-// rules, configures the timezone, and trusts mise config. Its teardown removes
-// the firewall rules before the container is deleted.
+// applyNetworkRunPhase forwards the SSH agent and any configured [[sockets]],
+// installs network isolation rules, configures the timezone, and trusts mise
+// config. Its teardown removes the firewall rules before the container is deleted.
 func (a *App) applyNetworkRunPhase(s *runState) session.Phase {
 	return session.PhaseFunc{
 		PhaseName: "apply-network",
 		RunFn: func(ctx context.Context) (session.Teardown, error) {
-			socketPath, err := a.applySSHAgentForwarding(s.mgr, s.containerName)
-			if err != nil {
-				return nil, err
-			}
-			s.sshAgentSocketPath = socketPath
+			s.socketEnv = a.applyForwardSockets(s.mgr, s.socketConfig)
 
 			nm, err := a.applyNetworkIsolation(ctx, s.containerName)
 			if err != nil {
@@ -270,7 +280,7 @@ func (a *App) runCommandPhase(args []string, s *runState) session.Phase {
 				"exec", s.containerName, "--user", fmt.Sprintf("%d", container.CodeUID),
 				"--group", fmt.Sprintf("%d", container.CodeUID), "--cwd", s.containerWorkspace,
 			}
-			incusArgs = a.appendEnvArgs(incusArgs, s.tz, s.sshAgentSocketPath)
+			incusArgs = a.appendEnvArgs(incusArgs, s.tz, s.socketEnv)
 			incusArgs = append(incusArgs, "--")
 			incusArgs = append(incusArgs, args...)
 

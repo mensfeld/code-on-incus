@@ -1,0 +1,22 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "A single host Unix socket forwarded into the container via an Incus proxy device",
+  "required": ["host", "container"],
+  "properties": {
+    "host": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Host path of the Unix socket to forward (supports ~ expansion)"
+    },
+    "container": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Absolute path inside the container where the socket is exposed"
+    },
+    "env": {
+      "type": "string",
+      "description": "Optional environment variable name set, inside the container, to the container socket path"
+    }
+  }
+}

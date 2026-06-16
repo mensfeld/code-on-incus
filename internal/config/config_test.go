@@ -110,6 +110,41 @@ func TestConfigMerge(t *testing.T) {
 	}
 }
 
+func TestConfigMerge_AppendsSockets(t *testing.T) {
+	base := GetDefaultConfig()
+	base.Sockets = []SocketEntry{{Host: "/run/base.sock", Container: "/c/base.sock"}}
+
+	other := &Config{
+		Sockets: []SocketEntry{{Host: "/run/other.sock", Container: "/c/other.sock", Env: "OTHER"}},
+	}
+	base.Merge(other)
+
+	if len(base.Sockets) != 2 {
+		t.Fatalf("expected merged sockets to append (2), got %d", len(base.Sockets))
+	}
+	if base.Sockets[1].Host != "/run/other.sock" || base.Sockets[1].Env != "OTHER" {
+		t.Errorf("appended socket not preserved: %+v", base.Sockets[1])
+	}
+}
+
+func TestApplyProfile_AppendsSockets(t *testing.T) {
+	cfg := GetDefaultConfig()
+	cfg.Sockets = []SocketEntry{{Host: "/run/base.sock", Container: "/c/base.sock"}}
+	cfg.Profiles["broker"] = ProfileConfig{
+		Sockets: []SocketEntry{{Host: "/run/broker.sock", Container: "/c/broker.sock", Env: "BROKER"}},
+	}
+
+	if err := cfg.ApplyProfile("broker"); err != nil {
+		t.Fatalf("ApplyProfile: %v", err)
+	}
+	if len(cfg.Sockets) != 2 {
+		t.Fatalf("expected profile sockets appended (2), got %d", len(cfg.Sockets))
+	}
+	if cfg.Sockets[1].Env != "BROKER" {
+		t.Errorf("profile socket not appended: %+v", cfg.Sockets)
+	}
+}
+
 func TestGetProfile(t *testing.T) {
 	cfg := GetDefaultConfig()
 
