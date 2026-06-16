@@ -299,14 +299,6 @@ func pathToDeviceName(path string) string {
 	return "protect-" + name
 }
 
-// SetupGitHooksMount is a convenience function for backwards compatibility
-// It mounts .git/hooks as read-only for security.
-// Deprecated: Use SetupSecurityMounts with config.Security.GetEffectiveProtectedPaths() instead
-func SetupGitHooksMount(mgr container.ContainerDevices, workspacePath string, useShift bool) error {
-	// Use /workspace as the default container path for backwards compatibility
-	return SetupSecurityMounts(mgr, workspacePath, "/workspace", []string{".git/hooks"}, useShift)
-}
-
 // GetProtectedPathsForLogging returns a human-readable list of protected paths
 // that actually exist in the workspace
 func GetProtectedPathsForLogging(workspacePath string, protectedPaths []string) []string {

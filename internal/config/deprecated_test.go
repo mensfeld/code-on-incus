@@ -253,7 +253,7 @@ image = "x"
 `)
 
 	cfg := GetDefaultConfig()
-	err := loadConfigFile(cfg, path)
+	err := loadConfigFileScoped(cfg, path, true)
 	if err == nil {
 		t.Fatal("expected loadConfigFile to fail on deprecated layout")
 	}

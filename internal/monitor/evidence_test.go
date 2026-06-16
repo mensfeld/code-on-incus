@@ -75,7 +75,7 @@ func TestEvidenceString_Empty(t *testing.T) {
 }
 
 func TestDetectorAnalyzeEvidenceTypes(t *testing.T) {
-	detector := NewDetectorWithWriteThresholds(50.0, 0, 50.0, 0)
+	detector := NewDetector(50.0, 0)
 
 	t.Run("reverse shell produces Process evidence", func(t *testing.T) {
 		snapshot := MonitorSnapshot{

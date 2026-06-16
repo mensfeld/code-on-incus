@@ -28,17 +28,6 @@ func NewDetector(fileReadThresholdMB, fileReadRateMBPerSec float64) *Detector {
 	}
 }
 
-// NewDetectorWithWriteThresholds creates a new threat detector with explicit write thresholds
-func NewDetectorWithWriteThresholds(fileReadThresholdMB, fileReadRateMBPerSec, fileWriteThresholdMB, fileWriteRateMBPerSec float64) *Detector {
-	return &Detector{
-		fileReadThresholdMB:   fileReadThresholdMB,
-		fileReadRateMBPerSec:  fileReadRateMBPerSec,
-		fileWriteThresholdMB:  fileWriteThresholdMB,
-		fileWriteRateMBPerSec: fileWriteRateMBPerSec,
-		previousProcessCount:  -1,
-	}
-}
-
 // WithProcessCountThreshold sets the process count threshold for fork-bomb detection.
 func (d *Detector) WithProcessCountThreshold(threshold int) *Detector {
 	d.processCountThreshold = threshold

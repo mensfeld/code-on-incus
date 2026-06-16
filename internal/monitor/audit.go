@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 )
 
@@ -80,34 +79,4 @@ func (a *AuditLog) Close() error {
 	}
 
 	return nil
-}
-
-// ReadAuditLog reads and parses an audit log file
-func ReadAuditLog(path string) ([]interface{}, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read audit log: %w", err)
-	}
-
-	// Parse JSON Lines
-	lines := strings.Split(string(data), "\n")
-	var entries []interface{}
-
-	// Parse each line as JSON
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if len(line) == 0 {
-			continue
-		}
-
-		var entry interface{}
-		if err := json.Unmarshal([]byte(line), &entry); err != nil {
-			// Skip invalid lines
-			continue
-		}
-
-		entries = append(entries, entry)
-	}
-
-	return entries, nil
 }

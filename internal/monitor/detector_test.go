@@ -262,7 +262,7 @@ func TestDetectLargeWrites(t *testing.T) {
 
 func TestDetectorAnalyzeWriteThreats(t *testing.T) {
 	// Test that Analyze() detects large writes
-	detector := NewDetectorWithWriteThresholds(50.0, 0, 50.0, 0)
+	detector := NewDetector(50.0, 0)
 
 	snapshot := MonitorSnapshot{
 		Filesystem: FilesystemStats{

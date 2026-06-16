@@ -92,30 +92,6 @@ func (r *Registry) Lookup(alias string) *AliasEntry {
 	return nil
 }
 
-// Remove deletes an alias from the registry.
-func (r *Registry) Remove(alias string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if _, ok := r.entries[alias]; !ok {
-		return fmt.Errorf("alias %q not found in registry", alias)
-	}
-	delete(r.entries, alias)
-	return nil
-}
-
-// ListAll returns a copy of all alias entries.
-func (r *Registry) ListAll() map[string]AliasEntry {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	out := make(map[string]AliasEntry, len(r.entries))
-	for k, v := range r.entries {
-		out[k] = v
-	}
-	return out
-}
-
 // Save writes the registry to disk atomically (temp file + rename).
 func (r *Registry) Save() error {
 	r.mu.Lock()

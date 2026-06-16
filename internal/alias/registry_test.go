@@ -90,34 +90,6 @@ func TestLookup_NotFound(t *testing.T) {
 	}
 }
 
-func TestRemove(t *testing.T) {
-	r := &Registry{
-		path: tempRegistryPath(t),
-		entries: map[string]AliasEntry{
-			"test": {Workspace: "/ws"},
-		},
-	}
-
-	if err := r.Remove("test"); err != nil {
-		t.Fatalf("Remove failed: %v", err)
-	}
-	if entry := r.Lookup("test"); entry != nil {
-		t.Error("Alias should be removed but Lookup still returns it")
-	}
-}
-
-func TestRemove_NotFound(t *testing.T) {
-	r := &Registry{
-		path:    tempRegistryPath(t),
-		entries: make(map[string]AliasEntry),
-	}
-
-	err := r.Remove("nonexistent")
-	if err == nil {
-		t.Fatal("Expected error when removing nonexistent alias")
-	}
-}
-
 func TestSaveLoad_Roundtrip(t *testing.T) {
 	path := tempRegistryPath(t)
 
@@ -139,9 +111,8 @@ func TestSaveLoad_Roundtrip(t *testing.T) {
 		t.Fatalf("Load failed: %v", err)
 	}
 
-	all := r2.ListAll()
-	if len(all) != 2 {
-		t.Fatalf("Expected 2 entries, got %d", len(all))
+	if len(r2.entries) != 2 {
+		t.Fatalf("Expected 2 entries, got %d", len(r2.entries))
 	}
 
 	entry := r2.Lookup("proj1")
@@ -160,7 +131,7 @@ func TestLoadFrom_NonexistentFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFrom nonexistent should return empty registry, got error: %v", err)
 	}
-	if len(r.ListAll()) != 0 {
+	if len(r.entries) != 0 {
 		t.Error("Expected empty registry for nonexistent file")
 	}
 }
@@ -178,25 +149,8 @@ func TestLoadFrom_EmptyFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadFrom empty file should succeed, got: %v", err)
 	}
-	if len(r.ListAll()) != 0 {
+	if len(r.entries) != 0 {
 		t.Error("Expected empty registry for empty file")
-	}
-}
-
-func TestListAll_ReturnsCopy(t *testing.T) {
-	r := &Registry{
-		path: tempRegistryPath(t),
-		entries: map[string]AliasEntry{
-			"a": {Workspace: "/a"},
-		},
-	}
-
-	all := r.ListAll()
-	all["b"] = AliasEntry{Workspace: "/b"}
-
-	// Mutation of returned map should not affect registry
-	if r.Lookup("b") != nil {
-		t.Error("ListAll should return a copy, not a reference")
 	}
 }
 

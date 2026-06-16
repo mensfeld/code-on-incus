@@ -412,29 +412,3 @@ func LoadSessionMetadata(path string) (*SessionMetadata, error) {
 
 	return &metadata, nil
 }
-
-// GetCLISessionID extracts the CLI tool's session ID from a saved coi session.
-// CLI tools store sessions in .claude/projects/-workspace/<session-id>.jsonl
-// Returns empty string if no session found.
-func GetCLISessionID(sessionsDir, coiSessionID string) string {
-	projectsDir := filepath.Join(sessionsDir, coiSessionID, ".claude", "projects", "-workspace")
-
-	entries, err := os.ReadDir(projectsDir)
-	if err != nil {
-		return ""
-	}
-
-	// Look for .jsonl files (session files)
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		if strings.HasSuffix(name, ".jsonl") {
-			// Extract session ID from filename (remove .jsonl suffix)
-			return strings.TrimSuffix(name, ".jsonl")
-		}
-	}
-
-	return ""
-}

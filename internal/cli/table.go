@@ -22,11 +22,6 @@ func NewTable(headers ...string) *Table {
 	}
 }
 
-// SetOutput overrides the default writer.
-func (t *Table) SetOutput(w io.Writer) {
-	t.out = w
-}
-
 // AddRow appends a row. Short rows are padded with empty strings.
 func (t *Table) AddRow(values ...string) {
 	for len(values) < len(t.headers) {
@@ -58,9 +53,4 @@ func (t *Table) Render() {
 		fmt.Fprintln(w)
 	}
 	w.Flush()
-}
-
-// Len returns the number of data rows (excluding the header).
-func (t *Table) Len() int {
-	return len(t.rows)
 }
