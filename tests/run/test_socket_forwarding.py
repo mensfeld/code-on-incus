@@ -9,49 +9,89 @@ Sockets declared by an untrusted project .coi/config.toml are gated behind
 `coi trust` exactly like out-of-workspace mounts (a forwarded host socket exposes
 a host capability), and the trust fingerprint spans both mounts and sockets.
 
-These tests assert the proxy device materializes the socket inside the container
-and the configured env var is injected; byte-level transfer over the same proxy
-mechanism is covered by the Go SSH-agent integration test.
+These tests are genuinely end-to-end: a host process listens on a Unix socket and
+replies with a sentinel; the container connects to the *forwarded* socket (using
+the system Node.js shipped in the base image — no socat/nc there) and must read
+that sentinel back, proving bytes actually traverse the proxy device. The gate
+tests assert the sentinel is *unreachable* until `coi trust`.
 """
 
 import os
 import pathlib
+import shutil
 import socket
 import subprocess
 import tempfile
+import threading
 
 CONTAINER_SOCK = "/tmp/broker.sock"
 ENV_NAME = "BROKER_SOCK"
+SENTINEL = "SOCKET_SENTINEL_8842"
 
 
-def make_host_socket():
-    """Create a listening host Unix socket in a short /tmp dir (path length is
-    capped at ~108 bytes, so pytest's deep tmp_path can't be used)."""
-    d = tempfile.mkdtemp(prefix="coisock")
-    path = os.path.join(d, "broker.sock")
-    srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    srv.bind(path)
-    srv.listen(8)
-    return srv, path
+class HostSocketServer:
+    """A host Unix-socket server that replies with SENTINEL on every connection
+    then closes, so a client sees a clean EOF. Lives in a short /tmp dir because
+    AF_UNIX paths are capped at ~108 bytes (pytest's tmp_path is too deep)."""
+
+    def __init__(self, sentinel=SENTINEL):
+        self.sentinel = sentinel
+        self.dir = tempfile.mkdtemp(prefix="coisock")
+        self.path = os.path.join(self.dir, "broker.sock")
+        self.srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.srv.bind(self.path)
+        self.srv.listen(8)
+        self.srv.settimeout(0.5)
+        self._stop = threading.Event()
+        self._t = threading.Thread(target=self._serve, daemon=True)
+        self._t.start()
+
+    def _serve(self):
+        while not self._stop.is_set():
+            try:
+                conn, _ = self.srv.accept()
+            except TimeoutError:
+                continue
+            except OSError:
+                break
+            with conn:
+                try:
+                    conn.sendall(self.sentinel.encode())
+                except OSError:
+                    pass
+
+    def close(self):
+        self._stop.set()
+        self._t.join(timeout=2)
+        try:
+            self.srv.close()
+        except OSError:
+            pass
+        shutil.rmtree(self.dir, ignore_errors=True)
 
 
-def env_gate_active():
-    return {k: v for k, v in os.environ.items() if k != "COI_TRUST_ALL"}
+# Node one-liner: connect to a forwarded Unix socket, print whatever the host
+# sends, and fail loudly (non-zero, no sentinel on stdout) if it can't connect.
+# Node is installed system-wide in the base image; socat/nc are not.
+def _node_read_script(container_path):
+    return (
+        "const net=require('net');"
+        f"const s=net.connect('{container_path}');"
+        "let d='';s.setEncoding('utf8');"
+        "s.on('data',c=>d+=c);"
+        "s.on('end',()=>{process.stdout.write(d);process.exit(0)});"
+        "s.on('error',e=>{process.stderr.write('CONNERR:'+e.message);process.exit(2)});"
+        "setTimeout(()=>{process.stderr.write('TIMEOUT');process.exit(3)},10000);"
+    )
 
 
-def probe_socket(coi_binary, workspace_dir, env, extra_args=None):
-    """Run `coi run` and report, for the forwarded socket, whether it exists in
-    the container and what the env var resolves to."""
+def read_through_socket(coi_binary, workspace_dir, env, container_path, extra_args=None):
+    """Run `coi run` and have the container read the sentinel back through the
+    forwarded socket via Node."""
     args = [coi_binary, "run"]
     if extra_args:
         args += extra_args
-    args += [
-        "--",
-        "sh",
-        "-c",
-        f"if [ -S {CONTAINER_SOCK} ]; then echo PRESENT; else echo ABSENT; fi; "
-        f'echo "ENV=${ENV_NAME}"',
-    ]
+    args += ["--", "node", "-e", _node_read_script(container_path)]
     return subprocess.run(
         args,
         capture_output=True,
@@ -62,17 +102,51 @@ def probe_socket(coi_binary, workspace_dir, env, extra_args=None):
     )
 
 
+def env_gate_active():
+    return {k: v for k, v in os.environ.items() if k != "COI_TRUST_ALL"}
+
+
 def test_ssh_forward_agent_regression(coi_binary, workspace_dir, cleanup_containers, tmp_path):
     """`[ssh] forward_agent = true` still forwards $SSH_AUTH_SOCK to the fixed
-    /tmp/ssh-agent.sock and sets SSH_AUTH_SOCK in the container."""
-    srv, host_sock = make_host_socket()
+    /tmp/ssh-agent.sock — and bytes actually traverse it (read the sentinel back
+    from the host through the forwarded agent socket)."""
+    server = HostSocketServer()
     try:
         cfg = tmp_path / "trusted-config.toml"
         cfg.write_text("[ssh]\nforward_agent = true\n")
         env = dict(os.environ)
         env["COI_CONFIG"] = str(cfg)
-        env["SSH_AUTH_SOCK"] = host_sock
+        env["SSH_AUTH_SOCK"] = server.path
 
+        r = read_through_socket(coi_binary, workspace_dir, env, "/tmp/ssh-agent.sock")
+        assert SENTINEL in r.stdout, (
+            f"SSH agent socket should forward bytes end-to-end. out={r.stdout} err={r.stderr}"
+        )
+    finally:
+        server.close()
+
+
+def test_configured_socket_end_to_end(coi_binary, workspace_dir, cleanup_containers, tmp_path):
+    """A [[sockets]] entry from a trusted-scope ($COI_CONFIG) config is forwarded,
+    its env var is injected, and the container reads the host sentinel back through
+    both the literal container path and the env-var-resolved path."""
+    server = HostSocketServer()
+    try:
+        cfg = tmp_path / "trusted-config.toml"
+        cfg.write_text(
+            f'[[sockets]]\nhost = "{server.path}"\ncontainer = "{CONTAINER_SOCK}"\nenv = "{ENV_NAME}"\n'
+        )
+        env = dict(os.environ)
+        env["COI_CONFIG"] = str(cfg)
+
+        # End-to-end byte transfer through the literal container path.
+        r = read_through_socket(coi_binary, workspace_dir, env, CONTAINER_SOCK)
+        assert SENTINEL in r.stdout, (
+            f"configured socket should forward bytes end-to-end. out={r.stdout} err={r.stderr}"
+        )
+
+        # The env var must be set to the container path and resolve to the same
+        # working socket (connect via $BROKER_SOCK).
         r = subprocess.run(
             [
                 coi_binary,
@@ -80,8 +154,13 @@ def test_ssh_forward_agent_regression(coi_binary, workspace_dir, cleanup_contain
                 "--",
                 "sh",
                 "-c",
-                "if [ -S /tmp/ssh-agent.sock ]; then echo PRESENT; else echo ABSENT; fi; "
-                'echo "ENV=$SSH_AUTH_SOCK"',
+                f'echo "ENV=${ENV_NAME}"; node -e "'
+                "const net=require('net');"
+                f"const s=net.connect(process.env.{ENV_NAME});"
+                "let d='';s.setEncoding('utf8');s.on('data',c=>d+=c);"
+                "s.on('end',()=>{process.stdout.write(d)});"
+                "s.on('error',e=>{process.stderr.write('CONNERR:'+e.message)});"
+                'setTimeout(()=>process.exit(0),10000)"',
             ],
             capture_output=True,
             text=True,
@@ -89,55 +168,32 @@ def test_ssh_forward_agent_regression(coi_binary, workspace_dir, cleanup_contain
             cwd=workspace_dir,
             env=env,
         )
-        assert "PRESENT" in r.stdout, (
-            f"SSH agent socket should be forwarded. out={r.stdout} err={r.stderr}"
-        )
-        assert "ENV=/tmp/ssh-agent.sock" in r.stdout, f"SSH_AUTH_SOCK should be set. out={r.stdout}"
-    finally:
-        srv.close()
-
-
-def test_configured_socket_forwarded_and_env_set(
-    coi_binary, workspace_dir, cleanup_containers, tmp_path
-):
-    """A [[sockets]] entry from a trusted-scope ($COI_CONFIG) config is forwarded
-    and its env var is injected."""
-    srv, host_sock = make_host_socket()
-    try:
-        cfg = tmp_path / "trusted-config.toml"
-        cfg.write_text(
-            f'[[sockets]]\nhost = "{host_sock}"\ncontainer = "{CONTAINER_SOCK}"\nenv = "{ENV_NAME}"\n'
-        )
-        env = dict(os.environ)
-        env["COI_CONFIG"] = str(cfg)
-
-        r = probe_socket(coi_binary, workspace_dir, env)
-        assert "PRESENT" in r.stdout, (
-            f"configured socket should be forwarded. out={r.stdout} err={r.stderr}"
-        )
         assert f"ENV={CONTAINER_SOCK}" in r.stdout, f"{ENV_NAME} should be set. out={r.stdout}"
+        assert SENTINEL in r.stdout, (
+            f"socket reached via $env var should work end-to-end. out={r.stdout} err={r.stderr}"
+        )
     finally:
-        srv.close()
+        server.close()
 
 
 def test_untrusted_socket_gated_until_trusted(
     coi_binary, workspace_dir, cleanup_containers, tmp_path
 ):
-    """A socket declared by the untrusted project .coi/config.toml is gated until
-    `coi trust`, then forwarded; `coi untrust` re-arms the gate."""
-    srv, host_sock = make_host_socket()
+    """A socket declared by the untrusted project .coi/config.toml is unreachable
+    until `coi trust`, then works end-to-end; `coi untrust` re-arms the gate."""
+    server = HostSocketServer()
     try:
         cfg_dir = pathlib.Path(workspace_dir) / ".coi"
         cfg_dir.mkdir(exist_ok=True)
         (cfg_dir / "config.toml").write_text(
-            f'[[sockets]]\nhost = "{host_sock}"\ncontainer = "{CONTAINER_SOCK}"\nenv = "{ENV_NAME}"\n'
+            f'[[sockets]]\nhost = "{server.path}"\ncontainer = "{CONTAINER_SOCK}"\nenv = "{ENV_NAME}"\n'
         )
         env = env_gate_active()
 
-        # 1. Untrusted -> gated: socket absent, env empty, warning emitted.
-        r = probe_socket(coi_binary, workspace_dir, env)
-        assert "ABSENT" in r.stdout, (
-            f"untrusted socket should be gated. out={r.stdout} err={r.stderr}"
+        # 1. Untrusted -> gated: socket not forwarded, sentinel unreachable, warning.
+        r = read_through_socket(coi_binary, workspace_dir, env, CONTAINER_SOCK)
+        assert SENTINEL not in r.stdout, (
+            f"untrusted socket must be unreachable before trust. out={r.stdout} err={r.stderr}"
         )
         assert "ignoring untrusted socket" in r.stderr.lower(), (
             f"expected the socket gate warning. err={r.stderr}"
@@ -157,12 +213,11 @@ def test_untrusted_socket_gated_until_trusted(
             f"unexpected trust output: {t.stdout}{t.stderr}"
         )
 
-        # 3. Now forwarded.
-        r = probe_socket(coi_binary, workspace_dir, env)
-        assert "PRESENT" in r.stdout, (
-            f"socket should be forwarded after trust. out={r.stdout} err={r.stderr}"
+        # 3. Now reachable end-to-end.
+        r = read_through_socket(coi_binary, workspace_dir, env, CONTAINER_SOCK)
+        assert SENTINEL in r.stdout, (
+            f"socket should forward end-to-end after trust. out={r.stdout} err={r.stderr}"
         )
-        assert f"ENV={CONTAINER_SOCK}" in r.stdout, f"env should be set after trust. out={r.stdout}"
 
         # 4. Revoke -> gated again.
         u = subprocess.run(
@@ -174,27 +229,56 @@ def test_untrusted_socket_gated_until_trusted(
             env=env,
         )
         assert u.returncode == 0, f"untrust failed: {u.stderr}"
-        r = probe_socket(coi_binary, workspace_dir, env)
-        assert "ABSENT" in r.stdout, f"socket must be gated again after untrust. out={r.stdout}"
+        r = read_through_socket(coi_binary, workspace_dir, env, CONTAINER_SOCK)
+        assert SENTINEL not in r.stdout, (
+            f"socket must be unreachable again after untrust. out={r.stdout} err={r.stderr}"
+        )
     finally:
-        srv.close()
+        server.close()
 
 
 def test_untrusted_socket_trust_all_bypass(coi_binary, workspace_dir, cleanup_containers, tmp_path):
-    """COI_TRUST_ALL=1 bypasses the socket gate for CI/automation."""
-    srv, host_sock = make_host_socket()
+    """COI_TRUST_ALL=1 bypasses the socket gate for CI/automation (reachable end-to-end)."""
+    server = HostSocketServer()
     try:
         cfg_dir = pathlib.Path(workspace_dir) / ".coi"
         cfg_dir.mkdir(exist_ok=True)
         (cfg_dir / "config.toml").write_text(
-            f'[[sockets]]\nhost = "{host_sock}"\ncontainer = "{CONTAINER_SOCK}"\nenv = "{ENV_NAME}"\n'
+            f'[[sockets]]\nhost = "{server.path}"\ncontainer = "{CONTAINER_SOCK}"\nenv = "{ENV_NAME}"\n'
         )
         env = dict(os.environ)
         env["COI_TRUST_ALL"] = "1"
 
-        r = probe_socket(coi_binary, workspace_dir, env)
-        assert "PRESENT" in r.stdout, (
-            f"COI_TRUST_ALL=1 should bypass the socket gate. out={r.stdout} err={r.stderr}"
+        r = read_through_socket(coi_binary, workspace_dir, env, CONTAINER_SOCK)
+        assert SENTINEL in r.stdout, (
+            f"COI_TRUST_ALL=1 should bypass the socket gate end-to-end. out={r.stdout} err={r.stderr}"
         )
     finally:
-        srv.close()
+        server.close()
+
+
+def test_project_scoped_profile_socket_gated(
+    coi_binary, workspace_dir, cleanup_containers, tmp_path
+):
+    """A socket declared by a project-scoped PROFILE (./.coi/profiles/dev) is
+    untrusted too — gated until approved (the profile bypass must be closed)."""
+    server = HostSocketServer()
+    try:
+        prof = pathlib.Path(workspace_dir) / ".coi" / "profiles" / "dev"
+        prof.mkdir(parents=True)
+        (prof / "config.toml").write_text(
+            f'[[sockets]]\nhost = "{server.path}"\ncontainer = "{CONTAINER_SOCK}"\nenv = "{ENV_NAME}"\n'
+        )
+        env = env_gate_active()
+
+        r = read_through_socket(
+            coi_binary, workspace_dir, env, CONTAINER_SOCK, extra_args=["--profile", "dev"]
+        )
+        assert SENTINEL not in r.stdout, (
+            f"profile-declared socket should be gated. out={r.stdout} err={r.stderr}"
+        )
+        assert "ignoring untrusted socket" in r.stderr.lower(), (
+            f"expected the gate warning for the profile socket. err={r.stderr}"
+        )
+    finally:
+        server.close()
