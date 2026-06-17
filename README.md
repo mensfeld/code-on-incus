@@ -276,6 +276,12 @@ coi monitor
 coi logs                        # Auto-detect container from current workspace
 coi logs coi-abc123-1 -f        # Tail logs live
 
+# Stream the structured (JSON Lines) threat-event audit log for a session
+coi audit coi-abc123-1 -f
+
+# Approve out-of-workspace mounts / forwarded sockets from a project .coi/config.toml
+coi trust                       # approve   (coi trust --list to view, coi untrust to revoke)
+
 # List active containers and saved sessions
 coi list --all
 
@@ -290,6 +296,8 @@ coi clean --pools             # Detect containers in unused storage pools
 # Update coi to the latest release
 coi update
 ```
+
+> **Upgrading to 0.9?** 0.9 is a security-hardening release that tightens what an untrusted project `.coi/config.toml` can do (out-of-workspace mounts and forwarded sockets now require `coi trust`; project configs can no longer weaken network isolation). See the [Upgrading from 0.8 to 0.9 guide](https://github.com/mensfeld/code-on-incus/wiki/Migration-Guide#upgrading-from-08-to-09).
 
 ### Container Aliases
 
