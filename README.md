@@ -583,7 +583,7 @@ enabled = true
 
 Audit logs are stored at `~/.coi/audit/<container-name>.jsonl` in JSON Lines format.
 
-See the [Security Monitoring wiki page](https://github.com/mensfeld/code-on-incus/wiki/Security-Monitoring) for monitoring commands, configuration options, NFT setup, and audit log management.
+See the [Security Monitoring wiki page](https://github.com/mensfeld/code-on-incus/wiki/Security-Monitoring) for monitoring commands, configuration options, and NFT setup, and the [Audit Log wiki page](https://github.com/mensfeld/code-on-incus/wiki/Audit-Log) for the audit log format, field reference, and `coi audit`.
 
 ### Audit streaming
 
