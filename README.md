@@ -405,95 +405,26 @@ Place a `.coi/config.toml` in any repository root to auto-configure COI for that
 
 See the [Configuration wiki page](https://github.com/mensfeld/code-on-incus/wiki/Configuration) for the full config reference, per-repo setup, profiles, and environment variables.
 
-### Forwarding host sockets
+### Forwarding host sockets & minting secrets
 
-`[ssh] forward_agent = true` forwards your host SSH agent into the container so AI tools can use git-over-SSH without ever seeing your private keys. The same mechanism is available for **any** host Unix socket via `[[sockets]]` — the socket is exposed inside the container through an Incus proxy device, so the host endpoint never crosses in:
+Two ways to give containerized tools credentials without the secret living in your host env or static config:
 
-```toml
-# Forward a host broker socket into the container.
-[[sockets]]
-host = "~/.coi/broker.sock"   # host socket (~ expanded)
-container = "/run/broker.sock" # absolute path inside the container
-env = "AWS_BROKER_SOCK"        # optional: env var set to the container path
-```
+- **`[[sockets]]`** forwards any host Unix socket into the container via an Incus proxy device, so the host endpoint never crosses in — the building block for **credential brokers** (a host process mints short-lived tokens; an in-container `credential_process` fetches them on demand).
+- **`[defaults.env_commands]`** runs a host command at session start and injects its trimmed stdout as an env var — for plain env-var credentials (e.g. an AWS Bedrock bearer token). Trade-off: the value lives in the container env for the session, so prefer the broker for high-value/rotatable secrets.
 
-This is the building block for **credential brokers**: a host process mints short-lived tokens and answers requests on the socket, while a tool inside the container (e.g. an AWS `credential_process`) fetches credentials on demand over the forward — no long-lived secrets ever enter the container.
-
-A project's own `.coi/config.toml` is **untrusted** (a cloned repo can ship one), so any socket it declares is ignored at launch until you approve it with `coi trust` (and re-approve if it changes); sockets from your trusted `~/.coi/config.toml` or `$COI_CONFIG` are never gated. Set `COI_TRUST_ALL=1` to bypass the gate in CI.
-
-### Minting secrets at session start
-
-For credentials consumed as plain **environment variables** (most API keys/tokens — e.g. an AWS Bedrock bearer token, a Vault token), `[defaults.env_commands]` runs a host command at session start and injects its trimmed stdout as the value, so a freshly-minted secret never sits in your host env or in static config:
-
-```toml
-[defaults.env_commands]
-AWS_BEARER_TOKEN_BEDROCK = "~/bin/mint-bedrock-key.sh"
-
-[defaults]
-# env_command_timeout = "30s"   # per-command timeout (default 30s)
-```
-
-Commands run via `sh -c` (so `~` and pipelines work); a failing or timing-out command **aborts the launch** rather than starting a session without its credential. Because running a host command is host code execution, `env_commands` is honored **only from trusted-scope config** (`~/.coi/config.toml` / `$COI_CONFIG`) and is ignored (with a warning) from an untrusted project `./.coi/config.toml` or project-scoped profile.
-
-**Trade-off vs. the broker pattern:** `env_commands` is the simplest option and works with any tool, but the minted value lives in the container's process environment for the session (readable via `/proc/self/environ`). For high-value or rotatable secrets, prefer the socket + broker pattern above — the value never enters the container and the broker can scope/rate-limit each request. Either way, pair with `limits.runtime.max_duration` to bound the exposure window.
+Both are honored only from trusted-scope config; sockets from an untrusted project `.coi/config.toml` are gated behind `coi trust`, and `env_commands` from one is ignored. See the [Configuration wiki page](https://github.com/mensfeld/code-on-incus/wiki/Configuration) for full examples and the trust model.
 
 ## Profiles
 
-Profiles are reusable container configurations bundling image, tool, limits, mounts, sockets, build scripts, context files, and environment into named templates. Each profile is a self-contained directory under `profiles/`:
-
-```
-.coi/profiles/
-├── rust-dev/
-│   ├── config.toml      # profile config
-│   ├── build.sh         # profile-specific build script
-│   └── CONTEXT.md       # AI agent context (appended to sandbox context)
-└── python-ml/
-    ├── config.toml
-    └── setup.sh
-```
-
-Example profile config (`.coi/profiles/rust-dev/config.toml`):
-
-```toml
-context = "CONTEXT.md"
-forward_env = ["CARGO_HOME"]
-
-[container]
-image = "coi-rust"
-persistent = true
-
-[environment]
-RUST_BACKTRACE = "1"
-
-[tool]
-name = "claude"
-permission_mode = "bypass"
-
-[limits.cpu]
-count = "4"
-```
+Profiles are reusable container configurations bundling image, tool, limits, mounts, sockets, build scripts, context files, and environment into named templates.
 
 ```bash
-coi shell --profile rust-dev                          # Use a profile
-coi profile create rust-dev --image coi-rust           # Create a new profile
-coi profile list                                       # List all profiles
+coi shell --profile rust-dev                 # Use a profile
+coi profile create rust-dev --image coi-rust  # Create a new profile
+coi profile list                              # List all profiles
 ```
 
-Profiles support inheritance (`inherits = "parent-name"`), context files for AI-agent instructions, and custom build scripts. See the [Profiles wiki page](https://github.com/mensfeld/code-on-incus/wiki/Profiles) for complete documentation.
-
-### Profile JSON Schema
-
-COI ships a JSON Schema 2020-12 document that describes every field accepted by a profile `config.toml`. External tools — such as a web UI or editor plugin — can consume it to validate profile data without duplicating COI's validation logic. The self-contained schema (with all definitions bundled inline) is produced by `coi schema profile`; the source files live under [`schema/`](schema/) but are incomplete without the bundling step.
-
-```bash
-# Print the schema
-coi schema profile
-
-# Save it for use in another tool
-coi schema profile > profile.schema.json
-```
-
-The schema covers all field types, enum values (`network.mode`, `tool.permission_mode`, `tool.claude.effort_level`, `timezone.mode`), required fields on mount entries, and rejects unknown keys. Any JSON Schema 2020-12 validator can use it — for example, the Ruby [`json_schemer`](https://github.com/davishmcclurg/json_schemer) gem or the Python [`jsonschema`](https://python-jsonschema.readthedocs.io/) package.
+Each profile is a self-contained directory (`.coi/profiles/<name>/`) bundling a `config.toml` plus optional build script and context file. Profiles support inheritance (`inherits = "parent"`), context files for AI-agent instructions, and custom build scripts. COI also ships a JSON Schema for profile configs (`coi schema profile`) so external tools can validate them. See the [Profiles wiki page](https://github.com/mensfeld/code-on-incus/wiki/Profiles) for the full reference, examples, and schema details.
 
 ## Resource and Time Limits
 
@@ -583,60 +514,7 @@ enabled = true
 
 Audit logs are stored at `~/.coi/audit/<container-name>.jsonl` in JSON Lines format.
 
-See the [Security Monitoring wiki page](https://github.com/mensfeld/code-on-incus/wiki/Security-Monitoring) for monitoring commands, configuration options, and NFT setup, and the [Audit Log wiki page](https://github.com/mensfeld/code-on-incus/wiki/Audit-Log) for the audit log format, field reference, and `coi audit`.
-
-### Audit streaming
-
-`coi audit` exposes the audit stream as JSON Lines on stdout, ready to pipe
-into a SIEM, `jq`, or a flat file:
-
-```sh
-# Dump the host-side audit log for a container
-coi audit coi-abc-1
-
-# Live in-container collector: auditd if available, otherwise syslog/auth.log,
-# plus periodic ss + ps snapshots
-coi audit coi-abc-1 --follow
-
-# Re-stream a saved JSONL file
-coi audit --file ./session.jsonl | jq -c 'select(.type=="net")'
-```
-
-Each line is a JSON object of the form:
-
-```json
-{"ts":"2026-05-05T12:34:56.789Z","sessionId":"coi-abc-1","container":"coi-abc-1",
- "type":"exec|net|file|audit|heartbeat","pid":42,"comm":"curl","args":"curl https://...",
- "peer":"1.2.3.4:443","path":"/etc/shadow","msg":"...","raw":"..."}
-```
-
-The `--follow` collector is a small POSIX-sh agent (`agent.sh`, no binary
-deploy). It picks the best available source — auditd first, falling back to
-`tail -F` of `/var/log/syslog` and `/var/log/auth.log` — and adds
-`ss -tunp` snapshots every 5 s plus `ps`-tree diffs every 2 s for new pids.
-Measured idle overhead: ~4.5 MB total RSS across the agent and its tail/awk
-helpers, ~0.0% CPU when the container is quiet.
-
-**Heartbeat / silent-failure detection.** The agent emits a
-`{"type":"heartbeat","seq":N,"sources":"..."}` event every 10 s. The host-side
-watcher tracks the most recent heartbeat per session and surfaces a warning
-if none arrives for 35 s (3 missed heartbeats with a small grace margin),
-both on stderr:
-
-```
-[audit] WARNING agent silent on coi-abc-1 for 36s (last heartbeat 2026-05-05T12:34:46Z)
-```
-
-and inside the JSONL stream as a `type=audit msg=agent.stale` event so SIEMs
-and downstream tooling can pick it up. When heartbeats resume, an
-`agent.alive` event clears the warning. The watcher does not auto-kill the
-connection — operators decide. Tunables: `COI_AUDIT_HEARTBEAT_INTERVAL` on
-the agent side; the 35 s stale threshold and 5 s check cadence are
-host-side defaults exposed as `audit.DefaultStaleAfter` and
-`audit.DefaultCheckInterval` for embedders.
-
-**Privacy model:** every event stays on the host running `coi audit`. Nothing
-is sent off-machine unless you pipe it elsewhere yourself.
+`coi audit` streams this log to stdout as JSON Lines (dump, or `--follow` for live in-container events), ready to pipe into a SIEM or `jq`. See the [Security Monitoring wiki page](https://github.com/mensfeld/code-on-incus/wiki/Security-Monitoring) for monitoring commands, configuration, and NFT setup, and the [Audit Log wiki page](https://github.com/mensfeld/code-on-incus/wiki/Audit-Log) for the event format, field reference, sources, and tuning.
 
 ## Security Best Practices
 
