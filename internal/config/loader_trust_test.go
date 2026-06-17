@@ -192,6 +192,76 @@ func TestLoadProfileDirectories_UntrustedMarksSockets(t *testing.T) {
 	}
 }
 
+const trustTestEnvCommandsConfig = `
+[defaults.env_commands]
+TOKEN = "echo secret"
+
+[defaults]
+env_command_timeout = "5s"
+`
+
+func writeEnvCommandsConfig(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path, []byte(trustTestEnvCommandsConfig), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestLoadConfigFileScoped_UntrustedStripsEnvCommands(t *testing.T) {
+	path := writeEnvCommandsConfig(t)
+	cfg := GetDefaultConfig()
+	if err := loadConfigFileScoped(cfg, path, false); err != nil {
+		t.Fatalf("loadConfigFileScoped: %v", err)
+	}
+	if len(cfg.Defaults.EnvCommands) != 0 {
+		t.Errorf("env_commands from untrusted config must be stripped, got %+v", cfg.Defaults.EnvCommands)
+	}
+	if cfg.Defaults.EnvCommandTimeout != "" {
+		t.Errorf("env_command_timeout from untrusted config must be cleared, got %q", cfg.Defaults.EnvCommandTimeout)
+	}
+}
+
+func TestLoadConfigFileScoped_TrustedKeepsEnvCommands(t *testing.T) {
+	path := writeEnvCommandsConfig(t)
+	cfg := GetDefaultConfig()
+	if err := loadConfigFileScoped(cfg, path, true); err != nil {
+		t.Fatalf("loadConfigFileScoped: %v", err)
+	}
+	if cfg.Defaults.EnvCommands["TOKEN"] != "echo secret" {
+		t.Errorf("env_commands from trusted config must be kept, got %+v", cfg.Defaults.EnvCommands)
+	}
+	if cfg.Defaults.EnvCommandTimeout != "5s" {
+		t.Errorf("env_command_timeout from trusted config must be kept, got %q", cfg.Defaults.EnvCommandTimeout)
+	}
+}
+
+func TestLoadProfileDirectories_UntrustedStripsEnvCommands(t *testing.T) {
+	body := "[env_commands]\nTOKEN = \"echo secret\"\n"
+	root, _ := writeProfile(t, body)
+	cfg := GetDefaultConfig()
+	if err := loadProfileDirectories(cfg, root, false); err != nil {
+		t.Fatalf("loadProfileDirectories: %v", err)
+	}
+	if len(cfg.Profiles["dev"].EnvCommands) != 0 {
+		t.Errorf("env_commands from untrusted profile must be stripped, got %+v", cfg.Profiles["dev"].EnvCommands)
+	}
+}
+
+func TestLoadProfileDirectories_TrustedKeepsEnvCommands(t *testing.T) {
+	body := "[env_commands]\nTOKEN = \"echo secret\"\n"
+	root, _ := writeProfile(t, body)
+	cfg := GetDefaultConfig()
+	if err := loadProfileDirectories(cfg, root, true); err != nil {
+		t.Fatalf("loadProfileDirectories: %v", err)
+	}
+	if cfg.Profiles["dev"].EnvCommands["TOKEN"] != "echo secret" {
+		t.Errorf("env_commands from trusted profile must be kept, got %+v", cfg.Profiles["dev"].EnvCommands)
+	}
+}
+
 func TestLoadConfigFileScoped_TrustedDoesNotMarkMounts(t *testing.T) {
 	path := writeMountConfig(t)
 	cfg := GetDefaultConfig()

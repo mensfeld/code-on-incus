@@ -183,7 +183,7 @@ func remapContainerUserIfNeeded(mgr container.ContainerManager, wasRestarted boo
 // tz is the resolved timezone name (may be empty).
 // socketEnv maps env var names to container-side socket paths for every
 // forwarded socket (SSH_AUTH_SOCK plus any configured [[sockets]] entries).
-func (a *App) appendEnvArgs(incusArgs []string, tz string, socketEnv map[string]string) []string {
+func (a *App) appendEnvArgs(incusArgs []string, tz string, socketEnv map[string]string) ([]string, error) {
 	// Timezone (lowest priority — user can override with config env)
 	if tz != "" {
 		incusArgs = append(incusArgs, "--env", fmt.Sprintf("TZ=%s", tz))
@@ -208,7 +208,17 @@ func (a *App) appendEnvArgs(incusArgs []string, tz string, socketEnv map[string]
 		}
 	}
 
-	return incusArgs
+	// Command-sourced env vars (highest precedence — freshly minted per session).
+	// A failing env_command is fatal: don't launch a half-credentialed session.
+	envCommandValues, err := a.resolveEnvCommands()
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range envCommandValues {
+		incusArgs = append(incusArgs, "--env", fmt.Sprintf("%s=%s", k, v))
+	}
+
+	return incusArgs, nil
 }
 
 // hasAnyLimits checks if any limits are configured (used in run.go)

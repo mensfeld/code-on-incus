@@ -138,6 +138,15 @@ type DefaultsConfig struct {
 	Model       string            `toml:"model"`
 	ForwardEnv  []string          `toml:"forward_env"`
 	Environment map[string]string `toml:"environment"`
+	// EnvCommands maps env var names to host commands run at session start; the
+	// trimmed stdout becomes the value. Honored ONLY from trusted-scope config
+	// (running a host command is host code execution) — stripped from untrusted
+	// project config/profiles at load time. The minted value is present in the
+	// container env for the session.
+	EnvCommands map[string]string `toml:"env_commands"`
+	// EnvCommandTimeout bounds each env_commands invocation (duration string,
+	// e.g. "30s"). Empty defaults to 30s.
+	EnvCommandTimeout string `toml:"env_command_timeout"`
 }
 
 // PathsConfig contains path settings
@@ -192,6 +201,7 @@ type ProfileConfig struct {
 	Container   ContainerConfig   `toml:"container"`
 	Context     string            `toml:"context"` // Path to context .md file (resolved relative to profile dir)
 	Environment map[string]string `toml:"environment"`
+	EnvCommands map[string]string `toml:"env_commands"`
 	Limits      *LimitsConfig     `toml:"limits"`
 	Tool        *ToolConfig       `toml:"tool"`
 	Mounts      []MountEntry      `toml:"mounts"`
@@ -414,6 +424,7 @@ func synthesizeDefaultProfile(cfg *Config) ProfileConfig {
 		Container:   container,
 		Model:       cfg.Defaults.Model,
 		Environment: cloneMap(cfg.Defaults.Environment),
+		EnvCommands: cloneMap(cfg.Defaults.EnvCommands),
 		ForwardEnv:  cloneSlice(cfg.Defaults.ForwardEnv),
 		Limits:      &limits,
 		Tool:        &tool,
@@ -550,6 +561,17 @@ func (c *Config) Merge(other *Config) {
 		for k, v := range other.Defaults.Environment {
 			c.Defaults.Environment[k] = v
 		}
+	}
+	if len(other.Defaults.EnvCommands) > 0 {
+		if c.Defaults.EnvCommands == nil {
+			c.Defaults.EnvCommands = make(map[string]string)
+		}
+		for k, v := range other.Defaults.EnvCommands {
+			c.Defaults.EnvCommands[k] = v
+		}
+	}
+	if other.Defaults.EnvCommandTimeout != "" {
+		c.Defaults.EnvCommandTimeout = other.Defaults.EnvCommandTimeout
 	}
 	if len(other.Mounts.Default) > 0 {
 		c.Mounts.Default = append(c.Mounts.Default, other.Mounts.Default...)
@@ -737,6 +759,14 @@ func (c *Config) ApplyProfile(name string) error {
 		}
 		for k, v := range profile.Environment {
 			c.Defaults.Environment[k] = v
+		}
+	}
+	if len(profile.EnvCommands) > 0 {
+		if c.Defaults.EnvCommands == nil {
+			c.Defaults.EnvCommands = make(map[string]string)
+		}
+		for k, v := range profile.EnvCommands {
+			c.Defaults.EnvCommands[k] = v
 		}
 	}
 	if len(profile.ForwardEnv) > 0 {

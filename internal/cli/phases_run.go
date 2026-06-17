@@ -280,7 +280,10 @@ func (a *App) runCommandPhase(args []string, s *runState) session.Phase {
 				"exec", s.containerName, "--user", fmt.Sprintf("%d", container.CodeUID),
 				"--group", fmt.Sprintf("%d", container.CodeUID), "--cwd", s.containerWorkspace,
 			}
-			incusArgs = a.appendEnvArgs(incusArgs, s.tz, s.socketEnv)
+			incusArgs, err := a.appendEnvArgs(incusArgs, s.tz, s.socketEnv)
+			if err != nil {
+				return nil, err
+			}
 			incusArgs = append(incusArgs, "--")
 			incusArgs = append(incusArgs, args...)
 

@@ -199,8 +199,9 @@ func buildCLICommand(sessionID string, useResumeFlag, restoreOnly bool, sessions
 }
 
 // buildContainerEnv constructs the environment variables map and user pointer for container execution.
-// It sets HOME, TERM (sanitized), IS_SANDBOX, merges config environment, and resolves forward_env from config.
-func (a *App) buildContainerEnv(result *session.SetupResult) (map[string]string, *int) {
+// It sets HOME, TERM (sanitized), IS_SANDBOX, merges config environment, resolves forward_env, and
+// runs env_commands (host commands whose trimmed stdout is injected). A failing env_command is fatal.
+func (a *App) buildContainerEnv(result *session.SetupResult) (map[string]string, *int, error) {
 	user := container.CodeUID
 	if result.RunAsRoot {
 		user = 0
@@ -238,12 +239,22 @@ func (a *App) buildContainerEnv(result *session.SetupResult) (map[string]string,
 		}
 	}
 
+	// Command-sourced env vars (highest precedence — freshly minted per session).
+	// Applied last so a minted value wins over static environment/forward_env.
+	envCommandValues, err := a.resolveEnvCommands()
+	if err != nil {
+		return nil, nil, err
+	}
+	for k, v := range envCommandValues {
+		containerEnv[k] = v
+	}
+
 	// Sanitize TERM if user explicitly provided it via config
 	if userTerm, exists := containerEnv["TERM"]; exists {
 		containerEnv["TERM"] = terminal.SanitizeTerm(userTerm)
 	}
 
-	return containerEnv, userPtr
+	return containerEnv, userPtr, nil
 }
 
 // resolveForwardedEnvVarNames returns the subset of env var names that are actually
@@ -310,7 +321,10 @@ func runPreLaunch(mgr container.ContainerManager, t tool.Tool, opts container.Ex
 // runCLI executes the CLI tool in the container interactively
 func (a *App) runCLI(result *session.SetupResult, sessionID string, useResumeFlag, restoreOnly bool, sessionsDir, resumeID string, t tool.Tool) error {
 	cmdToRun := buildCLICommand(sessionID, useResumeFlag, restoreOnly, sessionsDir, resumeID, t)
-	containerEnv, userPtr := a.buildContainerEnv(result)
+	containerEnv, userPtr, err := a.buildContainerEnv(result)
+	if err != nil {
+		return err
+	}
 
 	workspacePath := result.ContainerWorkspacePath
 	if workspacePath == "" {
@@ -334,7 +348,7 @@ func (a *App) runCLI(result *session.SetupResult, sessionID string, useResumeFla
 		return err
 	}
 
-	_, err := result.Manager.ExecCommand(cmdToRun, opts)
+	_, err = result.Manager.ExecCommand(cmdToRun, opts)
 	return err
 }
 
@@ -397,7 +411,10 @@ func (a *App) runCLIInTmux(result *session.SetupResult, sessionID string, detach
 	}
 
 	cliCmd := buildCLICommand(sessionID, useResumeFlag, restoreOnly, sessionsDir, resumeID, t)
-	containerEnv, userPtr := a.buildContainerEnv(result)
+	containerEnv, userPtr, err := a.buildContainerEnv(result)
+	if err != nil {
+		return err
+	}
 	mergeToolEnv(containerEnv, t, workspacePath)
 
 	// Run pre-launch commands (e.g., symlink creation) before the tool starts
@@ -429,7 +446,7 @@ func (a *App) runCLIInTmux(result *session.SetupResult, sessionID string, detach
 
 	// Check if tmux session already exists
 	checkSessionCmd := fmt.Sprintf("tmux has-session -t %s 2>/dev/null", tmuxSessionName)
-	_, err := result.Manager.ExecCommand(checkSessionCmd, container.ExecCommandOptions{
+	_, err = result.Manager.ExecCommand(checkSessionCmd, container.ExecCommandOptions{
 		Capture: true,
 		User:    userPtr,
 	})

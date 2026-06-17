@@ -154,6 +154,24 @@ func loadConfigFileScoped(cfg *Config, path string, trusted bool) error {
 // Strengthening values are left intact.
 func sanitizeUntrustedConfig(fileCfg *Config, path string) {
 	sanitizeUntrustedNetwork(&fileCfg.Network, path)
+	sanitizeUntrustedEnvCommands(&fileCfg.Defaults, path)
+}
+
+// sanitizeUntrustedEnvCommands strips env_commands (and their timeout) from an
+// untrusted source. Running a host command at session start is host code
+// execution, so — unlike escaping mounts/sockets, which can be approved via
+// `coi trust` — it is never honored from a project config or project-scoped
+// profile; it must live in trusted-scope config (~/.coi/config.toml / $COI_CONFIG).
+func sanitizeUntrustedEnvCommands(d *DefaultsConfig, path string) {
+	if d == nil || len(d.EnvCommands) == 0 {
+		return
+	}
+	fmt.Fprintf(os.Stderr,
+		"WARNING: ignoring 'env_commands' in project config %s; running a host "+
+			"command is host code execution. Move it to ~/.coi/config.toml or set "+
+			"COI_CONFIG to apply it.\n", path)
+	d.EnvCommands = nil
+	d.EnvCommandTimeout = ""
 }
 
 // sanitizeUntrustedNetwork drops security-downgrading network settings from an
@@ -314,6 +332,13 @@ func loadProfileDirectories(cfg *Config, configDir string, trusted bool) error {
 			sanitizeUntrustedNetwork(profileCfg.Network, profileConfigPath)
 			markUntrustedMounts(profileCfg.Mounts, profileConfigPath)
 			markUntrustedSockets(profileCfg.Sockets, profileConfigPath)
+			if len(profileCfg.EnvCommands) > 0 {
+				fmt.Fprintf(os.Stderr,
+					"WARNING: ignoring 'env_commands' in project profile %s; running a "+
+						"host command is host code execution. Move it to a profile under "+
+						"~/.coi/profiles to apply it.\n", profileConfigPath)
+				profileCfg.EnvCommands = nil
+			}
 		}
 
 		if cfg.Profiles == nil {
