@@ -15,13 +15,13 @@ func TestBuildJSONFromSettings_PiDefault(t *testing.T) {
 
 	// Pi with no context path returns empty settings
 	if len(settings) != 0 {
-		jsonStr, err := buildJSONFromSettings(settings)
+		result, _, err := mergeJSONSettings(nil, settings)
 		if err != nil {
-			t.Fatalf("buildJSONFromSettings() error: %v", err)
+			t.Fatalf("mergeJSONSettings() error: %v", err)
 		}
 
 		var parsed map[string]interface{}
-		if err := json.Unmarshal([]byte(jsonStr), &parsed); err != nil {
+		if err := json.Unmarshal(result, &parsed); err != nil {
 			t.Fatalf("Failed to parse JSON output: %v", err)
 		}
 	}
@@ -48,23 +48,23 @@ func TestBuildJSONFromSettings_PiRoundTrip(t *testing.T) {
 	pi.SetAutoContextPath("/home/code/SANDBOX_CONTEXT.md")
 	settings := pi.GetSandboxSettings()
 
-	jsonStr, err := buildJSONFromSettings(settings)
+	result, _, err := mergeJSONSettings(nil, settings)
 	if err != nil {
-		t.Fatalf("buildJSONFromSettings() error: %v", err)
+		t.Fatalf("mergeJSONSettings() error: %v", err)
 	}
 
 	// Unmarshal and re-marshal
 	var parsed map[string]interface{}
-	if err := json.Unmarshal([]byte(jsonStr), &parsed); err != nil {
+	if err := json.Unmarshal(result, &parsed); err != nil {
 		t.Fatalf("Failed to parse first JSON: %v", err)
 	}
 
-	jsonStr2, err := buildJSONFromSettings(parsed)
+	result2, _, err := mergeJSONSettings(nil, parsed)
 	if err != nil {
-		t.Fatalf("second buildJSONFromSettings() error: %v", err)
+		t.Fatalf("second mergeJSONSettings() error: %v", err)
 	}
 
-	if jsonStr != jsonStr2 {
-		t.Errorf("Round-trip mismatch:\n  first:  %s\n  second: %s", jsonStr, jsonStr2)
+	if string(result) != string(result2) {
+		t.Errorf("Round-trip mismatch:\n  first:  %s\n  second: %s", result, result2)
 	}
 }
