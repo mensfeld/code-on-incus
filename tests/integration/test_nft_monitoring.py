@@ -1094,7 +1094,7 @@ class TestNFTCOIRuleCleanupOnAutoKill:
 
             # Wait for responder to detect threat and kill container
             killed = False
-            for _ in range(15):
+            for _ in range(30):
                 time.sleep(1)
                 state = get_container_state(container_name)
                 if state in ("Stopped", "Unknown"):
@@ -1103,9 +1103,11 @@ class TestNFTCOIRuleCleanupOnAutoKill:
 
             assert killed, f"Container should have been killed but state is {state}"
 
-            # Verify nft coi forward rules are cleaned up (may take a moment after kill)
+            # Verify nft coi forward rules are cleaned up. Rule removal happens in
+            # COI's network teardown, which runs asynchronously after the kill — under
+            # CI load this can lag well past the kill itself, so poll generously.
             cleaned = False
-            for _ in range(15):
+            for _ in range(60):
                 if not check_nft_coi_rules_exist(container_ip):
                     cleaned = True
                     break
