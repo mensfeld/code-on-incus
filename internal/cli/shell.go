@@ -299,6 +299,25 @@ func mergeToolEnv(env map[string]string, t tool.Tool, workspacePath string) {
 	}
 }
 
+// runPreLaunch executes any pre-launch commands for the tool inside the container.
+// Commands are run via ExecArgs (no shell interpretation) to prevent injection.
+// Returns an error if any pre-launch command fails.
+func runPreLaunch(mgr container.ContainerManager, t tool.Tool, opts container.ExecCommandOptions) error {
+	pl, ok := t.(tool.ToolWithPreLaunch)
+	if !ok {
+		return nil
+	}
+	for _, argv := range pl.PreLaunch() {
+		if len(argv) == 0 {
+			continue
+		}
+		if err := mgr.ExecArgs(argv, opts); err != nil {
+			return fmt.Errorf("pre-launch command %v failed: %w", argv, err)
+		}
+	}
+	return nil
+}
+
 // runCLI executes the CLI tool in the container interactively
 func (a *App) runCLI(result *session.SetupResult, sessionID string, useResumeFlag, restoreOnly bool, sessionsDir, resumeID string, t tool.Tool) error {
 	cmdToRun := buildCLICommand(sessionID, useResumeFlag, restoreOnly, sessionsDir, resumeID, t)
@@ -317,6 +336,16 @@ func (a *App) runCLI(result *session.SetupResult, sessionID string, useResumeFla
 		Cwd:         workspacePath,
 		Env:         containerEnv,
 		Interactive: true, // Attach stdin/stdout/stderr for interactive session
+	}
+
+	// Run pre-launch commands (e.g., symlink creation) before the tool starts
+	if err := runPreLaunch(result.Manager, t, container.ExecCommandOptions{
+		User:    userPtr,
+		Cwd:     workspacePath,
+		Env:     containerEnv,
+		Capture: true,
+	}); err != nil {
+		return err
 	}
 
 	_, err = result.Manager.ExecCommand(cmdToRun, opts)
@@ -387,6 +416,16 @@ func (a *App) runCLIInTmux(result *session.SetupResult, sessionID string, detach
 		return err
 	}
 	mergeToolEnv(containerEnv, t, workspacePath)
+
+	// Run pre-launch commands (e.g., symlink creation) before the tool starts
+	if err := runPreLaunch(result.Manager, t, container.ExecCommandOptions{
+		User:    userPtr,
+		Cwd:     workspacePath,
+		Env:     containerEnv,
+		Capture: true,
+	}); err != nil {
+		return err
+	}
 
 	// Ensure tmux server is running first (critical for CI and new containers)
 	ensureTmuxServer(result.Manager, userPtr)

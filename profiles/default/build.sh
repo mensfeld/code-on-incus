@@ -96,7 +96,7 @@ install_base_dependencies() {
 install_nodejs() {
     log "Installing Node.js LTS..."
 
-    curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
     apt-get install -y -qq nodejs
 
     log "Node.js $(node --version) installed"
@@ -424,6 +424,41 @@ install_opencode() {
 }
 
 #######################################
+# Install pi (AI coding agent)
+# See: https://pi.dev
+#
+# Installed via the official install script from https://pi.dev/install.sh
+#######################################
+install_pi() {
+    log "Installing pi..."
+
+    # Install as the code user via the official installer
+    local attempt
+    for attempt in 1 2 3; do
+        if su - "$CODE_USER" -c 'curl -fsSL https://pi.dev/install.sh | sh'; then
+            break
+        fi
+        if [ "$attempt" -eq 3 ]; then
+            log "ERROR: pi installation failed after 3 attempts."
+            exit 1
+        fi
+        log "pi install failed (attempt $attempt/3), retrying in 10s..."
+        sleep 10
+    done
+
+    # Ensure pi is available system-wide for non-login/non-interactive shells
+    local PI_BIN
+    PI_BIN="$(su - "$CODE_USER" -c 'which pi' 2>/dev/null || true)"
+    if [[ -z "$PI_BIN" ]]; then
+        log "ERROR: pi binary not found after installation."
+        exit 1
+    fi
+    ln -sf "$PI_BIN" /usr/local/bin/pi
+
+    log "pi $(su - "$CODE_USER" -c 'pi --version' 2>/dev/null || echo 'installed')"
+}
+
+#######################################
 # Install dummy (test stub for testing)
 #######################################
 install_dummy() {
@@ -625,6 +660,7 @@ main() {
     configure_tmux
     install_claude_cli
     install_opencode
+    install_pi
     install_dummy
     install_docker
     install_github_cli
