@@ -100,6 +100,7 @@ See the [Supported Tools wiki page](https://github.com/mensfeld/code-on-incus/wi
 
 **Host Integration**
 - SSH agent forwarding - Use git-over-SSH inside containers without copying private keys (`[ssh] forward_agent = true`)
+- Host socket forwarding - Forward arbitrary host Unix sockets into the container (`[[sockets]]`) so the host endpoint never enters the container — the building block for credential brokers (mint short-lived tokens on the host, fetch them on demand inside). Untrusted project-config sockets are gated behind `coi trust`
 - Environment variable forwarding - Selectively forward host env vars by name (`forward_env` in config)
 - Host timezone inheritance - Containers automatically inherit the host's timezone (configurable via `[timezone]` config)
 - Sandbox context file - Auto-injected `~/SANDBOX_CONTEXT.md` tells AI tools about their environment (network mode, workspace path, persistence, etc.). Automatically loaded into each tool's native context system: Claude Code via `~/.claude/CLAUDE.md`, OpenCode via the `instructions` field in `opencode.json` (opt out with `auto_context = false`)
@@ -316,7 +317,7 @@ See the [Container Lifecycle and Sessions guide](https://github.com/mensfeld/cod
 --image NAME            # Use custom image (default: coi-default)
 ```
 
-Most container customization (network mode, mounts, environment variables, SSH agent, monitoring, timezone, resource limits, etc.) is configured via config files or profiles. See the [Configuration wiki page](https://github.com/mensfeld/code-on-incus/wiki/Configuration) for the full reference.
+Most container customization (network mode, mounts, socket forwarding, environment variables, SSH agent, monitoring, timezone, resource limits, etc.) is configured via config files or profiles. See the [Configuration wiki page](https://github.com/mensfeld/code-on-incus/wiki/Configuration) for the full reference.
 
 ### Advanced Usage
 
@@ -393,9 +394,25 @@ Place a `.coi/config.toml` in any repository root to auto-configure COI for that
 
 See the [Configuration wiki page](https://github.com/mensfeld/code-on-incus/wiki/Configuration) for the full config reference, per-repo setup, profiles, and environment variables.
 
+### Forwarding host sockets
+
+`[ssh] forward_agent = true` forwards your host SSH agent into the container so AI tools can use git-over-SSH without ever seeing your private keys. The same mechanism is available for **any** host Unix socket via `[[sockets]]` — the socket is exposed inside the container through an Incus proxy device, so the host endpoint never crosses in:
+
+```toml
+# Forward a host broker socket into the container.
+[[sockets]]
+host = "~/.coi/broker.sock"   # host socket (~ expanded)
+container = "/run/broker.sock" # absolute path inside the container
+env = "AWS_BROKER_SOCK"        # optional: env var set to the container path
+```
+
+This is the building block for **credential brokers**: a host process mints short-lived tokens and answers requests on the socket, while a tool inside the container (e.g. an AWS `credential_process`) fetches credentials on demand over the forward — no long-lived secrets ever enter the container.
+
+A project's own `.coi/config.toml` is **untrusted** (a cloned repo can ship one), so any socket it declares is ignored at launch until you approve it with `coi trust` (and re-approve if it changes); sockets from your trusted `~/.coi/config.toml` or `$COI_CONFIG` are never gated. Set `COI_TRUST_ALL=1` to bypass the gate in CI.
+
 ## Profiles
 
-Profiles are reusable container configurations bundling image, tool, limits, mounts, build scripts, context files, and environment into named templates. Each profile is a self-contained directory under `profiles/`:
+Profiles are reusable container configurations bundling image, tool, limits, mounts, sockets, build scripts, context files, and environment into named templates. Each profile is a self-contained directory under `profiles/`:
 
 ```
 .coi/profiles/
