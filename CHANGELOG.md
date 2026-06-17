@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## 0.9.0 (Unreleased)
+## 0.9.0 (2026-06-17)
 
 ### Security
 
