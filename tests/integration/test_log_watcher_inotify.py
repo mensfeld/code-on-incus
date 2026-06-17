@@ -31,7 +31,7 @@ def get_container_name_from_workspace(workspace):
     return f"coi-{hash_digest}-1"
 
 
-def wait_for_container_running(name, timeout=30):
+def wait_for_container_running(name, timeout=60):
     for _ in range(timeout):
         result = subprocess.run(
             ["incus", "list", name, "--format=json"], capture_output=True, text=True, timeout=10

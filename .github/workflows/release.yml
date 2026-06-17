@@ -174,14 +174,14 @@ jobs:
           ## Requirements
 
           - **Incus** - Linux container manager
-          - **Go 1.21+** - For building from source
+          - **Go 1.25+** - For building from source
           - **incus-admin group** - User must be in incus-admin group
 
           ## Documentation
 
           - [README](https://github.com/mensfeld/code-on-incus/blob/master/README.md)
-          - [PERSISTENT_MODE.md](https://github.com/mensfeld/code-on-incus/blob/master/PERSISTENT_MODE.md)
-          - [Integration Tests](https://github.com/mensfeld/code-on-incus/blob/master/INTE.md)
+          - [Wiki](https://github.com/mensfeld/code-on-incus/wiki)
+          - [CHANGELOG](https://github.com/mensfeld/code-on-incus/blob/master/CHANGELOG.md)
           EOF
 
       - name: Create GitHub Release
