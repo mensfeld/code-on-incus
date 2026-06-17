@@ -145,6 +145,45 @@ func TestApplyProfile_AppendsSockets(t *testing.T) {
 	}
 }
 
+func TestConfigMerge_MergesEnvCommands(t *testing.T) {
+	base := GetDefaultConfig()
+	base.Defaults.EnvCommands = map[string]string{"A": "echo a", "SHARED": "base"}
+	base.Defaults.EnvCommandTimeout = "10s"
+
+	other := &Config{
+		Defaults: DefaultsConfig{
+			EnvCommands:       map[string]string{"B": "echo b", "SHARED": "other"},
+			EnvCommandTimeout: "45s",
+		},
+	}
+	base.Merge(other)
+
+	if len(base.Defaults.EnvCommands) != 3 {
+		t.Fatalf("expected 3 merged env_commands, got %d", len(base.Defaults.EnvCommands))
+	}
+	if base.Defaults.EnvCommands["SHARED"] != "other" {
+		t.Errorf("later source should override on key collision, got %q", base.Defaults.EnvCommands["SHARED"])
+	}
+	if base.Defaults.EnvCommandTimeout != "45s" {
+		t.Errorf("non-empty timeout should override, got %q", base.Defaults.EnvCommandTimeout)
+	}
+}
+
+func TestApplyProfile_MergesEnvCommands(t *testing.T) {
+	cfg := GetDefaultConfig()
+	cfg.Defaults.EnvCommands = map[string]string{"A": "echo a"}
+	cfg.Profiles["broker"] = ProfileConfig{
+		EnvCommands: map[string]string{"TOKEN": "mint.sh"},
+	}
+
+	if err := cfg.ApplyProfile("broker"); err != nil {
+		t.Fatalf("ApplyProfile: %v", err)
+	}
+	if len(cfg.Defaults.EnvCommands) != 2 || cfg.Defaults.EnvCommands["TOKEN"] != "mint.sh" {
+		t.Fatalf("profile env_commands not merged: %+v", cfg.Defaults.EnvCommands)
+	}
+}
+
 func TestGetProfile(t *testing.T) {
 	cfg := GetDefaultConfig()
 

@@ -185,6 +185,28 @@ func TestGetProfileSchema_SocketsArrayWired(t *testing.T) {
 	}
 }
 
+// The profile schema must expose an `env_commands` object of string values.
+func TestGetProfileSchema_EnvCommandsWired(t *testing.T) {
+	b := mustGetSchema(t)
+	var doc struct {
+		Properties struct {
+			EnvCommands struct {
+				Type                 string         `json:"type"`
+				AdditionalProperties map[string]any `json:"additionalProperties"`
+			} `json:"env_commands"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(b, &doc); err != nil {
+		t.Fatalf("failed to parse schema: %v", err)
+	}
+	if doc.Properties.EnvCommands.Type != "object" {
+		t.Errorf("profile schema 'env_commands' should be an object, got %q", doc.Properties.EnvCommands.Type)
+	}
+	if doc.Properties.EnvCommands.AdditionalProperties["type"] != "string" {
+		t.Errorf("env_commands values should be strings, got %v", doc.Properties.EnvCommands.AdditionalProperties)
+	}
+}
+
 func TestGetProfileSchema_Deterministic(t *testing.T) {
 	a, err := schema.GetProfileSchema()
 	if err != nil {

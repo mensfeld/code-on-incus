@@ -28,6 +28,11 @@
       "additionalProperties": { "type": "string" },
       "description": "Environment variables to set inside the container. Empty string value clears an inherited key."
     },
+    "env_commands": {
+      "type": "object",
+      "additionalProperties": { "type": "string" },
+      "description": "Map of env var name to a host command run at session start; the command's trimmed stdout is injected as the value. Honored only from trusted-scope config (~/.coi/config.toml / $COI_CONFIG); the minted value is present in the container env for the session."
+    },
     "container": { "$ref": "#/$defs/ContainerConfig" },
     "limits":    { "$ref": "#/$defs/LimitsConfig" },
     "tool":      { "$ref": "#/$defs/ToolConfig" },
