@@ -292,7 +292,12 @@ func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.P
 			if err != nil {
 				return nil, fmt.Errorf("invalid mount configuration: %w", err)
 			}
-			mountConfig = gateUntrustedMounts(mountConfig, s.absWorkspace)
+			socketConfig, err := ParseSocketConfig(a.cfg)
+			if err != nil {
+				return nil, fmt.Errorf("invalid socket configuration: %w", err)
+			}
+			// Untrusted mounts/sockets are gated at the session.Setup chokepoint
+			// (combined trust fingerprint over both); pass them through unfiltered.
 			if err := session.ValidateMounts(mountConfig); err != nil {
 				return nil, fmt.Errorf("mount validation failed: %w", err)
 			}
@@ -310,6 +315,7 @@ func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.P
 				ResumeFromID:          resumeID,
 				Slot:                  slotNum,
 				MountConfig:           mountConfig,
+				SocketConfig:          socketConfig,
 				SessionsDir:           sessionsDir,
 				CLIConfigPath:         cliConfigPath,
 				Tool:                  ti,

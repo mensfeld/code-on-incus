@@ -122,37 +122,6 @@ func (w *HeartbeatWatcher) Observe(sessionID string) {
 	}
 }
 
-// LastSeen returns the most recent heartbeat timestamp for sessionID and a
-// boolean indicating whether any heartbeat has been observed.
-func (w *HeartbeatWatcher) LastSeen(sessionID string) (time.Time, bool) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	st, ok := w.sessions[sessionID]
-	if !ok || !st.seen {
-		return time.Time{}, false
-	}
-	return st.lastSeen, true
-}
-
-// IsStale reports whether sessionID is currently in the stale state.
-func (w *HeartbeatWatcher) IsStale(sessionID string) bool {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	st, ok := w.sessions[sessionID]
-	if !ok {
-		return false
-	}
-	return st.stale
-}
-
-// Forget drops sessionID from the tracker. Call this when a connection ends
-// cleanly so a paused operator review doesn't get a spurious stale warning.
-func (w *HeartbeatWatcher) Forget(sessionID string) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	delete(w.sessions, sessionID)
-}
-
 // Run loops on CheckInterval, marking sessions stale that have not heartbeat
 // within StaleAfter. Returns when ctx is cancelled.
 func (w *HeartbeatWatcher) Run(ctx context.Context) {
@@ -166,12 +135,6 @@ func (w *HeartbeatWatcher) Run(ctx context.Context) {
 			w.tick()
 		}
 	}
-}
-
-// Tick performs a single staleness sweep. Exposed for tests that drive the
-// watcher manually instead of via Run.
-func (w *HeartbeatWatcher) Tick() {
-	w.tick()
 }
 
 func (w *HeartbeatWatcher) tick() {

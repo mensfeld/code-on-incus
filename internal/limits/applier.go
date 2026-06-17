@@ -8,28 +8,6 @@ import (
 	"github.com/mensfeld/code-on-incus/internal/container"
 )
 
-// LimitsApplier is the interface for applying and removing resource limits.
-// The default implementation delegates to the package-level functions.
-type LimitsApplier interface {
-	Apply(ctx context.Context, opts ApplyOptions) error
-	Remove(ctx context.Context, containerName, project string) error
-}
-
-// Applier is the zero-value implementation of LimitsApplier that delegates to
-// the package-level Apply/Remove functions.
-type Applier struct{}
-
-func (Applier) Apply(ctx context.Context, opts ApplyOptions) error {
-	return ApplyResourceLimitsContext(ctx, opts)
-}
-
-func (Applier) Remove(ctx context.Context, containerName, project string) error {
-	return RemoveLimitsContext(ctx, containerName, project)
-}
-
-// Compile-time assertion: Applier must satisfy LimitsApplier.
-var _ LimitsApplier = Applier{}
-
 // ApplyOptions contains options for applying limits
 type ApplyOptions struct {
 	ContainerName string
@@ -234,72 +212,4 @@ func applyProcessLimits(ctx context.Context, containerName string, maxProcesses 
 		}
 	}
 	return nil
-}
-
-// RemoveLimits removes all limits from a container
-func RemoveLimits(containerName, project string) error {
-	return RemoveLimitsContext(context.Background(), containerName, project)
-}
-
-// RemoveLimitsContext removes all limits from a container with context support
-func RemoveLimitsContext(ctx context.Context, containerName, project string) error {
-	// Container-level limits
-	containerLimits := []string{
-		"limits.cpu",
-		"limits.cpu.allowance",
-		"limits.cpu.priority",
-		"limits.memory",
-		"limits.memory.enforce",
-		"limits.memory.swap",
-		"limits.processes",
-	}
-	for _, limit := range containerLimits {
-		// Best-effort: ignore not-found errors (limit was never set).
-		out, _ := container.ConfigUnset(ctx, containerName, limit)
-		_ = out
-	}
-
-	// Device-level disk I/O limits on the root device (set to empty to remove)
-	deviceLimits := []string{
-		"limits.read",
-		"limits.write",
-		"limits.max",
-		"limits.disk.priority",
-	}
-	for _, limit := range deviceLimits {
-		// Best-effort: ignore not-found and profile-inherited-device errors.
-		out, _ := container.DeviceSet(ctx, containerName, "root", limit+"=")
-		_ = out
-	}
-
-	return nil
-}
-
-// GetCurrentLimits retrieves current limits from a container
-func GetCurrentLimits(containerName, project string) (map[string]string, error) {
-	return GetCurrentLimitsContext(context.Background(), containerName, project)
-}
-
-// GetCurrentLimitsContext retrieves current limits from a container with context support
-func GetCurrentLimitsContext(ctx context.Context, containerName, project string) (map[string]string, error) {
-	output, err := container.ConfigShow(ctx, containerName, false)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get container config: %w", err)
-	}
-
-	limits := make(map[string]string)
-	lines := strings.Split(output, "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "limits.") {
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) == 2 {
-				key := strings.TrimSpace(parts[0])
-				value := strings.TrimSpace(parts[1])
-				limits[key] = value
-			}
-		}
-	}
-
-	return limits, nil
 }

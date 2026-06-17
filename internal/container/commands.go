@@ -581,35 +581,6 @@ func ImageExists(aliasName string) (bool, error) {
 	return false, nil
 }
 
-// ListImagesByPrefix lists images by alias prefix
-func ListImagesByPrefix(prefix string) ([]string, error) {
-	output, err := IncusOutput("image", "list", "--format=json")
-	if err != nil {
-		return nil, err
-	}
-
-	var images []struct {
-		Aliases []struct {
-			Name string `json:"name"`
-		} `json:"aliases"`
-	}
-
-	if err := json.Unmarshal([]byte(output), &images); err != nil {
-		return nil, err
-	}
-
-	var matching []string
-	for _, img := range images {
-		for _, alias := range img.Aliases {
-			if strings.HasPrefix(alias.Name, prefix) {
-				matching = append(matching, alias.Name)
-			}
-		}
-	}
-
-	return matching, nil
-}
-
 // ListContainers lists all containers matching a name pattern
 func ListContainers(pattern string) ([]string, error) {
 	output, err := IncusOutput("list", "--format=json")
@@ -669,12 +640,6 @@ func shellQuote(s string) string {
 // ConfigSet sets a configuration key on a container.
 func ConfigSet(ctx context.Context, containerName, key, value string) error {
 	return IncusExecContext(ctx, "config", "set", containerName, key+"="+value)
-}
-
-// ConfigUnset removes a configuration key from a container.
-// Returns the combined stdout+stderr output (useful for error inspection) and any error.
-func ConfigUnset(ctx context.Context, containerName, key string) (string, error) {
-	return IncusOutputWithStderrContext(ctx, "config", "unset", containerName, key)
 }
 
 // ConfigShow returns the container's YAML configuration.

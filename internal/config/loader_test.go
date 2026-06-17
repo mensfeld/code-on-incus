@@ -74,7 +74,7 @@ code_uid = 2000
 
 	// Load the config
 	cfg := GetDefaultConfig()
-	if err := loadConfigFile(cfg, configPath); err != nil {
+	if err := loadConfigFileScoped(cfg, configPath, true); err != nil {
 		t.Fatalf("loadConfigFile() failed: %v", err)
 	}
 
@@ -94,7 +94,7 @@ code_uid = 2000
 
 func TestLoadConfigFileNotExists(t *testing.T) {
 	cfg := GetDefaultConfig()
-	err := loadConfigFile(cfg, "/nonexistent/path/config.toml")
+	err := loadConfigFileScoped(cfg, "/nonexistent/path/config.toml", true)
 
 	if err == nil {
 		t.Error("Expected error for non-existent file")
@@ -120,30 +120,10 @@ image = "broken
 	}
 
 	cfg := GetDefaultConfig()
-	err := loadConfigFile(cfg, configPath)
+	err := loadConfigFileScoped(cfg, configPath, true)
 
 	if err == nil {
 		t.Error("Expected error for invalid TOML")
-	}
-}
-
-func TestWriteExample(t *testing.T) {
-	tmpDir := t.TempDir()
-	examplePath := filepath.Join(tmpDir, "example.toml")
-
-	if err := WriteExample(examplePath); err != nil {
-		t.Fatalf("WriteExample() failed: %v", err)
-	}
-
-	// Check file exists
-	if _, err := os.Stat(examplePath); err != nil {
-		t.Errorf("Example file not created: %v", err)
-	}
-
-	// Read and verify it's valid TOML
-	cfg := GetDefaultConfig()
-	if err := loadConfigFile(cfg, examplePath); err != nil {
-		t.Errorf("Example file is not valid TOML: %v", err)
 	}
 }
 
@@ -165,7 +145,7 @@ script = "build.sh"
 	}
 
 	cfg := GetDefaultConfig()
-	if err := loadConfigFile(cfg, configPath); err != nil {
+	if err := loadConfigFileScoped(cfg, configPath, true); err != nil {
 		t.Fatalf("loadConfigFile() failed: %v", err)
 	}
 
@@ -189,7 +169,7 @@ script = "/absolute/path/to/build.sh"
 	}
 
 	cfg := GetDefaultConfig()
-	if err := loadConfigFile(cfg, configPath); err != nil {
+	if err := loadConfigFileScoped(cfg, configPath, true); err != nil {
 		t.Fatalf("loadConfigFile() failed: %v", err)
 	}
 
@@ -211,7 +191,7 @@ script = "~/build-scripts/build.sh"
 	}
 
 	cfg := GetDefaultConfig()
-	if err := loadConfigFile(cfg, configPath); err != nil {
+	if err := loadConfigFileScoped(cfg, configPath, true); err != nil {
 		t.Fatalf("loadConfigFile() failed: %v", err)
 	}
 
@@ -418,7 +398,7 @@ mode = "restricted"
 	if err := loadProfileDirectories(cfg, configDir, true); err != nil {
 		t.Fatalf("loadProfileDirectories() failed: %v", err)
 	}
-	if err := loadConfigFile(cfg, filepath.Join(configDir, "config.toml")); err != nil {
+	if err := loadConfigFileScoped(cfg, filepath.Join(configDir, "config.toml"), true); err != nil {
 		t.Fatalf("loadConfigFile() failed: %v", err)
 	}
 
@@ -486,7 +466,7 @@ script = "build.sh"
 	if err := loadProfileDirectories(cfg, configDir, true); err != nil {
 		t.Fatalf("loadProfileDirectories() failed: %v", err)
 	}
-	if err := loadConfigFile(cfg, filepath.Join(configDir, "config.toml")); err != nil {
+	if err := loadConfigFileScoped(cfg, filepath.Join(configDir, "config.toml"), true); err != nil {
 		t.Fatalf("loadConfigFile() failed: %v", err)
 	}
 
@@ -524,7 +504,7 @@ script = "/absolute/path/build.sh"
 	if err := loadProfileDirectories(cfg, configDir, true); err != nil {
 		t.Fatalf("loadProfileDirectories() failed: %v", err)
 	}
-	if err := loadConfigFile(cfg, filepath.Join(configDir, "config.toml")); err != nil {
+	if err := loadConfigFileScoped(cfg, filepath.Join(configDir, "config.toml"), true); err != nil {
 		t.Fatalf("loadConfigFile() failed: %v", err)
 	}
 
@@ -554,7 +534,7 @@ func TestProfileDirectoryNoConfigToml(t *testing.T) {
 	if err := loadProfileDirectories(cfg, configDir, true); err != nil {
 		t.Fatalf("loadProfileDirectories() failed: %v", err)
 	}
-	if err := loadConfigFile(cfg, filepath.Join(configDir, "config.toml")); err != nil {
+	if err := loadConfigFileScoped(cfg, filepath.Join(configDir, "config.toml"), true); err != nil {
 		t.Fatalf("loadConfigFile() failed: %v", err)
 	}
 
@@ -586,7 +566,7 @@ func TestProfileDirectoryWithFileNotDir(t *testing.T) {
 	if err := loadProfileDirectories(cfg, configDir, true); err != nil {
 		t.Fatalf("loadProfileDirectories() failed: %v", err)
 	}
-	if err := loadConfigFile(cfg, filepath.Join(configDir, "config.toml")); err != nil {
+	if err := loadConfigFileScoped(cfg, filepath.Join(configDir, "config.toml"), true); err != nil {
 		t.Fatalf("loadConfigFile() failed: %v", err)
 	}
 
@@ -641,7 +621,7 @@ image = "test-image"
 	if err := loadProfileDirectories(cfg, configDir, true); err != nil {
 		t.Fatalf("loadProfileDirectories() failed: %v", err)
 	}
-	if err := loadConfigFile(cfg, filepath.Join(configDir, "config.toml")); err != nil {
+	if err := loadConfigFileScoped(cfg, filepath.Join(configDir, "config.toml"), true); err != nil {
 		t.Fatalf("loadConfigFile() failed: %v", err)
 	}
 
@@ -793,7 +773,7 @@ container = "/data"
 	}
 
 	cfg := GetDefaultConfig()
-	if err := loadConfigFile(cfg, configPath); err != nil {
+	if err := loadConfigFileScoped(cfg, configPath, true); err != nil {
 		t.Fatalf("loadConfigFile() failed: %v", err)
 	}
 
@@ -1161,7 +1141,7 @@ func TestMultipleProfileDirectories(t *testing.T) {
 	if err := loadProfileDirectories(cfg, configDir, true); err != nil {
 		t.Fatalf("loadProfileDirectories() failed: %v", err)
 	}
-	if err := loadConfigFile(cfg, filepath.Join(configDir, "config.toml")); err != nil {
+	if err := loadConfigFileScoped(cfg, filepath.Join(configDir, "config.toml"), true); err != nil {
 		t.Fatalf("loadConfigFile() failed: %v", err)
 	}
 

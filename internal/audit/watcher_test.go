@@ -63,6 +63,30 @@ func newTestWatcher(rec *recorder, clk *fakeClock, stale, check time.Duration) *
 	return w
 }
 
+// lastSeen reads a session's last-seen timestamp directly from the watcher's
+// internal state (the exported accessor was removed as dead code).
+func (w *HeartbeatWatcher) lastSeen(sessionID string) (time.Time, bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	st, ok := w.sessions[sessionID]
+	if !ok || !st.seen {
+		return time.Time{}, false
+	}
+	return st.lastSeen, true
+}
+
+// isStale reads a session's stale flag directly from the watcher's internal
+// state (the exported accessor was removed as dead code).
+func (w *HeartbeatWatcher) isStale(sessionID string) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	st, ok := w.sessions[sessionID]
+	if !ok {
+		return false
+	}
+	return st.stale
+}
+
 func TestWatcher_FirstHeartbeatFiresFirstSeen(t *testing.T) {
 	clk := newFakeClock()
 	rec := &recorder{}
@@ -80,8 +104,8 @@ func TestWatcher_FirstHeartbeatFiresFirstSeen(t *testing.T) {
 	if got[0].sessionID != "coi-a" {
 		t.Errorf("want sessionID coi-a, got %q", got[0].sessionID)
 	}
-	if last, ok := w.LastSeen("coi-a"); !ok || !last.Equal(clk.Now()) {
-		t.Errorf("LastSeen mismatch: %v ok=%v", last, ok)
+	if last, ok := w.lastSeen("coi-a"); !ok || !last.Equal(clk.Now()) {
+		t.Errorf("lastSeen mismatch: %v ok=%v", last, ok)
 	}
 }
 
@@ -97,7 +121,7 @@ func TestWatcher_HeartbeatUpdatesLastSeen(t *testing.T) {
 	w.Observe("coi-a")
 	t1 := clk.Now()
 
-	last, ok := w.LastSeen("coi-a")
+	last, ok := w.lastSeen("coi-a")
 	if !ok {
 		t.Fatal("session not tracked")
 	}
@@ -123,8 +147,8 @@ func TestWatcher_StaleFiresAfterThreshold(t *testing.T) {
 
 	// Inside the window: tick should not flip stale.
 	clk.Advance(20 * time.Second)
-	w.Tick()
-	if w.IsStale("coi-a") {
+	w.tick()
+	if w.isStale("coi-a") {
 		t.Fatal("session went stale before threshold")
 	}
 	if got := rec.snapshot(); len(got) != 0 {
@@ -133,8 +157,8 @@ func TestWatcher_StaleFiresAfterThreshold(t *testing.T) {
 
 	// Past threshold: tick must flip stale and fire exactly once.
 	clk.Advance(20 * time.Second)
-	w.Tick()
-	if !w.IsStale("coi-a") {
+	w.tick()
+	if !w.isStale("coi-a") {
 		t.Fatal("session did not go stale after threshold")
 	}
 	got := rec.snapshot()
@@ -144,8 +168,8 @@ func TestWatcher_StaleFiresAfterThreshold(t *testing.T) {
 
 	// Repeated ticks while still stale must not duplicate the transition.
 	clk.Advance(60 * time.Second)
-	w.Tick()
-	w.Tick()
+	w.tick()
+	w.tick()
 	if got := rec.snapshot(); len(got) != 1 {
 		t.Errorf("stale transition fired more than once: %d", len(got))
 	}
@@ -158,7 +182,7 @@ func TestWatcher_RecoveryFiresAlive(t *testing.T) {
 
 	w.Observe("coi-a")
 	clk.Advance(40 * time.Second)
-	w.Tick() // -> stale
+	w.tick() // -> stale
 
 	rec.mu.Lock()
 	rec.out = nil
@@ -168,7 +192,7 @@ func TestWatcher_RecoveryFiresAlive(t *testing.T) {
 	clk.Advance(2 * time.Second)
 	w.Observe("coi-a")
 
-	if w.IsStale("coi-a") {
+	if w.isStale("coi-a") {
 		t.Fatal("session still marked stale after heartbeat resumed")
 	}
 	got := rec.snapshot()
@@ -190,12 +214,12 @@ func TestWatcher_MultipleSessionsTrackedIndependently(t *testing.T) {
 
 	clk.Advance(40 * time.Second)
 	w.Observe("coi-b") // b stays alive
-	w.Tick()           // a should go stale
+	w.tick()           // a should go stale
 
-	if !w.IsStale("coi-a") {
+	if !w.isStale("coi-a") {
 		t.Error("coi-a should be stale")
 	}
-	if w.IsStale("coi-b") {
+	if w.isStale("coi-b") {
 		t.Error("coi-b should still be alive")
 	}
 	got := rec.snapshot()
@@ -210,21 +234,6 @@ func TestWatcher_MultipleSessionsTrackedIndependently(t *testing.T) {
 	}
 	if staleCount != 1 {
 		t.Errorf("want exactly one stale transition for coi-a, got %d (all: %+v)", staleCount, got)
-	}
-}
-
-func TestWatcher_ForgetClearsState(t *testing.T) {
-	clk := newFakeClock()
-	rec := &recorder{}
-	w := newTestWatcher(rec, clk, 35*time.Second, 5*time.Second)
-
-	w.Observe("coi-a")
-	w.Forget("coi-a")
-	if _, ok := w.LastSeen("coi-a"); ok {
-		t.Error("LastSeen should be empty after Forget")
-	}
-	if w.IsStale("coi-a") {
-		t.Error("IsStale should be false after Forget")
 	}
 }
 

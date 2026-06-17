@@ -122,6 +122,76 @@ func TestLoadProfileDirectories_TrustedDoesNotTag(t *testing.T) {
 	}
 }
 
+const trustTestSocketConfig = `
+[[sockets]]
+host = "/run/host.sock"
+container = "/run/c.sock"
+env = "BROKER"
+`
+
+func writeSocketConfig(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path, []byte(trustTestSocketConfig), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestLoadConfigFileScoped_UntrustedMarksSockets(t *testing.T) {
+	path := writeSocketConfig(t)
+	cfg := GetDefaultConfig()
+	if err := loadConfigFileScoped(cfg, path, false); err != nil {
+		t.Fatalf("loadConfigFileScoped: %v", err)
+	}
+	if len(cfg.Sockets) != 1 {
+		t.Fatalf("expected 1 socket, got %d", len(cfg.Sockets))
+	}
+	s := cfg.Sockets[0]
+	if !s.Untrusted {
+		t.Error("socket from untrusted config should have Untrusted=true")
+	}
+	abs, _ := filepath.Abs(path)
+	if s.SourcePath != abs {
+		t.Errorf("SourcePath = %q, want %q", s.SourcePath, abs)
+	}
+}
+
+func TestLoadConfigFileScoped_TrustedDoesNotMarkSockets(t *testing.T) {
+	path := writeSocketConfig(t)
+	cfg := GetDefaultConfig()
+	if err := loadConfigFileScoped(cfg, path, true); err != nil {
+		t.Fatalf("loadConfigFileScoped: %v", err)
+	}
+	if len(cfg.Sockets) != 1 {
+		t.Fatalf("expected 1 socket, got %d", len(cfg.Sockets))
+	}
+	if cfg.Sockets[0].Untrusted || cfg.Sockets[0].SourcePath != "" {
+		t.Errorf("socket from trusted config must not be marked untrusted: %+v", cfg.Sockets[0])
+	}
+}
+
+func TestLoadProfileDirectories_UntrustedMarksSockets(t *testing.T) {
+	body := "[[sockets]]\nhost = \"/run/host.sock\"\ncontainer = \"/run/c.sock\"\nenv = \"BROKER\"\n"
+	root, cfgPath := writeProfile(t, body)
+	cfg := GetDefaultConfig()
+	if err := loadProfileDirectories(cfg, root, false); err != nil {
+		t.Fatalf("loadProfileDirectories: %v", err)
+	}
+	p := cfg.Profiles["dev"]
+	if len(p.Sockets) != 1 {
+		t.Fatalf("expected 1 profile socket, got %d", len(p.Sockets))
+	}
+	if !p.Sockets[0].Untrusted {
+		t.Error("project-scoped profile socket must be marked Untrusted")
+	}
+	abs, _ := filepath.Abs(cfgPath)
+	if p.Sockets[0].SourcePath != abs {
+		t.Errorf("SourcePath = %q, want %q", p.Sockets[0].SourcePath, abs)
+	}
+}
+
 func TestLoadConfigFileScoped_TrustedDoesNotMarkMounts(t *testing.T) {
 	path := writeMountConfig(t)
 	cfg := GetDefaultConfig()

@@ -128,12 +128,12 @@ func TestSSHAgentForwarding_EndToEnd(t *testing.T) {
 	// Proxy devices must be added to running containers to work
 	t.Setenv("SSH_AUTH_SOCK", agentSocket)
 	logger := func(msg string) { t.Logf("[ssh-agent] %s", msg) }
-	socketPath, err := setupSSHAgentForwarding(mgr, containerName, logger)
+	socketPath, err := SetupSSHAgentForwarding(mgr, containerName, logger)
 	if err != nil {
-		t.Fatalf("setupSSHAgentForwarding failed: %v", err)
+		t.Fatalf("SetupSSHAgentForwarding failed: %v", err)
 	}
 	if socketPath == "" {
-		t.Fatal("setupSSHAgentForwarding returned empty socket path, expected forwarding to be configured")
+		t.Fatal("SetupSSHAgentForwarding returned empty socket path, expected forwarding to be configured")
 	}
 
 	// 4. Wait for socket to appear (proxy device may take a moment)
@@ -205,7 +205,7 @@ func TestSSHAgentForwarding_NoSocket(t *testing.T) {
 		t.Logf("[ssh-agent] %s", msg)
 	}
 
-	socketPath, err := setupSSHAgentForwarding(mgr, containerName, logger)
+	socketPath, err := SetupSSHAgentForwarding(mgr, containerName, logger)
 	if err != nil {
 		t.Errorf("Expected no error when SSH_AUTH_SOCK is empty, got: %v", err)
 	}
@@ -256,7 +256,7 @@ func TestSSHAgentForwarding_InvalidSocket(t *testing.T) {
 		t.Logf("[ssh-agent] %s", msg)
 	}
 
-	socketPath, err := setupSSHAgentForwarding(mgr, containerName, logger)
+	socketPath, err := SetupSSHAgentForwarding(mgr, containerName, logger)
 	if err != nil {
 		t.Errorf("Expected no error when socket doesn't exist, got: %v", err)
 	}
@@ -276,7 +276,7 @@ func TestSSHAgentForwarding_InvalidSocket(t *testing.T) {
 	}
 }
 
-// TestSSHAgentForwarding_DeviceReplace verifies that calling setupSSHAgentForwarding
+// TestSSHAgentForwarding_DeviceReplace verifies that calling SetupSSHAgentForwarding
 // twice on a running container (e.g., persistent container with changed socket path)
 // replaces the proxy device cleanly.
 func TestSSHAgentForwarding_DeviceReplace(t *testing.T) {
@@ -292,13 +292,13 @@ func TestSSHAgentForwarding_DeviceReplace(t *testing.T) {
 	logger := func(msg string) { t.Logf("[ssh-agent] %s", msg) }
 
 	// First call - add device to running container
-	if _, err := setupSSHAgentForwarding(mgr, containerName, logger); err != nil {
-		t.Fatalf("First setupSSHAgentForwarding failed: %v", err)
+	if _, err := SetupSSHAgentForwarding(mgr, containerName, logger); err != nil {
+		t.Fatalf("First SetupSSHAgentForwarding failed: %v", err)
 	}
 
 	// Second call - should remove and re-add device without error
-	if _, err := setupSSHAgentForwarding(mgr, containerName, logger); err != nil {
-		t.Fatalf("Second setupSSHAgentForwarding failed: %v", err)
+	if _, err := SetupSSHAgentForwarding(mgr, containerName, logger); err != nil {
+		t.Fatalf("Second SetupSSHAgentForwarding failed: %v", err)
 	}
 
 	// Wait for socket

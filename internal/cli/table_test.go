@@ -8,7 +8,7 @@ import (
 func TestTableBasicRender(t *testing.T) {
 	var buf bytes.Buffer
 	tbl := NewTable("NAME", "AGE")
-	tbl.SetOutput(&buf)
+	tbl.out = &buf
 	tbl.AddRow("alice", "30")
 	tbl.AddRow("bob", "25")
 	tbl.Render()
@@ -26,22 +26,10 @@ func TestTableBasicRender(t *testing.T) {
 	}
 }
 
-func TestTableLen(t *testing.T) {
-	tbl := NewTable("A", "B")
-	if tbl.Len() != 0 {
-		t.Errorf("expected Len() == 0, got %d", tbl.Len())
-	}
-	tbl.AddRow("1", "2")
-	tbl.AddRow("3", "4")
-	if tbl.Len() != 2 {
-		t.Errorf("expected Len() == 2, got %d", tbl.Len())
-	}
-}
-
 func TestTableShortRowPadding(t *testing.T) {
 	var buf bytes.Buffer
 	tbl := NewTable("A", "B", "C")
-	tbl.SetOutput(&buf)
+	tbl.out = &buf
 	tbl.AddRow("only-one")
 	tbl.Render()
 
@@ -55,7 +43,7 @@ func TestTableShortRowPadding(t *testing.T) {
 func TestTableColumnAlignment(t *testing.T) {
 	var buf bytes.Buffer
 	tbl := NewTable("NAME", "VALUE")
-	tbl.SetOutput(&buf)
+	tbl.out = &buf
 	tbl.AddRow("short", "1")
 	tbl.AddRow("a-much-longer-name", "2")
 	tbl.Render()

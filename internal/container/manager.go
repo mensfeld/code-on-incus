@@ -664,11 +664,6 @@ func UserInGroupFile(username, groupName string) bool {
 	return false
 }
 
-// ImageExistsGlobal checks if an image exists (class method equivalent)
-func ImageExistsGlobal(imageAlias string) (bool, error) {
-	return ImageExists(imageAlias)
-}
-
 // Helper function to create a file with content
 func (m *Manager) CreateFile(containerPath, content string) error {
 	// Create a unique temp file to avoid collisions with concurrent sessions

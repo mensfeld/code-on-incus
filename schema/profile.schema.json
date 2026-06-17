@@ -36,6 +36,11 @@
       "items": { "$ref": "#/$defs/MountEntry" },
       "description": "Additional host directories to mount into the container"
     },
+    "sockets": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/SocketEntry" },
+      "description": "Host Unix sockets to forward into the container"
+    },
     "network":    { "$ref": "#/$defs/NetworkConfig" },
     "paths":      { "$ref": "#/$defs/PathsConfig" },
     "incus":      { "$ref": "#/$defs/IncusConfig" },

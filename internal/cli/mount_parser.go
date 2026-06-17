@@ -9,13 +9,12 @@ import (
 	"github.com/mensfeld/code-on-incus/internal/session"
 )
 
-// gateUntrustedMounts drops mounts from untrusted project config whose host path
-// escapes the workspace unless the source config has been trusted (`coi trust`)
-// or COI_TRUST_ALL is set, warning about each dropped mount. This prevents a
-// cloned repo's `.coi/config.toml` from bind-mounting host paths (writable →
-// host RCE; read-only → exfiltration) without the user's explicit approval.
-func gateUntrustedMounts(mc *session.MountConfig, workspace string) *session.MountConfig {
-	kept, dropped := session.FilterTrustedMounts(mc, workspace)
+// warnDroppedMounts prints a per-mount warning for untrusted, unapproved mounts.
+// Untrusted project config (a cloned repo's `.coi/config.toml`) can declare
+// mounts that bind-mount host paths (host RCE / exfiltration) or sockets that
+// forward host capabilities; both are gated behind `coi trust` and warned about
+// here when dropped.
+func warnDroppedMounts(dropped []session.MountEntry) {
 	for _, m := range dropped {
 		access := "writable"
 		if m.Readonly {
@@ -24,11 +23,46 @@ func gateUntrustedMounts(mc *session.MountConfig, workspace string) *session.Mou
 		fmt.Fprintf(os.Stderr,
 			"WARNING: ignoring untrusted mount from project config %s:\n"+
 				"         host %q -> %q (%s) resolves outside the workspace.\n"+
-				"         Run 'coi trust' to approve it (re-approval is required if the mount\n"+
+				"         Run 'coi trust' to approve it (re-approval is required if the\n"+
 				"         config later changes), or set %s=1 for CI/automation.\n",
 			m.SourcePath, m.HostPath, m.ContainerPath, access, session.TrustEnvVar)
 	}
-	return kept
+}
+
+// warnDroppedSockets prints a per-socket warning for untrusted, unapproved sockets.
+func warnDroppedSockets(dropped []session.SocketEntry) {
+	for _, s := range dropped {
+		fmt.Fprintf(os.Stderr,
+			"WARNING: ignoring untrusted socket from project config %s:\n"+
+				"         host %q -> %q forwards a host socket into the container.\n"+
+				"         Run 'coi trust' to approve it (re-approval is required if the\n"+
+				"         config later changes), or set %s=1 for CI/automation.\n",
+			s.SourcePath, s.HostPath, s.ContainerPath, session.TrustEnvVar)
+	}
+}
+
+// ParseSocketConfig creates a SocketConfig from config file [[sockets]] entries.
+func ParseSocketConfig(cfg *config.Config) (*session.SocketConfig, error) {
+	sc := &session.SocketConfig{Sockets: []session.SocketEntry{}}
+	for i, s := range cfg.Sockets {
+		hostPath := config.ExpandPath(s.Host)
+		absHost, err := filepath.Abs(hostPath)
+		if err != nil {
+			return nil, fmt.Errorf("invalid socket host path '%s': %w", s.Host, err)
+		}
+		if !filepath.IsAbs(s.Container) {
+			return nil, fmt.Errorf("socket container path must be absolute: %s", s.Container)
+		}
+		sc.Sockets = append(sc.Sockets, session.SocketEntry{
+			HostPath:      absHost,
+			ContainerPath: filepath.Clean(s.Container),
+			EnvVar:        s.Env,
+			DeviceName:    fmt.Sprintf("socket-%d", i),
+			Untrusted:     s.Untrusted,
+			SourcePath:    s.SourcePath,
+		})
+	}
+	return sc, nil
 }
 
 // ParseMountConfig creates MountConfig from config file mounts

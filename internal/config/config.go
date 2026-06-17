@@ -31,6 +31,7 @@ type Config struct {
 	Tool               ToolConfig               `toml:"tool"`
 	Shell              ShellConfig              `toml:"shell"`
 	Mounts             MountsConfig             `toml:"mounts"`
+	Sockets            []SocketEntry            `toml:"sockets"`
 	Limits             LimitsConfig             `toml:"limits"`
 	Git                GitConfig                `toml:"git"`
 	SSH                SSHConfig                `toml:"ssh"`
@@ -194,6 +195,7 @@ type ProfileConfig struct {
 	Limits      *LimitsConfig     `toml:"limits"`
 	Tool        *ToolConfig       `toml:"tool"`
 	Mounts      []MountEntry      `toml:"mounts"`
+	Sockets     []SocketEntry     `toml:"sockets"`
 	Network     *NetworkConfig    `toml:"network"`
 	ForwardEnv  []string          `toml:"forward_env"`
 	Source      string            `toml:"-"` // Where this profile was loaded from (not serialized)
@@ -244,6 +246,23 @@ type MountEntry struct {
 // MountsConfig contains mount-related configuration
 type MountsConfig struct {
 	Default []MountEntry `toml:"default"` // Default mounts for all sessions
+}
+
+// SocketEntry forwards a host unix socket into the container via an Incus proxy
+// device (the secret/endpoint stays on the host; only the socket crosses in).
+// It generalizes SSH agent forwarding; the SSH agent (`[ssh] forward_agent`)
+// remains a built-in case synthesized at setup time.
+type SocketEntry struct {
+	Host      string `toml:"host"`      // Host socket path (supports ~ expansion)
+	Container string `toml:"container"` // In-container socket path (must be absolute)
+	Env       string `toml:"env"`       // Optional env var NAME set to the container path
+
+	// Untrusted/SourcePath are set programmatically (never from TOML) when this
+	// entry came from an untrusted, project-scope config file. Forwarding a host
+	// socket exposes a host capability, so untrusted entries are gated behind
+	// explicit trust (`coi trust`), like escaping mounts.
+	Untrusted  bool   `toml:"-"`
+	SourcePath string `toml:"-"`
 }
 
 // LimitsConfig contains resource and time limits for containers
@@ -401,6 +420,7 @@ func synthesizeDefaultProfile(cfg *Config) ProfileConfig {
 		Shell:       &shell,
 		Network:     &network,
 		Mounts:      cloneSlice(cfg.Mounts.Default),
+		Sockets:     cloneSlice(cfg.Sockets),
 		Paths:       &paths,
 		Incus:       &incus,
 		Git:         &git,
@@ -533,6 +553,9 @@ func (c *Config) Merge(other *Config) {
 	}
 	if len(other.Mounts.Default) > 0 {
 		c.Mounts.Default = append(c.Mounts.Default, other.Mounts.Default...)
+	}
+	if len(other.Sockets) > 0 {
+		c.Sockets = append(c.Sockets, other.Sockets...)
 	}
 
 	mergePathsInto(&c.Paths, &other.Paths)
@@ -721,6 +744,9 @@ func (c *Config) ApplyProfile(name string) error {
 	}
 	if len(profile.Mounts) > 0 {
 		c.Mounts.Default = append(c.Mounts.Default, profile.Mounts...)
+	}
+	if len(profile.Sockets) > 0 {
+		c.Sockets = append(c.Sockets, profile.Sockets...)
 	}
 
 	// Apply struct sections

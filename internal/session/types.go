@@ -19,3 +19,23 @@ type MountEntry struct {
 type MountConfig struct {
 	Mounts []MountEntry
 }
+
+// SocketEntry represents a host unix socket forwarded into the container at
+// runtime (via an Incus proxy device). It generalizes SSH agent forwarding.
+type SocketEntry struct {
+	HostPath      string // Absolute host socket path (expanded)
+	ContainerPath string // In-container socket path
+	EnvVar        string // Optional env var NAME set to ContainerPath ("" = none)
+	DeviceName    string // Unique Incus proxy-device name
+
+	// Untrusted is true when this entry came from an untrusted (project-scope)
+	// config file. SourcePath is that file's absolute path. Untrusted sockets are
+	// gated behind explicit trust (`coi trust`).
+	Untrusted  bool
+	SourcePath string
+}
+
+// SocketConfig holds all forwarded-socket entries for a session.
+type SocketConfig struct {
+	Sockets []SocketEntry
+}

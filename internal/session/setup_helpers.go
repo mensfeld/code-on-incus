@@ -35,16 +35,6 @@ func isColimaOrLimaEnvironment() bool {
 	return false
 }
 
-// buildJSONFromSettings converts a settings map to a properly escaped JSON string
-// Uses json.Marshal to ensure proper escaping and avoid command injection
-func buildJSONFromSettings(settings map[string]interface{}) (string, error) {
-	jsonBytes, err := json.Marshal(settings)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal settings: %w", err)
-	}
-	return string(jsonBytes), nil
-}
-
 // mergeJSONSettings merges settings into existing JSON content with one-level deep merge.
 // If both existing and new values for a key are maps, their entries are merged;
 // otherwise the new value overwrites. Returns indented JSON with trailing newline.

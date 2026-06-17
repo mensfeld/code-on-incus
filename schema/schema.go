@@ -35,17 +35,6 @@ func GetProfileSchema() ([]byte, error) {
 	return bundle()
 }
 
-// ProfileSchemaID returns the $id declared in the root schema document.
-func ProfileSchemaID() (string, error) {
-	var doc struct {
-		ID string `json:"$id"`
-	}
-	if err := json.Unmarshal(rootSchemaBytes, &doc); err != nil {
-		return "", fmt.Errorf("failed to parse profile schema: %w", err)
-	}
-	return doc.ID, nil
-}
-
 // compiled holds the lazily-compiled JSON Schema validator (thread-safe).
 var (
 	compiledOnce   sync.Once
