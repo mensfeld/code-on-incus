@@ -102,6 +102,7 @@ See the [Supported Tools wiki page](https://github.com/mensfeld/code-on-incus/wi
 - SSH agent forwarding - Use git-over-SSH inside containers without copying private keys (`[ssh] forward_agent = true`)
 - Host socket forwarding - Forward arbitrary host Unix sockets into the container (`[[sockets]]`) so the host endpoint never enters the container — the building block for credential brokers (mint short-lived tokens on the host, fetch them on demand inside). Untrusted project-config sockets are gated behind `coi trust`
 - Environment variable forwarding - Selectively forward host env vars by name (`forward_env` in config)
+- Command-sourced env vars - Mint a fresh secret per session by running a host command at start and injecting its output as an env var (`[defaults.env_commands]`) — for short-lived API keys/tokens. Trusted-scope config only
 - Host timezone inheritance - Containers automatically inherit the host's timezone (configurable via `[timezone]` config)
 - Sandbox context file - Auto-injected `~/SANDBOX_CONTEXT.md` tells AI tools about their environment (network mode, workspace path, persistence, etc.). Automatically loaded into each tool's native context system: Claude Code via `~/.claude/CLAUDE.md`, OpenCode via the `instructions` field in `opencode.json` (opt out with `auto_context = false`)
 
@@ -409,6 +410,22 @@ env = "AWS_BROKER_SOCK"        # optional: env var set to the container path
 This is the building block for **credential brokers**: a host process mints short-lived tokens and answers requests on the socket, while a tool inside the container (e.g. an AWS `credential_process`) fetches credentials on demand over the forward — no long-lived secrets ever enter the container.
 
 A project's own `.coi/config.toml` is **untrusted** (a cloned repo can ship one), so any socket it declares is ignored at launch until you approve it with `coi trust` (and re-approve if it changes); sockets from your trusted `~/.coi/config.toml` or `$COI_CONFIG` are never gated. Set `COI_TRUST_ALL=1` to bypass the gate in CI.
+
+### Minting secrets at session start
+
+For credentials consumed as plain **environment variables** (most API keys/tokens — e.g. an AWS Bedrock bearer token, a Vault token), `[defaults.env_commands]` runs a host command at session start and injects its trimmed stdout as the value, so a freshly-minted secret never sits in your host env or in static config:
+
+```toml
+[defaults.env_commands]
+AWS_BEARER_TOKEN_BEDROCK = "~/bin/mint-bedrock-key.sh"
+
+[defaults]
+# env_command_timeout = "30s"   # per-command timeout (default 30s)
+```
+
+Commands run via `sh -c` (so `~` and pipelines work); a failing or timing-out command **aborts the launch** rather than starting a session without its credential. Because running a host command is host code execution, `env_commands` is honored **only from trusted-scope config** (`~/.coi/config.toml` / `$COI_CONFIG`) and is ignored (with a warning) from an untrusted project `./.coi/config.toml` or project-scoped profile.
+
+**Trade-off vs. the broker pattern:** `env_commands` is the simplest option and works with any tool, but the minted value lives in the container's process environment for the session (readable via `/proc/self/environ`). For high-value or rotatable secrets, prefer the socket + broker pattern above — the value never enters the container and the broker can scope/rate-limit each request. Either way, pair with `limits.runtime.max_duration` to bound the exposure window.
 
 ## Profiles
 
