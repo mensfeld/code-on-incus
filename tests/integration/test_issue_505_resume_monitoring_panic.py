@@ -18,7 +18,6 @@ panic signature from the issue so this test goes red on the bug and green on the
 fix. Refine the trigger/assertions once the root cause is confirmed.
 """
 
-import os
 import subprocess
 import time
 from pathlib import Path
@@ -98,7 +97,7 @@ def _assert_no_panic(output, where):
 
 def test_resume_with_monitoring_does_not_panic(coi_binary, cleanup_containers, workspace_dir):
     env = {"COI_USE_DUMMY": "1"}
-    config_path, restore = _write_monitoring_config()
+    _config_path, restore = _write_monitoring_config()
 
     try:
         # === Phase 1: create an ephemeral session with monitoring enabled ===
