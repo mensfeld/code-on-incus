@@ -173,9 +173,9 @@ jobs:
           - name: git-hooks
             path: tests/git_hooks
             description: "Git hooks and security protection tests"
-          - name: monitoring-gtfobins-505
-            path: tests/integration/test_issue_505_resume_monitoring_panic.py
-            description: "Regression for #505: GTFOBins DB load panic under monitoring"
+          - name: monitoring-db
+            path: tests/integration/test_issue_505_resume_monitoring_panic.py tests/integration/test_gtfobins_db_pattern_detection.py tests/integration/test_gtfobins_db_absent_fallback.py tests/integration/test_sigma_db_detection.py
+            description: "Monitoring detection-DB load paths (GTFOBins + Sigma), present and absent, incl. #505 regression"
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
