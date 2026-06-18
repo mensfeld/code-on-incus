@@ -139,7 +139,9 @@ def test_resume_with_monitoring_does_not_panic(coi_binary, cleanup_containers, w
         )
 
         # === Phase 2: resume — this is where #505 panics ===
-        child2 = spawn_coi(coi_binary, ["shell", "--resume"], cwd=workspace_dir, env=env, timeout=120)
+        child2 = spawn_coi(
+            coi_binary, ["shell", "--resume"], cwd=workspace_dir, env=env, timeout=120
+        )
 
         resumed = False
         try:
