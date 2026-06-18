@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## Unreleased
+
+### Fixed
+
+- **Monitoring no longer crashes at session start when the GTFOBins detection DB is present (#505)** — with `[monitoring] enabled = true` and a GTFOBins clone on disk (e.g. after `coi update-patterns`), the proc-event watcher loaded the exec-pattern DB at session start and panicked: `slice bounds out of range [:12] with length 11`. The whole `coi` process died in a goroutine right after "monitoring started" — for both `coi shell` and `coi shell --resume` (patterns load on every session start). Root cause: `gtfobinsStripPlaceholders` computed the lowercased string once but reassigned `token` inside its placeholder loop, so once an earlier placeholder shortened the token, a later placeholder's stale index (a position in the original, longer string) overran it. The standard GTFOBins `socat` entry triggered it deterministically via the token `tcp-connect:attacker.com:12345`: matching `attacker.com` (index 12) shortened the token to `tcp-connect` (length 11), then matching `attacker` (a substring, still at index 12) did `token[:12]`. The parser now indexes and slices the same (lowercased) string, so the index can never exceed the token length. CI did not catch this because it has no GTFOBins clone (the loader falls back to compiled-in defaults when the DB is absent).
+
 ## 0.9.0 (2026-06-17)
 
 ### Security

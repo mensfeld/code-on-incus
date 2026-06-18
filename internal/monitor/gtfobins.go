@@ -140,12 +140,24 @@ func deriveKeywords(binaryName string, funcs []gtfoBinFunc) []string {
 //	"/dev/tcp/attacker.com/12345" → "/dev/tcp/"
 //	"attacker.com"                → ""
 func gtfobinsStripPlaceholders(token string) string {
-	lower := strings.ToLower(token)
+	// Operate on the lowercased form throughout. strings.Index below runs against
+	// it and the caller lowercases the result anyway, so indexing and slicing
+	// share one string. This avoids a bounds panic (issue #505): the previous
+	// code computed `lower` once but reassigned `token` inside the loop, so once
+	// an earlier placeholder shortened `token`, a later placeholder's index — a
+	// position in the original, longer string — could overrun the shortened
+	// token. E.g. "tcp-connect:attacker.com:12345": "attacker.com" (idx 12)
+	// shortened token to "tcp-connect" (len 11), then "attacker" (also idx 12 in
+	// the stale string) did token[:12] -> "slice bounds out of range [:12] with
+	// length 11". Slicing the same string we index into makes idx <= len always.
+	token = strings.ToLower(token)
 	for _, ph := range []string{"attacker.com", "attacker", "/path/to"} {
-		if idx := strings.Index(lower, ph); idx > 0 {
-			token = strings.TrimRight(token[:idx], ":.")
-		} else if idx == 0 {
+		idx := strings.Index(token, ph)
+		if idx == 0 {
 			return ""
+		}
+		if idx > 0 {
+			token = strings.TrimRight(token[:idx], ":.")
 		}
 	}
 	// Strip pure-numeric path segments (e.g. port numbers), working from the
