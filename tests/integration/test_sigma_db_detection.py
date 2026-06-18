@@ -77,11 +77,13 @@ mode = "open"
 
 [monitoring]
 enabled = true
-auto_pause_on_high = true
-auto_kill_on_critical = true
+auto_pause_on_high = false
+auto_kill_on_critical = false
 poll_interval_sec = 1
 file_read_threshold_mb = 500
 file_read_rate_mb_per_sec = 1000
+process_count_threshold = 9999
+process_spawn_rate_threshold = 9999
 """
     )
 
@@ -108,8 +110,15 @@ file_read_rate_mb_per_sec = 1000
 
     if not ready:
         proc.terminate()
-        proc.wait(timeout=5)
+        try:
+            proc.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            proc.kill()
         pytest.skip(f"Container {container_name} did not reach Running state")
+
+    # PROC_EVENT_EXEC fires once at execve, so the proc-connector subscription
+    # must be established before we exec — otherwise the event is missed.
+    time.sleep(3)
 
     # cmdline contains the rule's CommandLine|contains token → Sigma match.
     subprocess.Popen(
@@ -128,7 +137,7 @@ file_read_rate_mb_per_sec = 1000
 
     log_path = coi_dir / "audit" / f"{container_name}.jsonl"
     detected = False
-    for _ in range(20):
+    for _ in range(30):
         time.sleep(1)
         if log_path.exists():
             for raw in log_path.read_text().splitlines():
@@ -148,7 +157,10 @@ file_read_rate_mb_per_sec = 1000
             break
 
     proc.terminate()
-    proc.wait(timeout=5)
+    try:
+        proc.wait(timeout=15)
+    except subprocess.TimeoutExpired:
+        proc.kill()
     _cleanup(container_name, coi_binary)
 
     assert detected, (
