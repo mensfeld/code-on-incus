@@ -49,6 +49,32 @@ func TestSanitizeUntrustedConfig_KeepsStrengthening(t *testing.T) {
 	}
 }
 
+// An untrusted (project-scoped) config must not be able to remove read-only
+// protections: writable_paths is a security downgrade and must be dropped so a
+// cloned repo cannot turn off protection of host-auto-executing files.
+func TestSanitizeUntrustedConfig_DropsWritablePaths(t *testing.T) {
+	cfg := &Config{}
+	cfg.Security.WritablePaths = []string{".claude/settings.json", ".git/hooks"}
+
+	sanitizeUntrustedConfig(cfg, "/ws/.coi/config.toml")
+
+	if cfg.Security.WritablePaths != nil {
+		t.Error("security.writable_paths from untrusted config should be dropped")
+	}
+}
+
+// writable_paths from a trusted-scope config is honored (no sanitization runs).
+func TestTrustedConfig_KeepsWritablePaths(t *testing.T) {
+	cfg := GetDefaultConfig()
+	cfg.Merge(&Config{Security: SecurityConfig{WritablePaths: []string{".claude/settings.json"}}})
+
+	for _, p := range cfg.Security.GetEffectiveProtectedPaths() {
+		if p == ".claude/settings.json" {
+			t.Error("trusted writable_paths should make .claude/settings.json writable")
+		}
+	}
+}
+
 // A trusted config path must be recognized; a project path must not.
 func TestIsTrustedConfigPath(t *testing.T) {
 	t.Setenv("COI_CONFIG", "/explicit/coi.toml")

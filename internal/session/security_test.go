@@ -241,7 +241,7 @@ func TestDefaultProtectedPaths(t *testing.T) {
 
 	expected := []string{
 		".git/hooks", ".git/config", ".git/config.worktree", ".git/info/attributes",
-		".husky", ".vscode", ".coi",
+		".husky", ".vscode", ".coi", ".claude/settings.json", ".claude/settings.local.json",
 	}
 
 	if len(paths) != len(expected) {

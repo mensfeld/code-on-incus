@@ -51,8 +51,13 @@ writable_hooks = false
 forward_agent = false
 
 [security]
-protected_paths = [".git/hooks", ".git/config", ".git/config.worktree", ".git/info/attributes", ".husky", ".vscode", ".coi"]
+protected_paths = [".git/hooks", ".git/config", ".git/config.worktree", ".git/info/attributes", ".husky", ".vscode", ".coi", ".claude/settings.json", ".claude/settings.local.json"]
 host_immutable = true
+# writable_agent_config: when false (default), in-workspace agent tool config
+# (.claude/settings.json, .claude/settings.local.json) is mounted read-only so a
+# contained agent cannot plant/modify hooks that a later session would auto-execute.
+# Set to true in trusted-scope config (~/.coi/config.toml) to let the tool write them.
+# writable_agent_config = false
 
 [limits.cpu]
 count = ""

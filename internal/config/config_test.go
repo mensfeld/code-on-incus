@@ -1277,3 +1277,54 @@ func TestApplyProfile_AliasPreservation(t *testing.T) {
 		}
 	})
 }
+
+// The Claude Code project settings files (where the "hooks" key lives) must be
+// default protected paths so a contained agent cannot plant/modify hooks that a
+// later session would auto-execute on open.
+func TestDefaultConfig_ProtectsClaudeSettings(t *testing.T) {
+	cfg := GetDefaultConfig()
+	want := map[string]bool{
+		".claude/settings.json":       false,
+		".claude/settings.local.json": false,
+	}
+	for _, p := range cfg.Security.GetEffectiveProtectedPaths() {
+		if _, ok := want[p]; ok {
+			want[p] = true
+		}
+	}
+	for p, found := range want {
+		if !found {
+			t.Errorf("%s should be a default protected path", p)
+		}
+	}
+}
+
+// writable_paths removes specific entries from the effective protected set, the
+// generic trusted-scope opt-out.
+func TestGetEffectiveProtectedPaths_WritablePathsSubtracts(t *testing.T) {
+	s := &SecurityConfig{
+		ProtectedPaths: []string{".git/hooks", ".claude/settings.json", ".claude/settings.local.json"},
+		WritablePaths:  []string{".claude/settings.json", ".claude/settings.local.json"},
+	}
+	got := s.GetEffectiveProtectedPaths()
+	for _, p := range got {
+		if p == ".claude/settings.json" || p == ".claude/settings.local.json" {
+			t.Errorf("%s should have been removed by writable_paths", p)
+		}
+	}
+	if len(got) != 1 || got[0] != ".git/hooks" {
+		t.Errorf("expected only .git/hooks to remain, got %v", got)
+	}
+}
+
+// A trusted-scope security override must carry writable_paths through Merge
+// (the opt-out is only honored from trusted config).
+func TestConfigMerge_CarriesWritablePaths(t *testing.T) {
+	cfg := GetDefaultConfig()
+	cfg.Merge(&Config{Security: SecurityConfig{WritablePaths: []string{".claude/settings.json"}}})
+	for _, p := range cfg.Security.GetEffectiveProtectedPaths() {
+		if p == ".claude/settings.json" {
+			t.Error("Merge should carry writable_paths so .claude/settings.json becomes writable")
+		}
+	}
+}

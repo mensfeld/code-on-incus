@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## Unreleased
+
+### Security
+
+- **In-workspace agent config (`.claude/settings.json`, `.claude/settings.local.json`) is now mounted read-only** — these files can carry a `hooks` key: shell commands Claude Code auto-executes when it opens the repo. The workspace is mounted read-write and persists to the host, so a contained agent that wrote one of these files could plant a hook that a *later* session — another COI container reopening the same workspace, or a native `claude` run on the host — would auto-execute on open. That is a containment escape: the contained agent gains code execution in a context it was never granted (the host, or a sibling session), out-of-band of its own sandbox. This is the same "host-auto-executing file the container must not be able to write" class COI already closes for `.git/hooks`, `.git/config`, `.husky`, `.vscode`, and `.coi`; the two Claude settings files are added to the default `protected_paths` to fill the gap. The scope is deliberate: this protects against the *agent writing* the file (containment); a repo that *ships* malicious hooks is out of scope (that is the human's / PR-review's responsibility, and a repo hook firing inside the sandbox is already contained). Existing files are protected when present — no empty placeholders are created, so repos without a `.claude/` directory are untouched. COI runs Claude in `bypassPermissions` and injects its own settings into `~/.claude` (home, not the workspace), so read-only workspace settings have no functional impact by default; only the opt-in `interactive` permission mode persists grants to the workspace file.
+- **New generic `[security] writable_paths` opt-out** — removes specific entries from the effective `protected_paths` (e.g. `writable_paths = [".claude/settings.json"]` to let the tool manage its own project settings). It generalizes the per-feature `git.writable_hooks` boolean to any protected path. It is honored **only from trusted-scope config** (`~/.coi/config.toml` or `$COI_CONFIG`): an untrusted project `.coi/config.toml` (or project-scoped profile) cannot use it to remove a protection — mirroring how untrusted network downgrades are refused — so a cloned repo cannot turn the read-only protection back off. `git.writable_hooks` is retained as a shorthand for `.git/hooks`.
+
 ## 0.9.0 (2026-06-17)
 
 ### Security

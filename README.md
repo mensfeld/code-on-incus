@@ -521,9 +521,9 @@ Audit logs are stored at `~/.coi/audit/<container-name>.jsonl` in JSON Lines for
 See the [Security Best Practices guide](https://github.com/mensfeld/code-on-incus/wiki/Security-Best-Practices) for detailed security recommendations.
 
 COI automatically mounts security-sensitive paths as **read-only** to prevent supply-chain attacks:
-- `.git/hooks`, `.git/config`, `.husky`, `.vscode`
+- `.git/hooks`, `.git/config`, `.husky`, `.vscode`, `.coi`, `.claude/settings.json`, `.claude/settings.local.json`
 
-Set `[git] writable_hooks = true` in config to opt out, or customize protected paths via config. See the wiki for details.
+The `.claude/settings.*` files can carry auto-executing hooks, so making them read-only stops a contained agent from planting a hook that a later session (or a native run on the host) would auto-execute on open. To opt a path back out, set `[security] writable_paths = [".claude/settings.json"]` in **trusted-scope** config (`~/.coi/config.toml` or `$COI_CONFIG`) — an untrusted project `.coi/config.toml` cannot remove protections. (`[git] writable_hooks = true` remains as a shorthand for `.git/hooks`.) See the wiki for details.
 
 ## System Health Check
 

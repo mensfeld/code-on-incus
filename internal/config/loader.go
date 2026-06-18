@@ -155,6 +155,28 @@ func loadConfigFileScoped(cfg *Config, path string, trusted bool) error {
 func sanitizeUntrustedConfig(fileCfg *Config, path string) {
 	sanitizeUntrustedNetwork(&fileCfg.Network, path)
 	sanitizeUntrustedEnvCommands(&fileCfg.Defaults, path)
+	sanitizeUntrustedSecurity(&fileCfg.Security, path)
+}
+
+// sanitizeUntrustedSecurity drops security-weakening fields from an untrusted
+// source. A project config (or project-scoped profile) may *add* protections (via
+// additional_protected_paths) but must not *remove* them: writable_paths takes
+// entries out of the effective protected set, so honoring it from a cloned repo
+// would let the repo turn off read-only protection of host-auto-executing files
+// (e.g. .git/hooks, .claude/settings.json). It is only honored from trusted-scope
+// config (~/.coi/config.toml or $COI_CONFIG). nil is a no-op.
+func sanitizeUntrustedSecurity(s *SecurityConfig, path string) {
+	if s == nil {
+		return
+	}
+	if len(s.WritablePaths) > 0 {
+		fmt.Fprintf(os.Stderr,
+			"WARNING: ignoring 'security.writable_paths' in project config %s; "+
+				"removing read-only protection is a security downgrade. Move it to "+
+				"~/.coi/config.toml or set COI_CONFIG to apply it.\n", path)
+	}
+	// Never let an untrusted source carry this field into the merge.
+	s.WritablePaths = nil
 }
 
 // sanitizeUntrustedEnvCommands strips env_commands (and their timeout) from an
@@ -330,6 +352,7 @@ func loadProfileDirectories(cfg *Config, configDir string, trusted bool) error {
 		// escaping host mounts are gated behind `coi trust`.
 		if !trusted {
 			sanitizeUntrustedNetwork(profileCfg.Network, profileConfigPath)
+			sanitizeUntrustedSecurity(profileCfg.Security, profileConfigPath)
 			markUntrustedMounts(profileCfg.Mounts, profileConfigPath)
 			markUntrustedSockets(profileCfg.Sockets, profileConfigPath)
 			if len(profileCfg.EnvCommands) > 0 {
