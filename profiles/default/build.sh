@@ -382,18 +382,40 @@ install_claude_cli() {
 }
 
 #######################################
+# Map the host CPU architecture to the opencode release asset suffix.
+# opencode publishes opencode-linux-x64.tar.gz and opencode-linux-arm64.tar.gz.
+# Installing the x86_64 build on an arm64 host fails at runtime with
+# "qemu-x86_64: Could not open '/lib64/ld-linux-x86-64.so.2'" (issue #506).
+# Echoes the suffix on stdout; returns non-zero for unsupported architectures.
+#######################################
+opencode_asset_arch() {
+    case "$(uname -m)" in
+        x86_64 | amd64) echo "x64" ;;
+        aarch64 | arm64) echo "arm64" ;;
+        *) return 1 ;;
+    esac
+}
+
+#######################################
 # Install opencode
 # See: https://opencode.ai
 #######################################
 install_opencode() {
     log "Installing opencode..."
 
+    # Select the release asset for the host architecture (issue #506).
+    local OPENCODE_ARCH
+    if ! OPENCODE_ARCH="$(opencode_asset_arch)"; then
+        log "ERROR: unsupported CPU architecture '$(uname -m)' for opencode."
+        exit 1
+    fi
+
     # Download the binary directly from the /latest/download/ redirect URL.
     # This does NOT hit the GitHub API and is not subject to rate limits
     # (unlike the official installer which calls api.github.com).
     local INSTALL_DIR="/home/$CODE_USER/.opencode/bin"
     local OPENCODE_PATH="$INSTALL_DIR/opencode"
-    local DOWNLOAD_URL="https://github.com/anomalyco/opencode/releases/latest/download/opencode-linux-x64.tar.gz"
+    local DOWNLOAD_URL="https://github.com/anomalyco/opencode/releases/latest/download/opencode-linux-${OPENCODE_ARCH}.tar.gz"
 
     mkdir -p "$INSTALL_DIR"
     chown "$CODE_USER:$CODE_USER" "$INSTALL_DIR"
