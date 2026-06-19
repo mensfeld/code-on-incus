@@ -36,7 +36,6 @@ jobs:
         run: |
           mkdir -p internal/image/embedded
           mkdir -p internal/config/embedded
-          cp profiles/default/build.sh internal/image/embedded/coi_build.sh
           cp profiles/default/config.toml internal/config/embedded/default_config.toml
           cp testdata/dummy/dummy internal/image/embedded/dummy
           # GitHub Actions runners lack the memory.swap cgroup controller.
@@ -79,7 +78,6 @@ jobs:
         run: |
           mkdir -p internal/image/embedded
           mkdir -p internal/config/embedded
-          cp profiles/default/build.sh internal/image/embedded/coi_build.sh
           cp profiles/default/config.toml internal/config/embedded/default_config.toml
           cp testdata/dummy/dummy internal/image/embedded/dummy
           # GitHub Actions runners lack the memory.swap cgroup controller.
@@ -409,7 +407,6 @@ jobs:
         run: |
           mkdir -p internal/image/embedded
           mkdir -p internal/config/embedded
-          cp profiles/default/build.sh internal/image/embedded/coi_build.sh
           cp profiles/default/config.toml internal/config/embedded/default_config.toml
           cp testdata/dummy/dummy internal/image/embedded/dummy
           # GitHub Actions runners lack the memory.swap cgroup controller.
