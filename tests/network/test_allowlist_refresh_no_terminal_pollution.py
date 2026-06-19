@@ -1,41 +1,51 @@
 """
-Integration test: background IP refresh output must not appear in the terminal.
+Integration tests: allowlist network diagnostics must never reach the terminal.
 
-Regression test for https://github.com/mensfeld/code-on-incus/issues/372.
+Regression tests for https://github.com/mensfeld/code-on-incus/issues/372.
 
-In allowlist mode the Manager starts a background goroutine that periodically
-re-resolves allowed domains and updates firewall rules.  Before the fix that
-goroutine used the global log package (stderr), which is attached to the
-running tmux/shell session, causing every refresh cycle to dump log lines
-directly into the user's terminal.
+In allowlist mode coi resolves the allowed domains at setup and a background
+goroutine periodically re-resolves them (TTL-aware) and updates the nft rules.
+Before the fix, the resolver and nft helpers logged via the global `log` package
+(stderr), which in a running `coi shell` is the user's tmux terminal — so every
+refresh dumped lines like `example.com: resolved 3 IPs (TTL: 300s)` straight into
+the Claude session. (An earlier fix only redirected the refresh goroutine's own
+"IP refresh: ..." lines, so the resolver flood persisted in 0.9.)
 
-After the SessionLogger migration, all network manager logging goes to
-~/.coi/logs/<container>.stdout.log and ~/.coi/logs/<container>.stderr.log
-rather than the terminal.
-
-What we verify:
-  1. Startup stderr/stdout does NOT contain background-goroutine-only messages
-     ("checking for updated IPs", "no changes detected", "next check in").
-  2. The one-time setup message "Starting IP refresh" IS present in the
-     session log file (~/.coi/logs/<container>.stdout.log).
-  3. The session log file ~/.coi/logs/<container>.stdout.log is created so
-     that the output is not silently discarded.
+These tests lock the *behaviour*, not the code:
+  1. setup-time network diagnostics do not appear in the terminal, and ARE
+     written to the session log file (~/.coi/logs/<container>.stdout.log);
+  2. a real background refresh fires in a live session and its output goes to the
+     log file, NOT the attached terminal.
 """
 
 import os
 import subprocess
 import tempfile
 import time
+from pathlib import Path
 
+from support.helpers import (
+    calculate_container_name,
+    spawn_coi,
+    wait_for_container_ready,
+    wait_for_prompt,
+)
 
-def test_refresh_goroutine_output_not_in_terminal(coi_binary, workspace_dir, cleanup_containers):
-    """
-    Goroutine-only log messages must not appear in coi shell startup output.
-    """
-    # refresh_interval_minutes=1 so the goroutine fires ~60 s after start.
-    # We don't wait for it; we just assert the setup output is clean.
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as f:
-        f.write("""
+# Substrings emitted only by the network resolver / IP-refresh diagnostics.
+# None of these must ever appear on the user's terminal. They are specific
+# enough not to collide with the normal "[setup] ..." progress output.
+LEAK_PATTERNS = [
+    "IP refresh:",  # refresh goroutine progress
+    "(TTL:",  # resolver: "<domain>: resolved N IPs (TTL: Xs)"
+    ": resolved ",  # resolver per-domain resolution line
+    "TTL-aware DNS",  # resolver fallback warning
+    "Using cached IPs for",  # resolver cache notice
+    "No cached IPs available",
+    "updating nft rules with",
+    "wildcard — resolving",
+]
+
+_ALLOWLIST_CONFIG = """
 [network]
 mode = "allowlist"
 allowed_domains = [
@@ -44,7 +54,35 @@ allowed_domains = [
     "example.com",
 ]
 refresh_interval_minutes = 1
-""")
+"""
+
+
+def _assert_no_leak(text, where):
+    for pat in LEAK_PATTERNS:
+        assert pat not in text, (
+            f"network diagnostic {pat!r} leaked into {where} (issue #372).\nOutput:\n{text}"
+        )
+
+
+def _session_log_path(container_name):
+    return os.path.expanduser(f"~/.coi/logs/{container_name}.stdout.log")
+
+
+def _container_name_from_output(output):
+    for line in output.split("\n"):
+        if "Container:" in line or "Container name:" in line:
+            parts = line.split(":", 1)
+            if len(parts) == 2:
+                return parts[1].strip()
+    return None
+
+
+def test_setup_diagnostics_not_in_terminal_but_in_log(
+    coi_binary, workspace_dir, cleanup_containers
+):
+    """Setup-time resolver/nft diagnostics go to the session log, not the terminal."""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as f:
+        f.write(_ALLOWLIST_CONFIG)
         config_file = f.name
 
     try:
@@ -58,150 +96,100 @@ refresh_interval_minutes = 1
             timeout=120,
             env=env,
         )
-
         assert result.returncode == 0, f"coi shell failed: {result.stderr}"
 
         output = result.stdout + result.stderr
+        # The bug: resolver lines leaked here. Must be clean now.
+        _assert_no_leak(output, "coi shell startup terminal output")
 
-        # These strings are emitted only by the background goroutine, never by
-        # the one-time setup path.  They must not appear in the terminal output.
-        goroutine_only_phrases = [
-            "IP refresh: checking for updated IPs",
-            "IP refresh: no changes detected",
-            "IP refresh: next check in",
-            "IP refresh: updating firewall with",
-            "IP refresh: successfully updated firewall rules",
-        ]
-        for phrase in goroutine_only_phrases:
-            assert phrase not in output, (
-                f"Background goroutine message leaked into terminal output: {phrase!r}\n"
-                f"Full output:\n{output}"
-            )
-
-    finally:
-        os.unlink(config_file)
-
-
-def test_network_setup_logs_captured_in_session_log(coi_binary, workspace_dir, cleanup_containers):
-    """
-    One-time setup messages (e.g. "Starting IP refresh") are written to the
-    session log file (~/.coi/logs/<container>.stdout.log) rather than the
-    terminal after the SessionLogger migration.
-    """
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as f:
-        f.write("""
-[network]
-mode = "allowlist"
-allowed_domains = [
-    "8.8.8.8",
-    "1.1.1.1",
-    "example.com",
-]
-refresh_interval_minutes = 30
-""")
-        config_file = f.name
-
-    try:
-        env = os.environ.copy()
-        env["COI_CONFIG"] = config_file
-
-        result = subprocess.run(
-            [coi_binary, "shell", "--workspace", workspace_dir, "--background"],
-            capture_output=True,
-            text=True,
-            timeout=120,
-            env=env,
-        )
-
-        assert result.returncode == 0, f"coi shell failed: {result.stderr}"
-
-        # Extract container name from terminal output.
-        container_name = None
-        for line in (result.stdout + result.stderr).split("\n"):
-            if "Container:" in line or "Container name:" in line:
-                parts = line.split(":", 1)
-                if len(parts) == 2:
-                    container_name = parts[1].strip()
-                    break
-
-        assert container_name, (
-            f"Could not find container name in output:\n{result.stdout + result.stderr}"
-        )
-
-        # Poll until the session stdout log file exists (created asynchronously).
-        log_path = os.path.expanduser(f"~/.coi/logs/{container_name}.stdout.log")
-        deadline = time.time() + 15
+        # Positive side: the diagnostics must actually be routed to the log file
+        # (so they're not merely suppressed/lost).
+        container_name = _container_name_from_output(output)
+        assert container_name, f"could not find container name in:\n{output}"
+        log_path = _session_log_path(container_name)
+        deadline = time.time() + 20
         while not os.path.exists(log_path) and time.time() < deadline:
             time.sleep(0.5)
-
-        assert os.path.exists(log_path), f"Expected session log file to exist at {log_path}"
-
-        with open(log_path) as fh:
-            log_contents = fh.read()
-
-        assert "Starting IP refresh" in log_contents, (
-            f"Expected 'Starting IP refresh' in session log {log_path}.\n"
-            f"Log contents:\n{log_contents}"
+        assert os.path.exists(log_path), f"expected session log at {log_path}"
+        log = Path(log_path).read_text()
+        assert "Starting IP refresh" in log, f"refresh setup not in session log:\n{log}"
+        # At least one resolver line for the example.com domain must be present in
+        # the log (proving the resolver output is routed there, not just hidden).
+        assert (": resolved " in log) or ("(TTL:" in log) or ("Failed to resolve" in log), (
+            f"resolver diagnostics not routed to session log:\n{log}"
         )
-
     finally:
         os.unlink(config_file)
 
 
-def test_refresh_log_file_created(coi_binary, workspace_dir, cleanup_containers):
-    """
-    Session logger output must be written to
-    ~/.coi/logs/<container>.stdout.log, not discarded.
+def test_background_refresh_does_not_pollute_attached_terminal(
+    coi_binary, workspace_dir, cleanup_containers
+):
+    """A real refresh fires in a live (attached) session; its output goes to the
+    log file, never the terminal.
+
+    This exercises the timing-dependent background refresh end to end: an
+    interactive `coi shell` session is kept open long enough (refresh_interval=1)
+    for the refresh goroutine to fire, then we assert the terminal received none
+    of the diagnostics while the log file recorded the refresh.
     """
     with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as f:
-        f.write("""
-[network]
-mode = "allowlist"
-allowed_domains = [
-    "8.8.8.8",
-    "1.1.1.1",
-    "example.com",
-]
-refresh_interval_minutes = 1
-""")
+        f.write(_ALLOWLIST_CONFIG)
         config_file = f.name
 
+    child = None
     try:
-        env = os.environ.copy()
-        env["COI_CONFIG"] = config_file
+        env = {"COI_USE_DUMMY": "1", "COI_CONFIG": config_file}
+        child = spawn_coi(coi_binary, ["shell"], cwd=workspace_dir, env=env, timeout=240)
+        wait_for_container_ready(child, timeout=90)
+        wait_for_prompt(child, timeout=120)
 
-        result = subprocess.run(
-            [coi_binary, "shell", "--workspace", workspace_dir, "--background"],
-            capture_output=True,
-            text=True,
-            timeout=120,
-            env=env,
+        container_name = calculate_container_name(workspace_dir, 1)
+        log_path = _session_log_path(container_name)
+
+        # Wait for at least one background refresh to actually fire (interval=1m,
+        # TTL-capped). The refresh goroutine logs this marker to the session log.
+        fired = False
+        deadline = time.time() + 150
+        while time.time() < deadline:
+            if (
+                os.path.exists(log_path)
+                and "IP refresh: checking for updated IPs" in Path(log_path).read_text()
+            ):
+                fired = True
+                break
+            time.sleep(3)
+
+        # Everything the attached terminal received so far (raw, pre-render, so
+        # nothing scrolled off is missed).
+        raw = ""
+        lf = child.logfile_read
+        for attr in ("get_raw_output", "get_display_stripped", "get_output"):
+            if hasattr(lf, attr):
+                raw = getattr(lf, attr)()
+                break
+
+        _assert_no_leak(raw, "attached coi shell terminal during a refresh")
+
+        assert fired, (
+            "background IP refresh did not fire within 150s, so the no-leak "
+            f"assertion could not be validated against a real refresh.\nlog:\n"
+            f"{Path(log_path).read_text() if os.path.exists(log_path) else '(no log)'}"
         )
-
-        assert result.returncode == 0, f"coi shell failed: {result.stderr}"
-
-        # Extract container name from output
-        container_name = None
-        for line in (result.stdout + result.stderr).split("\n"):
-            if "Container:" in line or "Container name:" in line:
-                parts = line.split(":", 1)
-                if len(parts) == 2:
-                    container_name = parts[1].strip()
-                    break
-
-        assert container_name, (
-            f"Could not find container name in output:\n{result.stdout + result.stderr}"
-        )
-
-        # The session log file is created at container startup.
-        log_file = os.path.expanduser(f"~/.coi/logs/{container_name}.stdout.log")
-
-        # Poll briefly — the file is created asynchronously but almost instantly.
-        deadline = time.time() + 10
-        while not os.path.exists(log_file) and time.time() < deadline:
-            time.sleep(0.5)
-
-        assert os.path.exists(log_file), f"Expected session log file to be created at {log_file}"
-
+        # The refresh's diagnostics must be in the log (routed, not lost).
+        log = Path(log_path).read_text()
+        assert "IP refresh:" in log, f"refresh output not routed to session log:\n{log}"
     finally:
+        if child is not None:
+            try:
+                child.sendline("exit")
+                time.sleep(0.3)
+                child.sendline("sudo poweroff")
+                time.sleep(1)
+            except Exception:
+                pass
+            try:
+                child.close(force=True)
+            except Exception:
+                pass
         os.unlink(config_file)
