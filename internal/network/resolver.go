@@ -3,7 +3,6 @@ package network
 import (
 	"context"
 	"fmt"
-	"log"
 	"net"
 	"reflect"
 	"sort"
@@ -61,20 +60,20 @@ func (r *Resolver) ResolveDomain(domain string) ([]string, error) {
 		if effectiveDomain == "" {
 			return nil, fmt.Errorf("invalid wildcard entry %q: missing base domain", domain)
 		}
-		log.Printf("  %s: wildcard — resolving base domain %q (best-effort, not all IPs guaranteed)", domain, effectiveDomain)
+		logInfof("  %s: wildcard — resolving base domain %q (best-effort, not all IPs guaranteed)", domain, effectiveDomain)
 	}
 
 	// Try TTL-aware DNS query first
 	result, err := QueryDNS(effectiveDomain)
 	if err == nil && len(result.IPs) > 0 {
 		r.DomainTTLs[domain] = result.TTL
-		log.Printf("  %s: resolved %d IPs (TTL: %ds)", domain, len(result.IPs), result.TTL)
+		logInfof("  %s: resolved %d IPs (TTL: %ds)", domain, len(result.IPs), result.TTL)
 		return result.IPs, nil
 	}
 
 	// Fall back to standard resolver
 	if err != nil {
-		log.Printf("  %s: TTL-aware DNS failed (%v), falling back to standard resolver", domain, err)
+		logWarnf("  %s: TTL-aware DNS failed (%v), falling back to standard resolver", domain, err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -111,12 +110,12 @@ func (r *Resolver) ResolveAll(domains []string) (map[string][]string, error) {
 	for _, domain := range domains {
 		ips, err := r.ResolveDomain(domain)
 		if err != nil {
-			log.Printf("Warning: Failed to resolve %s: %v", domain, err)
+			logWarnf("Warning: Failed to resolve %s: %v", domain, err)
 			hasError = true
 
 			// Use cached IPs if available
 			if cached, ok := r.cache.Domains[domain]; ok && len(cached) > 0 {
-				log.Printf("Using cached IPs for %s: %v", domain, cached)
+				logInfof("Using cached IPs for %s: %v", domain, cached)
 				results[domain] = cached
 				// Preserve cached TTL if available
 				if cachedTTL, ok := r.cache.TTLs[domain]; ok {
@@ -127,7 +126,7 @@ func (r *Resolver) ResolveAll(domains []string) (map[string][]string, error) {
 			}
 
 			// Skip domain if no cache available
-			log.Printf("Warning: No cached IPs available for %s, skipping", domain)
+			logWarnf("Warning: No cached IPs available for %s, skipping", domain)
 			continue
 		}
 
