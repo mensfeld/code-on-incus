@@ -22,6 +22,11 @@ func SetLogger(l *logger.SessionLogger) {
 	pkgLogger.Store(l)
 }
 
+// Warnf routes a warning through the active session logger (or the standard
+// logger as a fallback) for callers outside this package that must not write
+// network diagnostics directly to the terminal — issue #372.
+func Warnf(format string, args ...any) { logWarnf(format, args...) }
+
 // logInfof writes an informational message to the session stdout log when a
 // session logger is set, otherwise to the standard logger (stderr).
 func logInfof(format string, args ...any) {

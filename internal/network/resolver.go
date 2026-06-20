@@ -71,9 +71,11 @@ func (r *Resolver) ResolveDomain(domain string) ([]string, error) {
 		return result.IPs, nil
 	}
 
-	// Fall back to standard resolver
+	// Fall back to standard resolver. This is an informational degradation
+	// notice, not a failure — resolution continues below — so it is logged at
+	// info level (stdout log) rather than as a warning.
 	if err != nil {
-		logWarnf("  %s: TTL-aware DNS failed (%v), falling back to standard resolver", domain, err)
+		logInfof("  %s: TTL-aware DNS failed (%v), falling back to standard resolver", domain, err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

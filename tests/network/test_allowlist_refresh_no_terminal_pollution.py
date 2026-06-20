@@ -13,7 +13,7 @@ the Claude session. (An earlier fix only redirected the refresh goroutine's own
 
 These tests lock the *behaviour*, not the code:
   1. setup-time network diagnostics do not appear in the terminal, and ARE
-     written to the session log file (~/.coi/logs/<container>.stdout.log);
+     written to the session log files (~/.coi/logs/<container>.{stdout,stderr}.log);
   2. a real background refresh fires in a live session and its output goes to the
      log file, NOT the attached terminal.
 """
@@ -24,7 +24,10 @@ import tempfile
 import time
 from pathlib import Path
 
+import pexpect
+
 from support.helpers import (
+    TerminalEmulator,
     calculate_container_name,
     spawn_coi,
     wait_for_container_ready,
@@ -38,11 +41,12 @@ LEAK_PATTERNS = [
     "IP refresh:",  # refresh goroutine progress
     "(TTL:",  # resolver: "<domain>: resolved N IPs (TTL: Xs)"
     ": resolved ",  # resolver per-domain resolution line
-    "TTL-aware DNS",  # resolver fallback warning
+    "TTL-aware DNS",  # resolver fallback notice
     "Using cached IPs for",  # resolver cache notice
     "No cached IPs available",
     "updating nft rules with",
     "wildcard — resolving",
+    "failed to resolve for monitoring",  # shell.go aggregate DNS-failure warning
 ]
 
 _ALLOWLIST_CONFIG = """
@@ -66,6 +70,19 @@ def _assert_no_leak(text, where):
 
 def _session_log_path(container_name):
     return os.path.expanduser(f"~/.coi/logs/{container_name}.stdout.log")
+
+
+def _session_stderr_log_path(container_name):
+    return os.path.expanduser(f"~/.coi/logs/{container_name}.stderr.log")
+
+
+def _read_both_logs(container_name):
+    """Return (stdout_log, stderr_log) contents, '' for any not yet created."""
+    out_path = _session_log_path(container_name)
+    err_path = _session_stderr_log_path(container_name)
+    out = Path(out_path).read_text() if os.path.exists(out_path) else ""
+    err = Path(err_path).read_text() if os.path.exists(err_path) else ""
+    return out, err
 
 
 def _container_name_from_output(output):
@@ -102,7 +119,7 @@ def test_setup_diagnostics_not_in_terminal_but_in_log(
         # The bug: resolver lines leaked here. Must be clean now.
         _assert_no_leak(output, "coi shell startup terminal output")
 
-        # Positive side: the diagnostics must actually be routed to the log file
+        # Positive side: the diagnostics must actually be routed to the log files
         # (so they're not merely suppressed/lost).
         container_name = _container_name_from_output(output)
         assert container_name, f"could not find container name in:\n{output}"
@@ -111,12 +128,21 @@ def test_setup_diagnostics_not_in_terminal_but_in_log(
         while not os.path.exists(log_path) and time.time() < deadline:
             time.sleep(0.5)
         assert os.path.exists(log_path), f"expected session log at {log_path}"
-        log = Path(log_path).read_text()
-        assert "Starting IP refresh" in log, f"refresh setup not in session log:\n{log}"
-        # At least one resolver line for the example.com domain must be present in
-        # the log (proving the resolver output is routed there, not just hidden).
-        assert (": resolved " in log) or ("(TTL:" in log) or ("Failed to resolve" in log), (
-            f"resolver diagnostics not routed to session log:\n{log}"
+
+        out_log, err_log = _read_both_logs(container_name)
+        assert "Starting IP refresh" in out_log, f"refresh setup not in session log:\n{out_log}"
+        # At least one resolver line must be present in the session logs (proving
+        # the resolver output is routed there, not just hidden). Success lines
+        # ("resolved", "TTL:") land in the stdout log; if the host cannot resolve
+        # example.com (e.g. DNS-restricted CI), the failure warning lands in the
+        # stderr log instead — either one proves routing works.
+        combined = out_log + err_log
+        assert any(
+            marker in combined
+            for marker in (": resolved ", "(TTL:", "Failed to resolve", "TTL-aware DNS")
+        ), (
+            "resolver diagnostics not routed to session logs.\n"
+            f"stdout:\n{out_log}\nstderr:\n{err_log}"
         )
     finally:
         os.unlink(config_file)
@@ -140,7 +166,17 @@ def test_background_refresh_does_not_pollute_attached_terminal(
     child = None
     try:
         env = {"COI_USE_DUMMY": "1", "COI_CONFIG": config_file}
-        child = spawn_coi(coi_binary, ["shell"], cwd=workspace_dir, env=env, timeout=240)
+        # Pin the workspace and slot so the container name (and therefore the log
+        # path) is deterministic. Relying on the default auto-allocated slot would
+        # make the computed log path wrong whenever slot 1 is already occupied
+        # (lagged cleanup / a parallel session) — a false-negative trap.
+        child = spawn_coi(
+            coi_binary,
+            ["shell", "--workspace", workspace_dir, "--slot", "1"],
+            cwd=workspace_dir,
+            env=env,
+            timeout=240,
+        )
         wait_for_container_ready(child, timeout=90)
         wait_for_prompt(child, timeout=120)
 
@@ -149,30 +185,50 @@ def test_background_refresh_does_not_pollute_attached_terminal(
 
         # Wait for at least one background refresh to actually fire (interval=1m,
         # TTL-capped). The refresh goroutine logs this marker to the session log.
+        #
+        # Crucially we DRAIN the child while waiting: read_nonblocking feeds the
+        # terminal emulator, so any bytes the refresh leaks onto the terminal are
+        # actually captured. Without this read, leaked output would sit unread in
+        # the PTY buffer and the no-leak assertion below would be vacuous.
         fired = False
-        deadline = time.time() + 150
+        post_drain_until = None
+        deadline = time.time() + 180
         while time.time() < deadline:
+            try:
+                child.read_nonblocking(size=4096, timeout=3)
+            except pexpect.TIMEOUT:
+                pass
+            except pexpect.EOF:
+                break
+
             if (
-                os.path.exists(log_path)
+                not fired
+                and os.path.exists(log_path)
                 and "IP refresh: checking for updated IPs" in Path(log_path).read_text()
             ):
                 fired = True
-                break
-            time.sleep(3)
+                # Keep draining briefly so the resolver/nft lines that follow the
+                # refresh marker are captured too (they'd leak right after it).
+                post_drain_until = time.time() + 12
 
-        # Everything the attached terminal received so far (raw, pre-render, so
-        # nothing scrolled off is missed).
-        raw = ""
-        lf = child.logfile_read
-        for attr in ("get_raw_output", "get_display_stripped", "get_output"):
-            if hasattr(lf, attr):
-                raw = getattr(lf, attr)()
+            if fired and time.time() >= post_drain_until:
                 break
+
+        # Everything the attached terminal received (raw, pre-render, so nothing
+        # scrolled off the 20-line emulator screen is missed). Assert the capture
+        # mechanism is the one we expect and is non-empty, so a capture failure
+        # fails loudly instead of silently passing the no-leak check.
+        assert isinstance(child.logfile_read, TerminalEmulator), (
+            f"expected TerminalEmulator capture, got {type(child.logfile_read)!r}; "
+            "cannot validate terminal cleanliness"
+        )
+        raw = child.logfile_read.get_raw_output()
+        assert raw, "terminal capture is empty — the no-leak assertion would be vacuous"
 
         _assert_no_leak(raw, "attached coi shell terminal during a refresh")
 
         assert fired, (
-            "background IP refresh did not fire within 150s, so the no-leak "
+            "background IP refresh did not fire within 180s, so the no-leak "
             f"assertion could not be validated against a real refresh.\nlog:\n"
             f"{Path(log_path).read_text() if os.path.exists(log_path) else '(no log)'}"
         )
@@ -192,4 +248,52 @@ def test_background_refresh_does_not_pollute_attached_terminal(
                 child.close(force=True)
             except Exception:
                 pass
+        os.unlink(config_file)
+
+
+def test_run_allowlist_does_not_leak_resolver_output(coi_binary, workspace_dir, cleanup_containers):
+    """`coi run` silences network output via a discard logger; the resolver must
+    honour it and not leak diagnostics to the terminal.
+
+    `coi run` (and the configure path) construct the network Manager with a
+    discard logger to suppress network output — but the resolver/nft helpers log
+    via the package logger, which was only wired up for `coi shell`. So in
+    allowlist mode `coi run` dumped resolver lines (`example.com: resolved 3 IPs
+    (TTL: 300s)`) to stderr despite the explicit discard request — the same leak
+    class as issue #372 on a different command. This locks the discard behaviour:
+    a successful allowlist `coi run` (which necessarily resolves the allowed
+    domains to build the nft rules) must leave the terminal free of resolver
+    diagnostics.
+    """
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as f:
+        f.write(_ALLOWLIST_CONFIG)
+        config_file = f.name
+
+    try:
+        env = os.environ.copy()
+        env["COI_CONFIG"] = config_file
+
+        result = subprocess.run(
+            [coi_binary, "run", "--workspace", workspace_dir, "echo", "coi-run-ok"],
+            capture_output=True,
+            text=True,
+            timeout=240,
+            env=env,
+        )
+        # A successful run means allowlist setup ran, i.e. the resolver actually
+        # resolved the allowed domains — so the no-leak check below is validated
+        # against real resolver activity, not a no-op.
+        assert result.returncode == 0, (
+            f"coi run failed (rc={result.returncode}):\nstdout:\n{result.stdout}\n"
+            f"stderr:\n{result.stderr}"
+        )
+        assert "coi-run-ok" in result.stdout, (
+            f"command did not run as expected:\nstdout:\n{result.stdout}"
+        )
+        # The discard logger must have suppressed the resolver diagnostics: none
+        # may reach stdout/stderr. (The intentional one-shot "Network isolation
+        # applied: allowlist" status line is not a resolver diagnostic and is
+        # deliberately not in LEAK_PATTERNS.)
+        _assert_no_leak(result.stdout + result.stderr, "coi run output (allowlist mode)")
+    finally:
         os.unlink(config_file)
