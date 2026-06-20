@@ -627,8 +627,11 @@ func startMonitoringDaemon(ctx context.Context, containerName, workspacePath str
 			log.Errorf("[monitor] collection error: %v", err)
 		},
 		OnAction: func(action, message string) {
-			// Critical actions (pause/kill) must stay visible on stderr
-			fmt.Fprintf(os.Stderr, "\n\n*** SECURITY: %s ***\n\n", message)
+			// Record the automated security action in the session log. Writing
+			// to os.Stderr here corrupts the attached AI tool's TUI (issue #372
+			// class); the pause/kill is self-evident to the user (the session
+			// freezes or ends) and is also recorded in the audit log.
+			log.Errorf("[security] %s", message)
 		},
 	}
 
@@ -645,6 +648,10 @@ func startMonitoringDaemon(ctx context.Context, containerName, workspacePath str
 
 // startNFTMonitoringDaemon starts the nftables network monitoring daemon
 func startNFTMonitoringDaemon(ctx context.Context, containerName string, cfg *config.Config, log *logger.SessionLogger, daemon *nftmonitor.NFTMonitorDaemon) error {
+	// Route the nft monitor's COI_NFT_DEBUG diagnostics to the session log
+	// instead of the user's attached terminal (issue #372 class).
+	nftmonitor.SetLogger(log)
+
 	// Get container IP
 	containerIP, err := network.GetContainerIPWithRetries(containerName, 3)
 	if err != nil {
@@ -686,8 +693,11 @@ func startNFTMonitoringDaemon(ctx context.Context, containerName string, cfg *co
 			log.Printf("[nft] threat detected: %s severity=%s", threat.Title, threat.Level)
 		},
 		OnAction: func(action, message string) {
-			// Critical actions (pause/kill) must stay visible on stderr
-			fmt.Fprintf(os.Stderr, "\n\n*** SECURITY: %s ***\n\n", message)
+			// Record the automated security action in the session log. Writing
+			// to os.Stderr here corrupts the attached AI tool's TUI (issue #372
+			// class); the pause/kill is self-evident to the user (the session
+			// freezes or ends) and is also recorded in the audit log.
+			log.Errorf("[security] %s", message)
 		},
 		OnError: func(err error) {
 			log.Errorf("[nft] error: %v", err)

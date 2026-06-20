@@ -60,6 +60,9 @@ func StartDaemon(ctx context.Context, cfg Config) (*Daemon, error) {
 	if cfg.OnAction != nil {
 		responder.SetOnAction(cfg.OnAction)
 	}
+	// Route the responder's non-fatal cleanup warnings to the session log
+	// instead of the user's attached terminal (issue #372 class).
+	responder.SetOnError(cfg.OnError)
 
 	// Create daemon context
 	daemonCtx, cancel := context.WithCancel(ctx)
