@@ -142,8 +142,8 @@ jobs:
             path: tests/config tests/health tests/limits tests/schema
             description: "Config, health, limits, and schema tests"
           - name: monitoring-nft
-            path: tests/integration/test_nft_monitoring.py
-            description: "NFT network monitoring tests"
+            path: tests/integration/test_nft_monitoring.py tests/integration/test_session_diagnostics_no_terminal_pollution.py
+            description: "NFT network monitoring tests + session-runtime terminal-pollution regression (#372)"
           - name: monitoring-threats
             path: tests/integration/test_security_monitoring.py
             pytest_args: "-k 'TestThreatDetection or TestEnvironmentScanningPatterns or TestReverseShellPatterns or TestNetworkThreats or TestPromptInjectionScenario or TestMonitoringFeature'"
