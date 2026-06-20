@@ -143,5 +143,13 @@ func (l *SessionLogger) Close() error {
 		}
 		l.errFile = nil
 	}
+
+	// Repoint the loggers at io.Discard so any write that races Close (e.g. the
+	// background IP-refresh goroutine still draining via a package logger that
+	// outlives the session — issue #372) is silently discarded rather than
+	// written to a now-closed fd. Done under both locks so it cannot race an
+	// in-flight Printf/Errorf.
+	l.out = log.New(io.Discard, "", 0)
+	l.err = log.New(io.Discard, "", 0)
 	return firstErr
 }

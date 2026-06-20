@@ -103,6 +103,10 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 	if w := result.Logger.InitWarning(); w != "" {
 		opts.Logger(fmt.Sprintf("Warning: %s", w))
 	}
+	// Route the network package's diagnostics (incl. the background IP-refresh
+	// goroutine) to the session log files instead of stderr, which in a coi
+	// shell is the user's tmux terminal (issue #372).
+	network.SetLogger(result.Logger)
 
 	// 1.5 Validate Bedrock setup if running in Colima/Lima
 	if isColimaOrLimaEnvironment() && opts.CLIConfigPath != "" {

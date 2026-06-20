@@ -712,7 +712,11 @@ func resolveDomainsToHostCIDRs(domains []string) []string {
 	resolver := network.NewResolver(&network.IPCache{})
 	resolved, err := resolver.ResolveAll(domains)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: some allowed domains failed to resolve for monitoring: %v\n", err)
+		// Route through the network session logger, not os.Stderr — in a coi
+		// shell os.Stderr is the user's tmux terminal (issue #372). The resolver
+		// already logs each failed domain to the session log; this records the
+		// monitoring-phase context alongside it.
+		network.Warnf("Warning: some allowed domains failed to resolve for monitoring: %v", err)
 	}
 	if len(resolved) == 0 {
 		return nil
