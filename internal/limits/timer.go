@@ -92,14 +92,24 @@ func (tm *TimeoutMonitor) handleTimeout() {
 		// StopGraceful=true means graceful shutdown (force=false)
 		if err := tm.stopContainerQuietly(false); err != nil {
 			tm.Logger.Errorf("[limits] Graceful stop failed: %v, forcing...", err)
-			_ = tm.stopContainerQuietly(true)
+			if ferr := tm.stopContainerQuietly(true); ferr != nil {
+				tm.Logger.Errorf("[limits] Force stop after graceful failure also failed: %v", ferr)
+			}
 		}
 
-		// Verify container actually stopped, force if still running
+		// Verify the container actually stopped, force again if it is still
+		// running. A failed status check is treated as "state unknown" and we
+		// force to be safe rather than assume it stopped.
 		time.Sleep(5 * time.Second)
-		if running, _ := mgr.Running(); running {
+		running, rerr := mgr.Running()
+		if rerr != nil {
+			tm.Logger.Errorf("[limits] Could not determine container state after graceful stop: %v, forcing...", rerr)
+		}
+		if running || rerr != nil {
 			tm.Logger.Println("[limits] Container still running after graceful stop, forcing...")
-			_ = tm.stopContainerQuietly(true)
+			if ferr := tm.stopContainerQuietly(true); ferr != nil {
+				tm.Logger.Errorf("[limits] Final force stop failed: %v", ferr)
+			}
 		}
 	} else {
 		// StopGraceful=false means force stop immediately (force=true)
@@ -109,6 +119,12 @@ func (tm *TimeoutMonitor) handleTimeout() {
 		}
 	}
 
+	// Only claim success if the container is confirmed stopped, so the log does
+	// not report enforcement that did not happen.
+	if running, rerr := mgr.Running(); rerr == nil && running {
+		tm.Logger.Errorf("[limits] Container still running after stop attempts; runtime limit may not be enforced")
+		return
+	}
 	tm.Logger.Println("[limits] Container stopped due to runtime limit")
 }
 

@@ -171,9 +171,13 @@ def test_shell_runtime_limit_stop_does_not_pollute_terminal(
     diagnostics and the incus stop subprocess output must go to the session log,
     not the attached terminal. (Existing limits tests cover only `coi run`; the
     interactive shell path — where os.Stderr is the user's TUI — was untested.)"""
+    # The watchdog timer starts during session setup, so max_duration must
+    # comfortably exceed worst-case container-ready + prompt-render time under CI
+    # load — otherwise the container is stopped before the prompt appears and the
+    # test errors during setup rather than exercising the no-leak path.
     config = """
 [limits.runtime]
-max_duration = "12s"
+max_duration = "40s"
 auto_stop = true
 stop_graceful = false
 """
@@ -201,7 +205,7 @@ stop_graceful = false
         # (the session ends, or the log records the stop).
         stopped = False
         post_drain_until = None
-        deadline = time.time() + 70
+        deadline = time.time() + 120
         while time.time() < deadline:
             try:
                 child.read_nonblocking(size=4096, timeout=3)
