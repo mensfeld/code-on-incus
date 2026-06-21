@@ -3,7 +3,6 @@ package monitor
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +19,7 @@ type Responder struct {
 	auditLog           *AuditLog
 	onThreat           func(ThreatEvent)
 	onAction           func(action, message string) // Called when container is paused/killed
+	onError            func(error)                  // Called for non-fatal cleanup errors (routes to the session log, never the terminal)
 
 	// State tracking to prevent infinite loops
 	mu            sync.Mutex
@@ -47,6 +47,23 @@ func NewResponder(containerName string, autoPauseOnHigh, autoKillOnCritical bool
 // SetOnAction sets a callback for when critical actions (pause/kill) are taken
 func (r *Responder) SetOnAction(callback func(action, message string)) {
 	r.onAction = callback
+}
+
+// SetOnError sets a callback for non-fatal cleanup errors. The daemons wire this
+// to the session logger so the warnings are recorded in
+// ~/.coi/logs/<container>.stderr.log instead of being written to the user's
+// attached terminal (issue #372 class).
+func (r *Responder) SetOnError(callback func(error)) {
+	r.onError = callback
+}
+
+// reportError routes a non-fatal error to the onError callback when set. It is
+// deliberately silent when no callback is set: these are best-effort cleanup
+// warnings on the kill path and must never fall back to a terminal sink.
+func (r *Responder) reportError(err error) {
+	if r.onError != nil {
+		r.onError(err)
+	}
 }
 
 // Handle processes a threat and takes appropriate action
@@ -217,11 +234,11 @@ func (r *Responder) killContainer(ctx context.Context) error {
 	if containerIP != "" {
 		if err := r.cleanupNftRules(containerIP); err != nil {
 			// Log warning but don't fail the kill operation
-			fmt.Fprintf(os.Stderr, "Warning: Failed to cleanup nft rules: %v\n", err)
+			r.reportError(fmt.Errorf("failed to cleanup nft rules: %w", err))
 		}
 		if err := r.cleanupNFTRules(containerIP); err != nil {
 			// Log warning but don't fail the kill operation
-			fmt.Fprintf(os.Stderr, "Warning: Failed to cleanup NFT monitoring rules: %v\n", err)
+			r.reportError(fmt.Errorf("failed to cleanup NFT monitoring rules: %w", err))
 		}
 	}
 

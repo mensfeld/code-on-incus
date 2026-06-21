@@ -174,6 +174,9 @@ jobs:
           - name: monitoring-db
             path: tests/integration/test_issue_505_resume_monitoring_panic.py tests/integration/test_gtfobins_db_pattern_detection.py tests/integration/test_gtfobins_db_absent_fallback.py tests/integration/test_sigma_db_detection.py
             description: "Monitoring detection-DB load paths (GTFOBins + Sigma), present and absent, incl. #505 regression"
+          - name: terminal-pollution
+            path: tests/integration/test_session_diagnostics_no_terminal_pollution.py
+            description: "Session-runtime diagnostics must not leak onto the attached terminal (#372): nft debug + runtime-limit auto-stop"
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 

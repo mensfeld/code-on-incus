@@ -624,10 +624,19 @@ func startMonitoringDaemon(ctx context.Context, containerName, workspacePath str
 			log.Printf("[monitor] threat detected: %s severity=%s", threat.Title, threat.Level)
 		},
 		OnError: func(err error) {
-			log.Errorf("[monitor] collection error: %v", err)
+			// Generic label: this callback now carries both collection errors and
+			// the responder's kill-path cleanup warnings (which are self-describing).
+			log.Errorf("[monitor] error: %v", err)
 		},
 		OnAction: func(action, message string) {
-			// Critical actions (pause/kill) must stay visible on stderr
+			// Record the security action durably in the session log, and surface
+			// it on the terminal. OnAction fires ONLY on auto-pause/kill — both of
+			// which freeze or end the session — so unlike the recurring background
+			// diagnostics that motivated issue #372 this one-shot banner does not
+			// corrupt a live TUI, and for the pause path it carries the only
+			// on-screen "coi unfreeze" recovery hint (the session would otherwise
+			// just appear to hang).
+			log.Errorf("[security] %s", message)
 			fmt.Fprintf(os.Stderr, "\n\n*** SECURITY: %s ***\n\n", message)
 		},
 	}
@@ -645,6 +654,10 @@ func startMonitoringDaemon(ctx context.Context, containerName, workspacePath str
 
 // startNFTMonitoringDaemon starts the nftables network monitoring daemon
 func startNFTMonitoringDaemon(ctx context.Context, containerName string, cfg *config.Config, log *logger.SessionLogger, daemon *nftmonitor.NFTMonitorDaemon) error {
+	// Route the nft monitor's COI_NFT_DEBUG diagnostics to the session log
+	// instead of the user's attached terminal (issue #372 class).
+	nftmonitor.SetLogger(log)
+
 	// Get container IP
 	containerIP, err := network.GetContainerIPWithRetries(containerName, 3)
 	if err != nil {
@@ -686,7 +699,14 @@ func startNFTMonitoringDaemon(ctx context.Context, containerName string, cfg *co
 			log.Printf("[nft] threat detected: %s severity=%s", threat.Title, threat.Level)
 		},
 		OnAction: func(action, message string) {
-			// Critical actions (pause/kill) must stay visible on stderr
+			// Record the security action durably in the session log, and surface
+			// it on the terminal. OnAction fires ONLY on auto-pause/kill — both of
+			// which freeze or end the session — so unlike the recurring background
+			// diagnostics that motivated issue #372 this one-shot banner does not
+			// corrupt a live TUI, and for the pause path it carries the only
+			// on-screen "coi unfreeze" recovery hint (the session would otherwise
+			// just appear to hang).
+			log.Errorf("[security] %s", message)
 			fmt.Fprintf(os.Stderr, "\n\n*** SECURITY: %s ***\n\n", message)
 		},
 		OnError: func(err error) {
