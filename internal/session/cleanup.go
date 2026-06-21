@@ -119,6 +119,19 @@ func Cleanup(opts CleanupOptions) error {
 			}
 		} else {
 			opts.Logger("Container was already removed")
+			// The container was deleted out from under us — typically the threat
+			// responder auto-killed it (it stops+deletes the container itself), or
+			// it was removed externally. The block above (which runs Teardown) is
+			// skipped in that case, so without this backstop the per-IP nft rules
+			// would be orphaned until the next `coi clean --orphans`. Teardown uses
+			// the cached setup-time IP and is idempotent, so it is safe to run here
+			// even if the responder already cleaned up. (Fixes the intermittent
+			// auto-kill nft-rule-cleanup flake.)
+			if opts.NetworkManager != nil {
+				if err := opts.NetworkManager.Teardown(context.Background(), opts.ContainerName); err != nil {
+					opts.Logger(fmt.Sprintf("Warning: Failed to cleanup network after external removal: %v", err))
+				}
+			}
 		}
 	}
 
