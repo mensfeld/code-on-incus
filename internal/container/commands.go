@@ -476,6 +476,22 @@ func StopContainer(containerName string) error {
 	return IncusExec("stop", containerName, "--force")
 }
 
+// StopContainerQuiet stops a container while CAPTURING the incus subprocess
+// output instead of streaming it to os.Stdout/os.Stderr. It is the
+// terminal-safe stop primitive for code that may run while a session is
+// interactively attached (the runtime-limit watchdog, the threat responder):
+// there the process's os.Stdout/os.Stderr are the user's terminal, so the
+// streaming Manager.Stop/StopContainer would corrupt the TUI (issue #372).
+// The captured stdout is returned, and on failure the *ExitError carries the
+// subprocess stderr, so the caller can route both to the session log.
+func StopContainerQuiet(ctx context.Context, containerName string, force bool) (string, error) {
+	args := []string{"stop", containerName}
+	if force {
+		args = append(args, "--force")
+	}
+	return IncusOutputContext(ctx, args...)
+}
+
 // DeleteContainer deletes a container forcefully
 func DeleteContainer(containerName string) error {
 	return IncusExecQuiet("delete", containerName, "--force")

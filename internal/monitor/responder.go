@@ -224,8 +224,9 @@ func (r *Responder) killContainer(ctx context.Context) error {
 	// Get container IP BEFORE stopping (needed for cleanup)
 	containerIP, _ := network.GetContainerIPFast(r.containerName)
 
-	// First stop the container
-	_, err := container.IncusOutputContext(ctx, "stop", r.containerName, "--force")
+	// First stop the container (captured output — this runs from the monitoring
+	// daemon goroutine while the session may be attached, issue #372).
+	_, err := container.StopContainerQuiet(ctx, r.containerName, true)
 	if err != nil {
 		return fmt.Errorf("failed to stop container: %w", err)
 	}
