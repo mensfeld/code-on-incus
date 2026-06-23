@@ -136,7 +136,7 @@ check_incus() {
     if ! command -v incus &> /dev/null; then
         echo -e "${YELLOW}⚠ Incus not found${NC}"
         echo ""
-        echo "  claude-on-incus requires Incus to be installed."
+        echo "  code-on-incus requires Incus to be installed."
         echo "  Install Incus: https://linuxcontainers.org/incus/docs/main/installing/"
         echo ""
         echo "  Quick install examples:"
@@ -192,7 +192,7 @@ check_group() {
     else
         echo -e "${YELLOW}⚠ User is not in incus-admin group${NC}"
         echo ""
-        echo "  You need to be in the incus-admin group to use claude-on-incus."
+        echo "  You need to be in the incus-admin group to use code-on-incus."
         echo "  Run: sudo usermod -aG incus-admin \$USER"
         echo "  Then log out and back in for changes to take effect."
         echo ""
@@ -255,7 +255,7 @@ download_binary() {
     local tmp_dir
     local binary_path
 
-    echo -e "${BLUE}→ Downloading claude-on-incus...${NC}"
+    echo -e "${BLUE}→ Downloading code-on-incus...${NC}"
 
     tmp_dir="$(mktemp -d)"
     trap "rm -rf '$tmp_dir'" EXIT
@@ -283,6 +283,9 @@ download_binary() {
     # Install to system
     echo -e "${BLUE}→ Installing to ${INSTALL_DIR}...${NC}"
 
+    # Also create the legacy "claude-on-incus" symlink for backward compatibility
+    # with installs from before the rename (coi update is symlink-aware and keeps
+    # it working). This is an on-disk alias only — it is never printed.
     if [ -w "$INSTALL_DIR" ]; then
         cp "$binary_path" "${INSTALL_DIR}/${BINARY_NAME}"
         ln -sf "${INSTALL_DIR}/${BINARY_NAME}" "${INSTALL_DIR}/claude-on-incus"
@@ -332,6 +335,8 @@ build_from_source() {
     # $INSTALL_DIR is not writable.
     echo -e "${BLUE}→ Installing to ${INSTALL_DIR}...${NC}"
     local built_binary="${tmp_dir}/${BINARY_NAME}"
+    # Legacy "claude-on-incus" symlink for backward compatibility (see above):
+    # on-disk alias only, never printed.
     if [ -w "$INSTALL_DIR" ]; then
         cp "$built_binary" "${INSTALL_DIR}/${BINARY_NAME}"
         ln -sf "${INSTALL_DIR}/${BINARY_NAME}" "${INSTALL_DIR}/claude-on-incus"
@@ -608,7 +613,7 @@ post_install() {
 main() {
     echo ""
     echo -e "${BLUE}════════════════════════════════════════${NC}"
-    echo -e "${BLUE}  claude-on-incus (coi) installer${NC}"
+    echo -e "${BLUE}  code-on-incus (coi) installer${NC}"
     echo -e "${BLUE}════════════════════════════════════════${NC}"
     echo ""
 
