@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -19,6 +20,24 @@ try:
     HAS_PYTE = True
 except ImportError:
     HAS_PYTE = False
+
+
+def write_trusted_coi_config(content):
+    """Write `content` to a temp TOML file and return an env dict (a copy of
+    os.environ) with COI_CONFIG pointing at it, so the config is loaded in
+    TRUSTED scope. Pass the result to subprocess.run(..., env=env).
+
+    Protection-weakening toggles (security.disable_protection / protected_paths /
+    host_immutable, git.writable_hooks) are honored ONLY from trusted-scope config
+    (~/.coi/config.toml or $COI_CONFIG), never from an untrusted project
+    .coi/config.toml — so tests that exercise those toggles must configure them
+    this way. The temp file persists for the duration of the test process (it
+    lives under the system temp dir, which the CI runner cleans up).
+    """
+    fd, path = tempfile.mkstemp(suffix=".toml", prefix="coi-trusted-")
+    with os.fdopen(fd, "w") as f:
+        f.write(content)
+    return {**os.environ, "COI_CONFIG": path}
 
 
 class TerminalEmulator:
