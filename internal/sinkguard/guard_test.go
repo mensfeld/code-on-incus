@@ -3,6 +3,8 @@ package sinkguard
 import (
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -25,8 +27,9 @@ var guardedPackages = []string{
 // forbidden tokens denote terminal sinks. "os.Stdout"/"os.Stderr" catch
 // fmt.Fprint*(os.Stderr, …) and direct references while leaving buffer writes
 // such as fmt.Fprintf(&sb, …) untouched. The fmt.Print*/log.* entries catch the
-// global stdout/stderr helpers. (The print/println builtins are intentionally
-// omitted: "print(" is a substring of the legitimate "fmt.Fprint(".)
+// global stdout/stderr helpers. The print/println builtins (which also write to
+// stderr) are matched separately by builtinSinkRe below, since a bare "print("
+// substring would false-match the legitimate "fmt.Fprint(".
 var forbidden = []string{
 	"os.Stdout",
 	"os.Stderr",
@@ -39,6 +42,12 @@ var forbidden = []string{
 	"log.Fatal",
 	"log.Panic",
 }
+
+// builtinSinkRe matches the print/println builtins (which write to stderr) as
+// standalone calls. The leading (^|[^\w.]) avoids false-matching fmt.Fprint( /
+// strings.Sprint( (preceded by a letter) and a foo.print( method call (preceded
+// by a dot).
+var builtinSinkRe = regexp.MustCompile(`(^|[^\w.])print(ln)?\(`)
 
 // allowMarker exempts a single source line. Use it ONLY for the documented
 // stderr/standard-logger fallbacks that fire when no session logger is set
@@ -97,11 +106,16 @@ func TestSessionRuntimePackagesDoNotWriteToTerminal(t *testing.T) {
 					continue
 				}
 				code := stripComment(line)
+				flagged := false
 				for _, tok := range forbidden {
 					if strings.Contains(code, tok) {
 						violations = append(violations, formatViolation(pkg, name, i+1, tok, line))
+						flagged = true
 						break
 					}
+				}
+				if !flagged && builtinSinkRe.MatchString(code) {
+					violations = append(violations, formatViolation(pkg, name, i+1, "print/println builtin", line))
 				}
 			}
 		}
@@ -116,19 +130,34 @@ func TestSessionRuntimePackagesDoNotWriteToTerminal(t *testing.T) {
 }
 
 func formatViolation(pkg, file string, line int, tok, src string) string {
-	return pkg + "/" + file + ":" + itoa(line) + ": " + tok + "  ->  " + strings.TrimSpace(src)
+	return pkg + "/" + file + ":" + strconv.Itoa(line) + ": " + tok + "  ->  " + strings.TrimSpace(src)
 }
 
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
+// TestBuiltinSinkRegex locks the print/println matcher: it must catch the
+// builtins as standalone calls but not the legitimate fmt.Fprint*/Sprint* family
+// or a .print( method call.
+func TestBuiltinSinkRegex(t *testing.T) {
+	shouldMatch := []string{
+		`	println("leak")`,
+		`	print("leak")`,
+		`println(x)`,
+		`	if true { println(y) }`,
 	}
-	var b [20]byte
-	i := len(b)
-	for n > 0 {
-		i--
-		b[i] = byte('0' + n%10)
-		n /= 10
+	shouldNotMatch := []string{
+		`	fmt.Fprint(os.Stdout, "ok")`, // os.Stdout caught elsewhere; regex itself must not match
+		`	fmt.Fprintln(&sb, "ok")`,     // buffer write
+		`	s := strings.Sprint("ok")`,   // Sprint
+		`	w.Fprintf("ok")`,             // Fprintf method-ish
+		`	foo.print("method, not builtin")`,
 	}
-	return string(b[i:])
+	for _, s := range shouldMatch {
+		if !builtinSinkRe.MatchString(stripComment(s)) {
+			t.Errorf("expected builtin match for: %q", s)
+		}
+	}
+	for _, s := range shouldNotMatch {
+		if builtinSinkRe.MatchString(stripComment(s)) {
+			t.Errorf("unexpected builtin match for: %q", s)
+		}
+	}
 }
