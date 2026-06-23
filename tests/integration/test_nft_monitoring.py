@@ -1020,7 +1020,12 @@ def check_nft_coi_rules_exist(container_ip):
     )
     if result.returncode != 0:
         return False
-    return container_ip in result.stdout
+    # Match the exact rule key (comment "coi-<IP>") rather than a bare substring:
+    # a substring match false-positives on a superstring IP (e.g. killed
+    # 10.x.x.5 matching a live 10.x.x.50) or a stale coi-<IP> from a recycled
+    # DHCP lease. The trailing quote anchors the IP. Rules are keyed this way in
+    # internal/network/nft_filter.go (fmt.Sprintf(`"coi-%s"`, containerIP)).
+    return f'comment "coi-{container_ip}"' in result.stdout
 
 
 class TestNFTCOIRuleCleanupOnAutoKill:
@@ -1103,9 +1108,13 @@ class TestNFTCOIRuleCleanupOnAutoKill:
 
             assert killed, f"Container should have been killed but state is {state}"
 
-            # Verify nft coi forward rules are cleaned up. Rule removal happens in
-            # COI's network teardown, which runs asynchronously after the kill — under
-            # CI load this can lag well past the kill itself, so poll generously.
+            # Verify nft coi forward rules are cleaned up. On auto-kill the
+            # responder removes the per-IP rules in its kill path, and the coi
+            # shell process's session.Cleanup runs Teardown as an idempotent
+            # backstop once the attach returns (the container is already gone) —
+            # the latter was previously skipped, which is what made this flaky.
+            # Either path clears the rules; under CI load it can still lag the
+            # kill, so poll generously.
             cleaned = False
             for _ in range(60):
                 if not check_nft_coi_rules_exist(container_ip):
