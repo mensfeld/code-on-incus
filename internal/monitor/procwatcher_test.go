@@ -258,6 +258,13 @@ func TestGTFOBinsStripPlaceholders(t *testing.T) {
 		{"fsockopen", "fsockopen"},
 		// Numeric suffix without slash is stripped correctly.
 		{"socat/12345", "socat"},
+		// Regression (issue #505): a token where one placeholder is a substring
+		// of an earlier one ("attacker" inside "attacker.com") and the first
+		// match shortens the token below the second match's index. Must yield the
+		// structural prefix, not panic with "slice bounds out of range [:12]".
+		{"tcp-connect:attacker.com:12345", "tcp-connect"},
+		{"TCP-CONNECT:ATTACKER.COM:12345", "tcp-connect"},
+		{"udp:attacker:9999", "udp"},
 	}
 	for _, tc := range cases {
 		got := gtfobinsStripPlaceholders(tc.in)

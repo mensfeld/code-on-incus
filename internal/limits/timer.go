@@ -2,6 +2,7 @@ package limits
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/mensfeld/code-on-incus/internal/container"
@@ -89,26 +90,63 @@ func (tm *TimeoutMonitor) handleTimeout() {
 	if tm.StopGraceful {
 		// Graceful: try non-force first, escalate to force if needed
 		// StopGraceful=true means graceful shutdown (force=false)
-		if err := mgr.Stop(false); err != nil {
+		if err := tm.stopContainerQuietly(false); err != nil {
 			tm.Logger.Errorf("[limits] Graceful stop failed: %v, forcing...", err)
-			_ = mgr.Stop(true)
+			if ferr := tm.stopContainerQuietly(true); ferr != nil {
+				tm.Logger.Errorf("[limits] Force stop after graceful failure also failed: %v", ferr)
+			}
 		}
 
-		// Verify container actually stopped, force if still running
+		// Verify the container actually stopped, force again if it is still
+		// running. A failed status check is treated as "state unknown" and we
+		// force to be safe rather than assume it stopped.
 		time.Sleep(5 * time.Second)
-		if running, _ := mgr.Running(); running {
+		running, rerr := mgr.Running()
+		if rerr != nil {
+			tm.Logger.Errorf("[limits] Could not determine container state after graceful stop: %v, forcing...", rerr)
+		}
+		if running || rerr != nil {
 			tm.Logger.Println("[limits] Container still running after graceful stop, forcing...")
-			_ = mgr.Stop(true)
+			if ferr := tm.stopContainerQuietly(true); ferr != nil {
+				tm.Logger.Errorf("[limits] Final force stop failed: %v", ferr)
+			}
 		}
 	} else {
 		// StopGraceful=false means force stop immediately (force=true)
-		if err := mgr.Stop(true); err != nil {
+		if err := tm.stopContainerQuietly(true); err != nil {
 			tm.Logger.Errorf("[limits] Error force-stopping container: %v", err)
 			return
 		}
 	}
 
+	// Only claim success if the container is confirmed stopped, so the log does
+	// not report enforcement that did not happen.
+	if running, rerr := mgr.Running(); rerr == nil && running {
+		tm.Logger.Errorf("[limits] Container still running after stop attempts; runtime limit may not be enforced")
+		return
+	}
 	tm.Logger.Println("[limits] Container stopped due to runtime limit")
+}
+
+// stopContainerQuietly stops the container without streaming the incus
+// subprocess output to the terminal. handleTimeout runs in a background
+// goroutine while the AI tool session is attached, so container.Manager.Stop
+// (which wires the incus subprocess stdio to os.Stdout/os.Stderr) would corrupt
+// the user's TUI (issue #372 class). We capture the subprocess output and send
+// it to the session log instead. A fresh timeout context is used so the stop
+// completes even if the session's context is being cancelled concurrently.
+func (tm *TimeoutMonitor) stopContainerQuietly(force bool) error {
+	args := []string{"stop", tm.ContainerName}
+	if force {
+		args = append(args, "--force")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	out, err := container.IncusOutputContext(ctx, args...)
+	if s := strings.TrimSpace(out); s != "" {
+		tm.Logger.Printf("[limits] incus %s: %s", strings.Join(args, " "), s)
+	}
+	return err
 }
 
 // Stop stops the timeout monitor

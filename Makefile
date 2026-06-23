@@ -86,7 +86,6 @@ build: check-deps
 	@echo "Building $(BINARY_NAME) version $(VERSION)..."
 	@mkdir -p internal/image/embedded
 	@mkdir -p internal/config/embedded
-	@cp profiles/default/build.sh internal/image/embedded/coi_build.sh
 	@cp profiles/default/config.toml internal/config/embedded/default_config.toml
 	@cp testdata/dummy/dummy internal/image/embedded/dummy
 	@$(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/coi
@@ -195,7 +194,6 @@ build-all: check-deps
 	@mkdir -p dist
 	@mkdir -p internal/image/embedded
 	@mkdir -p internal/config/embedded
-	@cp profiles/default/build.sh internal/image/embedded/coi_build.sh
 	@cp profiles/default/config.toml internal/config/embedded/default_config.toml
 	@cp testdata/dummy/dummy internal/image/embedded/dummy
 	@GOOS=linux GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o dist/$(BINARY_NAME)-linux-amd64 ./cmd/coi

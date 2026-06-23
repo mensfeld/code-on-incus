@@ -89,6 +89,35 @@ func TestClose_Idempotent(t *testing.T) {
 	_ = l.Close()
 }
 
+// TestWriteAfterClose verifies that a write racing/following Close (e.g. the
+// background IP-refresh goroutine that outlives the session — issue #372) is
+// silently discarded rather than written to a now-closed fd or panicking.
+func TestWriteAfterClose(t *testing.T) {
+	dir := t.TempDir()
+	l := New("post-close", dir)
+	l.Printf("before close")
+	if err := l.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// These must not panic and must not reach the (closed) fd.
+	l.Printf("after close info")
+	l.Errorf("after close warn")
+	l.Println("after close println")
+	l.Errorln("after close errorln")
+
+	outData, err := os.ReadFile(l.OutPath())
+	if err != nil {
+		t.Fatalf("read stdout log: %v", err)
+	}
+	if strings.Contains(string(outData), "after close") {
+		t.Errorf("post-close write reached the log file: %s", outData)
+	}
+	if !strings.Contains(string(outData), "before close") {
+		t.Errorf("pre-close content missing: %s", outData)
+	}
+}
+
 func TestNewDiscard(t *testing.T) {
 	l := NewDiscard()
 	if l == nil {

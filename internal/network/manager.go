@@ -57,6 +57,16 @@ func NewManager(cfg *config.NetworkConfig, log *logger.SessionLogger) *Manager {
 		homeDir = "/tmp"
 	}
 
+	// Route the package's resolver/nft diagnostics (which log via the package
+	// logger, including from package-level helpers and the background refresher)
+	// to this Manager's logger. This makes the caller's choice authoritative: a
+	// discard logger (coi run / ConfigureContainer) actually silences network
+	// output instead of falling back to stderr, and a session file logger keeps
+	// it off the tmux terminal — issue #372. session.Setup also calls SetLogger
+	// earlier to cover the pre-Manager boot rules; that is the same logger, so
+	// the two stay consistent.
+	SetLogger(log)
+
 	return &Manager{
 		config:       cfg,
 		cacheManager: NewCacheManager(homeDir),

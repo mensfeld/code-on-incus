@@ -3,7 +3,6 @@ package network
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"os/exec"
 	"sort"
 	"strings"
@@ -32,7 +31,7 @@ func NewNftManager(containerIP, gatewayIP string) *NftManager {
 // ApplyRestricted applies restricted mode rules (block RFC1918, allow internet)
 func (f *NftManager) ApplyRestricted(cfg *config.NetworkConfig) error {
 	if err := EnsureBaseRules(); err != nil {
-		log.Printf("Warning: failed to ensure base rules: %v", err)
+		logWarnf("Warning: failed to ensure base rules: %v", err)
 	}
 
 	if f.gatewayIP != "" {
@@ -72,7 +71,7 @@ func (f *NftManager) ApplyRestricted(cfg *config.NetworkConfig) error {
 // ApplyAllowlist applies allowlist mode rules (allow specific IPs, block all else)
 func (f *NftManager) ApplyAllowlist(cfg *config.NetworkConfig, allowedIPs []string) error {
 	if err := EnsureBaseRules(); err != nil {
-		log.Printf("Warning: failed to ensure base rules: %v", err)
+		logWarnf("Warning: failed to ensure base rules: %v", err)
 	}
 
 	if f.gatewayIP != "" {
@@ -172,7 +171,7 @@ func (f *NftManager) ReplaceAllowlist(cfg *config.NetworkConfig, allowedIPs []st
 	// container is never left without a filtering rule set.
 	for _, h := range oldHandles {
 		if _, delErr := runNFTCommand("delete", "rule", "ip", "coi", "forward", "handle", h); delErr != nil {
-			log.Printf("Warning: failed to delete stale nft rule handle %s: %v", h, delErr)
+			logWarnf("Warning: failed to delete stale nft rule handle %s: %v", h, delErr)
 		}
 	}
 	return nil
@@ -196,7 +195,7 @@ func EnsureBaseRules() error {
 // EnsureOpenModeRules adds an ACCEPT rule for all traffic from a container in open mode.
 func EnsureOpenModeRules(containerIP string) error {
 	if err := EnsureBaseRules(); err != nil {
-		log.Printf("Warning: failed to ensure base rules: %v", err)
+		logWarnf("Warning: failed to ensure base rules: %v", err)
 	}
 	exists, err := nftRuleExistsWithComment("coi-" + containerIP)
 	if err != nil {
@@ -513,7 +512,7 @@ func deleteNFTRulesByCommentFamily(family, comment string) error {
 		}
 		handles, err := nftGetHandlesByCommentFamily(family, comment)
 		if err != nil {
-			log.Printf("Warning: nft list failed (round %d/%d): %v, retrying...", round+1, maxRounds, err)
+			logWarnf("Warning: nft list failed (round %d/%d): %v, retrying...", round+1, maxRounds, err)
 			continue
 		}
 		if len(handles) == 0 {
@@ -521,7 +520,7 @@ func deleteNFTRulesByCommentFamily(family, comment string) error {
 		}
 		for _, h := range handles {
 			if _, delErr := runNFTCommand("delete", "rule", family, "coi", "forward", "handle", h); delErr != nil {
-				log.Printf("Warning: failed to delete nft rule handle %s (round %d/%d): %v", h, round+1, maxRounds, delErr)
+				logWarnf("Warning: failed to delete nft rule handle %s (round %d/%d): %v", h, round+1, maxRounds, delErr)
 			}
 		}
 	}

@@ -19,9 +19,17 @@ import (
 var Debug = os.Getenv("COI_NFT_DEBUG") == "1"
 
 func debugf(format string, args ...interface{}) {
-	if Debug {
-		fmt.Fprintf(os.Stderr, "[NFT-DEBUG] "+format+"\n", args...)
+	if !Debug {
+		return
 	}
+	// Route to the session log when set so COI_NFT_DEBUG output during a live
+	// session lands in the log file, not the user's attached terminal (issue
+	// #372 class). Fall back to stderr only for standalone/CLI use.
+	if l := pkgLogger.Load(); l != nil {
+		l.Printf("[NFT-DEBUG] "+format, args...)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "[NFT-DEBUG] "+format+"\n", args...)
 }
 
 // JournalReader wraps systemd journal for reading kernel logs
