@@ -140,8 +140,11 @@ func TestMaskDeviceName_CollisionFree(t *testing.T) {
 		}
 	}
 	// Stable per path, valid prefix, distinct from the protect-* scheme.
-	if maskDeviceName(".env") != maskDeviceName(".env") {
-		t.Error("maskDeviceName must be stable for the same path")
+	stable := maskDeviceName(".env")
+	for i := 0; i < 3; i++ {
+		if got := maskDeviceName(".env"); got != stable {
+			t.Errorf("maskDeviceName must be stable for the same path: %q != %q", got, stable)
+		}
 	}
 	for _, in := range []string{".env", "secrets/db.conf"} {
 		name := maskDeviceName(in)
