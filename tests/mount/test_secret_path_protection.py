@@ -54,15 +54,21 @@ def test_secret_paths_hidden_from_agent(coi_binary, cleanup_containers, workspac
             f"masked {path} leaked its secret to the agent.\nstdout: {r.stdout}\nstderr: {r.stderr}"
         )
 
-    # secrets/ is masked with an empty dir: db.conf is not visible.
-    r = _run(
+    # secrets/ is masked with an empty dir: it lists no entries (check the ls
+    # stdout only — the masked file's name legitimately appears in a "No such
+    # file" error, which actually proves it is hidden).
+    ls = _run(coi_binary, workspace_dir, ["ls", "-A", "/workspace/secrets"])
+    assert "db.conf" not in ls.stdout, (
+        f"masked secrets/ should be empty but still lists db.conf.\nstdout: {ls.stdout!r}"
+    )
+    # and its secret content is unreadable ("db-password" is unique to the db secret).
+    cat = _run(
         coi_binary,
         workspace_dir,
-        ["sh", "-c", "ls -A /workspace/secrets; cat /workspace/secrets/db.conf 2>&1 || true"],
+        ["sh", "-c", "cat /workspace/secrets/db.conf 2>/dev/null || true"],
     )
-    combined = r.stdout + r.stderr
-    assert "db.conf" not in combined and "leakme" not in combined, (
-        f"masked secrets/ leaked its contents to the agent.\n{combined}"
+    assert "db-password" not in (cat.stdout + cat.stderr), (
+        f"masked secrets/ leaked its secret content.\nstdout: {cat.stdout}\nstderr: {cat.stderr}"
     )
 
 
