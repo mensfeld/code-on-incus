@@ -98,3 +98,33 @@ def test_secret_paths_host_file_untouched(coi_binary, cleanup_containers, worksp
     # The real secret is still on the host (masking does not delete it).
     assert (Path(workspace_dir) / ".env").read_text().strip() == SECRET_ENV
     assert (Path(workspace_dir) / "secrets" / "db.conf").read_text().strip() == SECRET_DB
+
+
+def test_secret_path_symlink_is_resolved_and_masked(coi_binary, cleanup_containers, workspace_dir):
+    """A secret reached through a symlink is masked at its real target.
+
+    A repo must not be able to evade masking by making the listed secret a
+    symlink to another in-workspace file. COI resolves the symlink and masks
+    the real target, so reading EITHER the link or its target returns empty.
+    """
+    ws = Path(workspace_dir)
+    shared = ws / "shared"
+    shared.mkdir(exist_ok=True)
+    (shared / "real.env").write_text(SECRET_ENV + "\n")
+    # Relative symlink so it also resolves correctly inside the container.
+    link = ws / "link.env"
+    link.symlink_to(Path("shared") / "real.env")
+
+    coi = ws / ".coi"
+    coi.mkdir(exist_ok=True)
+    (coi / "config.toml").write_text('[security]\nsecret_paths = ["link.env"]\n')
+
+    # Reading through the link AND the resolved real file both return empty.
+    for path in ("/workspace/link.env", "/workspace/shared/real.env"):
+        r = _run(coi_binary, workspace_dir, ["cat", path])
+        assert "topsecret-do-not-leak" not in (r.stdout + r.stderr), (
+            f"symlinked secret leaked via {path}.\nstdout: {r.stdout}\nstderr: {r.stderr}"
+        )
+
+    # Host target is untouched.
+    assert (shared / "real.env").read_text().strip() == SECRET_ENV

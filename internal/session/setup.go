@@ -397,12 +397,18 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		}
 
 		// Mask secret paths (issue #494): mount an empty read-only file/dir over
-		// each match so the contained agent can neither read nor modify repo-local
-		// secrets. Independent of protected_paths; non-fatal on failure.
+		// each resolved match so the contained agent can neither read nor modify
+		// repo-local secrets. Independent of protected_paths. FAIL CLOSED — if a
+		// configured secret cannot be masked we must not launch with it exposed.
 		if len(opts.SecretPaths) > 0 {
-			if masked, err := SetupSecretMasks(result.Manager, opts.WorkspacePath, containerWorkspacePath, opts.SecretPaths, useShift); err != nil {
-				opts.Logger(fmt.Sprintf("Warning: Failed to mask secret paths: %v", err))
-			} else if len(masked) > 0 {
+			masked, skipped, err := SetupSecretMasks(result.Manager, opts.WorkspacePath, containerWorkspacePath, opts.SecretPaths, useShift)
+			for _, s := range skipped {
+				opts.Logger(fmt.Sprintf("Warning: secret_paths entry %q is NOT masked (missing, or a symlink resolving outside the workspace) — it is not hidden from the agent", s))
+			}
+			if err != nil {
+				return nil, fmt.Errorf("failed to mask secret paths: %w", err)
+			}
+			if len(masked) > 0 {
 				opts.Logger(fmt.Sprintf("Masked secret paths (hidden read-only): %s", strings.Join(masked, ", ")))
 			}
 		}

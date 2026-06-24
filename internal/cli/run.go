@@ -423,9 +423,14 @@ func (a *App) applySecurityMounts(mgr container.ContainerManager, absWorkspace, 
 
 	// Mask secret paths (issue #494) — independent of protected_paths.
 	if len(a.cfg.Security.SecretPaths) > 0 {
-		if masked, err := session.SetupSecretMasks(mgr, absWorkspace, containerWorkspacePath, a.cfg.Security.SecretPaths, useShift); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: Failed to mask secret paths: %v\n", err)
-		} else if len(masked) > 0 {
+		masked, skipped, err := session.SetupSecretMasks(mgr, absWorkspace, containerWorkspacePath, a.cfg.Security.SecretPaths, useShift)
+		for _, s := range skipped {
+			fmt.Fprintf(os.Stderr, "Warning: secret_paths entry %q is NOT masked (missing or a symlink resolving outside the workspace) — not hidden from the agent\n", s)
+		}
+		if err != nil {
+			return fmt.Errorf("failed to mask secret paths: %w", err)
+		}
+		if len(masked) > 0 {
 			fmt.Fprintf(os.Stderr, "Masked secret paths (hidden read-only): %s\n", strings.Join(masked, ", "))
 		}
 	}
