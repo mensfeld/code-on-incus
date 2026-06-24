@@ -13,6 +13,11 @@
       "items": { "type": "string" },
       "description": "Extra paths to protect in addition to the defaults"
     },
+    "writable_paths": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Workspace-relative paths to REMOVE from the effective protected set (e.g. to let a tool manage its own settings file). A protection downgrade, so it is honored only from trusted-scope config (~/.coi/config.toml or $COI_CONFIG), never from an untrusted project config."
+    },
     "disable_protection": {
       "type": "boolean",
       "description": "Disable all read-only path protection (not recommended)"

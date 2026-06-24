@@ -137,6 +137,25 @@ var fileTypeProtectedPaths = map[string]bool{
 	// (info/attributes) that runs on the host at the next git operation.
 	".git/config.worktree": true,
 	".git/info/attributes": true,
+	// Claude Code project settings carry a "hooks" key that the host auto-executes
+	// when it opens the repo. They are materialized as empty read-only placeholders
+	// so a contained agent cannot PLANT them when absent (the parent .claude dir is
+	// auto-created — see fileTypeParentAutoCreate). Issue #504 / settings planting.
+	".claude/settings.json":       true,
+	".claude/settings.local.json": true,
+}
+
+// fileTypeParentAutoCreate lists file-type protected entries whose parent
+// directory should be created (writable, symlink-safe) when absent, so the
+// read-only placeholder can be materialized even in a workspace that does not
+// already contain that directory. The parent directory itself is NOT mounted
+// read-only — only the listed file is. (.git/config is deliberately excluded: we
+// must not synthesize a .git directory in a non-git workspace.) This closes the
+// planting attack where a contained agent creates an absent .claude/settings.json
+// carrying a hooks payload that a later host `claude` session auto-executes.
+var fileTypeParentAutoCreate = map[string]bool{
+	".claude/settings.json":       true,
+	".claude/settings.local.json": true,
 }
 
 // directoryTypeProtectedPaths lists entries that are materialized as
@@ -211,6 +230,15 @@ func ensureProtectedExists(workspacePath, hostPath, relPath string) error {
 
 	switch {
 	case isFileTypeProtected(relPath):
+		if fileTypeParentAutoCreate[relPath] {
+			// Create the parent directory (writable, symlink-safe) when absent so
+			// the read-only placeholder can be materialized even in a workspace
+			// that doesn't already have it — closing the planting attack on an
+			// absent file. The parent dir itself is not mounted read-only.
+			if err := safeMkdirAll(workspacePath, filepath.Dir(hostPath), filepath.Dir(relPath)); err != nil {
+				return err
+			}
+		}
 		return createProtectedFilePlaceholder(hostPath, relPath)
 	case isDirTypeProtected(relPath):
 		return safeMkdirAll(workspacePath, hostPath, relPath)

@@ -551,6 +551,61 @@ func TestEnsureProtectedExists_FilePlaceholderParentMissing(t *testing.T) {
 	}
 }
 
+// .claude/settings.json must be materialized even when the .claude dir is
+// absent (the planting case): the parent dir is auto-created (writable) and the
+// settings file gets an empty read-only placeholder. Regression for #504 — an
+// agent must not be able to plant an absent settings file.
+func TestEnsureProtectedExists_ClaudeSettingsCreatesParentAndPlaceholder(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "ensure-exists-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// .claude/ does NOT exist yet.
+	settingsPath := filepath.Join(tmpDir, ".claude", "settings.json")
+	if err := ensureProtectedExists(tmpDir, settingsPath, ".claude/settings.json"); err != nil {
+		t.Fatalf("ensureProtectedExists returned error: %v", err)
+	}
+
+	// .claude/ was auto-created as a real directory.
+	dirInfo, err := os.Lstat(filepath.Join(tmpDir, ".claude"))
+	if err != nil || !dirInfo.IsDir() {
+		t.Fatalf("expected .claude/ to be auto-created as a dir, info=%v err=%v", dirInfo, err)
+	}
+	// The settings file is an empty regular placeholder ready for the RO mount.
+	info, err := os.Lstat(settingsPath)
+	if err != nil {
+		t.Fatalf("expected .claude/settings.json placeholder, got err: %v", err)
+	}
+	if !info.Mode().IsRegular() || info.Size() != 0 {
+		t.Errorf("expected empty regular placeholder, got mode=%v size=%d", info.Mode(), info.Size())
+	}
+}
+
+// When .claude already exists but the settings file is absent, the placeholder
+// is still materialized (parent already present).
+func TestEnsureProtectedExists_ClaudeSettingsPlaceholderWhenDirExists(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "ensure-exists-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	if err := os.Mkdir(filepath.Join(tmpDir, ".claude"), 0o755); err != nil {
+		t.Fatalf("Failed to create .claude: %v", err)
+	}
+
+	localPath := filepath.Join(tmpDir, ".claude", "settings.local.json")
+	if err := ensureProtectedExists(tmpDir, localPath, ".claude/settings.local.json"); err != nil {
+		t.Fatalf("ensureProtectedExists returned error: %v", err)
+	}
+	info, err := os.Lstat(localPath)
+	if err != nil || !info.Mode().IsRegular() || info.Size() != 0 {
+		t.Errorf("expected empty regular placeholder, info=%v err=%v", info, err)
+	}
+}
+
 func TestEnsureProtectedExists_SymlinkNotFollowed(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "ensure-exists-*")
 	if err != nil {
