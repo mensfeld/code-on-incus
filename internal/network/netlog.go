@@ -34,7 +34,7 @@ func logInfof(format string, args ...any) {
 		l.Printf(format, args...)
 		return
 	}
-	log.Printf(format, args...)
+	log.Printf(format, args...) // terminal-sink-ok: fallback only when no session logger is set (pre-attach/non-session use)
 }
 
 // logWarnf writes a warning/error message to the session stderr log when a
@@ -44,5 +44,5 @@ func logWarnf(format string, args ...any) {
 		l.Errorf(format, args...)
 		return
 	}
-	log.Printf(format, args...)
+	log.Printf(format, args...) // terminal-sink-ok: fallback only when no session logger is set (pre-attach/non-session use)
 }
