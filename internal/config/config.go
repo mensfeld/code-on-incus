@@ -111,16 +111,34 @@ type SecurityConfig struct {
 	// bypass of read-only bind mounts. Requires CAP_LINUX_IMMUTABLE on the coi binary.
 	// Default: true. Set to false to disable.
 	HostImmutable *bool `toml:"host_immutable"`
+	// WritablePaths removes specific entries from the effective protected paths,
+	// re-allowing the container to write them (e.g. [".claude/settings.json"] to
+	// let the agent manage its own project settings). It is the generic opt-out
+	// for any protected path. Only honored from trusted-scope config
+	// (~/.coi/config.toml or $COI_CONFIG) — an untrusted project config cannot
+	// remove protections (see sanitizeUntrustedSecurity), so a cloned repo cannot
+	// turn off read-only protection of host-auto-executing files.
+	WritablePaths []string `toml:"writable_paths"`
 }
 
 // GetEffectiveProtectedPaths returns the combined list of protected paths
+// (protected_paths + additional_protected_paths) minus any writable_paths
+// opt-outs. Matching is slash-normalized so config entries are platform-stable.
 func (s *SecurityConfig) GetEffectiveProtectedPaths() []string {
 	if s.DisableProtection {
 		return nil
 	}
+	writable := make(map[string]bool, len(s.WritablePaths))
+	for _, w := range s.WritablePaths {
+		writable[filepath.ToSlash(w)] = true
+	}
 	paths := make([]string, 0, len(s.ProtectedPaths)+len(s.AdditionalProtectedPaths))
-	paths = append(paths, s.ProtectedPaths...)
-	paths = append(paths, s.AdditionalProtectedPaths...)
+	for _, p := range append(append([]string{}, s.ProtectedPaths...), s.AdditionalProtectedPaths...) {
+		if writable[filepath.ToSlash(p)] {
+			continue
+		}
+		paths = append(paths, p)
+	}
 	return paths
 }
 
@@ -414,6 +432,7 @@ func synthesizeDefaultProfile(cfg *Config) ProfileConfig {
 	security := cfg.Security
 	security.ProtectedPaths = cloneSlice(cfg.Security.ProtectedPaths)
 	security.AdditionalProtectedPaths = cloneSlice(cfg.Security.AdditionalProtectedPaths)
+	security.WritablePaths = cloneSlice(cfg.Security.WritablePaths)
 	monitoring := cfg.Monitoring
 	timezone := cfg.Timezone
 
@@ -1045,6 +1064,9 @@ func mergeSecurityInto(dst *SecurityConfig, src *SecurityConfig) {
 	}
 	if src.HostImmutable != nil {
 		dst.HostImmutable = src.HostImmutable
+	}
+	if len(src.WritablePaths) > 0 {
+		dst.WritablePaths = MergeStringSliceUnique(dst.WritablePaths, src.WritablePaths)
 	}
 }
 

@@ -18,6 +18,8 @@ from pathlib import Path
 
 import pytest
 
+from support.helpers import write_trusted_coi_config
+
 
 def _make_workspace_writable(workspace_dir):
     """Make workspace world-writable so container user (UID 1000) can write.
@@ -436,15 +438,10 @@ class TestSecurityConfigCustomPaths:
 
     def test_custom_paths_replace_defaults(self, coi_binary, workspace_dir, cleanup_containers):
         """Test that protected_paths replaces the default list."""
-        # Create config with only .git/hooks (not other defaults)
-        config_content = """
-[security]
-protected_paths = [".git/hooks"]
-"""
-        config_dir = Path(workspace_dir) / ".coi"
-        config_dir.mkdir(exist_ok=True)
-        config_file = config_dir / "config.toml"
-        config_file.write_text(config_content)
+        # protected_paths REPLACES the defaults — a protection downgrade, so it is
+        # honored only from trusted-scope config (COI_CONFIG), not an untrusted
+        # project .coi/config.toml.
+        env = write_trusted_coi_config('[security]\nprotected_paths = [".git/hooks"]\n')
 
         # Initialize git repo
         subprocess.run(["git", "init"], cwd=workspace_dir, check=True, capture_output=True)
@@ -469,6 +466,7 @@ protected_paths = [".git/hooks"]
             text=True,
             timeout=120,
             cwd=workspace_dir,
+            env=env,
         )
 
         # Should succeed because .vscode is not in our custom protected_paths
@@ -484,15 +482,10 @@ class TestSecurityConfigDisableProtection:
 
     def test_disable_protection_allows_all(self, coi_binary, workspace_dir, cleanup_containers):
         """Test that disable_protection=true allows writing to all paths."""
-        # Create config that disables protection
-        config_content = """
-[security]
-disable_protection = true
-"""
-        config_dir = Path(workspace_dir) / ".coi"
-        config_dir.mkdir(exist_ok=True)
-        config_file = config_dir / "config.toml"
-        config_file.write_text(config_content)
+        # disable_protection removes ALL protections — a downgrade, so it is
+        # honored only from trusted-scope config (COI_CONFIG), not an untrusted
+        # project .coi/config.toml.
+        env = write_trusted_coi_config("[security]\ndisable_protection = true\n")
 
         # Initialize git repo
         subprocess.run(["git", "init"], cwd=workspace_dir, check=True, capture_output=True)
@@ -518,6 +511,7 @@ disable_protection = true
             text=True,
             timeout=120,
             cwd=workspace_dir,
+            env=env,
         )
 
         # Should succeed because protection is disabled
@@ -669,13 +663,9 @@ class TestWritableGitHooksConfigCompat:
         # Initialize git repo
         subprocess.run(["git", "init"], cwd=workspace_dir, check=True, capture_output=True)
 
-        # Create config that enables writable hooks
-        config_dir = Path(workspace_dir) / ".coi"
-        config_dir.mkdir(exist_ok=True)
-        (config_dir / "config.toml").write_text("""
-[git]
-writable_hooks = true
-""")
+        # writable_hooks is honored only from trusted-scope config (COI_CONFIG),
+        # not an untrusted project .coi/config.toml.
+        env = write_trusted_coi_config("[git]\nwritable_hooks = true\n")
 
         # Create hooks dir
         hooks_dir = Path(workspace_dir) / ".git" / "hooks"
@@ -697,6 +687,7 @@ writable_hooks = true
             text=True,
             timeout=120,
             cwd=workspace_dir,
+            env=env,
         )
 
         # Should succeed — .git/hooks is writable
@@ -1093,10 +1084,9 @@ class TestImmutableProtection:
                 "(grant with: sudo setcap cap_linux_immutable=ep <coi-binary>)"
             )
 
-        # Disable immutable protection via config
-        config_dir = Path(workspace_dir) / ".coi"
-        config_dir.mkdir(exist_ok=True)
-        (config_dir / "config.toml").write_text("[security]\nhost_immutable = false\n")
+        # host_immutable=false is a protection downgrade, honored only from
+        # trusted-scope config (COI_CONFIG), not an untrusted project config.
+        env = write_trusted_coi_config("[security]\nhost_immutable = false\n")
 
         # Initialize git repo with a hook file
         subprocess.run(["git", "init"], cwd=workspace_dir, check=True, capture_output=True)
@@ -1126,6 +1116,7 @@ class TestImmutableProtection:
             text=True,
             timeout=120,
             cwd=workspace_dir,
+            env=env,
         )
 
         # The attack SHOULD succeed — this validates the test isn't vacuous

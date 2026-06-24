@@ -7,6 +7,8 @@ malicious code injection that could execute on the host during git operations.
 import subprocess
 from pathlib import Path
 
+from support.helpers import write_trusted_coi_config
+
 
 def _make_workspace_writable(workspace_dir):
     """Make workspace world-writable so container user (UID 1000) can write.
@@ -174,13 +176,9 @@ def test_git_hooks_writable_with_config(coi_binary, workspace_dir, cleanup_conta
     # Initialize git repo
     subprocess.run(["git", "init"], cwd=workspace_dir, check=True, capture_output=True)
 
-    # Create config that enables writable hooks
-    config_dir = Path(workspace_dir) / ".coi"
-    config_dir.mkdir(exist_ok=True)
-    (config_dir / "config.toml").write_text("""
-[git]
-writable_hooks = true
-""")
+    # writable_hooks is a protection-weakening toggle, honored only from
+    # trusted-scope config (COI_CONFIG), not an untrusted project .coi/config.toml.
+    env = write_trusted_coi_config("[git]\nwritable_hooks = true\n")
 
     # Ensure hooks dir exists
     hooks_dir = Path(workspace_dir) / ".git" / "hooks"
@@ -189,7 +187,7 @@ writable_hooks = true
     # Make workspace writable by container user (CI UID mismatch workaround)
     _make_workspace_writable(workspace_dir)
 
-    # Run with writable hooks enabled via config (cwd needed for config pickup)
+    # Run with writable hooks enabled via trusted config
     result = subprocess.run(
         [
             coi_binary,
@@ -203,6 +201,7 @@ writable_hooks = true
         text=True,
         timeout=120,
         cwd=workspace_dir,
+        env=env,
     )
 
     # Should succeed
@@ -219,15 +218,9 @@ def test_git_hooks_writable_via_config(coi_binary, workspace_dir, cleanup_contai
     # Initialize git repo
     subprocess.run(["git", "init"], cwd=workspace_dir, check=True, capture_output=True)
 
-    # Create config that enables writable hooks (disables protection)
-    config_content = """
-[git]
-writable_hooks = true
-"""
-    config_dir = Path(workspace_dir) / ".coi"
-    config_dir.mkdir(exist_ok=True)
-    config_file = config_dir / "config.toml"
-    config_file.write_text(config_content)
+    # writable_hooks is honored only from trusted-scope config (COI_CONFIG),
+    # never from an untrusted project .coi/config.toml.
+    env = write_trusted_coi_config("[git]\nwritable_hooks = true\n")
 
     # Ensure hooks dir exists
     hooks_dir = Path(workspace_dir) / ".git" / "hooks"
@@ -236,7 +229,7 @@ writable_hooks = true
     # Make workspace writable by container user (CI UID mismatch workaround)
     _make_workspace_writable(workspace_dir)
 
-    # Run command - protection should be disabled via config
+    # Run command - protection is lifted via trusted config
     result = subprocess.run(
         [
             coi_binary,
@@ -249,7 +242,8 @@ writable_hooks = true
         capture_output=True,
         text=True,
         timeout=120,
-        cwd=workspace_dir,  # Run from workspace to pick up .coi/config.toml
+        cwd=workspace_dir,
+        env=env,
     )
 
     # Should succeed
