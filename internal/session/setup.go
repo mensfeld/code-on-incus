@@ -40,6 +40,7 @@ type SetupOptions struct {
 	LimitsConfig          *config.LimitsConfig // Resource and time limits
 	IncusProject          string               // Incus project name
 	ProtectedPaths        []string             // Paths to mount read-only for security (e.g., .git/hooks, .vscode)
+	SecretPaths           []string             // Workspace-relative globs to MASK (empty read-only mount hides contents) — issue #494
 	PreserveWorkspacePath bool                 // Mount workspace at same path as host instead of /workspace
 	ForwardSSHAgent       bool                 // Forward host SSH agent to container
 	ForwardedEnvVars      []string             // Names of host env vars being forwarded (for context file)
@@ -392,6 +393,17 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 					result.HasImmutableProtection = true
 					opts.Logger(fmt.Sprintf("Host-side immutable protection applied: %s", strings.Join(immutablePaths, ", ")))
 				}
+			}
+		}
+
+		// Mask secret paths (issue #494): mount an empty read-only file/dir over
+		// each match so the contained agent can neither read nor modify repo-local
+		// secrets. Independent of protected_paths; non-fatal on failure.
+		if len(opts.SecretPaths) > 0 {
+			if masked, err := SetupSecretMasks(result.Manager, opts.WorkspacePath, containerWorkspacePath, opts.SecretPaths, useShift); err != nil {
+				opts.Logger(fmt.Sprintf("Warning: Failed to mask secret paths: %v", err))
+			} else if len(masked) > 0 {
+				opts.Logger(fmt.Sprintf("Masked secret paths (hidden read-only): %s", strings.Join(masked, ", ")))
 			}
 		}
 
