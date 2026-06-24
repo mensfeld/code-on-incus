@@ -29,7 +29,7 @@ func debugf(format string, args ...interface{}) {
 		l.Printf("[NFT-DEBUG] "+format, args...)
 		return
 	}
-	fmt.Fprintf(os.Stderr, "[NFT-DEBUG] "+format+"\n", args...)
+	fmt.Fprintf(os.Stderr, "[NFT-DEBUG] "+format+"\n", args...) // terminal-sink-ok: fallback only when no session logger is set (non-session/CLI use)
 }
 
 // JournalReader wraps systemd journal for reading kernel logs

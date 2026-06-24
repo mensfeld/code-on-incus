@@ -2,7 +2,13 @@
 
 ## Unreleased
 
+### Added
+
+- **Regression guard against terminal-output leaks (issue #372 class)** — a new test (`internal/sinkguard`) scans the packages whose code runs while a `coi shell` session is interactively attached (`internal/monitor`, `internal/nftmonitor`, `internal/limits`, `internal/network`) and fails CI if any of them writes to a terminal sink (`os.Stdout`/`os.Stderr`/global `log`/`fmt.Print*`/the `print`/`println` builtins). During an attached session the coi process's stdio *is* the user's tmux terminal, so such a write corrupts the AI tool's TUI — the recurring #372 class. The two intentional no-session fallbacks (the `nftmonitor` debug and `internal/network` standard-logger fallbacks, used only when no session logger is set) are exempted by a `// terminal-sink-ok:` marker comment; everything else must route through the file-based `SessionLogger`. This locks the whole class against re-introduction rather than fixing instances one at a time.
+
 ### Changed
+
+- **A single terminal-safe container-stop primitive (`container.StopContainerQuiet`)** — code that stops a container while a session may be attached (the runtime-limit watchdog and the threat responder) now calls one helper that captures the `incus` subprocess output instead of streaming it to `os.Stdout`/`os.Stderr`, replacing two ad-hoc call sites. `container.Manager.Stop`/`StopContainer` remain stream-to-terminal for CLI use; the quiet variant is what during-session callers reach for.
 
 - **The image build script is embedded directly instead of via a generated copy** — `profiles/default/build.sh` was `cp`-ed to `internal/image/embedded/coi_build.sh` (gitignored) on every build so it could be `//go:embed`-ed into the binary. The canonical script now lives at `internal/image/build.sh` (tracked, embedded directly), and `profiles/default/build.sh` is a symlink to it — so it still resides in the default profile, with no duplication and no `cp` step. This removes a stale-embed footgun (`go build`/`go install` without running `make` first previously embedded an out-of-date script) and lets a fresh checkout compile without the Makefile's prepare step. Edit `internal/image/build.sh` (or the `profiles/default/build.sh` symlink — same file).
 

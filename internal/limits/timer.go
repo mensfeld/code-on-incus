@@ -136,15 +136,11 @@ func (tm *TimeoutMonitor) handleTimeout() {
 // it to the session log instead. A fresh timeout context is used so the stop
 // completes even if the session's context is being cancelled concurrently.
 func (tm *TimeoutMonitor) stopContainerQuietly(force bool) error {
-	args := []string{"stop", tm.ContainerName}
-	if force {
-		args = append(args, "--force")
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	out, err := container.IncusOutputContext(ctx, args...)
+	out, err := container.StopContainerQuiet(ctx, tm.ContainerName, force)
 	if s := strings.TrimSpace(out); s != "" {
-		tm.Logger.Printf("[limits] incus %s: %s", strings.Join(args, " "), s)
+		tm.Logger.Printf("[limits] incus stop output: %s", s)
 	}
 	return err
 }
