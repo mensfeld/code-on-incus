@@ -13,6 +13,7 @@ import (
 
 	"github.com/mensfeld/code-on-incus/internal/session"
 	"github.com/spf13/cobra"
+	"golang.org/x/sys/unix"
 )
 
 var overviewRefreshInterval int
@@ -293,14 +294,14 @@ func formatUptime(d time.Duration) string {
 	}
 }
 
-// isTerminal returns true when f is a character device (i.e. a real TTY).
-// Same stdlib-only approach Go's testing package uses, no extra deps.
+// isTerminal returns true when f is a real terminal. It uses the TIOCGWINSZ
+// ioctl rather than os.ModeCharDevice because /dev/null is also a character
+// device: ModeCharDevice would misreport `coi overview > /dev/null` as a TTY and
+// trap it in the refresh loop instead of the one-shot path. This matches
+// build_helpers.go's stdinIsTerminal.
 func isTerminal(f *os.File) bool {
-	info, err := f.Stat()
-	if err != nil {
-		return false
-	}
-	return (info.Mode() & os.ModeCharDevice) != 0
+	_, err := unix.IoctlGetWinsize(int(f.Fd()), unix.TIOCGWINSZ)
+	return err == nil
 }
 
 // renderOverviewToString is a small helper used in tests.
