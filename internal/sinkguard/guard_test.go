@@ -72,11 +72,20 @@ func repoRoot(t *testing.T) string {
 	}
 }
 
-// stripComment removes a line-comment so a forbidden token mentioned only in a
-// comment (e.g. a doc comment referencing os.Stderr) is not flagged.
-func stripComment(line string) string {
+// stringLitRe matches Go string literals — raw (`...`) and interpreted ("...",
+// honoring \" escapes) — so a forbidden token that appears only inside a string
+// (e.g. a log message mentioning os.Stderr, or a "//" inside a URL) is not
+// treated as code.
+var stringLitRe = regexp.MustCompile("`[^`]*`" + `|"(\\.|[^"\\])*"`)
+
+// sanitizeLine strips string-literal contents and then a trailing line comment,
+// leaving only code for the token/regex scan. Strings are removed BEFORE the
+// comment so that a "//" inside a string literal does not prematurely truncate
+// the line and hide a real sink after it.
+func sanitizeLine(line string) string {
+	line = stringLitRe.ReplaceAllString(line, "")
 	if i := strings.Index(line, "//"); i >= 0 {
-		return line[:i]
+		line = line[:i]
 	}
 	return line
 }
@@ -87,37 +96,51 @@ func TestSessionRuntimePackagesDoNotWriteToTerminal(t *testing.T) {
 
 	for _, pkg := range guardedPackages {
 		dir := filepath.Join(root, filepath.FromSlash(pkg))
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			t.Fatalf("read %s: %v", pkg, err)
-		}
-		for _, e := range entries {
-			name := e.Name()
-			if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-				continue
+		// Walk the whole package tree (not just the top-level dir) so a sink in a
+		// future sub-package under a guarded package is also caught.
+		err := filepath.WalkDir(dir, func(path string, d os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
 			}
-			path := filepath.Join(dir, name)
+			if d.IsDir() {
+				if d.Name() == "testdata" {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			name := d.Name()
+			if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+				return nil
+			}
 			data, err := os.ReadFile(path)
 			if err != nil {
-				t.Fatalf("read %s: %v", path, err)
+				return err
+			}
+			rel, err := filepath.Rel(root, path)
+			if err != nil {
+				rel = path
 			}
 			for i, line := range strings.Split(string(data), "\n") {
 				if strings.Contains(line, allowMarker) {
 					continue
 				}
-				code := stripComment(line)
+				code := sanitizeLine(line)
 				flagged := false
 				for _, tok := range forbidden {
 					if strings.Contains(code, tok) {
-						violations = append(violations, formatViolation(pkg, name, i+1, tok, line))
+						violations = append(violations, formatViolation(rel, i+1, tok, line))
 						flagged = true
 						break
 					}
 				}
 				if !flagged && builtinSinkRe.MatchString(code) {
-					violations = append(violations, formatViolation(pkg, name, i+1, "print/println builtin", line))
+					violations = append(violations, formatViolation(rel, i+1, "print/println builtin", line))
 				}
 			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("walk %s: %v", pkg, err)
 		}
 	}
 
@@ -129,8 +152,8 @@ func TestSessionRuntimePackagesDoNotWriteToTerminal(t *testing.T) {
 	}
 }
 
-func formatViolation(pkg, file string, line int, tok, src string) string {
-	return pkg + "/" + file + ":" + strconv.Itoa(line) + ": " + tok + "  ->  " + strings.TrimSpace(src)
+func formatViolation(relPath string, line int, tok, src string) string {
+	return relPath + ":" + strconv.Itoa(line) + ": " + tok + "  ->  " + strings.TrimSpace(src)
 }
 
 // TestBuiltinSinkRegex locks the print/println matcher: it must catch the
@@ -151,13 +174,46 @@ func TestBuiltinSinkRegex(t *testing.T) {
 		`	foo.print("method, not builtin")`,
 	}
 	for _, s := range shouldMatch {
-		if !builtinSinkRe.MatchString(stripComment(s)) {
+		if !builtinSinkRe.MatchString(sanitizeLine(s)) {
 			t.Errorf("expected builtin match for: %q", s)
 		}
 	}
 	for _, s := range shouldNotMatch {
-		if builtinSinkRe.MatchString(stripComment(s)) {
+		if builtinSinkRe.MatchString(sanitizeLine(s)) {
 			t.Errorf("unexpected builtin match for: %q", s)
 		}
+	}
+}
+
+// TestSanitizeLine locks that string literals and comments are stripped before
+// scanning: a sink token inside a string/comment must NOT be flagged (false
+// positive), but a real sink on a line whose string contains "//" must STILL be
+// seen (false negative).
+func TestSanitizeLine(t *testing.T) {
+	// A forbidden token only inside a string or comment -> removed (not flagged).
+	notSink := []string{
+		`	errMsg := "writes to os.Stderr on failure"`,
+		`	url := "https://example.com/x"`,
+		`	doThing() // see os.Stderr docs`,
+		"\ts := `raw with os.Stdout inside`",
+		`	msg := "use fmt.Println here"`,
+	}
+	for _, s := range notSink {
+		code := sanitizeLine(s)
+		for _, tok := range forbidden {
+			if strings.Contains(code, tok) {
+				t.Errorf("false positive: %q matched %q after sanitize -> %q", s, tok, code)
+			}
+		}
+		if builtinSinkRe.MatchString(code) {
+			t.Errorf("false positive (builtin): %q -> %q", s, code)
+		}
+	}
+
+	// A real sink on a line whose STRING contains "//" must survive sanitize.
+	realSink := `	u := "http://x"; fmt.Fprintln(os.Stderr, u)`
+	if !strings.Contains(sanitizeLine(realSink), "os.Stderr") {
+		t.Errorf("false negative: real os.Stderr sink hidden by // inside string: %q -> %q",
+			realSink, sanitizeLine(realSink))
 	}
 }
