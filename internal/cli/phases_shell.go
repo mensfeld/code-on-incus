@@ -324,6 +324,7 @@ func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.P
 				LimitsConfig:          limitsConfig,
 				IncusProject:          a.cfg.Incus.Project,
 				ProtectedPaths:        protectedPaths,
+				SecretPaths:           a.cfg.Security.SecretPaths,
 				HostImmutable:         a.cfg.Security.IsHostImmutableEnabled(),
 				PreserveWorkspacePath: a.cfg.Paths.PreserveWorkspacePath,
 				ForwardSSHAgent:       config.BoolVal(a.cfg.SSH.ForwardAgent),

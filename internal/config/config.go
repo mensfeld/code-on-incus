@@ -119,6 +119,15 @@ type SecurityConfig struct {
 	// remove protections (see sanitizeUntrustedSecurity), so a cloned repo cannot
 	// turn off read-only protection of host-auto-executing files.
 	WritablePaths []string `toml:"writable_paths"`
+	// SecretPaths is a list of workspace-relative globs to MASK inside the
+	// container: each match is mounted read-only over an empty file/dir so the
+	// contained agent can neither read its contents nor modify it (e.g.
+	// [".env", "*.pem", "secrets/**"]). The host file is left untouched. Unlike
+	// protected_paths (read-only, but contents stay readable), this hides
+	// contents — repo-local secret read-exfil + tamper protection. Purely
+	// additive, so it is honored from any scope and merges as a union: an
+	// untrusted project config can only ADD denies, never remove them.
+	SecretPaths []string `toml:"secret_paths"`
 }
 
 // GetEffectiveProtectedPaths returns the combined list of protected paths
@@ -433,6 +442,7 @@ func synthesizeDefaultProfile(cfg *Config) ProfileConfig {
 	security.ProtectedPaths = cloneSlice(cfg.Security.ProtectedPaths)
 	security.AdditionalProtectedPaths = cloneSlice(cfg.Security.AdditionalProtectedPaths)
 	security.WritablePaths = cloneSlice(cfg.Security.WritablePaths)
+	security.SecretPaths = cloneSlice(cfg.Security.SecretPaths)
 	monitoring := cfg.Monitoring
 	timezone := cfg.Timezone
 
@@ -1067,6 +1077,9 @@ func mergeSecurityInto(dst *SecurityConfig, src *SecurityConfig) {
 	}
 	if len(src.WritablePaths) > 0 {
 		dst.WritablePaths = MergeStringSliceUnique(dst.WritablePaths, src.WritablePaths)
+	}
+	if len(src.SecretPaths) > 0 {
+		dst.SecretPaths = MergeStringSliceUnique(dst.SecretPaths, src.SecretPaths)
 	}
 }
 

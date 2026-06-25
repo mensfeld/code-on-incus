@@ -368,10 +368,11 @@ func (a *App) applyWorkspaceMounts(mgr container.ContainerManager, containerName
 		}
 	}
 
-	if !a.cfg.Security.DisableProtection {
-		if err := a.applySecurityMounts(mgr, absWorkspace, *containerWorkspacePath, containerName, useShift); err != nil {
-			return err
-		}
+	// Called unconditionally: applySecurityMounts internally skips the read-only
+	// protected_paths when disable_protection is set (GetEffectiveProtectedPaths
+	// returns nil), but secret-path masking is a separate opt-in that still runs.
+	if err := a.applySecurityMounts(mgr, absWorkspace, *containerWorkspacePath, containerName, useShift); err != nil {
+		return err
 	}
 	return nil
 }
@@ -402,22 +403,35 @@ func addMount(mgr container.ContainerManager, mount session.MountEntry, useShift
 // applySecurityMounts sets up read-only protection mounts and optional host immutable flags.
 func (a *App) applySecurityMounts(mgr container.ContainerManager, absWorkspace, containerWorkspacePath, containerName string, useShift bool) error {
 	protectedPaths := filterWritableGitHooks(a.cfg.Security.GetEffectiveProtectedPaths(), a.cfg)
-	if len(protectedPaths) == 0 {
-		return nil
-	}
-	if err := session.SetupSecurityMounts(mgr, absWorkspace, containerWorkspacePath, protectedPaths, useShift); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: Failed to setup security mounts: %v\n", err)
-	} else {
-		actualPaths := session.GetProtectedPathsForLogging(absWorkspace, protectedPaths)
-		if len(actualPaths) > 0 {
-			fmt.Fprintf(os.Stderr, "Protected paths (mounted read-only): %s\n", strings.Join(actualPaths, ", "))
+	if len(protectedPaths) > 0 {
+		if err := session.SetupSecurityMounts(mgr, absWorkspace, containerWorkspacePath, protectedPaths, useShift); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Failed to setup security mounts: %v\n", err)
+		} else {
+			actualPaths := session.GetProtectedPathsForLogging(absWorkspace, protectedPaths)
+			if len(actualPaths) > 0 {
+				fmt.Fprintf(os.Stderr, "Protected paths (mounted read-only): %s\n", strings.Join(actualPaths, ", "))
+			}
+		}
+		if a.cfg.Security.IsHostImmutableEnabled() {
+			logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
+			immutablePaths := session.ApplyImmutable(absWorkspace, protectedPaths, containerName, logFn)
+			if len(immutablePaths) > 0 {
+				fmt.Fprintf(os.Stderr, "Host-side immutable protection applied: %s\n", strings.Join(immutablePaths, ", "))
+			}
 		}
 	}
-	if a.cfg.Security.IsHostImmutableEnabled() {
-		logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
-		immutablePaths := session.ApplyImmutable(absWorkspace, protectedPaths, containerName, logFn)
-		if len(immutablePaths) > 0 {
-			fmt.Fprintf(os.Stderr, "Host-side immutable protection applied: %s\n", strings.Join(immutablePaths, ", "))
+
+	// Mask secret paths (issue #494) — independent of protected_paths.
+	if len(a.cfg.Security.SecretPaths) > 0 {
+		masked, skipped, err := session.SetupSecretMasks(mgr, absWorkspace, containerWorkspacePath, a.cfg.Security.SecretPaths, useShift)
+		for _, s := range skipped {
+			fmt.Fprintf(os.Stderr, "Warning: secret_paths entry %q is NOT masked (missing or a symlink resolving outside the workspace) — not hidden from the agent\n", s)
+		}
+		if err != nil {
+			return fmt.Errorf("failed to mask secret paths: %w", err)
+		}
+		if len(masked) > 0 {
+			fmt.Fprintf(os.Stderr, "Masked secret paths (hidden read-only): %s\n", strings.Join(masked, ", "))
 		}
 	}
 	return nil
