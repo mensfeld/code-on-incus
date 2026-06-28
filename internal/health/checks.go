@@ -402,9 +402,9 @@ func CheckNft(netCfg config.NetworkConfig) HealthCheck {
 	mode := netCfg.Mode
 	sudoAllowed := netCfg.SudoAllowed()
 	installed := network.NftInstalled()
-	// Only probe passwordless sudo when config permits it — a user who set
-	// use_sudo=false has opted out of COI invoking sudo at all.
-	available := sudoAllowed && network.NftAvailable()
+	// NftUsable returns false (without probing sudo) when use_sudo=false — a user
+	// who opted out of COI invoking sudo at all.
+	available := network.NftUsable(&netCfg)
 	masquerade := network.MasqueradeEnabled()
 	isColima := isColimaEnvironment()
 
@@ -569,6 +569,14 @@ func CheckIptablesSudo() HealthCheck {
 			Name:    "iptables_sudo",
 			Status:  StatusOK,
 			Message: "macOS — not required",
+		}
+	}
+
+	if !network.SudoEnabled() {
+		return HealthCheck{
+			Name:    "iptables_sudo",
+			Status:  StatusOK,
+			Message: "skipped — [network] use_sudo = false (COI does not invoke sudo)",
 		}
 	}
 

@@ -56,6 +56,9 @@ func CleanupNFTMonitoringRules(containerIP string) error {
 
 // runNFTCommand executes an nft command with proper sudo handling
 func runNFTCommand(args ...string) ([]byte, error) {
+	if !SudoEnabled() {
+		return nil, fmt.Errorf("nft command skipped: sudo disabled (use_sudo=false)")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), NFTCommandTimeout)
 	defer cancel()
 

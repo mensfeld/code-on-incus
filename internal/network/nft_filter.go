@@ -237,6 +237,9 @@ func RemoveOpenModeRules(containerIP string) error {
 // within 5 s (e.g. nft unavailable, unusual networking) the error is returned
 // and the caller should log a warning and continue.
 func ApplyBootBlockRule(containerName string) error {
+	if !SudoEnabled() {
+		return nil // use_sudo=false: best-effort boot block skipped (no sudo)
+	}
 	if !NftInstalled() {
 		return fmt.Errorf("nft not installed, boot block skipped")
 	}
@@ -284,6 +287,9 @@ func ApplyBootBlockRule(containerName string) error {
 // RemoveBootBlockRule removes the temporary boot-block rule installed by
 // ApplyBootBlockRule. Safe to call even if no rule was ever installed.
 func RemoveBootBlockRule(containerName string) error {
+	if !SudoEnabled() {
+		return nil // nothing was applied without sudo
+	}
 	return deleteNFTRulesByComment(bootBlockComment(containerName))
 }
 
@@ -633,8 +639,13 @@ func NftInstalled() bool {
 	return err == nil
 }
 
-// NftAvailable checks if nft is available and passwordless sudo is configured
+// NftAvailable checks if nft is available and passwordless sudo is configured.
+// Returns false without probing when sudo is disabled (use_sudo=false), so no
+// callsite that gates on NftAvailable() ever shells out to sudo.
 func NftAvailable() bool {
+	if !SudoEnabled() {
+		return false
+	}
 	cmd := exec.Command("sudo", "-n", "nft", "list", "tables")
 	return cmd.Run() == nil
 }
@@ -718,6 +729,9 @@ func IptablesAvailable() bool {
 
 // ForwardPolicyIsDrop checks if the iptables FORWARD chain policy is DROP
 func ForwardPolicyIsDrop() bool {
+	if !SudoEnabled() {
+		return false // can't (and won't) probe iptables without sudo
+	}
 	cmd := exec.Command("sudo", "-n", "iptables", "-L", "FORWARD", "-n")
 	output, err := cmd.Output()
 	if err != nil {
@@ -733,6 +747,9 @@ func ForwardPolicyIsDrop() bool {
 // NeedsIptablesFallback returns true when nft is not available but
 // the FORWARD chain policy is DROP and iptables is available as a fallback
 func NeedsIptablesFallback() bool {
+	if !SudoEnabled() {
+		return false // iptables fallback also needs sudo
+	}
 	return !NftAvailable() && ForwardPolicyIsDrop() && IptablesAvailable()
 }
 

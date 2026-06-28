@@ -5,6 +5,7 @@ import (
 
 	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
+	"github.com/mensfeld/code-on-incus/internal/network"
 	"github.com/spf13/cobra"
 )
 
@@ -77,6 +78,11 @@ Examples:
 
 		// Apply Incus configuration from config file
 		container.Configure(app.cfg.Incus.Project, app.cfg.Incus.CodeUser, app.cfg.Incus.CodeUID)
+
+		// Honor [network] use_sudo process-wide so every network sudo entry point
+		// (nft probe, iptables fallback, boot block, health/build/clean) behaves
+		// as if passwordless sudo were unavailable when disabled.
+		network.SetSudoAllowed(app.cfg.Network.SudoAllowed())
 
 		// Apply config defaults to flags that weren't explicitly set
 		if !cmd.Flags().Changed("persistent") {

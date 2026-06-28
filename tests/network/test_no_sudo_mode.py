@@ -85,7 +85,7 @@ def test_allowlist_mode_fails_clearly_without_sudo(
     assert SENTINEL not in r.stdout
 
 
-def _nft_check_status(coi_binary, env):
+def _health_checks(coi_binary, env):
     r = subprocess.run(
         [coi_binary, "health", "--format", "json"],
         capture_output=True,
@@ -93,8 +93,11 @@ def _nft_check_status(coi_binary, env):
         timeout=30,
         env=env,
     )
-    data = json.loads(r.stdout)
-    return data["checks"]["nft"]["status"]
+    return json.loads(r.stdout)["checks"]
+
+
+def _nft_check_status(coi_binary, env):
+    return _health_checks(coi_binary, env)["nft"]["status"]
 
 
 def test_health_open_mode_use_sudo_false_not_failed(coi_binary, tmp_path):
@@ -103,6 +106,23 @@ def test_health_open_mode_use_sudo_false_not_failed(coi_binary, tmp_path):
     env = _trusted_config(tmp_path, '[network]\nmode = "open"\nuse_sudo = false\n')
     status = _nft_check_status(coi_binary, env)
     assert status == "ok", f"nft check should be OK for open + use_sudo=false, got {status!r}"
+
+
+def test_health_open_mode_use_sudo_false_fully_clean(coi_binary, tmp_path):
+    """The WHOLE `coi health` report must be sudo-clean with use_sudo=false + open:
+    no nft/iptables check should fail or nag the user to configure passwordless
+    sudo (the feature's promise — not just the nft check)."""
+    env = _trusted_config(tmp_path, '[network]\nmode = "open"\nuse_sudo = false\n')
+    checks = _health_checks(coi_binary, env)
+    # The sudo-related checks must not be failed, and must not tell the user to
+    # add a passwordless-sudo rule they deliberately declined.
+    for name in ("nft", "iptables_sudo"):
+        c = checks.get(name, {})
+        assert c.get("status") != "failed", f"{name} should not be failed: {c}"
+        assert (
+            "NOPASSWD" not in c.get("message", "")
+            and "passwordless sudo" not in c.get("message", "").lower()
+        ), f"{name} still nags about passwordless sudo: {c.get('message')!r}"
 
 
 def test_health_restricted_use_sudo_false_warns_not_fails(coi_binary, tmp_path):
