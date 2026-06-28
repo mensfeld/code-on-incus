@@ -639,6 +639,14 @@ func NftAvailable() bool {
 	return cmd.Run() == nil
 }
 
+// NftUsable reports whether COI can actually use nft for the given config:
+// config must permit sudo (`[network] use_sudo` != false) AND the passwordless
+// sudo probe must succeed. When use_sudo=false this returns false without ever
+// invoking sudo, so COI behaves as if passwordless sudo were unavailable.
+func NftUsable(cfg *config.NetworkConfig) bool {
+	return cfg.SudoAllowed() && NftAvailable()
+}
+
 // UfwInstalled checks if the ufw binary is installed
 func UfwInstalled() bool {
 	_, err := exec.LookPath("ufw")

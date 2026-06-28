@@ -450,7 +450,7 @@ func TestCheckNft_DetailedStatus(t *testing.T) {
 
 	for _, mode := range modes {
 		t.Run(string(mode), func(t *testing.T) {
-			result := CheckNft(mode)
+			result := CheckNft(config.NetworkConfig{Mode: mode})
 
 			if result.Name != "nft" {
 				t.Errorf("Expected check name 'nft', got %q", result.Name)
