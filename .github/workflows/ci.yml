@@ -119,12 +119,12 @@ jobs:
             description: "Persistent shell session tests"
           - name: network
             path: tests/network
+            description: "Network isolation tests"
 
           - name: no-sudoers
             path: tests/network/test_no_sudo_mode.py
             no_sudoers: true
             description: "Non-sudoers path (#508): [network] use_sudo=false, no passwordless nft sudo rule — restricted/allowlist fail clearly, open mode + health work"
-            description: "Network isolation tests"
           - name: container-file
             path: tests/container tests/file
             description: "Container and file operations"
