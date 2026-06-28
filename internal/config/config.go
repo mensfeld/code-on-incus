@@ -1012,6 +1012,9 @@ func mergeNetworkInto(dst *NetworkConfig, src *NetworkConfig) {
 	if src.AllowLocalNetworkAccess != nil {
 		dst.AllowLocalNetworkAccess = src.AllowLocalNetworkAccess
 	}
+	if src.UseSudo != nil {
+		dst.UseSudo = src.UseSudo
+	}
 	if src.AllowedDomains != nil {
 		dst.AllowedDomains = src.AllowedDomains
 	}
