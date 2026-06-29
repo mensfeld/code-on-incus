@@ -198,6 +198,9 @@ func parseJSON(data string, v interface{}) error {
 // CleanupOrphanedVeths removes orphaned veth interfaces
 // Returns the number of veths cleaned up and any error
 func CleanupOrphanedVeths(veths []string, logger func(string)) (int, error) {
+	if !network.SudoEnabled() {
+		return 0, nil // use_sudo=false: cannot `sudo ip link delete`
+	}
 	if logger == nil {
 		logger = func(msg string) { log.Println(msg) }
 	}
@@ -238,6 +241,9 @@ func CleanupOrphanedNftRules(rules []string, logger func(string)) (int, error) {
 // DetectOrphanedNFTMonitorRules finds nft monitoring rules for IPs that don't belong to any running container
 // These are rules with prefixes: NFT_COI[ip], NFT_DNS[ip], NFT_SUSPICIOUS[ip]
 func DetectOrphanedNFTMonitorRules() ([]string, error) {
+	if !network.SudoEnabled() {
+		return nil, nil // use_sudo=false: cannot enumerate nft rules
+	}
 	// List all rules in the FORWARD chain with handles
 	// Note: -a must come before the command (nft -a list chain...)
 	cmd := exec.Command("sudo", "-n", "nft", "-a", "list", "chain", "ip", "filter", "FORWARD")
@@ -296,6 +302,9 @@ func DetectOrphanedNFTMonitorRules() ([]string, error) {
 
 // CleanupOrphanedNFTMonitorRules removes orphaned nft monitoring rules by handle
 func CleanupOrphanedNFTMonitorRules(handles []string, logger func(string)) (int, error) {
+	if !network.SudoEnabled() {
+		return 0, nil // use_sudo=false: cannot `sudo nft delete`
+	}
 	if logger == nil {
 		logger = func(msg string) { log.Println(msg) }
 	}
@@ -318,6 +327,9 @@ func CleanupOrphanedNFTMonitorRules(handles []string, logger func(string)) (int,
 // DetectOrphanedIptablesBridgeRules finds coi-bridge-forward iptables rules
 // that are left over when no coi containers are running
 func DetectOrphanedIptablesBridgeRules() ([]string, error) {
+	if !network.SudoEnabled() {
+		return nil, nil // use_sudo=false: cannot `sudo iptables -S`
+	}
 	if !network.IptablesAvailable() {
 		return nil, nil
 	}

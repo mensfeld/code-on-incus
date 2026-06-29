@@ -120,6 +120,11 @@ jobs:
           - name: network
             path: tests/network
             description: "Network isolation tests"
+
+          - name: no-sudoers
+            path: tests/network/test_no_sudo_mode.py
+            no_sudoers: true
+            description: "Non-sudoers path (#508): [network] use_sudo=false, no passwordless nft sudo rule — restricted/allowlist fail clearly, open mode + health work"
           - name: container-file
             path: tests/container tests/file
             description: "Container and file operations"
@@ -187,6 +192,8 @@ jobs:
           cache: true
 
       - name: Install system dependencies
+        env:
+          NO_SUDOERS: ${{ matrix.test_group.no_sudoers }}
         run: |
           sudo apt-get update
           sudo apt-get install -y libsystemd-dev nftables
@@ -195,12 +202,22 @@ jobs:
           # Add runner to systemd-journal group for log access
           sudo usermod -aG systemd-journal $USER
 
-          # Configure sudo NOPASSWD for nft commands
-          echo "$USER ALL=(ALL) NOPASSWD: /usr/sbin/nft *" | sudo tee /etc/sudoers.d/coi-nft
-          sudo chmod 0440 /etc/sudoers.d/coi-nft
+          # The no-sudoers lane (#508) deliberately skips the passwordless-nft
+          # sudoers rule the installer would add, to exercise the path where a
+          # user declines it. (Note: GitHub runners still grant the runner
+          # blanket sudo, so the use_sudo=false config flag — not the absence of
+          # this file — is what actually drives the non-privileged behavior the
+          # tests assert.)
+          if [ "$NO_SUDOERS" = "true" ]; then
+            echo "no-sudoers lane: skipping /etc/sudoers.d/coi-nft"
+          else
+            # Configure sudo NOPASSWD for nft commands
+            echo "$USER ALL=(ALL) NOPASSWD: /usr/sbin/nft *" | sudo tee /etc/sudoers.d/coi-nft
+            sudo chmod 0440 /etc/sudoers.d/coi-nft
 
-          # Verify nft access
-          sudo -n nft list ruleset || echo "NFT access configured"
+            # Verify nft access
+            sudo -n nft list ruleset || echo "NFT access configured"
+          fi
 
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0

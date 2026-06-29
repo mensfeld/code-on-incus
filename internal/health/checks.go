@@ -398,9 +398,13 @@ func CheckIPForwarding() HealthCheck {
 }
 
 // CheckNft verifies nft availability and masquerade configuration
-func CheckNft(mode config.NetworkMode) HealthCheck {
+func CheckNft(netCfg config.NetworkConfig) HealthCheck {
+	mode := netCfg.Mode
+	sudoAllowed := netCfg.SudoAllowed()
 	installed := network.NftInstalled()
-	available := network.NftAvailable()
+	// NftUsable returns false (without probing sudo) when use_sudo=false — a user
+	// who opted out of COI invoking sudo at all.
+	available := network.NftUsable(&netCfg)
 	masquerade := network.MasqueradeEnabled()
 	isColima := isColimaEnvironment()
 
@@ -409,6 +413,7 @@ func CheckNft(mode config.NetworkMode) HealthCheck {
 		"nft_available": available,
 		"masquerade":    masquerade,
 		"colima":        isColima,
+		"use_sudo":      sudoAllowed,
 	}
 
 	if mode == config.NetworkModeOpen {
@@ -416,6 +421,18 @@ func CheckNft(mode config.NetworkMode) HealthCheck {
 			Name:    "nft",
 			Status:  StatusOK,
 			Message: "nft not required for open mode",
+			Details: details,
+		}
+	}
+
+	// use_sudo=false with a mode that needs nft is a deliberate opt-out paired
+	// with an incompatible mode. Surface it as a warning (not a hard failure)
+	// pointing at the fix, rather than nagging about configuring sudo.
+	if !sudoAllowed {
+		return HealthCheck{
+			Name:    "nft",
+			Status:  StatusWarning,
+			Message: fmt.Sprintf("use_sudo=false but network mode is %q, which needs nft — set [network] mode = \"open\" (restricted/allowlist require passwordless sudo)", mode),
 			Details: details,
 		}
 	}
@@ -552,6 +569,14 @@ func CheckIptablesSudo() HealthCheck {
 			Name:    "iptables_sudo",
 			Status:  StatusOK,
 			Message: "macOS — not required",
+		}
+	}
+
+	if !network.SudoEnabled() {
+		return HealthCheck{
+			Name:    "iptables_sudo",
+			Status:  StatusOK,
+			Message: "skipped — [network] use_sudo = false (COI does not invoke sudo)",
 		}
 	}
 

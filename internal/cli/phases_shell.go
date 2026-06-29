@@ -412,7 +412,11 @@ func (a *App) startMonitoringPhase(s *shellState) session.Phase {
 			}
 
 			if config.BoolVal(a.cfg.Monitoring.NFT.Enabled) {
-				if err := startNFTMonitoringDaemon(ctx, s.result.ContainerName, a.cfg, s.result.Logger, &s.nftDaemon); err != nil {
+				if !a.cfg.Network.SudoAllowed() {
+					// use_sudo=false: nft monitoring needs sudo nft, so skip it
+					// cleanly rather than attempting sudo and warning on failure.
+					fmt.Fprintf(os.Stderr, "NFT network monitoring skipped: [network] use_sudo = false\n")
+				} else if err := startNFTMonitoringDaemon(ctx, s.result.ContainerName, a.cfg, s.result.Logger, &s.nftDaemon); err != nil {
 					fmt.Fprintf(os.Stderr, "Warning: Failed to start NFT monitoring: %v\n", err)
 				}
 			}

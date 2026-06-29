@@ -69,7 +69,7 @@ func RunAllChecks(cfg *config.Config, verbose bool) *HealthResult {
 	// Networking checks
 	checks["network_bridge"] = CheckNetworkBridge()
 	checks["ip_forwarding"] = CheckIPForwarding()
-	checks["nft"] = CheckNft(cfg.Network.Mode)
+	checks["nft"] = CheckNft(cfg.Network)
 	checks["bridge_forward_rules"] = CheckBridgeForwardRules()
 	checks["iptables_sudo"] = CheckIptablesSudo()
 	checks["docker_forward_policy"] = CheckDockerForwardPolicy()

@@ -207,13 +207,19 @@ const (
 
 // NetworkConfig contains network isolation settings
 type NetworkConfig struct {
-	Mode                    NetworkMode          `toml:"mode"`
-	BlockPrivateNetworks    *bool                `toml:"block_private_networks"`
-	BlockMetadataEndpoint   *bool                `toml:"block_metadata_endpoint"`
-	AllowedDomains          []string             `toml:"allowed_domains"`
-	RefreshIntervalMinutes  int                  `toml:"refresh_interval_minutes"`
-	AllowLocalNetworkAccess *bool                `toml:"allow_local_network_access"` // Allow established connections from entire local network (not just gateway)
-	Logging                 NetworkLoggingConfig `toml:"logging"`
+	Mode                    NetworkMode `toml:"mode"`
+	BlockPrivateNetworks    *bool       `toml:"block_private_networks"`
+	BlockMetadataEndpoint   *bool       `toml:"block_metadata_endpoint"`
+	AllowedDomains          []string    `toml:"allowed_domains"`
+	RefreshIntervalMinutes  int         `toml:"refresh_interval_minutes"`
+	AllowLocalNetworkAccess *bool       `toml:"allow_local_network_access"` // Allow established connections from entire local network (not just gateway)
+	// UseSudo controls whether COI may invoke `sudo` for network operations (nft,
+	// iptables). Defaults to true. When false, COI never shells out to sudo: it
+	// behaves as if passwordless sudo were unavailable, so `restricted`/`allowlist`
+	// modes error out (no silent downgrade) and `open` mode runs without privileged
+	// rules. For users who decline the installer's /etc/sudoers.d/coi-nft rule.
+	UseSudo *bool                `toml:"use_sudo"`
+	Logging NetworkLoggingConfig `toml:"logging"`
 }
 
 // NetworkLoggingConfig contains network logging settings
@@ -545,6 +551,13 @@ func BoolVal(p *bool) bool {
 		return false
 	}
 	return *p
+}
+
+// SudoAllowed reports whether COI may invoke `sudo` for network operations.
+// Defaults to true; set `[network] use_sudo = false` to opt out (no sudoers
+// rule required, at the cost of restricted/allowlist enforcement).
+func (n *NetworkConfig) SudoAllowed() bool {
+	return n == nil || n.UseSudo == nil || *n.UseSudo
 }
 
 // IntVal dereferences a *int config pointer, returning 0 if nil.
@@ -998,6 +1011,9 @@ func mergeNetworkInto(dst *NetworkConfig, src *NetworkConfig) {
 	}
 	if src.AllowLocalNetworkAccess != nil {
 		dst.AllowLocalNetworkAccess = src.AllowLocalNetworkAccess
+	}
+	if src.UseSudo != nil {
+		dst.UseSudo = src.UseSudo
 	}
 	if src.AllowedDomains != nil {
 		dst.AllowedDomains = src.AllowedDomains

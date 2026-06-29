@@ -30,7 +30,10 @@ your config file (.coi/config.toml in your workspace, or the profile's
 config.toml):
 
   [network]
-  mode = "open"`
+  mode = "open"
+
+If you have deliberately declined passwordless sudo (use_sudo = false), note
+that restricted/allowlist modes cannot be enforced without it — use open mode.`
 
 // Manager provides high-level network isolation management for containers
 type Manager struct {
@@ -88,7 +91,7 @@ func (m *Manager) SetupForContainer(ctx context.Context, containerName string) e
 	case config.NetworkModeOpen:
 		m.logger.Println("Network mode: open (no restrictions)")
 		// Add ACCEPT rules via nft so traffic flows even when FORWARD policy is DROP
-		if NftAvailable() {
+		if NftUsable(m.config) {
 			containerIP, err := GetContainerIP(containerName)
 			if err != nil {
 				m.logger.Errorf("Warning: could not get container IP for open mode rules: %v", err)
@@ -100,7 +103,7 @@ func (m *Manager) SetupForContainer(ctx context.Context, containerName string) e
 					m.logger.Errorf("Warning: could not add open mode rules: %v", err)
 				}
 			}
-		} else if NeedsIptablesFallback() {
+		} else if m.config.SudoAllowed() && NeedsIptablesFallback() {
 			bridgeName, err := GetIncusBridgeName()
 			if err != nil {
 				m.logger.Errorf("Warning: could not get bridge name for iptables fallback: %v", err)
@@ -168,8 +171,8 @@ func (m *Manager) purgeStaleRulesForIP(containerIP string) {
 func (m *Manager) setupRestricted(ctx context.Context, containerName string) error {
 	m.logger.Println("Network mode: restricted (blocking local/internal networks)")
 
-	// Check if nft is available
-	if !NftAvailable() {
+	// Check if nft is available (and that sudo is permitted by config)
+	if !NftUsable(m.config) {
 		return fmt.Errorf("%s", errNftNotAvailable)
 	}
 
@@ -229,8 +232,8 @@ func (m *Manager) setupRestricted(ctx context.Context, containerName string) err
 func (m *Manager) setupAllowlist(ctx context.Context, containerName string) error {
 	m.logger.Println("Network mode: allowlist (domain-based filtering)")
 
-	// Check if nft is available
-	if !NftAvailable() {
+	// Check if nft is available (and that sudo is permitted by config)
+	if !NftUsable(m.config) {
 		return fmt.Errorf("%s", errNftNotAvailable)
 	}
 
@@ -487,7 +490,7 @@ func (m *Manager) Teardown(ctx context.Context, containerName string) error {
 
 	// For open mode, also clean up nft ACCEPT rules created by EnsureOpenModeRules()
 	if m.config.Mode == config.NetworkModeOpen {
-		if !NftAvailable() && m.iptablesBridgeName == "" {
+		if !NftUsable(m.config) && m.iptablesBridgeName == "" {
 			return nil // No nft and no iptables fallback, no rules to clean up
 		}
 
