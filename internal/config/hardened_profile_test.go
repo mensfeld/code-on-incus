@@ -4,10 +4,10 @@ import (
 	"testing"
 )
 
-// The built-in "review" profile must be available without any disk config and,
+// The built-in "hardened" profile must be available without any disk config and,
 // when applied, must harden the resolved config — overriding even a base config
 // that was deliberately weakened (open network, SSH agent forwarding, persistent).
-func TestReviewProfile_HardensResolvedConfig(t *testing.T) {
+func TestHardenedProfile_HardensResolvedConfig(t *testing.T) {
 	cfg := GetDefaultConfig()
 	// Deliberately weakened / risky base settings the preset must override.
 	yes := true
@@ -16,9 +16,9 @@ func TestReviewProfile_HardensResolvedConfig(t *testing.T) {
 	cfg.Container.Persistent = &yes
 	cfg.Security.SecretPaths = []string{"custom.secret"} // user's own — must be kept (union)
 
-	cfg.Profiles["review"] = synthesizeReviewProfile()
-	if err := cfg.ApplyProfile("review"); err != nil {
-		t.Fatalf("ApplyProfile(review): %v", err)
+	cfg.Profiles["hardened"] = synthesizeHardenedProfile()
+	if err := cfg.ApplyProfile("hardened"); err != nil {
+		t.Fatalf("ApplyProfile(hardened): %v", err)
 	}
 
 	if cfg.Network.Mode != NetworkModeRestricted {
@@ -51,7 +51,7 @@ func TestReviewProfile_HardensResolvedConfig(t *testing.T) {
 	if !have["custom.secret"] {
 		t.Error("user's secret_paths entry must be preserved (union merge)")
 	}
-	for _, want := range ReviewProfileSecretPaths {
+	for _, want := range HardenedProfileSecretPaths {
 		if !have[want] {
 			t.Errorf("preset secret path %q missing from merged secret_paths", want)
 		}
@@ -59,12 +59,12 @@ func TestReviewProfile_HardensResolvedConfig(t *testing.T) {
 }
 
 // The preset must be injected as a built-in (no disk profile required), like "default".
-func TestReviewProfile_InjectedAsBuiltin(t *testing.T) {
-	p := synthesizeReviewProfile()
+func TestHardenedProfile_InjectedAsBuiltin(t *testing.T) {
+	p := synthesizeHardenedProfile()
 	if p.Source != "(built-in)" {
-		t.Errorf("review profile Source = %q, want (built-in)", p.Source)
+		t.Errorf("hardened profile Source = %q, want (built-in)", p.Source)
 	}
 	if p.Network == nil || p.Network.Mode != NetworkModeRestricted {
-		t.Fatal("review profile must pin restricted network mode")
+		t.Fatal("hardened profile must pin restricted network mode")
 	}
 }

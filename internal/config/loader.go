@@ -59,11 +59,11 @@ func Load() (*Config, error) {
 		cfg.Profiles["default"] = synthesizeDefaultProfile(cfg)
 	}
 
-	// Inject built-in "review" profile: a hardened preset for opening untrusted
+	// Inject built-in "hardened" profile: a hardened preset for opening untrusted
 	// repos (restricted network, secret masking, immutability, ephemeral,
 	// no SSH-agent forwarding, monitoring). Overridable by a disk profile.
-	if _, exists := cfg.Profiles["review"]; !exists {
-		cfg.Profiles["review"] = synthesizeReviewProfile()
+	if _, exists := cfg.Profiles["hardened"]; !exists {
+		cfg.Profiles["hardened"] = synthesizeHardenedProfile()
 	}
 
 	// Resolve profile inheritance after all profiles are loaded from all levels

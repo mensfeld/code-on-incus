@@ -428,11 +428,11 @@ Each profile is a self-contained directory (`.coi/profiles/<name>/`) bundling a 
 
 ### Opening an untrusted repo safely
 
-For inspecting code you don't trust, COI ships a built-in **`review`** profile — a one-flag hardened preset:
+For inspecting code you don't trust, COI ships a built-in **`hardened`** profile — a one-flag preset:
 
 ```bash
-coi shell --profile review        # restricted net + secret masking + ephemeral + monitoring
-coi profile info review           # see exactly what it locks down
+coi shell --profile hardened        # restricted net + secret masking + ephemeral + monitoring
+coi profile info hardened           # see exactly what it locks down
 ```
 
 It bundles COI's strongest controls: `network.mode = "restricted"` (no exfil path), workspace secret masking (`.env`, `*.pem`, `secrets/**`, …), host immutability, an **ephemeral** container, **no SSH-agent forwarding**, and real-time threat monitoring with auto-pause/kill. It overrides a weaker global config (a global `mode = "open"` still becomes restricted) and needs no setup.

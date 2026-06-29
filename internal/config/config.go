@@ -479,16 +479,16 @@ func synthesizeDefaultProfile(cfg *Config) ProfileConfig {
 	return p
 }
 
-// ReviewProfileSecretPaths is the default secret-mask set bundled by the
-// built-in "review" profile. Exported so docs/tests can reference one source.
-var ReviewProfileSecretPaths = []string{
+// HardenedProfileSecretPaths is the default secret-mask set bundled by the
+// built-in "hardened" profile. Exported so docs/tests can reference one source.
+var HardenedProfileSecretPaths = []string{
 	".env", "*.pem", "*.key", "secrets/**", "id_rsa", "id_ed25519", ".npmrc", ".netrc",
 }
 
-// synthesizeReviewProfile returns the built-in "review" profile: a hardened
+// synthesizeHardenedProfile returns the built-in "hardened" profile: a hardened
 // preset for opening untrusted / freshly-cloned repositories. It bundles COI's
 // strongest EXISTING controls (no new enforcement, no in-shell policing) so
-// `coi shell --profile review` is a one-flag, maximally-safe way to inspect code
+// `coi shell --profile hardened` is a one-flag, maximally-safe way to inspect code
 // you don't trust.
 //
 // Unlike the "default" profile this is a FIXED baseline, not a clone of the
@@ -499,7 +499,7 @@ var ReviewProfileSecretPaths = []string{
 // *subtract* a globally-configured forward_env, nor force protections back on if
 // the user globally set disable_protection=true. It hardens network egress,
 // secrets, immutability, ephemerality, SSH-agent forwarding, and monitoring.
-func synthesizeReviewProfile() ProfileConfig {
+func synthesizeHardenedProfile() ProfileConfig {
 	t, f := true, false
 	return ProfileConfig{
 		Source: "(built-in)",
@@ -520,7 +520,7 @@ func synthesizeReviewProfile() ProfileConfig {
 		// .claude/settings*.json, .git/hooks, .coi, etc.
 		Security: &SecurityConfig{
 			HostImmutable: &t,
-			SecretPaths:   cloneSlice(ReviewProfileSecretPaths),
+			SecretPaths:   cloneSlice(HardenedProfileSecretPaths),
 		},
 		// Catch in-container exfil / reverse-shell attempts and auto-respond.
 		Monitoring: &MonitoringConfig{
