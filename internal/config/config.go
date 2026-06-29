@@ -479,6 +479,59 @@ func synthesizeDefaultProfile(cfg *Config) ProfileConfig {
 	return p
 }
 
+// ReviewProfileSecretPaths is the default secret-mask set bundled by the
+// built-in "review" profile. Exported so docs/tests can reference one source.
+var ReviewProfileSecretPaths = []string{
+	".env", "*.pem", "*.key", "secrets/**", "id_rsa", "id_ed25519", ".npmrc", ".netrc",
+}
+
+// synthesizeReviewProfile returns the built-in "review" profile: a hardened
+// preset for opening untrusted / freshly-cloned repositories. It bundles COI's
+// strongest EXISTING controls (no new enforcement, no in-shell policing) so
+// `coi shell --profile review` is a one-flag, maximally-safe way to inspect code
+// you don't trust.
+//
+// Unlike the "default" profile this is a FIXED baseline, not a clone of the
+// user's resolved config: it sets only the hardened overrides and lets every
+// other field fall through. It can be overridden by a same-named disk profile.
+//
+// Limitation: profile merges are additive for slice fields, so it cannot
+// *subtract* a globally-configured forward_env, nor force protections back on if
+// the user globally set disable_protection=true. It hardens network egress,
+// secrets, immutability, ephemerality, SSH-agent forwarding, and monitoring.
+func synthesizeReviewProfile() ProfileConfig {
+	t, f := true, false
+	return ProfileConfig{
+		Source: "(built-in)",
+		// Ephemeral: nothing from a risky session persists.
+		Container: ContainerConfig{Persistent: &f},
+		// No exfil path: internet-only, block LAN + cloud metadata endpoints.
+		Network: &NetworkConfig{
+			Mode:                    NetworkModeRestricted,
+			BlockPrivateNetworks:    &t,
+			BlockMetadataEndpoint:   &t,
+			AllowLocalNetworkAccess: &f,
+		},
+		// Never forward the host SSH agent into an untrusted repo's container
+		// (overrides a global forward_agent = true).
+		SSH: &SSHConfig{ForwardAgent: &f},
+		// Host-side immutability on; mask common secret files (union-merged with
+		// any the user already configured). protected_paths defaults already cover
+		// .claude/settings*.json, .git/hooks, .coi, etc.
+		Security: &SecurityConfig{
+			HostImmutable: &t,
+			SecretPaths:   cloneSlice(ReviewProfileSecretPaths),
+		},
+		// Catch in-container exfil / reverse-shell attempts and auto-respond.
+		Monitoring: &MonitoringConfig{
+			Enabled:            &t,
+			AutoPauseOnHigh:    &t,
+			AutoKillOnCritical: &t,
+			NFT:                NFTMonitoringConfig{Enabled: &t},
+		},
+	}
+}
+
 // GetConfigPaths returns the list of config file paths to check (in order).
 // COI looks for configuration in two places:
 //  1. ~/.coi/config.toml        (user, co-located with sessions/storage/logs)
