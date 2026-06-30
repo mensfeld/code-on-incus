@@ -36,6 +36,8 @@ def test_hardened_profile_hardened_settings(coi_binary):
         "host_immutable = true",  # host-side immutability
         "secret_paths = [",  # secret masking bundled
         ".env",  # a sensible default secret
+        "*.tfstate",  # broadened secret-mask defaults (terraform state)
+        ".git-credentials",  # broadened secret-mask defaults
         "enabled = true",  # monitoring on
     ]
     for token in expected:

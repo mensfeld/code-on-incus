@@ -1346,6 +1346,95 @@ func CheckSecretMasking(imageName string) HealthCheck {
 	}
 }
 
+// CheckHostCredentialIsolation proves COI's headline guarantee — host
+// credentials are not exposed to the container unless explicitly mounted — holds
+// at runtime. It plants a decoy in the host home directory, launches a probe
+// container with its own (separate) temp workspace, and confirms the decoy is
+// NOT readable inside by its host path. If it leaks, the host home has been
+// mounted into the container (a containment regression) → StatusFailed.
+func CheckHostCredentialIsolation(imageName string) HealthCheck {
+	const name = "host_credential_isolation"
+	const sentinel = "COI_HOST_CRED_DECOY_DO_NOT_LEAK"
+
+	if imageName == "" {
+		imageName = "coi-default"
+	}
+	if exists, err := container.ImageExists(imageName); err != nil || !exists {
+		return HealthCheck{Name: name, Status: StatusWarning, Message: "Skipped (image not available)"}
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return HealthCheck{Name: name, Status: StatusWarning, Message: fmt.Sprintf("Skipped (home dir: %v)", err)}
+	}
+	// Decoy in the host home ROOT (not inside .ssh/.aws — non-invasive); if COI
+	// ever mounted the host home into a container it would surface here.
+	decoyPath := filepath.Join(homeDir, fmt.Sprintf(".coi-hostcred-decoy-%d", time.Now().UnixNano()))
+	if err := os.WriteFile(decoyPath, []byte(sentinel+"\n"), 0o600); err != nil {
+		return HealthCheck{Name: name, Status: StatusWarning, Message: fmt.Sprintf("Skipped (write decoy: %v)", err)}
+	}
+	defer os.Remove(decoyPath)
+
+	// Separate temp workspace so the probe doesn't mount the host home.
+	workspace, err := os.MkdirTemp("", "coi-hostcred-check-")
+	if err != nil {
+		return HealthCheck{Name: name, Status: StatusWarning, Message: fmt.Sprintf("Skipped (temp dir: %v)", err)}
+	}
+	defer os.RemoveAll(workspace)
+
+	containerName := fmt.Sprintf("coi-hostcred-check-%d", time.Now().UnixNano())
+	if err := container.LaunchContainer(imageName, containerName, ""); err != nil {
+		return HealthCheck{Name: name, Status: StatusFailed, Message: fmt.Sprintf("Failed to launch test container: %v", err)}
+	}
+	defer func() {
+		_ = container.StopContainer(containerName)
+		_ = container.DeleteContainer(containerName)
+	}()
+
+	ready := false
+	for i := 0; i < 30; i++ {
+		if running, err := container.ContainerRunning(containerName); err == nil && running {
+			if _, err := container.IncusOutput("exec", containerName, "--", "echo", "ready"); err == nil {
+				ready = true
+				break
+			}
+		}
+		time.Sleep(1 * time.Second)
+	}
+	if !ready {
+		return HealthCheck{Name: name, Status: StatusFailed, Message: "Test container failed to start within timeout"}
+	}
+
+	mgr := container.NewManager(containerName)
+	if err := mgr.MountDisk("workspace", workspace, "/workspace", true, false); err != nil {
+		return HealthCheck{Name: name, Status: StatusWarning, Message: fmt.Sprintf("Skipped (mount workspace: %v)", err)}
+	}
+
+	// Try to read the host decoy by its absolute host path from inside.
+	out, _ := container.IncusOutput("exec", containerName, "--", "cat", decoyPath)
+	leaked := strings.Contains(out, sentinel)
+
+	details := map[string]interface{}{
+		"host_home":    homeDir,
+		"decoy_path":   decoyPath,
+		"decoy_leaked": leaked,
+	}
+	if leaked {
+		return HealthCheck{
+			Name:    name,
+			Status:  StatusFailed,
+			Message: "Host home is reachable inside the container — host credentials are NOT isolated",
+			Details: details,
+		}
+	}
+	return HealthCheck{
+		Name:    name,
+		Status:  StatusOK,
+		Message: "Host credentials isolated (host home not reachable inside the container)",
+		Details: details,
+	}
+}
+
 // CheckDiskSpace checks available disk space in ~/.coi directory
 func CheckDiskSpace() HealthCheck {
 	homeDir, err := os.UserHomeDir()

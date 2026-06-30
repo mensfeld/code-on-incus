@@ -62,6 +62,28 @@ def test_secret_masking_does_not_leak(health_json):
     )
 
 
+def test_host_credential_isolation_check_present(health_json):
+    """The host_credential_isolation check must always be reported."""
+    _check(health_json, "host_credential_isolation")
+
+
+def test_host_credentials_not_leaked(health_json):
+    """When the probe ran, a decoy planted in the host home must NOT be readable
+    inside the container (COI's 'credentials never exposed' guarantee)."""
+    c = _check(health_json, "host_credential_isolation")
+    status = c.get("status")
+    if status not in ("ok", "failed"):
+        pytest.skip(
+            f"host_credential_isolation probe did not run (status={status}): {c.get('message')}"
+        )
+
+    details = c.get("details") or {}
+    assert details.get("decoy_leaked") is False, (
+        f"HOST CREDENTIAL LEAK: host home is reachable inside the container. {c}"
+    )
+    assert status == "ok", f"host_credential_isolation did not pass: {c.get('message')} {details}"
+
+
 def test_network_restriction_blocks_metadata_endpoint(health_json):
     """When restricted-mode probe ran, it must verify the cloud metadata
     endpoint (169.254.169.254) is blocked."""
