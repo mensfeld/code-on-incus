@@ -88,7 +88,7 @@ func outputHealthText(result *health.HealthResult) error {
 	// Group checks by category
 	categories := map[string][]string{
 		"SYSTEM":        {"os", "kernel_version", "timezone"},
-		"CRITICAL":      {"incus", "permissions", "image", "image_age", "privileged_profile", "security_posture", "immutable_capability"},
+		"CRITICAL":      {"incus", "permissions", "image", "image_age", "privileged_profile", "security_posture", "immutable_capability", "secret_masking"},
 		"NETWORKING":    {"network_bridge", "ip_forwarding", "nft", "bridge_forward_rules", "iptables_sudo", "docker_forward_policy", "ufw_conflict", "container_connectivity", "network_restriction"},
 		"MONITORING":    {"nftables", "systemd_journal", "libsystemd", "monitoring_configuration", "audit_log_directory", "cgroup_availability"},
 		"STORAGE":       {"coi_directory", "sessions_directory", "disk_space", "incus_storage_pools"},
@@ -236,6 +236,7 @@ func formatCheckName(name string) string {
 		"ufw_conflict":             "UFW conflict",
 		"container_connectivity":   "Container connect",
 		"network_restriction":      "Network restriction",
+		"secret_masking":           "Secret masking",
 		"monitoring_configuration": "Monitoring config",
 		"audit_log_directory":      "Audit log dir",
 		"cgroup_availability":      "cgroup v2",
