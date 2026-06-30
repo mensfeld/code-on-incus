@@ -202,7 +202,7 @@ func outputHealthText(result *health.HealthResult) error {
 // formatCheckName converts snake_case check names to Title Case for display
 func formatCheckName(name string) string {
 	// Special cases for better display
-	specialCases := map[string]string{
+	specialCases := map[string]string{ //nolint:gosec // G101 false positive: map of UI display labels (e.g. "host_credential_isolation"), not credentials
 		"os":                        "Operating system",
 		"kernel_version":            "Kernel version",
 		"timezone":                  "Timezone",
