@@ -1171,6 +1171,11 @@ func CheckNetworkRestriction(imageName string) HealthCheck {
 	_, private2Err := container.IncusOutput("exec", containerName, "--", "curl", "-s", "--connect-timeout", "2", "-o", "/dev/null", "http://192.168.0.1:80")
 	private2Blocked := private2Err != nil
 
+	// Test 3: the cloud metadata endpoint (169.254.169.254) is the marquee SSRF
+	// target block_metadata_endpoint defends — verify it's actually unreachable.
+	_, metadataErr := container.IncusOutput("exec", containerName, "--", "curl", "-s", "--connect-timeout", "2", "-o", "/dev/null", "http://169.254.169.254/")
+	metadataBlocked := metadataErr != nil
+
 	details := map[string]interface{}{
 		"container_ip":        containerIP,
 		"gateway_ip":          gatewayIP,
@@ -1178,6 +1183,7 @@ func CheckNetworkRestriction(imageName string) HealthCheck {
 		"private_blocked":     privateBlocked,
 		"private_10_blocked":  privateBlocked,
 		"private_192_blocked": private2Blocked,
+		"metadata_blocked":    metadataBlocked,
 	}
 	if gwErr != nil {
 		details["gateway_read_error"] = gwErr.Error()
@@ -1188,11 +1194,11 @@ func CheckNetworkRestriction(imageName string) HealthCheck {
 	}
 
 	// Evaluate results
-	if externalOK && privateBlocked && private2Blocked {
+	if externalOK && privateBlocked && private2Blocked && metadataBlocked {
 		return HealthCheck{
 			Name:    "network_restriction",
 			Status:  StatusOK,
-			Message: "Restricted mode working (external OK, private networks blocked)",
+			Message: "Restricted mode working (external OK; private networks + metadata endpoint blocked)",
 			Details: details,
 		}
 	}
@@ -1215,10 +1221,127 @@ func CheckNetworkRestriction(imageName string) HealthCheck {
 		}
 	}
 
+	if !metadataBlocked {
+		return HealthCheck{
+			Name:    "network_restriction",
+			Status:  StatusFailed,
+			Message: "Restricted mode broken: cloud metadata endpoint (169.254.169.254) NOT blocked (SSRF exposure)",
+			Details: details,
+		}
+	}
+
 	return HealthCheck{
 		Name:    "network_restriction",
 		Status:  StatusWarning,
 		Message: "Restricted mode partially working",
+		Details: details,
+	}
+}
+
+// CheckSecretMasking proves, at runtime, that workspace secret masking
+// (`[security] secret_paths`) actually hides a secret from inside the container.
+// It plants a decoy secret plus a non-secret marker in a temp workspace, mounts
+// it into an ephemeral container, applies the real masking code path
+// (session.SetupSecretMasks), then reads both files from inside: the marker must
+// be readable (proves the workspace is mounted/readable — the control), and the
+// masked secret must read EMPTY (proves masking works). A leak is StatusFailed.
+func CheckSecretMasking(imageName string) HealthCheck {
+	const name = "secret_masking"
+	const secretSentinel = "COI_SECRET_SENTINEL_DO_NOT_LEAK"
+	const markerSentinel = "COI_MARKER_SENTINEL"
+
+	if imageName == "" {
+		imageName = "coi-default"
+	}
+	if exists, err := container.ImageExists(imageName); err != nil || !exists {
+		return HealthCheck{Name: name, Status: StatusWarning, Message: "Skipped (image not available)"}
+	}
+
+	// Temp workspace with a decoy secret + a readable marker (control).
+	workspace, err := os.MkdirTemp("", "coi-secret-check-")
+	if err != nil {
+		return HealthCheck{Name: name, Status: StatusWarning, Message: fmt.Sprintf("Skipped (temp dir: %v)", err)}
+	}
+	defer os.RemoveAll(workspace)
+	if err := os.WriteFile(filepath.Join(workspace, ".env"), []byte(secretSentinel+"\n"), 0o600); err != nil {
+		return HealthCheck{Name: name, Status: StatusWarning, Message: fmt.Sprintf("Skipped (write secret: %v)", err)}
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "marker.txt"), []byte(markerSentinel+"\n"), 0o644); err != nil {
+		return HealthCheck{Name: name, Status: StatusWarning, Message: fmt.Sprintf("Skipped (write marker: %v)", err)}
+	}
+
+	containerName := fmt.Sprintf("coi-secret-check-%d", time.Now().UnixNano())
+	if err := container.LaunchContainer(imageName, containerName, ""); err != nil {
+		return HealthCheck{Name: name, Status: StatusFailed, Message: fmt.Sprintf("Failed to launch test container: %v", err)}
+	}
+	defer func() {
+		_ = container.StopContainer(containerName)
+		_ = container.DeleteContainer(containerName)
+	}()
+
+	// Wait for readiness (mirrors CheckNetworkRestriction).
+	ready := false
+	for i := 0; i < 30; i++ {
+		if running, err := container.ContainerRunning(containerName); err == nil && running {
+			if _, err := container.IncusOutput("exec", containerName, "--", "echo", "ready"); err == nil {
+				ready = true
+				break
+			}
+		}
+		time.Sleep(1 * time.Second)
+	}
+	if !ready {
+		return HealthCheck{Name: name, Status: StatusFailed, Message: "Test container failed to start within timeout"}
+	}
+
+	mgr := container.NewManager(containerName)
+	const containerWorkspace = "/workspace"
+	const useShift = true // matches COI's default workspace mount
+	if err := mgr.MountDisk("workspace", workspace, containerWorkspace, useShift, false); err != nil {
+		return HealthCheck{Name: name, Status: StatusWarning, Message: fmt.Sprintf("Skipped (mount workspace: %v)", err)}
+	}
+
+	// Apply the REAL masking code path.
+	masked, _, maskErr := session.SetupSecretMasks(mgr, workspace, containerWorkspace, []string{".env"}, useShift)
+	if maskErr != nil || len(masked) == 0 {
+		return HealthCheck{Name: name, Status: StatusFailed, Message: fmt.Sprintf("Failed to apply secret masks: %v", maskErr)}
+	}
+
+	markerOut, _ := container.IncusOutput("exec", containerName, "--", "cat", containerWorkspace+"/marker.txt")
+	secretOut, _ := container.IncusOutput("exec", containerName, "--", "cat", containerWorkspace+"/.env")
+
+	controlReadable := strings.Contains(markerOut, markerSentinel)
+	secretLeaked := strings.Contains(secretOut, secretSentinel)
+
+	details := map[string]interface{}{
+		"masked_paths":     masked,
+		"control_readable": controlReadable,
+		"secret_leaked":    secretLeaked,
+	}
+
+	if secretLeaked {
+		return HealthCheck{
+			Name:    name,
+			Status:  StatusFailed,
+			Message: "Secret masking INEFFECTIVE: a masked secret_paths file is readable inside the container",
+			Details: details,
+		}
+	}
+	if !controlReadable {
+		// The masked file read empty, but so did the control marker — can't
+		// distinguish working masking from a broken/unreadable mount. Don't claim
+		// success on an inconclusive probe.
+		return HealthCheck{
+			Name:    name,
+			Status:  StatusWarning,
+			Message: "Could not verify secret masking (probe workspace not readable inside container)",
+			Details: details,
+		}
+	}
+	return HealthCheck{
+		Name:    name,
+		Status:  StatusOK,
+		Message: "Secret masking working (masked secret_paths read empty inside the container)",
 		Details: details,
 	}
 }
