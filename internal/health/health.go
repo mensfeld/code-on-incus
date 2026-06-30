@@ -95,6 +95,10 @@ func RunAllChecks(cfg *config.Config, verbose bool) *HealthResult {
 	checks["container_connectivity"] = CheckContainerConnectivity(cfg.Container.Image)
 	checks["network_restriction"] = CheckNetworkRestriction(cfg.Container.Image)
 
+	// Runtime isolation proof: verify secret_paths masking actually hides a
+	// planted decoy secret from inside a container (not just that config parses).
+	checks["secret_masking"] = CheckSecretMasking(cfg.Container.Image)
+
 	// NFT monitoring checks (only if enabled in config)
 	if config.BoolVal(cfg.Monitoring.NFT.Enabled) {
 		checks["nftables"] = CheckNFTables()
