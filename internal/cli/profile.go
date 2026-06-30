@@ -307,6 +307,15 @@ func (a *App) profileInfoRunE(cmd *cobra.Command, args []string) error {
 		if p.Security.DisableProtection {
 			fmt.Println("disable_protection = true")
 		}
+		if p.Security.HostImmutable != nil {
+			fmt.Printf("host_immutable = %v\n", *p.Security.HostImmutable)
+		}
+		if len(p.Security.WritablePaths) > 0 {
+			fmt.Printf("writable_paths = [%s]\n", formatStringSlice(p.Security.WritablePaths))
+		}
+		if len(p.Security.SecretPaths) > 0 {
+			fmt.Printf("secret_paths = [%s]\n", formatStringSlice(p.Security.SecretPaths))
+		}
 	}
 
 	if p.Monitoring != nil {

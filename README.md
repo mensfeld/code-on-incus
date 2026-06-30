@@ -426,6 +426,17 @@ coi profile list                              # List all profiles
 
 Each profile is a self-contained directory (`.coi/profiles/<name>/`) bundling a `config.toml` plus optional build script and context file. Profiles support inheritance (`inherits = "parent"`), context files for AI-agent instructions, and custom build scripts. COI also ships a JSON Schema for profile configs (`coi schema profile`) so external tools can validate them. See the [Profiles wiki page](https://github.com/mensfeld/code-on-incus/wiki/Profiles) for the full reference, examples, and schema details.
 
+### Opening an untrusted repo safely
+
+For inspecting code you don't trust, COI ships a built-in **`hardened`** profile — a one-flag preset:
+
+```bash
+coi shell --profile hardened        # restricted net + secret masking + ephemeral + monitoring
+coi profile info hardened           # see exactly what it locks down
+```
+
+It bundles COI's strongest controls: `network.mode = "restricted"` (no exfil path), workspace secret masking (`.env`, `*.pem`, `secrets/**`, …), host immutability, an **ephemeral** container, **no SSH-agent forwarding**, and real-time threat monitoring with auto-pause/kill. It overrides a weaker global config (a global `mode = "open"` still becomes restricted) and needs no setup.
+
 ## Resource and Time Limits
 
 See the [Resource and Time Limits guide](https://github.com/mensfeld/code-on-incus/wiki/Resource-and-Time-Limits) for complete documentation on controlling container resource consumption and runtime.
