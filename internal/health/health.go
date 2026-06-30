@@ -99,6 +99,10 @@ func RunAllChecks(cfg *config.Config, verbose bool) *HealthResult {
 	// planted decoy secret from inside a container (not just that config parses).
 	checks["secret_masking"] = CheckSecretMasking(cfg.Container.Image)
 
+	// Runtime isolation proof: verify host home/credentials are not reachable
+	// inside the container (COI's "credentials never exposed" guarantee).
+	checks["host_credential_isolation"] = CheckHostCredentialIsolation(cfg.Container.Image)
+
 	// NFT monitoring checks (only if enabled in config)
 	if config.BoolVal(cfg.Monitoring.NFT.Enabled) {
 		checks["nftables"] = CheckNFTables()

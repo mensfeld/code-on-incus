@@ -482,7 +482,15 @@ func synthesizeDefaultProfile(cfg *Config) ProfileConfig {
 // HardenedProfileSecretPaths is the default secret-mask set bundled by the
 // built-in "hardened" profile. Exported so docs/tests can reference one source.
 var HardenedProfileSecretPaths = []string{
-	".env", "*.pem", "*.key", "secrets/**", "id_rsa", "id_ed25519", ".npmrc", ".netrc",
+	// Generic env / key material
+	".env", "*.pem", "*.key", "*.p12", "id_rsa", "id_ed25519",
+	// Credential / config files that commonly carry secrets in a repo
+	".npmrc", ".netrc", ".git-credentials",
+	"credentials.json", "service_account.json", "kubeconfig", "database.yml",
+	// Terraform state/vars (frequently contain plaintext secrets)
+	"*.tfvars", "*.tfstate",
+	// Catch-all secret dir
+	"secrets/**",
 }
 
 // synthesizeHardenedProfile returns the built-in "hardened" profile: a hardened
