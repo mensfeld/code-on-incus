@@ -65,6 +65,50 @@ def cleanup_container(name, coi_binary):
     subprocess.run([coi_binary, "container", "delete", name, "--force"], timeout=30, check=False)
 
 
+def terminate_shell(proc):
+    """Fully reap a `coi shell` process so its monitor releases host resources.
+
+    A bare proc.terminate() is fire-and-forget: the monitor daemon (inotify
+    watches, cgroup/nft state) may still be alive when the next test's container
+    starts, starving it. Wait for the process to actually exit, escalating to
+    SIGKILL if it doesn't."""
+    proc.terminate()
+    try:
+        proc.wait(timeout=15)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            pass
+
+
+def container_exec_ready(name, timeout=30):
+    """Wait until the container's agent accepts `incus exec` (running != ready)."""
+    for _ in range(timeout):
+        result = subprocess.run(
+            ["incus", "exec", name, "--", "true"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0:
+            return True
+        time.sleep(1)
+    return False
+
+
+def line_in_container_file(name, path, needle):
+    """Return True if `needle` appears in the container file at `path`."""
+    result = subprocess.run(
+        ["incus", "exec", name, "--", "cat", path],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    return result.returncode == 0 and needle in result.stdout
+
+
 def _monitoring_config(auto_pause=False):
     return f"""
 [network]
@@ -158,7 +202,7 @@ class TestLogWatcherInotify:
             assert len(auth_events) > 0, f"Expected auth threat from syslog, got events: {events}"
             assert auth_events[0].get("level") == "warning"
         finally:
-            proc.terminate()
+            terminate_shell(proc)
             if backup:
                 config_path.write_text(backup)
             elif config_path.exists():
@@ -233,7 +277,7 @@ class TestLogWatcherInotify:
                 f"Events: {events}"
             )
         finally:
-            proc.terminate()
+            terminate_shell(proc)
             if backup:
                 config_path.write_text(backup)
             elif config_path.exists():
@@ -266,7 +310,12 @@ class TestLogWatcherInotify:
             assert wait_for_container_running(container_name), (
                 f"Container {container_name} did not start"
             )
-            time.sleep(3)
+            # "Running" != agent-ready: wait until incus exec actually works before
+            # writing, so a slow agent under CI load doesn't silently drop writes.
+            assert container_exec_ready(container_name), (
+                f"Container {container_name} agent not ready for exec"
+            )
+            time.sleep(3)  # let the monitoring daemon register its watches
 
             # Write the first suspicious line into the original auth.log, re-writing
             # on each poll. Just like the post-rotation write below, a single write
@@ -297,8 +346,13 @@ class TestLogWatcherInotify:
                 if first_events:
                     break
 
+            # Distinguish a write-side failure (line never landed) from a
+            # monitor-side failure (line present but not detected) so a future
+            # flake is diagnosable rather than a bare "events: []".
+            wrote = line_in_container_file(container_name, "/var/log/auth.log", "1.1.1.1")
             assert len(first_events) > 0, (
-                f"Expected first auth threat before rotation, events: {events}"
+                f"Expected first auth threat before rotation "
+                f"(line_present_in_container={wrote}), events: {events}"
             )
 
             # Simulate logrotate: move auth.log aside and create a fresh one.
@@ -361,7 +415,7 @@ class TestLogWatcherInotify:
                 f"events after rotation: {get_threat_events(container_name)}"
             )
         finally:
-            proc.terminate()
+            terminate_shell(proc)
             if backup:
                 config_path.write_text(backup)
             elif config_path.exists():
