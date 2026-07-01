@@ -436,8 +436,12 @@ func TestPollFile_DetectsRotationViaProcRoot(t *testing.T) {
 	st.usingFallback = true
 	states[rel] = st
 
-	// Rotate: remove + recreate with a new inode and a same-length attacker line.
-	if err := os.Remove(logPath); err != nil {
+	// Rotate the way logrotate does: move the old file aside (keeping its inode
+	// allocated) then create a fresh file — this GUARANTEES a new inode. A plain
+	// remove+recreate can reuse the just-freed inode, which for a same-length
+	// file is genuinely indistinguishable from "no change" (same inode, same
+	// size) and is not what this test is about.
+	if err := os.Rename(logPath, logPath+".1"); err != nil {
 		t.Fatal(err)
 	}
 	second := "Jun  5 12:00:01 coi sshd[2]: Failed password for a from 2.2.2.2 port 22 ssh2\n"
