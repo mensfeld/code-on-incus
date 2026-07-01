@@ -268,32 +268,34 @@ class TestLogWatcherInotify:
             )
             time.sleep(3)
 
-            # Write first suspicious line into the original auth.log.
-            subprocess.run(
-                [
-                    "incus",
-                    "exec",
-                    container_name,
-                    "--",
-                    "bash",
-                    "-c",
-                    "mkdir -p /var/log && "
-                    "echo 'Jun  5 12:00:00 coi sshd[1]: Failed password for attacker"
-                    " from 1.1.1.1 port 22 ssh2' >> /var/log/auth.log",
-                ],
-                check=False,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            # Write the first suspicious line into the original auth.log, re-writing
+            # on each poll. Just like the post-rotation write below, a single write
+            # can land before the watcher has registered its inotify watch (the
+            # monitor is still starting up, especially under CI load) and be missed;
+            # re-writing guarantees a write lands after registration and is detected.
+            write_first = [
+                "incus",
+                "exec",
+                container_name,
+                "--",
+                "bash",
+                "-c",
+                "mkdir -p /var/log && "
+                "echo 'Jun  5 12:00:00 coi sshd[1]: Failed password for attacker"
+                " from 1.1.1.1 port 22 ssh2' >> /var/log/auth.log",
+            ]
 
             # Wait for the first event before rotating.
             first_events = []
-            for _ in range(30):
+            for _ in range(60):
+                subprocess.run(
+                    write_first, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
+                time.sleep(1)
                 events = get_threat_events(container_name)
                 first_events = [e for e in events if e.get("category") == "auth"]
                 if first_events:
                     break
-                time.sleep(1)
 
             assert len(first_events) > 0, (
                 f"Expected first auth threat before rotation, events: {events}"
