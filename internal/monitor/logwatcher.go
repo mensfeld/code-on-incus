@@ -389,7 +389,13 @@ func (lw *LogWatcher) pollFile(ctx context.Context, rel string, states map[strin
 		}
 		newData = d
 		base = b
-		inode = 0 // incus file pull has no file descriptor, so no inode
+		// The incus file pull has no file descriptor, so no fresh inode. Preserve
+		// the last-known inode rather than clobbering it with 0 — otherwise a
+		// single transient fallback blip (e.g. GetContainerInitPID momentarily
+		// returns 0 under load) permanently disables inode-based rotation
+		// detection in readFileChunk, which can silently miss a post-rotation
+		// file whose size happens to be >= the stored offset.
+		inode = state.inode
 	}
 
 	newState := logState{inode: inode, usingFallback: !hostOK}
