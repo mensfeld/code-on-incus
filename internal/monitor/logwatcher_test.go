@@ -1,8 +1,10 @@
 package monitor
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -362,5 +364,95 @@ func TestReadFileChunk_RotationByInodeChange(t *testing.T) {
 	}
 	if string(data) != rotated {
 		t.Errorf("want rotated content %q got %q", rotated, string(data))
+	}
+}
+
+// TestReadFileChunk_RotationMissedWhenInodeUnknown documents the hazard the
+// inode-preservation fix in pollFile guards against: when the stored inode is 0
+// (unknown — e.g. a prior read went through the incus fallback, which has no
+// file descriptor), readFileChunk CANNOT detect a rotation whose replacement
+// file is >= the old offset, so the post-rotation content is silently skipped.
+// This is exactly why pollFile must preserve the last-known inode across
+// fallback reads instead of clobbering it with 0.
+func TestReadFileChunk_RotationMissedWhenInodeUnknown(t *testing.T) {
+	dir := t.TempDir()
+	f := filepath.Join(dir, "test.log")
+	original := "line one is here\n" // 17 bytes
+	if err := os.WriteFile(f, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Rotate into a fresh file (new inode) whose size == the old offset.
+	if err := os.Remove(f); err != nil {
+		t.Fatal(err)
+	}
+	rotated := "line two is here\n" // also 17 bytes → size == offset
+	if err := os.WriteFile(f, []byte(rotated), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// inode: 0 disables the inode check; size == offset defeats the size check.
+	data, base, _, err := readFileChunk(f, logState{offset: int64(len(original)), inode: 0})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if base != int64(len(original)) || len(data) != 0 {
+		t.Fatalf("hazard characterization changed: with a lost inode the rotation "+
+			"should be missed (base=%d, len(data)=%d)", base, len(data))
+	}
+}
+
+// TestPollFile_DetectsRotationViaProcRoot exercises the real pollFile host-side
+// path (reading /proc/<pid>/root/<rel>) across a log rotation, which is what the
+// test_log_rotation_handled integration test relies on. With the inode
+// preserved (as the fix guarantees after any fallback blip), a rotation into a
+// same-size file is still detected.
+func TestPollFile_DetectsRotationViaProcRoot(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "auth.log")
+	rel := strings.TrimPrefix(logPath, "/") // /proc/<pid>/root/<rel> == logPath
+
+	first := "Jun  5 12:00:00 coi sshd[1]: Failed password for a from 1.1.1.1 port 22 ssh2\n"
+	if err := os.WriteFile(logPath, []byte(first), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var threats []ThreatEvent
+	lw := NewLogWatcher("unused", func(e ThreatEvent) { threats = append(threats, e) }, nil)
+	states := map[string]logState{}
+	pid := os.Getpid()
+
+	lw.pollFile(context.Background(), rel, states, pid)
+	if len(threats) != 1 {
+		t.Fatalf("want 1 threat before rotation, got %d", len(threats))
+	}
+	if states[rel].inode == 0 {
+		t.Fatal("want a non-zero inode recorded after host-side read")
+	}
+
+	// Simulate returning from a transient fallback blip: the fix preserves the
+	// last-known inode, so mark the state accordingly (inode intact).
+	st := states[rel]
+	st.usingFallback = true
+	states[rel] = st
+
+	// Rotate: remove + recreate with a new inode and a same-length attacker line.
+	if err := os.Remove(logPath); err != nil {
+		t.Fatal(err)
+	}
+	second := "Jun  5 12:00:01 coi sshd[2]: Failed password for a from 2.2.2.2 port 22 ssh2\n"
+	if err := os.WriteFile(logPath, []byte(second), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	lw.pollFile(context.Background(), rel, states, pid)
+	found := false
+	for _, e := range threats {
+		if strings.Contains(e.Description, "2.2.2.2") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("post-rotation attacker line not detected; threats=%d", len(threats))
 	}
 }

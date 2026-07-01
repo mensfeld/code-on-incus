@@ -320,6 +320,15 @@ class TestLogWatcherInotify:
             # re-registered the new file when we first write (especially under CI
             # load), so a single write can be missed; re-writing guarantees a write
             # lands after re-registration and is detected.
+            #
+            # Use a DISTINCT pattern (invalid-user, not failed-password) from the
+            # pre-rotation line on purpose: the responder deduplicates threats by
+            # category+title+pattern within a 30s window, so re-using the same
+            # failed-password pattern would couple detection to that dedup window
+            # (and to same-length offset arithmetic). A distinct pattern makes the
+            # post-rotation event a fresh, immediately-alerted threat that is
+            # detected in one poll cycle once the watcher sees the new file —
+            # isolating what this test actually verifies: rotation handling.
             write_second = [
                 "incus",
                 "exec",
@@ -327,7 +336,7 @@ class TestLogWatcherInotify:
                 "--",
                 "bash",
                 "-c",
-                "echo 'Jun  5 12:00:01 coi sshd[2]: Failed password for attacker"
+                "echo 'Jun  5 12:00:01 coi sshd[2]: Invalid user attacker2"
                 " from 2.2.2.2 port 22 ssh2' >> /var/log/auth.log",
             ]
             second_events = []
