@@ -8,7 +8,6 @@ image = "coi-default"
 # BoolVal): "not configured" is distinguishable from an explicit choice, so
 # resume can let session metadata win unless the user explicitly set it.
 storage_pool = ""
-stale_base_check = "warn"
 
 [defaults]
 model = "claude-sonnet-4-5"
@@ -56,6 +55,11 @@ forward_agent = false
 [security]
 protected_paths = [".git/hooks", ".git/config", ".git/config.worktree", ".git/info/attributes", ".husky", ".vscode", ".coi", ".claude/settings.json", ".claude/settings.local.json"]
 host_immutable = true
+# writable_agent_config: when false (default), in-workspace agent tool config
+# (.claude/settings.json, .claude/settings.local.json) is mounted read-only so a
+# contained agent cannot plant/modify hooks that a later session would auto-execute.
+# Set to true in trusted-scope config (~/.coi/config.toml) to let the tool write them.
+# writable_agent_config = false
 
 [limits.cpu]
 count = ""
