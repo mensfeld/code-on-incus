@@ -308,7 +308,7 @@ func imageListCommand(cmd *cobra.Command, args []string) error {
 	fmt.Println("  - debian:12, debian:11")
 	fmt.Println("  - alpine:3.19")
 	fmt.Println()
-	fmt.Println("  Example: coi shell --image ubuntu:24.04")
+	fmt.Println("  Example: set [container] image = \"ubuntu:24.04\" in config or a profile")
 	fmt.Println()
 	fmt.Println("Custom Images:")
 	fmt.Println("  Build your own: coi build custom --script setup.sh my-image")

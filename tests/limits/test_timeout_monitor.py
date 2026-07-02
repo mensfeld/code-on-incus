@@ -98,6 +98,9 @@ def test_timeout_with_persistent_container(coi_binary, workspace_dir, cleanup_co
     config_dir.mkdir(exist_ok=True)
     (config_dir / "config.toml").write_text(
         """
+[container]
+persistent = true
+
 [limits.runtime]
 max_duration = "10s"
 """
@@ -122,7 +125,6 @@ echo "Done"
             "run",
             "--workspace",
             workspace_dir,
-            "--persistent",
             "bash",
             "/workspace/test_script.sh",
         ],

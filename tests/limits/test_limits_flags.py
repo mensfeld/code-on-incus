@@ -12,7 +12,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from support.helpers import calculate_container_name
+from support.helpers import calculate_container_name, write_workspace_container_config
 
 
 def test_config_values_applied(coi_binary, workspace_dir, cleanup_containers):
@@ -24,6 +24,9 @@ def test_config_values_applied(coi_binary, workspace_dir, cleanup_containers):
     project_config_dir.mkdir(exist_ok=True)
     (project_config_dir / "config.toml").write_text(
         """
+[container]
+persistent = true
+
 [limits.cpu]
 count = "2"
 
@@ -34,7 +37,7 @@ limit = "2GiB"
 
     # Launch without any extra flags -- config should be applied
     result = subprocess.run(
-        [coi_binary, "run", "--persistent", "--workspace", workspace_dir, "echo", "test"],
+        [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
         capture_output=True,
         text=True,
         timeout=120,
@@ -65,6 +68,9 @@ def test_profile_overrides_config(coi_binary, workspace_dir, cleanup_containers)
     project_config_dir.mkdir(exist_ok=True)
     project_config = project_config_dir / "config.toml"
     config_content = """
+[container]
+persistent = true
+
 [limits.cpu]
 count = "4"
 
@@ -94,7 +100,6 @@ limit = "512MiB"
         [
             coi_binary,
             "run",
-            "--persistent",
             "--workspace",
             workspace_dir,
             "--profile",
@@ -131,13 +136,15 @@ def test_env_vars_alongside_config(coi_binary, workspace_dir, cleanup_containers
     """Test that environment variables work alongside config."""
     container_name = calculate_container_name(workspace_dir, 1)
 
+    write_workspace_container_config(workspace_dir, persistent=True)
+
     env = os.environ.copy()
     env["COI_LIMIT_CPU"] = "1"
     env["COI_LIMIT_MEMORY"] = "512MiB"
 
-    # Launch with env vars, no config file
+    # Launch with env vars, no limits config file
     result = subprocess.run(
-        [coi_binary, "run", "--persistent", "--workspace", workspace_dir, "echo", "test"],
+        [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
         capture_output=True,
         text=True,
         timeout=120,
@@ -169,6 +176,9 @@ def test_config_overrides_env_vars(coi_binary, workspace_dir, cleanup_containers
     project_config_dir.mkdir(exist_ok=True)
     (project_config_dir / "config.toml").write_text(
         """
+[container]
+persistent = true
+
 [limits.cpu]
 count = "4"
 
@@ -183,7 +193,7 @@ limit = "4GiB"
 
     # Launch with both config and env vars
     result = subprocess.run(
-        [coi_binary, "run", "--persistent", "--workspace", workspace_dir, "echo", "test"],
+        [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
         capture_output=True,
         text=True,
         timeout=120,
@@ -221,6 +231,9 @@ def test_config_with_multiple_limit_sections(coi_binary, workspace_dir, cleanup_
     project_config_dir.mkdir(exist_ok=True)
     (project_config_dir / "config.toml").write_text(
         """
+[container]
+persistent = true
+
 [limits.cpu]
 count = "4"
 
@@ -234,7 +247,7 @@ max_processes = 100
 
     # Launch without any extra flags
     result = subprocess.run(
-        [coi_binary, "run", "--persistent", "--workspace", workspace_dir, "echo", "test"],
+        [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
         capture_output=True,
         text=True,
         timeout=120,
@@ -266,6 +279,9 @@ def test_profile_partial_override_of_config(coi_binary, workspace_dir, cleanup_c
     project_config_dir.mkdir(exist_ok=True)
     (project_config_dir / "config.toml").write_text(
         """
+[container]
+persistent = true
+
 [limits.cpu]
 count = "4"
 
@@ -295,7 +311,6 @@ count = "2"
         [
             coi_binary,
             "run",
-            "--persistent",
             "--workspace",
             workspace_dir,
             "--profile",

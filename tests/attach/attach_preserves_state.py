@@ -22,6 +22,7 @@ from support.helpers import (
     wait_for_prompt,
     wait_for_text_in_monitor,
     with_live_screen,
+    write_workspace_container_config,
 )
 
 
@@ -30,7 +31,7 @@ def test_attach_preserves_state(coi_binary, cleanup_containers, workspace_dir):
     Test that container state is preserved after detach/attach.
 
     Flow:
-    1. Start coi shell --persistent
+    1. Start coi shell (persistent via [container] config)
     2. Exit claude to bash, create a file
     3. Detach with Ctrl+b d
     4. Attach again with --bash
@@ -42,9 +43,11 @@ def test_attach_preserves_state(coi_binary, cleanup_containers, workspace_dir):
 
     # === Phase 1: Start persistent session ===
 
+    write_workspace_container_config(workspace_dir, persistent=True)
+
     child = spawn_coi(
         coi_binary,
-        ["shell", "--persistent"],
+        ["shell"],
         cwd=workspace_dir,
         env=env,
         timeout=120,

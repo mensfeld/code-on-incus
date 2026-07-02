@@ -1,5 +1,5 @@
 """
-Test for coi shell --persistent - exit bash keeps container running.
+Test for coi shell in persistent mode - exit bash keeps container running.
 
 Tests the behavior:
 1. Start dummy in persistent mode
@@ -29,6 +29,7 @@ from support.helpers import (
     wait_for_prompt,
     wait_for_text_in_monitor,
     with_live_screen,
+    write_workspace_container_config,
 )
 
 
@@ -39,7 +40,7 @@ def test_persistent_exit_bash_keeps_container_running(
     Test that exiting bash (not poweroff) keeps persistent container running.
 
     Flow:
-    1. Start coi shell --persistent
+    1. Start coi shell in persistent mode (via workspace config)
     2. Interact with dummy
     3. Exit claude to get to bash
     4. Exit bash (should keep container running)
@@ -50,11 +51,14 @@ def test_persistent_exit_bash_keeps_container_running(
     """
     env = {"COI_USE_DUMMY": "1"}
 
+    # Persistence is config-driven: [container] persistent = true
+    write_workspace_container_config(workspace_dir, persistent=True)
+
     # === Phase 1: Start persistent session and exit normally ===
 
     child = spawn_coi(
         coi_binary,
-        ["shell", "--persistent"],
+        ["shell"],
         cwd=workspace_dir,
         env=env,
         timeout=120,

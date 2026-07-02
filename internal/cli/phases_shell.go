@@ -205,16 +205,14 @@ func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.P
 						if err := a.cfg.ApplyProfile(a.profile); err != nil {
 							return nil, fmt.Errorf("failed to apply saved profile '%s': %w", a.profile, err)
 						}
-						if !cmd.Flags().Changed("persistent") {
-							a.persistent = config.BoolVal(a.cfg.Container.Persistent)
-						}
+						a.persistent = config.BoolVal(a.cfg.Container.Persistent)
 						fmt.Fprintf(os.Stderr, "Inherited profile '%s' from session\n", a.profile)
 					}
-					if !cmd.Flags().Changed("persistent") {
-						a.persistent = metadata.Persistent
-						if a.persistent {
-							fmt.Fprintf(os.Stderr, "Inherited persistent mode from session\n")
-						}
+					// Session metadata records how the session was actually
+					// created; it wins over the current config value.
+					a.persistent = metadata.Persistent
+					if a.persistent {
+						fmt.Fprintf(os.Stderr, "Inherited persistent mode from session\n")
 					}
 					if !cmd.Flags().Changed("slot") {
 						if _, origSlot, err := session.ParseContainerName(metadata.ContainerName); err == nil {
@@ -263,7 +261,7 @@ func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.P
 			s.slotNum = slotNum
 
 			// Resolve image and auto-build if needed.
-			img := ResolveImageName(a.imageName, a.cfg)
+			img := ResolveImageName(a.cfg)
 			if err := AutoBuildIfNeeded(a.cfg, img); err != nil {
 				return nil, err
 			}

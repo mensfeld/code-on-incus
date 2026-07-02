@@ -528,15 +528,17 @@ func (a *App) profileCreateRunE(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to check profile directory %s: %w", profileDir, statErr)
 	}
 
-	// Build TOML content from flags
-	// Note: --image and --persistent are inherited from root PersistentFlags
+	// Build TOML content from flags. --image and --persistent are local to
+	// `profile create` (profile authoring writes config, so flags are the
+	// right interface here) — the former global runtime flags were removed.
 	var topLines []string
 	var containerLines []string
 	if inherits, _ := cmd.Flags().GetString("inherits"); inherits != "" {
 		topLines = append(topLines, fmt.Sprintf("inherits = %q", inherits))
 	}
 	if cmd.Flags().Changed("image") {
-		containerLines = append(containerLines, fmt.Sprintf("image = %q", a.imageName))
+		imageValue, _ := cmd.Flags().GetString("image")
+		containerLines = append(containerLines, fmt.Sprintf("image = %q", imageValue))
 	}
 	if cmd.Flags().Changed("persistent") {
 		containerLines = append(containerLines, "persistent = true")
@@ -737,6 +739,8 @@ func init() {
 	profileCreateCmd.Flags().String("inherits", "", "Set the parent profile to inherit from")
 	profileCreateCmd.Flags().Bool("user", false, "Force creation in ~/.coi/profiles/")
 	profileCreateCmd.Flags().Bool("project", false, "Force creation in ./.coi/profiles/")
+	profileCreateCmd.Flags().String("image", "", "Set [container] image in the new profile")
+	profileCreateCmd.Flags().Bool("persistent", false, "Set [container] persistent = true in the new profile")
 
 	profileDeleteCmd.Flags().BoolP("force", "f", false, "Skip confirmation prompt")
 

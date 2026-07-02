@@ -1,8 +1,8 @@
 """
-Test for coi run --persistent - no spurious errors during cleanup.
+Test for persistent coi run - no spurious errors during cleanup.
 
 Tests that:
-1. Run with --persistent flag
+1. Run with [container] persistent = true config
 2. Container stops itself (command completes)
 3. Cleanup does not show "Error: The instance is already stopped"
 
@@ -12,7 +12,7 @@ already-stopped persistent container, causing spurious error messages.
 
 import subprocess
 
-from support.helpers import calculate_container_name
+from support.helpers import calculate_container_name, write_workspace_container_config
 
 
 def test_run_persistent_no_spurious_errors(coi_binary, cleanup_containers, workspace_dir):
@@ -20,13 +20,14 @@ def test_run_persistent_no_spurious_errors(coi_binary, cleanup_containers, works
     Test that persistent run cleanup doesn't show spurious stop errors.
 
     Flow:
-    1. Run coi run --persistent with a simple command
+    1. Run coi run with persistent config and a simple command
     2. Command completes and container stops itself
     3. Verify no "Error: The instance is already stopped" message
     4. Cleanup
     """
     slot = 9
     container_name = calculate_container_name(workspace_dir, slot)
+    write_workspace_container_config(workspace_dir, persistent=True)
 
     # Run with persistent - container will stop after command completes
     result = subprocess.run(
@@ -35,7 +36,6 @@ def test_run_persistent_no_spurious_errors(coi_binary, cleanup_containers, works
             "run",
             "--workspace",
             workspace_dir,
-            "--persistent",
             "--slot",
             str(slot),
             "echo",

@@ -18,6 +18,7 @@ from support.helpers import (
     spawn_coi,
     wait_for_container_ready,
     wait_for_prompt,
+    write_workspace_container_config,
 )
 
 
@@ -26,9 +27,9 @@ def test_attach_lists_multiple_sessions(coi_binary, cleanup_containers, workspac
     Test that coi attach lists sessions when multiple are running.
 
     Flow:
-    1. Start coi shell --persistent (slot 1)
+    1. Start coi shell (persistent via [container] config, slot 1)
     2. Detach
-    3. Start coi shell --persistent (slot 2)
+    3. Start coi shell (persistent via [container] config, slot 2)
     4. Detach
     5. Run coi attach
     6. Verify it lists both sessions
@@ -40,9 +41,11 @@ def test_attach_lists_multiple_sessions(coi_binary, cleanup_containers, workspac
 
     # === Phase 1: Start first persistent session ===
 
+    write_workspace_container_config(workspace_dir, persistent=True)
+
     child1 = spawn_coi(
         coi_binary,
-        ["shell", "--persistent"],
+        ["shell"],
         cwd=workspace_dir,
         env=env,
         timeout=120,
@@ -76,7 +79,7 @@ def test_attach_lists_multiple_sessions(coi_binary, cleanup_containers, workspac
 
     child2 = spawn_coi(
         coi_binary,
-        ["shell", "--persistent"],
+        ["shell"],
         cwd=workspace_dir,
         env=env,
         timeout=120,

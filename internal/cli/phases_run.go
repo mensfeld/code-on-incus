@@ -10,6 +10,8 @@ import (
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/limits"
 	"github.com/mensfeld/code-on-incus/internal/logger"
+	"github.com/mensfeld/code-on-incus/internal/monitor"
+	"github.com/mensfeld/code-on-incus/internal/nftmonitor"
 	"github.com/mensfeld/code-on-incus/internal/session"
 )
 
@@ -18,6 +20,12 @@ import (
 type runState struct {
 	// After resolve-workspace
 	absWorkspace string
+
+	// Boot-script mode (coi run with no command): run <workspace>/coi-boot.sh
+	// from the workspace mount. bootScriptDirect means the host file is
+	// executable (exec directly, shebang respected); otherwise run via bash.
+	bootScript       bool
+	bootScriptDirect bool
 
 	// After validate-env
 	containerName  string
@@ -36,6 +44,10 @@ type runState struct {
 	// After apply-network
 	socketEnv map[string]string
 	tz        string
+
+	// After start-monitoring
+	monitorDaemon monitor.MonitorDaemon
+	nftDaemon     nftmonitor.NFTMonitorDaemon
 }
 
 // validateEnvRunPhase checks Incus availability, allocates a slot, resolves
@@ -65,7 +77,7 @@ func (a *App) validateEnvRunPhase(s *runState) session.Phase {
 			}
 			s.containerName = session.ContainerName(s.absWorkspace, slotNum)
 
-			img := ResolveImageName(a.imageName, a.cfg)
+			img := ResolveImageName(a.cfg)
 			if err := AutoBuildIfNeeded(a.cfg, img); err != nil {
 				return nil, err
 			}
@@ -252,6 +264,51 @@ func (a *App) applyNetworkRunPhase(s *runState) session.Phase {
 
 // runCommandPhase starts the optional timeout monitor, executes the user's
 // command inside the container via incus exec, and returns any exit-code error.
+// startMonitoringRunPhase starts the security monitoring daemons for the run
+// container, mirroring the shell pipeline's startMonitoringPhase: an arbitrary
+// command or boot script deserves the same watchers as an agent session.
+// Honors [monitoring] config; threat events land in the audit log via the
+// responder. Diagnostics use a discard logger (run has no session log file).
+func (a *App) startMonitoringRunPhase(s *runState) session.Phase {
+	return session.PhaseFunc{
+		PhaseName: "start-monitoring",
+		RunFn: func(ctx context.Context) (session.Teardown, error) {
+			if !config.BoolVal(a.cfg.Monitoring.Enabled) {
+				return nil, nil
+			}
+
+			runLog := logger.NewDiscard()
+			if err := startMonitoringDaemon(ctx, s.containerName, s.absWorkspace, a.cfg, runLog, &s.monitorDaemon); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: Failed to start monitoring daemon: %v\n", err)
+			}
+
+			if config.BoolVal(a.cfg.Monitoring.NFT.Enabled) {
+				if !a.cfg.Network.SudoAllowed() {
+					// use_sudo=false: nft monitoring needs sudo nft, so skip it
+					// cleanly rather than attempting sudo and warning on failure.
+					fmt.Fprintf(os.Stderr, "NFT network monitoring skipped: [network] use_sudo = false\n")
+				} else if err := startNFTMonitoringDaemon(ctx, s.containerName, a.cfg, runLog, &s.nftDaemon); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: Failed to start NFT monitoring: %v\n", err)
+				}
+			}
+
+			teardown := func() {
+				if s.monitorDaemon != nil {
+					if err := s.monitorDaemon.Stop(); err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: Failed to stop monitoring daemon: %v\n", err)
+					}
+				}
+				if s.nftDaemon != nil {
+					if err := s.nftDaemon.Stop(); err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: Failed to stop NFT monitoring: %v\n", err)
+					}
+				}
+			}
+			return teardown, nil
+		},
+	}
+}
+
 func (a *App) runCommandPhase(args []string, s *runState) session.Phase {
 	return session.PhaseFunc{
 		PhaseName: "run-command",
@@ -274,7 +331,20 @@ func (a *App) runCommandPhase(args []string, s *runState) session.Phase {
 				}
 			}()
 
-			fmt.Fprintf(os.Stderr, "Executing: %s\n", strings.Join(args, " "))
+			// Boot-script mode: execute the script straight from the workspace
+			// mount — it comes from the host, nothing is pushed.
+			execArgs := args
+			if s.bootScript {
+				scriptPath := s.containerWorkspace + "/" + bootScriptName
+				if s.bootScriptDirect {
+					execArgs = []string{scriptPath}
+				} else {
+					execArgs = []string{"bash", scriptPath}
+				}
+				fmt.Fprintf(os.Stderr, "Running workspace boot script: %s\n", bootScriptName)
+			} else {
+				fmt.Fprintf(os.Stderr, "Executing: %s\n", strings.Join(args, " "))
+			}
 
 			incusArgs := []string{
 				"exec", s.containerName, "--user", fmt.Sprintf("%d", container.CodeUID),
@@ -285,14 +355,11 @@ func (a *App) runCommandPhase(args []string, s *runState) session.Phase {
 				return nil, err
 			}
 			incusArgs = append(incusArgs, "--")
-			incusArgs = append(incusArgs, args...)
+			incusArgs = append(incusArgs, execArgs...)
 
-			output, err := container.IncusOutputWithArgs(incusArgs...)
-			if output != "" {
-				fmt.Print(output)
-			}
-
-			if err != nil {
+			// Streamed exec: output appears live (a long build isn't silent
+			// until completion) and stdin is connected for piped input.
+			if err := container.IncusExecStreamedContext(ctx, incusArgs...); err != nil {
 				if exitErr, ok := err.(*container.ExitError); ok {
 					fmt.Fprintf(os.Stderr, "\nCommand exited with code %d\n", exitErr.ExitCode)
 					return nil, &ExitCodeError{Code: exitErr.ExitCode}

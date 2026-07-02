@@ -1,5 +1,5 @@
 """
-Test for coi shell --persistent - resume does NOT persist home directory files.
+Test for coi shell in persistent mode - resume does NOT persist home directory files.
 
 Verifies that:
 1. Start dummy in persistent mode, exit to bash
@@ -28,6 +28,7 @@ from support.helpers import (
     wait_for_text_in_monitor,
     wait_for_text_on_screen,
     with_live_screen,
+    write_workspace_container_config,
 )
 
 
@@ -38,7 +39,7 @@ def test_persistent_resume_does_not_persist_home_files(
     Test that persistent resume only restores .claude, not other home files.
 
     Flow:
-    1. Start coi shell --persistent
+    1. Start coi shell in persistent mode (via workspace config)
     2. Exit claude to bash
     3. Create ~/test.txt file
     4. Poweroff (container kept)
@@ -49,11 +50,14 @@ def test_persistent_resume_does_not_persist_home_files(
     """
     env = {"COI_USE_DUMMY": "1"}
 
+    # Persistence is config-driven: [container] persistent = true
+    write_workspace_container_config(workspace_dir, persistent=True)
+
     # === Phase 1: Create file in persistent container ===
 
     child = spawn_coi(
         coi_binary,
-        ["shell", "--persistent"],
+        ["shell"],
         cwd=workspace_dir,
         env=env,
         timeout=120,
@@ -127,7 +131,7 @@ def test_persistent_resume_does_not_persist_home_files(
 
     child2 = spawn_coi(
         coi_binary,
-        ["shell", "--persistent", "--resume"],
+        ["shell", "--resume"],
         cwd=workspace_dir,
         env=env,
         timeout=120,

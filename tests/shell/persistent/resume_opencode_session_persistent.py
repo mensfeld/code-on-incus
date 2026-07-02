@@ -1,18 +1,18 @@
 """
-Test for coi shell --persistent - opencode session with resume.
+Test for coi shell in persistent mode - opencode session with resume.
 
 Tests that persistent sessions saved with [tool] name = "opencode" can be resumed.
 The opencode tool stores its config under .config/opencode (not .claude),
 so this verifies that session detection is tool-agnostic.
 
 Flow:
-1. Write .coi/config.toml with [tool] name = "opencode"
+1. Write .coi/config.toml with [tool] name = "opencode" and [container] persistent = true
 2. Start dummy in persistent mode
 3. Send a message and verify response
 4. Exit to bash shell
 5. Issue sudo poweroff (container kept in persistent mode)
 6. Delete container to simulate fresh start
-7. Run coi shell --persistent --resume
+7. Run coi shell --resume
 8. Verify session was resumed (dummy shows "Resuming session")
 9. Cleanup
 """
@@ -40,16 +40,17 @@ def test_persistent_opencode_session_with_resume(coi_binary, cleanup_containers,
     Test persistent opencode session resume.
 
     This is the opencode variant of session_with_resume.py.
-    It verifies that --persistent --resume works when the tool is opencode.
+    It verifies that resuming a persistent session works when the tool is opencode.
     """
     import os
 
-    # Write .coi/config.toml to select opencode as the tool
+    # Write .coi/config.toml to select opencode as the tool and enable
+    # persistent mode (persistence is config-driven: [container] persistent).
     config_dir = os.path.join(workspace_dir, ".coi")
     os.makedirs(config_dir, exist_ok=True)
     config_path = os.path.join(config_dir, "config.toml")
     with open(config_path, "w") as f:
-        f.write('[tool]\nname = "opencode"\n')
+        f.write('[tool]\nname = "opencode"\n\n[container]\npersistent = true\n')
 
     env = {"COI_USE_DUMMY": "1"}
 
@@ -57,7 +58,7 @@ def test_persistent_opencode_session_with_resume(coi_binary, cleanup_containers,
 
     child = spawn_coi(
         coi_binary,
-        ["shell", "--persistent"],
+        ["shell"],
         cwd=workspace_dir,
         env=env,
         timeout=120,
@@ -138,7 +139,7 @@ def test_persistent_opencode_session_with_resume(coi_binary, cleanup_containers,
 
     child2 = spawn_coi(
         coi_binary,
-        ["shell", "--persistent", "--resume"],
+        ["shell", "--resume"],
         cwd=workspace_dir,
         env=env,
         timeout=120,

@@ -63,11 +63,9 @@ func resolveBuildScript(build *config.BuildConfig) (string, func(), error) {
 	return "", noop, fmt.Errorf("no build script or commands configured")
 }
 
-// ResolveImageName returns the effective image name using: CLI flag > config container.image > CoiAlias
-func ResolveImageName(flagValue string, cfg *config.Config) string {
-	if flagValue != "" {
-		return flagValue
-	}
+// ResolveImageName returns the effective image name using: config
+// container.image (globally, per project, or per profile) > CoiAlias.
+func ResolveImageName(cfg *config.Config) string {
 	if cfg.Container.Image != "" {
 		return cfg.Container.Image
 	}

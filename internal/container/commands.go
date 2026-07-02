@@ -219,6 +219,29 @@ func IncusOutputWithArgs(args ...string) (string, error) {
 	return IncusOutputWithArgsContext(context.Background(), args...)
 }
 
+// IncusExecStreamedContext executes incus with raw args, streaming the child's
+// stdio directly to the caller's terminal: output appears live (not buffered
+// until exit) and stdin is connected, so piping data into the in-container
+// command works. The in-container exit code is preserved via *ExitError so
+// callers can propagate it. Stderr is not captured (it streams), so
+// ExitError.Stderr is empty on this path.
+func IncusExecStreamedContext(ctx context.Context, args ...string) error {
+	incusCmd := buildIncusCommand(args...)
+	cmd := execIncusCommandContext(ctx, incusCmd)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	err := cmd.Run()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return &ExitError{ExitCode: exitErr.ExitCode(), Err: err}
+		}
+		return err
+	}
+	return nil
+}
+
 // IncusFilePushContext pushes a file into a container with context support
 func IncusFilePushContext(ctx context.Context, source, destination string) error {
 	cmdArgs := buildIncusCommand("file", "push", source, destination)

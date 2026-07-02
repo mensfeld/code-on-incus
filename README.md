@@ -46,6 +46,7 @@ Built by developers, for developers who run AI agents and want to know what thos
 - [Installation](#installation)
 - [macOS Support](#macos-support)
 - [Usage](#usage)
+- [Run Scripts and Commands in the Sandbox](#run-scripts-and-commands-in-the-sandbox)
 - [Session Resume](#session-resume)
 - [Persistent Mode](#persistent-mode)
 - [Configuration](#configuration)
@@ -254,17 +255,17 @@ coi shell
 # Use a different AI tool
 coi shell --tool opencode
 
-# Persistent mode - keep container between sessions
-coi shell --persistent
-
 # Use specific slot for parallel sessions
 coi shell --slot 2
 
 # Resume previous session
 coi shell --resume
 
-# Run a command in an ephemeral container
-coi run "npm test"
+# Run a command in the sandbox (streams output, propagates exit code)
+coi run -- npm test
+
+# Run the workspace boot script (./coi-boot.sh) in the sandbox
+coi run
 
 # Attach to existing session
 coi attach
@@ -321,14 +322,12 @@ See the [Container Lifecycle and Sessions guide](https://github.com/mensfeld/cod
 ```bash
 --workspace PATH        # Workspace directory to mount (default: current directory)
 --slot NUMBER           # Slot number for parallel sessions (0 = auto-allocate)
---persistent            # Keep container between sessions
 --resume [SESSION_ID]   # Resume from session (omit ID to auto-detect latest for workspace)
 --continue [SESSION_ID] # Alias for --resume
 --profile NAME          # Use named profile
---image NAME            # Use custom image (default: coi-default)
 ```
 
-Most container customization (network mode, mounts, socket forwarding, environment variables, SSH agent, monitoring, timezone, resource limits, etc.) is configured via config files or profiles. See the [Configuration wiki page](https://github.com/mensfeld/code-on-incus/wiki/Configuration) for the full reference.
+Everything else — image selection, persistence, network mode, mounts, socket forwarding, environment variables, SSH agent, monitoring, timezone, resource limits — is configured via config files or profiles, not flags (the former `--image` and `--persistent` flags were removed in 0.10; set `[container] image` / `persistent` instead). See the [Configuration wiki page](https://github.com/mensfeld/code-on-incus/wiki/Configuration) for the full reference.
 
 ### Advanced Usage
 
@@ -339,6 +338,42 @@ See the wiki for detailed documentation:
 - **[Tmux Automation](https://github.com/mensfeld/code-on-incus/wiki/Tmux-Automation)** - Automate AI sessions with tmux commands
 - **[Image Management](https://github.com/mensfeld/code-on-incus/wiki/Image-Management)** - Create and manage custom images
 - **[Snapshot Management](https://github.com/mensfeld/code-on-incus/wiki/Snapshot-Management)** - Create checkpoints and rollback changes
+
+## Run Scripts and Commands in the Sandbox
+
+COI's isolation isn't only for AI agents — `coi run` executes regular commands
+and scripts with the same protection: workspace mount, read-only protected
+paths, secret masking, network isolation, resource/time limits, and security
+monitoring. Output streams live, stdin is connected, and the command's exit
+code becomes `coi run`'s exit code.
+
+```bash
+# Arbitrary commands
+coi run -- npm test
+coi run -- make build
+cat data.csv | coi run -- ./process.sh
+
+# Workspace boot script: with no command, coi runs ./coi-boot.sh
+cat > coi-boot.sh <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+npm ci && npm test
+EOF
+coi run
+```
+
+The boot script is executed **directly from the workspace mount** — it comes
+from the host; nothing is copied into the container. An executable script runs
+as-is (shebang respected); a non-executable one runs via bash. The container is
+cleaned up when the script finishes — or kept, with `[container] persistent =
+true`, so installed packages and caches survive between runs.
+
+**Security note:** a cloned repository can ship its own `coi-boot.sh`, so
+`coi run` in a repo you don't trust executes that repo's code — inside the
+sandbox, which is exactly what the sandbox is for. For untrusted projects, use
+a credential-limiting profile (e.g. `coi run --profile hardened`, or your own
+profile with `[ssh] forward_agent = false` and a restricted network mode) so
+the script gets no SSH agent, forwarded env, or open egress.
 
 ## Session Resume
 
@@ -360,12 +395,8 @@ By default, containers are **ephemeral** (deleted on exit). Your **workspace fil
 
 Enable **persistent mode** to also keep the container and its installed packages:
 
-```bash
-coi shell --persistent
-```
-
 ```toml
-# Or via config (~/.coi/config.toml)
+# ~/.coi/config.toml, ./.coi/config.toml, or a profile
 [container]
 persistent = true
 ```

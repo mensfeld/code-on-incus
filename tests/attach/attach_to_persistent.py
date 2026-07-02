@@ -22,6 +22,7 @@ from support.helpers import (
     wait_for_prompt,
     wait_for_text_in_monitor,
     with_live_screen,
+    write_workspace_container_config,
 )
 
 
@@ -30,7 +31,7 @@ def test_attach_to_persistent(coi_binary, cleanup_containers, workspace_dir):
     Test that coi attach works with persistent containers.
 
     Flow:
-    1. Start coi shell --persistent
+    1. Start coi shell (persistent via [container] config)
     2. Detach with Ctrl+b d (claude keeps running)
     3. Attach to container
     4. Verify we can still interact with CLI
@@ -41,9 +42,11 @@ def test_attach_to_persistent(coi_binary, cleanup_containers, workspace_dir):
 
     # === Phase 1: Start persistent session ===
 
+    write_workspace_container_config(workspace_dir, persistent=True)
+
     child = spawn_coi(
         coi_binary,
-        ["shell", "--persistent"],
+        ["shell"],
         cwd=workspace_dir,
         env=env,
         timeout=120,

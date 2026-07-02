@@ -19,20 +19,50 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var runCmd = &cobra.Command{
-	Use:   "run <command> [args...]",
-	Short: "Run a command in an ephemeral container",
-	Long: `Execute a command in an ephemeral Incus container.
+// bootScriptName is the workspace boot script convention: when `coi run` is
+// invoked with no command, a file with this name at the workspace root is
+// executed inside the container (straight from the workspace mount).
+const bootScriptName = "coi-boot.sh"
 
-The container is automatically cleaned up after the command completes.
+var runCmd = &cobra.Command{
+	Use:   "run [command] [args...]",
+	Short: "Run a command or the workspace boot script in a sandboxed container",
+	Long: `Execute a command in an isolated Incus container with the full sandbox
+(workspace mount, protected paths, secret masking, network isolation, limits,
+monitoring). Output streams live and the command's exit code is propagated.
+
+With no command, coi looks for ` + bootScriptName + ` at the workspace root and
+runs it inside the container directly from the workspace mount. The script is
+executed as-is when it has the executable bit, and via bash otherwise.
+
+The container is cleaned up after the command completes (or stopped, when
+[container] persistent = true is configured).
 
 Examples:
-  coi run "echo hello"
-  coi run "npm test" --slot 2
-  coi run --workspace ~/project "make build"
+  coi run                            # run ./` + bootScriptName + ` in the sandbox
+  coi run --profile scripts          # same, with a credential-limiting profile
+  coi run -- npm test                # run an arbitrary command
+  coi run --workspace ~/project -- make build
 `,
-	Args: cobra.MinimumNArgs(1),
+	Args: cobra.ArbitraryArgs,
 	RunE: app.runCommand,
+}
+
+// detectBootScript checks for the workspace boot script and reports whether it
+// exists and whether it carries the executable bit (run directly, shebang
+// respected) or not (run via bash).
+func detectBootScript(absWorkspace string) (found bool, executable bool, err error) {
+	fi, statErr := os.Stat(filepath.Join(absWorkspace, bootScriptName))
+	if statErr != nil {
+		if os.IsNotExist(statErr) {
+			return false, false, nil
+		}
+		return false, false, fmt.Errorf("failed to check for %s: %w", bootScriptName, statErr)
+	}
+	if fi.IsDir() {
+		return false, false, fmt.Errorf("%s in workspace is a directory, expected a script file", bootScriptName)
+	}
+	return true, fi.Mode()&0o111 != 0, nil
 }
 
 func (a *App) runCommand(cmd *cobra.Command, args []string) error {
@@ -56,6 +86,23 @@ func (a *App) runCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	s := &runState{absWorkspace: absWorkspace}
+
+	// No command given: fall back to the workspace boot script convention.
+	// Detection happens host-side before any container work so a missing
+	// script fails fast with a clear message.
+	if len(args) == 0 {
+		found, executable, err := detectBootScript(absWorkspace)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return fmt.Errorf("no command given and no %s found in workspace %s\n"+
+				"Create %s at the workspace root or pass a command: coi run -- <command>",
+				bootScriptName, absWorkspace, bootScriptName)
+		}
+		s.bootScript = true
+		s.bootScriptDirect = executable
+	}
 
 	pipeline := &session.Pipeline{}
 	defer pipeline.Teardown()
@@ -82,6 +129,7 @@ func (a *App) runCommand(cmd *cobra.Command, args []string) error {
 		a.launchContainerRunPhase(s),
 		a.configureContainerRunPhase(s),
 		a.applyNetworkRunPhase(s),
+		a.startMonitoringRunPhase(s),
 		a.runCommandPhase(args, s),
 	)
 }

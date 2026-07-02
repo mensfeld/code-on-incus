@@ -12,7 +12,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from support.helpers import calculate_container_name
+from support.helpers import calculate_container_name, write_workspace_container_config
 
 
 def test_config_file_limits_loaded(coi_binary, workspace_dir, cleanup_containers):
@@ -27,6 +27,7 @@ def test_config_file_limits_loaded(coi_binary, workspace_dir, cleanup_containers
         """
 [container]
 image = "coi-default"
+persistent = true
 
 [limits.cpu]
 count = "2"
@@ -41,7 +42,7 @@ max_processes = 100
 
     # Launch container with coi run (quick test)
     result = subprocess.run(
-        [coi_binary, "run", "--persistent", "--workspace", workspace_dir, "echo", "test"],
+        [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
         capture_output=True,
         text=True,
         timeout=120,
@@ -72,6 +73,9 @@ def test_profile_limits_override_global(coi_binary, workspace_dir, cleanup_conta
     project_config = project_config_dir / "config.toml"
 
     config_content = """
+[container]
+persistent = true
+
 [limits.cpu]
 count = "4"
 
@@ -103,7 +107,6 @@ limit = "512MiB"
         [
             coi_binary,
             "run",
-            "--persistent",
             "--workspace",
             workspace_dir,
             "--profile",
@@ -136,12 +139,14 @@ def test_environment_variables_work(coi_binary, workspace_dir, cleanup_container
     """Test that environment variables set limits."""
     container_name = calculate_container_name(workspace_dir, 1)
 
+    write_workspace_container_config(workspace_dir, persistent=True)
+
     env = os.environ.copy()
     env["COI_LIMIT_CPU"] = "2"
     env["COI_LIMIT_MEMORY"] = "2GiB"
 
     result = subprocess.run(
-        [coi_binary, "run", "--persistent", "--workspace", workspace_dir, "echo", "test"],
+        [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
         capture_output=True,
         text=True,
         timeout=120,
@@ -168,9 +173,11 @@ def test_empty_limits_means_unlimited(coi_binary, workspace_dir, cleanup_contain
     """Test that empty/missing limits result in unlimited (no limits applied)."""
     container_name = calculate_container_name(workspace_dir, 1)
 
+    write_workspace_container_config(workspace_dir, persistent=True)
+
     # Launch without any limits configured
     result = subprocess.run(
-        [coi_binary, "run", "--persistent", "--workspace", workspace_dir, "echo", "test"],
+        [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
         capture_output=True,
         text=True,
         timeout=120,
