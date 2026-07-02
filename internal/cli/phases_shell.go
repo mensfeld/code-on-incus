@@ -93,6 +93,18 @@ func (a *App) resolveWorkspacePhase(cmd *cobra.Command, s *shellState) session.P
 				}
 			}
 
+			// An explicitly requested --profile must keep winning over the
+			// workspace/alias overlays for [container] settings — otherwise a
+			// project config could silently override the profile the user
+			// asked for, with precedence depending on the invocation
+			// directory. (The alias branch above re-applies a saved profile
+			// only when --profile was NOT given, so this covers the rest.)
+			if cmd.Flags().Changed("profile") && a.profile != "" {
+				if err := a.cfg.ReapplyProfileContainer(a.profile); err != nil {
+					return nil, err
+				}
+			}
+
 			// The workspace/alias config overlays (and an alias-applied
 			// profile) may set [container] persistent — PersistentPreRunE
 			// computed a.persistent before they ran, so recompute it here.
@@ -211,12 +223,21 @@ func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.P
 						if err := a.cfg.ApplyProfile(a.profile); err != nil {
 							return nil, fmt.Errorf("failed to apply saved profile '%s': %w", a.profile, err)
 						}
-						a.persistent = config.BoolVal(a.cfg.Container.Persistent)
 						fmt.Fprintf(os.Stderr, "Inherited profile '%s' from session\n", a.profile)
 					}
 					// Session metadata records how the session was actually
-					// created; it wins over the current config value.
-					a.persistent = metadata.Persistent
+					// created and is the default on resume — but an EXPLICIT
+					// [container] persistent in the effective config wins, so
+					// a user can still convert a session's mode (with the
+					// --persistent flag removed, config is the only lever;
+					// unconditional metadata would make ephemeral-ness sticky
+					// forever, re-recorded into metadata on every resume).
+					a.persistent = resumePersistence(a.cfg.Container.Persistent, metadata.Persistent)
+					if a.persistent != metadata.Persistent {
+						fmt.Fprintf(os.Stderr,
+							"Config [container] persistent = %v overrides the session's saved mode\n",
+							a.persistent)
+					}
 					if a.persistent {
 						fmt.Fprintf(os.Stderr, "Inherited persistent mode from session\n")
 					}
@@ -402,44 +423,27 @@ func (a *App) setupContainerPhase(s *shellState) session.Phase {
 }
 
 // startMonitoringPhase starts the traditional and NFT monitoring daemons when
-// enabled in config. Its teardown stops both daemons.
+// enabled in config (see startSessionMonitoring — shared with the run
+// pipeline). Its teardown stops both daemons.
 func (a *App) startMonitoringPhase(s *shellState) session.Phase {
 	return session.PhaseFunc{
 		PhaseName: "start-monitoring",
 		RunFn: func(ctx context.Context) (session.Teardown, error) {
-			if !config.BoolVal(a.cfg.Monitoring.Enabled) {
-				return nil, nil
-			}
-
-			if err := startMonitoringDaemon(ctx, s.result.ContainerName, s.absWorkspace, a.cfg, s.result.Logger, &s.monitorDaemon); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: Failed to start monitoring daemon: %v\n", err)
-			}
-
-			if config.BoolVal(a.cfg.Monitoring.NFT.Enabled) {
-				if !a.cfg.Network.SudoAllowed() {
-					// use_sudo=false: nft monitoring needs sudo nft, so skip it
-					// cleanly rather than attempting sudo and warning on failure.
-					fmt.Fprintf(os.Stderr, "NFT network monitoring skipped: [network] use_sudo = false\n")
-				} else if err := startNFTMonitoringDaemon(ctx, s.result.ContainerName, a.cfg, s.result.Logger, &s.nftDaemon); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: Failed to start NFT monitoring: %v\n", err)
-				}
-			}
-
-			teardown := func() {
-				if s.monitorDaemon != nil {
-					if err := s.monitorDaemon.Stop(); err != nil {
-						fmt.Fprintf(os.Stderr, "Warning: Failed to stop monitoring daemon: %v\n", err)
-					}
-				}
-				if s.nftDaemon != nil {
-					if err := s.nftDaemon.Stop(); err != nil {
-						fmt.Fprintf(os.Stderr, "Warning: Failed to stop NFT monitoring: %v\n", err)
-					}
-				}
-			}
+			teardown := a.startSessionMonitoring(ctx, s.result.ContainerName, s.absWorkspace, s.result.Logger, &s.monitorDaemon, &s.nftDaemon)
 			return teardown, nil
 		},
 	}
+}
+
+// resumePersistence decides a resumed session's persistence: an explicitly
+// configured [container] persistent (non-nil pointer — the embedded default
+// leaves it unset) wins so users can convert a session's mode; otherwise the
+// session metadata (how the session was actually created) is inherited.
+func resumePersistence(cfgPersistent *bool, metadataPersistent bool) bool {
+	if cfgPersistent != nil {
+		return *cfgPersistent
+	}
+	return metadataPersistent
 }
 
 // runToolPhase executes the AI coding tool (via tmux or direct mode) and

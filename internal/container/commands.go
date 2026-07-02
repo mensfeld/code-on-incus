@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 var (
@@ -219,18 +221,49 @@ func IncusOutputWithArgs(args ...string) (string, error) {
 	return IncusOutputWithArgsContext(context.Background(), args...)
 }
 
+// StdinIsTerminal reports whether os.Stdin is connected to a real terminal.
+// Uses TIOCGWINSZ rather than ModeCharDevice because /dev/null is also a
+// character device on Linux, causing false positives with the stat approach.
+func StdinIsTerminal() bool {
+	_, err := unix.IoctlGetWinsize(int(os.Stdin.Fd()), unix.TIOCGWINSZ)
+	return err == nil
+}
+
+// streamedStdin returns the stdin to attach for a streamed exec: piped or
+// redirected input is passed through so `cat data | coi run -- ...` works,
+// but an interactive terminal is NOT attached. Attaching a TTY would flip
+// `incus exec` into interactive PTY mode (raw terminal, Ctrl+C forwarded into
+// the container instead of signaling coi, stdin-reading commands blocking on
+// the keyboard instead of seeing EOF, SIGTTIN stops for backgrounded runs);
+// leaving it nil preserves the previous /dev/null semantics for TTY runs.
+func streamedStdin() *os.File {
+	if StdinIsTerminal() {
+		return nil
+	}
+	return os.Stdin
+}
+
 // IncusExecStreamedContext executes incus with raw args, streaming the child's
-// stdio directly to the caller's terminal: output appears live (not buffered
-// until exit) and stdin is connected, so piping data into the in-container
-// command works. The in-container exit code is preserved via *ExitError so
-// callers can propagate it. Stderr is not captured (it streams), so
-// ExitError.Stderr is empty on this path.
+// output directly to the caller's terminal: output appears live (not buffered
+// until exit). Piped/redirected stdin is connected (see streamedStdin); an
+// interactive terminal is not. The in-container exit code is preserved via
+// *ExitError so callers can propagate it. Stderr is not captured (it streams),
+// so ExitError.Stderr is empty on this path. On context cancellation the incus
+// client gets SIGINT first (a chance to detach cleanly) and is killed only
+// after WaitDelay.
 func IncusExecStreamedContext(ctx context.Context, args ...string) error {
 	incusCmd := buildIncusCommand(args...)
 	cmd := execIncusCommandContext(ctx, incusCmd)
-	cmd.Stdin = os.Stdin
+	if in := streamedStdin(); in != nil {
+		cmd.Stdin = in
+	}
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	cmd.Cancel = func() error {
+		// Default Cancel sends SIGKILL; SIGINT lets the incus client wind
+		// down (WaitDelay in execIncusCommandContext escalates to kill).
+		return cmd.Process.Signal(os.Interrupt)
+	}
 
 	err := cmd.Run()
 	if err != nil {

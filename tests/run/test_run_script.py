@@ -16,12 +16,9 @@ import subprocess
 from support.helpers import write_workspace_container_config
 
 
-def _run_coi(coi_binary, workspace_dir, timeout=180, slot=None):
-    args = [coi_binary, "run", "--workspace", workspace_dir]
-    if slot is not None:
-        args += ["--slot", str(slot)]
+def _run_coi(coi_binary, workspace_dir, timeout=180):
     return subprocess.run(
-        args,
+        [coi_binary, "run", "--workspace", workspace_dir],
         capture_output=True,
         text=True,
         timeout=timeout,
@@ -117,16 +114,19 @@ def test_run_script_persistent_state_survives(coi_binary, cleanup_containers, wo
         "touch ~/state-marker\n",
     )
 
-    # Pin the slot: auto-allocation would give the second run a fresh slot
-    # (the stopped persistent container occupies the first), creating a new
-    # container instead of restarting the one holding the state.
-    first = _run_coi(coi_binary, workspace_dir, slot=7)
+    # No slot pinning on purpose: persistent mode must reuse the stopped
+    # container from the first run automatically (FindReusablePersistentSlot)
+    # rather than drifting to a fresh slot and silently losing the state.
+    first = _run_coi(coi_binary, workspace_dir)
     assert first.returncode == 0, f"first run failed:\n{first.stdout + first.stderr}"
     assert "SECOND-RUN-SEES-STATE" not in first.stdout + first.stderr
 
-    second = _run_coi(coi_binary, workspace_dir, slot=7)
+    second = _run_coi(coi_binary, workspace_dir)
     combined = second.stdout + second.stderr
     assert second.returncode == 0, f"second run failed:\n{combined}"
     assert "SECOND-RUN-SEES-STATE" in combined, (
-        f"persistent container should preserve home-dir state between runs. Got:\n{combined}"
+        f"persistent runs must reuse the stopped container (no --slot needed). Got:\n{combined}"
+    )
+    assert "Reusing persistent container" in combined, (
+        f"second run should announce slot reuse. Got:\n{combined}"
     )

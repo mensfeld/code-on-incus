@@ -164,6 +164,16 @@ func sanitizeUntrustedConfig(fileCfg *Config, path string) {
 	sanitizeUntrustedEnvCommands(&fileCfg.Defaults, path)
 	sanitizeUntrustedSecurity(&fileCfg.Security, path)
 	sanitizeUntrustedGit(&fileCfg.Git, path)
+
+	// Persistence is honored from project scope (not a protection downgrade —
+	// the container stays fully sandboxed), but a cloned repo opting the user
+	// into container reuse deserves a visible note: state from a previous
+	// run's container (which executed repo-controlled code) is carried into
+	// subsequent runs.
+	if fileCfg.Container.Persistent != nil && *fileCfg.Container.Persistent {
+		fmt.Fprintf(os.Stderr,
+			"Note: project config %s enables persistent containers — container state is reused across runs\n", path)
+	}
 }
 
 // warnUntrustedDowngrade reports that a protection-weakening field from an

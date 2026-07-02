@@ -4,7 +4,9 @@
 
 [container]
 image = "coi-default"
-persistent = false
+# persistent is deliberately UNSET (nil pointer, defaults to false via
+# BoolVal): "not configured" is distinguishable from an explicit choice, so
+# resume can let session metadata win unless the user explicitly set it.
 storage_pool = ""
 stale_base_check = "warn"
 

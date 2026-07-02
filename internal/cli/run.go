@@ -55,12 +55,35 @@ Examples:
 // the executable bit — it is executed directly (the shebang decides the
 // interpreter), so a non-executable file is an error with a chmod hint rather
 // than a silent guess at how to interpret it.
+//
+// A symlink is followed only if it resolves INSIDE the workspace: the script
+// executes from the workspace mount, so a target outside it would pass the
+// host-side check but not exist in the container — the exact opaque failure
+// this fail-fast detection exists to prevent (same rule as secret_paths
+// symlink handling).
 func detectRunScript(absWorkspace string) (found bool, err error) {
-	fi, statErr := os.Stat(filepath.Join(absWorkspace, runScriptName))
-	if statErr != nil {
-		if os.IsNotExist(statErr) {
+	scriptPath := filepath.Join(absWorkspace, runScriptName)
+	if _, lerr := os.Lstat(scriptPath); lerr != nil {
+		if os.IsNotExist(lerr) {
 			return false, nil
 		}
+		return false, fmt.Errorf("failed to check for %s: %w", runScriptName, lerr)
+	}
+
+	resolved, rerr := filepath.EvalSymlinks(scriptPath)
+	if rerr != nil {
+		return false, fmt.Errorf("%s exists but cannot be resolved (dangling symlink?): %w", runScriptName, rerr)
+	}
+	resolvedWorkspace, rerr := filepath.EvalSymlinks(absWorkspace)
+	if rerr != nil {
+		return false, fmt.Errorf("failed to resolve workspace path: %w", rerr)
+	}
+	if resolved != resolvedWorkspace && !strings.HasPrefix(resolved, resolvedWorkspace+string(filepath.Separator)) {
+		return false, fmt.Errorf("%s is a symlink resolving outside the workspace (%s) — the target will not exist inside the container; move the script into the workspace or replace the symlink with a copy", runScriptName, resolved)
+	}
+
+	fi, statErr := os.Stat(scriptPath)
+	if statErr != nil {
 		return false, fmt.Errorf("failed to check for %s: %w", runScriptName, statErr)
 	}
 	if fi.IsDir() {
@@ -369,6 +392,15 @@ func (a *App) overlayWorkspaceConfig(absWorkspace string) error {
 		return fmt.Errorf("failed to load project config from %s: %w", absWorkspace, err)
 	}
 	container.Configure(a.cfg.Incus.Project, a.cfg.Incus.CodeUser, a.cfg.Incus.CodeUID)
+	// An explicitly requested --profile must keep winning over the workspace
+	// overlay for [container] settings — otherwise a project config could
+	// silently override the profile the user asked for (and precedence would
+	// depend on whether the command ran from inside the workspace or not).
+	if a.profile != "" {
+		if err := a.cfg.ReapplyProfileContainer(a.profile); err != nil {
+			return err
+		}
+	}
 	// The workspace config may set [container] persistent — PersistentPreRunE
 	// computed a.persistent before this overlay ran, so recompute it here.
 	a.persistent = config.BoolVal(a.cfg.Container.Persistent)

@@ -34,6 +34,18 @@ def test_removed_image_flag_hint(coi_binary):
     assert "[container]" in result.stderr, f"hint must point at config, got:\n{result.stderr}"
 
 
+def test_no_false_hint_for_prefix_collisions(coi_binary):
+    """Flags that merely share the prefix (--images, --persistent-home) must
+    get the plain unknown-flag error, NOT the migration hint."""
+    for flag in ["--images", "--image-tag", "--persistent-home"]:
+        result = _run(coi_binary, ["shell", flag, "x"])
+        assert result.returncode != 0
+        assert "flag was removed" not in result.stderr, (
+            f"{flag}: false migration hint for a flag that never existed:\n{result.stderr}"
+        )
+        assert "unknown flag" in result.stderr
+
+
 def test_profile_create_flags_removed_too(coi_binary):
     """The flags are gone from profile create as well — profiles are authored
     by editing their config.toml, so the migration hint fires there too."""

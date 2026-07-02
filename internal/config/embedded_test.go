@@ -24,8 +24,15 @@ func TestEmbeddedDefaultConfigValues(t *testing.T) {
 	if cfg.Defaults.Model != "claude-sonnet-4-5" {
 		t.Errorf("Expected model 'claude-sonnet-4-5', got %q", cfg.Defaults.Model)
 	}
-	if cfg.Container.Persistent == nil || *cfg.Container.Persistent {
-		t.Error("Expected persistent=false")
+	// persistent must be UNSET (nil) in the embedded default: nil means "not
+	// configured", which lets resume distinguish an explicit user choice
+	// (config wins) from the default (session metadata wins). The effective
+	// default stays false via BoolVal.
+	if cfg.Container.Persistent != nil {
+		t.Error("Expected persistent to be unset (nil) in the embedded default")
+	}
+	if BoolVal(cfg.Container.Persistent) {
+		t.Error("Expected effective persistent default to be false")
 	}
 	if cfg.Network.Mode != NetworkModeRestricted {
 		t.Errorf("Expected network mode 'restricted', got %q", cfg.Network.Mode)

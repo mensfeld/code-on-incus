@@ -68,11 +68,23 @@ func (a *App) validateEnvRunPhase(s *runState) session.Phase {
 			slotNum := a.slot
 			var err error
 			if slotNum == 0 {
-				slotNum, err = session.AllocateSlot(s.absWorkspace, 10)
-				if err != nil {
-					return nil, fmt.Errorf("failed to allocate slot: %w", err)
+				// Persistent mode: prefer the stopped container from a
+				// previous run — plain AllocateSlot treats it as occupying
+				// its slot and would silently launch a FRESH container on
+				// the next slot (state never persists, slots exhaust).
+				if a.persistent {
+					if reuse, ok := session.FindReusablePersistentSlot(s.absWorkspace, 10); ok {
+						slotNum = reuse
+						fmt.Fprintf(os.Stderr, "Reusing persistent container on slot %d\n", slotNum)
+					}
 				}
-				fmt.Fprintf(os.Stderr, "Auto-allocated slot %d\n", slotNum)
+				if slotNum == 0 {
+					slotNum, err = session.AllocateSlot(s.absWorkspace, 10)
+					if err != nil {
+						return nil, fmt.Errorf("failed to allocate slot: %w", err)
+					}
+					fmt.Fprintf(os.Stderr, "Auto-allocated slot %d\n", slotNum)
+				}
 			}
 			s.containerName = session.ContainerName(s.absWorkspace, slotNum)
 
@@ -261,53 +273,22 @@ func (a *App) applyNetworkRunPhase(s *runState) session.Phase {
 	}
 }
 
-// runCommandPhase starts the optional timeout monitor, executes the user's
-// command inside the container via incus exec, and returns any exit-code error.
 // startMonitoringRunPhase starts the security monitoring daemons for the run
-// container, mirroring the shell pipeline's startMonitoringPhase: an arbitrary
-// command or boot script deserves the same watchers as an agent session.
-// Honors [monitoring] config; threat events land in the audit log via the
-// responder. Diagnostics use a discard logger (run has no session log file).
+// container via the shared startSessionMonitoring helper (same watchers as an
+// agent session). Threat events land in the audit log via the responder;
+// diagnostics use a discard logger (run has no session log file).
 func (a *App) startMonitoringRunPhase(s *runState) session.Phase {
 	return session.PhaseFunc{
 		PhaseName: "start-monitoring",
 		RunFn: func(ctx context.Context) (session.Teardown, error) {
-			if !config.BoolVal(a.cfg.Monitoring.Enabled) {
-				return nil, nil
-			}
-
-			runLog := logger.NewDiscard()
-			if err := startMonitoringDaemon(ctx, s.containerName, s.absWorkspace, a.cfg, runLog, &s.monitorDaemon); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: Failed to start monitoring daemon: %v\n", err)
-			}
-
-			if config.BoolVal(a.cfg.Monitoring.NFT.Enabled) {
-				if !a.cfg.Network.SudoAllowed() {
-					// use_sudo=false: nft monitoring needs sudo nft, so skip it
-					// cleanly rather than attempting sudo and warning on failure.
-					fmt.Fprintf(os.Stderr, "NFT network monitoring skipped: [network] use_sudo = false\n")
-				} else if err := startNFTMonitoringDaemon(ctx, s.containerName, a.cfg, runLog, &s.nftDaemon); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: Failed to start NFT monitoring: %v\n", err)
-				}
-			}
-
-			teardown := func() {
-				if s.monitorDaemon != nil {
-					if err := s.monitorDaemon.Stop(); err != nil {
-						fmt.Fprintf(os.Stderr, "Warning: Failed to stop monitoring daemon: %v\n", err)
-					}
-				}
-				if s.nftDaemon != nil {
-					if err := s.nftDaemon.Stop(); err != nil {
-						fmt.Fprintf(os.Stderr, "Warning: Failed to stop NFT monitoring: %v\n", err)
-					}
-				}
-			}
+			teardown := a.startSessionMonitoring(ctx, s.containerName, s.absWorkspace, logger.NewDiscard(), &s.monitorDaemon, &s.nftDaemon)
 			return teardown, nil
 		},
 	}
 }
 
+// runCommandPhase starts the optional timeout monitor, executes the user's
+// command inside the container via incus exec, and returns any exit-code error.
 func (a *App) runCommandPhase(args []string, s *runState) session.Phase {
 	return session.PhaseFunc{
 		PhaseName: "run-command",

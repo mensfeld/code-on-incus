@@ -590,7 +590,7 @@ func detectHostTimezone() string {
 }
 
 // startMonitoringDaemon starts the background monitoring daemon
-func startMonitoringDaemon(ctx context.Context, containerName, workspacePath string, cfg *config.Config, log *logger.SessionLogger, daemon *monitor.MonitorDaemon) error {
+func startMonitoringDaemon(ctx context.Context, containerName, workspacePath string, cfg *config.Config, allowedCIDRs []string, log *logger.SessionLogger, daemon *monitor.MonitorDaemon) error {
 	// Get home directory for audit log
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -598,11 +598,6 @@ func startMonitoringDaemon(ctx context.Context, containerName, workspacePath str
 	}
 
 	auditLogPath := filepath.Join(homeDir, ".coi", "audit", containerName+".jsonl")
-
-	var allowedCIDRs []string
-	if cfg.Network.Mode == config.NetworkModeAllowlist {
-		allowedCIDRs = resolveDomainsToHostCIDRs(cfg.Network.AllowedDomains)
-	}
 
 	// Create daemon config
 	daemonCfg := monitor.DaemonConfig{
@@ -653,13 +648,17 @@ func startMonitoringDaemon(ctx context.Context, containerName, workspacePath str
 }
 
 // startNFTMonitoringDaemon starts the nftables network monitoring daemon
-func startNFTMonitoringDaemon(ctx context.Context, containerName string, cfg *config.Config, log *logger.SessionLogger, daemon *nftmonitor.NFTMonitorDaemon) error {
+func startNFTMonitoringDaemon(ctx context.Context, containerName string, cfg *config.Config, allowedCIDRs []string, log *logger.SessionLogger, daemon *nftmonitor.NFTMonitorDaemon) error {
 	// Route the nft monitor's COI_NFT_DEBUG diagnostics to the session log
 	// instead of the user's attached terminal (issue #372 class).
 	nftmonitor.SetLogger(log)
 
-	// Get container IP
-	containerIP, err := network.GetContainerIPWithRetries(containerName, 3)
+	// Get container IP. 30 retries (matching restricted-mode network setup's
+	// DHCP wait): in open mode nothing upstream waits for the lease, and the
+	// run pipeline reaches this phase seconds after launch — 3 retries (~2 s)
+	// intermittently missed the IP under load, silently skipping nft
+	// monitoring with only a stderr warning.
+	containerIP, err := network.GetContainerIPWithRetries(containerName, 30)
 	if err != nil {
 		return fmt.Errorf("failed to get container IP: %w", err)
 	}
@@ -678,11 +677,6 @@ func startNFTMonitoringDaemon(ctx context.Context, containerName string, cfg *co
 	}
 
 	auditLogPath := filepath.Join(homeDir, ".coi", "audit", containerName+"-nft.jsonl")
-
-	var allowedCIDRs []string
-	if cfg.Network.Mode == config.NetworkModeAllowlist {
-		allowedCIDRs = resolveDomainsToHostCIDRs(cfg.Network.AllowedDomains)
-	}
 
 	// Create NFT daemon config
 	nftCfg := nftmonitor.Config{

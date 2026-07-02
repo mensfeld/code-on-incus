@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"golang.org/x/sys/unix"
-
 	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/image"
@@ -104,11 +102,8 @@ func imageNotFoundError(imageName string) error {
 }
 
 // stdinIsTerminal reports whether os.Stdin is connected to a real terminal.
-// Uses TIOCGWINSZ rather than ModeCharDevice because /dev/null is also a
-// character device on Linux, causing false positives with the stat approach.
 func stdinIsTerminal() bool {
-	_, err := unix.IoctlGetWinsize(int(os.Stdin.Fd()), unix.TIOCGWINSZ)
-	return err == nil
+	return container.StdinIsTerminal()
 }
 
 // promptYesNo prints prompt and reads a single line from stdin.

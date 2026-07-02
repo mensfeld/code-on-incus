@@ -2,7 +2,7 @@ package cli
 
 import (
 	"fmt"
-	"strings"
+	"regexp"
 
 	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
@@ -99,6 +99,14 @@ Examples:
 	},
 }
 
+// removedFlagRe matches the removed --image/--persistent flags as EXACT
+// tokens inside a flag-error message ("unknown flag: --image",
+// "flag needs an argument: --image"). The boundary check prevents false
+// hints for flags that merely share the prefix (--images, --image-tag,
+// --persistent-home): the token must be followed by end-of-string,
+// whitespace, or '=' — never by more flag-name characters.
+var removedFlagRe = regexp.MustCompile(`(--image|--persistent)($|[\s=])`)
+
 // removedFlagHint upgrades the bare "unknown flag" error for the removed
 // --image/--persistent flags into an actionable migration message. The flags
 // no longer exist anywhere — image selection and persistence are configured
@@ -109,15 +117,13 @@ func removedFlagHint(cmd *cobra.Command, err error) error {
 		return nil
 	}
 	msg := err.Error()
-	for _, flag := range []string{"--image", "--persistent"} {
-		if strings.Contains(msg, flag) {
-			return fmt.Errorf("%s\n\nThe %s flag was removed. Set it via config instead:\n"+
-				"  [container]\n"+
-				"  image = \"my-image\"      # was --image\n"+
-				"  persistent = true       # was --persistent\n"+
-				"in ~/.coi/config.toml, ./.coi/config.toml, or a profile (--profile <name>)",
-				msg, flag)
-		}
+	if m := removedFlagRe.FindStringSubmatch(msg); m != nil {
+		return fmt.Errorf("%s\n\nThe %s flag was removed. Set it via config instead:\n"+
+			"  [container]\n"+
+			"  image = \"my-image\"      # was --image\n"+
+			"  persistent = true       # was --persistent\n"+
+			"in ~/.coi/config.toml, ./.coi/config.toml, or a profile (--profile <name>)",
+			msg, m[1])
 	}
 	return err
 }

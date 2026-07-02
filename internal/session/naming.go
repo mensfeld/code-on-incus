@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/mensfeld/code-on-incus/internal/container"
 )
@@ -100,6 +101,50 @@ func AllocateSlot(workspacePath string, maxSlots int) (int, error) {
 	}
 
 	return 0, fmt.Errorf("all %d slots are in use", maxSlots)
+}
+
+// FindReusablePersistentSlot returns the lowest slot whose container for the
+// workspace exists and is STOPPED — the natural reuse target for persistent
+// mode. Without this, auto-allocation treats the stopped persistent container
+// as occupying its slot and silently launches a fresh container on the next
+// slot (state never persists, and slots exhaust after maxSlots runs).
+// Running containers are never returned: they may belong to an active
+// session, and parallel invocations should keep taking fresh slots.
+// Returns (0, false) when no stopped container exists or listing fails.
+func FindReusablePersistentSlot(workspacePath string, maxSlots int) (int, bool) {
+	if maxSlots == 0 {
+		maxSlots = 10
+	}
+	hash := WorkspaceHash(workspacePath)
+	prefix := fmt.Sprintf("%s%s-", GetContainerPrefix(), hash)
+
+	output, err := container.IncusOutput("list", "--format=json")
+	if err != nil {
+		return 0, false
+	}
+	var containers []struct {
+		Name   string `json:"name"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(output), &containers); err != nil {
+		return 0, false
+	}
+
+	re := regexp.MustCompile(fmt.Sprintf(`^%s(\d+)$`, regexp.QuoteMeta(prefix)))
+	best := 0
+	for _, c := range containers {
+		if !strings.EqualFold(c.Status, "stopped") {
+			continue
+		}
+		if m := re.FindStringSubmatch(c.Name); len(m) > 1 {
+			if n, err := strconv.Atoi(m[1]); err == nil && n >= 1 && n <= maxSlots {
+				if best == 0 || n < best {
+					best = n
+				}
+			}
+		}
+	}
+	return best, best != 0
 }
 
 // AllocateSlotFrom finds the next available slot starting from a specific slot number
