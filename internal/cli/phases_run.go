@@ -21,11 +21,10 @@ type runState struct {
 	// After resolve-workspace
 	absWorkspace string
 
-	// Boot-script mode (coi run with no command): run <workspace>/coi-boot.sh
-	// from the workspace mount. bootScriptDirect means the host file is
-	// executable (exec directly, shebang respected); otherwise run via bash.
-	bootScript       bool
-	bootScriptDirect bool
+	// Run-script mode (coi run with no command): execute <workspace>/coi-run
+	// from the workspace mount. The file is required to be executable, so it
+	// runs directly and its shebang decides the interpreter.
+	runScript bool
 
 	// After validate-env
 	containerName  string
@@ -331,17 +330,13 @@ func (a *App) runCommandPhase(args []string, s *runState) session.Phase {
 				}
 			}()
 
-			// Boot-script mode: execute the script straight from the workspace
-			// mount — it comes from the host, nothing is pushed.
+			// Run-script mode: execute the script straight from the workspace
+			// mount — it comes from the host, nothing is pushed. It runs
+			// directly, so the shebang decides the interpreter.
 			execArgs := args
-			if s.bootScript {
-				scriptPath := s.containerWorkspace + "/" + bootScriptName
-				if s.bootScriptDirect {
-					execArgs = []string{scriptPath}
-				} else {
-					execArgs = []string{"bash", scriptPath}
-				}
-				fmt.Fprintf(os.Stderr, "Running workspace boot script: %s\n", bootScriptName)
+			if s.runScript {
+				execArgs = []string{s.containerWorkspace + "/" + runScriptName}
+				fmt.Fprintf(os.Stderr, "Running workspace run script: %s\n", runScriptName)
 			} else {
 				fmt.Fprintf(os.Stderr, "Executing: %s\n", strings.Join(args, " "))
 			}

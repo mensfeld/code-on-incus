@@ -46,7 +46,7 @@ Examples:
   coi                          # Start interactive AI coding session (same as 'coi shell')
   coi shell --slot 2           # Use specific slot
   coi run -- npm test          # Run a command in the sandbox
-  coi run                      # Run the workspace boot script (coi-boot.sh)
+  coi run                      # Run the workspace run script (coi-run)
   coi build                    # Build coi image
   coi image list               # List available images
   coi list                     # List active sessions

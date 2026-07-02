@@ -61,7 +61,7 @@ def test_run_help_uses_square_brackets(coi_binary):
     """coi run --help should show [command] [args...] not COMMAND.
 
     The command became optional (coi run with no command executes the
-    workspace coi-boot.sh), so square brackets are the correct style.
+    workspace coi-run), so square brackets are the correct style.
     """
     result = subprocess.run(
         [coi_binary, "run", "--help"],

@@ -19,27 +19,30 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// bootScriptName is the workspace boot script convention: when `coi run` is
-// invoked with no command, a file with this name at the workspace root is
-// executed inside the container (straight from the workspace mount).
-const bootScriptName = "coi-boot.sh"
+// runScriptName is the workspace run-script convention: when `coi run` is
+// invoked with no command, an executable file with this name at the workspace
+// root is executed inside the container (straight from the workspace mount).
+// It is extensionless on purpose: the shebang decides the interpreter, so a
+// bash, ruby, or python script all work the same way.
+const runScriptName = "coi-run"
 
 var runCmd = &cobra.Command{
 	Use:   "run [command] [args...]",
-	Short: "Run a command or the workspace boot script in a sandboxed container",
+	Short: "Run a command or the workspace run script in a sandboxed container",
 	Long: `Execute a command in an isolated Incus container with the full sandbox
 (workspace mount, protected paths, secret masking, network isolation, limits,
 monitoring). Output streams live and the command's exit code is propagated.
 
-With no command, coi looks for ` + bootScriptName + ` at the workspace root and
-runs it inside the container directly from the workspace mount. The script is
-executed as-is when it has the executable bit, and via bash otherwise.
+With no command, coi looks for an executable ` + runScriptName + ` at the workspace
+root and runs it inside the container directly from the workspace mount. The
+shebang decides the interpreter, so any language works (#!/usr/bin/env bash,
+ruby, python, ...).
 
 The container is ephemeral: it is cleaned up after the command completes (or
 stopped and kept, when [container] persistent = true is configured).
 
 Examples:
-  coi run                            # run ./` + bootScriptName + ` in the sandbox
+  coi run                            # run ./` + runScriptName + ` in the sandbox
   coi run --profile scripts          # same, with a credential-limiting profile
   coi run -- npm test                # run an arbitrary command
   coi run --workspace ~/project -- make build
@@ -48,21 +51,25 @@ Examples:
 	RunE: app.runCommand,
 }
 
-// detectBootScript checks for the workspace boot script and reports whether it
-// exists and whether it carries the executable bit (run directly, shebang
-// respected) or not (run via bash).
-func detectBootScript(absWorkspace string) (found bool, executable bool, err error) {
-	fi, statErr := os.Stat(filepath.Join(absWorkspace, bootScriptName))
+// detectRunScript checks for the workspace run script. The script must carry
+// the executable bit — it is executed directly (the shebang decides the
+// interpreter), so a non-executable file is an error with a chmod hint rather
+// than a silent guess at how to interpret it.
+func detectRunScript(absWorkspace string) (found bool, err error) {
+	fi, statErr := os.Stat(filepath.Join(absWorkspace, runScriptName))
 	if statErr != nil {
 		if os.IsNotExist(statErr) {
-			return false, false, nil
+			return false, nil
 		}
-		return false, false, fmt.Errorf("failed to check for %s: %w", bootScriptName, statErr)
+		return false, fmt.Errorf("failed to check for %s: %w", runScriptName, statErr)
 	}
 	if fi.IsDir() {
-		return false, false, fmt.Errorf("%s in workspace is a directory, expected a script file", bootScriptName)
+		return false, fmt.Errorf("%s in workspace is a directory, expected a script file", runScriptName)
 	}
-	return true, fi.Mode()&0o111 != 0, nil
+	if fi.Mode()&0o111 == 0 {
+		return false, fmt.Errorf("%s exists but is not executable — its shebang decides the interpreter, so make it executable: chmod +x %s", runScriptName, runScriptName)
+	}
+	return true, nil
 }
 
 func (a *App) runCommand(cmd *cobra.Command, args []string) error {
@@ -87,21 +94,20 @@ func (a *App) runCommand(cmd *cobra.Command, args []string) error {
 
 	s := &runState{absWorkspace: absWorkspace}
 
-	// No command given: fall back to the workspace boot script convention.
+	// No command given: fall back to the workspace run-script convention.
 	// Detection happens host-side before any container work so a missing
 	// script fails fast with a clear message.
 	if len(args) == 0 {
-		found, executable, err := detectBootScript(absWorkspace)
+		found, err := detectRunScript(absWorkspace)
 		if err != nil {
 			return err
 		}
 		if !found {
 			return fmt.Errorf("no command given and no %s found in workspace %s\n"+
-				"Create %s at the workspace root or pass a command: coi run -- <command>",
-				bootScriptName, absWorkspace, bootScriptName)
+				"Create an executable %s at the workspace root or pass a command: coi run -- <command>",
+				runScriptName, absWorkspace, runScriptName)
 		}
-		s.bootScript = true
-		s.bootScriptDirect = executable
+		s.runScript = true
 	}
 
 	pipeline := &session.Pipeline{}

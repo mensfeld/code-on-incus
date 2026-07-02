@@ -10,8 +10,8 @@ import (
 	"github.com/mensfeld/code-on-incus/internal/config"
 )
 
-func TestDetectBootScript_Absent(t *testing.T) {
-	found, _, err := detectBootScript(t.TempDir())
+func TestDetectRunScript_Absent(t *testing.T) {
+	found, err := detectRunScript(t.TempDir())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -20,53 +20,47 @@ func TestDetectBootScript_Absent(t *testing.T) {
 	}
 }
 
-func TestDetectBootScript_Executable(t *testing.T) {
+func TestDetectRunScript_Executable(t *testing.T) {
 	dir := t.TempDir()
-	script := filepath.Join(dir, bootScriptName)
-	if err := os.WriteFile(script, []byte("#!/bin/sh\necho hi\n"), 0o755); err != nil {
+	script := filepath.Join(dir, runScriptName)
+	if err := os.WriteFile(script, []byte("#!/usr/bin/env ruby\nputs 'hi'\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	found, executable, err := detectBootScript(dir)
+	found, err := detectRunScript(dir)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !found {
-		t.Fatal("want found=true")
-	}
-	if !executable {
-		t.Error("want executable=true for a 0755 script (direct exec, shebang respected)")
+		t.Fatal("want found=true for an executable coi-run (any shebang works)")
 	}
 }
 
-func TestDetectBootScript_NonExecutable(t *testing.T) {
+func TestDetectRunScript_NonExecutableIsError(t *testing.T) {
 	dir := t.TempDir()
-	script := filepath.Join(dir, bootScriptName)
+	script := filepath.Join(dir, runScriptName)
 	if err := os.WriteFile(script, []byte("echo hi\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	found, executable, err := detectBootScript(dir)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	_, err := detectRunScript(dir)
+	if err == nil {
+		t.Fatal("want error for a non-executable coi-run (no interpreter guessing)")
 	}
-	if !found {
-		t.Fatal("want found=true")
-	}
-	if executable {
-		t.Error("want executable=false for a 0644 script (run via bash)")
+	if !strings.Contains(err.Error(), "chmod +x") {
+		t.Errorf("error should carry the chmod hint, got: %v", err)
 	}
 }
 
-func TestDetectBootScript_DirectoryIsError(t *testing.T) {
+func TestDetectRunScript_DirectoryIsError(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.Mkdir(filepath.Join(dir, bootScriptName), 0o755); err != nil {
+	if err := os.Mkdir(filepath.Join(dir, runScriptName), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	_, _, err := detectBootScript(dir)
+	_, err := detectRunScript(dir)
 	if err == nil {
-		t.Fatal("want error when coi-boot.sh is a directory")
+		t.Fatal("want error when coi-run is a directory")
 	}
 	if !strings.Contains(err.Error(), "directory") {
 		t.Errorf("error should mention directory, got: %v", err)

@@ -264,7 +264,7 @@ coi shell --resume
 # Run a command in the sandbox (streams output, propagates exit code)
 coi run -- npm test
 
-# Run the workspace boot script (./coi-boot.sh) in the sandbox
+# Run the workspace run script (./coi-run) in the sandbox
 coi run
 
 # Attach to existing session
@@ -353,22 +353,24 @@ coi run -- npm test
 coi run -- make build
 cat data.csv | coi run -- ./process.sh
 
-# Workspace boot script: with no command, coi runs ./coi-boot.sh
-cat > coi-boot.sh <<'EOF'
+# Workspace run script: with no command, coi runs ./coi-run
+cat > coi-run <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 npm ci && npm test
 EOF
+chmod +x coi-run
 coi run
 ```
 
-The boot script is executed **directly from the workspace mount** — it comes
-from the host; nothing is copied into the container. An executable script runs
-as-is (shebang respected); a non-executable one runs via bash. The container is
-cleaned up when the script finishes — or kept, with `[container] persistent =
-true`, so installed packages and caches survive between runs.
+The run script is executed **directly from the workspace mount** — it comes
+from the host; nothing is copied into the container. It is extensionless and
+must be executable: the shebang decides the interpreter, so a bash, ruby, or
+python `coi-run` all work the same way. The container is cleaned up when the
+script finishes — or kept, with `[container] persistent = true`, so installed
+packages and caches survive between runs.
 
-**Security note:** a cloned repository can ship its own `coi-boot.sh`, so
+**Security note:** a cloned repository can ship its own `coi-run`, so
 `coi run` in a repo you don't trust executes that repo's code — inside the
 sandbox, which is exactly what the sandbox is for. For untrusted projects, use
 a credential-limiting profile (e.g. `coi run --profile hardened`, or your own
