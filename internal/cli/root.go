@@ -101,10 +101,9 @@ Examples:
 
 // removedFlagHint upgrades the bare "unknown flag" error for the removed
 // --image/--persistent flags into an actionable migration message. The flags
-// were removed in favor of config ([container] image / persistent), which is
-// settable globally, per project, or per profile. `coi profile create` keeps
-// local flags with the same names (profile authoring writes config), so this
-// only fires on commands where the flags genuinely no longer exist.
+// no longer exist anywhere — image selection and persistence are configured
+// via [container] image / persistent, settable globally, per project, or per
+// profile (edit the profile's config.toml).
 func removedFlagHint(cmd *cobra.Command, err error) error {
 	if err == nil {
 		return nil

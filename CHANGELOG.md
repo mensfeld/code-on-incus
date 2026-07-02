@@ -4,7 +4,7 @@
 
 ### Breaking Changes
 
-- **The global `--image` and `--persistent` CLI flags were removed** — everything config-shaped goes via config/profiles, not flags. Set `[container] image = "..."` and `[container] persistent = true` in `~/.coi/config.toml`, a project `./.coi/config.toml`, or a profile (then `coi shell|run --profile <name>`). Using the removed flags fails with an actionable migration hint (not a bare "unknown flag"). `coi profile create` keeps local `--image`/`--persistent` flags — there they are profile *authoring* inputs that write config, which is exactly the model. Runtime behavior is unchanged once configured: persistent containers are still reused and stopped (not deleted) on exit; images still resolve as `[container] image` > `coi-default`.
+- **The `--image` and `--persistent` CLI flags were removed everywhere** — everything config-shaped goes via config/profiles, not flags. Set `[container] image = "..."` and `[container] persistent = true` in `~/.coi/config.toml`, a project `./.coi/config.toml`, or a profile (then `coi shell|run --profile <name>`). Using the removed flags fails with an actionable migration hint (not a bare "unknown flag") on every command, including `coi profile create` — profiles are authored by editing their `config.toml` (`coi profile edit <name>`); only `--inherits` still seeds the scaffold. Runtime behavior is unchanged once configured: persistent containers are still reused and stopped (not deleted) on exit; images still resolve as `[container] image` > `coi-default`.
 
 ### New Features
 
