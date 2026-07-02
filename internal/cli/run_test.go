@@ -91,6 +91,29 @@ func TestRemovedFlagHint_OtherFlagsUntouched(t *testing.T) {
 	}
 }
 
+func TestOverlayWorkspaceConfig_AppliesPersistent(t *testing.T) {
+	// Regression: PersistentPreRunE computes a.persistent before the
+	// --workspace project config is overlaid; the overlay must recompute it,
+	// or [container] persistent = true in the workspace config is ignored
+	// whenever coi run/shell is invoked from outside the workspace.
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".coi"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfgContent := "[container]\npersistent = true\n"
+	if err := os.WriteFile(filepath.Join(dir, ".coi", "config.toml"), []byte(cfgContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	a := &App{cfg: config.GetDefaultConfig()}
+	if err := a.overlayWorkspaceConfig(dir); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !a.persistent {
+		t.Error("persistent from the workspace .coi/config.toml must apply after the overlay")
+	}
+}
+
 func TestResolveImageName_ConfigDriven(t *testing.T) {
 	cfg := config.GetDefaultConfig()
 	if got := ResolveImageName(cfg); got == "" {

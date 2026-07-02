@@ -93,6 +93,12 @@ func (a *App) resolveWorkspacePhase(cmd *cobra.Command, s *shellState) session.P
 				}
 			}
 
+			// The workspace/alias config overlays (and an alias-applied
+			// profile) may set [container] persistent — PersistentPreRunE
+			// computed a.persistent before they ran, so recompute it here.
+			// Resume metadata (configureSessionPhase) still overrides later.
+			a.persistent = config.BoolVal(a.cfg.Container.Persistent)
+
 			s.absWorkspace = absWorkspace
 			return nil, nil
 		},

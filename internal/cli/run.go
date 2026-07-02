@@ -369,6 +369,9 @@ func (a *App) overlayWorkspaceConfig(absWorkspace string) error {
 		return fmt.Errorf("failed to load project config from %s: %w", absWorkspace, err)
 	}
 	container.Configure(a.cfg.Incus.Project, a.cfg.Incus.CodeUser, a.cfg.Incus.CodeUID)
+	// The workspace config may set [container] persistent — PersistentPreRunE
+	// computed a.persistent before this overlay ran, so recompute it here.
+	a.persistent = config.BoolVal(a.cfg.Container.Persistent)
 	return nil
 }
 
