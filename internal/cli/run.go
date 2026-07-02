@@ -35,8 +35,8 @@ With no command, coi looks for ` + bootScriptName + ` at the workspace root and
 runs it inside the container directly from the workspace mount. The script is
 executed as-is when it has the executable bit, and via bash otherwise.
 
-The container is cleaned up after the command completes (or stopped, when
-[container] persistent = true is configured).
+The container is ephemeral: it is cleaned up after the command completes (or
+stopped and kept, when [container] persistent = true is configured).
 
 Examples:
   coi run                            # run ./` + bootScriptName + ` in the sandbox
