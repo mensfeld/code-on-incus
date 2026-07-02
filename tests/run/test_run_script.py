@@ -16,9 +16,12 @@ import subprocess
 from support.helpers import write_workspace_container_config
 
 
-def _run_coi(coi_binary, workspace_dir, timeout=180):
+def _run_coi(coi_binary, workspace_dir, timeout=180, slot=None):
+    args = [coi_binary, "run", "--workspace", workspace_dir]
+    if slot is not None:
+        args += ["--slot", str(slot)]
     return subprocess.run(
-        [coi_binary, "run", "--workspace", workspace_dir],
+        args,
         capture_output=True,
         text=True,
         timeout=timeout,
@@ -114,11 +117,14 @@ def test_run_script_persistent_state_survives(coi_binary, cleanup_containers, wo
         "touch ~/state-marker\n",
     )
 
-    first = _run_coi(coi_binary, workspace_dir)
+    # Pin the slot: auto-allocation would give the second run a fresh slot
+    # (the stopped persistent container occupies the first), creating a new
+    # container instead of restarting the one holding the state.
+    first = _run_coi(coi_binary, workspace_dir, slot=7)
     assert first.returncode == 0, f"first run failed:\n{first.stdout + first.stderr}"
     assert "SECOND-RUN-SEES-STATE" not in first.stdout + first.stderr
 
-    second = _run_coi(coi_binary, workspace_dir)
+    second = _run_coi(coi_binary, workspace_dir, slot=7)
     combined = second.stdout + second.stderr
     assert second.returncode == 0, f"second run failed:\n{combined}"
     assert "SECOND-RUN-SEES-STATE" in combined, (
