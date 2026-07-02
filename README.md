@@ -216,8 +216,8 @@ coi build
 coi build --compression none
 
 # Build a custom image via a profile
-coi profile create my-image --image my-image
-# Edit .coi/profiles/my-image/config.toml to add a [container.build] section
+coi profile create my-image
+# Edit .coi/profiles/my-image/config.toml: set [container] image and a [container.build] section
 coi build --profile my-image
 
 # Build images for all profiles that have a [container.build] section
@@ -453,8 +453,8 @@ Profiles are reusable container configurations bundling image, tool, limits, mou
 
 ```bash
 coi shell --profile rust-dev                 # Use a profile
-coi profile create rust-dev --image coi-rust  # Create a new profile
-coi profile list                              # List all profiles
+coi profile create rust-dev                  # Create a new profile (then edit its config.toml)
+coi profile list                             # List all profiles
 ```
 
 Each profile is a self-contained directory (`.coi/profiles/<name>/`) bundling a `config.toml` plus optional build script and context file. Profiles support inheritance (`inherits = "parent"`), context files for AI-agent instructions, and custom build scripts. COI also ships a JSON Schema for profile configs (`coi schema profile`) so external tools can validate them. See the [Profiles wiki page](https://github.com/mensfeld/code-on-incus/wiki/Profiles) for the full reference, examples, and schema details.
