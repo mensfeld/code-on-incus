@@ -675,28 +675,6 @@ def get_session_id_from_output(output):
     return None
 
 
-def get_latest_session_id():
-    """
-    Get the most recent session ID from sessions directory.
-    """
-    sessions_dir = Path.home() / ".claude-on-incus" / "sessions"
-
-    if not sessions_dir.exists():
-        return None
-
-    # Get all session directories sorted by modification time
-    sessions = sorted(
-        [d for d in sessions_dir.iterdir() if d.is_dir()],
-        key=lambda x: x.stat().st_mtime,
-        reverse=True,
-    )
-
-    if sessions:
-        return sessions[0].name
-
-    return None
-
-
 def wait_for_text(child, text, timeout=30):
     """
     Wait for specific text to appear in output.

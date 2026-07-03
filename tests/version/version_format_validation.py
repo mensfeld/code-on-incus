@@ -17,7 +17,7 @@ def test_version_format_validation(coi_binary):
 
     Flow:
     1. Run coi version
-    2. Verify first line matches version format: claude-on-incus (coi) vX.Y.Z
+    2. Verify first line matches version format: code-on-incus (coi) vX.Y.Z
     3. Verify second line is GitHub repository URL
     """
     result = subprocess.run(

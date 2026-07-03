@@ -150,7 +150,7 @@ func (a *App) cleanCommand(cmd *cobra.Command, args []string) error {
 // cleanStoppedContainers finds and removes stopped containers.
 // Returns (count cleaned, was cancelled, error).
 func cleanStoppedContainers() (int, bool, error) {
-	fmt.Println("Checking for stopped claude-on-incus containers...")
+	fmt.Println("Checking for stopped code-on-incus containers...")
 
 	containers, err := listActiveContainers()
 	if err != nil {
