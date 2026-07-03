@@ -4,6 +4,8 @@
 
 ### Breaking Changes
 
+- **The legacy `CLAUDE_ON_INCUS_*` env-var config overrides were removed entirely** — `CLAUDE_ON_INCUS_IMAGE`, `CLAUDE_ON_INCUS_PERSISTENT`, `CLAUDE_ON_INCUS_SESSIONS_DIR`, and `CLAUDE_ON_INCUS_STORAGE_DIR` were first-commit relics from the pre-rename claude-on-incus era that silently overrode config (`CLAUDE_ON_INCUS_PERSISTENT=true` in a shell profile could defeat explicit config). They are now simply ignored, with no shim: set `[container] image` / `persistent` and `[paths] sessions_dir` / `storage_dir` instead. (The `COI_LIMIT_*` env family remains for now; the `claude-on-incus` binary symlink compatibility is untouched.)
+
 - **All config-shaped CLI flags were removed: `--image`, `--persistent`, `--tmux`, `--tool`, `coi build --compression`, and `coi shutdown --timeout`** — everything config-shaped goes via config/profiles, not flags; flags are only for per-invocation choices (workspace, slot, resume, profile, force, format, ...). The replacements, settable in `~/.coi/config.toml`, a project `./.coi/config.toml`, or a profile (then `coi shell|run --profile <name>`):
   - `[container] image = "..."` (was `--image`) and `[container] persistent = true` (was `--persistent`)
   - `[shell] use_tmux = false` (was `coi shell --tmux=false`; previously duplicated as flag + config with a documented override rule — the two-sources-of-truth pattern this release eliminates)
