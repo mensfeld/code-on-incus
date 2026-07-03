@@ -34,6 +34,23 @@ def test_removed_image_flag_hint(coi_binary):
     assert "[container]" in result.stderr, f"hint must point at config, got:\n{result.stderr}"
 
 
+def test_removed_tmux_tool_compression_timeout_hints(coi_binary):
+    """Each removed config-shaped flag points at its replacement config key."""
+    cases = [
+        (["shell", "--tmux=false"], "[shell] use_tmux"),
+        (["shell", "--tool", "opencode"], "[tool] name"),
+        (["build", "--compression", "none"], "[container.build] compression"),
+        (["shutdown", "--timeout=5", "x"], "[container] shutdown_timeout"),
+    ]
+    for args, want in cases:
+        result = _run(coi_binary, args)
+        assert result.returncode != 0, f"{args}: removed flag must fail"
+        assert "flag was removed" in result.stderr, (
+            f"{args}: want migration hint, got:\n{result.stderr}"
+        )
+        assert want in result.stderr, f"{args}: hint must point at {want}, got:\n{result.stderr}"
+
+
 def test_no_false_hint_for_prefix_collisions(coi_binary):
     """Flags that merely share the prefix (--images, --persistent-home) must
     get the plain unknown-flag error, NOT the migration hint."""

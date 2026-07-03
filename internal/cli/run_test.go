@@ -95,7 +95,11 @@ func TestRemovedFlagHint_NoFalsePositiveOnPrefixCollision(t *testing.T) {
 	// Regression: substring matching told users "--image was removed" for
 	// flags that merely share the prefix. Exact-token matching must pass
 	// these through unchanged.
-	for _, flag := range []string{"--images", "--image-tag", "--imagestore", "--persistent-home", "--persistently"} {
+	for _, flag := range []string{
+		"--images", "--image-tag", "--imagestore",
+		"--persistent-home", "--persistently",
+		"--tmux-session", "--tooling", "--timeouts", "--compression-level",
+	} {
 		orig := errors.New("unknown flag: " + flag)
 		if err := removedFlagHint(nil, orig); err != orig {
 			t.Errorf("%s: must NOT trigger the migration hint, got: %v", flag, err)
@@ -105,10 +109,31 @@ func TestRemovedFlagHint_NoFalsePositiveOnPrefixCollision(t *testing.T) {
 	for _, msg := range []string{
 		"unknown flag: --image",
 		"unknown flag: --persistent",
+		"unknown flag: --tmux",
+		"unknown flag: --tool",
+		"unknown flag: --compression",
+		"unknown flag: --timeout",
 		"flag needs an argument: --image",
 	} {
 		if err := removedFlagHint(nil, errors.New(msg)); err.Error() == msg {
 			t.Errorf("%q: expected the migration hint to be appended", msg)
+		}
+	}
+}
+
+func TestRemovedFlagHint_PointsAtTheRightConfigKey(t *testing.T) {
+	cases := map[string]string{
+		"--tmux":        "[shell] use_tmux",
+		"--tool":        "[tool] name",
+		"--compression": "[container.build] compression",
+		"--timeout":     "[container] shutdown_timeout",
+		"--image":       "[container] image",
+		"--persistent":  "[container] persistent",
+	}
+	for flag, want := range cases {
+		err := removedFlagHint(nil, errors.New("unknown flag: "+flag))
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: hint must point at %q, got: %v", flag, want, err)
 		}
 	}
 }

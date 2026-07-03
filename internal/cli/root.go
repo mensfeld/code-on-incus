@@ -99,31 +99,41 @@ Examples:
 	},
 }
 
-// removedFlagRe matches the removed --image/--persistent flags as EXACT
-// tokens inside a flag-error message ("unknown flag: --image",
-// "flag needs an argument: --image"). The boundary check prevents false
-// hints for flags that merely share the prefix (--images, --image-tag,
-// --persistent-home): the token must be followed by end-of-string,
-// whitespace, or '=' — never by more flag-name characters.
-var removedFlagRe = regexp.MustCompile(`(--image|--persistent)($|[\s=])`)
+// removedFlagConfig maps each removed, config-shaped CLI flag to the config
+// setting that replaces it. Everything config-shaped goes via config/profiles;
+// flags are only for per-invocation choices.
+var removedFlagConfig = map[string]string{
+	"--image":       `[container] image = "..."`,
+	"--persistent":  `[container] persistent = true`,
+	"--tmux":        `[shell] use_tmux = false`,
+	"--tool":        `[tool] name = "opencode"`,
+	"--compression": `[container.build] compression = "none"`,
+	"--timeout":     `[container] shutdown_timeout = 30`,
+}
 
-// removedFlagHint upgrades the bare "unknown flag" error for the removed
-// --image/--persistent flags into an actionable migration message. The flags
-// no longer exist anywhere — image selection and persistence are configured
-// via [container] image / persistent, settable globally, per project, or per
-// profile (edit the profile's config.toml).
+// removedFlagRe matches the removed flags as EXACT tokens inside a
+// flag-error message ("unknown flag: --image", "flag needs an argument:
+// --image"). The boundary check prevents false hints for flags that merely
+// share the prefix (--images, --image-tag, --persistent-home): the token must
+// be followed by end-of-string, whitespace, or '=' — never by more flag-name
+// characters. Commands that legitimately keep one of these names (e.g.
+// `coi image publish --compression`) never reach this path because their
+// flag exists and parses.
+var removedFlagRe = regexp.MustCompile(`(--image|--persistent|--tmux|--tool|--compression|--timeout)($|[\s=])`)
+
+// removedFlagHint upgrades the bare "unknown flag" error for a removed,
+// config-shaped flag into an actionable migration message pointing at the
+// replacement config setting (settable globally, per project, or per profile).
 func removedFlagHint(cmd *cobra.Command, err error) error {
 	if err == nil {
 		return nil
 	}
 	msg := err.Error()
 	if m := removedFlagRe.FindStringSubmatch(msg); m != nil {
-		return fmt.Errorf("%s\n\nThe %s flag was removed. Set it via config instead:\n"+
-			"  [container]\n"+
-			"  image = \"my-image\"      # was --image\n"+
-			"  persistent = true       # was --persistent\n"+
-			"in ~/.coi/config.toml, ./.coi/config.toml, or a profile (--profile <name>)",
-			msg, m[1])
+		return fmt.Errorf("%s\n\nThe %s flag was removed — config-shaped settings live in config, not flags.\n"+
+			"Set it in ~/.coi/config.toml, ./.coi/config.toml, or a profile (--profile <name>):\n"+
+			"  %s",
+			msg, m[1], removedFlagConfig[m[1]])
 	}
 	return err
 }

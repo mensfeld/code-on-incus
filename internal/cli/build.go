@@ -13,8 +13,6 @@ import (
 
 var buildForce bool
 
-var buildCompression string
-
 var buildAll bool
 
 var buildCmd = &cobra.Command{
@@ -44,7 +42,6 @@ Examples:
 
 func init() {
 	buildCmd.Flags().BoolVarP(&buildForce, "force", "f", false, "Force rebuild even if image exists")
-	buildCmd.Flags().StringVar(&buildCompression, "compression", "", "Compression algorithm (e.g., none, gzip, xz; see Incus docs for all options)")
 	buildCmd.Flags().BoolVar(&buildAll, "all", false, "Build images for all profiles visible from the current directory (global ~/.coi/profiles + project .coi/profiles)")
 }
 
@@ -111,7 +108,7 @@ func (a *App) buildCommand(cmd *cobra.Command, args []string) error {
 			BaseImage:   coiBaseImage,
 			AliasName:   image.CoiAlias,
 			Description: "coi image (Docker + build tools + Claude CLI + GitHub CLI)",
-			Compression: buildCompression,
+			Compression: p.Container.Build.Compression,
 			StoragePool: buildPool,
 			Logger: func(msg string) {
 				fmt.Fprintf(os.Stderr, "%s\n", msg)
@@ -165,7 +162,7 @@ func (a *App) buildCommand(cmd *cobra.Command, args []string) error {
 		BaseImage:   baseImage,
 		BuildScript: scriptPath,
 		Force:       buildForce,
-		Compression: buildCompression,
+		Compression: p.Container.Build.Compression,
 		StoragePool: buildPool,
 		Logger: func(msg string) {
 			fmt.Fprintf(os.Stderr, "%s\n", msg)
@@ -250,7 +247,7 @@ func (a *App) buildAllProfiles() error {
 				BaseImage:   coiBaseImage,
 				AliasName:   image.CoiAlias,
 				Description: "coi image (Docker + build tools + Claude CLI + GitHub CLI)",
-				Compression: buildCompression,
+				Compression: p.Container.Build.Compression,
 				StoragePool: buildPool,
 				Logger:      func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) },
 			}
@@ -289,7 +286,7 @@ func (a *App) buildAllProfiles() error {
 				BaseImage:   baseImage,
 				BuildScript: scriptPath,
 				Force:       buildForce,
-				Compression: buildCompression,
+				Compression: p.Container.Build.Compression,
 				StoragePool: buildPool,
 				Logger:      func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) },
 			}

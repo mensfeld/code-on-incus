@@ -11,9 +11,8 @@ import (
 )
 
 var (
-	shutdownTimeout int
-	shutdownForce   bool
-	shutdownAll     bool
+	shutdownForce bool
+	shutdownAll   bool
 )
 
 var shutdownCmd = &cobra.Command{
@@ -36,7 +35,6 @@ Examples:
 }
 
 func init() {
-	shutdownCmd.Flags().IntVar(&shutdownTimeout, "timeout", 60, "Timeout in seconds to wait for graceful shutdown before force-killing")
 	shutdownCmd.Flags().BoolVarP(&shutdownForce, "force", "f", false, "Skip confirmation prompts")
 	shutdownCmd.Flags().BoolVarP(&shutdownAll, "all", "a", false, "Shutdown all containers")
 }
@@ -49,6 +47,10 @@ func shutdownCommand(cmd *cobra.Command, args []string) error {
 	if containerNames == nil {
 		return nil
 	}
+
+	// Graceful-shutdown window is config-driven: [container] shutdown_timeout
+	// (settable globally, per project, or per profile).
+	shutdownTimeout := app.cfg.Container.ShutdownTimeoutSeconds()
 
 	// Shutdown each container
 	shutdown := 0

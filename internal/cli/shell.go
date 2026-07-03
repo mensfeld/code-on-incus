@@ -26,9 +26,7 @@ import (
 var (
 	debugShell    bool
 	background    bool
-	useTmux       bool
 	containerName string
-	toolFlag      string
 )
 
 var shellCmd = &cobra.Command{
@@ -39,8 +37,8 @@ var shellCmd = &cobra.Command{
 By default, runs Claude Code. Other tools can be configured via the tool.name config option.
 
 Sessions run in tmux by default for monitoring and detach/reattach support.
-Set [shell] use_tmux = false in .coi/config.toml to run without tmux (direct mode).
-The --tmux flag always overrides the config setting.
+Set [shell] use_tmux = false in config (or a profile) to run without tmux
+(direct mode) — like all config-shaped settings, this has no CLI flag.
 
 Tmux mode (default):
   - Interactive: Automatically attaches to tmux session
@@ -55,9 +53,8 @@ in .coi/config.toml.
 Examples:
   coi shell                         # Interactive session in tmux
   coi shell myproject               # Launch session using alias (from any directory)
-  coi shell --tool opencode         # Use opencode instead of configured tool
+  coi shell --profile opencode      # Tool/behavior via a profile ([tool] name = "opencode")
   coi shell --background            # Run in background (detached, tmux only)
-  coi shell --tmux=false            # Run in direct mode (no tmux)
   coi shell --resume                # Resume latest session (auto)
   coi shell --resume=<session-id>   # Resume specific session (note: = is required)
   coi shell --continue=<session-id> # Same as --resume (alias)
@@ -71,9 +68,7 @@ Examples:
 func init() {
 	shellCmd.Flags().BoolVar(&debugShell, "debug", false, "Launch interactive bash instead of AI tool (for debugging)")
 	shellCmd.Flags().BoolVar(&background, "background", false, "Run AI tool in background tmux session (detached)")
-	shellCmd.Flags().BoolVar(&useTmux, "tmux", true, "Use tmux for session management (default true)")
 	shellCmd.Flags().StringVar(&containerName, "container", "", "Use existing container (for testing)")
-	shellCmd.Flags().StringVar(&toolFlag, "tool", "", "Override AI tool (e.g. claude, opencode, aider)")
 }
 
 func (a *App) shellCommand(cmd *cobra.Command, args []string) error {

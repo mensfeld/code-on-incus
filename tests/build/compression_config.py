@@ -1,23 +1,33 @@
 """
-Integration tests for the --compression flag in build commands.
+Integration tests for [container.build] compression (config-driven; the former
+--compression build flag was removed — config-shaped settings live in
+config/profiles, not flags).
 
 Currently covered:
-- coi build --compression none
-- coi build --profile <name> --compression none
+- coi build with [container.build] compression = "none" via $COI_CONFIG
+- coi build --profile <name> with compression in the profile's build section
+- the removed --compression flag fails with the config migration hint
 """
 
+import os
 import subprocess
+import tempfile
 import time
 
 
 def test_build_with_compression_none(coi_binary):
-    """Test building the coi image with --compression none flag."""
-    # Build coi image with --compression none --force
+    """Test building the coi image with [container.build] compression = none."""
+    fd, cfg_path = tempfile.mkstemp(suffix=".toml", prefix="coi-compression-")
+    with os.fdopen(fd, "w") as f:
+        f.write('[container.build]\ncompression = "none"\n')
+    env = {**os.environ, "COI_CONFIG": cfg_path}
+
     result = subprocess.run(
-        [coi_binary, "build", "--compression", "none", "--force"],
+        [coi_binary, "build", "--force"],
         capture_output=True,
         text=True,
         timeout=600,
+        env=env,
     )
     assert result.returncode == 0, f"Build failed: {result.stderr}"
     assert (
@@ -54,7 +64,8 @@ def test_build_custom_with_compression_none(coi_binary, tmp_path):
     profile_dir.mkdir(parents=True)
 
     (profile_dir / "config.toml").write_text(
-        f'[container]\nimage = "{image_name}"\n\n[container.build]\nscript = "build.sh"\n'
+        f'[container]\nimage = "{image_name}"\n\n'
+        '[container.build]\nscript = "build.sh"\ncompression = "none"\n'
     )
 
     (profile_dir / "build.sh").write_text("""#!/bin/bash
@@ -64,9 +75,9 @@ apt-get install -y curl
 echo "Custom build completed" > /tmp/build_marker.txt
 """)
 
-    # Build custom image with --compression none
+    # Build custom image; compression comes from the profile's build section
     result = subprocess.run(
-        [coi_binary, "build", "--profile", "test-compression", "--compression", "none"],
+        [coi_binary, "build", "--profile", "test-compression"],
         capture_output=True,
         text=True,
         timeout=300,
@@ -102,3 +113,18 @@ echo "Custom build completed" > /tmp/build_marker.txt
     # Cleanup
     subprocess.run([coi_binary, "container", "delete", container_name, "--force"], check=False)
     subprocess.run([coi_binary, "image", "delete", image_name], check=False)
+
+
+def test_build_compression_flag_removed(coi_binary):
+    """The removed --compression flag fails with the config migration hint."""
+    result = subprocess.run(
+        [coi_binary, "build", "--compression", "none"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode != 0, "removed --compression flag must fail"
+    assert "flag was removed" in result.stderr, f"want migration hint, got:\n{result.stderr}"
+    assert "[container.build] compression" in result.stderr, (
+        f"hint must point at the build config key, got:\n{result.stderr}"
+    )

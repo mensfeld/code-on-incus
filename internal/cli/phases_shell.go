@@ -26,7 +26,7 @@ type shellState struct {
 	absWorkspace string
 
 	// After validate-env
-	useTmux bool // determined from config + explicit --tmux flag
+	useTmux bool // determined from [shell] use_tmux config (default true)
 
 	// After configure-session
 	sessionID    string
@@ -117,22 +117,17 @@ func (a *App) resolveWorkspacePhase(cmd *cobra.Command, s *shellState) session.P
 	}
 }
 
-// validateEnvPhase determines the effective tmux mode (config default vs
-// explicit flag) and verifies that Incus is available and at the minimum
+// validateEnvPhase determines the effective tmux mode ([shell] use_tmux,
+// default true) and verifies that Incus is available and at the minimum
 // required version.
 func (a *App) validateEnvPhase(cmd *cobra.Command, s *shellState) session.Phase {
 	return session.PhaseFunc{
 		PhaseName: "validate-env",
 		RunFn: func(_ context.Context) (session.Teardown, error) {
-			// Config default, overridden by explicit --tmux flag.
-			useTmuxDefault := true
+			// Tmux mode is config-driven: [shell] use_tmux (default true).
+			s.useTmux = true
 			if a.cfg.Shell.UseTmux != nil {
-				useTmuxDefault = *a.cfg.Shell.UseTmux
-			}
-			if cmd.Flags().Changed("tmux") {
-				s.useTmux = useTmux // cobra already set the package-level var
-			} else {
-				s.useTmux = useTmuxDefault
+				s.useTmux = *a.cfg.Shell.UseTmux
 			}
 
 			if !container.Available() {
@@ -158,10 +153,6 @@ func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.P
 	return session.PhaseFunc{
 		PhaseName: "configure-session",
 		RunFn: func(_ context.Context) (session.Teardown, error) {
-			// Override tool from --tool flag.
-			if toolFlag != "" {
-				a.cfg.Tool.Name = toolFlag
-			}
 			ti, err := getConfiguredTool(a.cfg)
 			if err != nil {
 				return nil, err
