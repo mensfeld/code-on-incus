@@ -97,6 +97,7 @@ install: build
 clean:
 	@$(GOCLEAN)
 	@rm -f $(BUILD_DIR)/$(BINARY_NAME)
+	@rm -f $(BUILD_DIR)/claude-on-incus # transitional: pre-0.10 builds created this symlink
 	@rm -rf $(COVERAGE_DIR)
 	@rm -rf dist
 	@rm -rf internal/image/embedded

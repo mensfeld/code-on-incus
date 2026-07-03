@@ -1,5 +1,6 @@
 # Binaries (in root only)
 /coi
+# transitional: pre-0.10 `make build` created this symlink in existing checkouts
 /claude-on-incus
 *.exe
 *.dll
@@ -46,11 +47,9 @@ tmp/
 Thumbs.db
 
 # Config files (for local testing)
-.claude-on-incus.toml
 test-config.toml
 
 # Session data (for local testing)
-.claude-on-incus/
 
 # opencode data (created when running opencode in workspace)
 .local/
