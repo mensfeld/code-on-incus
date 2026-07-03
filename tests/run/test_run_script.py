@@ -120,6 +120,11 @@ def test_run_script_persistent_state_survives(coi_binary, cleanup_containers, wo
     first = _run_coi(coi_binary, workspace_dir)
     assert first.returncode == 0, f"first run failed:\n{first.stdout + first.stderr}"
     assert "SECOND-RUN-SEES-STATE" not in first.stdout + first.stderr
+    # A project-scope config enabling persistence must be visibly noted (a
+    # cloned repo can opt the user into container reuse).
+    assert "enables persistent containers" in first.stderr, (
+        f"expected the untrusted-persistence notice. Got:\n{first.stderr}"
+    )
 
     second = _run_coi(coi_binary, workspace_dir)
     combined = second.stdout + second.stderr

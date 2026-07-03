@@ -331,3 +331,65 @@ func TestApplyProfileNewFields(t *testing.T) {
 		t.Error("Expected monitoring enabled=true after apply")
 	}
 }
+
+// TestEmbeddedConfigMatchesCanonical guards against drift between the
+// canonical default profile (profiles/default/config.toml — the file CI and
+// make copy over the embedded one before building) and the tracked embedded
+// copy. An edit to only one of them "works locally, differs in CI": the
+// persistent-unset fix was silently reverted in CI exactly this way.
+func TestEmbeddedConfigMatchesCanonical(t *testing.T) {
+	canonical, err := os.ReadFile(filepath.Join("..", "..", "profiles", "default", "config.toml"))
+	if err != nil {
+		t.Skipf("canonical default profile not readable (non-repo build?): %v", err)
+	}
+	if string(canonical) != string(EmbeddedDefaultConfig) {
+		t.Error("profiles/default/config.toml and internal/config/embedded/default_config.toml differ — " +
+			"edit the canonical file and copy it over the embedded one (CI overwrites the embedded copy)")
+	}
+}
+
+// TestReapplyProfileContainer covers the mechanism behind the
+// profile-beats-workspace-overlay fix: container-section re-merge must be
+// idempotent (a full ApplyProfile re-run would duplicate mounts/sockets),
+// must preserve the project alias, and must error on unknown profiles.
+func TestReapplyProfileContainer(t *testing.T) {
+	f := false
+	cfg := GetDefaultConfig()
+	cfg.Profiles["p"] = ProfileConfig{
+		Container: ContainerConfig{Image: "prof-img", Persistent: &f},
+		Mounts:    []MountEntry{{Host: "/x", Container: "/y"}},
+	}
+	if err := cfg.ApplyProfile("p"); err != nil {
+		t.Fatal(err)
+	}
+	mountsAfterApply := len(cfg.Mounts.Default)
+
+	// Simulate a workspace overlay clobbering the container section.
+	tr := true
+	cfg.Container.Image = "ws-img"
+	cfg.Container.Persistent = &tr
+	cfg.Container.Alias = "project-alias"
+
+	for i := 0; i < 2; i++ { // twice: must be idempotent
+		if err := cfg.ReapplyProfileContainer("p"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if cfg.Container.Image != "prof-img" {
+		t.Errorf("profile image must win after re-apply, got %q", cfg.Container.Image)
+	}
+	if cfg.Container.Persistent == nil || *cfg.Container.Persistent {
+		t.Error("profile persistent=false must win after re-apply")
+	}
+	if cfg.Container.Alias != "project-alias" {
+		t.Errorf("project alias must be preserved, got %q", cfg.Container.Alias)
+	}
+	if got := len(cfg.Mounts.Default); got != mountsAfterApply {
+		t.Errorf("re-apply must not duplicate profile mounts: %d -> %d", mountsAfterApply, got)
+	}
+
+	if err := cfg.ReapplyProfileContainer("nope"); err == nil {
+		t.Error("unknown profile must error")
+	}
+}
