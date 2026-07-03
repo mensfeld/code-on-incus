@@ -45,9 +45,10 @@ type Config struct {
 
 // BuildConfig defines how to build the project's custom image
 type BuildConfig struct {
-	Base     string   `toml:"base"`     // Base image (default: "coi")
-	Script   string   `toml:"script"`   // Path to build script (relative to config file or absolute)
-	Commands []string `toml:"commands"` // Inline build commands (alternative to script)
+	Base        string   `toml:"base"`        // Base image (default: "coi")
+	Script      string   `toml:"script"`      // Path to build script (relative to config file or absolute)
+	Commands    []string `toml:"commands"`    // Inline build commands (alternative to script)
+	Compression string   `toml:"compression"` // Image compression algorithm (e.g. "none", "gzip", "xz"; empty = Incus default)
 }
 
 // HasBuildConfig returns true if a build configuration is defined (script or commands)
@@ -61,22 +62,33 @@ func (b *BuildConfig) HasBuildConfig() bool {
 // and top-level [build]. The same struct is embedded in both Config and
 // ProfileConfig so global and profile configs are symmetric.
 type ContainerConfig struct {
-	Image          string      `toml:"image"`
-	Persistent     *bool       `toml:"persistent"`
-	StoragePool    string      `toml:"storage_pool"`
-	Alias          string      `toml:"alias"`
-	Build          BuildConfig `toml:"build"`
-	StaleBaseCheck string      `toml:"stale_base_check"` // "error", "warn", "off"
+	Image           string      `toml:"image"`
+	Persistent      *bool       `toml:"persistent"`
+	ShutdownTimeout int         `toml:"shutdown_timeout"` // Seconds to wait for graceful shutdown before force-killing (default: 60)
+	StoragePool     string      `toml:"storage_pool"`
+	Alias           string      `toml:"alias"`
+	Build           BuildConfig `toml:"build"`
+	StaleBaseCheck  string      `toml:"stale_base_check"` // "error", "warn", "off"
 }
 
 // HasContainerConfig reports whether any field is set.
 func (c *ContainerConfig) HasContainerConfig() bool {
 	return c.Image != "" ||
 		c.Persistent != nil ||
+		c.ShutdownTimeout != 0 ||
 		c.StoragePool != "" ||
 		c.Alias != "" ||
 		c.StaleBaseCheck != "" ||
 		c.Build.HasBuildConfig()
+}
+
+// ShutdownTimeoutSeconds returns the graceful-shutdown window in seconds,
+// defaulting to 60 when unset.
+func (c *ContainerConfig) ShutdownTimeoutSeconds() int {
+	if c.ShutdownTimeout <= 0 {
+		return 60
+	}
+	return c.ShutdownTimeout
 }
 
 // TimezoneConfig contains timezone settings for containers
@@ -955,6 +967,9 @@ func mergeContainerInto(dst *ContainerConfig, src *ContainerConfig) {
 	if src.Persistent != nil {
 		dst.Persistent = src.Persistent
 	}
+	if src.ShutdownTimeout != 0 {
+		dst.ShutdownTimeout = src.ShutdownTimeout
+	}
 	if src.StoragePool != "" {
 		dst.StoragePool = src.StoragePool
 	}
@@ -1080,6 +1095,9 @@ func mergeBuildInto(dst *BuildConfig, src *BuildConfig) {
 	}
 	if src.Commands != nil {
 		dst.Commands = src.Commands
+	}
+	if src.Compression != "" {
+		dst.Compression = src.Compression
 	}
 }
 

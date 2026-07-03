@@ -73,11 +73,15 @@ Coming soon:
 - Cursor - AI-first code editor
 - And more...
 
-**Tool selection:**
+**Tool selection** is config/profile-driven:
+```toml
+# ~/.coi/config.toml or ./.coi/config.toml
+[tool]
+name = "opencode"            # or "claude" (default), "pi"
+```
 ```bash
-coi shell                    # Uses default tool (Claude Code)
-coi shell --tool opencode    # Use opencode instead
-coi shell --tool pi          # Use pi instead
+coi shell                    # Uses the configured tool (Claude Code by default)
+coi shell --profile opencode # Or switch via a profile with [tool] name = "opencode"
 ```
 
 **Permission mode** - Control whether AI tools run autonomously or ask before each action:
@@ -144,8 +148,8 @@ coi build
 cd your-project
 coi shell
 
-# Or use opencode instead
-coi shell --tool opencode
+# Or use opencode instead (config-driven: [tool] name = "opencode",
+# or a profile: coi shell --profile opencode)
 
 # That's it! Your AI coding assistant is now running in an isolated container with:
 # - Your project mounted at /workspace
@@ -212,8 +216,9 @@ curl -fsSL https://raw.githubusercontent.com/mensfeld/code-on-incus/master/insta
 # Build the default coi-default image (5-10 minutes)
 coi build
 
-# Build without compression (faster iteration)
-coi build --compression none
+# Build without compression (faster iteration):
+# set [container.build] compression = "none" in config or the profile
+coi build
 
 # Build a custom image via a profile
 coi profile create my-image
@@ -252,8 +257,8 @@ coi build --all --force
 # Interactive session (defaults to Claude Code)
 coi shell
 
-# Use a different AI tool
-coi shell --tool opencode
+# Use a different AI tool (config/profile-driven: [tool] name = "opencode")
+coi shell --profile opencode
 
 # Use specific slot for parallel sessions
 coi shell --slot 2

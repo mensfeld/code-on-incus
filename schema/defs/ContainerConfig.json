@@ -21,6 +21,10 @@
     },
     "build": {
       "$ref": "#/$defs/BuildConfig"
+    },
+    "shutdown_timeout": {
+      "type": "integer",
+      "description": "Seconds to wait for graceful shutdown before force-killing (default: 60)"
     }
   }
 }

@@ -181,11 +181,14 @@ def test_resume_running_container_succeeds(coi_binary, cleanup_containers, works
     # Phase 3: Resume — should reuse running container (currently fails)  #
     # ------------------------------------------------------------------ #
 
-    # Run with --tmux=false so it runs directly (no tmux detach).
+    # Run with [shell] use_tmux = false so it runs directly (no tmux detach;
+    # the --tmux flag was removed — tmux mode is config-driven).
     # The bug causes an immediate error exit; a successful resume would start
     # an interactive session that we'd then kill via timeout.
+    with (Path(workspace_dir) / ".coi" / "config.toml").open("a") as f:
+        f.write("\n[shell]\nuse_tmux = false\n")
     proc = subprocess.Popen(
-        [coi_binary, "shell", f"--resume={session_id}", "--tmux=false"],
+        [coi_binary, "shell", f"--resume={session_id}"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

@@ -3,8 +3,11 @@ Test for [shell] use_tmux config option in coi shell.
 
 Tests that:
 1. use_tmux = false in config causes shell to run in direct mode (no tmux)
-2. --tmux=true flag overrides use_tmux = false config
+2. the removed --tmux flag fails with the config migration hint
 3. use_tmux = true (default) causes shell to use tmux mode
+
+Tmux mode is config-driven only (0.10): the former --tmux flag was removed —
+config-shaped settings live in config/profiles, not flags.
 """
 
 import subprocess
@@ -42,39 +45,21 @@ use_tmux = false
     ), f"Expected no tmux mode with use_tmux=false config. Output:\n{combined}"
 
 
-def test_tmux_flag_overrides_config(coi_binary, workspace_dir, cleanup_containers):
+def test_tmux_flag_removed_with_hint(coi_binary, workspace_dir, cleanup_containers):
     """
-    --tmux=true flag should override use_tmux = false in config.
+    The removed --tmux flag must fail with the config migration hint.
     """
-    config_dir = Path(workspace_dir) / ".coi"
-    config_dir.mkdir(exist_ok=True)
-    (config_dir / "config.toml").write_text("""
-[shell]
-use_tmux = false
-""")
-
     result = subprocess.run(
-        [
-            coi_binary,
-            "shell",
-            "--workspace",
-            workspace_dir,
-            "--background",
-            "--tmux=true",
-            "--debug",
-        ],
+        [coi_binary, "shell", "--workspace", workspace_dir, "--tmux=false"],
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=30,
     )
 
-    combined = result.stdout + result.stderr
-    # --tmux=true explicitly overrides use_tmux=false; must show a tmux Mode line
-    assert "Mode: Background (tmux)" in combined or "Mode: Interactive (tmux)" in combined, (
-        f"Expected tmux Mode line when --tmux=true overrides use_tmux=false config. Output:\n{combined}"
-    )
-    assert "Mode: Direct" not in combined, (
-        f"Expected --tmux=true to override use_tmux=false config. Output:\n{combined}"
+    assert result.returncode != 0, "removed --tmux flag must fail"
+    assert "flag was removed" in result.stderr, f"want migration hint, got:\n{result.stderr}"
+    assert "[shell] use_tmux" in result.stderr, (
+        f"hint must point at [shell] use_tmux, got:\n{result.stderr}"
     )
 
 

@@ -4,7 +4,14 @@
 
 ### Breaking Changes
 
-- **The `--image` and `--persistent` CLI flags were removed everywhere** — everything config-shaped goes via config/profiles, not flags. Set `[container] image = "..."` and `[container] persistent = true` in `~/.coi/config.toml`, a project `./.coi/config.toml`, or a profile (then `coi shell|run --profile <name>`). Using the removed flags fails with an actionable migration hint (not a bare "unknown flag") on every command, including `coi profile create` — profiles are authored by editing their `config.toml` (`coi profile edit <name>`); only `--inherits` still seeds the scaffold. Runtime behavior is unchanged once configured: persistent containers are still reused and stopped (not deleted) on exit; images still resolve as `[container] image` > `coi-default`.
+- **All config-shaped CLI flags were removed: `--image`, `--persistent`, `--tmux`, `--tool`, `coi build --compression`, and `coi shutdown --timeout`** — everything config-shaped goes via config/profiles, not flags; flags are only for per-invocation choices (workspace, slot, resume, profile, force, format, ...). The replacements, settable in `~/.coi/config.toml`, a project `./.coi/config.toml`, or a profile (then `coi shell|run --profile <name>`):
+  - `[container] image = "..."` (was `--image`) and `[container] persistent = true` (was `--persistent`)
+  - `[shell] use_tmux = false` (was `coi shell --tmux=false`; previously duplicated as flag + config with a documented override rule — the two-sources-of-truth pattern this release eliminates)
+  - `[tool] name = "opencode"` (was `coi shell --tool` — a per-tool profile also carries the tool's whole setup, not just its name)
+  - `[container.build] compression = "none"` (NEW config key; was the flag-only `coi build --compression` — a profile that defines a build can now declare its compression; `coi image publish --compression` stays, it is raw plumbing)
+  - `[container] shutdown_timeout = 30` (NEW config key, default 60; was the flag-only `coi shutdown --timeout` — a graceful-shutdown window is policy, not a per-invocation whim)
+
+  Using any removed flag fails with an actionable migration hint pointing at the exact replacement key (not a bare "unknown flag"), on every command including `coi profile create` — profiles are authored by editing their `config.toml` (`coi profile edit <name>`); only `--inherits` still seeds the scaffold. Runtime behavior is unchanged once configured: persistent containers are still reused and stopped (not deleted) on exit; images still resolve as `[container] image` > `coi-default`.
 
 ### New Features
 
