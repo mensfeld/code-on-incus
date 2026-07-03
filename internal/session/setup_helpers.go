@@ -35,42 +35,46 @@ func isColimaOrLimaEnvironment() bool {
 	return false
 }
 
-// ConfigureUIDMapping decides how the workspace mount should map host UIDs into
-// the container and applies raw.idmap when needed. It is the single source of
-// truth for both the shell (session.Setup) and run pipelines so they cannot
-// diverge (issue #530). Returns the effective shift flag to pass to MountDisk.
+// ConfigureUIDMapping decides how the workspace mount maps host UIDs into the
+// container and applies raw.idmap when needed. It is the single source of truth
+// for both the shell (session.Setup) and run pipelines so they cannot diverge
+// (issue #530). Returns the effective shift flag (for MountDisk) and whether
+// raw.idmap was applied.
 //
-// Three cases, in order:
-//   - Shift disabled (explicit disable_shift, or auto-detected Colima/Lima where
-//     the VM already maps host↔guest UIDs) AND host UID == container code UID:
-//     no mapping needed, shift off.
-//   - Host UID differs from the container's code UID (e.g. macOS host user 501,
-//     or a CI runner at 1001, mapped to code=1000): set raw.idmap so the code
-//     user owns the workspace files, and turn shift OFF (shift=true only
-//     translates root, not arbitrary UIDs, and cannot combine with raw.idmap).
-//     This runs REGARDLESS of disable_shift/Colima — the previous code gated it
-//     on !disableShift, so the Colima/Lima path silently skipped it and writes
-//     to a non-1000-owned workspace failed.
-//   - Otherwise (host UID == code UID, shift allowed): use shift=true.
-func ConfigureUIDMapping(containerName string, disableShift bool, logger func(string)) bool {
+// See decideUIDMapping for the case matrix; the key rule is that a host-UID /
+// code-UID mismatch (macOS user 501, CI runner 1001, mapped to code=1000)
+// ALWAYS sets raw.idmap and turns shift off — the previous code gated this on
+// !disableShift, so the Colima/Lima path silently skipped it and writes to a
+// non-1000-owned workspace failed.
+//
+// raw.idmap only takes effect at container START, so a caller that has ALREADY
+// started the container (the run pipeline uses `incus launch` = create+start)
+// must restart it when idmapApplied is true; the shell pipeline sets it before
+// its own start, so it ignores idmapApplied.
+func ConfigureUIDMapping(containerName string, disableShift bool, logger func(string)) (useShift, idmapApplied bool) {
 	if logger == nil {
 		logger = func(string) {}
 	}
-	useShift, idmap := decideUIDMapping(os.Getuid(), container.CodeUID, disableShift, isColimaOrLimaEnvironment())
+	var idmap string
+	useShift, idmap = decideUIDMapping(os.Getuid(), container.CodeUID, disableShift, isColimaOrLimaEnvironment())
 
 	if idmap != "" {
 		logger(fmt.Sprintf("Host UID %d differs from container code UID %d, using raw.idmap: %s",
 			os.Getuid(), container.CodeUID, idmap))
 		if err := container.IncusExec("config", "set", containerName, "raw.idmap", idmap); err != nil {
 			logger(fmt.Sprintf("Warning: Failed to set raw.idmap: %v", err))
+			return useShift, false
 		}
-	} else if !useShift {
+		return useShift, true
+	}
+
+	if !useShift {
 		logger("UID shifting disabled (Colima/Lima or configured); host UID matches container code UID")
 	} else if disableShift || isColimaOrLimaEnvironment() {
 		// Colima/Lima was detected but host UID happens to equal code UID.
 		logger("Auto-detected Colima/Lima environment - disabling UID shifting")
 	}
-	return useShift
+	return useShift, false
 }
 
 // decideUIDMapping is the pure decision behind ConfigureUIDMapping (no I/O), so

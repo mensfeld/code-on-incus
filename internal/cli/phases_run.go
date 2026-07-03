@@ -230,7 +230,22 @@ func (a *App) configureContainerRunPhase(s *runState) session.Phase {
 			useShift := !a.cfg.Incus.DisableShift
 			if !s.wasRestarted {
 				logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
-				useShift = session.ConfigureUIDMapping(s.containerName, a.cfg.Incus.DisableShift, logFn)
+				var idmapApplied bool
+				useShift, idmapApplied = session.ConfigureUIDMapping(s.containerName, a.cfg.Incus.DisableShift, logFn)
+				if idmapApplied {
+					// The run pipeline used `incus launch` (create+start), so the
+					// container is already running — raw.idmap only takes effect at
+					// start. Restart to apply it before mounting the workspace.
+					// `incus restart` preserves ephemeral instances (only a plain
+					// stop deletes them).
+					fmt.Fprintf(os.Stderr, "Restarting to apply UID mapping...\n")
+					if err := container.IncusExec("restart", s.containerName); err != nil {
+						return nil, fmt.Errorf("failed to restart container to apply UID mapping: %w", err)
+					}
+					if err := waitForContainer(s.mgr, 30); err != nil {
+						return nil, fmt.Errorf("container not ready after UID-mapping restart: %w", err)
+					}
+				}
 			}
 			if err := a.applyWorkspaceMounts(s.mgr, s.containerName, s.absWorkspace, &s.containerWorkspace, s.mountConfig, useShift, s.wasRestarted); err != nil {
 				return nil, err

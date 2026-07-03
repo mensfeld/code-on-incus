@@ -272,7 +272,9 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		// the run pipeline via ConfigureUIDMapping so both honor Colima/Lima
 		// auto-detection AND set raw.idmap on any host-UID/code-UID mismatch
 		// (issue #530).
-		useShift := ConfigureUIDMapping(result.ContainerName, opts.DisableShift, opts.Logger)
+		// Shell path sets raw.idmap before its own start (below), so the
+		// idmapApplied signal is not needed here.
+		useShift, _ := ConfigureUIDMapping(result.ContainerName, opts.DisableShift, opts.Logger)
 
 		// Add disk devices BEFORE starting container
 		// Determine container mount path - either /workspace (default) or same as host path
