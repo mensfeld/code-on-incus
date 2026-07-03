@@ -42,7 +42,7 @@ Examples:
 
 func init() {
 	buildCmd.Flags().BoolVarP(&buildForce, "force", "f", false, "Force rebuild even if image exists")
-	buildCmd.Flags().BoolVar(&buildAll, "all", false, "Build images for all profiles visible from the current directory (global ~/.coi/profiles + project .coi/profiles)")
+	buildCmd.Flags().BoolVarP(&buildAll, "all", "a", false, "Build images for all profiles visible from the current directory (global ~/.coi/profiles + project .coi/profiles)")
 }
 
 func (a *App) buildCommand(cmd *cobra.Command, args []string) error {

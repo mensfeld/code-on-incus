@@ -21,7 +21,7 @@ var (
 var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List active containers and saved sessions",
-	Long: `List active claude-on-incus containers and saved sessions.
+	Long: `List active code-on-incus containers and saved sessions.
 
 By default, shows only active containers. Use --all to also show saved sessions.
 
@@ -123,7 +123,7 @@ type SessionInfo struct {
 	Workspace string
 }
 
-// listActiveContainers lists all active claude-on-incus containers
+// listActiveContainers lists all active code-on-incus containers
 func listActiveContainers() ([]ContainerInfo, error) {
 	// Use the configured container prefix (respects COI_CONTAINER_PREFIX env var)
 	prefix := session.GetContainerPrefix()

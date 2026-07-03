@@ -139,17 +139,12 @@ func removedFlagHint(cmd *cobra.Command, err error) error {
 }
 
 // Execute runs the root command
-func Execute(isCoi bool) error {
+func Execute() error {
 	// Reset app state so that repeated calls (e.g. in tests) start clean.
 	// Cobra re-parses flags on every Execute, so flag-bound fields are
 	// repopulated correctly from the fresh zero value.
 	*app = App{}
 
-	if !isCoi {
-		rootCmd.Use = "claude-on-incus"
-	}
-	// Prevent cobra from double-printing errors — main.go handles error output.
-	rootCmd.SilenceErrors = true
 	return rootCmd.Execute()
 }
 
@@ -167,6 +162,9 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&app.profile, "profile", "", "Use named profile")
 
 	rootCmd.SetFlagErrorFunc(removedFlagHint)
+
+	// Prevent cobra from double-printing errors — main.go handles error output.
+	rootCmd.SilenceErrors = true
 
 	// Add subcommands
 	rootCmd.AddCommand(runCmd)
