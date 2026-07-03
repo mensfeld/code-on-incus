@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -332,6 +333,12 @@ func TestApplyProfileNewFields(t *testing.T) {
 	}
 }
 
+// swapLineRe matches the [limits.memory] swap line, which CI intentionally
+// rewrites in the embedded copy (sed 's/^swap = "true"/swap = ""/' — GitHub
+// runners lack swap accounting). It is the ONLY sanctioned difference between
+// the canonical and embedded files, so normalize it before comparing.
+var swapLineRe = regexp.MustCompile(`(?m)^swap = "[^"]*"$`)
+
 // TestEmbeddedConfigMatchesCanonical guards against drift between the
 // canonical default profile (profiles/default/config.toml — the file CI and
 // make copy over the embedded one before building) and the tracked embedded
@@ -342,9 +349,13 @@ func TestEmbeddedConfigMatchesCanonical(t *testing.T) {
 	if err != nil {
 		t.Skipf("canonical default profile not readable (non-repo build?): %v", err)
 	}
-	if string(canonical) != string(EmbeddedDefaultConfig) {
+	normalize := func(b []byte) string {
+		return swapLineRe.ReplaceAllString(string(b), `swap = "<normalized>"`)
+	}
+	if normalize(canonical) != normalize(EmbeddedDefaultConfig) {
 		t.Error("profiles/default/config.toml and internal/config/embedded/default_config.toml differ — " +
-			"edit the canonical file and copy it over the embedded one (CI overwrites the embedded copy)")
+			"edit the canonical file and copy it over the embedded one (CI overwrites the embedded copy; " +
+			"only the swap line may differ)")
 	}
 }
 
