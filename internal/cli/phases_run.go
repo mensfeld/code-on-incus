@@ -34,6 +34,7 @@ type runState struct {
 	// After launch-container
 	mgr          container.ContainerManager
 	wasRestarted bool
+	useShift     bool // resolved by the launch phase's UID-mapping pre-start hook
 
 	// After configure-container
 	containerWorkspace string
@@ -125,7 +126,19 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 				return nil, fmt.Errorf("failed to check if container exists: %w", err)
 			}
 
-			if err := launchOrReuseContainer(mgr, s.img, a.cfg.Container.StoragePool, containerExists, a.persistent); err != nil {
+			// Pre-start hook: apply the workspace UID mapping (raw.idmap on a
+			// host/code UID mismatch; Colima/Lima auto-detect) AFTER init but
+			// BEFORE first start, so raw.idmap takes effect (#530). Captures the
+			// resulting shift flag for the later workspace mount. Default until
+			// the hook runs (reused persistent containers skip it).
+			s.useShift = !a.cfg.Incus.DisableShift
+			logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
+			preStart := func() error {
+				s.useShift, _ = session.ConfigureUIDMapping(s.containerName, a.cfg.Incus.DisableShift, logFn)
+				return nil
+			}
+
+			if err := launchOrReuseContainer(mgr, s.img, a.cfg.Container.StoragePool, containerExists, a.persistent, preStart); err != nil {
 				return nil, err
 			}
 
@@ -227,25 +240,14 @@ func (a *App) configureContainerRunPhase(s *runState) session.Phase {
 			// user 501, a CI runner at 1001) was unwritable by the code user
 			// (issue #530). Skip when reusing a persistent container — its mount
 			// devices and raw.idmap were set at creation time.
-			useShift := !a.cfg.Incus.DisableShift
-			if !s.wasRestarted {
-				logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
-				var idmapApplied bool
-				useShift, idmapApplied = session.ConfigureUIDMapping(s.containerName, a.cfg.Incus.DisableShift, logFn)
-				if idmapApplied {
-					// The run pipeline used `incus launch` (create+start), so the
-					// container is already running — raw.idmap only takes effect at
-					// start. Restart to apply it before mounting the workspace.
-					// `incus restart` preserves ephemeral instances (only a plain
-					// stop deletes them).
-					fmt.Fprintf(os.Stderr, "Restarting to apply UID mapping...\n")
-					if err := container.IncusExec("restart", s.containerName); err != nil {
-						return nil, fmt.Errorf("failed to restart container to apply UID mapping: %w", err)
-					}
-					if err := waitForContainer(s.mgr, 30); err != nil {
-						return nil, fmt.Errorf("container not ready after UID-mapping restart: %w", err)
-					}
-				}
+			// UID mapping (raw.idmap on a host/code UID mismatch, Colima/Lima
+			// auto-detect) was applied by the launch phase's pre-start hook so
+			// raw.idmap takes effect at first boot (#530). s.useShift carries
+			// the resulting shift flag; reused persistent containers keep their
+			// creation-time mapping (default shift from config).
+			useShift := s.useShift
+			if s.wasRestarted {
+				useShift = !a.cfg.Incus.DisableShift
 			}
 			if err := a.applyWorkspaceMounts(s.mgr, s.containerName, s.absWorkspace, &s.containerWorkspace, s.mountConfig, useShift, s.wasRestarted); err != nil {
 				return nil, err

@@ -165,7 +165,7 @@ func (a *App) runCommand(cmd *cobra.Command, args []string) error {
 
 // launchOrReuseContainer restarts an existing persistent container, or
 // recreates / creates a fresh one on the given storage pool.
-func launchOrReuseContainer(mgr container.ContainerManager, img, pool string, containerExists, persistent bool) error {
+func launchOrReuseContainer(mgr container.ContainerManager, img, pool string, containerExists, persistent bool, preStart func() error) error {
 	if containerExists && persistent {
 		fmt.Fprintf(os.Stderr, "Restarting existing persistent container...\n")
 		if err := mgr.Start(); err != nil {
@@ -180,7 +180,9 @@ func launchOrReuseContainer(mgr container.ContainerManager, img, pool string, co
 		}
 	}
 	ephemeral := !persistent
-	if err := mgr.Launch(img, ephemeral, pool); err != nil {
+	// preStart applies start-time-only settings (raw.idmap for the workspace
+	// UID mapping) between init and first start — see #530.
+	if err := mgr.LaunchWithPreStart(img, ephemeral, pool, preStart); err != nil {
 		return fmt.Errorf("failed to launch container: %w", err)
 	}
 	return nil
