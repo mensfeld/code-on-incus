@@ -24,19 +24,6 @@ func TestLoad(t *testing.T) {
 	}
 }
 
-func TestLoadFromEnv(t *testing.T) {
-	// COI_LIMIT_* is the only env layer; config-shaped settings (image,
-	// persistence, paths) are config/profile-only.
-	t.Setenv("COI_LIMIT_CPU", "3")
-
-	cfg := GetDefaultConfig()
-	loadFromEnv(cfg)
-
-	if cfg.Limits.CPU.Count != "3" {
-		t.Errorf("Expected COI_LIMIT_CPU to apply, got %q", cfg.Limits.CPU.Count)
-	}
-}
-
 func TestLoadConfigFile(t *testing.T) {
 	// Create a temporary config file
 	tmpDir := t.TempDir()

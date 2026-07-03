@@ -135,8 +135,8 @@ limit = "512MiB"
     assert "limits.memory: 512MiB" in config_output, "Profile memory limit should override global"
 
 
-def test_environment_variables_work(coi_binary, workspace_dir, cleanup_containers):
-    """Test that environment variables set limits."""
+def test_environment_variables_removed(coi_binary, workspace_dir, cleanup_containers):
+    """COI_LIMIT_* env vars were removed (0.10) — they must NOT set limits."""
     container_name = calculate_container_name(workspace_dir, 1)
 
     write_workspace_container_config(workspace_dir, persistent=True)
@@ -156,7 +156,7 @@ def test_environment_variables_work(coi_binary, workspace_dir, cleanup_container
 
     assert result.returncode == 0, f"Command should succeed. stderr: {result.stderr}"
 
-    # Check that env var limits were applied
+    # The env vars must be ignored — no limits applied
     result = subprocess.run(
         ["incus", "config", "show", container_name],
         capture_output=True,
@@ -165,8 +165,12 @@ def test_environment_variables_work(coi_binary, workspace_dir, cleanup_container
     )
 
     config_output = result.stdout
-    assert 'limits.cpu: "2"' in config_output, "CPU limit from env should be applied"
-    assert "limits.memory: 2GiB" in config_output, "Memory limit from env should be applied"
+    assert 'limits.cpu: "2"' not in config_output, (
+        f"COI_LIMIT_CPU must be ignored (removed in 0.10). Got:\n{config_output}"
+    )
+    assert "limits.memory: 2GiB" not in config_output, (
+        f"COI_LIMIT_MEMORY must be ignored (removed in 0.10). Got:\n{config_output}"
+    )
 
 
 def test_empty_limits_means_unlimited(coi_binary, workspace_dir, cleanup_containers):

@@ -437,10 +437,9 @@ permission_mode = "bypass"
 3. Project config (`./.coi/config.toml`)
 4. Profile (`--profile <name>`)
 
-Config-shaped settings have no CLI flags or env-var overrides — config and
-profiles are the single source of truth (`COI_LIMIT_*` env vars are the one
-remaining legacy exception). The remaining CLI flags are per-invocation
-choices only: `--workspace`, `--slot`, `--resume`, `--profile`.
+Config-shaped settings have no CLI flags and no env-var overrides — config
+and profiles are the single source of truth. The remaining CLI flags are
+per-invocation choices only: `--workspace`, `--slot`, `--resume`, `--profile`.
 
 Place a `.coi/config.toml` in any repository root to auto-configure COI for that project — useful for teams to share container image, environment, and resource limits.
 
