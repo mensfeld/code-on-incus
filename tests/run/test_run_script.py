@@ -35,10 +35,12 @@ def _write_script(workspace_dir, content):
 
 def test_run_script_runs_and_writes_to_workspace(coi_binary, cleanup_containers, workspace_dir):
     """An executable coi-run runs in the sandbox; its workspace writes persist
-    to the host (the script operates on the real mounted workspace)."""
-    # Make the workspace writable by the container's code user through the
-    # shift mapping (the pytest tmp dir is owned by the CI runner's uid).
-    os.chmod(workspace_dir, 0o777)
+    to the host (the script operates on the real mounted workspace).
+
+    No chmod 0o777 crutch: the workspace is left owned by the (non-1000) CI
+    runner uid on purpose, so the run pipeline's UID mapping (raw.idmap /
+    shift) must make it writable by the container's code user — exercising the
+    issue #530 fix on every CI run."""
     _write_script(
         workspace_dir,
         "#!/usr/bin/env bash\nset -e\necho run-script-running\necho ok > run-sentinel.txt\n",

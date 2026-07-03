@@ -17,13 +17,14 @@ def test_run_timezone_fixed_workspace(coi_binary, cleanup_containers, workspace_
     Test that a fixed timezone is visible through workspace files on the host.
 
     Flow:
-    1. Make workspace writable by container's code user (shift mapping)
+    1. Container's code user writes to the workspace via UID mapping
     2. Create .coi/config.toml with [timezone] mode="fixed", name="Asia/Tokyo"
     3. Run coi run to write TZ to workspace file
     4. Read the file back on the host and verify JST
     """
-    # Ensure workspace is writable by container's code user through shift mapping
-    os.chmod(workspace_dir, 0o777)
+    # No chmod crutch: the run pipeline's UID mapping (raw.idmap when the host
+    # uid differs from the container code uid) must make the CI-runner-owned
+    # workspace writable by the code user — see issue #530.
 
     # Create config with fixed timezone
     config_dir = Path(workspace_dir) / ".coi"

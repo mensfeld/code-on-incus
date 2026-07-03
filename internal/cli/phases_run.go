@@ -220,7 +220,18 @@ func (a *App) configureContainerRunPhase(s *runState) session.Phase {
 			s.mountConfig, s.socketConfig = a.gateRunForwarding(mc, sc, s.absWorkspace, s.wasRestarted)
 
 			s.containerWorkspace = a.resolveContainerWorkspacePath(s.absWorkspace)
+			// Configure UID mapping (Colima/Lima auto-detect + raw.idmap on a
+			// host-UID/code-UID mismatch) the same way the shell pipeline does.
+			// Previously `coi run` only did `useShift := !DisableShift` with no
+			// idmap handling, so a workspace owned by a non-1000 host UID (macOS
+			// user 501, a CI runner at 1001) was unwritable by the code user
+			// (issue #530). Skip when reusing a persistent container — its mount
+			// devices and raw.idmap were set at creation time.
 			useShift := !a.cfg.Incus.DisableShift
+			if !s.wasRestarted {
+				logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
+				useShift = session.ConfigureUIDMapping(s.containerName, a.cfg.Incus.DisableShift, logFn)
+			}
 			if err := a.applyWorkspaceMounts(s.mgr, s.containerName, s.absWorkspace, &s.containerWorkspace, s.mountConfig, useShift, s.wasRestarted); err != nil {
 				return nil, err
 			}

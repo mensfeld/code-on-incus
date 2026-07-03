@@ -268,39 +268,11 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 			return nil, fmt.Errorf("failed to create container: %w", err)
 		}
 
-		// Configure UID/GID mapping for bind mounts based on environment
-		// When host UID matches container code user UID: Use shift=true (simple, works everywhere)
-		// When host UID differs: Use raw.idmap to explicitly map host UID → container code UID
-		// Colima/Lima: Disable shift (VM already handles UID mapping via virtiofs)
-
-		// Auto-detect Colima/Lima environment if not explicitly configured
-		disableShift := opts.DisableShift
-		if !disableShift && isColimaOrLimaEnvironment() {
-			disableShift = true
-			opts.Logger("Auto-detected Colima/Lima environment - disabling UID shifting")
-		}
-
-		useShift := !disableShift
-		hostUID := os.Getuid()
-
-		if !disableShift && hostUID != container.CodeUID {
-			// Host UID differs from container code user UID — shift=true won't work
-			// because it only translates root (UID 0), not arbitrary UIDs.
-			// Use raw.idmap to explicitly map host UID → container code UID.
-			idmapValue := fmt.Sprintf("both %d %d", hostUID, container.CodeUID)
-			opts.Logger(fmt.Sprintf("Host UID %d differs from container code UID %d, using raw.idmap: %s", hostUID, container.CodeUID, idmapValue))
-			if err := container.IncusExec("config", "set", result.ContainerName, "raw.idmap", idmapValue); err != nil {
-				opts.Logger(fmt.Sprintf("Warning: Failed to set raw.idmap: %v", err))
-			}
-			useShift = false // Don't use shift=true with raw.idmap
-		} else if disableShift {
-			if !opts.DisableShift {
-				// Was auto-detected, not explicitly configured
-				opts.Logger("UID shifting disabled (auto-detected Colima/Lima environment)")
-			} else {
-				opts.Logger("UID shifting disabled (configured via disable_shift option)")
-			}
-		}
+		// Configure UID/GID mapping for the workspace bind mount. Shared with
+		// the run pipeline via ConfigureUIDMapping so both honor Colima/Lima
+		// auto-detection AND set raw.idmap on any host-UID/code-UID mismatch
+		// (issue #530).
+		useShift := ConfigureUIDMapping(result.ContainerName, opts.DisableShift, opts.Logger)
 
 		// Add disk devices BEFORE starting container
 		// Determine container mount path - either /workspace (default) or same as host path
