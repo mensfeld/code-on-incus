@@ -18,10 +18,19 @@ on:
 permissions:
   contents: read
 
+# A newer commit cancels an older queued/running macOS run for the same ref, so
+# scarce macOS runners don't accumulate a backlog of stale jobs across pushes.
+concurrency:
+  group: macos-colima-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   colima-uid-mapping:
     name: "#530 UID mapping repro (Colima)"
-    runs-on: macos-13
+    # macos-13-large is paid Intel (nested-virt capable, needed for Colima vz)
+    # with better availability than free macos-13, which GitHub is retiring.
+    # Apple-silicon runners cannot do nested virtualization, so Intel is required.
+    runs-on: macos-13-large
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
