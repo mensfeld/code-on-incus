@@ -8,8 +8,8 @@
   - `[container] image = "..."` (was `--image`) and `[container] persistent = true` (was `--persistent`)
   - `[shell] use_tmux = false` (was `coi shell --tmux=false`; previously duplicated as flag + config with a documented override rule — the two-sources-of-truth pattern this release eliminates)
   - `[tool] name = "opencode"` (was `coi shell --tool` — a per-tool profile also carries the tool's whole setup, not just its name)
-  - `[container.build] compression = "none"` (NEW config key; was the flag-only `coi build --compression` — a profile that defines a build can now declare its compression; `coi image publish --compression` stays, it is raw plumbing)
-  - `[container] shutdown_timeout = 30` (NEW config key, default 60; was the flag-only `coi shutdown --timeout` — a graceful-shutdown window is policy, not a per-invocation whim)
+  - `[container.build] compression = "none"` (NEW config key, settable globally, per project, or per profile like all of `[container]`; was the flag-only `coi build --compression` — a profile that defines a build can now declare its compression; `coi image publish --compression` stays, it is raw plumbing)
+  - `[container] shutdown_timeout = 30` (NEW config key, default 60, settable globally, per project, or per profile like all of `[container]`; was the flag-only `coi shutdown --timeout` — a graceful-shutdown window is policy, not a per-invocation whim)
 
   Using any removed flag fails with an actionable migration hint pointing at the exact replacement key (not a bare "unknown flag"), on every command including `coi profile create` — profiles are authored by editing their `config.toml` (`coi profile edit <name>`); only `--inherits` still seeds the scaffold. Runtime behavior is unchanged once configured: persistent containers are still reused and stopped (not deleted) on exit; images still resolve as `[container] image` > `coi-default`.
 
