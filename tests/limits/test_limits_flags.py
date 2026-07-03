@@ -132,8 +132,9 @@ limit = "512MiB"
     )
 
 
-def test_env_vars_alongside_config(coi_binary, workspace_dir, cleanup_containers):
-    """Test that environment variables work alongside config."""
+def test_limit_env_vars_removed(coi_binary, workspace_dir, cleanup_containers):
+    """COI_LIMIT_* env vars were removed (0.10): limits are config-only.
+    Setting them must NOT apply any limits."""
     container_name = calculate_container_name(workspace_dir, 1)
 
     write_workspace_container_config(workspace_dir, persistent=True)
@@ -142,7 +143,7 @@ def test_env_vars_alongside_config(coi_binary, workspace_dir, cleanup_containers
     env["COI_LIMIT_CPU"] = "1"
     env["COI_LIMIT_MEMORY"] = "512MiB"
 
-    # Launch with env vars, no limits config file
+    # Launch with env vars set and no limits config file
     result = subprocess.run(
         [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
         capture_output=True,
@@ -154,7 +155,7 @@ def test_env_vars_alongside_config(coi_binary, workspace_dir, cleanup_containers
 
     assert result.returncode == 0, f"Command should succeed. stderr: {result.stderr}"
 
-    # Verify env var limits were applied
+    # The env vars must be ignored — no limits applied
     result = subprocess.run(
         ["incus", "config", "show", container_name],
         capture_output=True,
@@ -163,12 +164,16 @@ def test_env_vars_alongside_config(coi_binary, workspace_dir, cleanup_containers
     )
 
     config_output = result.stdout
-    assert 'limits.cpu: "1"' in config_output, "Env var CPU limit should be applied"
-    assert "limits.memory: 512MiB" in config_output, "Env var memory limit should be applied"
+    assert 'limits.cpu: "1"' not in config_output, (
+        f"COI_LIMIT_CPU must be ignored (removed in 0.10). Got:\n{config_output}"
+    )
+    assert "limits.memory: 512MiB" not in config_output, (
+        f"COI_LIMIT_MEMORY must be ignored (removed in 0.10). Got:\n{config_output}"
+    )
 
 
-def test_config_overrides_env_vars(coi_binary, workspace_dir, cleanup_containers):
-    """Test that env vars override config file settings (env vars have higher priority)."""
+def test_config_wins_over_removed_env_vars(coi_binary, workspace_dir, cleanup_containers):
+    """Config limits apply; COI_LIMIT_* env vars are ignored (removed in 0.10)."""
     container_name = calculate_container_name(workspace_dir, 1)
 
     # Create project config with limits
@@ -203,9 +208,7 @@ limit = "4GiB"
 
     assert result.returncode == 0, f"Command should succeed. stderr: {result.stderr}"
 
-    # Env vars have higher priority than config files (12-factor app convention).
-    # COI applies env overrides after config file loading, so COI_LIMIT_CPU=1 wins
-    # over the config file's count = "4".
+    # Env-var overrides were removed: the CONFIG values must win.
     result = subprocess.run(
         ["incus", "config", "show", container_name],
         capture_output=True,
@@ -214,11 +217,11 @@ limit = "4GiB"
     )
 
     config_output = result.stdout
-    assert 'limits.cpu: "1"' in config_output, (
-        "Env var CPU limit should override config (should be 1, not 4)"
+    assert 'limits.cpu: "4"' in config_output, (
+        f"Config CPU limit must apply (env var ignored). Got:\n{config_output}"
     )
-    assert "limits.memory: 512MiB" in config_output, (
-        "Env var memory limit should override config (should be 512MiB, not 4GiB)"
+    assert "limits.memory: 4GiB" in config_output, (
+        f"Config memory limit must apply (env var ignored). Got:\n{config_output}"
     )
 
 

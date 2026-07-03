@@ -13,9 +13,11 @@ import (
 // Load loads configuration from all available sources
 // Hierarchy (lowest to highest precedence):
 // 1. Built-in defaults
-// 2. User config (~/.coi/config.toml)
+// 2. User config (~/.coi/config.toml, or the file $COI_CONFIG points at)
 // 3. Project config (./.coi/config.toml)
-// 4. Environment variables (COI_LIMIT_* only)
+//
+// There are no env-var config overrides: config-shaped settings live in
+// config files and profiles only.
 //
 // Profile directories are scanned independently from config files.
 // See GetProfileParentDirs() for the full list of scanned locations.
@@ -70,9 +72,6 @@ func Load() (*Config, error) {
 	if err := cfg.ResolveProfileInheritance(); err != nil {
 		return nil, fmt.Errorf("profile inheritance error: %w", err)
 	}
-
-	// Load from environment variables
-	loadFromEnv(cfg)
 
 	// Ensure directories exist
 	if err := ensureDirectories(cfg); err != nil {
@@ -429,40 +428,6 @@ func loadProfileDirectories(cfg *Config, configDir string, trusted bool) error {
 		cfg.Profiles[profileName] = profileCfg
 	}
 	return nil
-}
-
-// loadFromEnv loads configuration from environment variables (COI_LIMIT_*
-// only; config-shaped settings live in config/profiles, not env vars).
-func loadFromEnv(cfg *Config) {
-	// Limit environment variables (using COI_ prefix for brevity)
-	// CPU limits
-	if env := os.Getenv("COI_LIMIT_CPU"); env != "" {
-		cfg.Limits.CPU.Count = env
-	}
-	if env := os.Getenv("COI_LIMIT_CPU_ALLOWANCE"); env != "" {
-		cfg.Limits.CPU.Allowance = env
-	}
-
-	// Memory limits
-	if env := os.Getenv("COI_LIMIT_MEMORY"); env != "" {
-		cfg.Limits.Memory.Limit = env
-	}
-	if env := os.Getenv("COI_LIMIT_MEMORY_SWAP"); env != "" {
-		cfg.Limits.Memory.Swap = env
-	}
-
-	// Disk limits
-	if env := os.Getenv("COI_LIMIT_DISK_READ"); env != "" {
-		cfg.Limits.Disk.Read = env
-	}
-	if env := os.Getenv("COI_LIMIT_DISK_WRITE"); env != "" {
-		cfg.Limits.Disk.Write = env
-	}
-
-	// Runtime limits
-	if env := os.Getenv("COI_LIMIT_DURATION"); env != "" {
-		cfg.Limits.Runtime.MaxDuration = env
-	}
 }
 
 // ensureDirectories creates necessary directories if they don't exist
