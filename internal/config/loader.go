@@ -15,7 +15,7 @@ import (
 // 1. Built-in defaults
 // 2. User config (~/.coi/config.toml)
 // 3. Project config (./.coi/config.toml)
-// 4. Environment variables (CLAUDE_ON_INCUS_* or COI_*)
+// 4. Environment variables (COI_LIMIT_* only)
 //
 // Profile directories are scanned independently from config files.
 // See GetProfileParentDirs() for the full list of scanned locations.
@@ -431,28 +431,9 @@ func loadProfileDirectories(cfg *Config, configDir string, trusted bool) error {
 	return nil
 }
 
-// loadFromEnv loads configuration from environment variables
+// loadFromEnv loads configuration from environment variables (COI_LIMIT_*
+// only; config-shaped settings live in config/profiles, not env vars).
 func loadFromEnv(cfg *Config) {
-	// CLAUDE_ON_INCUS_IMAGE
-	if env := os.Getenv("CLAUDE_ON_INCUS_IMAGE"); env != "" {
-		cfg.Container.Image = env
-	}
-
-	// CLAUDE_ON_INCUS_SESSIONS_DIR
-	if env := os.Getenv("CLAUDE_ON_INCUS_SESSIONS_DIR"); env != "" {
-		cfg.Paths.SessionsDir = ExpandPath(env)
-	}
-
-	// CLAUDE_ON_INCUS_STORAGE_DIR
-	if env := os.Getenv("CLAUDE_ON_INCUS_STORAGE_DIR"); env != "" {
-		cfg.Paths.StorageDir = ExpandPath(env)
-	}
-
-	// CLAUDE_ON_INCUS_PERSISTENT
-	if env := os.Getenv("CLAUDE_ON_INCUS_PERSISTENT"); env == "true" || env == "1" {
-		cfg.Container.Persistent = ptrBool(true)
-	}
-
 	// Limit environment variables (using COI_ prefix for brevity)
 	// CPU limits
 	if env := os.Getenv("COI_LIMIT_CPU"); env != "" {

@@ -433,11 +433,14 @@ permission_mode = "bypass"
 
 **Configuration hierarchy** (highest precedence last):
 1. Built-in defaults
-2. User config (`~/.coi/config.toml`)
+2. User config (`~/.coi/config.toml`, or the file `$COI_CONFIG` points at)
 3. Project config (`./.coi/config.toml`)
-4. `COI_CONFIG` environment variable
-5. Environment variables (`CLAUDE_ON_INCUS_*`, `COI_*`)
-6. Operational CLI flags (`--workspace`, `--slot`, `--persistent`, `--resume`, `--profile`, `--image`)
+4. Profile (`--profile <name>`)
+
+Config-shaped settings have no CLI flags or env-var overrides — config and
+profiles are the single source of truth (`COI_LIMIT_*` env vars are the one
+remaining legacy exception). The remaining CLI flags are per-invocation
+choices only: `--workspace`, `--slot`, `--resume`, `--profile`.
 
 Place a `.coi/config.toml` in any repository root to auto-configure COI for that project — useful for teams to share container image, environment, and resource limits.
 

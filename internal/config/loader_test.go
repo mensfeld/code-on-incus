@@ -9,13 +9,6 @@ import (
 )
 
 func TestLoad(t *testing.T) {
-	// Clean environment
-	cleanEnv := func() {
-		os.Unsetenv("CLAUDE_ON_INCUS_IMAGE")
-		os.Unsetenv("CLAUDE_ON_INCUS_PERSISTENT")
-	}
-	defer cleanEnv()
-
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
@@ -32,23 +25,15 @@ func TestLoad(t *testing.T) {
 }
 
 func TestLoadFromEnv(t *testing.T) {
-	// Set environment variables
-	os.Setenv("CLAUDE_ON_INCUS_IMAGE", "env-image")
-	os.Setenv("CLAUDE_ON_INCUS_PERSISTENT", "1")
-	defer func() {
-		os.Unsetenv("CLAUDE_ON_INCUS_IMAGE")
-		os.Unsetenv("CLAUDE_ON_INCUS_PERSISTENT")
-	}()
+	// COI_LIMIT_* is the only env layer; config-shaped settings (image,
+	// persistence, paths) are config/profile-only.
+	t.Setenv("COI_LIMIT_CPU", "3")
 
 	cfg := GetDefaultConfig()
 	loadFromEnv(cfg)
 
-	if cfg.Container.Image != "env-image" {
-		t.Errorf("Expected image 'env-image', got '%s'", cfg.Container.Image)
-	}
-
-	if cfg.Container.Persistent == nil || !*cfg.Container.Persistent {
-		t.Error("Expected persistent to be true from env")
+	if cfg.Limits.CPU.Count != "3" {
+		t.Errorf("Expected COI_LIMIT_CPU to apply, got %q", cfg.Limits.CPU.Count)
 	}
 }
 
