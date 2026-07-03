@@ -1,19 +1,19 @@
 name: macOS (Colima) smoke
 
-# EXPERIMENTAL — reproduces issue #530 on a real macOS + Colima stack, where the
-# workspace is a virtiofs mount owned by the macOS user (uid 501), not the
-# container's code user (uid 1000). The Linux CI covers the raw.idmap code path
-# (its runner uid is 1001 != 1000), but only Colima/Lima has the auto-detect +
-# virtiofs behavior this issue is about.
+# Reproduces issue #530 on a real macOS + Colima stack, where the workspace is a
+# virtiofs mount owned by the macOS user (uid 501), not the container's code
+# user (uid 1000). The Linux CI covers the raw.idmap code path (its runner uid
+# is 1001 != 1000), but only Colima/Lima has the auto-detect + virtiofs behavior
+# this issue is about — so this runs on every PR to guard the macOS path.
 #
-# Not on every PR: nested virtualization on GitHub's Intel macOS runners is slow
-# and occasionally flaky, so this runs on demand and weekly. macos-13 is Intel
-# (Colima can use the `vz` hypervisor with nested virt); Apple-silicon runners
-# do not permit nested virtualization.
+# macos-13 is Intel (Colima can use the `vz` hypervisor with nested virt);
+# Apple-silicon GitHub runners do not permit nested virtualization.
 on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
   workflow_dispatch: {}
-  schedule:
-    - cron: "0 6 * * 1" # Mondays 06:00 UTC
 
 permissions:
   contents: read
