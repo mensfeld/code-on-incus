@@ -19,20 +19,80 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var runCmd = &cobra.Command{
-	Use:   "run <command> [args...]",
-	Short: "Run a command in an ephemeral container",
-	Long: `Execute a command in an ephemeral Incus container.
+// runScriptName is the workspace run-script convention: when `coi run` is
+// invoked with no command, an executable file with this name at the workspace
+// root is executed inside the container (straight from the workspace mount).
+// It is extensionless on purpose: the shebang decides the interpreter, so a
+// bash, ruby, or python script all work the same way.
+const runScriptName = "coi-run"
 
-The container is automatically cleaned up after the command completes.
+var runCmd = &cobra.Command{
+	Use:   "run [command] [args...]",
+	Short: "Run a command or the workspace run script in a sandboxed container",
+	Long: `Execute a command in an isolated Incus container with the full sandbox
+(workspace mount, protected paths, secret masking, network isolation, limits,
+monitoring). Output streams live and the command's exit code is propagated.
+
+With no command, coi looks for an executable ` + runScriptName + ` at the workspace
+root and runs it inside the container directly from the workspace mount. The
+shebang decides the interpreter, so any language works (#!/usr/bin/env bash,
+ruby, python, ...).
+
+The container is ephemeral: it is cleaned up after the command completes (or
+stopped and kept, when [container] persistent = true is configured).
 
 Examples:
-  coi run "echo hello"
-  coi run "npm test" --slot 2
-  coi run --workspace ~/project "make build"
+  coi run                            # run ./` + runScriptName + ` in the sandbox
+  coi run --profile scripts          # same, with a credential-limiting profile
+  coi run -- npm test                # run an arbitrary command
+  coi run --workspace ~/project -- make build
 `,
-	Args: cobra.MinimumNArgs(1),
+	Args: cobra.ArbitraryArgs,
 	RunE: app.runCommand,
+}
+
+// detectRunScript checks for the workspace run script. The script must carry
+// the executable bit — it is executed directly (the shebang decides the
+// interpreter), so a non-executable file is an error with a chmod hint rather
+// than a silent guess at how to interpret it.
+//
+// A symlink is followed only if it resolves INSIDE the workspace: the script
+// executes from the workspace mount, so a target outside it would pass the
+// host-side check but not exist in the container — the exact opaque failure
+// this fail-fast detection exists to prevent (same rule as secret_paths
+// symlink handling).
+func detectRunScript(absWorkspace string) (found bool, err error) {
+	scriptPath := filepath.Join(absWorkspace, runScriptName)
+	if _, lerr := os.Lstat(scriptPath); lerr != nil {
+		if os.IsNotExist(lerr) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to check for %s: %w", runScriptName, lerr)
+	}
+
+	resolved, rerr := filepath.EvalSymlinks(scriptPath)
+	if rerr != nil {
+		return false, fmt.Errorf("%s exists but cannot be resolved (dangling symlink?): %w", runScriptName, rerr)
+	}
+	resolvedWorkspace, rerr := filepath.EvalSymlinks(absWorkspace)
+	if rerr != nil {
+		return false, fmt.Errorf("failed to resolve workspace path: %w", rerr)
+	}
+	if resolved != resolvedWorkspace && !strings.HasPrefix(resolved, resolvedWorkspace+string(filepath.Separator)) {
+		return false, fmt.Errorf("%s is a symlink resolving outside the workspace (%s) — the target will not exist inside the container; move the script into the workspace or replace the symlink with a copy", runScriptName, resolved)
+	}
+
+	fi, statErr := os.Stat(scriptPath)
+	if statErr != nil {
+		return false, fmt.Errorf("failed to check for %s: %w", runScriptName, statErr)
+	}
+	if fi.IsDir() {
+		return false, fmt.Errorf("%s in workspace is a directory, expected a script file", runScriptName)
+	}
+	if fi.Mode()&0o111 == 0 {
+		return false, fmt.Errorf("%s exists but is not executable — its shebang decides the interpreter, so make it executable: chmod +x %s", runScriptName, runScriptName)
+	}
+	return true, nil
 }
 
 func (a *App) runCommand(cmd *cobra.Command, args []string) error {
@@ -56,6 +116,22 @@ func (a *App) runCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	s := &runState{absWorkspace: absWorkspace}
+
+	// No command given: fall back to the workspace run-script convention.
+	// Detection happens host-side before any container work so a missing
+	// script fails fast with a clear message.
+	if len(args) == 0 {
+		found, err := detectRunScript(absWorkspace)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return fmt.Errorf("no command given and no %s found in workspace %s\n"+
+				"Create an executable %s at the workspace root or pass a command: coi run -- <command>",
+				runScriptName, absWorkspace, runScriptName)
+		}
+		s.runScript = true
+	}
 
 	pipeline := &session.Pipeline{}
 	defer pipeline.Teardown()
@@ -82,6 +158,7 @@ func (a *App) runCommand(cmd *cobra.Command, args []string) error {
 		a.launchContainerRunPhase(s),
 		a.configureContainerRunPhase(s),
 		a.applyNetworkRunPhase(s),
+		a.startMonitoringRunPhase(s),
 		a.runCommandPhase(args, s),
 	)
 }
@@ -315,6 +392,18 @@ func (a *App) overlayWorkspaceConfig(absWorkspace string) error {
 		return fmt.Errorf("failed to load project config from %s: %w", absWorkspace, err)
 	}
 	container.Configure(a.cfg.Incus.Project, a.cfg.Incus.CodeUser, a.cfg.Incus.CodeUID)
+	// An explicitly requested --profile must keep winning over the workspace
+	// overlay for [container] settings — otherwise a project config could
+	// silently override the profile the user asked for (and precedence would
+	// depend on whether the command ran from inside the workspace or not).
+	if a.profile != "" {
+		if err := a.cfg.ReapplyProfileContainer(a.profile); err != nil {
+			return err
+		}
+	}
+	// The workspace config may set [container] persistent — PersistentPreRunE
+	// computed a.persistent before this overlay ran, so recompute it here.
+	a.persistent = config.BoolVal(a.cfg.Container.Persistent)
 	return nil
 }
 

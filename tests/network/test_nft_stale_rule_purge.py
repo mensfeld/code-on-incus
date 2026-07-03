@@ -7,13 +7,14 @@ leases, so a new container can reuse a prior container's IP. If the prior
 container's rules were orphaned (unclean teardown), a leftover blanket ACCEPT
 sitting ahead of a restricted successor's rules would let it bypass its filter.
 
-Reproduced deterministically with a persistent container pinned to a fixed slot:
-1. `coi run --persistent --slot 1 -- sleep` (background); once it reports network
+Reproduced deterministically with a persistent container ([container]
+persistent = true in the workspace config) pinned to a fixed slot:
+1. `coi run --slot 1 -- sleep` (background); once it reports network
    isolation applied, capture the container IP, then SIGINT the run. Its teardown
    removes the rules; persistent mode keeps the container (stopped).
 2. Inject a uniquely fingerprinted ACCEPT rule for that IP (a TEST-NET-3
    destination a real restricted setup never produces) — an orphan stand-in.
-3. `coi run --persistent --slot 1 -- sleep` again. The same persistent container
+3. `coi run --slot 1 -- sleep` again. The same persistent container
    restarts (same MAC -> same IP) and network setup re-runs. Wait for it to
    report network isolation applied (so purge + apply have completed) and, while
    the run is still live (before its teardown), assert the fingerprint rule is
@@ -92,7 +93,6 @@ def start_run(coi_binary, workspace_dir, stderr_file):
         [
             coi_binary,
             "run",
-            "--persistent",
             "--slot",
             "1",
             "--workspace",
@@ -163,7 +163,9 @@ def test_setup_purges_stale_rules_for_reused_ip(coi_binary, workspace_dir, clean
     container_name = calculate_container_name(workspace_dir, 1)
     config_dir = pathlib.Path(workspace_dir) / ".coi"
     config_dir.mkdir(exist_ok=True)
-    (config_dir / "config.toml").write_text('[network]\nmode = "restricted"\n')
+    (config_dir / "config.toml").write_text(
+        '[network]\nmode = "restricted"\n\n[container]\npersistent = true\n'
+    )
 
     fd1, err1 = tempfile.mkstemp(suffix=".err")
     fd2, err2 = tempfile.mkstemp(suffix=".err")

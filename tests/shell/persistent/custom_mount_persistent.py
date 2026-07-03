@@ -1,5 +1,5 @@
 """
-Test for coi shell --persistent - custom directory mounting in persistent mode.
+Test for coi shell in persistent mode - custom directory mounting in persistent mode.
 
 Tests that:
 1. Create a temp directory with a test file
@@ -22,6 +22,7 @@ from support.helpers import (
     wait_for_prompt,
     wait_for_text_in_monitor,
     with_live_screen,
+    write_workspace_container_config,
 )
 
 
@@ -31,7 +32,7 @@ def test_custom_mount_persistent(coi_binary, cleanup_containers, workspace_dir, 
 
     Flow:
     1. Create a temp directory with a unique test file
-    2. Start coi shell --persistent with the temp dir as workspace
+    2. Start coi shell in persistent mode with the temp dir as workspace
     3. Exit claude to bash
     4. Verify the test file exists in /workspace
     5. Create a new file inside container
@@ -54,11 +55,15 @@ def test_custom_mount_persistent(coi_binary, cleanup_containers, workspace_dir, 
 
     container_name = calculate_container_name(str(custom_dir), 1)
 
+    # Persistence is config-driven: [container] persistent = true in the
+    # custom workspace (the directory coi mounts, not the workspace_dir fixture)
+    write_workspace_container_config(str(custom_dir), persistent=True)
+
     # === Phase 2: Start persistent shell with custom workspace ===
 
     child = spawn_coi(
         coi_binary,
-        ["shell", "--persistent", f"--workspace={custom_dir}"],
+        ["shell", f"--workspace={custom_dir}"],
         cwd=str(custom_dir),
         env=env,
         timeout=120,

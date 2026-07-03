@@ -19,6 +19,7 @@ from support.helpers import (
     wait_for_prompt,
     wait_for_text_in_monitor,
     with_live_screen,
+    write_workspace_container_config,
 )
 
 
@@ -39,11 +40,14 @@ def test_power_management_no_sudo(coi_binary, cleanup_containers, workspace_dir,
     env = {"COI_USE_DUMMY": "1"}
     container_name = calculate_container_name(workspace_dir, 1)
 
+    # Image selection is config-driven: [container] image = "..."
+    write_workspace_container_config(workspace_dir, image=dummy_image)
+
     # === Phase 1: Start ephemeral session ===
 
     child = spawn_coi(
         coi_binary,
-        ["shell", "--image", dummy_image],
+        ["shell"],
         cwd=workspace_dir,
         env=env,
         timeout=120,

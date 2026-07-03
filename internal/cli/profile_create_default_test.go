@@ -17,8 +17,6 @@ func newCreateDefaultCmd() *cobra.Command {
 	c := &cobra.Command{Use: "create"}
 	c.Flags().Bool("user", false, "")
 	c.Flags().Bool("project", false, "")
-	c.Flags().Bool("persistent", false, "")
-	c.Flags().String("image", "", "")
 	c.Flags().String("inherits", "", "")
 	return c
 }
@@ -89,22 +87,16 @@ func TestScaffoldMainConfig_RefusesWhenExists(t *testing.T) {
 }
 
 func TestScaffoldMainConfig_RejectsProfileFlags(t *testing.T) {
-	for _, flag := range []string{"image", "persistent", "inherits"} {
-		t.Run(flag, func(t *testing.T) {
-			t.Setenv("HOME", t.TempDir())
-			a := &App{workspace: t.TempDir()}
-			cmd := newCreateDefaultCmd()
-			val := "x"
-			if flag == "persistent" {
-				val = "true"
-			}
-			if err := cmd.Flags().Set(flag, val); err != nil {
-				t.Fatal(err)
-			}
-			if err := a.scaffoldMainConfig(cmd); err == nil {
-				t.Fatalf("expected --%s to be rejected for 'create default'", flag)
-			}
-		})
+	// --image/--persistent no longer exist as flags anywhere; --inherits is
+	// the only profile-shaping flag left and must be rejected for "default".
+	t.Setenv("HOME", t.TempDir())
+	a := &App{workspace: t.TempDir()}
+	cmd := newCreateDefaultCmd()
+	if err := cmd.Flags().Set("inherits", "x"); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.scaffoldMainConfig(cmd); err == nil {
+		t.Fatal("expected --inherits to be rejected for 'create default'")
 	}
 }
 

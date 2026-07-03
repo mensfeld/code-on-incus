@@ -473,13 +473,16 @@ otherwise creates in ~/.coi/profiles/. Use --user or --project to override.
 The special name "default" scaffolds the MAIN config (the file that backs the
 built-in default profile) instead of a profile directory: ~/.coi/config.toml,
 or ./.coi/config.toml with --project. It writes a documented starter only when
-no config exists there (it never overwrites), and ignores --image/--persistent/
---inherits. COI runs fine without any config — this just gives you a commented
-starting point to customize.
+no config exists there (it never overwrites), and rejects --inherits. COI runs
+fine without any config — this just gives you a commented starting point to
+customize.
+
+Settings like [container] image / persistent are edited into the created
+config.toml afterwards (coi profile edit <name>).
 
 Examples:
-  coi profile create rust-dev --image coi-rust --inherits default
-  coi profile create my-profile --persistent --project
+  coi profile create rust-dev --inherits default
+  coi profile create my-profile --project
   coi profile create default              # scaffold ~/.coi/config.toml
   coi profile create default --project    # scaffold ./.coi/config.toml`,
 	Args: cobra.ExactArgs(1),
@@ -528,29 +531,12 @@ func (a *App) profileCreateRunE(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to check profile directory %s: %w", profileDir, statErr)
 	}
 
-	// Build TOML content from flags
-	// Note: --image and --persistent are inherited from root PersistentFlags
-	var topLines []string
-	var containerLines []string
-	if inherits, _ := cmd.Flags().GetString("inherits"); inherits != "" {
-		topLines = append(topLines, fmt.Sprintf("inherits = %q", inherits))
-	}
-	if cmd.Flags().Changed("image") {
-		containerLines = append(containerLines, fmt.Sprintf("image = %q", a.imageName))
-	}
-	if cmd.Flags().Changed("persistent") {
-		containerLines = append(containerLines, "persistent = true")
-	}
-
+	// Build TOML content. Only --inherits seeds the file — everything else
+	// ([container] image / persistent, limits, network, ...) is edited into
+	// the created config.toml, keeping config the single authoring surface.
 	var content string
-	if len(topLines) > 0 {
-		content += strings.Join(topLines, "\n") + "\n"
-	}
-	if len(containerLines) > 0 {
-		if content != "" {
-			content += "\n"
-		}
-		content += "[container]\n" + strings.Join(containerLines, "\n") + "\n"
+	if inherits, _ := cmd.Flags().GetString("inherits"); inherits != "" {
+		content = fmt.Sprintf("inherits = %q\n", inherits)
 	}
 
 	// Create directory and write config
@@ -573,12 +559,10 @@ func (a *App) profileCreateRunE(cmd *cobra.Command, args []string) error {
 // config (the file that backs the built-in default profile) from the curated
 // starter template, but only when no config exists there — it never overwrites.
 func (a *App) scaffoldMainConfig(cmd *cobra.Command) error {
-	// --image/--persistent/--inherits configure a profile, not the main config.
-	for _, f := range []string{"image", "persistent", "inherits"} {
-		if cmd.Flags().Changed(f) {
-			return fmt.Errorf("--%s is not valid for 'coi profile create default'; "+
-				"it scaffolds the main config — edit the generated file to set values", f)
-		}
+	// --inherits configures a profile, not the main config.
+	if cmd.Flags().Changed("inherits") {
+		return fmt.Errorf("--inherits is not valid for 'coi profile create default'; " +
+			"it scaffolds the main config — edit the generated file to set values")
 	}
 
 	forceUser, _ := cmd.Flags().GetBool("user")

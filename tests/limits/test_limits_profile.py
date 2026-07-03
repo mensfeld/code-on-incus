@@ -25,7 +25,7 @@ def test_profile_with_limits(coi_binary, workspace_dir, cleanup_containers):
         """
 [container]
 image = "coi-default"
-persistent = false
+persistent = true
 
 [limits.cpu]
 count = "2"
@@ -48,7 +48,6 @@ max_processes = 50
         [
             coi_binary,
             "run",
-            "--persistent",
             "--workspace",
             workspace_dir,
             "--profile",
@@ -93,6 +92,7 @@ def test_multiple_profiles_different_limits(coi_binary, workspace_dir, cleanup_c
             f"""
 [container]
 image = "coi-default"
+persistent = true
 
 [limits.cpu]
 count = "{cpu}"
@@ -108,7 +108,6 @@ limit = "{memory}"
         [
             coi_binary,
             "run",
-            "--persistent",
             "--workspace",
             workspace_dir,
             "--slot=1",
@@ -149,7 +148,6 @@ limit = "{memory}"
         [
             coi_binary,
             "run",
-            "--persistent",
             "--workspace",
             workspace_dir,
             "--slot=2",
@@ -189,6 +187,7 @@ def test_profile_partial_limits(coi_binary, workspace_dir, cleanup_containers):
         """
 [container]
 image = "coi-default"
+persistent = true
 
 [limits.cpu]
 count = "2"
@@ -200,7 +199,6 @@ count = "2"
         [
             coi_binary,
             "run",
-            "--persistent",
             "--workspace",
             workspace_dir,
             "--profile",
@@ -260,6 +258,7 @@ max_processes = 200
         """
 [container]
 image = "coi-default"
+persistent = true
 
 [limits.cpu]
 count = "1"
@@ -273,7 +272,6 @@ count = "1"
         [
             coi_binary,
             "run",
-            "--persistent",
             "--workspace",
             workspace_dir,
             "--profile",
@@ -331,6 +329,7 @@ limit = "2GiB"
         """
 [container]
 image = "coi-default"
+persistent = true
 
 [limits.cpu]
 count = "4"
@@ -345,7 +344,6 @@ limit = "4GiB"
         [
             coi_binary,
             "run",
-            "--persistent",
             "--workspace",
             workspace_dir,
             "--profile",
@@ -402,7 +400,7 @@ limit = "2GiB"
         """
 [container]
 image = "coi-default"
-persistent = false
+persistent = true
 # No limits defined in profile
 """
     )
@@ -412,7 +410,6 @@ persistent = false
         [
             coi_binary,
             "run",
-            "--persistent",
             "--workspace",
             workspace_dir,
             "--profile",

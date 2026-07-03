@@ -10,6 +10,8 @@ import (
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/limits"
 	"github.com/mensfeld/code-on-incus/internal/logger"
+	"github.com/mensfeld/code-on-incus/internal/monitor"
+	"github.com/mensfeld/code-on-incus/internal/nftmonitor"
 	"github.com/mensfeld/code-on-incus/internal/session"
 )
 
@@ -18,6 +20,11 @@ import (
 type runState struct {
 	// After resolve-workspace
 	absWorkspace string
+
+	// Run-script mode (coi run with no command): execute <workspace>/coi-run
+	// from the workspace mount. The file is required to be executable, so it
+	// runs directly and its shebang decides the interpreter.
+	runScript bool
 
 	// After validate-env
 	containerName  string
@@ -36,6 +43,10 @@ type runState struct {
 	// After apply-network
 	socketEnv map[string]string
 	tz        string
+
+	// After start-monitoring
+	monitorDaemon monitor.MonitorDaemon
+	nftDaemon     nftmonitor.NFTMonitorDaemon
 }
 
 // validateEnvRunPhase checks Incus availability, allocates a slot, resolves
@@ -57,15 +68,27 @@ func (a *App) validateEnvRunPhase(s *runState) session.Phase {
 			slotNum := a.slot
 			var err error
 			if slotNum == 0 {
-				slotNum, err = session.AllocateSlot(s.absWorkspace, 10)
-				if err != nil {
-					return nil, fmt.Errorf("failed to allocate slot: %w", err)
+				// Persistent mode: prefer the stopped container from a
+				// previous run — plain AllocateSlot treats it as occupying
+				// its slot and would silently launch a FRESH container on
+				// the next slot (state never persists, slots exhaust).
+				if a.persistent {
+					if reuse, ok := session.FindReusablePersistentSlot(s.absWorkspace, 10); ok {
+						slotNum = reuse
+						fmt.Fprintf(os.Stderr, "Reusing persistent container on slot %d\n", slotNum)
+					}
 				}
-				fmt.Fprintf(os.Stderr, "Auto-allocated slot %d\n", slotNum)
+				if slotNum == 0 {
+					slotNum, err = session.AllocateSlot(s.absWorkspace, 10)
+					if err != nil {
+						return nil, fmt.Errorf("failed to allocate slot: %w", err)
+					}
+					fmt.Fprintf(os.Stderr, "Auto-allocated slot %d\n", slotNum)
+				}
 			}
 			s.containerName = session.ContainerName(s.absWorkspace, slotNum)
 
-			img := ResolveImageName(a.imageName, a.cfg)
+			img := ResolveImageName(a.cfg)
 			if err := AutoBuildIfNeeded(a.cfg, img); err != nil {
 				return nil, err
 			}
@@ -250,6 +273,20 @@ func (a *App) applyNetworkRunPhase(s *runState) session.Phase {
 	}
 }
 
+// startMonitoringRunPhase starts the security monitoring daemons for the run
+// container via the shared startSessionMonitoring helper (same watchers as an
+// agent session). Threat events land in the audit log via the responder;
+// diagnostics use a discard logger (run has no session log file).
+func (a *App) startMonitoringRunPhase(s *runState) session.Phase {
+	return session.PhaseFunc{
+		PhaseName: "start-monitoring",
+		RunFn: func(ctx context.Context) (session.Teardown, error) {
+			teardown := a.startSessionMonitoring(ctx, s.containerName, s.absWorkspace, logger.NewDiscard(), &s.monitorDaemon, &s.nftDaemon)
+			return teardown, nil
+		},
+	}
+}
+
 // runCommandPhase starts the optional timeout monitor, executes the user's
 // command inside the container via incus exec, and returns any exit-code error.
 func (a *App) runCommandPhase(args []string, s *runState) session.Phase {
@@ -274,7 +311,16 @@ func (a *App) runCommandPhase(args []string, s *runState) session.Phase {
 				}
 			}()
 
-			fmt.Fprintf(os.Stderr, "Executing: %s\n", strings.Join(args, " "))
+			// Run-script mode: execute the script straight from the workspace
+			// mount — it comes from the host, nothing is pushed. It runs
+			// directly, so the shebang decides the interpreter.
+			execArgs := args
+			if s.runScript {
+				execArgs = []string{s.containerWorkspace + "/" + runScriptName}
+				fmt.Fprintf(os.Stderr, "Running workspace run script: %s\n", runScriptName)
+			} else {
+				fmt.Fprintf(os.Stderr, "Executing: %s\n", strings.Join(args, " "))
+			}
 
 			incusArgs := []string{
 				"exec", s.containerName, "--user", fmt.Sprintf("%d", container.CodeUID),
@@ -285,14 +331,11 @@ func (a *App) runCommandPhase(args []string, s *runState) session.Phase {
 				return nil, err
 			}
 			incusArgs = append(incusArgs, "--")
-			incusArgs = append(incusArgs, args...)
+			incusArgs = append(incusArgs, execArgs...)
 
-			output, err := container.IncusOutputWithArgs(incusArgs...)
-			if output != "" {
-				fmt.Print(output)
-			}
-
-			if err != nil {
+			// Streamed exec: output appears live (a long build isn't silent
+			// until completion) and stdin is connected for piped input.
+			if err := container.IncusExecStreamedContext(ctx, incusArgs...); err != nil {
 				if exitErr, ok := err.(*container.ExitError); ok {
 					fmt.Fprintf(os.Stderr, "\nCommand exited with code %d\n", exitErr.ExitCode)
 					return nil, &ExitCodeError{Code: exitErr.ExitCode}

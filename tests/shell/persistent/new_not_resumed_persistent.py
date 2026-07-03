@@ -1,11 +1,11 @@
 """
-Test for coi shell --persistent - new session is NOT resumed without --resume flag.
+Test for coi shell in persistent mode - new session is NOT resumed without --resume flag.
 
 Verifies that:
-1. Start dummy in persistent mode, interact with it
+1. Start dummy in persistent mode ([container] persistent = true), interact with it
 2. Poweroff container (container kept in persistent mode)
 3. Delete container for clean slate
-4. Start coi shell --persistent again WITHOUT --resume
+4. Start coi shell again WITHOUT --resume
 5. Verify it's a NEW session (not resuming the old one)
 """
 
@@ -23,6 +23,7 @@ from support.helpers import (
     wait_for_prompt,
     wait_for_text_in_monitor,
     with_live_screen,
+    write_workspace_container_config,
 )
 
 
@@ -31,20 +32,23 @@ def test_persistent_new_session_not_resumed(coi_binary, cleanup_containers, work
     Test that without --resume, a new persistent session is started.
 
     Flow:
-    1. Start coi shell --persistent, interact with dummy
+    1. Start coi shell in persistent mode, interact with dummy
     2. Poweroff container (kept in persistent mode)
     3. Delete container to ensure clean slate
-    4. Start coi shell --persistent again (no --resume)
+    4. Start coi shell again (no --resume)
     5. Verify dummy shows new session, not resuming
     6. Cleanup
     """
     env = {"COI_USE_DUMMY": "1"}
 
+    # Persistence is config-driven: [container] persistent = true
+    write_workspace_container_config(workspace_dir, persistent=True)
+
     # === Phase 1: Initial persistent session ===
 
     child = spawn_coi(
         coi_binary,
-        ["shell", "--persistent"],
+        ["shell"],
         cwd=workspace_dir,
         env=env,
         timeout=120,
@@ -98,7 +102,7 @@ def test_persistent_new_session_not_resumed(coi_binary, cleanup_containers, work
 
     child2 = spawn_coi(
         coi_binary,
-        ["shell", "--persistent"],  # No --resume flag
+        ["shell"],  # No --resume flag (persistent via workspace config)
         cwd=workspace_dir,
         env=env,
         timeout=120,

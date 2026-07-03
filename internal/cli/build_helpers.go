@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"golang.org/x/sys/unix"
-
 	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/image"
@@ -63,11 +61,9 @@ func resolveBuildScript(build *config.BuildConfig) (string, func(), error) {
 	return "", noop, fmt.Errorf("no build script or commands configured")
 }
 
-// ResolveImageName returns the effective image name using: CLI flag > config container.image > CoiAlias
-func ResolveImageName(flagValue string, cfg *config.Config) string {
-	if flagValue != "" {
-		return flagValue
-	}
+// ResolveImageName returns the effective image name using: config
+// container.image (globally, per project, or per profile) > CoiAlias.
+func ResolveImageName(cfg *config.Config) string {
 	if cfg.Container.Image != "" {
 		return cfg.Container.Image
 	}
@@ -106,11 +102,8 @@ func imageNotFoundError(imageName string) error {
 }
 
 // stdinIsTerminal reports whether os.Stdin is connected to a real terminal.
-// Uses TIOCGWINSZ rather than ModeCharDevice because /dev/null is also a
-// character device on Linux, causing false positives with the stat approach.
 func stdinIsTerminal() bool {
-	_, err := unix.IoctlGetWinsize(int(os.Stdin.Fd()), unix.TIOCGWINSZ)
-	return err == nil
+	return container.StdinIsTerminal()
 }
 
 // promptYesNo prints prompt and reads a single line from stdin.

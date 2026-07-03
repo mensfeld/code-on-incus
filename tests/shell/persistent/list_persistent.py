@@ -22,6 +22,7 @@ from support.helpers import (
     wait_for_prompt,
     wait_for_text_in_monitor,
     with_live_screen,
+    write_workspace_container_config,
 )
 
 
@@ -30,18 +31,21 @@ def test_list_persistent(coi_binary, cleanup_containers, workspace_dir):
     Test that persistent containers are marked as persistent in coi list.
 
     Flow:
-    1. Start coi shell --persistent
+    1. Start coi shell in persistent mode (via workspace config)
     2. Verify container is running
     3. Run coi list and verify container IS marked as (persistent)
     4. Cleanup
     """
     env = {"COI_USE_DUMMY": "1"}
 
+    # Persistence is config-driven: [container] persistent = true
+    write_workspace_container_config(workspace_dir, persistent=True)
+
     # === Phase 1: Start persistent session ===
 
     child = spawn_coi(
         coi_binary,
-        ["shell", "--persistent"],
+        ["shell"],
         cwd=workspace_dir,
         env=env,
         timeout=120,

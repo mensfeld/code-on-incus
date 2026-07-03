@@ -2,11 +2,13 @@
 Test for coi run - with nonexistent image.
 
 Tests that:
-1. Run with --image pointing to nonexistent image
+1. Run with [container] image config pointing to a nonexistent image
 2. Verify it fails with appropriate error
 """
 
 import subprocess
+
+from support.helpers import write_workspace_container_config
 
 
 def test_run_nonexistent_image(coi_binary, cleanup_containers, workspace_dir):
@@ -14,17 +16,17 @@ def test_run_nonexistent_image(coi_binary, cleanup_containers, workspace_dir):
     Test that run with nonexistent image fails gracefully.
 
     Flow:
-    1. Run coi run --image nonexistent-xyz
+    1. Run coi run with [container] image = "nonexistent-image-xyz-123"
     2. Verify it fails with image not found error
     """
+    write_workspace_container_config(workspace_dir, image="nonexistent-image-xyz-123")
+
     result = subprocess.run(
         [
             coi_binary,
             "run",
             "--workspace",
             workspace_dir,
-            "--image",
-            "nonexistent-image-xyz-123",
             "echo",
             "test",
         ],

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -201,19 +202,16 @@ func updatePersistentFlag(metadataPath string, persistent bool) error {
 		return nil // No change needed
 	}
 
-	// Update persistent field
+	// Update persistent field and marshal the WHOLE struct — the previous
+	// hand-written JSON silently dropped fields it didn't format
+	// (profile_name), so persisting a session lost profile inheritance on
+	// the next resume.
 	metadata.Persistent = persistent
 
-	// Write back using same format as cleanup.go:saveMetadata
-	content := fmt.Sprintf(`{
-  "session_id": "%s",
-  "container_name": "%s",
-  "persistent": %t,
-  "workspace": "%s",
-  "saved_at": "%s"
-}
-`, metadata.SessionID, metadata.ContainerName, metadata.Persistent,
-		metadata.Workspace, metadata.SavedAt)
+	data, err := json.MarshalIndent(metadata, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal metadata: %w", err)
+	}
 
-	return os.WriteFile(metadataPath, []byte(content), 0o644)
+	return os.WriteFile(metadataPath, append(data, '\n'), 0o644)
 }

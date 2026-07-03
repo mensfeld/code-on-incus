@@ -18,6 +18,7 @@ from support.helpers import (
     spawn_coi,
     wait_for_container_ready,
     wait_for_prompt,
+    write_workspace_container_config,
 )
 
 
@@ -26,7 +27,7 @@ def test_auto_attach_single_session(coi_binary, cleanup_containers, workspace_di
     Test that coi attach works with --slot flag (workspace-specific).
 
     Flow:
-    1. Start coi shell --persistent
+    1. Start coi shell (persistent via [container] config)
     2. Detach from session (exit bash, container stays running)
     3. Run coi attach --slot 1
     4. Verify it attaches and shows "Attaching to..."
@@ -40,9 +41,11 @@ def test_auto_attach_single_session(coi_binary, cleanup_containers, workspace_di
 
     # === Phase 1: Start persistent session ===
 
+    write_workspace_container_config(workspace_dir, persistent=True)
+
     child = spawn_coi(
         coi_binary,
-        ["shell", "--persistent"],
+        ["shell"],
         cwd=workspace_dir,
         env=env,
         timeout=120,

@@ -1,5 +1,5 @@
 """
-Test for coi shell --persistent - session with resume.
+Test for coi shell in persistent mode ([container] persistent = true) - session with resume.
 
 Tests the resume lifecycle in persistent mode:
 1. Start dummy in persistent mode
@@ -7,7 +7,7 @@ Tests the resume lifecycle in persistent mode:
 3. Exit to bash shell
 4. Issue sudo poweroff (container kept in persistent mode)
 5. Delete container to simulate fresh start
-6. Run coi shell --persistent --resume
+6. Run coi shell --resume (persistent via workspace config)
 7. Verify session was resumed (dummy shows "Resuming session")
 8. Cleanup
 """
@@ -27,6 +27,7 @@ from support.helpers import (
     wait_for_text_in_monitor,
     wait_for_text_on_screen,
     with_live_screen,
+    write_workspace_container_config,
 )
 
 
@@ -35,21 +36,24 @@ def test_persistent_session_with_resume(coi_binary, cleanup_containers, workspac
     Test persistent session resume.
 
     Flow:
-    1. Start coi shell --persistent
+    1. Start coi shell in persistent mode (via workspace config)
     2. Interact with dummy
     3. Exit claude to bash, then poweroff
     4. Delete container (for clean slate)
-    5. Run coi shell --persistent --resume
+    5. Run coi shell --resume
     6. Verify resume worked
     7. Cleanup
     """
     env = {"COI_USE_DUMMY": "1"}
 
+    # Persistence is config-driven: [container] persistent = true
+    write_workspace_container_config(workspace_dir, persistent=True)
+
     # === Phase 1: Initial persistent session ===
 
     child = spawn_coi(
         coi_binary,
-        ["shell", "--persistent"],
+        ["shell"],
         cwd=workspace_dir,
         env=env,
         timeout=120,
@@ -130,7 +134,7 @@ def test_persistent_session_with_resume(coi_binary, cleanup_containers, workspac
 
     child2 = spawn_coi(
         coi_binary,
-        ["shell", "--persistent", "--resume"],
+        ["shell", "--resume"],
         cwd=workspace_dir,
         env=env,
         timeout=120,

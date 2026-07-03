@@ -20,6 +20,7 @@ from support.helpers import (
     wait_for_prompt,
     wait_for_text_in_monitor,
     with_live_screen,
+    write_workspace_container_config,
 )
 
 
@@ -28,7 +29,7 @@ def test_attach_with_bash(coi_binary, cleanup_containers, workspace_dir):
     Test that coi attach --bash attaches to bash shell.
 
     Flow:
-    1. Start coi shell --persistent
+    1. Start coi shell (persistent via [container] config)
     2. Detach from session
     3. Run coi attach <name> --bash
     4. Verify we get a bash shell (can run commands)
@@ -39,9 +40,11 @@ def test_attach_with_bash(coi_binary, cleanup_containers, workspace_dir):
 
     # === Phase 1: Start persistent session ===
 
+    write_workspace_container_config(workspace_dir, persistent=True)
+
     child = spawn_coi(
         coi_binary,
-        ["shell", "--persistent"],
+        ["shell"],
         cwd=workspace_dir,
         env=env,
         timeout=120,

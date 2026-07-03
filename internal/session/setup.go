@@ -260,7 +260,7 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 
 	// 5. Create and configure container (but don't start yet if we need to add devices)
 	// Always launch as non-ephemeral so we can save session data even if container is stopped
-	// (e.g., via 'sudo shutdown 0' from within). Cleanup will delete if not --persistent.
+	// (e.g., via 'sudo shutdown 0' from within). Cleanup will delete unless persistent mode is configured.
 	if !skipLaunch {
 		opts.Logger(fmt.Sprintf("Creating container from %s...", image))
 		// Create container without starting it (init)

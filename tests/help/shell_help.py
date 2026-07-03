@@ -39,7 +39,12 @@ def test_shell_help(coi_binary):
     # Should mention key flags
     assert "--slot" in output, f"Should document --slot flag. Got:\n{output}"
     assert "--resume" in output, f"Should document --resume flag. Got:\n{output}"
-    assert "--persistent" in output, f"Should document --persistent flag. Got:\n{output}"
+    assert "--tool" in output, f"Should document --tool flag. Got:\n{output}"
+
+    # Persistence and image selection are config-driven now
+    # ([container] persistent / image in .coi/config.toml); the CLI flags were removed.
+    assert "--persistent" not in output, f"--persistent flag was removed. Got:\n{output}"
+    assert "--image" not in output, f"--image flag was removed. Got:\n{output}"
 
     # Should contain Flags section
     assert "Flags:" in output, f"Should contain Flags section. Got:\n{output}"

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"regexp"
 
 	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
@@ -19,8 +20,7 @@ var Version = "dev"
 type App struct {
 	workspace       string
 	slot            int
-	imageName       string
-	persistent      bool
+	persistent      bool // config-driven: [container] persistent (no CLI flag)
 	resume          string
 	continueSession string
 	profile         string
@@ -45,7 +45,8 @@ By default runs Claude Code. Other tools can be configured via the tool.name con
 Examples:
   coi                          # Start interactive AI coding session (same as 'coi shell')
   coi shell --slot 2           # Use specific slot
-  coi run "npm test"           # Run command in container
+  coi run -- npm test          # Run a command in the sandbox
+  coi run                      # Run the workspace run script (coi-run)
   coi build                    # Build coi image
   coi image list               # List available images
   coi list                     # List active sessions
@@ -84,10 +85,9 @@ Examples:
 		// as if passwordless sudo were unavailable when disabled.
 		network.SetSudoAllowed(app.cfg.Network.SudoAllowed())
 
-		// Apply config defaults to flags that weren't explicitly set
-		if !cmd.Flags().Changed("persistent") {
-			app.persistent = config.BoolVal(app.cfg.Container.Persistent)
-		}
+		// Persistence is config-driven ([container] persistent, settable per
+		// profile) — the former --persistent flag was removed.
+		app.persistent = config.BoolVal(app.cfg.Container.Persistent)
 
 		// Silence usage output for RunE errors. Setting this here (in
 		// PersistentPreRunE) rather than globally means cobra still prints
@@ -97,6 +97,35 @@ Examples:
 
 		return nil
 	},
+}
+
+// removedFlagRe matches the removed --image/--persistent flags as EXACT
+// tokens inside a flag-error message ("unknown flag: --image",
+// "flag needs an argument: --image"). The boundary check prevents false
+// hints for flags that merely share the prefix (--images, --image-tag,
+// --persistent-home): the token must be followed by end-of-string,
+// whitespace, or '=' — never by more flag-name characters.
+var removedFlagRe = regexp.MustCompile(`(--image|--persistent)($|[\s=])`)
+
+// removedFlagHint upgrades the bare "unknown flag" error for the removed
+// --image/--persistent flags into an actionable migration message. The flags
+// no longer exist anywhere — image selection and persistence are configured
+// via [container] image / persistent, settable globally, per project, or per
+// profile (edit the profile's config.toml).
+func removedFlagHint(cmd *cobra.Command, err error) error {
+	if err == nil {
+		return nil
+	}
+	msg := err.Error()
+	if m := removedFlagRe.FindStringSubmatch(msg); m != nil {
+		return fmt.Errorf("%s\n\nThe %s flag was removed. Set it via config instead:\n"+
+			"  [container]\n"+
+			"  image = \"my-image\"      # was --image\n"+
+			"  persistent = true       # was --persistent\n"+
+			"in ~/.coi/config.toml, ./.coi/config.toml, or a profile (--profile <name>)",
+			msg, m[1])
+	}
+	return err
 }
 
 // Execute runs the root command
@@ -115,16 +144,19 @@ func Execute(isCoi bool) error {
 }
 
 func init() {
-	// Global flags available to all commands
+	// Global flags available to all commands.
+	// NOTE: --image and --persistent were removed on purpose — anything
+	// config-shaped goes via config/profiles ([container] image / persistent).
+	// removedFlagHint below turns their unknown-flag errors into a migration hint.
 	rootCmd.PersistentFlags().StringVarP(&app.workspace, "workspace", "w", ".", "Workspace directory to mount")
 	rootCmd.PersistentFlags().IntVar(&app.slot, "slot", 0, "Slot number for parallel sessions (0 = auto-allocate)")
-	rootCmd.PersistentFlags().StringVar(&app.imageName, "image", "", "Custom image to use (default: coi-default)")
-	rootCmd.PersistentFlags().BoolVar(&app.persistent, "persistent", false, "Reuse container across sessions")
 	rootCmd.PersistentFlags().StringVar(&app.resume, "resume", "", "Resume from session ID (omit value to auto-detect)")
 	rootCmd.PersistentFlags().Lookup("resume").NoOptDefVal = "auto"
 	rootCmd.PersistentFlags().StringVar(&app.continueSession, "continue", "", "Alias for --resume")
 	rootCmd.PersistentFlags().Lookup("continue").NoOptDefVal = "auto"
 	rootCmd.PersistentFlags().StringVar(&app.profile, "profile", "", "Use named profile")
+
+	rootCmd.SetFlagErrorFunc(removedFlagHint)
 
 	// Add subcommands
 	rootCmd.AddCommand(runCmd)

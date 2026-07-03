@@ -18,6 +18,7 @@ from support.helpers import (
     spawn_coi,
     wait_for_container_ready,
     wait_for_prompt,
+    write_workspace_container_config,
 )
 
 
@@ -26,7 +27,7 @@ def test_attach_wrong_workspace_slot(coi_binary, cleanup_containers, workspace_d
     Test that coi attach --slot fails when workspace doesn't match.
 
     Flow:
-    1. Start coi shell --persistent in workspace_dir (slot 1)
+    1. Start coi shell (persistent via [container] config) in workspace_dir (slot 1)
     2. Detach
     3. Create a different workspace directory
     4. Try coi attach --slot=1 --workspace=<different>
@@ -42,9 +43,11 @@ def test_attach_wrong_workspace_slot(coi_binary, cleanup_containers, workspace_d
 
     # === Phase 1: Start session in original workspace ===
 
+    write_workspace_container_config(workspace_dir, persistent=True)
+
     child = spawn_coi(
         coi_binary,
-        ["shell", "--persistent"],
+        ["shell"],
         cwd=workspace_dir,
         env=env,
         timeout=120,

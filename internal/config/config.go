@@ -921,6 +921,29 @@ func (c *Config) ApplyProfile(name string) error {
 	return nil
 }
 
+// ReapplyProfileContainer re-merges ONLY the container section of the named
+// profile into the config. Used after a workspace-config overlay so an
+// explicitly requested profile keeps winning over the project's
+// [container] settings (image, persistent, storage pool, build) — the
+// overlay merges the project config on top of the profile applied earlier
+// in PersistentPreRunE. Unlike a full ApplyProfile, this is idempotent:
+// mergeContainerInto/mergeBuildInto are field-level overrides with no
+// appends, so it is safe to call after a profile was already applied
+// (a full re-apply would duplicate profile mounts and sockets).
+// The project alias is preserved, mirroring ApplyProfile.
+func (c *Config) ReapplyProfileContainer(name string) error {
+	profile := c.GetProfile(name)
+	if profile == nil {
+		return fmt.Errorf("profile '%s' not found", name)
+	}
+	projectAlias := c.Container.Alias
+	mergeContainerInto(&c.Container, &profile.Container)
+	if projectAlias != "" {
+		c.Container.Alias = projectAlias
+	}
+	return nil
+}
+
 // mergeContainerInto merges src into dst for the container-shape section.
 func mergeContainerInto(dst *ContainerConfig, src *ContainerConfig) {
 	if src == nil {
