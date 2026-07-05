@@ -125,20 +125,48 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 			if err != nil {
 				return nil, fmt.Errorf("failed to check if container exists: %w", err)
 			}
+			s.wasRestarted = containerExists && a.persistent
 
-			// Pre-start hook: apply the workspace UID mapping (raw.idmap on a
-			// host/code UID mismatch; Colima/Lima auto-detect) AFTER init but
-			// BEFORE first start, so raw.idmap takes effect (#530). Captures the
-			// resulting shift flag for the later workspace mount. Default until
-			// the hook runs (reused persistent containers skip it).
+			// Mount/socket config is parsed and trust-gated BEFORE launch so the
+			// pre-start hook below can attach every disk device to the stopped
+			// container (all host-side computation; no container required).
+			mc, err := ParseMountConfig(a.cfg)
+			if err != nil {
+				return nil, fmt.Errorf("invalid mount configuration: %w", err)
+			}
+			sc, err := ParseSocketConfig(a.cfg)
+			if err != nil {
+				return nil, fmt.Errorf("invalid socket configuration: %w", err)
+			}
+			// One combined trust gate over mounts + sockets, so the per-source
+			// fingerprint matches what `coi trust` recorded.
+			s.mountConfig, s.socketConfig = a.gateRunForwarding(mc, sc, s.absWorkspace, s.wasRestarted)
+
+			// Pre-start hook: runs AFTER init but BEFORE first start (fresh
+			// launches only; reused persistent containers keep their creation-time
+			// devices and mapping). Two jobs:
+			//  1. Apply the workspace UID mapping (raw.idmap on a host/code UID
+			//     mismatch; Colima/Lima auto-detect) so it takes effect at first
+			//     boot (#530).
+			//  2. Attach ALL disk devices (workspace, additional mounts, security
+			//     + secret masks) to the STOPPED container, exactly like the shell
+			//     path does. The devices then materialize at start, so a
+			//     filesystem that cannot satisfy security.idmap.isolated (e.g. a
+			//     virtiofs workspace under OrbStack/Colima) fails the START — where
+			//     the existing isolation fallback disables isolation and retries —
+			//     instead of failing a post-start hot-mount with no fallback at
+			//     all (issue #534).
+			// If the ephemeral isolation fallback recreates the container, this
+			// hook re-runs on the fresh container, re-applying mapping and devices.
 			s.useShift = !a.cfg.Incus.DisableShift
 			logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
 			preStart := func() error {
 				s.useShift, _ = session.ConfigureUIDMapping(s.containerName, a.cfg.Incus.DisableShift, logFn)
-				return nil
+				s.containerWorkspace = a.resolveContainerWorkspacePath(s.absWorkspace)
+				return a.applyWorkspaceMounts(mgr, s.containerName, s.absWorkspace, &s.containerWorkspace, s.mountConfig, s.useShift, false)
 			}
 
-			if err := launchOrReuseContainer(mgr, s.img, a.cfg.Container.StoragePool, containerExists, a.persistent, preStart); err != nil {
+			if err := launchOrReuseContainer(mgr, s.img, a.cfg.Container.StoragePool, s.containerName, containerExists, a.persistent, preStart); err != nil {
 				return nil, err
 			}
 
@@ -147,7 +175,6 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 			}
 
 			s.mgr = mgr
-			s.wasRestarted = containerExists && a.persistent
 
 			teardown := func() {
 				if !a.persistent {
@@ -220,37 +247,17 @@ func (a *App) configureContainerRunPhase(s *runState) session.Phase {
 				}
 			}
 
-			mc, err := ParseMountConfig(a.cfg)
-			if err != nil {
-				return nil, fmt.Errorf("invalid mount configuration: %w", err)
-			}
-			sc, err := ParseSocketConfig(a.cfg)
-			if err != nil {
-				return nil, fmt.Errorf("invalid socket configuration: %w", err)
-			}
-			// One combined trust gate over mounts + sockets, so the per-source
-			// fingerprint matches what `coi trust` recorded.
-			s.mountConfig, s.socketConfig = a.gateRunForwarding(mc, sc, s.absWorkspace, s.wasRestarted)
-
-			s.containerWorkspace = a.resolveContainerWorkspacePath(s.absWorkspace)
-			// Configure UID mapping (Colima/Lima auto-detect + raw.idmap on a
-			// host-UID/code-UID mismatch) the same way the shell pipeline does.
-			// Previously `coi run` only did `useShift := !DisableShift` with no
-			// idmap handling, so a workspace owned by a non-1000 host UID (macOS
-			// user 501, a CI runner at 1001) was unwritable by the code user
-			// (issue #530). Skip when reusing a persistent container — its mount
-			// devices and raw.idmap were set at creation time.
-			// UID mapping (raw.idmap on a host/code UID mismatch, Colima/Lima
-			// auto-detect) was applied by the launch phase's pre-start hook so
-			// raw.idmap takes effect at first boot (#530). s.useShift carries
-			// the resulting shift flag; reused persistent containers keep their
-			// creation-time mapping (default shift from config).
-			useShift := s.useShift
+			// Disk devices (workspace, additional mounts, security + secret masks)
+			// and the UID mapping were applied by the launch phase's pre-start
+			// hook, BEFORE first start — so raw.idmap takes effect at boot (#530)
+			// and a device on an idmap-incompatible filesystem (virtiofs) fails
+			// the start where the isolation fallback covers it (#534). Only a
+			// reused persistent container has work left here: resolve its existing
+			// workspace mount path from the container config.
 			if s.wasRestarted {
-				useShift = !a.cfg.Incus.DisableShift
-			}
-			if err := a.applyWorkspaceMounts(s.mgr, s.containerName, s.absWorkspace, &s.containerWorkspace, s.mountConfig, useShift, s.wasRestarted); err != nil {
-				return nil, err
+				if err := a.applyWorkspaceMounts(s.mgr, s.containerName, s.absWorkspace, &s.containerWorkspace, s.mountConfig, !a.cfg.Incus.DisableShift, true); err != nil {
+					return nil, err
+				}
 			}
 
 			// LIFO teardown: apply-network's teardown runs before this one;

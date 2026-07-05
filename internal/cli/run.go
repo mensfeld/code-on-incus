@@ -165,10 +165,15 @@ func (a *App) runCommand(cmd *cobra.Command, args []string) error {
 
 // launchOrReuseContainer restarts an existing persistent container, or
 // recreates / creates a fresh one on the given storage pool.
-func launchOrReuseContainer(mgr container.ContainerManager, img, pool string, containerExists, persistent bool, preStart func() error) error {
+func launchOrReuseContainer(mgr container.ContainerManager, img, pool, containerName string, containerExists, persistent bool, preStart func() error) error {
 	if containerExists && persistent {
 		fmt.Fprintf(os.Stderr, "Restarting existing persistent container...\n")
-		if err := mgr.Start(); err != nil {
+		// Start with the isolation fallback: the container's disk devices (set at
+		// creation) materialize at start, and one on an idmap-incompatible
+		// filesystem (virtiofs workspace, #534) fails the start under
+		// security.idmap.isolated — same class the fresh-launch path handles.
+		// Safe for persistent containers: a failed start does not delete them.
+		if err := container.StartWithIsolationFallback(containerName); err != nil {
 			return fmt.Errorf("failed to start container: %w", err)
 		}
 		return nil
@@ -180,9 +185,15 @@ func launchOrReuseContainer(mgr container.ContainerManager, img, pool string, co
 		}
 	}
 	ephemeral := !persistent
-	// preStart applies start-time-only settings (raw.idmap for the workspace
-	// UID mapping) between init and first start — see #530.
+	// preStart applies start-time-only settings between init and first start:
+	// raw.idmap for the workspace UID mapping (#530) and every disk device, so
+	// idmap-incompatible device filesystems fail the START where the isolation
+	// fallback covers them (#534).
 	if err := mgr.LaunchWithPreStart(img, ephemeral, pool, preStart); err != nil {
+		// Best-effort cleanup: a preStart/start failure can leave the freshly
+		// init'ed container behind in a stopped state (stopped ephemeral
+		// containers are only auto-deleted after having run).
+		_ = mgr.Delete(true)
 		return fmt.Errorf("failed to launch container: %w", err)
 	}
 	return nil

@@ -585,9 +585,10 @@ jobs:
   # isColimaOrLimaEnvironment() is genuinely TRUE (it keys on virtiofs in
   # /proc/mounts), reproducing the macOS Colima/Lima environment class (#530,
   # #534, #221, #45) that hosted macOS runners cannot cover (Colima needs Intel
-  # nested virt; GitHub retired those runners). Test workspaces stay on the
-  # guest's NATIVE fs (pytest tmp_path -> /tmp): a virtiofs-backed workspace
-  # reproduces open bug #534 and joins this lane together with its fix.
+  # nested virt; GitHub retired those runners). Most test workspaces live on the
+  # guest's native fs (pytest tmp_path -> /tmp); the #534 regression test
+  # deliberately puts its workspace ON the virtiofs mount to prove the
+  # isolation fallback covers idmap-incompatible device filesystems.
   lima-smoke:
     name: Lima Smoke (COI inside a Lima VM, virtiofs)
     runs-on: ubuntu-24.04
@@ -712,13 +713,17 @@ jobs:
         run: |
           # Single-quoted body: $HOME resolves in the GUEST (/home/<user>.guest,
           # native fs) where the venv lives. cwd is the virtiofs-mounted checkout.
+          # COI_TEST_VIRTIOFS_DIR is quote-spliced from the HOST shell: the host
+          # $HOME is the virtiofs mount inside the guest — the #534 regression
+          # test creates its workspace there.
           # No --cov: it measures test code only (all native lanes already emit it)
           # and coverage's SQLite file on virtiofs is a needless flake surface.
           limactl shell --workdir "$GITHUB_WORKSPACE" coi -- bash -c '
             set -euo pipefail
             export COI_BINARY=/usr/local/bin/coi
+            export COI_TEST_VIRTIOFS_DIR="'"$HOME"'"
             exec "$HOME/venv/bin/python" -m pytest \
-              tests/run/test_uid_mapping.py tests/run/test_run_script.py \
+              tests/run/test_uid_mapping.py tests/run/test_run_script.py tests/run/test_virtiofs_workspace.py \
               -v --tb=short --durations=0
           '
 
