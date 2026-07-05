@@ -580,6 +580,179 @@ jobs:
           ./coi kill --all --force || true
           ./coi clean --force || true
 
+  # COI inside a Lima VM (issue #543): runner -> Lima/QEMU-KVM Ubuntu guest with a
+  # virtiofs $HOME mount -> Incus -> COI containers. This is the only lane where
+  # isColimaOrLimaEnvironment() is genuinely TRUE (it keys on virtiofs in
+  # /proc/mounts), reproducing the macOS Colima/Lima environment class (#530,
+  # #534, #221, #45) that hosted macOS runners cannot cover (Colima needs Intel
+  # nested virt; GitHub retired those runners). Test workspaces stay on the
+  # guest's NATIVE fs (pytest tmp_path -> /tmp): a virtiofs-backed workspace
+  # reproduces open bug #534 and joins this lane together with its fix.
+  lima-smoke:
+    name: Lima Smoke (COI inside a Lima VM, virtiofs)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    needs: build
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - name: Install host packages (QEMU + virtiofsd + build deps)
+        run: |
+          sudo apt-get update
+          # qemu-system-x86 + qemu-utils: Lima's qemu driver; virtiofsd: the Rust
+          # vhost-user daemon Lima discovers via /usr/share/qemu/vhost-user/*.json
+          # (Lima does NOT search PATH for it); libsystemd-dev: cgo build (sdjournal).
+          sudo apt-get install -y libsystemd-dev qemu-system-x86 qemu-utils virtiofsd
+
+      - name: Enable KVM (fail fast if unavailable)
+        run: |
+          # Standard GitHub pattern for /dev/kvm access on Linux runners.
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
+            echo "FATAL: /dev/kvm not usable — this lane must not run under TCG emulation"
+            exit 1
+          fi
+          # Rust virtiofsd sandboxes itself via unprivileged user namespaces;
+          # make sure noble's restriction cannot block it (cheap insurance).
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          df -h /
+
+      - name: Prepare embedded build assets
+        run: |
+          mkdir -p internal/image/embedded
+          mkdir -p internal/config/embedded
+          cp profiles/default/config.toml internal/config/embedded/default_config.toml
+          cp testdata/dummy/dummy internal/image/embedded/dummy
+          # GitHub Actions runners lack the memory.swap cgroup controller.
+          # Disable swap limit in the embedded default so tests can run.
+          sed -i 's/^swap = "true"/swap = ""/' internal/config/embedded/default_config.toml
+
+      - name: Build COI binary (on the runner; go.mod needs Go 1.25)
+        run: |
+          # The guest is the same distro/arch (Ubuntu 24.04 amd64), so the binary
+          # runs there as-is. setcap happens in the guest on a native-fs copy —
+          # xattrs on the virtiofs mount are unreliable.
+          go build -o coi ./cmd/coi
+          ./coi version
+
+      - name: Install Lima
+        run: |
+          LIMA_VERSION=2.1.4
+          curl -fsSL --retry 3 "https://github.com/lima-vm/lima/releases/download/v${LIMA_VERSION}/lima-${LIMA_VERSION}-Linux-x86_64.tar.gz" -o /tmp/lima.tar.gz
+          echo "78da175634c38beab62a6618d16b9c7aeeabdbb5d99ed5c9a03bac212c786bfa  /tmp/lima.tar.gz" | sha256sum -c
+          sudo tar -C /usr/local -xzf /tmp/lima.tar.gz
+          limactl --version
+
+      - name: Cache Lima guest image downloads
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/lima
+          key: ${{ runner.os }}-lima-guest-${{ hashFiles('scripts/lima-coi.yaml') }}
+
+      - name: Restore COI image from cache (restore-only; core-build owns saves)
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /tmp/coi-image.tar.gz
+          key: ${{ runner.os }}-coi-image-${{ hashFiles('internal/image/**', 'testdata/dummy/**', 'profiles/default/**') }}
+
+      - name: Restore base Ubuntu image from cache (restore-only)
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /tmp/ubuntu-base-image.tar.gz
+          key: ${{ runner.os }}-ubuntu-24.04-base-image
+
+      - name: Stage image tarballs under $HOME (the guest sees only the ~ mount, not /tmp)
+        run: |
+          cp /tmp/coi-image.tar.gz "$HOME/" 2>/dev/null || echo "no cached coi image (will build inside the guest)"
+          cp /tmp/ubuntu-base-image.tar.gz "$HOME/" 2>/dev/null || echo "no cached base image (smoke tests don't need it)"
+
+      - name: Start the Lima VM (retry x3, refuse TCG fallback)
+        run: |
+          started=0
+          for attempt in 1 2 3; do
+            echo "limactl start attempt $attempt/3"
+            if timeout 600 limactl start --name=coi --tty=false "$GITHUB_WORKSPACE/scripts/lima-coi.yaml"; then
+              started=1
+              break
+            fi
+            limactl stop -f coi 2>/dev/null || true
+            limactl delete -f coi 2>/dev/null || true
+            sleep 10
+          done
+          if [ "$started" != 1 ]; then
+            echo "FATAL: lima failed to start after 3 attempts"
+            exit 1
+          fi
+          limactl list
+          # Lima v2 silently falls back to TCG when KVM is unusable — refuse that:
+          # a TCG run would blow the time budget and mask perf-class regressions.
+          if ! pgrep -af qemu-system-x86_64 | grep -Eq 'accel[ =]kvm|-enable-kvm'; then
+            echo "FATAL: QEMU is running WITHOUT KVM acceleration (TCG fallback):"
+            pgrep -af qemu-system-x86_64 || true
+            exit 1
+          fi
+
+      - name: Provision the guest (incus, deps, coi binary, image import-or-build)
+        # timeout-wrapped: if the guest dies mid-provision (first run: host memory
+        # exhaustion killed the VM during `incus publish`), the dead SSH session
+        # otherwise lingers ~20+ min on TCP timeouts before exiting 255.
+        run: |
+          timeout 2400 limactl shell --workdir "$GITHUB_WORKSPACE" coi -- bash "$GITHUB_WORKSPACE/scripts/lima-guest-setup.sh" \
+            "$GITHUB_WORKSPACE" "$HOME/coi-image.tar.gz" "$HOME/ubuntu-base-image.tar.gz"
+
+      - name: Run smoke tests inside the Lima guest
+        run: |
+          # Single-quoted body: $HOME resolves in the GUEST (/home/<user>.guest,
+          # native fs) where the venv lives. cwd is the virtiofs-mounted checkout.
+          # No --cov: it measures test code only (all native lanes already emit it)
+          # and coverage's SQLite file on virtiofs is a needless flake surface.
+          limactl shell --workdir "$GITHUB_WORKSPACE" coi -- bash -c '
+            set -euo pipefail
+            export COI_BINARY=/usr/local/bin/coi
+            exec "$HOME/venv/bin/python" -m pytest \
+              tests/run/test_uid_mapping.py tests/run/test_run_script.py \
+              -v --tb=short --durations=0
+          '
+
+      - name: Diagnostics (on failure)
+        if: failure()
+        # Every limactl invocation is timeout-wrapped: if the guest/SSH is the
+        # thing that broke, an unguarded `limactl shell` hangs this step until
+        # the job timeout (observed on the first run) instead of surfacing logs.
+        run: |
+          set +e
+          echo "=== host ==="
+          df -h; free -m
+          echo "--- host dmesg tail (OOM kills of qemu land here) ---"
+          sudo dmesg | tail -n 30
+          timeout 30 limactl list
+          echo "--- hostagent stderr (virtiofsd/QEMU spawn failures land here) ---"
+          tail -n 100 "$HOME/.lima/coi/ha.stderr.log" 2>/dev/null
+          echo "--- guest serial console tail (guest kernel oops/OOM land here) ---"
+          tail -n 80 "$HOME"/.lima/coi/serial*.log 2>/dev/null
+          echo "=== guest ==="
+          timeout 90 limactl shell coi -- bash -c '
+            grep virtiofs /proc/mounts; id
+            timeout 15 incus list 2>&1
+            timeout 15 incus warning list 2>&1 | head -20
+            sudo journalctl -u incus -n 100 --no-pager 2>&1 | tail -n 60
+            sudo dmesg | tail -n 40
+            df -h /; free -m
+          ' 2>&1 | head -n 200
+          echo "=== diagnostics done ==="
+
+      - name: Stop the VM
+        if: always()
+        run: timeout 60 limactl stop -f coi 2>/dev/null || true
+
   ci-success:
     name: CI Success
     runs-on: ubuntu-24.04
@@ -589,6 +762,7 @@ jobs:
       - build
       - unit-tests
       - integration
+      - lima-smoke
     steps:
       - name: Check all jobs passed
         if: |
