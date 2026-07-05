@@ -614,13 +614,30 @@ jobs:
       - name: Enable KVM (fail fast if unavailable)
         run: |
           # Standard GitHub pattern for /dev/kvm access on Linux runners.
+          # udev applies the rule ASYNCHRONOUSLY: without settle + retry the
+          # permission check races the mode change (observed: identical code
+          # passed twice, then failed on the third run purely on timing).
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+          sudo udevadm settle --timeout=15 || true
+          for i in 1 2 3 4 5; do
+            if [ -r /dev/kvm ] && [ -w /dev/kvm ]; then break; fi
+            sleep 2
+          done
+          # Node exists but perms still not applied -> set them directly (the
+          # udev rule stays in place for any future node re-creation).
+          if [ -e /dev/kvm ] && { [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; }; then
+            sudo chmod 666 /dev/kvm
+          fi
           if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
             echo "FATAL: /dev/kvm not usable — this lane must not run under TCG emulation"
+            ls -l /dev/kvm 2>&1 || echo "(no /dev/kvm node at all)"
+            lsmod | grep -i kvm || echo "(no kvm modules loaded)"
+            grep -m1 -oE 'vmx|svm' /proc/cpuinfo || echo "(no virt extensions in cpuinfo)"
             exit 1
           fi
+          ls -l /dev/kvm
           # Rust virtiofsd sandboxes itself via unprivileged user namespaces;
           # make sure noble's restriction cannot block it (cheap insurance).
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
