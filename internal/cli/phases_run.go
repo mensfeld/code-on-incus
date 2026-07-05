@@ -166,17 +166,17 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 				return a.applyWorkspaceMounts(mgr, s.containerName, s.absWorkspace, &s.containerWorkspace, s.mountConfig, s.useShift, false)
 			}
 
-			if err := launchOrReuseContainer(mgr, s.img, a.cfg.Container.StoragePool, s.containerName, containerExists, a.persistent, preStart); err != nil {
-				return nil, err
-			}
-
-			if err := applyContainerAlias(s.effectiveAlias, s.containerName, s.absWorkspace); err != nil {
-				return nil, err
-			}
-
 			s.mgr = mgr
-
+			// The teardown pairs with THIS phase's acquisitions: the pre-start
+			// hook applies host-side immutable flags (chattr +i on protected
+			// paths inside the workspace), so their removal belongs here — not in
+			// a later phase whose teardown never registers if that phase (or this
+			// one) fails first. Leaked +i flags make the workspace undeletable
+			// (pytest tmpdir cleanup EPERM). Returned even alongside an error:
+			// the pipeline registers teardowns returned with a failed Run.
 			teardown := func() {
+				logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
+				session.RemoveImmutable(s.containerName, logFn)
 				if !a.persistent {
 					fmt.Fprintf(os.Stderr, "Cleaning up container %s...\n", s.containerName)
 					_ = s.mgr.Delete(true)
@@ -187,6 +187,15 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 					}
 				}
 			}
+
+			if err := launchOrReuseContainer(mgr, s.img, a.cfg.Container.StoragePool, s.containerName, containerExists, a.persistent, preStart); err != nil {
+				return teardown, err
+			}
+
+			if err := applyContainerAlias(s.effectiveAlias, s.containerName, s.absWorkspace); err != nil {
+				return teardown, err
+			}
+
 			return teardown, nil
 		},
 	}
@@ -260,14 +269,11 @@ func (a *App) configureContainerRunPhase(s *runState) session.Phase {
 				}
 			}
 
-			// LIFO teardown: apply-network's teardown runs before this one;
-			// the critical constraint (network before container deletion) is
-			// satisfied by the launch-container teardown running last.
-			teardown := func() {
-				logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
-				session.RemoveImmutable(s.containerName, logFn)
-			}
-			return teardown, nil
+			// No teardown: the immutable-flag removal moved to the launch phase's
+			// teardown, alongside the pre-start hook that now applies them —
+			// so it runs even when a later phase (this one included) fails
+			// before registering anything.
+			return nil, nil
 		},
 	}
 }
