@@ -1,0 +1,46 @@
+# Lima template for the CI lima-smoke lane (issue #543).
+#
+# Purpose: run COI's smoke tests INSIDE a Lima VM on a Linux runner so that
+# isColimaOrLimaEnvironment() (internal/session/setup_helpers.go) is genuinely
+# true in CI — it keys on "virtiofs" appearing in /proc/mounts, which is why
+# mountType MUST be virtiofs here. This reproduces the macOS Colima/Lima
+# environment class (#530, #534, #221, #45) that hosted macOS runners cannot
+# cover (Colima needs Intel nested virt; GitHub has no such runners).
+#
+# The host $HOME is mounted writable at the identical path inside the guest,
+# so the repo checkout (under $GITHUB_WORKSPACE) and any staged image tarballs
+# are visible in the guest with zero copying. The guest user's own $HOME is a
+# separate, guest-native directory (/home/<user>.guest since Lima v2.1).
+vmType: qemu
+arch: x86_64
+images:
+  # Pinned dated release => the hashFiles()-keyed ~/.cache/lima cache stays
+  # stable; the digest guards content integrity.
+  - location: "https://cloud-images.ubuntu.com/releases/noble/release-20260615/ubuntu-24.04-server-cloudimg-amd64.img"
+    arch: x86_64
+    digest: "sha256:5fa5b05e5ec239858c4531485d6023b0896448c2df7c63b34f8dae6ea6051a44"
+  # Floating fallback in case the dated directory is ever pruned upstream.
+  - location: "https://cloud-images.ubuntu.com/releases/noble/release/ubuntu-24.04-server-cloudimg-amd64.img"
+    arch: x86_64
+
+# Runner is 4-core / 16 GB: give the guest most cores, half the memory, and a
+# sparse 30 GiB disk (real host usage grows only with guest writes).
+cpus: 4
+memory: "8GiB"
+disk: "30GiB"
+
+mountType: "virtiofs"
+mounts:
+  # Writable is required: pytest writes .pytest_cache/__pycache__ into the
+  # mounted checkout, and the provisioning script write-probes the mount.
+  - location: "~"
+    writable: true
+
+# We use Incus inside the guest; skip Lima's containerd provisioning entirely.
+containerd:
+  system: false
+  user: false
+
+# No provision: blocks on purpose — provisioning runs via `limactl shell`
+# (scripts/lima-guest-setup.sh) so failures surface in the CI step log and the
+# boot step stays dumb and retryable.
