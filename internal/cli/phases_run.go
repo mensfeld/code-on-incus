@@ -34,6 +34,7 @@ type runState struct {
 	// After launch-container
 	mgr          container.ContainerManager
 	wasRestarted bool
+	useShift     bool // resolved by the launch phase's UID-mapping pre-start hook
 
 	// After configure-container
 	containerWorkspace string
@@ -125,7 +126,19 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 				return nil, fmt.Errorf("failed to check if container exists: %w", err)
 			}
 
-			if err := launchOrReuseContainer(mgr, s.img, a.cfg.Container.StoragePool, containerExists, a.persistent); err != nil {
+			// Pre-start hook: apply the workspace UID mapping (raw.idmap on a
+			// host/code UID mismatch; Colima/Lima auto-detect) AFTER init but
+			// BEFORE first start, so raw.idmap takes effect (#530). Captures the
+			// resulting shift flag for the later workspace mount. Default until
+			// the hook runs (reused persistent containers skip it).
+			s.useShift = !a.cfg.Incus.DisableShift
+			logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
+			preStart := func() error {
+				s.useShift, _ = session.ConfigureUIDMapping(s.containerName, a.cfg.Incus.DisableShift, logFn)
+				return nil
+			}
+
+			if err := launchOrReuseContainer(mgr, s.img, a.cfg.Container.StoragePool, containerExists, a.persistent, preStart); err != nil {
 				return nil, err
 			}
 
@@ -220,7 +233,22 @@ func (a *App) configureContainerRunPhase(s *runState) session.Phase {
 			s.mountConfig, s.socketConfig = a.gateRunForwarding(mc, sc, s.absWorkspace, s.wasRestarted)
 
 			s.containerWorkspace = a.resolveContainerWorkspacePath(s.absWorkspace)
-			useShift := !a.cfg.Incus.DisableShift
+			// Configure UID mapping (Colima/Lima auto-detect + raw.idmap on a
+			// host-UID/code-UID mismatch) the same way the shell pipeline does.
+			// Previously `coi run` only did `useShift := !DisableShift` with no
+			// idmap handling, so a workspace owned by a non-1000 host UID (macOS
+			// user 501, a CI runner at 1001) was unwritable by the code user
+			// (issue #530). Skip when reusing a persistent container — its mount
+			// devices and raw.idmap were set at creation time.
+			// UID mapping (raw.idmap on a host/code UID mismatch, Colima/Lima
+			// auto-detect) was applied by the launch phase's pre-start hook so
+			// raw.idmap takes effect at first boot (#530). s.useShift carries
+			// the resulting shift flag; reused persistent containers keep their
+			// creation-time mapping (default shift from config).
+			useShift := s.useShift
+			if s.wasRestarted {
+				useShift = !a.cfg.Incus.DisableShift
+			}
 			if err := a.applyWorkspaceMounts(s.mgr, s.containerName, s.absWorkspace, &s.containerWorkspace, s.mountConfig, useShift, s.wasRestarted); err != nil {
 				return nil, err
 			}

@@ -90,7 +90,12 @@ def _health_checks(coi_binary, env):
         [coi_binary, "health", "--format", "json"],
         capture_output=True,
         text=True,
-        timeout=30,
+        # `coi health` launches several ephemeral probe containers
+        # (secret_masking, host_credential_isolation, network_restriction,
+        # container_connectivity). 30s is too tight on a CI lane that built the
+        # coi image cold (heavy CPU/IO contention) — de-flake, not a behavior
+        # change.
+        timeout=120,
         env=env,
     )
     return json.loads(r.stdout)["checks"]

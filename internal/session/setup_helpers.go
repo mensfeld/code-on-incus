@@ -35,6 +35,66 @@ func isColimaOrLimaEnvironment() bool {
 	return false
 }
 
+// ConfigureUIDMapping decides how the workspace mount maps host UIDs into the
+// container and applies raw.idmap when needed. It is the single source of truth
+// for both the shell (session.Setup) and run pipelines so they cannot diverge
+// (issue #530). Returns the effective shift flag (for MountDisk) and whether
+// raw.idmap was applied.
+//
+// See decideUIDMapping for the case matrix; the key rule is that a host-UID /
+// code-UID mismatch (macOS user 501, CI runner 1001, mapped to code=1000)
+// ALWAYS sets raw.idmap and turns shift off — the previous code gated this on
+// !disableShift, so the Colima/Lima path silently skipped it and writes to a
+// non-1000-owned workspace failed.
+//
+// raw.idmap only takes effect at container START, so a caller that has ALREADY
+// started the container (the run pipeline uses `incus launch` = create+start)
+// must restart it when idmapApplied is true; the shell pipeline sets it before
+// its own start, so it ignores idmapApplied.
+func ConfigureUIDMapping(containerName string, disableShift bool, logger func(string)) (useShift, idmapApplied bool) {
+	if logger == nil {
+		logger = func(string) {}
+	}
+	var idmap string
+	useShift, idmap = decideUIDMapping(os.Getuid(), container.CodeUID, disableShift, isColimaOrLimaEnvironment())
+
+	if idmap != "" {
+		logger(fmt.Sprintf("Host UID %d differs from container code UID %d, using raw.idmap: %s",
+			os.Getuid(), container.CodeUID, idmap))
+		if err := container.IncusExec("config", "set", containerName, "raw.idmap", idmap); err != nil {
+			logger(fmt.Sprintf("Warning: Failed to set raw.idmap: %v", err))
+			return useShift, false
+		}
+		return useShift, true
+	}
+
+	if !useShift {
+		logger("UID shifting disabled (Colima/Lima or configured); host UID matches container code UID")
+	} else if disableShift || isColimaOrLimaEnvironment() {
+		// Colima/Lima was detected but host UID happens to equal code UID.
+		logger("Auto-detected Colima/Lima environment - disabling UID shifting")
+	}
+	return useShift, false
+}
+
+// decideUIDMapping is the pure decision behind ConfigureUIDMapping (no I/O), so
+// the case matrix — especially the issue #530 regression where a UID mismatch
+// was skipped under Colima/Lima — is unit-testable. Returns the effective shift
+// flag and the raw.idmap value to set (empty = none).
+//
+// A host-UID/code-UID mismatch ALWAYS wins: raw.idmap is set and shift is off,
+// regardless of disableShift or Colima/Lima. shift=true only translates root,
+// not arbitrary UIDs, and cannot be combined with raw.idmap.
+func decideUIDMapping(hostUID, codeUID int, disableShift, isColimaOrLima bool) (useShift bool, idmap string) {
+	if !disableShift && isColimaOrLima {
+		disableShift = true
+	}
+	if hostUID != codeUID {
+		return false, fmt.Sprintf("both %d %d", hostUID, codeUID)
+	}
+	return !disableShift, ""
+}
+
 // mergeJSONSettings merges settings into existing JSON content with one-level deep merge.
 // If both existing and new values for a key are maps, their entries are merged;
 // otherwise the new value overwrites. Returns indented JSON with trailing newline.

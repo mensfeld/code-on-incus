@@ -327,11 +327,31 @@ func startWithIsolationFallback(containerName string) error {
 // An empty pool means "use Incus's default pool".
 // Uses init+configure+start (not launch) so security flags are set before first boot.
 func LaunchContainer(imageAlias, containerName, pool string) error {
-	if err := initAndConfigureContainer(imageAlias, containerName, pool, true); err != nil {
+	return LaunchContainerWithPreStart(imageAlias, containerName, pool, true, nil)
+}
+
+// LaunchContainerPersistent launches a non-ephemeral container on the given
+// storage pool. An empty pool means "use Incus's default pool".
+// Uses init+configure+start (not launch) so security flags are set before first boot.
+func LaunchContainerPersistent(imageAlias, containerName, pool string) error {
+	return LaunchContainerWithPreStart(imageAlias, containerName, pool, false, nil)
+}
+
+// LaunchContainerWithPreStart is LaunchContainer/LaunchContainerPersistent with
+// an optional preStart hook that runs AFTER `incus init` (+ config flags) but
+// BEFORE the container is started. This is where start-time-only instance
+// settings such as raw.idmap must be applied (issue #530): the run pipeline
+// needs the workspace UID mapping set before first boot, and `incus launch`
+// would start too early. A nil preStart is a no-op.
+func LaunchContainerWithPreStart(imageAlias, containerName, pool string, ephemeral bool, preStart func() error) error {
+	if err := initAndConfigureContainer(imageAlias, containerName, pool, ephemeral, preStart); err != nil {
 		return err
 	}
 	// Non-fatal: unset and retry at start time if the environment lacks subuid space.
 	_ = IsolateUIDNamespace(containerName)
+	if !ephemeral {
+		return startWithIsolationFallback(containerName)
+	}
 	if err := IncusExec("start", containerName); err == nil {
 		return nil
 	}
@@ -346,9 +366,10 @@ func LaunchContainer(imageAlias, containerName, pool string) error {
 		// Check for deletion: stopped ephemeral containers are deleted by Incus.
 		out, err := IncusOutput("list", "^"+containerName+"$", "--format=csv", "--columns=n")
 		if err == nil && strings.TrimSpace(out) == "" {
-			// Recreate without isolation and start fresh.
+			// Recreate without isolation and start fresh (preStart re-runs so the
+			// idmap is re-applied on the recreated container).
 			fmt.Fprintf(os.Stderr, "Warning: UID namespace isolation not supported in this environment\n")
-			return initConfigureAndStart(imageAlias, containerName, pool, true)
+			return initConfigureAndStart(imageAlias, containerName, pool, true, preStart)
 		}
 	}
 	// Container exists but didn't start; unset isolation and retry.
@@ -363,20 +384,10 @@ func LaunchContainer(imageAlias, containerName, pool string) error {
 	return nil
 }
 
-// LaunchContainerPersistent launches a non-ephemeral container on the given
-// storage pool. An empty pool means "use Incus's default pool".
-// Uses init+configure+start (not launch) so security flags are set before first boot.
-func LaunchContainerPersistent(imageAlias, containerName, pool string) error {
-	if err := initAndConfigureContainer(imageAlias, containerName, pool, false); err != nil {
-		return err
-	}
-	// Non-fatal: unset and retry at start time if the environment lacks subuid space.
-	_ = IsolateUIDNamespace(containerName)
-	return startWithIsolationFallback(containerName)
-}
-
-// initAndConfigureContainer creates a container and applies the required config flags.
-func initAndConfigureContainer(imageAlias, containerName, pool string, ephemeral bool) error {
+// initAndConfigureContainer creates a container, applies the required config
+// flags, and runs the optional preStart hook (used for start-time-only settings
+// like raw.idmap) before the caller starts the container.
+func initAndConfigureContainer(imageAlias, containerName, pool string, ephemeral bool, preStart func() error) error {
 	args := []string{"init", imageAlias, containerName}
 	if ephemeral {
 		args = append(args, "--ephemeral")
@@ -393,13 +404,19 @@ func initAndConfigureContainer(imageAlias, containerName, pool string, ephemeral
 	if err := DisableGuestAPI(containerName); err != nil {
 		return err
 	}
-	return CheckNotPrivileged(containerName)
+	if err := CheckNotPrivileged(containerName); err != nil {
+		return err
+	}
+	if preStart != nil {
+		return preStart()
+	}
+	return nil
 }
 
 // initConfigureAndStart creates, configures, and starts a container without
 // security.idmap.isolated — used as the isolation-unsupported fallback path.
-func initConfigureAndStart(imageAlias, containerName, pool string, ephemeral bool) error {
-	if err := initAndConfigureContainer(imageAlias, containerName, pool, ephemeral); err != nil {
+func initConfigureAndStart(imageAlias, containerName, pool string, ephemeral bool, preStart func() error) error {
+	if err := initAndConfigureContainer(imageAlias, containerName, pool, ephemeral, preStart); err != nil {
 		return err
 	}
 	return IncusExec("start", containerName)

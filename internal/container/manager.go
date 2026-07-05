@@ -53,6 +53,12 @@ func (m *Manager) Launch(image string, ephemeral bool, pool string) error {
 	return LaunchContainerPersistent(image, m.ContainerName, pool)
 }
 
+// LaunchWithPreStart launches the container, running preStart after init/config
+// but before start (for start-time-only settings like raw.idmap; see #530).
+func (m *Manager) LaunchWithPreStart(image string, ephemeral bool, pool string, preStart func() error) error {
+	return LaunchContainerWithPreStart(image, m.ContainerName, pool, ephemeral, preStart)
+}
+
 // Stop stops the container
 func (m *Manager) Stop(force bool) error {
 	if force {
