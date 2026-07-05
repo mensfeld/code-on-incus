@@ -23,10 +23,14 @@ images:
   - location: "https://cloud-images.ubuntu.com/releases/noble/release/ubuntu-24.04-server-cloudimg-amd64.img"
     arch: x86_64
 
-# Runner is 4-core / 16 GB: give the guest most cores, half the memory, and a
-# sparse 30 GiB disk (real host usage grows only with guest writes).
-cpus: 4
-memory: "8GiB"
+# Runner is 4-core / 16 GB. virtiofs (vhost-user) forces the guest RAM into a
+# SHARED memory backend on the host, so the full guest allocation becomes
+# host-resident under load — the first run died mid-`incus publish` when an
+# 8GiB guest left the 16GB host with ~223MB free (guest killed, SSH EOF).
+# 6GiB keeps ample host headroom and is plenty for incus + a coi build; 3 cpus
+# leave a host core for virtiofsd + the runner agent.
+cpus: 3
+memory: "6GiB"
 disk: "30GiB"
 
 mountType: "virtiofs"

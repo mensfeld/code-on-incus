@@ -701,8 +701,11 @@ jobs:
           fi
 
       - name: Provision the guest (incus, deps, coi binary, image import-or-build)
+        # timeout-wrapped: if the guest dies mid-provision (first run: host memory
+        # exhaustion killed the VM during `incus publish`), the dead SSH session
+        # otherwise lingers ~20+ min on TCP timeouts before exiting 255.
         run: |
-          limactl shell --workdir "$GITHUB_WORKSPACE" coi -- bash "$GITHUB_WORKSPACE/scripts/lima-guest-setup.sh" \
+          timeout 2400 limactl shell --workdir "$GITHUB_WORKSPACE" coi -- bash "$GITHUB_WORKSPACE/scripts/lima-guest-setup.sh" \
             "$GITHUB_WORKSPACE" "$HOME/coi-image.tar.gz" "$HOME/ubuntu-base-image.tar.gz"
 
       - name: Run smoke tests inside the Lima guest
@@ -721,26 +724,34 @@ jobs:
 
       - name: Diagnostics (on failure)
         if: failure()
+        # Every limactl invocation is timeout-wrapped: if the guest/SSH is the
+        # thing that broke, an unguarded `limactl shell` hangs this step until
+        # the job timeout (observed on the first run) instead of surfacing logs.
         run: |
           set +e
           echo "=== host ==="
           df -h; free -m
-          limactl list
+          echo "--- host dmesg tail (OOM kills of qemu land here) ---"
+          sudo dmesg | tail -n 30
+          timeout 30 limactl list
           echo "--- hostagent stderr (virtiofsd/QEMU spawn failures land here) ---"
           tail -n 100 "$HOME/.lima/coi/ha.stderr.log" 2>/dev/null
+          echo "--- guest serial console tail (guest kernel oops/OOM land here) ---"
+          tail -n 80 "$HOME"/.lima/coi/serial*.log 2>/dev/null
           echo "=== guest ==="
-          limactl shell coi -- bash -c '
+          timeout 90 limactl shell coi -- bash -c '
             grep virtiofs /proc/mounts; id
-            incus list 2>&1
-            incus warning list 2>&1 | head -20
+            timeout 15 incus list 2>&1
+            timeout 15 incus warning list 2>&1 | head -20
             sudo journalctl -u incus -n 100 --no-pager 2>&1 | tail -n 60
             sudo dmesg | tail -n 40
             df -h /; free -m
           ' 2>&1 | head -n 200
+          echo "=== diagnostics done ==="
 
       - name: Stop the VM
         if: always()
-        run: limactl stop -f coi 2>/dev/null || true
+        run: timeout 60 limactl stop -f coi 2>/dev/null || true
 
   ci-success:
     name: CI Success

@@ -159,8 +159,10 @@ if [ -n "$COI_TARBALL" ] && [ -f "$COI_TARBALL" ]; then
 else
     echo "coi image cache miss: building inside the guest"
     cd "$REPO_DIR"
+    # 15-minute cap per attempt (the pattern the old macOS Colima lane used):
+    # a wedged build/publish must fail the attempt, not hang until job timeout.
     for attempt in 1 2 3; do
-        if /usr/local/bin/coi build; then
+        if timeout 900 /usr/local/bin/coi build; then
             echo "image built on attempt $attempt"
             break
         fi
@@ -168,7 +170,7 @@ else
             echo "FATAL: coi build failed after 3 attempts"
             exit 1
         fi
-        echo "build failed (attempt $attempt/3), retrying in 10s..."
+        echo "build failed or timed out (attempt $attempt/3), retrying in 10s..."
         sleep 10
     done
 fi
