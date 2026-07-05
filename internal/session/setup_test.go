@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestIsColimaOrLimaEnvironment(t *testing.T) {
+func TestHostHandlesUIDMapping(t *testing.T) {
 	tests := []struct {
 		name         string
 		procMounts   string
@@ -86,7 +86,7 @@ tmpfs /tmp tmpfs rw,nosuid,nodev 0 0
 			// In actual usage, the function reads /proc/mounts directly
 			// For full coverage, the function would need to be refactored to accept a path parameter
 
-			result := isColimaOrLimaEnvironment()
+			result := hostHandlesUIDMapping()
 
 			// If we set lima user, we should detect it
 			if tt.userEnv == "lima" && !result {
@@ -99,13 +99,13 @@ tmpfs /tmp tmpfs rw,nosuid,nodev 0 0
 	}
 }
 
-func TestIsColimaOrLimaEnvironment_Integration(t *testing.T) {
+func TestHostHandlesUIDMapping_Integration(t *testing.T) {
 	// This test just ensures the function runs without panicking
 	// It will return false on normal CI environments and true on Colima/Lima
-	result := isColimaOrLimaEnvironment()
+	result := hostHandlesUIDMapping()
 
 	// Log the result for debugging
-	t.Logf("isColimaOrLimaEnvironment() returned: %v", result)
+	t.Logf("hostHandlesUIDMapping() returned: %v", result)
 
 	// Check if we're in a known Lima environment
 	if os.Getenv("USER") == "lima" {

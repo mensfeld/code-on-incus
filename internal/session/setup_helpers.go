@@ -10,23 +10,23 @@ import (
 	"github.com/mensfeld/code-on-incus/internal/container"
 )
 
-// isColimaOrLimaEnvironment detects if we're running inside a Colima or Lima VM
-// These VMs use virtiofs for mounting host directories and already handle UID mapping
-// at the VM level, making Incus's shift=true unnecessary and problematic
-func isColimaOrLimaEnvironment() bool {
+// hostHandlesUIDMapping detects whether the VM host already handles UID
+// mapping for mounted host directories (as Colima/Lima do via virtiofs),
+// making Incus's own shift=true unnecessary and problematic on top of it
+func hostHandlesUIDMapping() bool {
 	data, _ := os.ReadFile("/proc/mounts")
 	osRelease, _ := os.ReadFile("/proc/sys/kernel/osrelease")
-	return detectColimaOrLima(string(data), os.Getenv("USER"), string(osRelease))
+	return detectHostUIDMapping(string(data), os.Getenv("USER"), string(osRelease))
 }
 
-// detectColimaOrLima is the pure decision logic behind isColimaOrLimaEnvironment,
+// detectHostUIDMapping is the pure decision logic behind hostHandlesUIDMapping,
 // split out so it can be unit tested without touching the real filesystem.
 //
 // OrbStack also mounts the host filesystem via virtiofs, so a bare virtiofs
 // check false-positives on it too — but unlike Colima/Lima, OrbStack's
 // virtiofs mounts do support idmapped shift mounts fine, so it's excluded
 // up front via its guest kernel's release string (e.g. "7.0.11-orbstack-...").
-func detectColimaOrLima(mounts, user, osRelease string) bool {
+func detectHostUIDMapping(mounts, user, osRelease string) bool {
 	if strings.Contains(strings.ToLower(osRelease), "orbstack") {
 		return false
 	}
@@ -66,7 +66,7 @@ func ConfigureUIDMapping(containerName string, disableShift bool, logger func(st
 		logger = func(string) {}
 	}
 	var idmap string
-	useShift, idmap = decideUIDMapping(os.Getuid(), container.CodeUID, disableShift, isColimaOrLimaEnvironment())
+	useShift, idmap = decideUIDMapping(os.Getuid(), container.CodeUID, disableShift, hostHandlesUIDMapping())
 
 	if idmap != "" {
 		logger(fmt.Sprintf("Host UID %d differs from container code UID %d, using raw.idmap: %s",
@@ -80,7 +80,7 @@ func ConfigureUIDMapping(containerName string, disableShift bool, logger func(st
 
 	if !useShift {
 		logger("UID shifting disabled (Colima/Lima or configured); host UID matches container code UID")
-	} else if disableShift || isColimaOrLimaEnvironment() {
+	} else if disableShift || hostHandlesUIDMapping() {
 		// Colima/Lima was detected but host UID happens to equal code UID.
 		logger("Auto-detected Colima/Lima environment - disabling UID shifting")
 	}

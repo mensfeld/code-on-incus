@@ -111,7 +111,7 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 	network.SetLogger(result.Logger)
 
 	// 1.5 Validate Bedrock setup if running in Colima/Lima
-	if isColimaOrLimaEnvironment() && opts.CLIConfigPath != "" {
+	if hostHandlesUIDMapping() && opts.CLIConfigPath != "" {
 		settingsPath := filepath.Join(opts.CLIConfigPath, "settings.json")
 		isConfigured, err := bedrock.IsBedrockConfigured(settingsPath)
 		if err != nil {

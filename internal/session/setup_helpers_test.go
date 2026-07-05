@@ -2,7 +2,7 @@ package session
 
 import "testing"
 
-func TestDetectColimaOrLima(t *testing.T) {
+func TestDetectHostUIDMapping(t *testing.T) {
 	tests := []struct {
 		name      string
 		mounts    string
@@ -36,9 +36,9 @@ func TestDetectColimaOrLima(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := detectColimaOrLima(tt.mounts, tt.user, tt.osRelease)
+			got := detectHostUIDMapping(tt.mounts, tt.user, tt.osRelease)
 			if got != tt.want {
-				t.Errorf("detectColimaOrLima(%q, %q, %q) = %v, want %v", tt.mounts, tt.user, tt.osRelease, got, tt.want)
+				t.Errorf("detectHostUIDMapping(%q, %q, %q) = %v, want %v", tt.mounts, tt.user, tt.osRelease, got, tt.want)
 			}
 		})
 	}
