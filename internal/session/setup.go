@@ -349,6 +349,12 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		// (issue #545 — the single chokepoint both session paths share) and returns
 		// the effective list used for logging + the immutable pass over the same set.
 		effectivePaths, err := SetupSecurityMounts(result.Manager, opts.WorkspacePath, containerWorkspacePath, opts.ProtectedPaths, useShift, opts.Security)
+		// Adopt the expanded list as the canonical protected set so downstream
+		// consumers (the SANDBOX_CONTEXT.md "Protected paths" listing built from
+		// opts.ProtectedPaths below) reflect what was actually mounted, including the
+		// per-worktree configs — matching pre-#545 behavior where the caller expanded
+		// in place. Returned even on partial error, so the record stays complete.
+		opts.ProtectedPaths = effectivePaths
 		if err != nil {
 			opts.Logger(fmt.Sprintf("Warning: Failed to setup security mounts: %v", err))
 			// Non-fatal: continue even if protection fails
