@@ -494,27 +494,25 @@ func addMount(mgr container.ContainerManager, mount session.MountEntry, useShift
 // applySecurityMounts sets up read-only protection mounts and optional host immutable flags.
 func (a *App) applySecurityMounts(mgr container.ContainerManager, absWorkspace, containerWorkspacePath, containerName string, useShift bool) error {
 	protectedPaths := filterWritableGitHooks(a.cfg.Security.GetEffectiveProtectedPaths(), a.cfg)
-	// Expand per-worktree git config files (.git/worktrees/*/config.worktree) into
-	// concrete protected entries — the static list cannot glob, and these are
-	// host-code-execution sinks when extensions.worktreeConfig is enabled. The
-	// shell path does the same (see setup.go); without this, `coi run` left them
-	// writable (issue #542).
-	protectedPaths = session.ExpandGitWorktreeProtectedPaths(absWorkspace, protectedPaths, &a.cfg.Security)
-	if len(protectedPaths) > 0 {
-		if err := session.SetupSecurityMounts(mgr, absWorkspace, containerWorkspacePath, protectedPaths, useShift); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: Failed to setup security mounts: %v\n", err)
-		} else {
-			actualPaths := session.GetProtectedPathsForLogging(absWorkspace, protectedPaths)
-			if len(actualPaths) > 0 {
-				fmt.Fprintf(os.Stderr, "Protected paths (mounted read-only): %s\n", strings.Join(actualPaths, ", "))
-			}
+	// SetupSecurityMounts expands the dynamic per-worktree git configs internally
+	// (issue #545 — the single chokepoint both `coi run` and `coi shell` share) and
+	// returns the effective list to drive logging + the immutable pass over the same
+	// set. The immutable pass runs even on a partial mount error, so it is gated on
+	// the returned list rather than the error.
+	effectivePaths, err := session.SetupSecurityMounts(mgr, absWorkspace, containerWorkspacePath, protectedPaths, useShift, &a.cfg.Security)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: Failed to setup security mounts: %v\n", err)
+	} else if len(effectivePaths) > 0 {
+		actualPaths := session.GetProtectedPathsForLogging(absWorkspace, effectivePaths)
+		if len(actualPaths) > 0 {
+			fmt.Fprintf(os.Stderr, "Protected paths (mounted read-only): %s\n", strings.Join(actualPaths, ", "))
 		}
-		if a.cfg.Security.IsHostImmutableEnabled() {
-			logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
-			immutablePaths := session.ApplyImmutable(absWorkspace, protectedPaths, containerName, logFn)
-			if len(immutablePaths) > 0 {
-				fmt.Fprintf(os.Stderr, "Host-side immutable protection applied: %s\n", strings.Join(immutablePaths, ", "))
-			}
+	}
+	if len(effectivePaths) > 0 && a.cfg.Security.IsHostImmutableEnabled() {
+		logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
+		immutablePaths := session.ApplyImmutable(absWorkspace, effectivePaths, containerName, logFn)
+		if len(immutablePaths) > 0 {
+			fmt.Fprintf(os.Stderr, "Host-side immutable protection applied: %s\n", strings.Join(immutablePaths, ", "))
 		}
 	}
 

@@ -16,10 +16,23 @@ import (
 // on the host (git hooks, IDE configs, etc.).
 // containerWorkspacePath is the path where the workspace is mounted inside the container
 // (either /workspace or the preserved host path).
-// Returns nil if no paths need protection.
-func SetupSecurityMounts(mgr container.ContainerDevices, workspacePath, containerWorkspacePath string, protectedPaths []string, useShift bool) error {
+//
+// The dynamic per-worktree git configs (.git/worktrees/<name>/config.worktree)
+// are expanded HERE — the single chokepoint every caller passes through — rather
+// than at each call site. That is deliberate (issue #545): #542 was caused by one
+// of two callers forgetting to expand, and centralizing it makes that class of gap
+// structurally impossible for any future caller. sec carries the trusted-scope
+// opt-outs (disable_protection / writable_paths) honored during expansion; it may
+// be nil (expand unconditionally).
+//
+// Returns the effective (expanded) protected-path list, so the caller can drive
+// its logging and host-immutable passes over the same set that was mounted, and an
+// error if a mount failed. The list is returned even on error so a partial failure
+// still applies the immutable attribute to the full set.
+func SetupSecurityMounts(mgr container.ContainerDevices, workspacePath, containerWorkspacePath string, protectedPaths []string, useShift bool, sec *config.SecurityConfig) ([]string, error) {
+	protectedPaths = ExpandGitWorktreeProtectedPaths(workspacePath, protectedPaths, sec)
 	if len(protectedPaths) == 0 {
-		return nil
+		return protectedPaths, nil
 	}
 
 	for _, relPath := range protectedPaths {
@@ -31,12 +44,12 @@ func SetupSecurityMounts(mgr container.ContainerDevices, workspacePath, containe
 			// (validation / stat / mount errors) is propagated and surfaces
 			// as a warning at the caller in setup.go.
 			if !errors.Is(err, os.ErrNotExist) {
-				return fmt.Errorf("failed to protect %s: %w", relPath, err)
+				return protectedPaths, fmt.Errorf("failed to protect %s: %w", relPath, err)
 			}
 		}
 	}
 
-	return nil
+	return protectedPaths, nil
 }
 
 // setupProtectedPath mounts a single path as read-only
@@ -197,6 +210,11 @@ func isDirTypeProtected(relPath string) bool {
 // explicitly listed in writable_paths is not re-added (without this, the
 // expansion would silently override an opt-out that the static-list subtraction
 // had already applied). sec may be nil (expand unconditionally).
+//
+// Idempotent: a discovered path already present in paths is not re-added, so
+// calling this more than once on the same list (or on an already-expanded list)
+// never produces a duplicate — a duplicate would collide on the derived Incus
+// device name and fail the second mount.
 func ExpandGitWorktreeProtectedPaths(workspacePath string, paths []string, sec *config.SecurityConfig) []string {
 	if sec != nil && sec.DisableProtection {
 		return paths // protection disabled — do not resurrect worktree configs
@@ -207,12 +225,19 @@ func ExpandGitWorktreeProtectedPaths(workspacePath string, paths []string, sec *
 		return paths // no worktrees, or .git is a file/symlink — nothing to add
 	}
 
+	seen := make(map[string]bool, len(paths))
+	for _, p := range paths {
+		seen[filepath.ToSlash(p)] = true
+	}
 	out := append([]string(nil), paths...)
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
 		}
 		rel := filepath.Join(".git", "worktrees", e.Name(), "config.worktree")
+		if seen[filepath.ToSlash(rel)] {
+			continue // already protected — keep expansion idempotent
+		}
 		if err := validateRelPath(rel); err != nil {
 			continue
 		}
@@ -223,6 +248,7 @@ func ExpandGitWorktreeProtectedPaths(workspacePath string, paths []string, sec *
 		if err != nil || info.Mode()&os.ModeSymlink != 0 || info.IsDir() {
 			continue
 		}
+		seen[filepath.ToSlash(rel)] = true
 		out = append(out, rel)
 	}
 	return out

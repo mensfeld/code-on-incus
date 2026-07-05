@@ -343,31 +343,30 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 			return nil, err
 		}
 
-		// Protect security-sensitive paths by mounting read-only (security feature)
+		// Protect security-sensitive paths by mounting read-only (security feature).
 		// This must be added after the workspace mount for the overlay to work.
-		// Expand per-worktree git config files (.git/worktrees/*/config.worktree)
-		// into concrete protected entries — the static list cannot glob, and these
-		// are host-code-execution sinks when extensions.worktreeConfig is enabled.
-		opts.ProtectedPaths = ExpandGitWorktreeProtectedPaths(opts.WorkspacePath, opts.ProtectedPaths, opts.Security)
-		if len(opts.ProtectedPaths) > 0 {
-			if err := SetupSecurityMounts(result.Manager, opts.WorkspacePath, containerWorkspacePath, opts.ProtectedPaths, useShift); err != nil {
-				opts.Logger(fmt.Sprintf("Warning: Failed to setup security mounts: %v", err))
-				// Non-fatal: continue even if protection fails
-			} else {
-				// Log which paths were actually protected
-				protectedPaths := GetProtectedPathsForLogging(opts.WorkspacePath, opts.ProtectedPaths)
-				if len(protectedPaths) > 0 {
-					opts.Logger(fmt.Sprintf("Protected paths (mounted read-only): %s", strings.Join(protectedPaths, ", ")))
-				}
+		// SetupSecurityMounts expands the dynamic per-worktree git configs internally
+		// (issue #545 — the single chokepoint both session paths share) and returns
+		// the effective list used for logging + the immutable pass over the same set.
+		effectivePaths, err := SetupSecurityMounts(result.Manager, opts.WorkspacePath, containerWorkspacePath, opts.ProtectedPaths, useShift, opts.Security)
+		if err != nil {
+			opts.Logger(fmt.Sprintf("Warning: Failed to setup security mounts: %v", err))
+			// Non-fatal: continue even if protection fails
+		} else if len(effectivePaths) > 0 {
+			// Log which paths were actually protected
+			protectedPaths := GetProtectedPathsForLogging(opts.WorkspacePath, effectivePaths)
+			if len(protectedPaths) > 0 {
+				opts.Logger(fmt.Sprintf("Protected paths (mounted read-only): %s", strings.Join(protectedPaths, ", ")))
 			}
+		}
 
-			// Apply host-side immutable attribute for defense-in-depth
-			if opts.HostImmutable {
-				immutablePaths := ApplyImmutable(opts.WorkspacePath, opts.ProtectedPaths, containerName, opts.Logger)
-				if len(immutablePaths) > 0 {
-					result.HasImmutableProtection = true
-					opts.Logger(fmt.Sprintf("Host-side immutable protection applied: %s", strings.Join(immutablePaths, ", ")))
-				}
+		// Apply host-side immutable attribute for defense-in-depth. Runs even on a
+		// partial mount error, so it is gated on the effective list, not err.
+		if len(effectivePaths) > 0 && opts.HostImmutable {
+			immutablePaths := ApplyImmutable(opts.WorkspacePath, effectivePaths, containerName, opts.Logger)
+			if len(immutablePaths) > 0 {
+				result.HasImmutableProtection = true
+				opts.Logger(fmt.Sprintf("Host-side immutable protection applied: %s", strings.Join(immutablePaths, ", ")))
 			}
 		}
 
