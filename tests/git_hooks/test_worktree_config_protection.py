@@ -103,9 +103,16 @@ def _add_worktree_with_config(git, workspace_dir, name):
         )
     except subprocess.CalledProcessError as e:
         pytest.skip(f"git worktree setup unavailable: {e.stderr.decode(errors='replace')}")
+    # git accepted `worktree add` + `config --worktree`, so it supports worktreeConfig.
+    # If the per-worktree config file is nonetheless absent, our test assumption is
+    # broken — fail loudly rather than skip (a silent skip would report green while
+    # exercising nothing, masking a real ExpandGitWorktreeProtectedPaths regression).
     cw = Path(workspace_dir) / ".git" / "worktrees" / name / "config.worktree"
     if not cw.exists():
-        pytest.skip("config.worktree was not created by git worktree config")
+        pytest.fail(
+            f"git config --worktree succeeded but {cw} was not created — "
+            "test assumption broken (cannot verify protection)"
+        )
     return cw
 
 

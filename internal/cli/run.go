@@ -499,7 +499,7 @@ func (a *App) applySecurityMounts(mgr container.ContainerManager, absWorkspace, 
 	// host-code-execution sinks when extensions.worktreeConfig is enabled. The
 	// shell path does the same (see setup.go); without this, `coi run` left them
 	// writable (issue #542).
-	protectedPaths = session.ExpandGitWorktreeProtectedPaths(absWorkspace, protectedPaths)
+	protectedPaths = session.ExpandGitWorktreeProtectedPaths(absWorkspace, protectedPaths, &a.cfg.Security)
 	if len(protectedPaths) > 0 {
 		if err := session.SetupSecurityMounts(mgr, absWorkspace, containerWorkspacePath, protectedPaths, useShift); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: Failed to setup security mounts: %v\n", err)

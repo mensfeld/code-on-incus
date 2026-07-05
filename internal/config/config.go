@@ -163,6 +163,21 @@ func (s *SecurityConfig) GetEffectiveProtectedPaths() []string {
 	return paths
 }
 
+// IsWritablePath reports whether relPath was explicitly opted out of protection
+// via [security] writable_paths (a trusted-scope-only list). Separators are
+// normalized so an entry written with either slash style still matches. Callers
+// that discover protected paths dynamically (e.g. per-worktree git configs that
+// GetEffectiveProtectedPaths cannot enumerate) use this to honor the same opt-out.
+func (s *SecurityConfig) IsWritablePath(relPath string) bool {
+	target := filepath.ToSlash(relPath)
+	for _, w := range s.WritablePaths {
+		if filepath.ToSlash(w) == target {
+			return true
+		}
+	}
+	return false
+}
+
 // IsHostImmutableEnabled returns whether host-side immutable protection is enabled.
 // Defaults to true when the field is not explicitly set.
 func (s *SecurityConfig) IsHostImmutableEnabled() bool {
