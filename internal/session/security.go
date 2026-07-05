@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
 )
 
@@ -189,7 +190,17 @@ func isDirTypeProtected(relPath string) bool {
 // concrete files at setup time. Only files that already exist on disk are added
 // (worktree config files are created by `git worktree`, never synthesized here);
 // symlinks and directories are skipped.
-func ExpandGitWorktreeProtectedPaths(workspacePath string, paths []string) []string {
+//
+// The same trusted-scope opt-outs that GetEffectiveProtectedPaths applies to the
+// static list are honored for these dynamically discovered files: when sec is
+// non-nil, nothing is expanded if disable_protection is set, and a file the user
+// explicitly listed in writable_paths is not re-added (without this, the
+// expansion would silently override an opt-out that the static-list subtraction
+// had already applied). sec may be nil (expand unconditionally).
+func ExpandGitWorktreeProtectedPaths(workspacePath string, paths []string, sec *config.SecurityConfig) []string {
+	if sec != nil && sec.DisableProtection {
+		return paths // protection disabled — do not resurrect worktree configs
+	}
 	wtRoot := filepath.Join(workspacePath, ".git", "worktrees")
 	entries, err := os.ReadDir(wtRoot)
 	if err != nil {
@@ -204,6 +215,9 @@ func ExpandGitWorktreeProtectedPaths(workspacePath string, paths []string) []str
 		rel := filepath.Join(".git", "worktrees", e.Name(), "config.worktree")
 		if err := validateRelPath(rel); err != nil {
 			continue
+		}
+		if sec != nil && sec.IsWritablePath(rel) {
+			continue // user explicitly opted this path out of protection
 		}
 		info, err := os.Lstat(filepath.Join(workspacePath, rel))
 		if err != nil || info.Mode()&os.ModeSymlink != 0 || info.IsDir() {

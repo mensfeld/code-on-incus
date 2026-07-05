@@ -494,6 +494,12 @@ func addMount(mgr container.ContainerManager, mount session.MountEntry, useShift
 // applySecurityMounts sets up read-only protection mounts and optional host immutable flags.
 func (a *App) applySecurityMounts(mgr container.ContainerManager, absWorkspace, containerWorkspacePath, containerName string, useShift bool) error {
 	protectedPaths := filterWritableGitHooks(a.cfg.Security.GetEffectiveProtectedPaths(), a.cfg)
+	// Expand per-worktree git config files (.git/worktrees/*/config.worktree) into
+	// concrete protected entries — the static list cannot glob, and these are
+	// host-code-execution sinks when extensions.worktreeConfig is enabled. The
+	// shell path does the same (see setup.go); without this, `coi run` left them
+	// writable (issue #542).
+	protectedPaths = session.ExpandGitWorktreeProtectedPaths(absWorkspace, protectedPaths, &a.cfg.Security)
 	if len(protectedPaths) > 0 {
 		if err := session.SetupSecurityMounts(mgr, absWorkspace, containerWorkspacePath, protectedPaths, useShift); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: Failed to setup security mounts: %v\n", err)

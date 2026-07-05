@@ -816,7 +816,7 @@ func TestExpandGitWorktreeProtectedPaths(t *testing.T) {
 	in := []string{".git/config"}
 
 	// No .git/worktrees → unchanged.
-	if out := ExpandGitWorktreeProtectedPaths(tmp, in); len(out) != len(in) {
+	if out := ExpandGitWorktreeProtectedPaths(tmp, in, nil); len(out) != len(in) {
 		t.Fatalf("expected no expansion without .git/worktrees, got %v", out)
 	}
 
@@ -836,7 +836,7 @@ func TestExpandGitWorktreeProtectedPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out := ExpandGitWorktreeProtectedPaths(tmp, in)
+	out := ExpandGitWorktreeProtectedPaths(tmp, in, nil)
 	want := filepath.Join(".git", "worktrees", "wt", "config.worktree")
 	found := false
 	for _, p := range out {
@@ -849,5 +849,21 @@ func TestExpandGitWorktreeProtectedPaths(t *testing.T) {
 	}
 	if len(out) != len(in)+1 {
 		t.Errorf("expected exactly one added path, got %v", out)
+	}
+
+	// disable_protection must suppress expansion — the discovered worktree config
+	// is not resurrected when the user turned all protection off.
+	sec := &config.SecurityConfig{DisableProtection: true}
+	if out := ExpandGitWorktreeProtectedPaths(tmp, in, sec); len(out) != len(in) {
+		t.Errorf("disable_protection should suppress worktree expansion, got %v", out)
+	}
+
+	// writable_paths must opt a specific discovered worktree config out of protection.
+	sec = &config.SecurityConfig{WritablePaths: []string{want}}
+	out = ExpandGitWorktreeProtectedPaths(tmp, in, sec)
+	for _, p := range out {
+		if p == want {
+			t.Errorf("writable_paths entry %q should be excluded from expansion, got %v", want, out)
+		}
 	}
 }

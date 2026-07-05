@@ -36,20 +36,21 @@ type SetupOptions struct {
 	CLIConfigPath         string        // e.g., ~/.claude (host CLI config to copy credentials from)
 	Tool                  tool.Tool     // AI coding tool being used
 	NetworkConfig         *config.NetworkConfig
-	DisableShift          bool                 // Disable UID shifting (for Colima/Lima environments)
-	LimitsConfig          *config.LimitsConfig // Resource and time limits
-	IncusProject          string               // Incus project name
-	ProtectedPaths        []string             // Paths to mount read-only for security (e.g., .git/hooks, .vscode)
-	SecretPaths           []string             // Workspace-relative globs to MASK (empty read-only mount hides contents) — issue #494
-	PreserveWorkspacePath bool                 // Mount workspace at same path as host instead of /workspace
-	ForwardSSHAgent       bool                 // Forward host SSH agent to container
-	ForwardedEnvVars      []string             // Names of host env vars being forwarded (for context file)
-	ContextFilePath       string               // Path to custom context .md file on host (overrides tool default)
-	ProfileContextFile    string               // Path to profile context .md file (appended to sandbox context)
-	Timezone              string               // Resolved IANA timezone name (e.g., "America/New_York"), empty for UTC
-	AutoContext           *bool                // Auto-inject sandbox context into tool's native system (default: true)
-	HostImmutable         bool                 // Apply chattr +i on host-side protected paths (set by CLI from config)
-	Alias                 string               // Human-friendly alias for this container (set user.coi.alias)
+	DisableShift          bool                   // Disable UID shifting (for Colima/Lima environments)
+	LimitsConfig          *config.LimitsConfig   // Resource and time limits
+	IncusProject          string                 // Incus project name
+	ProtectedPaths        []string               // Paths to mount read-only for security (e.g., .git/hooks, .vscode)
+	Security              *config.SecurityConfig // Security config, so worktree-config expansion honors disable_protection/writable_paths (nil = expand unconditionally)
+	SecretPaths           []string               // Workspace-relative globs to MASK (empty read-only mount hides contents) — issue #494
+	PreserveWorkspacePath bool                   // Mount workspace at same path as host instead of /workspace
+	ForwardSSHAgent       bool                   // Forward host SSH agent to container
+	ForwardedEnvVars      []string               // Names of host env vars being forwarded (for context file)
+	ContextFilePath       string                 // Path to custom context .md file on host (overrides tool default)
+	ProfileContextFile    string                 // Path to profile context .md file (appended to sandbox context)
+	Timezone              string                 // Resolved IANA timezone name (e.g., "America/New_York"), empty for UTC
+	AutoContext           *bool                  // Auto-inject sandbox context into tool's native system (default: true)
+	HostImmutable         bool                   // Apply chattr +i on host-side protected paths (set by CLI from config)
+	Alias                 string                 // Human-friendly alias for this container (set user.coi.alias)
 	Logger                func(string)
 	ContainerName         string // Use existing container (for testing) - skips container creation
 }
@@ -347,7 +348,7 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		// Expand per-worktree git config files (.git/worktrees/*/config.worktree)
 		// into concrete protected entries — the static list cannot glob, and these
 		// are host-code-execution sinks when extensions.worktreeConfig is enabled.
-		opts.ProtectedPaths = ExpandGitWorktreeProtectedPaths(opts.WorkspacePath, opts.ProtectedPaths)
+		opts.ProtectedPaths = ExpandGitWorktreeProtectedPaths(opts.WorkspacePath, opts.ProtectedPaths, opts.Security)
 		if len(opts.ProtectedPaths) > 0 {
 			if err := SetupSecurityMounts(result.Manager, opts.WorkspacePath, containerWorkspacePath, opts.ProtectedPaths, useShift); err != nil {
 				opts.Logger(fmt.Sprintf("Warning: Failed to setup security mounts: %v", err))

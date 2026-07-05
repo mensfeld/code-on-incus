@@ -340,6 +340,7 @@ func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.P
 				LimitsConfig:          limitsConfig,
 				IncusProject:          a.cfg.Incus.Project,
 				ProtectedPaths:        protectedPaths,
+				Security:              &a.cfg.Security,
 				SecretPaths:           a.cfg.Security.SecretPaths,
 				HostImmutable:         a.cfg.Security.IsHostImmutableEnabled(),
 				PreserveWorkspacePath: a.cfg.Paths.PreserveWorkspacePath,
