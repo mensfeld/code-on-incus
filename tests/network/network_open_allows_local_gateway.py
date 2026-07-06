@@ -8,7 +8,8 @@ Tests that:
 """
 
 import subprocess
-import time
+
+from support.helpers import wait_for_firewall_rules
 
 
 def test_open_allows_local_gateway(coi_binary, workspace_dir, cleanup_containers):
@@ -63,8 +64,8 @@ def test_open_allows_local_gateway(coi_binary, workspace_dir, cleanup_containers
         f"Should find container name in output. stderr: {result.stderr}"
     )
 
-    # Give container time to fully start
-    time.sleep(5)
+    # Wait (poll) for the container's network setup to land instead of a fixed sleep.
+    wait_for_firewall_rules(container_name)
 
     # First, verify internet access works (sanity check)
     result = subprocess.run(
