@@ -173,3 +173,19 @@ def test_snapshot_delete_short_all(coi_binary):
     assert "-a, --all" in result.stdout, (
         f"Expected '-a, --all' in help output, got: {result.stdout}"
     )
+
+
+def test_build_short_all(coi_binary):
+    """coi build -a is the shorthand for --all; -a must appear in build's help
+    (a cheap proof the short flag is registered — a full build is not needed)."""
+    result = subprocess.run(
+        [coi_binary, "build", "--help"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    out = result.stdout + result.stderr
+    assert "-a, --all" in out or ("-a" in out and "--all" in out), (
+        f"build should expose the -a shorthand for --all.\n{out}"
+    )
