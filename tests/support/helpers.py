@@ -1195,6 +1195,10 @@ def wait_for_firewall_rules(container_name, timeout=30, poll_interval=0.5):
         return False
 
     # Poll for a rule referencing this container IP in the ip coi forward chain.
+    # Match the IP on word boundaries (not a bare `in` substring): a substring
+    # test reports a false positive when a prefix-overlapping sibling IP has a
+    # rule (e.g. 10.0.0.2 spuriously matching a rule for 10.0.0.20).
+    ip_re = re.compile(r"(?<![\d.])" + re.escape(container_ip) + r"(?![\d.])")
     start = time.time()
     while time.time() - start < timeout:
         result = subprocess.run(
@@ -1203,7 +1207,7 @@ def wait_for_firewall_rules(container_name, timeout=30, poll_interval=0.5):
             text=True,
             timeout=10,
         )
-        if result.returncode == 0 and container_ip in result.stdout:
+        if result.returncode == 0 and ip_re.search(result.stdout):
             return True
         time.sleep(poll_interval)
 
