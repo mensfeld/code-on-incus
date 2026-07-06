@@ -18,6 +18,7 @@ from support.helpers import (
     spawn_coi,
     wait_for_container_ready,
     wait_for_prompt,
+    write_workspace_container_config,
 )
 
 
@@ -26,7 +27,7 @@ def test_attach_specific_container(coi_binary, cleanup_containers, workspace_dir
     Test that coi attach <name> attaches to the specified container.
 
     Flow:
-    1. Start coi shell --persistent
+    1. Start coi shell (persistent via [container] config)
     2. Detach from session
     3. Run coi attach <container-name>
     4. Verify it attaches to that specific container
@@ -37,9 +38,11 @@ def test_attach_specific_container(coi_binary, cleanup_containers, workspace_dir
 
     # === Phase 1: Start persistent session ===
 
+    write_workspace_container_config(workspace_dir, persistent=True)
+
     child = spawn_coi(
         coi_binary,
-        ["shell", "--persistent"],
+        ["shell"],
         cwd=workspace_dir,
         env=env,
         timeout=120,

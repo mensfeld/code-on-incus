@@ -2,7 +2,6 @@
 
 # Binary name
 BINARY_NAME=coi
-BINARY_FULL=claude-on-incus
 
 # Build directory
 BUILD_DIR=.
@@ -89,18 +88,16 @@ build: check-deps
 	@cp profiles/default/config.toml internal/config/embedded/default_config.toml
 	@cp testdata/dummy/dummy internal/image/embedded/dummy
 	@$(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/coi
-	@ln -sf $(BINARY_NAME) $(BUILD_DIR)/$(BINARY_FULL)
 
 # Install to system
 install: build
 	@sudo cp $(BUILD_DIR)/$(BINARY_NAME) $(INSTALL_DIR)/$(BINARY_NAME)
-	@sudo ln -sf $(INSTALL_DIR)/$(BINARY_NAME) $(INSTALL_DIR)/$(BINARY_FULL)
 
 # Clean build artifacts
 clean:
 	@$(GOCLEAN)
 	@rm -f $(BUILD_DIR)/$(BINARY_NAME)
-	@rm -f $(BUILD_DIR)/$(BINARY_FULL)
+	@rm -f $(BUILD_DIR)/claude-on-incus # transitional: pre-0.10 builds created this symlink
 	@rm -rf $(COVERAGE_DIR)
 	@rm -rf dist
 	@rm -rf internal/image/embedded

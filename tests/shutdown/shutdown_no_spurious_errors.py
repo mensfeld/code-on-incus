@@ -15,7 +15,7 @@ force-kill attempt executes.
 import subprocess
 import time
 
-from support.helpers import calculate_container_name
+from support.helpers import calculate_container_name, write_trusted_coi_config
 
 
 def test_shutdown_no_spurious_errors(coi_binary, cleanup_containers, workspace_dir):
@@ -55,14 +55,17 @@ def test_shutdown_no_spurious_errors(coi_binary, cleanup_containers, workspace_d
 
     time.sleep(2)
 
-    # Now shutdown the already-stopped container with a timeout
+    # Now shutdown the already-stopped container with a short config-driven
+    # timeout ([container] shutdown_timeout — the --timeout flag was removed).
     # This simulates the race condition where graceful shutdown completes
     # during the timeout window, and the force-kill check runs on stopped container
+    env = write_trusted_coi_config("[container]\nshutdown_timeout = 5\n")
     result = subprocess.run(
-        [coi_binary, "shutdown", "--timeout=5", container_name],
+        [coi_binary, "shutdown", container_name],
         capture_output=True,
         text=True,
         timeout=120,
+        env=env,
     )
 
     # Shutdown should succeed

@@ -1,8 +1,8 @@
 """
-Test for coi shell --persistent --resume when no saved session exists.
+Test for coi shell --resume in persistent mode (config-driven) when no saved session exists.
 
 Tests that:
-1. Running --persistent --resume with no saved session errors gracefully
+1. Running --resume in persistent mode with no saved session errors gracefully
 2. Error message is helpful and suggests what to do
 3. No container is created/left behind
 """
@@ -15,28 +15,32 @@ from support.helpers import (
     get_container_list,
     spawn_coi,
     with_live_screen,
+    write_workspace_container_config,
 )
 
 
 def test_persistent_resume_without_session(coi_binary, cleanup_containers, workspace_dir):
     """
-    Test that --persistent --resume with no saved session errors gracefully.
+    Test that --resume in persistent mode with no saved session errors gracefully.
 
     Flow:
-    1. Run coi shell --persistent --resume in fresh workspace (no saved sessions)
+    1. Run coi shell --resume in fresh persistent workspace (no saved sessions)
     2. Verify it exits with error
     3. Verify error message is helpful
     4. Verify no containers were created
     """
     env = {"COI_USE_DUMMY": "1"}
 
+    # Persistence is config-driven: [container] persistent = true
+    write_workspace_container_config(workspace_dir, persistent=True)
+
     # Get container list before
     containers_before = get_container_list()
 
-    # Launch with --persistent --resume - should fail since no session exists
+    # Launch with --resume in persistent mode - should fail since no session exists
     child = spawn_coi(
         coi_binary,
-        ["shell", "--persistent", "--resume"],
+        ["shell", "--resume"],
         cwd=workspace_dir,
         env=env,
         timeout=30,

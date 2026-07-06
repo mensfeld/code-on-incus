@@ -13,9 +13,11 @@ import (
 // Load loads configuration from all available sources
 // Hierarchy (lowest to highest precedence):
 // 1. Built-in defaults
-// 2. User config (~/.coi/config.toml)
+// 2. User config (~/.coi/config.toml, or the file $COI_CONFIG points at)
 // 3. Project config (./.coi/config.toml)
-// 4. Environment variables (CLAUDE_ON_INCUS_* or COI_*)
+//
+// There are no env-var config overrides: config-shaped settings live in
+// config files and profiles only.
 //
 // Profile directories are scanned independently from config files.
 // See GetProfileParentDirs() for the full list of scanned locations.
@@ -70,9 +72,6 @@ func Load() (*Config, error) {
 	if err := cfg.ResolveProfileInheritance(); err != nil {
 		return nil, fmt.Errorf("profile inheritance error: %w", err)
 	}
-
-	// Load from environment variables
-	loadFromEnv(cfg)
 
 	// Ensure directories exist
 	if err := ensureDirectories(cfg); err != nil {
@@ -164,6 +163,16 @@ func sanitizeUntrustedConfig(fileCfg *Config, path string) {
 	sanitizeUntrustedEnvCommands(&fileCfg.Defaults, path)
 	sanitizeUntrustedSecurity(&fileCfg.Security, path)
 	sanitizeUntrustedGit(&fileCfg.Git, path)
+
+	// Persistence is honored from project scope (not a protection downgrade —
+	// the container stays fully sandboxed), but a cloned repo opting the user
+	// into container reuse deserves a visible note: state from a previous
+	// run's container (which executed repo-controlled code) is carried into
+	// subsequent runs.
+	if fileCfg.Container.Persistent != nil && *fileCfg.Container.Persistent {
+		fmt.Fprintf(os.Stderr,
+			"Note: project config %s enables persistent containers — container state is reused across runs\n", path)
+	}
 }
 
 // warnUntrustedDowngrade reports that a protection-weakening field from an
@@ -419,59 +428,6 @@ func loadProfileDirectories(cfg *Config, configDir string, trusted bool) error {
 		cfg.Profiles[profileName] = profileCfg
 	}
 	return nil
-}
-
-// loadFromEnv loads configuration from environment variables
-func loadFromEnv(cfg *Config) {
-	// CLAUDE_ON_INCUS_IMAGE
-	if env := os.Getenv("CLAUDE_ON_INCUS_IMAGE"); env != "" {
-		cfg.Container.Image = env
-	}
-
-	// CLAUDE_ON_INCUS_SESSIONS_DIR
-	if env := os.Getenv("CLAUDE_ON_INCUS_SESSIONS_DIR"); env != "" {
-		cfg.Paths.SessionsDir = ExpandPath(env)
-	}
-
-	// CLAUDE_ON_INCUS_STORAGE_DIR
-	if env := os.Getenv("CLAUDE_ON_INCUS_STORAGE_DIR"); env != "" {
-		cfg.Paths.StorageDir = ExpandPath(env)
-	}
-
-	// CLAUDE_ON_INCUS_PERSISTENT
-	if env := os.Getenv("CLAUDE_ON_INCUS_PERSISTENT"); env == "true" || env == "1" {
-		cfg.Container.Persistent = ptrBool(true)
-	}
-
-	// Limit environment variables (using COI_ prefix for brevity)
-	// CPU limits
-	if env := os.Getenv("COI_LIMIT_CPU"); env != "" {
-		cfg.Limits.CPU.Count = env
-	}
-	if env := os.Getenv("COI_LIMIT_CPU_ALLOWANCE"); env != "" {
-		cfg.Limits.CPU.Allowance = env
-	}
-
-	// Memory limits
-	if env := os.Getenv("COI_LIMIT_MEMORY"); env != "" {
-		cfg.Limits.Memory.Limit = env
-	}
-	if env := os.Getenv("COI_LIMIT_MEMORY_SWAP"); env != "" {
-		cfg.Limits.Memory.Swap = env
-	}
-
-	// Disk limits
-	if env := os.Getenv("COI_LIMIT_DISK_READ"); env != "" {
-		cfg.Limits.Disk.Read = env
-	}
-	if env := os.Getenv("COI_LIMIT_DISK_WRITE"); env != "" {
-		cfg.Limits.Disk.Write = env
-	}
-
-	// Runtime limits
-	if env := os.Getenv("COI_LIMIT_DURATION"); env != "" {
-		cfg.Limits.Runtime.MaxDuration = env
-	}
 }
 
 // ensureDirectories creates necessary directories if they don't exist

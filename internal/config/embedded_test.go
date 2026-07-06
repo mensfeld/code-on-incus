@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -24,8 +25,15 @@ func TestEmbeddedDefaultConfigValues(t *testing.T) {
 	if cfg.Defaults.Model != "claude-sonnet-4-5" {
 		t.Errorf("Expected model 'claude-sonnet-4-5', got %q", cfg.Defaults.Model)
 	}
-	if cfg.Container.Persistent == nil || *cfg.Container.Persistent {
-		t.Error("Expected persistent=false")
+	// persistent must be UNSET (nil) in the embedded default: nil means "not
+	// configured", which lets resume distinguish an explicit user choice
+	// (config wins) from the default (session metadata wins). The effective
+	// default stays false via BoolVal.
+	if cfg.Container.Persistent != nil {
+		t.Error("Expected persistent to be unset (nil) in the embedded default")
+	}
+	if BoolVal(cfg.Container.Persistent) {
+		t.Error("Expected effective persistent default to be false")
 	}
 	if cfg.Network.Mode != NetworkModeRestricted {
 		t.Errorf("Expected network mode 'restricted', got %q", cfg.Network.Mode)
@@ -322,5 +330,77 @@ func TestApplyProfileNewFields(t *testing.T) {
 	}
 	if cfg.Monitoring.Enabled == nil || !*cfg.Monitoring.Enabled {
 		t.Error("Expected monitoring enabled=true after apply")
+	}
+}
+
+// swapLineRe matches the [limits.memory] swap line, which CI intentionally
+// rewrites in the embedded copy (sed 's/^swap = "true"/swap = ""/' — GitHub
+// runners lack swap accounting). It is the ONLY sanctioned difference between
+// the canonical and embedded files, so normalize it before comparing.
+var swapLineRe = regexp.MustCompile(`(?m)^swap = "[^"]*"$`)
+
+// TestEmbeddedConfigMatchesCanonical guards against drift between the
+// canonical default profile (profiles/default/config.toml — the file CI and
+// make copy over the embedded one before building) and the tracked embedded
+// copy. An edit to only one of them "works locally, differs in CI": the
+// persistent-unset fix was silently reverted in CI exactly this way.
+func TestEmbeddedConfigMatchesCanonical(t *testing.T) {
+	canonical, err := os.ReadFile(filepath.Join("..", "..", "profiles", "default", "config.toml"))
+	if err != nil {
+		t.Skipf("canonical default profile not readable (non-repo build?): %v", err)
+	}
+	normalize := func(b []byte) string {
+		return swapLineRe.ReplaceAllString(string(b), `swap = "<normalized>"`)
+	}
+	if normalize(canonical) != normalize(EmbeddedDefaultConfig) {
+		t.Error("profiles/default/config.toml and internal/config/embedded/default_config.toml differ — " +
+			"edit the canonical file and copy it over the embedded one (CI overwrites the embedded copy; " +
+			"only the swap line may differ)")
+	}
+}
+
+// TestReapplyProfileContainer covers the mechanism behind the
+// profile-beats-workspace-overlay fix: container-section re-merge must be
+// idempotent (a full ApplyProfile re-run would duplicate mounts/sockets),
+// must preserve the project alias, and must error on unknown profiles.
+func TestReapplyProfileContainer(t *testing.T) {
+	f := false
+	cfg := GetDefaultConfig()
+	cfg.Profiles["p"] = ProfileConfig{
+		Container: ContainerConfig{Image: "prof-img", Persistent: &f},
+		Mounts:    []MountEntry{{Host: "/x", Container: "/y"}},
+	}
+	if err := cfg.ApplyProfile("p"); err != nil {
+		t.Fatal(err)
+	}
+	mountsAfterApply := len(cfg.Mounts.Default)
+
+	// Simulate a workspace overlay clobbering the container section.
+	tr := true
+	cfg.Container.Image = "ws-img"
+	cfg.Container.Persistent = &tr
+	cfg.Container.Alias = "project-alias"
+
+	for i := 0; i < 2; i++ { // twice: must be idempotent
+		if err := cfg.ReapplyProfileContainer("p"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if cfg.Container.Image != "prof-img" {
+		t.Errorf("profile image must win after re-apply, got %q", cfg.Container.Image)
+	}
+	if cfg.Container.Persistent == nil || *cfg.Container.Persistent {
+		t.Error("profile persistent=false must win after re-apply")
+	}
+	if cfg.Container.Alias != "project-alias" {
+		t.Errorf("project alias must be preserved, got %q", cfg.Container.Alias)
+	}
+	if got := len(cfg.Mounts.Default); got != mountsAfterApply {
+		t.Errorf("re-apply must not duplicate profile mounts: %d -> %d", mountsAfterApply, got)
+	}
+
+	if err := cfg.ReapplyProfileContainer("nope"); err == nil {
+		t.Error("unknown profile must error")
 	}
 }

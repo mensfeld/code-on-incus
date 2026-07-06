@@ -36,6 +36,7 @@ from support.helpers import (
     wait_for_prompt,
     wait_for_text_in_monitor,
     with_live_screen,
+    write_workspace_container_config,
 )
 
 SESSIONS_DIR = Path.home() / ".coi" / "sessions-claude"
@@ -75,9 +76,12 @@ def _start_persistent_session_and_exit(coi_binary, workspace_dir, env):
     Container stays Running after exit (persistent mode). Returns the child process
     output for debugging.
     """
+    # Persistence is config-driven: [container] persistent = true
+    write_workspace_container_config(workspace_dir, persistent=True)
+
     child = spawn_coi(
         coi_binary,
-        ["shell", "--persistent"],
+        ["shell"],
         cwd=workspace_dir,
         env=env,
         timeout=120,
@@ -129,7 +133,7 @@ def test_resume_running_container_succeeds(coi_binary, cleanup_containers, works
     by reconnecting to the already-running container.
 
     Simulation steps:
-    1. Start --persistent session → container stays Running after coi exits
+    1. Start persistent session (via config) → container stays Running after coi exits
     2. Edit metadata: set persistent=false (simulates post-reboot non-persistent session)
     3. coi shell --resume=<id> → should succeed (reconnects to running container)
     """
@@ -177,11 +181,14 @@ def test_resume_running_container_succeeds(coi_binary, cleanup_containers, works
     # Phase 3: Resume — should reuse running container (currently fails)  #
     # ------------------------------------------------------------------ #
 
-    # Run with --tmux=false so it runs directly (no tmux detach).
+    # Run with [shell] use_tmux = false so it runs directly (no tmux detach;
+    # the --tmux flag was removed — tmux mode is config-driven).
     # The bug causes an immediate error exit; a successful resume would start
     # an interactive session that we'd then kill via timeout.
+    with (Path(workspace_dir) / ".coi" / "config.toml").open("a") as f:
+        f.write("\n[shell]\nuse_tmux = false\n")
     proc = subprocess.Popen(
-        [coi_binary, "shell", f"--resume={session_id}", "--tmux=false"],
+        [coi_binary, "shell", f"--resume={session_id}"],
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

@@ -40,6 +40,30 @@ def write_trusted_coi_config(content):
     return {**os.environ, "COI_CONFIG": path}
 
 
+def write_workspace_container_config(workspace_dir, persistent=None, image=None):
+    """Write [container] settings into <workspace>/.coi/config.toml.
+
+    Replaces the removed --persistent / --image CLI flags: persistence and image
+    selection are config-driven ([container] persistent / image), and both are
+    honored from project scope (they are not protection-weakening fields, so
+    the untrusted-config sanitizer leaves them alone).
+
+    Appends to an existing config file if present (assumes it does not already
+    contain a [container] section — TOML forbids duplicate tables).
+    """
+    lines = ["[container]"]
+    if persistent is not None:
+        lines.append(f"persistent = {'true' if persistent else 'false'}")
+    if image is not None:
+        lines.append(f'image = "{image}"')
+    coi_dir = Path(workspace_dir) / ".coi"
+    coi_dir.mkdir(parents=True, exist_ok=True)
+    config_path = coi_dir / "config.toml"
+    with open(config_path, "a") as f:
+        f.write("\n" + "\n".join(lines) + "\n")
+    return config_path
+
+
 class TerminalEmulator:
     """
     Terminal emulator using pyte that properly handles ANSI escape sequences.
@@ -172,7 +196,7 @@ def spawn_coi(
 
     Args:
         binary_path: Path to coi binary
-        args: List of arguments (e.g., ["shell", "--persistent"])
+        args: List of arguments (e.g., ["shell", "--slot", "2"])
         timeout: Default timeout for expect operations
         env: Optional environment variables dict
         cwd: Optional working directory
@@ -648,28 +672,6 @@ def get_session_id_from_output(output):
     match = re.search(r"Session ID: ([a-f0-9\-]{36})", output)
     if match:
         return match.group(1)
-    return None
-
-
-def get_latest_session_id():
-    """
-    Get the most recent session ID from sessions directory.
-    """
-    sessions_dir = Path.home() / ".claude-on-incus" / "sessions"
-
-    if not sessions_dir.exists():
-        return None
-
-    # Get all session directories sorted by modification time
-    sessions = sorted(
-        [d for d in sessions_dir.iterdir() if d.is_dir()],
-        key=lambda x: x.stat().st_mtime,
-        reverse=True,
-    )
-
-    if sessions:
-        return sessions[0].name
-
     return None
 
 

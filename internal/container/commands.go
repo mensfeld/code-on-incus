@@ -11,6 +11,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 var (
@@ -219,6 +221,60 @@ func IncusOutputWithArgs(args ...string) (string, error) {
 	return IncusOutputWithArgsContext(context.Background(), args...)
 }
 
+// StdinIsTerminal reports whether os.Stdin is connected to a real terminal.
+// Uses TIOCGWINSZ rather than ModeCharDevice because /dev/null is also a
+// character device on Linux, causing false positives with the stat approach.
+func StdinIsTerminal() bool {
+	_, err := unix.IoctlGetWinsize(int(os.Stdin.Fd()), unix.TIOCGWINSZ)
+	return err == nil
+}
+
+// streamedStdin returns the stdin to attach for a streamed exec: piped or
+// redirected input is passed through so `cat data | coi run -- ...` works,
+// but an interactive terminal is NOT attached. Attaching a TTY would flip
+// `incus exec` into interactive PTY mode (raw terminal, Ctrl+C forwarded into
+// the container instead of signaling coi, stdin-reading commands blocking on
+// the keyboard instead of seeing EOF, SIGTTIN stops for backgrounded runs);
+// leaving it nil preserves the previous /dev/null semantics for TTY runs.
+func streamedStdin() *os.File {
+	if StdinIsTerminal() {
+		return nil
+	}
+	return os.Stdin
+}
+
+// IncusExecStreamedContext executes incus with raw args, streaming the child's
+// output directly to the caller's terminal: output appears live (not buffered
+// until exit). Piped/redirected stdin is connected (see streamedStdin); an
+// interactive terminal is not. The in-container exit code is preserved via
+// *ExitError so callers can propagate it. Stderr is not captured (it streams),
+// so ExitError.Stderr is empty on this path. On context cancellation the incus
+// client gets SIGINT first (a chance to detach cleanly) and is killed only
+// after WaitDelay.
+func IncusExecStreamedContext(ctx context.Context, args ...string) error {
+	incusCmd := buildIncusCommand(args...)
+	cmd := execIncusCommandContext(ctx, incusCmd)
+	if in := streamedStdin(); in != nil {
+		cmd.Stdin = in
+	}
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Cancel = func() error {
+		// Default Cancel sends SIGKILL; SIGINT lets the incus client wind
+		// down (WaitDelay in execIncusCommandContext escalates to kill).
+		return cmd.Process.Signal(os.Interrupt)
+	}
+
+	err := cmd.Run()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			return &ExitError{ExitCode: exitErr.ExitCode(), Err: err}
+		}
+		return err
+	}
+	return nil
+}
+
 // IncusFilePushContext pushes a file into a container with context support
 func IncusFilePushContext(ctx context.Context, source, destination string) error {
 	cmdArgs := buildIncusCommand("file", "push", source, destination)
@@ -231,16 +287,25 @@ func IncusFilePush(source, destination string) error {
 	return IncusFilePushContext(context.Background(), source, destination)
 }
 
-// StartWithIsolationFallback starts a non-ephemeral container that has
+// StartWithIsolationFallback starts a non-ephemeral container that may have
 // security.idmap.isolated set, with automatic fallback if the host doesn't
-// support it. Intended for non-ephemeral containers (setup.go path) — stopped
-// containers are not deleted, so a simple unset+retry is sufficient.
+// support it. Intended for non-ephemeral containers (setup.go path, run's
+// persistent reuse) — stopped containers are not deleted, so unset+retry works.
 //
 // On some hosts (nested containers, CI runners), forkstart exits non-zero even
 // though the LXC process started successfully. We poll ContainerRunning for up
 // to 5 s before deciding the container failed to start.
+//
+// The fallback is careful not to downgrade a container it didn't help:
+//   - a second attempt runs with isolation INTACT first, so transient failures
+//     (incusd blip, slow storage) recover without touching the security posture;
+//   - the prior isolated state is captured, and restored if the post-unset
+//     retry fails too — an unrelated permanent failure (corrupt rootfs, missing
+//     mount source) must not leave a persistent container silently un-isolated
+//     for every future session.
 func StartWithIsolationFallback(containerName string) error {
-	if err := IncusExec("start", containerName); err == nil {
+	firstErr := IncusExec("start", containerName)
+	if firstErr == nil {
 		return nil
 	}
 	// Poll: maybe it came up despite the forkstart error (soft error on some hosts).
@@ -251,12 +316,31 @@ func StartWithIsolationFallback(containerName string) error {
 			return nil
 		}
 	}
-	// Container didn't come up; unset isolation and retry.
+	// Retry once with isolation intact: transient failures recover here.
+	if retryErr := IncusExec("start", containerName); retryErr == nil {
+		return nil
+	}
+	if running, _ := ContainerRunning(containerName); running {
+		return nil
+	}
+	// Persistent failure — isolation may genuinely be unsupported. Surface the
+	// original error so a non-isolation root cause isn't misattributed, capture
+	// the prior flag state, then unset and retry.
+	fmt.Fprintf(os.Stderr, "Container start failed: %v\n", firstErr)
+	wasIsolated := false
+	if out, err := IncusOutput("config", "get", containerName, "security.idmap.isolated"); err == nil {
+		wasIsolated = strings.TrimSpace(out) == "true"
+	}
 	fmt.Fprintf(os.Stderr, "Warning: UID namespace isolation not available in this environment, disabling and retrying\n")
 	_ = IncusExecQuiet("config", "unset", containerName, "security.idmap.isolated")
 	if retryErr := IncusExec("start", containerName); retryErr != nil {
 		if running, _ := ContainerRunning(containerName); running {
 			return nil
+		}
+		// The fallback didn't help — the failure is not isolation-related.
+		// Restore the container's isolation so the failed run leaves no trace.
+		if wasIsolated {
+			_ = IncusExecQuiet("config", "set", containerName, "security.idmap.isolated=true")
 		}
 		return retryErr
 	}
@@ -271,11 +355,31 @@ func startWithIsolationFallback(containerName string) error {
 // An empty pool means "use Incus's default pool".
 // Uses init+configure+start (not launch) so security flags are set before first boot.
 func LaunchContainer(imageAlias, containerName, pool string) error {
-	if err := initAndConfigureContainer(imageAlias, containerName, pool, true); err != nil {
+	return LaunchContainerWithPreStart(imageAlias, containerName, pool, true, nil)
+}
+
+// LaunchContainerPersistent launches a non-ephemeral container on the given
+// storage pool. An empty pool means "use Incus's default pool".
+// Uses init+configure+start (not launch) so security flags are set before first boot.
+func LaunchContainerPersistent(imageAlias, containerName, pool string) error {
+	return LaunchContainerWithPreStart(imageAlias, containerName, pool, false, nil)
+}
+
+// LaunchContainerWithPreStart is LaunchContainer/LaunchContainerPersistent with
+// an optional preStart hook that runs AFTER `incus init` (+ config flags) but
+// BEFORE the container is started. This is where start-time-only instance
+// settings such as raw.idmap must be applied (issue #530): the run pipeline
+// needs the workspace UID mapping set before first boot, and `incus launch`
+// would start too early. A nil preStart is a no-op.
+func LaunchContainerWithPreStart(imageAlias, containerName, pool string, ephemeral bool, preStart func() error) error {
+	if err := initAndConfigureContainer(imageAlias, containerName, pool, ephemeral, preStart); err != nil {
 		return err
 	}
 	// Non-fatal: unset and retry at start time if the environment lacks subuid space.
 	_ = IsolateUIDNamespace(containerName)
+	if !ephemeral {
+		return startWithIsolationFallback(containerName)
+	}
 	if err := IncusExec("start", containerName); err == nil {
 		return nil
 	}
@@ -290,9 +394,10 @@ func LaunchContainer(imageAlias, containerName, pool string) error {
 		// Check for deletion: stopped ephemeral containers are deleted by Incus.
 		out, err := IncusOutput("list", "^"+containerName+"$", "--format=csv", "--columns=n")
 		if err == nil && strings.TrimSpace(out) == "" {
-			// Recreate without isolation and start fresh.
+			// Recreate without isolation and start fresh (preStart re-runs so the
+			// idmap is re-applied on the recreated container).
 			fmt.Fprintf(os.Stderr, "Warning: UID namespace isolation not supported in this environment\n")
-			return initConfigureAndStart(imageAlias, containerName, pool, true)
+			return initConfigureAndStart(imageAlias, containerName, pool, true, preStart)
 		}
 	}
 	// Container exists but didn't start; unset isolation and retry.
@@ -307,20 +412,10 @@ func LaunchContainer(imageAlias, containerName, pool string) error {
 	return nil
 }
 
-// LaunchContainerPersistent launches a non-ephemeral container on the given
-// storage pool. An empty pool means "use Incus's default pool".
-// Uses init+configure+start (not launch) so security flags are set before first boot.
-func LaunchContainerPersistent(imageAlias, containerName, pool string) error {
-	if err := initAndConfigureContainer(imageAlias, containerName, pool, false); err != nil {
-		return err
-	}
-	// Non-fatal: unset and retry at start time if the environment lacks subuid space.
-	_ = IsolateUIDNamespace(containerName)
-	return startWithIsolationFallback(containerName)
-}
-
-// initAndConfigureContainer creates a container and applies the required config flags.
-func initAndConfigureContainer(imageAlias, containerName, pool string, ephemeral bool) error {
+// initAndConfigureContainer creates a container, applies the required config
+// flags, and runs the optional preStart hook (used for start-time-only settings
+// like raw.idmap) before the caller starts the container.
+func initAndConfigureContainer(imageAlias, containerName, pool string, ephemeral bool, preStart func() error) error {
 	args := []string{"init", imageAlias, containerName}
 	if ephemeral {
 		args = append(args, "--ephemeral")
@@ -337,13 +432,19 @@ func initAndConfigureContainer(imageAlias, containerName, pool string, ephemeral
 	if err := DisableGuestAPI(containerName); err != nil {
 		return err
 	}
-	return CheckNotPrivileged(containerName)
+	if err := CheckNotPrivileged(containerName); err != nil {
+		return err
+	}
+	if preStart != nil {
+		return preStart()
+	}
+	return nil
 }
 
 // initConfigureAndStart creates, configures, and starts a container without
 // security.idmap.isolated — used as the isolation-unsupported fallback path.
-func initConfigureAndStart(imageAlias, containerName, pool string, ephemeral bool) error {
-	if err := initAndConfigureContainer(imageAlias, containerName, pool, ephemeral); err != nil {
+func initConfigureAndStart(imageAlias, containerName, pool string, ephemeral bool, preStart func() error) error {
+	if err := initAndConfigureContainer(imageAlias, containerName, pool, ephemeral, preStart); err != nil {
 		return err
 	}
 	return IncusExec("start", containerName)

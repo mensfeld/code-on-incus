@@ -19,20 +19,80 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var runCmd = &cobra.Command{
-	Use:   "run <command> [args...]",
-	Short: "Run a command in an ephemeral container",
-	Long: `Execute a command in an ephemeral Incus container.
+// runScriptName is the workspace run-script convention: when `coi run` is
+// invoked with no command, an executable file with this name at the workspace
+// root is executed inside the container (straight from the workspace mount).
+// It is extensionless on purpose: the shebang decides the interpreter, so a
+// bash, ruby, or python script all work the same way.
+const runScriptName = "coi-run"
 
-The container is automatically cleaned up after the command completes.
+var runCmd = &cobra.Command{
+	Use:   "run [command] [args...]",
+	Short: "Run a command or the workspace run script in a sandboxed container",
+	Long: `Execute a command in an isolated Incus container with the full sandbox
+(workspace mount, protected paths, secret masking, network isolation, limits,
+monitoring). Output streams live and the command's exit code is propagated.
+
+With no command, coi looks for an executable ` + runScriptName + ` at the workspace
+root and runs it inside the container directly from the workspace mount. The
+shebang decides the interpreter, so any language works (#!/usr/bin/env bash,
+ruby, python, ...).
+
+The container is ephemeral: it is cleaned up after the command completes (or
+stopped and kept, when [container] persistent = true is configured).
 
 Examples:
-  coi run "echo hello"
-  coi run "npm test" --slot 2
-  coi run --workspace ~/project "make build"
+  coi run                            # run ./` + runScriptName + ` in the sandbox
+  coi run --profile scripts          # same, with a credential-limiting profile
+  coi run -- npm test                # run an arbitrary command
+  coi run --workspace ~/project -- make build
 `,
-	Args: cobra.MinimumNArgs(1),
+	Args: cobra.ArbitraryArgs,
 	RunE: app.runCommand,
+}
+
+// detectRunScript checks for the workspace run script. The script must carry
+// the executable bit — it is executed directly (the shebang decides the
+// interpreter), so a non-executable file is an error with a chmod hint rather
+// than a silent guess at how to interpret it.
+//
+// A symlink is followed only if it resolves INSIDE the workspace: the script
+// executes from the workspace mount, so a target outside it would pass the
+// host-side check but not exist in the container — the exact opaque failure
+// this fail-fast detection exists to prevent (same rule as secret_paths
+// symlink handling).
+func detectRunScript(absWorkspace string) (found bool, err error) {
+	scriptPath := filepath.Join(absWorkspace, runScriptName)
+	if _, lerr := os.Lstat(scriptPath); lerr != nil {
+		if os.IsNotExist(lerr) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to check for %s: %w", runScriptName, lerr)
+	}
+
+	resolved, rerr := filepath.EvalSymlinks(scriptPath)
+	if rerr != nil {
+		return false, fmt.Errorf("%s exists but cannot be resolved (dangling symlink?): %w", runScriptName, rerr)
+	}
+	resolvedWorkspace, rerr := filepath.EvalSymlinks(absWorkspace)
+	if rerr != nil {
+		return false, fmt.Errorf("failed to resolve workspace path: %w", rerr)
+	}
+	if resolved != resolvedWorkspace && !strings.HasPrefix(resolved, resolvedWorkspace+string(filepath.Separator)) {
+		return false, fmt.Errorf("%s is a symlink resolving outside the workspace (%s) — the target will not exist inside the container; move the script into the workspace or replace the symlink with a copy", runScriptName, resolved)
+	}
+
+	fi, statErr := os.Stat(scriptPath)
+	if statErr != nil {
+		return false, fmt.Errorf("failed to check for %s: %w", runScriptName, statErr)
+	}
+	if fi.IsDir() {
+		return false, fmt.Errorf("%s in workspace is a directory, expected a script file", runScriptName)
+	}
+	if fi.Mode()&0o111 == 0 {
+		return false, fmt.Errorf("%s exists but is not executable — its shebang decides the interpreter, so make it executable: chmod +x %s", runScriptName, runScriptName)
+	}
+	return true, nil
 }
 
 func (a *App) runCommand(cmd *cobra.Command, args []string) error {
@@ -56,6 +116,22 @@ func (a *App) runCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	s := &runState{absWorkspace: absWorkspace}
+
+	// No command given: fall back to the workspace run-script convention.
+	// Detection happens host-side before any container work so a missing
+	// script fails fast with a clear message.
+	if len(args) == 0 {
+		found, err := detectRunScript(absWorkspace)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return fmt.Errorf("no command given and no %s found in workspace %s\n"+
+				"Create an executable %s at the workspace root or pass a command: coi run -- <command>",
+				runScriptName, absWorkspace, runScriptName)
+		}
+		s.runScript = true
+	}
 
 	pipeline := &session.Pipeline{}
 	defer pipeline.Teardown()
@@ -82,16 +158,30 @@ func (a *App) runCommand(cmd *cobra.Command, args []string) error {
 		a.launchContainerRunPhase(s),
 		a.configureContainerRunPhase(s),
 		a.applyNetworkRunPhase(s),
+		a.startMonitoringRunPhase(s),
 		a.runCommandPhase(args, s),
 	)
 }
 
 // launchOrReuseContainer restarts an existing persistent container, or
 // recreates / creates a fresh one on the given storage pool.
-func launchOrReuseContainer(mgr container.ContainerManager, img, pool string, containerExists, persistent bool) error {
+func launchOrReuseContainer(mgr container.ContainerManager, img, pool, containerName string, containerExists, persistent bool, preStart func() error) error {
 	if containerExists && persistent {
+		// Fail fast on an already-running container (another session may own
+		// it). Master's plain Start() errored here; StartWithIsolationFallback's
+		// came-up-anyway poll would misread "already running" as success and let
+		// two sessions share one container — the first to exit would stop it
+		// under the second.
+		if running, _ := mgr.Running(); running {
+			return fmt.Errorf("container %s is already running — another session may be using it; pick a different --slot or stop it first", containerName)
+		}
 		fmt.Fprintf(os.Stderr, "Restarting existing persistent container...\n")
-		if err := mgr.Start(); err != nil {
+		// Start with the isolation fallback: the container's disk devices (set at
+		// creation) materialize at start, and one on an idmap-incompatible
+		// filesystem (virtiofs workspace, #534) fails the start under
+		// security.idmap.isolated — same class the fresh-launch path handles.
+		// Safe for persistent containers: a failed start does not delete them.
+		if err := container.StartWithIsolationFallback(containerName); err != nil {
 			return fmt.Errorf("failed to start container: %w", err)
 		}
 		return nil
@@ -103,7 +193,20 @@ func launchOrReuseContainer(mgr container.ContainerManager, img, pool string, co
 		}
 	}
 	ephemeral := !persistent
-	if err := mgr.Launch(img, ephemeral, pool); err != nil {
+	// preStart applies start-time-only settings between init and first start:
+	// raw.idmap for the workspace UID mapping (#530) and every disk device, so
+	// idmap-incompatible device filesystems fail the START where the isolation
+	// fallback covers them (#534).
+	if err := mgr.LaunchWithPreStart(img, ephemeral, pool, preStart); err != nil {
+		// Best-effort cleanup of the half-created container: a preStart/start
+		// failure leaves it behind stopped and half-configured (stopped
+		// ephemeral containers are only auto-deleted after having run, and a
+		// persistent corpse would be reused broken by the next run). Never
+		// delete a RUNNING container — if a concurrent invocation won the name
+		// race (our init failed with "already exists"), it is theirs.
+		if running, _ := mgr.Running(); !running {
+			_ = mgr.Delete(true)
+		}
 		return fmt.Errorf("failed to launch container: %w", err)
 	}
 	return nil
@@ -167,13 +270,24 @@ func remapContainerUserIfNeeded(mgr container.ContainerManager, wasRestarted boo
 	}
 	fmt.Fprintf(os.Stderr, "Remapping user %s from UID 1000 to %d...\n", container.CodeUser, container.CodeUID)
 	remapCmd := fmt.Sprintf(
-		"groupmod -g %d %s && usermod -u %d -g %d %s && chown -R %s:%s /home/%s",
+		"groupmod -g %d %s && usermod -u %d -g %d %s",
 		container.CodeUID, container.CodeUser,
 		container.CodeUID, container.CodeUID, container.CodeUser,
-		container.CodeUser, container.CodeUser, container.CodeUser,
 	)
 	if _, err := mgr.ExecCommand(remapCmd, container.ExecCommandOptions{Capture: true}); err != nil {
 		return fmt.Errorf("failed to remap user %s to UID %d: %w", container.CodeUser, container.CodeUID, err)
+	}
+	// The home-ownership sweep is best-effort, separately from the remap
+	// itself: disk devices attach pre-start now (#534), so a user-configured
+	// mount under /home/<code> is already live here — a readonly one makes
+	// chown -R exit non-zero after fixing everything it could, which must not
+	// abort the run (the remap succeeded; only some mounted paths kept their
+	// ownership, as they would have on the host).
+	chownCmd := fmt.Sprintf("chown -R %s:%s /home/%s", container.CodeUser, container.CodeUser, container.CodeUser)
+	if _, err := mgr.ExecCommand(chownCmd, container.ExecCommandOptions{Capture: true}); err != nil {
+		fmt.Fprintf(os.Stderr,
+			"Warning: could not chown all of /home/%s after UID remap (a read-only mount under it is expected to fail): %v\n",
+			container.CodeUser, err)
 	}
 	return nil
 }
@@ -315,6 +429,18 @@ func (a *App) overlayWorkspaceConfig(absWorkspace string) error {
 		return fmt.Errorf("failed to load project config from %s: %w", absWorkspace, err)
 	}
 	container.Configure(a.cfg.Incus.Project, a.cfg.Incus.CodeUser, a.cfg.Incus.CodeUID)
+	// An explicitly requested --profile must keep winning over the workspace
+	// overlay for [container] settings — otherwise a project config could
+	// silently override the profile the user asked for (and precedence would
+	// depend on whether the command ran from inside the workspace or not).
+	if a.profile != "" {
+		if err := a.cfg.ReapplyProfileContainer(a.profile); err != nil {
+			return err
+		}
+	}
+	// The workspace config may set [container] persistent — PersistentPreRunE
+	// computed a.persistent before this overlay ran, so recompute it here.
+	a.persistent = config.BoolVal(a.cfg.Container.Persistent)
 	return nil
 }
 
@@ -403,21 +529,25 @@ func addMount(mgr container.ContainerManager, mount session.MountEntry, useShift
 // applySecurityMounts sets up read-only protection mounts and optional host immutable flags.
 func (a *App) applySecurityMounts(mgr container.ContainerManager, absWorkspace, containerWorkspacePath, containerName string, useShift bool) error {
 	protectedPaths := filterWritableGitHooks(a.cfg.Security.GetEffectiveProtectedPaths(), a.cfg)
-	if len(protectedPaths) > 0 {
-		if err := session.SetupSecurityMounts(mgr, absWorkspace, containerWorkspacePath, protectedPaths, useShift); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: Failed to setup security mounts: %v\n", err)
-		} else {
-			actualPaths := session.GetProtectedPathsForLogging(absWorkspace, protectedPaths)
-			if len(actualPaths) > 0 {
-				fmt.Fprintf(os.Stderr, "Protected paths (mounted read-only): %s\n", strings.Join(actualPaths, ", "))
-			}
+	// SetupSecurityMounts expands the dynamic per-worktree git configs internally
+	// (issue #545 — the single chokepoint both `coi run` and `coi shell` share) and
+	// returns the effective list to drive logging + the immutable pass over the same
+	// set. The immutable pass runs even on a partial mount error, so it is gated on
+	// the returned list rather than the error.
+	effectivePaths, err := session.SetupSecurityMounts(mgr, absWorkspace, containerWorkspacePath, protectedPaths, useShift, &a.cfg.Security)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: Failed to setup security mounts: %v\n", err)
+	} else if len(effectivePaths) > 0 {
+		actualPaths := session.GetProtectedPathsForLogging(absWorkspace, effectivePaths)
+		if len(actualPaths) > 0 {
+			fmt.Fprintf(os.Stderr, "Protected paths (mounted read-only): %s\n", strings.Join(actualPaths, ", "))
 		}
-		if a.cfg.Security.IsHostImmutableEnabled() {
-			logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
-			immutablePaths := session.ApplyImmutable(absWorkspace, protectedPaths, containerName, logFn)
-			if len(immutablePaths) > 0 {
-				fmt.Fprintf(os.Stderr, "Host-side immutable protection applied: %s\n", strings.Join(immutablePaths, ", "))
-			}
+	}
+	if len(effectivePaths) > 0 && a.cfg.Security.IsHostImmutableEnabled() {
+		logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
+		immutablePaths := session.ApplyImmutable(absWorkspace, effectivePaths, containerName, logFn)
+		if len(immutablePaths) > 0 {
+			fmt.Fprintf(os.Stderr, "Host-side immutable protection applied: %s\n", strings.Join(immutablePaths, ", "))
 		}
 	}
 

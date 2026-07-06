@@ -36,20 +36,21 @@ type SetupOptions struct {
 	CLIConfigPath         string        // e.g., ~/.claude (host CLI config to copy credentials from)
 	Tool                  tool.Tool     // AI coding tool being used
 	NetworkConfig         *config.NetworkConfig
-	DisableShift          bool                 // Disable UID shifting (for Colima/Lima environments)
-	LimitsConfig          *config.LimitsConfig // Resource and time limits
-	IncusProject          string               // Incus project name
-	ProtectedPaths        []string             // Paths to mount read-only for security (e.g., .git/hooks, .vscode)
-	SecretPaths           []string             // Workspace-relative globs to MASK (empty read-only mount hides contents) — issue #494
-	PreserveWorkspacePath bool                 // Mount workspace at same path as host instead of /workspace
-	ForwardSSHAgent       bool                 // Forward host SSH agent to container
-	ForwardedEnvVars      []string             // Names of host env vars being forwarded (for context file)
-	ContextFilePath       string               // Path to custom context .md file on host (overrides tool default)
-	ProfileContextFile    string               // Path to profile context .md file (appended to sandbox context)
-	Timezone              string               // Resolved IANA timezone name (e.g., "America/New_York"), empty for UTC
-	AutoContext           *bool                // Auto-inject sandbox context into tool's native system (default: true)
-	HostImmutable         bool                 // Apply chattr +i on host-side protected paths (set by CLI from config)
-	Alias                 string               // Human-friendly alias for this container (set user.coi.alias)
+	DisableShift          bool                   // Disable UID shifting (for Colima/Lima environments)
+	LimitsConfig          *config.LimitsConfig   // Resource and time limits
+	IncusProject          string                 // Incus project name
+	ProtectedPaths        []string               // Paths to mount read-only for security (e.g., .git/hooks, .vscode)
+	Security              *config.SecurityConfig // Security config, so worktree-config expansion honors disable_protection/writable_paths (nil = expand unconditionally)
+	SecretPaths           []string               // Workspace-relative globs to MASK (empty read-only mount hides contents) — issue #494
+	PreserveWorkspacePath bool                   // Mount workspace at same path as host instead of /workspace
+	ForwardSSHAgent       bool                   // Forward host SSH agent to container
+	ForwardedEnvVars      []string               // Names of host env vars being forwarded (for context file)
+	ContextFilePath       string                 // Path to custom context .md file on host (overrides tool default)
+	ProfileContextFile    string                 // Path to profile context .md file (appended to sandbox context)
+	Timezone              string                 // Resolved IANA timezone name (e.g., "America/New_York"), empty for UTC
+	AutoContext           *bool                  // Auto-inject sandbox context into tool's native system (default: true)
+	HostImmutable         bool                   // Apply chattr +i on host-side protected paths (set by CLI from config)
+	Alias                 string                 // Human-friendly alias for this container (set user.coi.alias)
 	Logger                func(string)
 	ContainerName         string // Use existing container (for testing) - skips container creation
 }
@@ -260,7 +261,7 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 
 	// 5. Create and configure container (but don't start yet if we need to add devices)
 	// Always launch as non-ephemeral so we can save session data even if container is stopped
-	// (e.g., via 'sudo shutdown 0' from within). Cleanup will delete if not --persistent.
+	// (e.g., via 'sudo shutdown 0' from within). Cleanup will delete unless persistent mode is configured.
 	if !skipLaunch {
 		opts.Logger(fmt.Sprintf("Creating container from %s...", image))
 		// Create container without starting it (init)
@@ -268,39 +269,13 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 			return nil, fmt.Errorf("failed to create container: %w", err)
 		}
 
-		// Configure UID/GID mapping for bind mounts based on environment
-		// When host UID matches container code user UID: Use shift=true (simple, works everywhere)
-		// When host UID differs: Use raw.idmap to explicitly map host UID → container code UID
-		// Colima/Lima: Disable shift (VM already handles UID mapping via virtiofs)
-
-		// Auto-detect Colima/Lima environment if not explicitly configured
-		disableShift := opts.DisableShift
-		if !disableShift && isColimaOrLimaEnvironment() {
-			disableShift = true
-			opts.Logger("Auto-detected Colima/Lima environment - disabling UID shifting")
-		}
-
-		useShift := !disableShift
-		hostUID := os.Getuid()
-
-		if !disableShift && hostUID != container.CodeUID {
-			// Host UID differs from container code user UID — shift=true won't work
-			// because it only translates root (UID 0), not arbitrary UIDs.
-			// Use raw.idmap to explicitly map host UID → container code UID.
-			idmapValue := fmt.Sprintf("both %d %d", hostUID, container.CodeUID)
-			opts.Logger(fmt.Sprintf("Host UID %d differs from container code UID %d, using raw.idmap: %s", hostUID, container.CodeUID, idmapValue))
-			if err := container.IncusExec("config", "set", result.ContainerName, "raw.idmap", idmapValue); err != nil {
-				opts.Logger(fmt.Sprintf("Warning: Failed to set raw.idmap: %v", err))
-			}
-			useShift = false // Don't use shift=true with raw.idmap
-		} else if disableShift {
-			if !opts.DisableShift {
-				// Was auto-detected, not explicitly configured
-				opts.Logger("UID shifting disabled (auto-detected Colima/Lima environment)")
-			} else {
-				opts.Logger("UID shifting disabled (configured via disable_shift option)")
-			}
-		}
+		// Configure UID/GID mapping for the workspace bind mount. Shared with
+		// the run pipeline via ConfigureUIDMapping so both honor Colima/Lima
+		// auto-detection AND set raw.idmap on any host-UID/code-UID mismatch
+		// (issue #530).
+		// Shell path sets raw.idmap before its own start (below), so the
+		// idmapApplied signal is not needed here.
+		useShift, _ := ConfigureUIDMapping(result.ContainerName, opts.DisableShift, opts.Logger)
 
 		// Add disk devices BEFORE starting container
 		// Determine container mount path - either /workspace (default) or same as host path
@@ -368,31 +343,36 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 			return nil, err
 		}
 
-		// Protect security-sensitive paths by mounting read-only (security feature)
+		// Protect security-sensitive paths by mounting read-only (security feature).
 		// This must be added after the workspace mount for the overlay to work.
-		// Expand per-worktree git config files (.git/worktrees/*/config.worktree)
-		// into concrete protected entries — the static list cannot glob, and these
-		// are host-code-execution sinks when extensions.worktreeConfig is enabled.
-		opts.ProtectedPaths = ExpandGitWorktreeProtectedPaths(opts.WorkspacePath, opts.ProtectedPaths)
-		if len(opts.ProtectedPaths) > 0 {
-			if err := SetupSecurityMounts(result.Manager, opts.WorkspacePath, containerWorkspacePath, opts.ProtectedPaths, useShift); err != nil {
-				opts.Logger(fmt.Sprintf("Warning: Failed to setup security mounts: %v", err))
-				// Non-fatal: continue even if protection fails
-			} else {
-				// Log which paths were actually protected
-				protectedPaths := GetProtectedPathsForLogging(opts.WorkspacePath, opts.ProtectedPaths)
-				if len(protectedPaths) > 0 {
-					opts.Logger(fmt.Sprintf("Protected paths (mounted read-only): %s", strings.Join(protectedPaths, ", ")))
-				}
+		// SetupSecurityMounts expands the dynamic per-worktree git configs internally
+		// (issue #545 — the single chokepoint both session paths share) and returns
+		// the effective list used for logging + the immutable pass over the same set.
+		effectivePaths, err := SetupSecurityMounts(result.Manager, opts.WorkspacePath, containerWorkspacePath, opts.ProtectedPaths, useShift, opts.Security)
+		// Adopt the expanded list as the canonical protected set so downstream
+		// consumers (the SANDBOX_CONTEXT.md "Protected paths" listing built from
+		// opts.ProtectedPaths below) reflect what was actually mounted, including the
+		// per-worktree configs — matching pre-#545 behavior where the caller expanded
+		// in place. Returned even on partial error, so the record stays complete.
+		opts.ProtectedPaths = effectivePaths
+		if err != nil {
+			opts.Logger(fmt.Sprintf("Warning: Failed to setup security mounts: %v", err))
+			// Non-fatal: continue even if protection fails
+		} else if len(effectivePaths) > 0 {
+			// Log which paths were actually protected
+			protectedPaths := GetProtectedPathsForLogging(opts.WorkspacePath, effectivePaths)
+			if len(protectedPaths) > 0 {
+				opts.Logger(fmt.Sprintf("Protected paths (mounted read-only): %s", strings.Join(protectedPaths, ", ")))
 			}
+		}
 
-			// Apply host-side immutable attribute for defense-in-depth
-			if opts.HostImmutable {
-				immutablePaths := ApplyImmutable(opts.WorkspacePath, opts.ProtectedPaths, containerName, opts.Logger)
-				if len(immutablePaths) > 0 {
-					result.HasImmutableProtection = true
-					opts.Logger(fmt.Sprintf("Host-side immutable protection applied: %s", strings.Join(immutablePaths, ", ")))
-				}
+		// Apply host-side immutable attribute for defense-in-depth. Runs even on a
+		// partial mount error, so it is gated on the effective list, not err.
+		if len(effectivePaths) > 0 && opts.HostImmutable {
+			immutablePaths := ApplyImmutable(opts.WorkspacePath, effectivePaths, containerName, opts.Logger)
+			if len(immutablePaths) > 0 {
+				result.HasImmutableProtection = true
+				opts.Logger(fmt.Sprintf("Host-side immutable protection applied: %s", strings.Join(immutablePaths, ", ")))
 			}
 		}
 

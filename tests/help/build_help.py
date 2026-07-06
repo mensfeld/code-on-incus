@@ -41,3 +41,6 @@ def test_build_help(coi_binary):
 
     # Should document force flag
     assert "--force" in output, f"Should document --force flag. Got:\n{output}"
+
+    # --all must carry the -a shorthand like every other --all in the CLI
+    assert "-a, --all" in output, f"Should document -a, --all. Got:\n{output}"

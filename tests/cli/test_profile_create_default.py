@@ -81,7 +81,7 @@ def test_create_default_rejects_profile_flags(coi_binary, tmp_path):
     home = tmp_path / "home"
     home.mkdir()
     r = run_coi(
-        coi_binary, ["profile", "create", "default", "--image", "coi-rust"], home, cwd=tmp_path
+        coi_binary, ["profile", "create", "default", "--inherits", "base"], home, cwd=tmp_path
     )
     assert r.returncode != 0, "profile-only flags should be rejected for 'create default'"
     assert "not valid" in r.stderr.lower(), f"expected a 'not valid' message. stderr: {r.stderr}"

@@ -26,9 +26,7 @@ import (
 var (
 	debugShell    bool
 	background    bool
-	useTmux       bool
 	containerName string
-	toolFlag      string
 )
 
 var shellCmd = &cobra.Command{
@@ -39,8 +37,8 @@ var shellCmd = &cobra.Command{
 By default, runs Claude Code. Other tools can be configured via the tool.name config option.
 
 Sessions run in tmux by default for monitoring and detach/reattach support.
-Set [shell] use_tmux = false in .coi/config.toml to run without tmux (direct mode).
-The --tmux flag always overrides the config setting.
+Set [shell] use_tmux = false in config (or a profile) to run without tmux
+(direct mode) — like all config-shaped settings, this has no CLI flag.
 
 Tmux mode (default):
   - Interactive: Automatically attaches to tmux session
@@ -55,9 +53,8 @@ in .coi/config.toml.
 Examples:
   coi shell                         # Interactive session in tmux
   coi shell myproject               # Launch session using alias (from any directory)
-  coi shell --tool opencode         # Use opencode instead of configured tool
+  coi shell --profile opencode      # Tool/behavior via a profile ([tool] name = "opencode")
   coi shell --background            # Run in background (detached, tmux only)
-  coi shell --tmux=false            # Run in direct mode (no tmux)
   coi shell --resume                # Resume latest session (auto)
   coi shell --resume=<session-id>   # Resume specific session (note: = is required)
   coi shell --continue=<session-id> # Same as --resume (alias)
@@ -71,9 +68,7 @@ Examples:
 func init() {
 	shellCmd.Flags().BoolVar(&debugShell, "debug", false, "Launch interactive bash instead of AI tool (for debugging)")
 	shellCmd.Flags().BoolVar(&background, "background", false, "Run AI tool in background tmux session (detached)")
-	shellCmd.Flags().BoolVar(&useTmux, "tmux", true, "Use tmux for session management (default true)")
 	shellCmd.Flags().StringVar(&containerName, "container", "", "Use existing container (for testing)")
-	shellCmd.Flags().StringVar(&toolFlag, "tool", "", "Override AI tool (e.g. claude, opencode, aider)")
 }
 
 func (a *App) shellCommand(cmd *cobra.Command, args []string) error {
@@ -590,7 +585,7 @@ func detectHostTimezone() string {
 }
 
 // startMonitoringDaemon starts the background monitoring daemon
-func startMonitoringDaemon(ctx context.Context, containerName, workspacePath string, cfg *config.Config, log *logger.SessionLogger, daemon *monitor.MonitorDaemon) error {
+func startMonitoringDaemon(ctx context.Context, containerName, workspacePath string, cfg *config.Config, allowedCIDRs []string, log *logger.SessionLogger, daemon *monitor.MonitorDaemon) error {
 	// Get home directory for audit log
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
@@ -598,11 +593,6 @@ func startMonitoringDaemon(ctx context.Context, containerName, workspacePath str
 	}
 
 	auditLogPath := filepath.Join(homeDir, ".coi", "audit", containerName+".jsonl")
-
-	var allowedCIDRs []string
-	if cfg.Network.Mode == config.NetworkModeAllowlist {
-		allowedCIDRs = resolveDomainsToHostCIDRs(cfg.Network.AllowedDomains)
-	}
 
 	// Create daemon config
 	daemonCfg := monitor.DaemonConfig{
@@ -653,13 +643,17 @@ func startMonitoringDaemon(ctx context.Context, containerName, workspacePath str
 }
 
 // startNFTMonitoringDaemon starts the nftables network monitoring daemon
-func startNFTMonitoringDaemon(ctx context.Context, containerName string, cfg *config.Config, log *logger.SessionLogger, daemon *nftmonitor.NFTMonitorDaemon) error {
+func startNFTMonitoringDaemon(ctx context.Context, containerName string, cfg *config.Config, allowedCIDRs []string, log *logger.SessionLogger, daemon *nftmonitor.NFTMonitorDaemon) error {
 	// Route the nft monitor's COI_NFT_DEBUG diagnostics to the session log
 	// instead of the user's attached terminal (issue #372 class).
 	nftmonitor.SetLogger(log)
 
-	// Get container IP
-	containerIP, err := network.GetContainerIPWithRetries(containerName, 3)
+	// Get container IP. 30 retries (matching restricted-mode network setup's
+	// DHCP wait): in open mode nothing upstream waits for the lease, and the
+	// run pipeline reaches this phase seconds after launch — 3 retries (~2 s)
+	// intermittently missed the IP under load, silently skipping nft
+	// monitoring with only a stderr warning.
+	containerIP, err := network.GetContainerIPWithRetries(containerName, 30)
 	if err != nil {
 		return fmt.Errorf("failed to get container IP: %w", err)
 	}
@@ -678,11 +672,6 @@ func startNFTMonitoringDaemon(ctx context.Context, containerName string, cfg *co
 	}
 
 	auditLogPath := filepath.Join(homeDir, ".coi", "audit", containerName+"-nft.jsonl")
-
-	var allowedCIDRs []string
-	if cfg.Network.Mode == config.NetworkModeAllowlist {
-		allowedCIDRs = resolveDomainsToHostCIDRs(cfg.Network.AllowedDomains)
-	}
 
 	// Create NFT daemon config
 	nftCfg := nftmonitor.Config{

@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 from pexpect import EOF, TIMEOUT
 
-from support.helpers import spawn_coi
+from support.helpers import spawn_coi, write_workspace_container_config
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -56,9 +56,10 @@ def test_prompt_shown_on_tty_for_missing_image(coi_binary, workspace_dir):
     When stdin is a terminal and the image is missing, COI should ask the
     user before failing — not immediately print an error.
     """
+    write_workspace_container_config(workspace_dir, image=_FAKE_DEFAULT)
     child = spawn_coi(
         coi_binary,
-        ["shell", "--image", _FAKE_DEFAULT, "--workspace", workspace_dir],
+        ["shell", "--workspace", workspace_dir],
         timeout=60,
         cwd=workspace_dir,
     )
@@ -80,9 +81,10 @@ def test_prompt_decline_exits_with_not_found_error(coi_binary, workspace_dir):
     Answering 'n' (or just Enter) at the build prompt should exit non-zero
     with a message that still tells the user how to build.
     """
+    write_workspace_container_config(workspace_dir, image=_FAKE_DEFAULT)
     child = spawn_coi(
         coi_binary,
-        ["shell", "--image", _FAKE_DEFAULT, "--workspace", workspace_dir],
+        ["shell", "--workspace", workspace_dir],
         timeout=60,
         cwd=workspace_dir,
     )
@@ -111,9 +113,10 @@ def test_prompt_empty_enter_treated_as_no(coi_binary, workspace_dir):
     Pressing Enter without typing anything should default to 'no'.
     The process should still exit with a not-found error.
     """
+    write_workspace_container_config(workspace_dir, image=_FAKE_DEFAULT)
     child = spawn_coi(
         coi_binary,
-        ["shell", "--image", _FAKE_DEFAULT, "--workspace", workspace_dir],
+        ["shell", "--workspace", workspace_dir],
         timeout=60,
         cwd=workspace_dir,
     )
@@ -188,14 +191,13 @@ def test_no_prompt_when_stdin_not_tty(coi_binary, workspace_dir):
     stdin=subprocess.DEVNULL guarantees a non-TTY stdin regardless of
     whether the CI runner itself has a PTY allocated.
     """
+    write_workspace_container_config(workspace_dir, image=_FAKE_DEFAULT)
     result = subprocess.run(
         [
             coi_binary,
             "shell",
             "--workspace",
             workspace_dir,
-            "--image",
-            _FAKE_DEFAULT,
             "--debug",
         ],
         capture_output=True,

@@ -45,9 +45,10 @@ type Config struct {
 
 // BuildConfig defines how to build the project's custom image
 type BuildConfig struct {
-	Base     string   `toml:"base"`     // Base image (default: "coi")
-	Script   string   `toml:"script"`   // Path to build script (relative to config file or absolute)
-	Commands []string `toml:"commands"` // Inline build commands (alternative to script)
+	Base        string   `toml:"base"`        // Base image (default: "coi")
+	Script      string   `toml:"script"`      // Path to build script (relative to config file or absolute)
+	Commands    []string `toml:"commands"`    // Inline build commands (alternative to script)
+	Compression string   `toml:"compression"` // Image compression algorithm (e.g. "none", "gzip", "xz"; empty = Incus default)
 }
 
 // HasBuildConfig returns true if a build configuration is defined (script or commands)
@@ -61,22 +62,33 @@ func (b *BuildConfig) HasBuildConfig() bool {
 // and top-level [build]. The same struct is embedded in both Config and
 // ProfileConfig so global and profile configs are symmetric.
 type ContainerConfig struct {
-	Image          string      `toml:"image"`
-	Persistent     *bool       `toml:"persistent"`
-	StoragePool    string      `toml:"storage_pool"`
-	Alias          string      `toml:"alias"`
-	Build          BuildConfig `toml:"build"`
-	StaleBaseCheck string      `toml:"stale_base_check"` // "error", "warn", "off"
+	Image           string      `toml:"image"`
+	Persistent      *bool       `toml:"persistent"`
+	ShutdownTimeout int         `toml:"shutdown_timeout"` // Seconds to wait for graceful shutdown before force-killing (default: 60)
+	StoragePool     string      `toml:"storage_pool"`
+	Alias           string      `toml:"alias"`
+	Build           BuildConfig `toml:"build"`
+	StaleBaseCheck  string      `toml:"stale_base_check"` // "error", "warn", "off"
 }
 
 // HasContainerConfig reports whether any field is set.
 func (c *ContainerConfig) HasContainerConfig() bool {
 	return c.Image != "" ||
 		c.Persistent != nil ||
+		c.ShutdownTimeout != 0 ||
 		c.StoragePool != "" ||
 		c.Alias != "" ||
 		c.StaleBaseCheck != "" ||
 		c.Build.HasBuildConfig()
+}
+
+// ShutdownTimeoutSeconds returns the graceful-shutdown window in seconds,
+// defaulting to 60 when unset.
+func (c *ContainerConfig) ShutdownTimeoutSeconds() int {
+	if c.ShutdownTimeout <= 0 {
+		return 60
+	}
+	return c.ShutdownTimeout
 }
 
 // TimezoneConfig contains timezone settings for containers
@@ -149,6 +161,21 @@ func (s *SecurityConfig) GetEffectiveProtectedPaths() []string {
 		paths = append(paths, p)
 	}
 	return paths
+}
+
+// IsWritablePath reports whether relPath was explicitly opted out of protection
+// via [security] writable_paths (a trusted-scope-only list). Separators are
+// normalized so an entry written with either slash style still matches. Callers
+// that discover protected paths dynamically (e.g. per-worktree git configs that
+// GetEffectiveProtectedPaths cannot enumerate) use this to honor the same opt-out.
+func (s *SecurityConfig) IsWritablePath(relPath string) bool {
+	target := filepath.ToSlash(relPath)
+	for _, w := range s.WritablePaths {
+		if filepath.ToSlash(w) == target {
+			return true
+		}
+	}
+	return false
 }
 
 // IsHostImmutableEnabled returns whether host-side immutable protection is enabled.
@@ -921,6 +948,29 @@ func (c *Config) ApplyProfile(name string) error {
 	return nil
 }
 
+// ReapplyProfileContainer re-merges ONLY the container section of the named
+// profile into the config. Used after a workspace-config overlay so an
+// explicitly requested profile keeps winning over the project's
+// [container] settings (image, persistent, storage pool, build) — the
+// overlay merges the project config on top of the profile applied earlier
+// in PersistentPreRunE. Unlike a full ApplyProfile, this is idempotent:
+// mergeContainerInto/mergeBuildInto are field-level overrides with no
+// appends, so it is safe to call after a profile was already applied
+// (a full re-apply would duplicate profile mounts and sockets).
+// The project alias is preserved, mirroring ApplyProfile.
+func (c *Config) ReapplyProfileContainer(name string) error {
+	profile := c.GetProfile(name)
+	if profile == nil {
+		return fmt.Errorf("profile '%s' not found", name)
+	}
+	projectAlias := c.Container.Alias
+	mergeContainerInto(&c.Container, &profile.Container)
+	if projectAlias != "" {
+		c.Container.Alias = projectAlias
+	}
+	return nil
+}
+
 // mergeContainerInto merges src into dst for the container-shape section.
 func mergeContainerInto(dst *ContainerConfig, src *ContainerConfig) {
 	if src == nil {
@@ -931,6 +981,9 @@ func mergeContainerInto(dst *ContainerConfig, src *ContainerConfig) {
 	}
 	if src.Persistent != nil {
 		dst.Persistent = src.Persistent
+	}
+	if src.ShutdownTimeout != 0 {
+		dst.ShutdownTimeout = src.ShutdownTimeout
 	}
 	if src.StoragePool != "" {
 		dst.StoragePool = src.StoragePool
@@ -1057,6 +1110,9 @@ func mergeBuildInto(dst *BuildConfig, src *BuildConfig) {
 	}
 	if src.Commands != nil {
 		dst.Commands = src.Commands
+	}
+	if src.Compression != "" {
+		dst.Compression = src.Compression
 	}
 }
 

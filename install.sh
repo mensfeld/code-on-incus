@@ -249,6 +249,20 @@ check_nft() {
     setup_nft_sudoers
 }
 
+# Copy a built/downloaded binary into INSTALL_DIR (sudo only when needed) and
+# remove any leftover legacy claude-on-incus symlink from pre-0.10 installs —
+# 0.10 retired the name, so upgrades should not keep the alias alive.
+install_binary() {
+    local src="$1"
+    if [ -w "$INSTALL_DIR" ]; then
+        cp "$src" "${INSTALL_DIR}/${BINARY_NAME}"
+        rm -f "${INSTALL_DIR}/claude-on-incus"
+    else
+        sudo cp "$src" "${INSTALL_DIR}/${BINARY_NAME}"
+        sudo rm -f "${INSTALL_DIR}/claude-on-incus"
+    fi
+}
+
 # Download binary from GitHub releases
 download_binary() {
     local download_url
@@ -283,16 +297,7 @@ download_binary() {
     # Install to system
     echo -e "${BLUE}→ Installing to ${INSTALL_DIR}...${NC}"
 
-    # Also create the legacy "claude-on-incus" symlink for backward compatibility
-    # with installs from before the rename (coi update is symlink-aware and keeps
-    # it working). This is an on-disk alias only — it is never printed.
-    if [ -w "$INSTALL_DIR" ]; then
-        cp "$binary_path" "${INSTALL_DIR}/${BINARY_NAME}"
-        ln -sf "${INSTALL_DIR}/${BINARY_NAME}" "${INSTALL_DIR}/claude-on-incus"
-    else
-        sudo cp "$binary_path" "${INSTALL_DIR}/${BINARY_NAME}"
-        sudo ln -sf "${INSTALL_DIR}/${BINARY_NAME}" "${INSTALL_DIR}/claude-on-incus"
-    fi
+    install_binary "$binary_path"
 
     echo -e "${GREEN}✓ Installed to ${INSTALL_DIR}/${BINARY_NAME}${NC}"
 
@@ -335,15 +340,7 @@ build_from_source() {
     # $INSTALL_DIR is not writable.
     echo -e "${BLUE}→ Installing to ${INSTALL_DIR}...${NC}"
     local built_binary="${tmp_dir}/${BINARY_NAME}"
-    # Legacy "claude-on-incus" symlink for backward compatibility (see above):
-    # on-disk alias only, never printed.
-    if [ -w "$INSTALL_DIR" ]; then
-        cp "$built_binary" "${INSTALL_DIR}/${BINARY_NAME}"
-        ln -sf "${INSTALL_DIR}/${BINARY_NAME}" "${INSTALL_DIR}/claude-on-incus"
-    else
-        sudo cp "$built_binary" "${INSTALL_DIR}/${BINARY_NAME}"
-        sudo ln -sf "${INSTALL_DIR}/${BINARY_NAME}" "${INSTALL_DIR}/claude-on-incus"
-    fi
+    install_binary "$built_binary"
 
     echo -e "${GREEN}✓ Built and installed${NC}"
 

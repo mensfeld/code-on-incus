@@ -19,6 +19,7 @@ from support.helpers import (
     spawn_coi,
     wait_for_container_ready,
     wait_for_prompt,
+    write_workspace_container_config,
 )
 
 
@@ -27,7 +28,7 @@ def test_attach_by_slot(coi_binary, cleanup_containers, workspace_dir):
     Test that coi attach --slot attaches to the specified slot.
 
     Flow:
-    1. Start coi shell --persistent --slot=1
+    1. Start coi shell --slot=1 (persistent via [container] config)
     2. Detach from session
     3. Run coi attach --slot=1
     4. Verify it attaches and shows "Attaching to ... (slot 1)"
@@ -38,9 +39,11 @@ def test_attach_by_slot(coi_binary, cleanup_containers, workspace_dir):
 
     # === Phase 1: Start persistent session on slot 1 ===
 
+    write_workspace_container_config(workspace_dir, persistent=True)
+
     child = spawn_coi(
         coi_binary,
-        ["shell", "--persistent", "--slot=1"],
+        ["shell", "--slot=1"],
         cwd=workspace_dir,
         env=env,
         timeout=120,

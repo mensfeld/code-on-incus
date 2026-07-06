@@ -2,7 +2,7 @@
 Test converting a running ephemeral session to persistent.
 
 Tests the main use case:
-1. Start ephemeral shell session (no --persistent flag)
+1. Start ephemeral shell session (no persistent config)
 2. While session is running, persist it from outside
 3. Verify coi list shows (persistent)
 4. Exit the shell

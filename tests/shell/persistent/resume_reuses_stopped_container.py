@@ -1,5 +1,5 @@
 """
-Test for coi shell --persistent --resume - verifies the stopped container is reused.
+Test for coi shell --resume in persistent mode - verifies the stopped container is reused.
 
 When a persistent session is resumed, coi should restart the original stopped container
 on the same slot rather than creating a fresh container on a new slot. This ensures that
@@ -31,6 +31,7 @@ from support.helpers import (
     wait_for_prompt,
     wait_for_text_in_monitor,
     with_live_screen,
+    write_workspace_container_config,
 )
 
 
@@ -47,11 +48,14 @@ def test_persistent_resume_reuses_stopped_container(coi_binary, cleanup_containe
     env = {"COI_USE_DUMMY": "1"}
     container_name = calculate_container_name(workspace_dir, 1)
 
+    # Persistence is config-driven: [container] persistent = true
+    write_workspace_container_config(workspace_dir, persistent=True)
+
     # === Phase 1: Start persistent session and create marker ===
 
     child = spawn_coi(
         coi_binary,
-        ["shell", "--persistent"],
+        ["shell"],
         cwd=workspace_dir,
         env=env,
         timeout=120,

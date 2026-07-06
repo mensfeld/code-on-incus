@@ -9,13 +9,6 @@ import (
 )
 
 func TestLoad(t *testing.T) {
-	// Clean environment
-	cleanEnv := func() {
-		os.Unsetenv("CLAUDE_ON_INCUS_IMAGE")
-		os.Unsetenv("CLAUDE_ON_INCUS_PERSISTENT")
-	}
-	defer cleanEnv()
-
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("Load() failed: %v", err)
@@ -28,27 +21,6 @@ func TestLoad(t *testing.T) {
 	// Should have defaults
 	if cfg.Container.Image == "" {
 		t.Error("Expected default image to be set")
-	}
-}
-
-func TestLoadFromEnv(t *testing.T) {
-	// Set environment variables
-	os.Setenv("CLAUDE_ON_INCUS_IMAGE", "env-image")
-	os.Setenv("CLAUDE_ON_INCUS_PERSISTENT", "1")
-	defer func() {
-		os.Unsetenv("CLAUDE_ON_INCUS_IMAGE")
-		os.Unsetenv("CLAUDE_ON_INCUS_PERSISTENT")
-	}()
-
-	cfg := GetDefaultConfig()
-	loadFromEnv(cfg)
-
-	if cfg.Container.Image != "env-image" {
-		t.Errorf("Expected image 'env-image', got '%s'", cfg.Container.Image)
-	}
-
-	if cfg.Container.Persistent == nil || !*cfg.Container.Persistent {
-		t.Error("Expected persistent to be true from env")
 	}
 }
 

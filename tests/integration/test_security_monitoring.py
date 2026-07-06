@@ -4781,20 +4781,16 @@ process_spawn_rate_threshold = 9999
                     check=False,
                 )
 
-            # Write the suspicious line into the container's auth.log.
-            # The LogWatcher reads from offset 0 on startup so it catches
-            # lines written before the daemon started. Re-inject at 10s and
-            # 20s into the poll loop so a late-starting daemon detects the
-            # event via inotify regardless of container setup time.
-            inject_ssh_failure()
-
-            # Poll until the auth threat appears (inotify delivers near-instantly
-            # once the daemon is running; backstop ticker fires within 3 s).
-            # 30 s timeout with periodic re-injection handles slow CI runners.
+            # Write the suspicious line into the container's auth.log,
+            # re-injecting on EVERY poll iteration: a single write (or sparse
+            # re-injections) can land before the watcher has registered its
+            # inotify watch under CI load and be missed entirely — re-writing
+            # each iteration guarantees a write lands after registration.
+            # (Same de-flake pattern as test_log_watcher_inotify.py.)
             auth_events = []
-            for i in range(30):
-                if i in (10, 20):
-                    inject_ssh_failure()
+            for _ in range(60):
+                inject_ssh_failure()
+                time.sleep(1)
                 events = get_threat_events(container_name)
                 auth_events = [
                     e
@@ -4805,7 +4801,6 @@ process_spawn_rate_threshold = 9999
                 ]
                 if auth_events:
                     break
-                time.sleep(1)
 
             assert len(auth_events) > 0, (
                 f"Expected auth threat for failed SSH login, got events: {events}"

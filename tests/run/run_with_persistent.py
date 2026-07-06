@@ -1,8 +1,8 @@
 """
-Test for coi run - with --persistent flag.
+Test for coi run - with persistent mode.
 
 Tests that:
-1. Run with --persistent flag
+1. Run with [container] persistent = true config
 2. Container is stopped but not deleted
 3. Second run reuses the container
 """
@@ -10,15 +10,15 @@ Tests that:
 import subprocess
 import time
 
-from support.helpers import calculate_container_name
+from support.helpers import calculate_container_name, write_workspace_container_config
 
 
 def test_run_with_persistent(coi_binary, cleanup_containers, workspace_dir):
     """
-    Test running with --persistent flag.
+    Test running with [container] persistent = true.
 
     Flow:
-    1. Run coi run --persistent --slot N
+    1. Run coi run --slot N with persistent config
     2. Verify command succeeds
     3. Verify container still exists (stopped)
     4. Run again and verify it reuses container
@@ -26,6 +26,7 @@ def test_run_with_persistent(coi_binary, cleanup_containers, workspace_dir):
     """
     slot = 8
     container_name = calculate_container_name(workspace_dir, slot)
+    write_workspace_container_config(workspace_dir, persistent=True)
 
     # === Phase 1: First run with persistent ===
 
@@ -35,7 +36,6 @@ def test_run_with_persistent(coi_binary, cleanup_containers, workspace_dir):
             "run",
             "--workspace",
             workspace_dir,
-            "--persistent",
             "--slot",
             str(slot),
             "echo",
@@ -74,7 +74,6 @@ def test_run_with_persistent(coi_binary, cleanup_containers, workspace_dir):
             "run",
             "--workspace",
             workspace_dir,
-            "--persistent",
             "--slot",
             str(slot),
             "echo",

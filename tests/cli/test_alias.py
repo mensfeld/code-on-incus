@@ -8,15 +8,28 @@ import json
 import os
 import subprocess
 
-from support.helpers import calculate_container_name, get_container_list
+from support.helpers import (
+    calculate_container_name,
+    get_container_list,
+    write_workspace_container_config,
+)
 
 
-def write_alias_config(workspace_dir, alias_name):
-    """Create .coi/config.toml with alias in the workspace."""
+def write_alias_config(workspace_dir, alias_name, persistent=None, image=None):
+    """Create .coi/config.toml with alias (and optional container settings).
+
+    persistent/image go into the same [container] block — they replace the
+    removed --persistent / --image CLI flags.
+    """
     config_dir = os.path.join(workspace_dir, ".coi")
     os.makedirs(config_dir, exist_ok=True)
+    lines = ["[container]", f'alias = "{alias_name}"']
+    if persistent is not None:
+        lines.append(f"persistent = {'true' if persistent else 'false'}")
+    if image is not None:
+        lines.append(f'image = "{image}"')
     with open(os.path.join(config_dir, "config.toml"), "w") as f:
-        f.write(f'[container]\nalias = "{alias_name}"\n')
+        f.write("\n".join(lines) + "\n")
 
 
 def run_coi(coi_binary, args, workspace_dir=None, env_extra=None, timeout=120):
@@ -56,12 +69,12 @@ class TestAliasStoredOnContainer:
         self, coi_binary, workspace_dir, cleanup_containers, dummy_image
     ):
         """Launch persistent session with alias, verify user.coi.alias is set."""
-        write_alias_config(workspace_dir, "testalias")
+        write_alias_config(workspace_dir, "testalias", persistent=True, image=dummy_image)
         container_name = calculate_container_name(workspace_dir, 1)
 
         result = run_coi(
             coi_binary,
-            ["run", "--persistent", "--image", dummy_image, "sleep", "30"],
+            ["run", "sleep", "30"],
             workspace_dir=workspace_dir,
         )
         assert result.returncode == 0, f"coi run failed: {result.stderr}"
@@ -88,11 +101,11 @@ class TestAliasInRegistry:
 
     def test_alias_in_registry(self, coi_binary, workspace_dir, cleanup_containers, dummy_image):
         """Launch session with alias, verify it appears in registry."""
-        write_alias_config(workspace_dir, "registrytest")
+        write_alias_config(workspace_dir, "registrytest", image=dummy_image)
 
         result = run_coi(
             coi_binary,
-            ["run", "--image", dummy_image, "echo", "ok"],
+            ["run", "echo", "ok"],
             workspace_dir=workspace_dir,
         )
         assert result.returncode == 0, f"coi run failed: {result.stderr}"
@@ -109,13 +122,13 @@ class TestAliasShownInList:
         self, coi_binary, workspace_dir, cleanup_containers, dummy_image
     ):
         """Launch container with alias, verify it appears in JSON list output."""
-        write_alias_config(workspace_dir, "listalias")
+        write_alias_config(workspace_dir, "listalias", persistent=True, image=dummy_image)
         container_name = calculate_container_name(workspace_dir, 1)
 
         # Launch a persistent container so it stays running
         run_coi(
             coi_binary,
-            ["run", "--image", dummy_image, "--persistent", "sleep", "30"],
+            ["run", "sleep", "30"],
             workspace_dir=workspace_dir,
         )
 
@@ -140,12 +153,12 @@ class TestAliasShownInList:
         self, coi_binary, workspace_dir, cleanup_containers, dummy_image
     ):
         """Launch container with alias, verify (alias) appears in text output."""
-        write_alias_config(workspace_dir, "textalias")
+        write_alias_config(workspace_dir, "textalias", persistent=True, image=dummy_image)
         container_name = calculate_container_name(workspace_dir, 1)
 
         run_coi(
             coi_binary,
-            ["run", "--image", dummy_image, "--persistent", "sleep", "30"],
+            ["run", "sleep", "30"],
             workspace_dir=workspace_dir,
         )
         list_result = run_coi(coi_binary, ["list"])
@@ -166,12 +179,12 @@ class TestAttachByAlias:
 
     def test_attach_by_alias(self, coi_binary, workspace_dir, cleanup_containers, dummy_image):
         """Launch container with alias, attempt to attach by alias."""
-        write_alias_config(workspace_dir, "attachalias")
+        write_alias_config(workspace_dir, "attachalias", persistent=True, image=dummy_image)
 
         # Start a persistent container
         run_coi(
             coi_binary,
-            ["run", "--image", dummy_image, "--persistent", "sleep", "60"],
+            ["run", "sleep", "60"],
             workspace_dir=workspace_dir,
         )
 
@@ -195,11 +208,11 @@ class TestKillByAlias:
 
     def test_kill_by_alias(self, coi_binary, workspace_dir, cleanup_containers, dummy_image):
         """Launch container with alias, kill it by alias."""
-        write_alias_config(workspace_dir, "killalias")
+        write_alias_config(workspace_dir, "killalias", persistent=True, image=dummy_image)
 
         run_coi(
             coi_binary,
-            ["run", "--image", dummy_image, "--persistent", "sleep", "60"],
+            ["run", "sleep", "60"],
             workspace_dir=workspace_dir,
         )
 
@@ -216,11 +229,11 @@ class TestShutdownByAlias:
 
     def test_shutdown_by_alias(self, coi_binary, workspace_dir, cleanup_containers, dummy_image):
         """Launch container with alias, shutdown by alias."""
-        write_alias_config(workspace_dir, "shutdownalias")
+        write_alias_config(workspace_dir, "shutdownalias", persistent=True, image=dummy_image)
 
         run_coi(
             coi_binary,
-            ["run", "--image", dummy_image, "--persistent", "sleep", "60"],
+            ["run", "sleep", "60"],
             workspace_dir=workspace_dir,
         )
 
@@ -237,12 +250,12 @@ class TestUnfreezeByAlias:
 
     def test_unfreeze_by_alias(self, coi_binary, workspace_dir, cleanup_containers, dummy_image):
         """Launch container with alias, freeze it, unfreeze by alias."""
-        write_alias_config(workspace_dir, "unfreezealias")
+        write_alias_config(workspace_dir, "unfreezealias", persistent=True, image=dummy_image)
         container_name = calculate_container_name(workspace_dir, 1)
 
         run_coi(
             coi_binary,
-            ["run", "--image", dummy_image, "--persistent", "sleep", "60"],
+            ["run", "sleep", "60"],
             workspace_dir=workspace_dir,
         )
 
@@ -281,18 +294,18 @@ class TestAliasSlotSuffix:
         self, coi_binary, workspace_dir, cleanup_containers, dummy_image
     ):
         """Launch two containers, kill slot 2 by alias suffix."""
-        write_alias_config(workspace_dir, "slotalias")
+        write_alias_config(workspace_dir, "slotalias", persistent=True, image=dummy_image)
 
         # Launch slot 1
         run_coi(
             coi_binary,
-            ["run", "--image", dummy_image, "--persistent", "--slot", "1", "sleep", "60"],
+            ["run", "--slot", "1", "sleep", "60"],
             workspace_dir=workspace_dir,
         )
         # Launch slot 2
         run_coi(
             coi_binary,
-            ["run", "--image", dummy_image, "--persistent", "--slot", "2", "sleep", "60"],
+            ["run", "--slot", "2", "sleep", "60"],
             workspace_dir=workspace_dir,
         )
 
@@ -323,24 +336,24 @@ class TestAliasConflict:
         self, coi_binary, workspace_dir, cleanup_containers, dummy_image, tmp_path
     ):
         """Register alias for workspace A, try to use same alias from workspace B."""
-        write_alias_config(workspace_dir, "conflictalias")
+        write_alias_config(workspace_dir, "conflictalias", image=dummy_image)
 
         # Register alias from workspace A
         run_coi(
             coi_binary,
-            ["run", "--image", dummy_image, "echo", "ok"],
+            ["run", "echo", "ok"],
             workspace_dir=workspace_dir,
         )
 
         # Create workspace B with same alias
         workspace_b = str(tmp_path / "workspace_b")
         os.makedirs(workspace_b)
-        write_alias_config(workspace_b, "conflictalias")
+        write_alias_config(workspace_b, "conflictalias", image=dummy_image)
 
         # Try to run from workspace B
         result = run_coi(
             coi_binary,
-            ["run", "--image", dummy_image, "echo", "ok"],
+            ["run", "echo", "ok"],
             workspace_dir=workspace_b,
         )
         # Should fail with alias conflict
@@ -351,18 +364,18 @@ class TestAliasConflict:
         self, coi_binary, workspace_dir, cleanup_containers, dummy_image
     ):
         """Running twice from same workspace with same alias should not conflict."""
-        write_alias_config(workspace_dir, "idempotentalias")
+        write_alias_config(workspace_dir, "idempotentalias", image=dummy_image)
 
         result1 = run_coi(
             coi_binary,
-            ["run", "--image", dummy_image, "echo", "first"],
+            ["run", "echo", "first"],
             workspace_dir=workspace_dir,
         )
         assert result1.returncode == 0
 
         result2 = run_coi(
             coi_binary,
-            ["run", "--image", dummy_image, "echo", "second"],
+            ["run", "echo", "second"],
             workspace_dir=workspace_dir,
         )
         assert result2.returncode == 0, f"Second run should succeed: {result2.stderr}"
@@ -417,11 +430,11 @@ class TestAliasEdgeCases:
         self, coi_binary, workspace_dir, cleanup_containers, dummy_image
     ):
         """Invalid alias characters should be rejected."""
-        write_alias_config(workspace_dir, "my project!")
+        write_alias_config(workspace_dir, "my project!", image=dummy_image)
 
         result = run_coi(
             coi_binary,
-            ["run", "--image", dummy_image, "echo", "ok"],
+            ["run", "echo", "ok"],
             workspace_dir=workspace_dir,
         )
         assert result.returncode != 0
@@ -431,11 +444,11 @@ class TestAliasEdgeCases:
         self, coi_binary, workspace_dir, cleanup_containers, dummy_image
     ):
         """Alias starting with digit should be rejected."""
-        write_alias_config(workspace_dir, "123project")
+        write_alias_config(workspace_dir, "123project", image=dummy_image)
 
         result = run_coi(
             coi_binary,
-            ["run", "--image", dummy_image, "echo", "ok"],
+            ["run", "echo", "ok"],
             workspace_dir=workspace_dir,
         )
         assert result.returncode != 0
@@ -446,11 +459,11 @@ class TestAliasEdgeCases:
 
     def test_alias_empty_string(self, coi_binary, workspace_dir, cleanup_containers, dummy_image):
         """Empty alias should work normally (no alias set)."""
-        write_alias_config(workspace_dir, "")
+        write_alias_config(workspace_dir, "", image=dummy_image)
 
         result = run_coi(
             coi_binary,
-            ["run", "--image", dummy_image, "echo", "ok"],
+            ["run", "echo", "ok"],
             workspace_dir=workspace_dir,
         )
         assert result.returncode == 0, f"Empty alias should work: {result.stderr}"
@@ -459,10 +472,11 @@ class TestAliasEdgeCases:
         """Container without alias should show empty alias in JSON output."""
         container_name = calculate_container_name(workspace_dir, 1)
 
-        # No alias config — just launch normally
+        # No alias config — just launch normally (persistent/image via config)
+        write_workspace_container_config(workspace_dir, persistent=True, image=dummy_image)
         run_coi(
             coi_binary,
-            ["run", "--image", dummy_image, "--persistent", "sleep", "30"],
+            ["run", "sleep", "30"],
             workspace_dir=workspace_dir,
         )
 
@@ -502,7 +516,7 @@ class TestAliasCWDAutoRegister:
         self, coi_binary, workspace_dir, cleanup_containers, dummy_image
     ):
         """coi shell <alias> should work when CWD config has matching alias, even without prior registration."""
-        write_alias_config(workspace_dir, "cwdauto")
+        write_alias_config(workspace_dir, "cwdauto", image=dummy_image)
 
         # Clear any existing registry entry for this alias
         registry = get_aliases_registry()
@@ -517,7 +531,7 @@ class TestAliasCWDAutoRegister:
         # Use --background so the command exits after starting the detached session.
         result = run_coi(
             coi_binary,
-            ["shell", "cwdauto", "--image", dummy_image, "--background"],
+            ["shell", "cwdauto", "--background"],
             workspace_dir=workspace_dir,
         )
         # Should succeed (alias resolved via CWD fallback)

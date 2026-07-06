@@ -57,8 +57,12 @@ def test_info_help_uses_lowercase(coi_binary):
     )
 
 
-def test_run_help_uses_angle_brackets(coi_binary):
-    """coi run --help should show <command> [args...] not COMMAND."""
+def test_run_help_uses_square_brackets(coi_binary):
+    """coi run --help should show [command] [args...] not COMMAND.
+
+    The command became optional (coi run with no command executes the
+    workspace coi-run), so square brackets are the correct style.
+    """
     result = subprocess.run(
         [coi_binary, "run", "--help"],
         capture_output=True,
@@ -68,5 +72,6 @@ def test_run_help_uses_angle_brackets(coi_binary):
 
     assert result.returncode == 0, f"Expected exit 0, got {result.returncode}: {result.stderr}"
     combined = result.stdout + result.stderr
-    assert "<command>" in combined, f"Expected '<command>' in help output, got: {combined}"
+    assert "[command]" in combined, f"Expected '[command]' in help output, got: {combined}"
     assert "[args...]" in combined, f"Expected '[args...]' in help output, got: {combined}"
+    assert "COMMAND" not in combined, f"UPPERCASE style not allowed, got: {combined}"

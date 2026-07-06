@@ -13,8 +13,14 @@
     },
     "commands": {
       "type": "array",
-      "items": { "type": "string" },
+      "items": {
+        "type": "string"
+      },
       "description": "Inline build commands as an alternative to a script file"
+    },
+    "compression": {
+      "type": "string",
+      "description": "Image compression algorithm (e.g. \"none\", \"gzip\", \"xz\"; empty = Incus default)"
     }
   }
 }

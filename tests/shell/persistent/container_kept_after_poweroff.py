@@ -1,5 +1,5 @@
 """
-Test for coi shell --persistent - container kept after poweroff.
+Test for coi shell in persistent mode - container kept after poweroff.
 
 Tests that in persistent mode:
 1. Start dummy in persistent mode
@@ -25,6 +25,7 @@ from support.helpers import (
     wait_for_prompt,
     wait_for_text_in_monitor,
     with_live_screen,
+    write_workspace_container_config,
 )
 
 
@@ -33,7 +34,7 @@ def test_persistent_container_kept_after_poweroff(coi_binary, cleanup_containers
     Test persistent session keeps container after poweroff.
 
     Flow:
-    1. Start coi shell --persistent
+    1. Start coi shell in persistent mode (via workspace config)
     2. Interact with dummy
     3. Exit claude to get to bash
     4. Run sudo poweroff to stop container
@@ -43,10 +44,13 @@ def test_persistent_container_kept_after_poweroff(coi_binary, cleanup_containers
     """
     env = {"COI_USE_DUMMY": "1"}
 
+    # Persistence is config-driven: [container] persistent = true
+    write_workspace_container_config(workspace_dir, persistent=True)
+
     # Launch persistent container
     child = spawn_coi(
         coi_binary,
-        ["shell", "--persistent"],
+        ["shell"],
         cwd=workspace_dir,
         env=env,
         timeout=120,

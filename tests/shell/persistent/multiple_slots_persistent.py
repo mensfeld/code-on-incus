@@ -1,5 +1,5 @@
 """
-Test for coi shell --persistent - multiple slots running in parallel with isolation.
+Test for coi shell in persistent mode - multiple slots running in parallel with isolation.
 
 Tests that:
 1. Start persistent session on slot 1, create marker file in ~/
@@ -24,6 +24,7 @@ from support.helpers import (
     wait_for_prompt,
     wait_for_text_in_monitor,
     with_live_screen,
+    write_workspace_container_config,
 )
 
 
@@ -32,15 +33,18 @@ def test_persistent_multiple_slots_parallel(coi_binary, cleanup_containers, work
     Test that multiple persistent slots can run in parallel with isolated home directories.
 
     Flow:
-    1. Start coi shell --persistent (slot 1 auto-allocated)
+    1. Start coi shell in persistent mode (slot 1 auto-allocated)
     2. Interact with dummy, create marker file in ~/
     3. Exit claude, exit bash (detach - container stays running)
-    4. Start coi shell --persistent again (slot 2 auto-allocated)
+    4. Start coi shell again (slot 2 auto-allocated)
     5. Verify both containers are running
     6. Create marker file in slot 2, verify slot 1's file is NOT visible (isolation)
     7. Cleanup both containers
     """
     env = {"COI_USE_DUMMY": "1"}
+
+    # Persistence is config-driven: [container] persistent = true
+    write_workspace_container_config(workspace_dir, persistent=True)
 
     container_name_1 = calculate_container_name(workspace_dir, 1)
     container_name_2 = calculate_container_name(workspace_dir, 2)
@@ -49,7 +53,7 @@ def test_persistent_multiple_slots_parallel(coi_binary, cleanup_containers, work
 
     child1 = spawn_coi(
         coi_binary,
-        ["shell", "--persistent"],
+        ["shell"],
         cwd=workspace_dir,
         env=env,
         timeout=120,
@@ -128,7 +132,7 @@ def test_persistent_multiple_slots_parallel(coi_binary, cleanup_containers, work
 
     child2 = spawn_coi(
         coi_binary,
-        ["shell", "--persistent"],
+        ["shell"],
         cwd=workspace_dir,
         env=env,
         timeout=120,

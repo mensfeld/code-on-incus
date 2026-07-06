@@ -89,12 +89,12 @@ func TestSetupSecurityMounts_EmptyPaths(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	// Empty paths should return nil
-	err = SetupSecurityMounts(nil, tmpDir, "/workspace", []string{}, false)
+	_, err = SetupSecurityMounts(nil, tmpDir, "/workspace", []string{}, false, nil)
 	if err != nil {
 		t.Errorf("Expected nil error for empty paths, got: %v", err)
 	}
 
-	err = SetupSecurityMounts(nil, tmpDir, "/workspace", nil, false)
+	_, err = SetupSecurityMounts(nil, tmpDir, "/workspace", nil, false, nil)
 	if err != nil {
 		t.Errorf("Expected nil error for nil paths, got: %v", err)
 	}
@@ -110,8 +110,8 @@ func TestSetupSecurityMounts_NonExistentPaths(t *testing.T) {
 	// In a non-git workspace, .git/hooks and .git/config are silently
 	// skipped by the .git guard, so SetupSecurityMounts returns nil
 	// even with a nil manager (MountDisk is never reached).
-	err = SetupSecurityMounts(nil, tmpDir, "/workspace",
-		[]string{".git/hooks", ".git/config"}, false)
+	_, err = SetupSecurityMounts(nil, tmpDir, "/workspace",
+		[]string{".git/hooks", ".git/config"}, false, nil)
 	if err != nil {
 		t.Errorf("Expected nil error when .git is missing, got: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestSetupSecurityMounts_SymlinkRejection(t *testing.T) {
 	}
 
 	// Should return error for symlinked paths
-	err = SetupSecurityMounts(nil, tmpDir, "/workspace", []string{".vscode"}, false)
+	_, err = SetupSecurityMounts(nil, tmpDir, "/workspace", []string{".vscode"}, false, nil)
 	if err == nil {
 		t.Error("Expected error for symlinked path, got nil")
 	}
@@ -168,7 +168,7 @@ func TestSetupSecurityMounts_GitSymlinkSkipped(t *testing.T) {
 	}
 
 	// Should skip .git/hooks when .git is a symlink (no error, just skip)
-	err = SetupSecurityMounts(nil, tmpDir, "/workspace", []string{".git/hooks"}, false)
+	_, err = SetupSecurityMounts(nil, tmpDir, "/workspace", []string{".git/hooks"}, false, nil)
 	if err != nil {
 		t.Errorf("Expected nil error when .git is symlink, got: %v", err)
 	}
@@ -188,7 +188,7 @@ func TestSetupSecurityMounts_GitFileSkipped(t *testing.T) {
 	}
 
 	// Should skip .git/hooks when .git is a file (no error, just skip)
-	err = SetupSecurityMounts(nil, tmpDir, "/workspace", []string{".git/hooks"}, false)
+	_, err = SetupSecurityMounts(nil, tmpDir, "/workspace", []string{".git/hooks"}, false, nil)
 	if err != nil {
 		t.Errorf("Expected nil error when .git is file, got: %v", err)
 	}
@@ -779,7 +779,7 @@ func TestSetupProtectedPath_RejectsAbsolutePath(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	err = SetupSecurityMounts(nil, tmpDir, "/workspace", []string{"/etc/passwd"}, false)
+	_, err = SetupSecurityMounts(nil, tmpDir, "/workspace", []string{"/etc/passwd"}, false, nil)
 	if err == nil {
 		t.Fatal("Expected error for absolute protected path, got nil")
 	}
@@ -799,7 +799,7 @@ func TestSetupProtectedPath_RejectsTraversal(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	err = SetupSecurityMounts(nil, tmpDir, "/workspace", []string{"../outside"}, false)
+	_, err = SetupSecurityMounts(nil, tmpDir, "/workspace", []string{"../outside"}, false, nil)
 	if err == nil {
 		t.Fatal("Expected error for traversal protected path, got nil")
 	}
@@ -816,7 +816,7 @@ func TestExpandGitWorktreeProtectedPaths(t *testing.T) {
 	in := []string{".git/config"}
 
 	// No .git/worktrees → unchanged.
-	if out := ExpandGitWorktreeProtectedPaths(tmp, in); len(out) != len(in) {
+	if out := ExpandGitWorktreeProtectedPaths(tmp, in, nil); len(out) != len(in) {
 		t.Fatalf("expected no expansion without .git/worktrees, got %v", out)
 	}
 
@@ -836,7 +836,7 @@ func TestExpandGitWorktreeProtectedPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out := ExpandGitWorktreeProtectedPaths(tmp, in)
+	out := ExpandGitWorktreeProtectedPaths(tmp, in, nil)
 	want := filepath.Join(".git", "worktrees", "wt", "config.worktree")
 	found := false
 	for _, p := range out {
@@ -849,5 +849,114 @@ func TestExpandGitWorktreeProtectedPaths(t *testing.T) {
 	}
 	if len(out) != len(in)+1 {
 		t.Errorf("expected exactly one added path, got %v", out)
+	}
+
+	// disable_protection must suppress expansion — the discovered worktree config
+	// is not resurrected when the user turned all protection off.
+	sec := &config.SecurityConfig{DisableProtection: true}
+	if out := ExpandGitWorktreeProtectedPaths(tmp, in, sec); len(out) != len(in) {
+		t.Errorf("disable_protection should suppress worktree expansion, got %v", out)
+	}
+
+	// writable_paths must opt a specific discovered worktree config out of protection.
+	sec = &config.SecurityConfig{WritablePaths: []string{want}}
+	out = ExpandGitWorktreeProtectedPaths(tmp, in, sec)
+	for _, p := range out {
+		if p == want {
+			t.Errorf("writable_paths entry %q should be excluded from expansion, got %v", want, out)
+		}
+	}
+
+	// Idempotent: expanding an already-expanded list must not duplicate the entry
+	// (a duplicate would collide on the derived device name and fail the 2nd mount).
+	expanded := ExpandGitWorktreeProtectedPaths(tmp, in, nil)
+	again := ExpandGitWorktreeProtectedPaths(tmp, expanded, nil)
+	if len(again) != len(expanded) {
+		t.Errorf("re-expanding an expanded list must be a no-op, got %v then %v", expanded, again)
+	}
+	count := 0
+	for _, p := range again {
+		if p == want {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected %q exactly once after double expansion, got %d (%v)", want, count, again)
+	}
+}
+
+// recordingDevices is a container.ContainerDevices that records MountDisk calls,
+// so a test can assert what SetupSecurityMounts actually mounted.
+type recordingDevices struct {
+	mounts []mountedDevice
+}
+
+type mountedDevice struct {
+	name, source, path string
+	shift, readonly    bool
+}
+
+func (r *recordingDevices) MountDisk(name, source, path string, shift, readonly bool) error {
+	r.mounts = append(r.mounts, mountedDevice{name, source, path, shift, readonly})
+	return nil
+}
+func (r *recordingDevices) AddProxyDevice(_, _, _ string, _, _ int) error { return nil }
+func (r *recordingDevices) RemoveDevice(_ string) error                   { return nil }
+func (r *recordingDevices) SetTmpfsSize(_ string) error                   { return nil }
+
+// SetupSecurityMounts must expand the dynamic per-worktree git configs itself —
+// the single chokepoint every caller passes through (issue #545). Passing an EMPTY
+// static list plus an on-disk .git/worktrees/<name>/config.worktree must still
+// result in that file being mounted read-only, proving no caller has to remember
+// to expand.
+func TestSetupSecurityMounts_ExpandsWorktreeConfigsAtChokepoint(t *testing.T) {
+	tmp := t.TempDir()
+	wtDir := filepath.Join(tmp, ".git", "worktrees", "wt")
+	if err := os.MkdirAll(wtDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wtDir, "config.worktree"), []byte("[core]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := &recordingDevices{}
+	effective, err := SetupSecurityMounts(rec, tmp, "/workspace", nil, false, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	want := filepath.Join(".git", "worktrees", "wt", "config.worktree")
+	inList := false
+	for _, p := range effective {
+		if p == want {
+			inList = true
+		}
+	}
+	if !inList {
+		t.Errorf("expected %q in returned effective paths, got %v", want, effective)
+	}
+
+	wantContainerPath := filepath.Join("/workspace", want)
+	mounted := false
+	for _, m := range rec.mounts {
+		if m.path == wantContainerPath {
+			mounted = true
+			if !m.readonly {
+				t.Errorf("worktree config mounted but not read-only: %+v", m)
+			}
+		}
+	}
+	if !mounted {
+		t.Errorf("SetupSecurityMounts did not mount %q through the chokepoint; mounts=%+v", wantContainerPath, rec.mounts)
+	}
+
+	// disable_protection at the chokepoint: nothing is expanded or mounted.
+	rec2 := &recordingDevices{}
+	eff2, err := SetupSecurityMounts(rec2, tmp, "/workspace", nil, false, &config.SecurityConfig{DisableProtection: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(eff2) != 0 || len(rec2.mounts) != 0 {
+		t.Errorf("disable_protection must mount nothing at the chokepoint, got paths=%v mounts=%+v", eff2, rec2.mounts)
 	}
 }

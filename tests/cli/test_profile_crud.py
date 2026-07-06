@@ -7,12 +7,12 @@ import subprocess
 
 
 def test_profile_create_basic(coi_binary, tmp_path):
-    """coi profile create with --image should create a profile and write its config."""
+    """coi profile create should create the profile directory and config.toml."""
     home_coi = tmp_path / ".coi"
     home_coi.mkdir()
 
     result = subprocess.run(
-        [coi_binary, "profile", "create", "test-basic", "--image", "coi-test", "--user"],
+        [coi_binary, "profile", "create", "test-basic", "--user"],
         capture_output=True,
         text=True,
         timeout=30,
@@ -25,8 +25,7 @@ def test_profile_create_basic(coi_binary, tmp_path):
     config_path = home_coi / "profiles" / "test-basic" / "config.toml"
     assert config_path.exists(), f"config.toml not created at {config_path}"
 
-    content = config_path.read_text()
-    assert 'image = "coi-test"' in content
+    assert config_path.read_text() == "", "scaffold is empty — settings are edited in"
 
 
 def test_profile_create_with_inherits(coi_binary, tmp_path):
@@ -40,8 +39,6 @@ def test_profile_create_with_inherits(coi_binary, tmp_path):
             "profile",
             "create",
             "test-inherit",
-            "--image",
-            "coi-test",
             "--inherits",
             "default",
             "--user",
@@ -57,11 +54,11 @@ def test_profile_create_with_inherits(coi_binary, tmp_path):
     config_path = home_coi / "profiles" / "test-inherit" / "config.toml"
     content = config_path.read_text()
     assert 'inherits = "default"' in content
-    assert 'image = "coi-test"' in content
 
 
-def test_profile_create_with_persistent(coi_binary, tmp_path):
-    """coi profile create with --persistent should set persistent = true."""
+def test_profile_create_rejects_removed_flags(coi_binary, tmp_path):
+    """The removed --image/--persistent flags fail on profile create too — the
+    profile's config.toml is the only authoring surface (edit it afterwards)."""
     home_coi = tmp_path / ".coi"
     home_coi.mkdir()
 
@@ -73,11 +70,9 @@ def test_profile_create_with_persistent(coi_binary, tmp_path):
         env={**os.environ, "HOME": str(tmp_path)},
     )
 
-    assert result.returncode == 0, f"Expected exit 0, got {result.returncode}: {result.stderr}"
-
-    config_path = home_coi / "profiles" / "test-persist" / "config.toml"
-    content = config_path.read_text()
-    assert "persistent = true" in content
+    assert result.returncode != 0, "removed flag must fail on profile create as well"
+    assert "flag was removed" in result.stderr, f"want migration hint, got:\n{result.stderr}"
+    assert not (home_coi / "profiles" / "test-persist").exists()
 
 
 def test_profile_create_duplicate_fails(coi_binary, tmp_path):
@@ -89,7 +84,7 @@ def test_profile_create_duplicate_fails(coi_binary, tmp_path):
 
     # First create succeeds
     result = subprocess.run(
-        [coi_binary, "profile", "create", "test-dup", "--image", "img", "--user"],
+        [coi_binary, "profile", "create", "test-dup", "--user"],
         capture_output=True,
         text=True,
         timeout=30,
@@ -99,7 +94,7 @@ def test_profile_create_duplicate_fails(coi_binary, tmp_path):
 
     # Second create fails
     result = subprocess.run(
-        [coi_binary, "profile", "create", "test-dup", "--image", "img2", "--user"],
+        [coi_binary, "profile", "create", "test-dup", "--user"],
         capture_output=True,
         text=True,
         timeout=30,
@@ -137,8 +132,6 @@ def test_profile_create_project_flag(coi_binary, tmp_path):
             "profile",
             "create",
             "test-proj",
-            "--image",
-            "coi-test",
             "--project",
             "--workspace",
             str(tmp_path),
@@ -206,7 +199,7 @@ def test_profile_delete_basic(coi_binary, tmp_path):
 
     # Create
     result = subprocess.run(
-        [coi_binary, "profile", "create", "test-del", "--image", "img", "--user"],
+        [coi_binary, "profile", "create", "test-del", "--user"],
         capture_output=True,
         text=True,
         timeout=30,
@@ -290,7 +283,7 @@ def test_profile_create_visible_in_list(coi_binary, tmp_path):
     env = {**os.environ, "HOME": str(tmp_path)}
 
     result = subprocess.run(
-        [coi_binary, "profile", "create", "list-test", "--image", "coi-test", "--user"],
+        [coi_binary, "profile", "create", "list-test", "--user"],
         capture_output=True,
         text=True,
         timeout=30,
@@ -310,7 +303,7 @@ def test_profile_create_visible_in_list(coi_binary, tmp_path):
 
 
 def test_profile_create_no_flags_produces_empty_config(coi_binary, tmp_path):
-    """Creating a profile with no --image/--inherits/--persistent produces an empty config."""
+    """Creating a profile without --inherits produces an empty config to edit."""
     home_coi = tmp_path / ".coi"
     home_coi.mkdir()
 
@@ -340,8 +333,6 @@ def test_profile_create_auto_detects_project(coi_binary, tmp_path):
             "profile",
             "create",
             "auto-proj",
-            "--image",
-            "img",
             "--workspace",
             str(tmp_path),
         ],
@@ -364,7 +355,7 @@ def test_profile_create_duplicate_across_locations_fails(coi_binary, tmp_path):
 
     # Create at user level
     result = subprocess.run(
-        [coi_binary, "profile", "create", "cross-dup", "--image", "img", "--user"],
+        [coi_binary, "profile", "create", "cross-dup", "--user"],
         capture_output=True,
         text=True,
         timeout=30,
@@ -383,8 +374,6 @@ def test_profile_create_duplicate_across_locations_fails(coi_binary, tmp_path):
             "profile",
             "create",
             "cross-dup",
-            "--image",
-            "img2",
             "--project",
             "--workspace",
             str(project_dir),
@@ -407,7 +396,7 @@ def test_profile_edit_with_true_editor(coi_binary, tmp_path):
 
     # Create a profile first
     result = subprocess.run(
-        [coi_binary, "profile", "create", "edit-test", "--image", "img", "--user"],
+        [coi_binary, "profile", "create", "edit-test", "--user"],
         capture_output=True,
         text=True,
         timeout=30,
@@ -435,7 +424,7 @@ def test_profile_delete_short_flag(coi_binary, tmp_path):
 
     # Create
     result = subprocess.run(
-        [coi_binary, "profile", "create", "test-sf", "--image", "img", "--user"],
+        [coi_binary, "profile", "create", "test-sf", "--user"],
         capture_output=True,
         text=True,
         timeout=30,
