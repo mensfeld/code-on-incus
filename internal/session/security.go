@@ -11,6 +11,8 @@ import (
 	"github.com/mensfeld/code-on-incus/internal/container"
 )
 
+var errGitDirIndirection = errors.New("workspace .git uses gitdir indirection")
+
 // SetupSecurityMounts mounts protected paths as read-only for security.
 // This prevents containers from modifying files that could execute automatically
 // on the host (git hooks, IDE configs, etc.).
@@ -35,8 +37,13 @@ func SetupSecurityMounts(mgr container.ContainerDevices, workspacePath, containe
 		return protectedPaths, nil
 	}
 
+	var warnings []string
 	for _, relPath := range protectedPaths {
 		if err := setupProtectedPath(mgr, workspacePath, containerWorkspacePath, relPath, useShift); err != nil {
+			if errors.Is(err, errGitDirIndirection) {
+				warnings = append(warnings, fmt.Sprintf("%s: %v", relPath, err))
+				continue
+			}
 			// Paths that legitimately cannot be protected (non-git workspace,
 			// a file-type default whose parent directory is missing, or a
 			// user-added path that does not exist in the workspace) surface
@@ -47,6 +54,10 @@ func SetupSecurityMounts(mgr container.ContainerDevices, workspacePath, containe
 				return protectedPaths, fmt.Errorf("failed to protect %s: %w", relPath, err)
 			}
 		}
+	}
+
+	if len(warnings) > 0 {
+		return protectedPaths, errors.New(strings.Join(warnings, "; "))
 	}
 
 	return protectedPaths, nil
@@ -73,13 +84,15 @@ func setupProtectedPath(mgr container.ContainerDevices, workspacePath, container
 			}
 			return fmt.Errorf("failed to stat .git: %w", err)
 		}
-		// Skip if .git is a symlink (worktree pointing elsewhere)
+		// Gitdir indirection means the mounted workspace does not contain the
+		// real git internals. Surface this instead of silently pretending the
+		// workspace is not a repo; otherwise worktrees/submodules lose hook/config
+		// protection without an operator-visible clue (issue #533).
 		if gitInfo.Mode()&os.ModeSymlink != 0 {
-			return os.ErrNotExist // Treat as non-existent for safety
+			return fmt.Errorf("%w: .git is a symlink, so git commands may fail and git protected paths cannot be mounted from the workspace", errGitDirIndirection)
 		}
-		// Skip if .git is a file (worktree/submodule gitdir file)
 		if !gitInfo.IsDir() {
-			return os.ErrNotExist // Treat as non-existent for safety
+			return fmt.Errorf("%w: .git is a file, so git commands may fail and git protected paths are not applied because git internals may live outside the mounted workspace", errGitDirIndirection)
 		}
 	}
 
