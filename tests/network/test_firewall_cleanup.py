@@ -107,13 +107,16 @@ def wait_for_rules_for_ip(coi_binary, container_name, timeout=20):
     """
     deadline = time.time() + timeout
     ip = ""
+    count = 0
     while time.time() < deadline:
         if not ip:
             ip = get_container_ip(coi_binary, container_name) or ""
-        if ip and count_rules_for_ip(ip) > 0:
-            return ip, count_rules_for_ip(ip)
+        if ip:
+            count = count_rules_for_ip(ip)  # counted once — no TOCTOU between guard and return
+            if count > 0:
+                return ip, count
         time.sleep(0.5)
-    return ip, (count_rules_for_ip(ip) if ip else 0)
+    return ip, count
 
 
 def nft_available():
