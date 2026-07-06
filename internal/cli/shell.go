@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"sort"
@@ -153,6 +154,27 @@ func getConfiguredTool(cfg *config.Config) (tool.Tool, error) {
 	}
 
 	return t, nil
+}
+
+// resolveHostGitIdentity reads only the user's trusted global git config. It
+// deliberately avoids project-local git config so an untrusted checkout cannot
+// choose the author identity that will be installed in the container.
+func resolveHostGitIdentity() session.GitIdentity {
+	name := hostGlobalGitConfig("user.name")
+	email := hostGlobalGitConfig("user.email")
+	identity := session.GitIdentity{Name: name, Email: email}
+	if !identity.Complete() {
+		return session.GitIdentity{}
+	}
+	return identity
+}
+
+func hostGlobalGitConfig(key string) string {
+	out, err := exec.Command("git", "config", "--global", "--get", key).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // buildCLICommand builds the CLI command string to execute in the container.
