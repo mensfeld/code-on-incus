@@ -6,6 +6,7 @@ referenced by at least one group in the CI integration matrix.
 Run: python3 scripts/check-ci-coverage.py
 Exit 0 = all covered. Exit 1 = uncovered paths found.
 """
+import re
 import sys
 import yaml
 from pathlib import Path
@@ -16,6 +17,74 @@ NOT_TEST_ENTRIES = {
     "support",      # helper modules (helpers.py etc.)
     "__pycache__",
 }
+
+
+def check_pytest_k_filters(ci: dict, repo: Path) -> list[str]:
+    """Verify `-k` class filters against the classes actually in the file.
+
+    A lane can narrow a big test file to a subset of classes via
+    `pytest_args: -k 'ClassA or ClassB'`. Split across several lanes, this is
+    how test_security_monitoring.py is sharded. The failure mode is silent
+    DRIFT: rename/add a class and a lane's `-k` still "passes" while that class
+    never runs in CI, or a `-k` names a class that no longer exists (dead
+    reference). For every single-file lane path that carries a `-k`, this
+    checks BOTH directions:
+      - every `Test*` class declared in the file is named by some lane's `-k`
+        (nothing falls out of CI), and
+      - every class token in a `-k` matches a real class (no dead reference).
+    """
+    errors: list[str] = []
+    groups = ci["jobs"]["integration"]["strategy"]["matrix"]["test_group"]
+
+    # file path -> union of class tokens across every lane that runs it with -k
+    filtered: dict[str, set[str]] = {}
+    for group in groups:
+        args = group.get("pytest_args", "")
+        # Match either quote style: -k 'A or B' or -k "A or B".
+        m = re.search(r"-k\s+(['\"])(.*?)\1", args)
+        if not m:
+            continue
+        expr = m.group(2).strip()
+        # The guard models pytest's simple "A or B or C" filters (all the CI
+        # matrix uses). Refuse to guess on and/not/parentheses rather than
+        # silently misclassify tokens — a clear error beats a wrong answer.
+        if re.search(r"\band\b|\bnot\b|[()]", expr):
+            errors.append(
+                f"pytest_args {args!r}: the -k drift guard only supports 'A or B or C' "
+                "filters; and/not/parentheses are not modeled. Keep monitoring filters simple."
+            )
+            continue
+        tokens = {t for t in re.split(r"\s+or\s+", expr) if t}
+        py_paths = [p for p in group.get("path", "").split() if p.endswith(".py")]
+        if not py_paths:
+            # A -k on a directory lane applies to every file collected under it;
+            # this guard only validates single-file lanes. Surface it instead of
+            # silently skipping (which would disable the check).
+            errors.append(
+                f"pytest_args {args!r}: a -k filter on a non-single-file lane "
+                f"(path={group.get('path', '')!r}) is not validated by this guard."
+            )
+            continue
+        for path in py_paths:
+            filtered.setdefault(path, set()).update(tokens)
+
+    for path, referenced in sorted(filtered.items()):
+        f = repo / path
+        if not f.exists():
+            errors.append(f"{path}: referenced by a -k lane but the file does not exist")
+            continue
+        declared = set(re.findall(r"^class (Test\w+)", f.read_text(), re.MULTILINE))
+        # pytest -k matches a token as a SUBSTRING of the node id (which contains
+        # the class name), so token "TestFoo" also selects "TestFooExtended".
+        # Model that instead of exact-set equality, or valid substring filters
+        # would be falsely flagged.
+        missing = {c for c in declared if not any(tok in c for tok in referenced)}
+        dead = {tok for tok in referenced if not any(tok in c for c in declared)}
+        for c in sorted(missing):
+            errors.append(f"{path}: class {c} is not selected by any lane's -k filter (it never runs in CI)")
+        for c in sorted(dead):
+            errors.append(f"{path}: -k filter references {c}, which does not exist in the file (dead reference)")
+    return errors
 
 
 def main() -> int:
@@ -68,6 +137,16 @@ def main() -> int:
         print()
         print("Add them to a group in .github/workflows/ci.yml under")
         print("jobs.integration.strategy.matrix.test_group[*].path")
+        return 1
+
+    k_errors = check_pytest_k_filters(ci, repo)
+    if k_errors:
+        print("ERROR: pytest -k class-filter drift in the CI matrix:")
+        for e in k_errors:
+            print(f"  {e}")
+        print()
+        print("Update the lane's pytest_args -k filter in .github/workflows/ci.yml so the")
+        print("union of selected classes matches the Test* classes declared in the file.")
         return 1
 
     print(f"OK: all test paths are covered ({len(covered)} path entries across CI groups)")

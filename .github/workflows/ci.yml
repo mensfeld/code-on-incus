@@ -151,7 +151,7 @@ jobs:
             description: "NFT network monitoring tests"
           - name: monitoring-threats
             path: tests/integration/test_security_monitoring.py
-            pytest_args: "-k 'TestThreatDetection or TestEnvironmentScanningPatterns or TestReverseShellPatterns or TestNetworkThreats or TestPromptInjectionScenario or TestMonitoringFeature'"
+            pytest_args: "-k 'TestThreatDetection or TestEnvironmentScanningPatterns or TestReverseShellPatterns or TestNetworkThreats or TestPromptInjectionScenario'"
             description: "Threat detection tests"
           - name: monitoring-response
             path: tests/integration/test_security_monitoring.py
