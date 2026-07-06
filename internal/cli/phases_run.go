@@ -31,13 +31,14 @@ type runState struct {
 	img            string
 	effectiveAlias string
 
-	// After launch-container
-	mgr          container.ContainerManager
-	wasRestarted bool
-	useShift     bool // resolved by the launch phase's UID-mapping pre-start hook
-
-	// After configure-container
-	containerWorkspace string
+	// After launch-container (mount/socket config is parsed + trust-gated and
+	// all disk devices are attached by the launch phase's pre-start hook; only
+	// the wasRestarted reuse path resolves containerWorkspace later, in
+	// configure-container)
+	mgr                container.ContainerManager
+	wasRestarted       bool
+	useShift           bool                  // resolved by the launch phase's UID-mapping pre-start hook
+	containerWorkspace string                // in-container workspace path
 	mountConfig        *session.MountConfig  // trust-gated
 	socketConfig       *session.SocketConfig // trust-gated
 
@@ -125,31 +126,57 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 			if err != nil {
 				return nil, fmt.Errorf("failed to check if container exists: %w", err)
 			}
+			s.wasRestarted = containerExists && a.persistent
 
-			// Pre-start hook: apply the workspace UID mapping (raw.idmap on a
-			// host/code UID mismatch; Colima/Lima auto-detect) AFTER init but
-			// BEFORE first start, so raw.idmap takes effect (#530). Captures the
-			// resulting shift flag for the later workspace mount. Default until
-			// the hook runs (reused persistent containers skip it).
+			// Mount/socket config is parsed and trust-gated BEFORE launch so the
+			// pre-start hook below can attach every disk device to the stopped
+			// container (all host-side computation; no container required).
+			mc, err := ParseMountConfig(a.cfg)
+			if err != nil {
+				return nil, fmt.Errorf("invalid mount configuration: %w", err)
+			}
+			sc, err := ParseSocketConfig(a.cfg)
+			if err != nil {
+				return nil, fmt.Errorf("invalid socket configuration: %w", err)
+			}
+			// One combined trust gate over mounts + sockets, so the per-source
+			// fingerprint matches what `coi trust` recorded.
+			s.mountConfig, s.socketConfig = a.gateRunForwarding(mc, sc, s.absWorkspace, s.wasRestarted)
+
+			// Pre-start hook: runs AFTER init but BEFORE first start (fresh
+			// launches only; reused persistent containers keep their creation-time
+			// devices and mapping). Two jobs:
+			//  1. Apply the workspace UID mapping (raw.idmap on a host/code UID
+			//     mismatch; Colima/Lima auto-detect) so it takes effect at first
+			//     boot (#530).
+			//  2. Attach ALL disk devices (workspace, additional mounts, security
+			//     + secret masks) to the STOPPED container, exactly like the shell
+			//     path does. The devices then materialize at start, so a
+			//     filesystem that cannot satisfy security.idmap.isolated (e.g. a
+			//     virtiofs workspace under OrbStack/Colima) fails the START — where
+			//     the existing isolation fallback disables isolation and retries —
+			//     instead of failing a post-start hot-mount with no fallback at
+			//     all (issue #534).
+			// If the ephemeral isolation fallback recreates the container, this
+			// hook re-runs on the fresh container, re-applying mapping and devices.
 			s.useShift = !a.cfg.Incus.DisableShift
 			logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
 			preStart := func() error {
 				s.useShift, _ = session.ConfigureUIDMapping(s.containerName, a.cfg.Incus.DisableShift, logFn)
-				return nil
-			}
-
-			if err := launchOrReuseContainer(mgr, s.img, a.cfg.Container.StoragePool, containerExists, a.persistent, preStart); err != nil {
-				return nil, err
-			}
-
-			if err := applyContainerAlias(s.effectiveAlias, s.containerName, s.absWorkspace); err != nil {
-				return nil, err
+				s.containerWorkspace = a.resolveContainerWorkspacePath(s.absWorkspace)
+				return a.applyWorkspaceMounts(mgr, s.containerName, s.absWorkspace, &s.containerWorkspace, s.mountConfig, s.useShift, false)
 			}
 
 			s.mgr = mgr
-			s.wasRestarted = containerExists && a.persistent
-
+			// The teardown pairs with THIS phase's acquisitions: the pre-start
+			// hook applies host-side immutable flags (chattr +i on protected
+			// paths inside the workspace), so their removal belongs here — not in
+			// a later phase whose teardown never registers if that phase (or this
+			// one) fails first. Leaked +i flags make the workspace undeletable
+			// (pytest tmpdir cleanup EPERM).
 			teardown := func() {
+				logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
+				session.RemoveImmutable(s.containerName, logFn)
 				if !a.persistent {
 					fmt.Fprintf(os.Stderr, "Cleaning up container %s...\n", s.containerName)
 					_ = s.mgr.Delete(true)
@@ -160,14 +187,37 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 					}
 				}
 			}
+
+			if err := launchOrReuseContainer(mgr, s.img, a.cfg.Container.StoragePool, s.containerName, containerExists, a.persistent, preStart); err != nil {
+				// No teardown on a failed launch: launchOrReuseContainer already
+				// removed the half-created container when it was safe to (never a
+				// running one — a concurrent invocation may own it), and the
+				// teardown's unconditional delete must not fire on a container
+				// that may not be ours. Only the immutable flags the pre-start
+				// hook may have applied need releasing here.
+				logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
+				session.RemoveImmutable(s.containerName, logFn)
+				return nil, err
+			}
+
+			// From here the container is definitively ours (we created or
+			// restarted it) — register the teardown, including alongside an
+			// error: the pipeline registers teardowns returned with a failed Run.
+			if err := applyContainerAlias(s.effectiveAlias, s.containerName, s.absWorkspace); err != nil {
+				return teardown, err
+			}
+
 			return teardown, nil
 		},
 	}
 }
 
 // configureContainerRunPhase applies resource limits, waits for the container
-// to be ready, remaps UID/GID if needed, mounts the workspace and security
-// paths, and registers an immutable-removal teardown.
+// to be ready, and remaps the code user's UID/GID if configured. Disk devices
+// (workspace, additional mounts, security + secret overlays) and the immutable
+// flags are the launch phase's job now — attached by its pre-start hook,
+// released by its teardown (#534); only the wasRestarted reuse path resolves
+// its existing workspace mount path here.
 func (a *App) configureContainerRunPhase(s *runState) session.Phase {
 	return session.PhaseFunc{
 		PhaseName: "configure-container",
@@ -220,47 +270,24 @@ func (a *App) configureContainerRunPhase(s *runState) session.Phase {
 				}
 			}
 
-			mc, err := ParseMountConfig(a.cfg)
-			if err != nil {
-				return nil, fmt.Errorf("invalid mount configuration: %w", err)
-			}
-			sc, err := ParseSocketConfig(a.cfg)
-			if err != nil {
-				return nil, fmt.Errorf("invalid socket configuration: %w", err)
-			}
-			// One combined trust gate over mounts + sockets, so the per-source
-			// fingerprint matches what `coi trust` recorded.
-			s.mountConfig, s.socketConfig = a.gateRunForwarding(mc, sc, s.absWorkspace, s.wasRestarted)
-
-			s.containerWorkspace = a.resolveContainerWorkspacePath(s.absWorkspace)
-			// Configure UID mapping (Colima/Lima auto-detect + raw.idmap on a
-			// host-UID/code-UID mismatch) the same way the shell pipeline does.
-			// Previously `coi run` only did `useShift := !DisableShift` with no
-			// idmap handling, so a workspace owned by a non-1000 host UID (macOS
-			// user 501, a CI runner at 1001) was unwritable by the code user
-			// (issue #530). Skip when reusing a persistent container — its mount
-			// devices and raw.idmap were set at creation time.
-			// UID mapping (raw.idmap on a host/code UID mismatch, Colima/Lima
-			// auto-detect) was applied by the launch phase's pre-start hook so
-			// raw.idmap takes effect at first boot (#530). s.useShift carries
-			// the resulting shift flag; reused persistent containers keep their
-			// creation-time mapping (default shift from config).
-			useShift := s.useShift
+			// Disk devices (workspace, additional mounts, security + secret masks)
+			// and the UID mapping were applied by the launch phase's pre-start
+			// hook, BEFORE first start — so raw.idmap takes effect at boot (#530)
+			// and a device on an idmap-incompatible filesystem (virtiofs) fails
+			// the start where the isolation fallback covers it (#534). Only a
+			// reused persistent container has work left here: resolve its existing
+			// workspace mount path from the container config.
 			if s.wasRestarted {
-				useShift = !a.cfg.Incus.DisableShift
-			}
-			if err := a.applyWorkspaceMounts(s.mgr, s.containerName, s.absWorkspace, &s.containerWorkspace, s.mountConfig, useShift, s.wasRestarted); err != nil {
-				return nil, err
+				if err := a.applyWorkspaceMounts(s.mgr, s.containerName, s.absWorkspace, &s.containerWorkspace, s.mountConfig, !a.cfg.Incus.DisableShift, true); err != nil {
+					return nil, err
+				}
 			}
 
-			// LIFO teardown: apply-network's teardown runs before this one;
-			// the critical constraint (network before container deletion) is
-			// satisfied by the launch-container teardown running last.
-			teardown := func() {
-				logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
-				session.RemoveImmutable(s.containerName, logFn)
-			}
-			return teardown, nil
+			// No teardown: the immutable-flag removal moved to the launch phase's
+			// teardown, alongside the pre-start hook that now applies them —
+			// so it runs even when a later phase (this one included) fails
+			// before registering anything.
+			return nil, nil
 		},
 	}
 }

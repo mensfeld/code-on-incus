@@ -585,9 +585,10 @@ jobs:
   # isColimaOrLimaEnvironment() is genuinely TRUE (it keys on virtiofs in
   # /proc/mounts), reproducing the macOS Colima/Lima environment class (#530,
   # #534, #221, #45) that hosted macOS runners cannot cover (Colima needs Intel
-  # nested virt; GitHub retired those runners). Test workspaces stay on the
-  # guest's NATIVE fs (pytest tmp_path -> /tmp): a virtiofs-backed workspace
-  # reproduces open bug #534 and joins this lane together with its fix.
+  # nested virt; GitHub retired those runners). Most test workspaces live on the
+  # guest's native fs (pytest tmp_path -> /tmp); the #534 regression test
+  # deliberately puts its workspace ON the virtiofs mount to prove the
+  # isolation fallback covers idmap-incompatible device filesystems.
   lima-smoke:
     name: Lima Smoke (COI inside a Lima VM, virtiofs)
     runs-on: ubuntu-24.04
@@ -613,13 +614,30 @@ jobs:
       - name: Enable KVM (fail fast if unavailable)
         run: |
           # Standard GitHub pattern for /dev/kvm access on Linux runners.
+          # udev applies the rule ASYNCHRONOUSLY: without settle + retry the
+          # permission check races the mode change (observed: identical code
+          # passed twice, then failed on the third run purely on timing).
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
+          sudo udevadm settle --timeout=15 || true
+          for i in 1 2 3 4 5; do
+            if [ -r /dev/kvm ] && [ -w /dev/kvm ]; then break; fi
+            sleep 2
+          done
+          # Node exists but perms still not applied -> set them directly (the
+          # udev rule stays in place for any future node re-creation).
+          if [ -e /dev/kvm ] && { [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; }; then
+            sudo chmod 666 /dev/kvm
+          fi
           if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
             echo "FATAL: /dev/kvm not usable — this lane must not run under TCG emulation"
+            ls -l /dev/kvm 2>&1 || echo "(no /dev/kvm node at all)"
+            lsmod | grep -i kvm || echo "(no kvm modules loaded)"
+            grep -m1 -oE 'vmx|svm' /proc/cpuinfo || echo "(no virt extensions in cpuinfo)"
             exit 1
           fi
+          ls -l /dev/kvm
           # Rust virtiofsd sandboxes itself via unprivileged user namespaces;
           # make sure noble's restriction cannot block it (cheap insurance).
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
@@ -712,13 +730,17 @@ jobs:
         run: |
           # Single-quoted body: $HOME resolves in the GUEST (/home/<user>.guest,
           # native fs) where the venv lives. cwd is the virtiofs-mounted checkout.
+          # COI_TEST_VIRTIOFS_DIR is quote-spliced from the HOST shell: the host
+          # $HOME is the virtiofs mount inside the guest — the #534 regression
+          # test creates its workspace there.
           # No --cov: it measures test code only (all native lanes already emit it)
           # and coverage's SQLite file on virtiofs is a needless flake surface.
           limactl shell --workdir "$GITHUB_WORKSPACE" coi -- bash -c '
             set -euo pipefail
             export COI_BINARY=/usr/local/bin/coi
+            export COI_TEST_VIRTIOFS_DIR="'"$HOME"'"
             exec "$HOME/venv/bin/python" -m pytest \
-              tests/run/test_uid_mapping.py tests/run/test_run_script.py \
+              tests/run/test_uid_mapping.py tests/run/test_run_script.py tests/run/test_virtiofs_workspace.py \
               -v --tb=short --durations=0
           '
 

@@ -165,10 +165,23 @@ func (a *App) runCommand(cmd *cobra.Command, args []string) error {
 
 // launchOrReuseContainer restarts an existing persistent container, or
 // recreates / creates a fresh one on the given storage pool.
-func launchOrReuseContainer(mgr container.ContainerManager, img, pool string, containerExists, persistent bool, preStart func() error) error {
+func launchOrReuseContainer(mgr container.ContainerManager, img, pool, containerName string, containerExists, persistent bool, preStart func() error) error {
 	if containerExists && persistent {
+		// Fail fast on an already-running container (another session may own
+		// it). Master's plain Start() errored here; StartWithIsolationFallback's
+		// came-up-anyway poll would misread "already running" as success and let
+		// two sessions share one container — the first to exit would stop it
+		// under the second.
+		if running, _ := mgr.Running(); running {
+			return fmt.Errorf("container %s is already running — another session may be using it; pick a different --slot or stop it first", containerName)
+		}
 		fmt.Fprintf(os.Stderr, "Restarting existing persistent container...\n")
-		if err := mgr.Start(); err != nil {
+		// Start with the isolation fallback: the container's disk devices (set at
+		// creation) materialize at start, and one on an idmap-incompatible
+		// filesystem (virtiofs workspace, #534) fails the start under
+		// security.idmap.isolated — same class the fresh-launch path handles.
+		// Safe for persistent containers: a failed start does not delete them.
+		if err := container.StartWithIsolationFallback(containerName); err != nil {
 			return fmt.Errorf("failed to start container: %w", err)
 		}
 		return nil
@@ -180,9 +193,20 @@ func launchOrReuseContainer(mgr container.ContainerManager, img, pool string, co
 		}
 	}
 	ephemeral := !persistent
-	// preStart applies start-time-only settings (raw.idmap for the workspace
-	// UID mapping) between init and first start — see #530.
+	// preStart applies start-time-only settings between init and first start:
+	// raw.idmap for the workspace UID mapping (#530) and every disk device, so
+	// idmap-incompatible device filesystems fail the START where the isolation
+	// fallback covers them (#534).
 	if err := mgr.LaunchWithPreStart(img, ephemeral, pool, preStart); err != nil {
+		// Best-effort cleanup of the half-created container: a preStart/start
+		// failure leaves it behind stopped and half-configured (stopped
+		// ephemeral containers are only auto-deleted after having run, and a
+		// persistent corpse would be reused broken by the next run). Never
+		// delete a RUNNING container — if a concurrent invocation won the name
+		// race (our init failed with "already exists"), it is theirs.
+		if running, _ := mgr.Running(); !running {
+			_ = mgr.Delete(true)
+		}
 		return fmt.Errorf("failed to launch container: %w", err)
 	}
 	return nil
@@ -246,13 +270,24 @@ func remapContainerUserIfNeeded(mgr container.ContainerManager, wasRestarted boo
 	}
 	fmt.Fprintf(os.Stderr, "Remapping user %s from UID 1000 to %d...\n", container.CodeUser, container.CodeUID)
 	remapCmd := fmt.Sprintf(
-		"groupmod -g %d %s && usermod -u %d -g %d %s && chown -R %s:%s /home/%s",
+		"groupmod -g %d %s && usermod -u %d -g %d %s",
 		container.CodeUID, container.CodeUser,
 		container.CodeUID, container.CodeUID, container.CodeUser,
-		container.CodeUser, container.CodeUser, container.CodeUser,
 	)
 	if _, err := mgr.ExecCommand(remapCmd, container.ExecCommandOptions{Capture: true}); err != nil {
 		return fmt.Errorf("failed to remap user %s to UID %d: %w", container.CodeUser, container.CodeUID, err)
+	}
+	// The home-ownership sweep is best-effort, separately from the remap
+	// itself: disk devices attach pre-start now (#534), so a user-configured
+	// mount under /home/<code> is already live here — a readonly one makes
+	// chown -R exit non-zero after fixing everything it could, which must not
+	// abort the run (the remap succeeded; only some mounted paths kept their
+	// ownership, as they would have on the host).
+	chownCmd := fmt.Sprintf("chown -R %s:%s /home/%s", container.CodeUser, container.CodeUser, container.CodeUser)
+	if _, err := mgr.ExecCommand(chownCmd, container.ExecCommandOptions{Capture: true}); err != nil {
+		fmt.Fprintf(os.Stderr,
+			"Warning: could not chown all of /home/%s after UID remap (a read-only mount under it is expected to fail): %v\n",
+			container.CodeUser, err)
 	}
 	return nil
 }
