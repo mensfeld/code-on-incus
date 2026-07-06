@@ -11,7 +11,8 @@ Network isolation is implemented using nft rules.
 
 import pathlib
 import subprocess
-import time
+
+from support.helpers import wait_for_firewall_rules
 
 
 def test_restricted_blocks_local_gateway(coi_binary, workspace_dir, cleanup_containers):
@@ -63,8 +64,8 @@ def test_restricted_blocks_local_gateway(coi_binary, workspace_dir, cleanup_cont
         f"Should find container name in output. stderr: {result.stderr}"
     )
 
-    # Give container time to fully start
-    time.sleep(5)
+    # Wait (poll) for the container's network setup to land instead of a fixed sleep.
+    wait_for_firewall_rules(container_name)
 
     # Discover the gateway IP from inside the container
     # Using 'ip route show default' to find the gateway
