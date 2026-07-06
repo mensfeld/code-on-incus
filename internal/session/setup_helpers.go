@@ -14,21 +14,31 @@ import (
 // These VMs use virtiofs for mounting host directories and already handle UID mapping
 // at the VM level, making Incus's shift=true unnecessary and problematic
 func isColimaOrLimaEnvironment() bool {
-	// Check for virtiofs mounts which are characteristic of Lima/Colima
-	data, err := os.ReadFile("/proc/mounts")
-	if err != nil {
+	data, _ := os.ReadFile("/proc/mounts")
+	osRelease, _ := os.ReadFile("/proc/sys/kernel/osrelease")
+	return detectColimaOrLima(string(data), os.Getenv("USER"), string(osRelease))
+}
+
+// detectColimaOrLima is the pure decision logic behind isColimaOrLimaEnvironment,
+// split out so it can be unit tested without touching the real filesystem.
+//
+// OrbStack also mounts the host filesystem via virtiofs, so a bare virtiofs
+// check false-positives on it too — but unlike Colima/Lima, OrbStack's
+// virtiofs mounts do support idmapped shift mounts fine, so it's excluded
+// up front via its guest kernel's release string (e.g. "7.0.11-orbstack-...").
+func detectColimaOrLima(mounts, user, osRelease string) bool {
+	if strings.Contains(strings.ToLower(osRelease), "orbstack") {
 		return false
 	}
 
 	// Lima mounts host directories via virtiofs (e.g., "mount0 on /Users/... type virtiofs")
 	// Colima uses Lima under the hood, so same detection applies
-	mounts := string(data)
 	if strings.Contains(mounts, "virtiofs") {
 		return true
 	}
 
 	// Additional check: Lima typically runs as the "lima" user
-	if user := os.Getenv("USER"); user == "lima" {
+	if user == "lima" {
 		return true
 	}
 
