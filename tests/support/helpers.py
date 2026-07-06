@@ -1270,3 +1270,22 @@ def calculate_container_name(workspace_dir, slot):
 
     # Format: {prefix}{hash}-{slot}
     return f"{prefix}{workspace_id}-{slot}"
+
+
+def extract_container_name(result):
+    """Extract the container name a `coi shell --background` launch reported.
+
+    Complements calculate_container_name (which derives the EXPECTED name from
+    workspace+slot); this reads the ACTUAL name from the launch output. Handles
+    both the `--debug` line ("Container name: <n>") and the plain "Container: <n>"
+    line, searching stderr then stdout. Returns the name, or None if not found.
+
+    result: a subprocess.CompletedProcess from `coi shell --background` (text mode).
+    """
+    for stream in (result.stderr or "", result.stdout or ""):
+        for line in stream.splitlines():
+            if "Container name:" in line:
+                return line.split("Container name:")[-1].strip()
+            if "Container: " in line:
+                return line.split("Container: ")[-1].strip()
+    return None

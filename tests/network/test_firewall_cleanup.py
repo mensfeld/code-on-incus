@@ -18,6 +18,8 @@ import subprocess
 import time
 from pathlib import Path
 
+from support.helpers import extract_container_name
+
 
 def get_container_ip(coi_binary, container_name):
     """Get container IP using coi container exec with --capture."""
@@ -176,11 +178,7 @@ mode = "open"
     assert result.returncode == 0, f"Shell should start. stderr: {result.stderr}"
 
     # Extract container name
-    container_name = None
-    for line in result.stderr.split("\n"):
-        if "Container name:" in line:
-            container_name = line.split("Container name:")[-1].strip()
-            break
+    container_name = extract_container_name(result)
 
     assert container_name, f"Should find container name. stderr: {result.stderr}"
 
@@ -257,11 +255,7 @@ mode = "restricted"
     assert result.returncode == 0, f"Shell should start. stderr: {result.stderr}"
 
     # Extract container name
-    container_name = None
-    for line in result.stderr.split("\n"):
-        if "Container name:" in line:
-            container_name = line.split("Container name:")[-1].strip()
-            break
+    container_name = extract_container_name(result)
 
     assert container_name, f"Should find container name. stderr: {result.stderr}"
 
@@ -339,11 +333,7 @@ mode = "open"
             continue
 
         # Extract container name
-        container_name = None
-        for line in result.stderr.split("\n"):
-            if "Container name:" in line:
-                container_name = line.split("Container name:")[-1].strip()
-                break
+        container_name = extract_container_name(result)
 
         if not container_name:
             continue
@@ -429,11 +419,7 @@ mode = "restricted"
     assert result.returncode == 0, f"Shell should start. stderr: {result.stderr}"
 
     # Extract container name
-    container_name = None
-    for line in result.stderr.split("\n"):
-        if "Container name:" in line:
-            container_name = line.split("Container name:")[-1].strip()
-            break
+    container_name = extract_container_name(result)
 
     assert container_name, "Should find container name"
 
