@@ -40,13 +40,33 @@ def check_pytest_k_filters(ci: dict, repo: Path) -> list[str]:
     filtered: dict[str, set[str]] = {}
     for group in groups:
         args = group.get("pytest_args", "")
-        m = re.search(r"-k\s+'([^']*)'", args)
+        # Match either quote style: -k 'A or B' or -k "A or B".
+        m = re.search(r"-k\s+(['\"])(.*?)\1", args)
         if not m:
             continue
-        tokens = {t for t in re.split(r"\s+or\s+", m.group(1).strip()) if t.startswith("Test")}
-        for path in group.get("path", "").split():
-            if path.endswith(".py"):
-                filtered.setdefault(path, set()).update(tokens)
+        expr = m.group(2).strip()
+        # The guard models pytest's simple "A or B or C" filters (all the CI
+        # matrix uses). Refuse to guess on and/not/parentheses rather than
+        # silently misclassify tokens — a clear error beats a wrong answer.
+        if re.search(r"\band\b|\bnot\b|[()]", expr):
+            errors.append(
+                f"pytest_args {args!r}: the -k drift guard only supports 'A or B or C' "
+                "filters; and/not/parentheses are not modeled. Keep monitoring filters simple."
+            )
+            continue
+        tokens = {t for t in re.split(r"\s+or\s+", expr) if t}
+        py_paths = [p for p in group.get("path", "").split() if p.endswith(".py")]
+        if not py_paths:
+            # A -k on a directory lane applies to every file collected under it;
+            # this guard only validates single-file lanes. Surface it instead of
+            # silently skipping (which would disable the check).
+            errors.append(
+                f"pytest_args {args!r}: a -k filter on a non-single-file lane "
+                f"(path={group.get('path', '')!r}) is not validated by this guard."
+            )
+            continue
+        for path in py_paths:
+            filtered.setdefault(path, set()).update(tokens)
 
     for path, referenced in sorted(filtered.items()):
         f = repo / path
@@ -54,8 +74,12 @@ def check_pytest_k_filters(ci: dict, repo: Path) -> list[str]:
             errors.append(f"{path}: referenced by a -k lane but the file does not exist")
             continue
         declared = set(re.findall(r"^class (Test\w+)", f.read_text(), re.MULTILINE))
-        missing = declared - referenced  # classes that never run in any lane
-        dead = referenced - declared  # -k names a class that isn't in the file
+        # pytest -k matches a token as a SUBSTRING of the node id (which contains
+        # the class name), so token "TestFoo" also selects "TestFooExtended".
+        # Model that instead of exact-set equality, or valid substring filters
+        # would be falsely flagged.
+        missing = {c for c in declared if not any(tok in c for tok in referenced)}
+        dead = {tok for tok in referenced if not any(tok in c for c in declared)}
         for c in sorted(missing):
             errors.append(f"{path}: class {c} is not selected by any lane's -k filter (it never runs in CI)")
         for c in sorted(dead):

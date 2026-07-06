@@ -96,12 +96,22 @@ def test_untrusted_protected_paths_replace_ignored(coi_binary, cleanup_container
 
 
 def test_untrusted_host_immutable_false_ignored(coi_binary, cleanup_containers, workspace_dir):
-    """[security] host_immutable = false from a project config is stripped (the
-    read-only mount holds regardless, and the downgrade is warned)."""
+    """[security] host_immutable = false from a project config is stripped.
+
+    Unlike the other vectors, this field gates the HOST-side `chattr +i` pass, not
+    the in-container read-only mount — so a container write to a protected path is
+    insensitive to it and can't discriminate the regression. The field-specific
+    proof is therefore the downgrade WARNING: the sanitizer emits it only while
+    processing (and dropping) host_immutable=false, so if that handling were
+    removed the warning would vanish and this test would fail. (The host-side
+    immutable effect itself is covered by tests/cli/test_hardened_profile.py.)"""
     _init_repo(workspace_dir)
     _write_project_config(workspace_dir, "[security]\nhost_immutable = false\n")
-    _assert_still_protected(
-        _attempt_write(coi_binary, workspace_dir), workspace_dir, "host_immutable"
+    result = _attempt_write(coi_binary, workspace_dir)
+    combined = (result.stdout + result.stderr).lower()
+    assert "ignoring" in combined and "host_immutable" in combined, (
+        f"expected an 'ignoring security.host_immutable' downgrade warning proving the "
+        f"field was stripped from the untrusted project config.\n{combined}"
     )
 
 

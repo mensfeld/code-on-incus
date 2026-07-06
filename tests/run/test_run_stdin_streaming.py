@@ -11,7 +11,9 @@ Both are exercised against a real container, so they are integration tests
 handle isolation + teardown.
 """
 
+import select
 import subprocess
+import tempfile
 import time
 
 
@@ -44,36 +46,58 @@ def test_run_output_streams_before_completion(coi_binary, cleanup_containers, wo
     the process exits (by at least most of the sleep gap), which is impossible
     with buffer-until-completion semantics."""
     gap = 8  # seconds between the two prints
-    proc = subprocess.Popen(
-        [
-            coi_binary,
-            "run",
-            "--workspace",
-            workspace_dir,
-            "--",
-            "bash",
-            "-c",
-            f"echo FIRST_LINE_MARKER; sleep {gap}; echo SECOND_LINE_MARKER",
-        ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,  # coi setup chatter goes here; ignore it
-        text=True,
-    )
-    t_first = None
-    try:
-        # Read stdout line by line; record when the first command output arrives.
-        for line in proc.stdout:
-            if "FIRST_LINE_MARKER" in line:
-                t_first = time.monotonic()
-                break
-        assert t_first is not None, "never saw the first line on stdout"
-        proc.wait(timeout=180)
-        t_exit = time.monotonic()
-    finally:
-        if proc.poll() is None:
-            proc.kill()
-            proc.wait()
+    overall_deadline = 180  # hard cap: never let a stalled read hang the CI lane
+    # Capture stderr to a temp file (not DEVNULL) so a failure has coi's launch
+    # diagnostics; not a PIPE, to avoid a full-pipe-buffer deadlock if unread.
+    with tempfile.TemporaryFile(mode="w+") as errf:
+        proc = subprocess.Popen(
+            [
+                coi_binary,
+                "run",
+                "--workspace",
+                workspace_dir,
+                "--",
+                "bash",
+                "-c",
+                f"echo FIRST_LINE_MARKER; sleep {gap}; echo SECOND_LINE_MARKER",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=errf,
+            text=True,
+        )
+        t_first = None
+        try:
+            # Bounded read: select() with a shrinking deadline so a coi that
+            # stalls before emitting the first line fails the test in finite time
+            # (a bare `for line in proc.stdout` would block until the job timeout).
+            deadline = time.monotonic() + overall_deadline
+            while t_first is None and time.monotonic() < deadline:
+                ready, _, _ = select.select([proc.stdout], [], [], deadline - time.monotonic())
+                if not ready:
+                    break
+                line = proc.stdout.readline()
+                if line == "":  # EOF
+                    break
+                if "FIRST_LINE_MARKER" in line:
+                    t_first = time.monotonic()
+            if t_first is None:
+                errf.seek(0)
+                raise AssertionError(
+                    f"never saw the first stdout line within {overall_deadline}s.\n"
+                    f"coi stderr:\n{errf.read()}"
+                )
+            rc = proc.wait(timeout=deadline - time.monotonic())
+            t_exit = time.monotonic()
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+            proc.stdout.close()
 
+        errf.seek(0)
+        stderr_text = errf.read()
+
+    assert rc == 0, f"the streamed command should exit 0, got {rc}.\ncoi stderr:\n{stderr_text}"
     # If output were buffered until the command finished, the first line and the
     # process exit would be near-simultaneous (delta ~0). Live streaming means the
     # first line arrives, THEN the sleep+second-line+teardown elapse before exit.
