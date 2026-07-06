@@ -25,6 +25,8 @@ import tempfile
 
 import pytest
 
+from support.helpers import calculate_container_name
+
 
 def _virtiofs_dir_or_skip():
     """Return the configured virtiofs directory, or skip if unavailable/unfit."""
@@ -34,14 +36,21 @@ def _virtiofs_dir_or_skip():
     if not os.path.isdir(vdir):
         pytest.skip(f"COI_TEST_VIRTIOFS_DIR={vdir} is not a directory")
     # The directory must actually be on virtiofs — guard against a misconfigured
-    # env var silently degrading this into a plain native-fs test.
+    # env var silently degrading this into a plain native-fs test. The match is
+    # path-boundary-aware: in the Lima guest, the NATIVE home /home/runner.guest
+    # startswith the virtiofs mount point /home/runner — a bare prefix match
+    # would wave exactly the wrong directory through.
     try:
         with open("/proc/mounts") as f:
             mounts = f.read()
     except OSError:
         pytest.skip("cannot read /proc/mounts")
+
+    def _under(path, mount_point):
+        return path == mount_point or path.startswith(mount_point.rstrip("/") + "/")
+
     on_virtiofs = any(
-        len(parts) > 2 and parts[2] == "virtiofs" and vdir.startswith(parts[1])
+        len(parts) > 2 and parts[2] == "virtiofs" and _under(vdir, parts[1])
         for parts in (line.split() for line in mounts.splitlines())
     )
     if not on_virtiofs:
@@ -95,4 +104,15 @@ def test_run_works_with_virtiofs_workspace(coi_binary):
                 "the writer inside the container should be code (uid 1000)"
             )
     finally:
+        # This workspace is NOT the cleanup_containers fixture's workspace_dir,
+        # so that fixture cannot compute this test's container names. If coi was
+        # SIGKILLed (subprocess timeout) its own teardown never ran — force-kill
+        # the slots for THIS workspace so a leaked container doesn't outlive the
+        # test (and doesn't pin the virtiofs tmpdir against rmtree).
+        for slot in range(1, 11):
+            subprocess.run(
+                ["incus", "delete", calculate_container_name(workspace, slot), "--force"],
+                capture_output=True,
+                check=False,
+            )
         shutil.rmtree(workspace, ignore_errors=True)

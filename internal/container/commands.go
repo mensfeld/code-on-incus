@@ -287,16 +287,25 @@ func IncusFilePush(source, destination string) error {
 	return IncusFilePushContext(context.Background(), source, destination)
 }
 
-// StartWithIsolationFallback starts a non-ephemeral container that has
+// StartWithIsolationFallback starts a non-ephemeral container that may have
 // security.idmap.isolated set, with automatic fallback if the host doesn't
-// support it. Intended for non-ephemeral containers (setup.go path) — stopped
-// containers are not deleted, so a simple unset+retry is sufficient.
+// support it. Intended for non-ephemeral containers (setup.go path, run's
+// persistent reuse) — stopped containers are not deleted, so unset+retry works.
 //
 // On some hosts (nested containers, CI runners), forkstart exits non-zero even
 // though the LXC process started successfully. We poll ContainerRunning for up
 // to 5 s before deciding the container failed to start.
+//
+// The fallback is careful not to downgrade a container it didn't help:
+//   - a second attempt runs with isolation INTACT first, so transient failures
+//     (incusd blip, slow storage) recover without touching the security posture;
+//   - the prior isolated state is captured, and restored if the post-unset
+//     retry fails too — an unrelated permanent failure (corrupt rootfs, missing
+//     mount source) must not leave a persistent container silently un-isolated
+//     for every future session.
 func StartWithIsolationFallback(containerName string) error {
-	if err := IncusExec("start", containerName); err == nil {
+	firstErr := IncusExec("start", containerName)
+	if firstErr == nil {
 		return nil
 	}
 	// Poll: maybe it came up despite the forkstart error (soft error on some hosts).
@@ -307,12 +316,31 @@ func StartWithIsolationFallback(containerName string) error {
 			return nil
 		}
 	}
-	// Container didn't come up; unset isolation and retry.
+	// Retry once with isolation intact: transient failures recover here.
+	if retryErr := IncusExec("start", containerName); retryErr == nil {
+		return nil
+	}
+	if running, _ := ContainerRunning(containerName); running {
+		return nil
+	}
+	// Persistent failure — isolation may genuinely be unsupported. Surface the
+	// original error so a non-isolation root cause isn't misattributed, capture
+	// the prior flag state, then unset and retry.
+	fmt.Fprintf(os.Stderr, "Container start failed: %v\n", firstErr)
+	wasIsolated := false
+	if out, err := IncusOutput("config", "get", containerName, "security.idmap.isolated"); err == nil {
+		wasIsolated = strings.TrimSpace(out) == "true"
+	}
 	fmt.Fprintf(os.Stderr, "Warning: UID namespace isolation not available in this environment, disabling and retrying\n")
 	_ = IncusExecQuiet("config", "unset", containerName, "security.idmap.isolated")
 	if retryErr := IncusExec("start", containerName); retryErr != nil {
 		if running, _ := ContainerRunning(containerName); running {
 			return nil
+		}
+		// The fallback didn't help — the failure is not isolation-related.
+		// Restore the container's isolation so the failed run leaves no trace.
+		if wasIsolated {
+			_ = IncusExecQuiet("config", "set", containerName, "security.idmap.isolated=true")
 		}
 		return retryErr
 	}

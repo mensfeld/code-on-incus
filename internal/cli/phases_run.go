@@ -31,13 +31,14 @@ type runState struct {
 	img            string
 	effectiveAlias string
 
-	// After launch-container
-	mgr          container.ContainerManager
-	wasRestarted bool
-	useShift     bool // resolved by the launch phase's UID-mapping pre-start hook
-
-	// After configure-container
-	containerWorkspace string
+	// After launch-container (mount/socket config is parsed + trust-gated and
+	// all disk devices are attached by the launch phase's pre-start hook; only
+	// the wasRestarted reuse path resolves containerWorkspace later, in
+	// configure-container)
+	mgr                container.ContainerManager
+	wasRestarted       bool
+	useShift           bool                  // resolved by the launch phase's UID-mapping pre-start hook
+	containerWorkspace string                // in-container workspace path
 	mountConfig        *session.MountConfig  // trust-gated
 	socketConfig       *session.SocketConfig // trust-gated
 
@@ -172,8 +173,7 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 			// paths inside the workspace), so their removal belongs here — not in
 			// a later phase whose teardown never registers if that phase (or this
 			// one) fails first. Leaked +i flags make the workspace undeletable
-			// (pytest tmpdir cleanup EPERM). Returned even alongside an error:
-			// the pipeline registers teardowns returned with a failed Run.
+			// (pytest tmpdir cleanup EPERM).
 			teardown := func() {
 				logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
 				session.RemoveImmutable(s.containerName, logFn)
@@ -189,9 +189,20 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 			}
 
 			if err := launchOrReuseContainer(mgr, s.img, a.cfg.Container.StoragePool, s.containerName, containerExists, a.persistent, preStart); err != nil {
-				return teardown, err
+				// No teardown on a failed launch: launchOrReuseContainer already
+				// removed the half-created container when it was safe to (never a
+				// running one — a concurrent invocation may own it), and the
+				// teardown's unconditional delete must not fire on a container
+				// that may not be ours. Only the immutable flags the pre-start
+				// hook may have applied need releasing here.
+				logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
+				session.RemoveImmutable(s.containerName, logFn)
+				return nil, err
 			}
 
+			// From here the container is definitively ours (we created or
+			// restarted it) — register the teardown, including alongside an
+			// error: the pipeline registers teardowns returned with a failed Run.
 			if err := applyContainerAlias(s.effectiveAlias, s.containerName, s.absWorkspace); err != nil {
 				return teardown, err
 			}
@@ -202,8 +213,11 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 }
 
 // configureContainerRunPhase applies resource limits, waits for the container
-// to be ready, remaps UID/GID if needed, mounts the workspace and security
-// paths, and registers an immutable-removal teardown.
+// to be ready, and remaps the code user's UID/GID if configured. Disk devices
+// (workspace, additional mounts, security + secret overlays) and the immutable
+// flags are the launch phase's job now — attached by its pre-start hook,
+// released by its teardown (#534); only the wasRestarted reuse path resolves
+// its existing workspace mount path here.
 func (a *App) configureContainerRunPhase(s *runState) session.Phase {
 	return session.PhaseFunc{
 		PhaseName: "configure-container",
