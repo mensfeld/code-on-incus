@@ -572,8 +572,18 @@ func DisableIPv6AtBoot(containerName string) error {
 		"linux.sysctl.net.ipv6.conf.default.disable_ipv6=1")
 }
 
-// networkdIPv4OnlyConfig manages eth0 as IPv4-only. The 05- prefix sorts before
-// netplan's generated 10-netplan-eth0.network, so systemd-networkd uses this one.
+// networkdConfigFilename is the on-disk name of the coi networkd config. The
+// 05- prefix must sort before netplan's generated 10-netplan-eth0.network so
+// systemd-networkd prefers this one (both live in the search path; only the
+// first-sorting match per link is applied).
+const networkdConfigFilename = "05-coi-ipv4-only.network"
+
+// networkdIPv4OnlyConfig manages eth0 as IPv4-only. Because networkd applies only
+// the first-matching .network per link (no merge), this fully supersedes netplan's
+// generated eth0 config — so it re-requests the DHCP-supplied MTU (UseMTU) and
+// search domains (UseDomains), which networkd would otherwise default to off,
+// to avoid silently dropping them relative to netplan (PMTU black-holing / broken
+// short-name DNS on overlay bridges).
 const networkdIPv4OnlyConfig = `# Installed by coi in restricted/allowlist mode (issue #548).
 # coi disables IPv6 in the container; without this, systemd-networkd keeps
 # failing to add the IPv6 link-local address, the link never leaves the
@@ -587,6 +597,10 @@ Name=eth0
 DHCP=ipv4
 LinkLocalAddressing=no
 IPv6AcceptRA=no
+
+[DHCPv4]
+UseMTU=true
+UseDomains=yes
 
 [Link]
 RequiredFamilyForOnline=ipv4
@@ -611,7 +625,7 @@ func ConfigureNetworkdIPv4Only(containerName string) error {
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("close temp networkd config: %w", err)
 	}
-	dest := containerName + "/etc/systemd/network/05-coi-ipv4-only.network"
+	dest := containerName + "/etc/systemd/network/" + networkdConfigFilename
 	if err := IncusExec("file", "push", "--create-dirs", "--mode=0644", tmp.Name(), dest); err != nil {
 		return fmt.Errorf("push networkd config to %s: %w", dest, err)
 	}
