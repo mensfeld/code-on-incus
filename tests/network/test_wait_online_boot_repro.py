@@ -63,7 +63,7 @@ def _set_network_mode(workspace_dir, mode):
 # does not). ipv4_filtering (EnableNICSecurity) and the boot-block run in BOTH.
 # Expectation if the IPv6-disable is the cause: restricted hangs, open is clean.
 @pytest.mark.parametrize("mode", ["restricted", "open"])
-@pytest.mark.parametrize("attempt", range(1, 3))
+@pytest.mark.parametrize("attempt", range(1, 5))
 def test_wait_online_does_not_hang(coi_binary, cleanup_containers, workspace_dir, mode, attempt):
     _set_network_mode(workspace_dir, mode)
 
