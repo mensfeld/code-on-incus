@@ -1195,6 +1195,10 @@ def wait_for_firewall_rules(container_name, timeout=30, poll_interval=0.5):
         return False
 
     # Poll for a rule referencing this container IP in the ip coi forward chain.
+    # Match the IP on word boundaries (not a bare `in` substring): a substring
+    # test reports a false positive when a prefix-overlapping sibling IP has a
+    # rule (e.g. 10.0.0.2 spuriously matching a rule for 10.0.0.20).
+    ip_re = re.compile(r"(?<![\d.])" + re.escape(container_ip) + r"(?![\d.])")
     start = time.time()
     while time.time() - start < timeout:
         result = subprocess.run(
@@ -1203,7 +1207,7 @@ def wait_for_firewall_rules(container_name, timeout=30, poll_interval=0.5):
             text=True,
             timeout=10,
         )
-        if result.returncode == 0 and container_ip in result.stdout:
+        if result.returncode == 0 and ip_re.search(result.stdout):
             return True
         time.sleep(poll_interval)
 
@@ -1266,3 +1270,22 @@ def calculate_container_name(workspace_dir, slot):
 
     # Format: {prefix}{hash}-{slot}
     return f"{prefix}{workspace_id}-{slot}"
+
+
+def extract_container_name(result):
+    """Extract the container name a `coi shell --background` launch reported.
+
+    Complements calculate_container_name (which derives the EXPECTED name from
+    workspace+slot); this reads the ACTUAL name from the launch output. Handles
+    both the `--debug` line ("Container name: <n>") and the plain "Container: <n>"
+    line, searching stderr then stdout. Returns the name, or None if not found.
+
+    result: a subprocess.CompletedProcess from `coi shell --background` (text mode).
+    """
+    for stream in (result.stderr or "", result.stdout or ""):
+        for line in stream.splitlines():
+            if "Container name:" in line:
+                return line.split("Container name:")[-1].strip()
+            if "Container: " in line:
+                return line.split("Container: ")[-1].strip()
+    return None

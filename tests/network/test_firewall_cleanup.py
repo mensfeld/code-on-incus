@@ -18,6 +18,8 @@ import subprocess
 import time
 from pathlib import Path
 
+from support.helpers import extract_container_name
+
 
 def get_container_ip(coi_binary, container_name):
     """Get container IP using coi container exec with --capture."""
@@ -97,6 +99,28 @@ def wait_for_no_rules_for_ip(ip, timeout=15):
     return count
 
 
+def wait_for_rules_for_ip(coi_binary, container_name, timeout=20):
+    """Poll until the container has a DHCP IP and >=1 nft rule references it.
+
+    Replaces a fixed `sleep(N)` before asserting rules exist: both the IP lease
+    and the rule install are asynchronous, so poll for the end state instead of
+    guessing a duration. Returns (ip, count); ip is "" if none was assigned in
+    time (callers keep their existing `if ip:` guard).
+    """
+    deadline = time.time() + timeout
+    ip = ""
+    count = 0
+    while time.time() < deadline:
+        if not ip:
+            ip = get_container_ip(coi_binary, container_name) or ""
+        if ip:
+            count = count_rules_for_ip(ip)  # counted once — no TOCTOU between guard and return
+            if count > 0:
+                return ip, count
+        time.sleep(0.5)
+    return ip, count
+
+
 def nft_available():
     """Check if nft is available with sudo access."""
     try:
@@ -154,23 +178,15 @@ mode = "open"
     assert result.returncode == 0, f"Shell should start. stderr: {result.stderr}"
 
     # Extract container name
-    container_name = None
-    for line in result.stderr.split("\n"):
-        if "Container name:" in line:
-            container_name = line.split("Container name:")[-1].strip()
-            break
+    container_name = extract_container_name(result)
 
     assert container_name, f"Should find container name. stderr: {result.stderr}"
 
-    # Wait for container to start and get IP
-    time.sleep(5)
-
-    # Get container IP for verification
-    container_ip = get_container_ip(coi_binary, container_name)
+    # Wait (poll) for the container to get its IP and its open-mode rule.
+    container_ip, rules_for_container = wait_for_rules_for_ip(coi_binary, container_name)
 
     # Verify rules were created for open mode
     if container_ip:
-        rules_for_container = count_rules_for_ip(container_ip)
         # Open mode creates at least 1 ACCEPT rule in the ip coi forward chain
         assert rules_for_container >= 1, (
             f"Open mode should create nft rule for IP {container_ip} in ip coi forward, "
@@ -239,23 +255,15 @@ mode = "restricted"
     assert result.returncode == 0, f"Shell should start. stderr: {result.stderr}"
 
     # Extract container name
-    container_name = None
-    for line in result.stderr.split("\n"):
-        if "Container name:" in line:
-            container_name = line.split("Container name:")[-1].strip()
-            break
+    container_name = extract_container_name(result)
 
     assert container_name, f"Should find container name. stderr: {result.stderr}"
 
-    # Wait for container to start
-    time.sleep(5)
-
-    # Get container IP
-    container_ip = get_container_ip(coi_binary, container_name)
+    # Wait (poll) for the container to get its IP and its restricted-mode rules.
+    container_ip, rules_for_container = wait_for_rules_for_ip(coi_binary, container_name)
 
     # Verify rules were created for restricted mode
     if container_ip:
-        rules_for_container = count_rules_for_ip(container_ip)
         assert rules_for_container > 0, (
             f"Restricted mode should create nft rules for IP {container_ip} in ip coi forward"
         )
@@ -325,20 +333,14 @@ mode = "open"
             continue
 
         # Extract container name
-        container_name = None
-        for line in result.stderr.split("\n"):
-            if "Container name:" in line:
-                container_name = line.split("Container name:")[-1].strip()
-                break
+        container_name = extract_container_name(result)
 
         if not container_name:
             continue
 
-        # Wait for container
-        time.sleep(3)
-
-        # Get IP
-        container_ip = get_container_ip(coi_binary, container_name)
+        # Poll for the container's IP and rules (so the orphan check after kill is
+        # meaningful — the container must actually have had rules to leak).
+        container_ip, _ = wait_for_rules_for_ip(coi_binary, container_name)
         if container_ip:
             collected_ips.append(container_ip)
 
@@ -349,8 +351,8 @@ mode = "open"
             timeout=30,
             check=False,
         )
-
-        time.sleep(1)
+        # No per-iteration settle here: the orphan check below polls until all
+        # collected IPs are clean, which already absorbs async cleanup lag.
 
     # Check for any orphaned rules from our containers. On loaded CI runners
     # the nft rule deletion may lag the kill by a fraction of a second, so
@@ -417,24 +419,16 @@ mode = "restricted"
     assert result.returncode == 0, f"Shell should start. stderr: {result.stderr}"
 
     # Extract container name
-    container_name = None
-    for line in result.stderr.split("\n"):
-        if "Container name:" in line:
-            container_name = line.split("Container name:")[-1].strip()
-            break
+    container_name = extract_container_name(result)
 
     assert container_name, "Should find container name"
 
-    # Wait for container
-    time.sleep(5)
-
-    # Get container IP
-    container_ip = get_container_ip(coi_binary, container_name)
+    # Wait (poll) for the container's IP and its rules, instead of a fixed sleep.
+    container_ip, rules_before_kill = wait_for_rules_for_ip(coi_binary, container_name)
 
     assert container_ip, "Should be able to get container IP"
 
     # Verify rules exist in ip coi forward
-    rules_before_kill = count_rules_for_ip(container_ip)
     assert rules_before_kill > 0, (
         f"Restricted mode should have created nft rules for {container_ip} in ip coi forward"
     )

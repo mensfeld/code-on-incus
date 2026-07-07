@@ -167,3 +167,20 @@ def test_monitor_format_invalid_rejected(coi_binary):
     assert result.returncode == 2, f"Expected exit code 2 for --format xml, got {result.returncode}"
     combined = result.stdout + result.stderr
     assert "invalid format" in combined.lower(), f"Expected 'invalid format' error, got: {combined}"
+
+
+def test_monitor_watch_json_conflict(coi_binary):
+    """`coi monitor --watch N --json` is an unsupported combination and must be
+    rejected with exit 2 before any container work (JSON is a one-shot format)."""
+    result = subprocess.run(
+        [coi_binary, "monitor", "--watch", "1", "--json"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 2, (
+        f"--json with --watch should exit 2. rc={result.returncode}\n{result.stdout}{result.stderr}"
+    )
+    assert "not supported with --watch" in (result.stdout + result.stderr).lower(), (
+        f"expected the watch/json conflict message.\n{result.stdout}{result.stderr}"
+    )

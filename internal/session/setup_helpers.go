@@ -8,48 +8,17 @@ import (
 
 	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
+	"github.com/mensfeld/code-on-incus/internal/vmhost"
 )
-
-// isColimaOrLimaEnvironment detects if we're running inside a Colima or Lima VM
-// These VMs use virtiofs for mounting host directories and already handle UID mapping
-// at the VM level, making Incus's shift=true unnecessary and problematic
-func isColimaOrLimaEnvironment() bool {
-	data, _ := os.ReadFile("/proc/mounts")
-	osRelease, _ := os.ReadFile("/proc/sys/kernel/osrelease")
-	return detectColimaOrLima(string(data), os.Getenv("USER"), string(osRelease))
-}
-
-// detectColimaOrLima is the pure decision logic behind isColimaOrLimaEnvironment,
-// split out so it can be unit tested without touching the real filesystem.
-//
-// OrbStack also mounts the host filesystem via virtiofs, so a bare virtiofs
-// check false-positives on it too — but unlike Colima/Lima, OrbStack's
-// virtiofs mounts do support idmapped shift mounts fine, so it's excluded
-// up front via its guest kernel's release string (e.g. "7.0.11-orbstack-...").
-func detectColimaOrLima(mounts, user, osRelease string) bool {
-	if strings.Contains(strings.ToLower(osRelease), "orbstack") {
-		return false
-	}
-
-	// Lima mounts host directories via virtiofs (e.g., "mount0 on /Users/... type virtiofs")
-	// Colima uses Lima under the hood, so same detection applies
-	if strings.Contains(mounts, "virtiofs") {
-		return true
-	}
-
-	// Additional check: Lima typically runs as the "lima" user
-	if user == "lima" {
-		return true
-	}
-
-	return false
-}
 
 // ConfigureUIDMapping decides how the workspace mount maps host UIDs into the
 // container and applies raw.idmap when needed. It is the single source of truth
 // for both the shell (session.Setup) and run pipelines so they cannot diverge
 // (issue #530). Returns the effective shift flag (for MountDisk) and whether
 // raw.idmap was applied.
+//
+// Host-VM detection (whether the VM already handles UID mapping, as Colima/Lima
+// do — but NOT OrbStack) is delegated to the shared internal/vmhost package.
 //
 // See decideUIDMapping for the case matrix; the key rule is that a host-UID /
 // code-UID mismatch (macOS user 501, CI runner 1001, mapped to code=1000)
@@ -65,8 +34,10 @@ func ConfigureUIDMapping(containerName string, disableShift bool, logger func(st
 	if logger == nil {
 		logger = func(string) {}
 	}
+	// Detect() reads /proc/mounts etc.; call it once and reuse.
+	hostHandlesUIDMapping := vmhost.Detect().HandlesUIDMapping()
 	var idmap string
-	useShift, idmap = decideUIDMapping(os.Getuid(), container.CodeUID, disableShift, isColimaOrLimaEnvironment())
+	useShift, idmap = decideUIDMapping(os.Getuid(), container.CodeUID, disableShift, hostHandlesUIDMapping)
 
 	if idmap != "" {
 		logger(fmt.Sprintf("Host UID %d differs from container code UID %d, using raw.idmap: %s",
@@ -80,7 +51,7 @@ func ConfigureUIDMapping(containerName string, disableShift bool, logger func(st
 
 	if !useShift {
 		logger("UID shifting disabled (Colima/Lima or configured); host UID matches container code UID")
-	} else if disableShift || isColimaOrLimaEnvironment() {
+	} else if disableShift || hostHandlesUIDMapping {
 		// Colima/Lima was detected but host UID happens to equal code UID.
 		logger("Auto-detected Colima/Lima environment - disabling UID shifting")
 	}
@@ -95,8 +66,8 @@ func ConfigureUIDMapping(containerName string, disableShift bool, logger func(st
 // A host-UID/code-UID mismatch ALWAYS wins: raw.idmap is set and shift is off,
 // regardless of disableShift or Colima/Lima. shift=true only translates root,
 // not arbitrary UIDs, and cannot be combined with raw.idmap.
-func decideUIDMapping(hostUID, codeUID int, disableShift, isColimaOrLima bool) (useShift bool, idmap string) {
-	if !disableShift && isColimaOrLima {
+func decideUIDMapping(hostUID, codeUID int, disableShift, hostHandlesUIDMapping bool) (useShift bool, idmap string) {
+	if !disableShift && hostHandlesUIDMapping {
 		disableShift = true
 	}
 	if hostUID != codeUID {

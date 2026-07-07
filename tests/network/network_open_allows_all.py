@@ -8,8 +8,9 @@ Tests that:
 """
 
 import subprocess
-import time
 from pathlib import Path
+
+from support.helpers import wait_for_firewall_rules
 
 
 def test_open_mode_allows_all(coi_binary, workspace_dir, cleanup_containers):
@@ -58,8 +59,8 @@ mode = "open"
         f"Should find container name in output. stderr: {result.stderr}"
     )
 
-    # Give container time to fully start
-    time.sleep(5)
+    # Wait (poll) for the container's network setup to land instead of a fixed sleep.
+    wait_for_firewall_rules(container_name)
 
     # Test 1: Public internet should work
     result = subprocess.run(
@@ -105,8 +106,13 @@ mode = "open"
         timeout=10,
     )
 
-    # In open mode, the connection attempt should be made (not blocked by ACL)
-    # Exit code may still be non-zero if no device responds, but we shouldn't see ACL rejection
-    # This is a best-effort test - we can't guarantee 192.168.1.1 exists
-    # Just verify we don't get instant rejection
-    # If the command completes within 2 seconds, ACL likely didn't block it
+    # In open mode the ACL must NOT reject an RFC1918 address. Nothing answers at
+    # 192.168.1.1, so the probe fails with a timeout (the packet is routed out and
+    # gets no reply) — never with an instant ACL/iptables refusal. A "connection
+    # refused" with no timeout would mean egress was actively blocked. (Same
+    # assertion the comprehensive open-mode test uses.) Previously this probe ran
+    # with no assertion at all — a vacuous no-op (#559 C2).
+    combined = (result.stdout + result.stderr).lower()
+    assert "connection refused" not in combined or "timed out" in combined, (
+        f"open mode should not ACL-block RFC1918 (no instant refusal expected): {result.stderr}"
+    )

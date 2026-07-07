@@ -129,11 +129,16 @@ def get_container_state(name):
     return containers[0].get("status", "Unknown") if containers else "Unknown"
 
 
-def wait_for_container_running(name, timeout=30):
+def wait_for_container_running(name, timeout=60):
     """Wait for container to reach Running state with retries.
 
     Returns True if container is Running, False if it never reached Running
     within the timeout period.
+
+    Timeout is 60s (was 30s): on the heavily-parallel monitoring lanes a
+    `coi shell` first-boot occasionally needs >30s, which surfaced as an
+    intermittent "Container ... did not start" failure that passed on re-run.
+    60s matches the sibling helper in test_log_watcher_inotify.py.
     """
     for _ in range(timeout):
         state = get_container_state(name)

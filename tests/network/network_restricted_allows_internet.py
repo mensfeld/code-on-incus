@@ -11,7 +11,8 @@ Network isolation is implemented using nft rules.
 
 import pathlib
 import subprocess
-import time
+
+from support.helpers import wait_for_firewall_rules
 
 
 def test_restricted_allows_internet(coi_binary, workspace_dir, cleanup_containers):
@@ -57,9 +58,9 @@ def test_restricted_allows_internet(coi_binary, workspace_dir, cleanup_container
         f"Should find container name in output. stderr: {result.stderr}"
     )
 
-    # Give container time to fully start and for network ACLs to be applied
-    # Longer wait needed as this test runs alongside other network tests
-    time.sleep(12)
+    # Wait (poll) for the container's network ACLs to land instead of a fixed sleep
+    # (was 12s to absorb contention when running alongside other network tests).
+    wait_for_firewall_rules(container_name)
 
     # Test 1: Curl example.com (should work)
     result = subprocess.run(
