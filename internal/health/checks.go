@@ -22,6 +22,7 @@ import (
 	"github.com/mensfeld/code-on-incus/internal/nftmonitor"
 	"github.com/mensfeld/code-on-incus/internal/session"
 	"github.com/mensfeld/code-on-incus/internal/tool"
+	"github.com/mensfeld/code-on-incus/internal/vmhost"
 )
 
 // CheckOS reports the operating system information
@@ -51,7 +52,7 @@ func CheckOS() HealthCheck {
 		}
 
 		// Detect if running in Colima/Lima VM
-		if isColimaEnvironment() {
+		if vmhost.Detect() == vmhost.KindLimaLike {
 			environment = "colima"
 		}
 	} else if osName == "darwin" {
@@ -81,25 +82,6 @@ func CheckOS() HealthCheck {
 			"environment": environment,
 		},
 	}
-}
-
-// isColimaEnvironment detects if running inside a Colima/Lima VM
-func isColimaEnvironment() bool {
-	// Check for virtiofs mounts (characteristic of Lima VMs)
-	if content, err := os.ReadFile("/proc/mounts"); err == nil {
-		if strings.Contains(string(content), "virtiofs") {
-			return true
-		}
-	}
-
-	// Check for lima user
-	if currentUser, err := user.Current(); err == nil {
-		if currentUser.Username == "lima" {
-			return true
-		}
-	}
-
-	return false
 }
 
 // CheckIncus verifies that Incus is available and running
@@ -406,7 +388,7 @@ func CheckNft(netCfg config.NetworkConfig) HealthCheck {
 	// who opted out of COI invoking sudo at all.
 	available := network.NftUsable(&netCfg)
 	masquerade := network.MasqueradeEnabled()
-	isColima := isColimaEnvironment()
+	isColima := vmhost.Detect() == vmhost.KindLimaLike
 
 	details := map[string]interface{}{
 		"nft_installed": installed,

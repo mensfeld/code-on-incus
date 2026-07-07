@@ -6,6 +6,18 @@
     "writable_hooks": {
       "type": "boolean",
       "description": "Allow the container to write to .git/hooks (default: false — hooks are mounted read-only)"
+    },
+    "name": {
+      "type": "string",
+      "description": "Explicit commit author name installed in the container's global git config; takes precedence over the host's global git config. Trusted-scope only (ignored from project config)."
+    },
+    "email": {
+      "type": "string",
+      "description": "Explicit commit author email installed in the container's global git config; takes precedence over the host's global git config. Trusted-scope only (ignored from project config)."
+    },
+    "seed_host_identity": {
+      "type": "boolean",
+      "description": "Read the host's global git user.name/user.email and install it in the container when no explicit name/email is set (default: true). Set false to keep only the fail-closed guard. Trusted-scope only."
     }
   }
 }

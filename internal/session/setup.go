@@ -16,6 +16,7 @@ import (
 	"github.com/mensfeld/code-on-incus/internal/logger"
 	"github.com/mensfeld/code-on-incus/internal/network"
 	"github.com/mensfeld/code-on-incus/internal/tool"
+	"github.com/mensfeld/code-on-incus/internal/vmhost"
 )
 
 const (
@@ -45,6 +46,7 @@ type SetupOptions struct {
 	PreserveWorkspacePath bool                   // Mount workspace at same path as host instead of /workspace
 	ForwardSSHAgent       bool                   // Forward host SSH agent to container
 	ForwardedEnvVars      []string               // Names of host env vars being forwarded (for context file)
+	GitIdentity           GitIdentity            // Resolved host git identity to configure inside the container
 	ContextFilePath       string                 // Path to custom context .md file on host (overrides tool default)
 	ProfileContextFile    string                 // Path to profile context .md file (appended to sandbox context)
 	Timezone              string                 // Resolved IANA timezone name (e.g., "America/New_York"), empty for UTC
@@ -111,7 +113,7 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 	network.SetLogger(result.Logger)
 
 	// 1.5 Validate Bedrock setup if running in Colima/Lima
-	if isColimaOrLimaEnvironment() && opts.CLIConfigPath != "" {
+	if vmhost.Detect().HandlesUIDMapping() && opts.CLIConfigPath != "" {
 		settingsPath := filepath.Join(opts.CLIConfigPath, "settings.json")
 		isConfigured, err := bedrock.IsBedrockConfigured(settingsPath)
 		if err != nil {
@@ -566,6 +568,7 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 	// user.name and user.email are explicitly configured, which ensures AI
 	// tools discover and set the real developer identity.
 	SetupGitIdentityGuard(result.Manager, result.HomeDir, opts.Logger)
+	SetupGitIdentity(result.Manager, result.HomeDir, opts.GitIdentity, opts.Logger)
 
 	// 6.6.2. Suppress Claude Code auto-mode prompt via managed settings.
 	// Only applies when the tool is Claude Code — the managed settings path
