@@ -25,15 +25,27 @@ import subprocess
 
 import pytest
 
-# Runs inside the coi container.
+# Runs inside the coi container. Polls (up to ~40s) until the boot transaction
+# is terminal OR eth0 reaches the "configured" setup state, instead of a fixed
+# sleep — the pre-fix hang left eth0 permanently at "routable (configuring)", so
+# a fixed snapshot could sample too early on a slow runner.
 _BOOT_INSPECT = r"""
 set +e
-sleep 8
+for _ in $(seq 1 40); do
+  s=$(systemctl is-system-running 2>/dev/null)
+  net=$(networkctl status eth0 --no-pager 2>/dev/null)
+  case "$s" in running|degraded) break;; esac
+  case "$net" in *"(configured)"*) break;; esac
+  sleep 1
+done
 echo "SYSTEM_STATE=$(systemctl is-system-running 2>/dev/null)"
+# Prove wait-online is actually part of the boot path — otherwise a green result
+# would be meaningless ("nothing to hang on" rather than "fix works").
+echo "WAIT_ONLINE_ENABLED=$(systemctl is-enabled systemd-networkd-wait-online.service 2>/dev/null)"
 echo "=== list-jobs ==="
 systemctl list-jobs --no-legend 2>/dev/null
 echo "=== networkctl eth0 ==="
-networkctl status eth0 --no-pager 2>/dev/null | sed -n '1,10p'
+networkctl status eth0 --no-pager 2>/dev/null | sed -n '1,12p'
 """
 
 
@@ -59,11 +71,26 @@ def test_wait_online_not_stuck_when_ipv6_disabled(
     out = result.stdout + result.stderr
     assert result.returncode == 0, f"coi run failed (attempt {attempt}):\n{out}"
 
-    boot_jobs = out.split("=== list-jobs ===", 1)[-1].split("=== networkctl", 1)[0]
-    settled = "SYSTEM_STATE=running" in out or "SYSTEM_STATE=degraded" in out
-    wait_online_queued = "systemd-networkd-wait-online" in boot_jobs
+    # Guard against a false pass: if the image ever stops shipping wait-online in
+    # the boot path, "not queued" would be trivially true. Require it to be a real
+    # unit so this test keeps exercising the #548 mechanism.
+    assert "WAIT_ONLINE_ENABLED=" in out, f"probe did not run:\n{out}"
+    wait_online_status = out.split("WAIT_ONLINE_ENABLED=", 1)[1].splitlines()[0].strip()
+    assert wait_online_status not in ("", "not-found", "masked"), (
+        f"systemd-networkd-wait-online is not in the boot path ({wait_online_status!r}); "
+        f"this test no longer exercises #548.\n{out}"
+    )
 
-    assert settled and not wait_online_queued, (
-        f"#548 regression (attempt {attempt}): boot did not settle / "
-        f"systemd-networkd-wait-online still queued with IPv6 disabled.\n{out}"
+    # Direct proof of the fix: the bug left eth0 stuck at "routable (configuring)".
+    # The fix makes it reach "configured". This assertion holds even if wait-online
+    # weren't pulled in, so it cannot false-pass on the wedge.
+    networkctl_out = out.split("=== networkctl eth0 ===", 1)[-1]
+    boot_jobs = out.split("=== list-jobs ===", 1)[1].split("=== networkctl", 1)[0]
+    stuck_configuring = "(configuring)" in networkctl_out
+    wait_online_queued = "systemd-networkd-wait-online" in boot_jobs
+    settled = "SYSTEM_STATE=running" in out or "SYSTEM_STATE=degraded" in out
+
+    assert settled and not stuck_configuring and not wait_online_queued, (
+        f"#548 regression (attempt {attempt}): eth0 stuck configuring="
+        f"{stuck_configuring}, wait-online queued={wait_online_queued}, settled={settled}.\n{out}"
     )

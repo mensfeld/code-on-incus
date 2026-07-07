@@ -44,9 +44,25 @@ func TestNetworkdIPv4OnlyConfig_HasKeyDirectives(t *testing.T) {
 		"LinkLocalAddressing=no",
 		"IPv6AcceptRA=no",
 		"RequiredFamilyForOnline=ipv4",
+		"UseMTU=true",    // don't drop the DHCP-supplied MTU (netplan would keep it)
+		"UseDomains=yes", // don't drop DHCP search domains
 	} {
 		if !strings.Contains(networkdIPv4OnlyConfig, want) {
 			t.Errorf("networkdIPv4OnlyConfig missing %q", want)
 		}
+	}
+}
+
+// The fix depends on this file sorting before netplan's generated
+// 10-netplan-eth0.network; guard the load-bearing prefix so a rename can't
+// silently revive the #548 hang (the directive test above would stay green).
+func TestNetworkdConfigFilename_SortsBeforeNetplan(t *testing.T) {
+	if !strings.HasSuffix(networkdConfigFilename, ".network") {
+		t.Errorf("networkd config must be a .network file, got %q", networkdConfigFilename)
+	}
+	// systemd-networkd applies the lexicographically-first matching file; netplan
+	// generates 10-netplan-*.network, so ours must sort strictly before "10".
+	if networkdConfigFilename >= "10" {
+		t.Errorf("networkd config filename %q must sort before netplan's 10-netplan-eth0.network", networkdConfigFilename)
 	}
 }
