@@ -25,6 +25,11 @@
     "shutdown_timeout": {
       "type": "integer",
       "description": "Seconds to wait for graceful shutdown before force-killing (default: 60)"
+    },
+    "stale_base_check": {
+      "type": "string",
+      "enum": ["error", "warn", "off"],
+      "description": "How to react when the project image's base is older than the current coi base: 'error' aborts, 'warn' prints a warning (default), 'off' is silent"
     }
   }
 }

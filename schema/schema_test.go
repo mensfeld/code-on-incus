@@ -207,6 +207,45 @@ func TestGetProfileSchema_EnvCommandsWired(t *testing.T) {
 	}
 }
 
+// Regression: these keys are supported by the Go structs but were missing from
+// the JSON schema, so `coi validate profile` rejected valid profiles that used
+// them (container.stale_base_check, monitoring.process_count_threshold,
+// monitoring.process_spawn_rate_threshold). ValidateProfileMap must now accept them.
+func TestValidateProfileMap_AcceptsStructSupportedKeys(t *testing.T) {
+	profile := map[string]any{
+		"container": map[string]any{
+			"stale_base_check": "error",
+		},
+		"monitoring": map[string]any{
+			"process_count_threshold":      256,
+			"process_spawn_rate_threshold": 100,
+		},
+	}
+	if err := schema.ValidateProfileMap(profile); err != nil {
+		t.Fatalf("profile with struct-supported keys should validate, got: %v", err)
+	}
+}
+
+// stale_base_check is constrained to the enum the runtime understands.
+func TestValidateProfileMap_RejectsBadStaleBaseCheck(t *testing.T) {
+	profile := map[string]any{
+		"container": map[string]any{"stale_base_check": "loud"},
+	}
+	if err := schema.ValidateProfileMap(profile); err == nil {
+		t.Fatal("stale_base_check='loud' should be rejected (not in enum)")
+	}
+}
+
+// The strict schema must still reject genuinely unknown keys.
+func TestValidateProfileMap_RejectsUnknownKey(t *testing.T) {
+	profile := map[string]any{
+		"container": map[string]any{"bogus_key": true},
+	}
+	if err := schema.ValidateProfileMap(profile); err == nil {
+		t.Fatal("unknown container key should be rejected by additionalProperties:false")
+	}
+}
+
 func TestGetProfileSchema_Deterministic(t *testing.T) {
 	a, err := schema.GetProfileSchema()
 	if err != nil {

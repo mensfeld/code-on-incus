@@ -35,6 +35,16 @@
       "minimum": 0,
       "description": "Number of days to retain audit log files"
     },
+    "process_count_threshold": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Maximum process count before a fork-bomb alert (0 = disabled)"
+    },
+    "process_spawn_rate_threshold": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Maximum processes spawned per poll interval before an alert (0 = disabled)"
+    },
     "nft": {
       "$ref": "#/$defs/NFTMonitoringConfig"
     }

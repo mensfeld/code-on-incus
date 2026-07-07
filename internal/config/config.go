@@ -1057,9 +1057,31 @@ func mergeProfiles(parent, child ProfileConfig) ProfileConfig {
 		result.Environment = merged
 	}
 
+	// EnvCommands: deep merge with the same semantics as Environment — parent
+	// keys preserved, child keys override, an empty child value clears the
+	// inherited key. Without this a child profile silently loses the parent's
+	// env_commands (they are trusted-scope, so this only affects trusted profiles).
+	if len(parent.EnvCommands) > 0 {
+		merged := make(map[string]string, len(parent.EnvCommands)+len(result.EnvCommands))
+		for k, v := range parent.EnvCommands {
+			merged[k] = v
+		}
+		for k, v := range result.EnvCommands {
+			if v == "" {
+				delete(merged, k)
+			} else {
+				merged[k] = v
+			}
+		}
+		result.EnvCommands = merged
+	}
+
 	// Arrays: if child defines them, they fully replace parent's. If not, inherit.
 	if result.Mounts == nil {
 		result.Mounts = parent.Mounts
+	}
+	if result.Sockets == nil {
+		result.Sockets = parent.Sockets
 	}
 	if result.ForwardEnv == nil {
 		result.ForwardEnv = parent.ForwardEnv
