@@ -64,9 +64,7 @@ def _set_network_mode(workspace_dir, mode):
 # Expectation if the IPv6-disable is the cause: restricted hangs, open is clean.
 @pytest.mark.parametrize("mode", ["restricted", "open"])
 @pytest.mark.parametrize("attempt", range(1, 3))
-def test_wait_online_does_not_hang(
-    coi_binary, cleanup_containers, workspace_dir, mode, attempt
-):
+def test_wait_online_does_not_hang(coi_binary, cleanup_containers, workspace_dir, mode, attempt):
     _set_network_mode(workspace_dir, mode)
 
     result = subprocess.run(
