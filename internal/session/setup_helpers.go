@@ -146,6 +146,17 @@ func SetupMiseTrust(mgr container.ContainerExecution, containerWorkspacePath str
 	}
 }
 
+// GitIdentity is a concrete git author identity resolved outside the container.
+type GitIdentity struct {
+	Name  string
+	Email string
+}
+
+// Complete reports whether both identity fields are present.
+func (i GitIdentity) Complete() bool {
+	return strings.TrimSpace(i.Name) != "" && strings.TrimSpace(i.Email) != ""
+}
+
 // SetupGitIdentityGuard configures git to require explicit user.name and
 // user.email before allowing commits. This prevents AI tools from committing
 // as the container's default "code" user. The setting is applied globally
@@ -154,11 +165,33 @@ func SetupMiseTrust(mgr container.ContainerExecution, containerWorkspacePath str
 func SetupGitIdentityGuard(mgr container.ContainerExecution, homeDir string, logger func(string)) {
 	cmd := fmt.Sprintf(
 		`HOME=%s git config --global user.useConfigOnly true`,
-		homeDir,
+		shellEscape(homeDir),
 	)
 	if _, err := mgr.ExecCommand(cmd, container.ExecCommandOptions{Capture: true}); err != nil {
 		logger(fmt.Sprintf("Warning: Failed to set git user.useConfigOnly: %v", err))
 	}
+}
+
+// SetupGitIdentity writes a complete, pre-resolved identity into container git
+// config. It intentionally does not guess inside the container; when the host
+// side cannot provide both fields, user.useConfigOnly remains the fail-closed
+// boundary and git will refuse commits rather than allowing model fabrication.
+func SetupGitIdentity(mgr container.ContainerExecution, homeDir string, identity GitIdentity, logger func(string)) {
+	if !identity.Complete() {
+		return
+	}
+	cmd := fmt.Sprintf(
+		`HOME=%s git config --global user.name %s && HOME=%s git config --global user.email %s`,
+		shellEscape(homeDir),
+		shellEscape(strings.TrimSpace(identity.Name)),
+		shellEscape(homeDir),
+		shellEscape(strings.TrimSpace(identity.Email)),
+	)
+	if _, err := mgr.ExecCommand(cmd, container.ExecCommandOptions{Capture: true}); err != nil {
+		logger(fmt.Sprintf("Warning: Failed to configure git identity: %v", err))
+		return
+	}
+	logger("Configured container git identity from host global git config")
 }
 
 // SetupClaudeManagedSettings writes /etc/claude-code/managed-settings.json

@@ -105,6 +105,30 @@ type SSHConfig struct {
 // GitConfig contains git-related security settings
 type GitConfig struct {
 	WritableHooks *bool `toml:"writable_hooks"` // Allow container to write to .git/hooks (default: false)
+	// Name and Email pin an explicit commit identity into the container's global
+	// git config, taking precedence over the host's global git config. They are
+	// honored only from trusted-scope config (~/.coi/config.toml / $COI_CONFIG);
+	// an untrusted project config choosing the author identity is stripped by
+	// sanitizeUntrustedGit (a cloned repo must not pick who its commits appear to
+	// be authored by).
+	Name  string `toml:"name"`
+	Email string `toml:"email"`
+	// SeedHostIdentity controls whether COI reads the host's global
+	// `git config --global user.name/user.email` and installs it in the container
+	// when no explicit Name/Email is given. Defaults to true. Set false to keep
+	// the fail-closed guard only (git refuses commits until the tool sets an
+	// identity), e.g. to avoid copying the host identity into the container.
+	SeedHostIdentity *bool `toml:"seed_host_identity"`
+}
+
+// IsSeedHostIdentityEnabled reports whether host-global git identity seeding is
+// enabled. Defaults to true when the field is not explicitly set (nil receiver
+// or nil field), matching the pre-flag behavior.
+func (g *GitConfig) IsSeedHostIdentityEnabled() bool {
+	if g == nil || g.SeedHostIdentity == nil {
+		return true
+	}
+	return *g.SeedHostIdentity
 }
 
 // SecurityConfig contains security-related settings for workspace protection
@@ -1186,6 +1210,15 @@ func mergeIncusInto(dst *IncusConfig, src *IncusConfig) {
 func mergeGitInto(dst *GitConfig, src *GitConfig) {
 	if src.WritableHooks != nil {
 		dst.WritableHooks = src.WritableHooks
+	}
+	if src.Name != "" {
+		dst.Name = src.Name
+	}
+	if src.Email != "" {
+		dst.Email = src.Email
+	}
+	if src.SeedHostIdentity != nil {
+		dst.SeedHostIdentity = src.SeedHostIdentity
 	}
 }
 

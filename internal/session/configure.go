@@ -28,6 +28,7 @@ type ConfigureOptions struct {
 	Timezone      string                // IANA timezone name (e.g., "Europe/Warsaw"), empty = UTC
 	ToolName      string                // "claude" triggers managed settings injection
 	GitGuard      bool                  // Set git user.useConfigOnly=true
+	GitIdentity   GitIdentity           // Optional pre-resolved identity to configure when GitGuard is true
 
 	Logger func(string)
 }
@@ -96,6 +97,7 @@ func ConfigureContainer(ctx context.Context, opts ConfigureOptions) (*ConfigureR
 	// 2. Git identity guard
 	if opts.GitGuard {
 		SetupGitIdentityGuard(mgr, homeDir, opts.Logger)
+		SetupGitIdentity(mgr, homeDir, opts.GitIdentity, opts.Logger)
 	}
 
 	// 3. Claude managed settings

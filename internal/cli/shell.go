@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"sort"
@@ -153,6 +154,47 @@ func getConfiguredTool(cfg *config.Config) (tool.Tool, error) {
 	}
 
 	return t, nil
+}
+
+// resolveGitIdentity picks the commit identity to install in the container, in
+// precedence order:
+//
+//  1. an explicit [git] name/email from trusted-scope config (the sanitizer
+//     strips these from untrusted project config), so a user can pin a container
+//     identity distinct from their host git config;
+//  2. otherwise, when seed_host_identity is enabled (the default), the user's
+//     trusted global git config (user.name/user.email);
+//  3. otherwise nothing — SetupGitIdentityGuard's user.useConfigOnly=true stays
+//     the fail-closed boundary and the tool must set an identity itself.
+//
+// It never reads project-local git config, so an untrusted checkout cannot
+// choose the author identity that will be installed in the container.
+func resolveGitIdentity(gitCfg *config.GitConfig) session.GitIdentity {
+	if gitCfg != nil {
+		explicit := session.GitIdentity{Name: gitCfg.Name, Email: gitCfg.Email}
+		if explicit.Complete() {
+			return explicit
+		}
+	}
+	if !gitCfg.IsSeedHostIdentityEnabled() {
+		return session.GitIdentity{}
+	}
+	identity := session.GitIdentity{
+		Name:  hostGlobalGitConfig("user.name"),
+		Email: hostGlobalGitConfig("user.email"),
+	}
+	if !identity.Complete() {
+		return session.GitIdentity{}
+	}
+	return identity
+}
+
+func hostGlobalGitConfig(key string) string {
+	out, err := exec.Command("git", "config", "--global", "--get", key).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // buildCLICommand builds the CLI command string to execute in the container.

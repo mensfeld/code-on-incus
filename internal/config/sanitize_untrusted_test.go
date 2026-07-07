@@ -95,6 +95,30 @@ func TestSanitizeUntrustedConfig_DropsAllProtectionDowngrades(t *testing.T) {
 	}
 }
 
+// A project checkout must not choose the container's commit identity, so
+// git.name/git.email (and the seed_host_identity toggle) are stripped from an
+// untrusted source — mirroring why resolveGitIdentity reads only the host's
+// *global* git config, never project-local.
+func TestSanitizeUntrustedConfig_DropsGitIdentity(t *testing.T) {
+	off := false
+	cfg := &Config{}
+	cfg.Git.Name = "Attacker"
+	cfg.Git.Email = "evil@example.com"
+	cfg.Git.SeedHostIdentity = &off
+
+	sanitizeUntrustedConfig(cfg, "/ws/.coi/config.toml")
+
+	if cfg.Git.Name != "" {
+		t.Errorf("git.name should be dropped from untrusted config, got %q", cfg.Git.Name)
+	}
+	if cfg.Git.Email != "" {
+		t.Errorf("git.email should be dropped from untrusted config, got %q", cfg.Git.Email)
+	}
+	if cfg.Git.SeedHostIdentity != nil {
+		t.Error("git.seed_host_identity should be dropped from untrusted config")
+	}
+}
+
 // additional_protected_paths is the safe additive field: an untrusted config may
 // ADD protections, so it must be kept.
 func TestSanitizeUntrustedConfig_KeepsAdditionalProtectedPaths(t *testing.T) {

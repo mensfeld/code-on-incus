@@ -89,9 +89,14 @@ These paths are available alongside the workspace and persist changes to the hos
 
 ### MANDATORY — Discover your git identity BEFORE the first commit
 
-`user.useConfigOnly=true` is set globally, so git will **refuse to commit** until you configure a real identity. **NEVER fabricate** an identity — values like "code", "Code", "code@example.com", or any made-up name/email are WRONG and FORBIDDEN because "code" is just the container's default OS user.
+`user.useConfigOnly=true` is set globally, so git will **refuse to commit** until a real identity is configured. **NEVER fabricate** an identity — values like "code", "Code", "code@example.com", or any made-up name/email are WRONG and FORBIDDEN because "code" is just the container's default OS user.
 
-Run the following commands **in order** and stop at the first one that succeeds:
+**0. First check whether COI already set your identity.** At startup COI installs the container git identity from the host's global `git config` (or from an explicit `[git] name`/`email` in COI config):
+```bash
+git config --global --get user.name
+git config --global --get user.email
+```
+If **both** print a value, your identity is already configured — **use it as-is, do NOT overwrite it**, and skip the rest of this section. Only if either is empty (the host had no global identity, or `seed_host_identity = false`) resolve it yourself: run the commands below **in order**, stopping at the first that succeeds:
 
 **1. SSH agent (preferred)**
 ```bash
@@ -132,9 +137,14 @@ git config user.email "<real email>"
 
 ### MANDATORY — Discover your git identity BEFORE the first commit
 
-`user.useConfigOnly=true` is set globally, so git will **refuse to commit** until you configure a real identity. **NEVER fabricate** an identity — values like "code", "Code", "code@example.com", or any made-up name/email are WRONG and FORBIDDEN because "code" is just the container's default OS user.
+`user.useConfigOnly=true` is set globally, so git will **refuse to commit** until a real identity is configured. **NEVER fabricate** an identity — values like "code", "Code", "code@example.com", or any made-up name/email are WRONG and FORBIDDEN because "code" is just the container's default OS user.
 
-Run the following commands **in order** and stop at the first one that succeeds:
+**0. First check whether COI already set your identity.** At startup COI installs the container git identity from the host's global `git config` (or from an explicit `[git] name`/`email` in COI config):
+```bash
+git config --global --get user.name
+git config --global --get user.email
+```
+If **both** print a value, your identity is already configured — **use it as-is, do NOT overwrite it**, and skip the rest of this section. Only if either is empty (the host had no global identity, or `seed_host_identity = false`) resolve it yourself: run the commands below **in order**, stopping at the first that succeeds:
 
 **1. SSH agent (preferred)**
 ```bash
@@ -169,9 +179,14 @@ git config user.email "<real email>"
 
 ### MANDATORY — Discover your git identity BEFORE the first commit
 
-`user.useConfigOnly=true` is set globally, so git will **refuse to commit** until you configure a real identity. **NEVER fabricate** an identity — values like "code", "Code", "code@example.com", or any made-up name/email are WRONG and FORBIDDEN because "code" is just the container's default OS user.
+`user.useConfigOnly=true` is set globally, so git will **refuse to commit** until a real identity is configured. **NEVER fabricate** an identity — values like "code", "Code", "code@example.com", or any made-up name/email are WRONG and FORBIDDEN because "code" is just the container's default OS user.
 
-Run the following commands **in order** and stop at the first one that succeeds:
+**0. First check whether COI already set your identity.** At startup COI installs the container git identity from the host's global `git config` (or from an explicit `[git] name`/`email` in COI config):
+```bash
+git config --global --get user.name
+git config --global --get user.email
+```
+If **both** print a value, your identity is already configured — **use it as-is, do NOT overwrite it**, and skip the rest of this section. Only if either is empty (the host had no global identity, or `seed_host_identity = false`) resolve it yourself: run the commands below **in order**, stopping at the first that succeeds:
 
 **1. GitHub CLI (preferred)**
 ```bash
