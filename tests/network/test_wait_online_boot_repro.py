@@ -50,20 +50,24 @@ journalctl -u systemd-networkd --no-pager 2>/dev/null | tail -15
 """
 
 
-def _restricted_workspace(workspace_dir):
-    """Force [network] mode = restricted so the full pre-start hardening +
-    fail-closed boot block are applied (project-scope config, honored)."""
+def _set_network_mode(workspace_dir, mode):
+    """Force [network] mode via project-scope config (honored, not sanitized)."""
     coi_dir = os.path.join(workspace_dir, ".coi")
     os.makedirs(coi_dir, exist_ok=True)
     with open(os.path.join(coi_dir, "config.toml"), "a") as f:
-        f.write('\n[network]\nmode = "restricted"\n')
+        f.write(f'\n[network]\nmode = "{mode}"\n')
 
 
-@pytest.mark.parametrize("attempt", range(1, 5))
-def test_wait_online_does_not_hang_in_restricted_mode(
-    coi_binary, cleanup_containers, workspace_dir, attempt
+# One-variable bisection: the ONLY boot-path action that differs between these
+# two modes is DisableIPv6AtBoot (restricted/allowlist sets disable_ipv6=1; open
+# does not). ipv4_filtering (EnableNICSecurity) and the boot-block run in BOTH.
+# Expectation if the IPv6-disable is the cause: restricted hangs, open is clean.
+@pytest.mark.parametrize("mode", ["restricted", "open"])
+@pytest.mark.parametrize("attempt", range(1, 3))
+def test_wait_online_does_not_hang(
+    coi_binary, cleanup_containers, workspace_dir, mode, attempt
 ):
-    _restricted_workspace(workspace_dir)
+    _set_network_mode(workspace_dir, mode)
 
     result = subprocess.run(
         [
@@ -81,7 +85,7 @@ def test_wait_online_does_not_hang_in_restricted_mode(
         timeout=150,
     )
     out = result.stdout + result.stderr
-    assert result.returncode == 0, f"coi run itself failed (attempt {attempt}):\n{out}"
+    assert result.returncode == 0, f"coi run itself failed ({mode}, attempt {attempt}):\n{out}"
 
     # (2) deterministic signal: manual wait-online start timed out => hung.
     hung_on_manual_start = "WAIT_ONLINE_RC=124" in out
@@ -94,7 +98,7 @@ def test_wait_online_does_not_hang_in_restricted_mode(
     hung_at_boot = queued_at_boot and not settled
 
     assert not (hung_on_manual_start or hung_at_boot), (
-        f"issue #548 reproduced on attempt {attempt}: "
+        f"issue #548 reproduced in {mode} mode (attempt {attempt}): "
         f"wait-online hung (manual_start_timeout={hung_on_manual_start}, "
         f"boot_transaction_stuck={hung_at_boot}).\n{out}"
     )
