@@ -463,6 +463,10 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 			if err := container.DisableIPv6AtBoot(result.ContainerName); err != nil {
 				opts.Logger(fmt.Sprintf("Warning: pre-boot IPv6 disable not applied: %v", err))
 			}
+			// With IPv6 disabled, keep systemd-networkd from wedging on it (#548).
+			if err := container.ConfigureNetworkdIPv4Only(result.ContainerName); err != nil {
+				opts.Logger(fmt.Sprintf("Warning: networkd IPv4-only config not applied: %v", err))
+			}
 		}
 
 		// Block privileged containers — they defeat all isolation

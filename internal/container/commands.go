@@ -572,6 +572,52 @@ func DisableIPv6AtBoot(containerName string) error {
 		"linux.sysctl.net.ipv6.conf.default.disable_ipv6=1")
 }
 
+// networkdIPv4OnlyConfig manages eth0 as IPv4-only. The 05- prefix sorts before
+// netplan's generated 10-netplan-eth0.network, so systemd-networkd uses this one.
+const networkdIPv4OnlyConfig = `# Installed by coi in restricted/allowlist mode (issue #548).
+# coi disables IPv6 in the container; without this, systemd-networkd keeps
+# failing to add the IPv6 link-local address, the link never leaves the
+# "configuring" state, and systemd-networkd-wait-online (hence
+# network-online.target and everything ordered after it, e.g. docker.service)
+# hangs forever. Declaring eth0 IPv4-only lets the link reach "configured".
+[Match]
+Name=eth0
+
+[Network]
+DHCP=ipv4
+LinkLocalAddressing=no
+IPv6AcceptRA=no
+
+[Link]
+RequiredFamilyForOnline=ipv4
+`
+
+// ConfigureNetworkdIPv4Only writes a high-priority networkd config that manages
+// eth0 as IPv4-only, so the link reaches "configured" even though coi disables
+// IPv6 (issue #548). It MUST be pushed before the container starts (networkd
+// reads it on first boot) — callers invoke it from their pre-start hook. Only
+// meaningful in restricted/allowlist mode, where coi disables IPv6; in open mode
+// IPv6 is left working and this is not applied.
+func ConfigureNetworkdIPv4Only(containerName string) error {
+	tmp, err := os.CreateTemp("", "coi-networkd-*.network")
+	if err != nil {
+		return fmt.Errorf("create temp networkd config: %w", err)
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.WriteString(networkdIPv4OnlyConfig); err != nil {
+		tmp.Close()
+		return fmt.Errorf("write temp networkd config: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp networkd config: %w", err)
+	}
+	dest := containerName + "/etc/systemd/network/05-coi-ipv4-only.network"
+	if err := IncusExec("file", "push", "--create-dirs", "--mode=0644", tmp.Name(), dest); err != nil {
+		return fmt.Errorf("push networkd config to %s: %w", dest, err)
+	}
+	return nil
+}
+
 // StopContainer stops a container
 func StopContainer(containerName string) error {
 	return IncusExec("stop", containerName, "--force")

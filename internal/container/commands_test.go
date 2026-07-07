@@ -2,6 +2,7 @@ package container
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -29,6 +30,23 @@ func TestStreamedStdin_TerminalMapsToNil(t *testing.T) {
 	} else {
 		if got := streamedStdin(); got == nil {
 			t.Error("non-terminal stdin should be attached")
+		}
+	}
+}
+
+// The IPv4-only networkd config (issue #548) must declare the directives that
+// keep systemd-networkd from wedging when IPv6 is disabled, and sort before
+// netplan's 10-netplan-eth0.network so networkd uses it.
+func TestNetworkdIPv4OnlyConfig_HasKeyDirectives(t *testing.T) {
+	for _, want := range []string{
+		"Name=eth0",
+		"DHCP=ipv4",
+		"LinkLocalAddressing=no",
+		"IPv6AcceptRA=no",
+		"RequiredFamilyForOnline=ipv4",
+	} {
+		if !strings.Contains(networkdIPv4OnlyConfig, want) {
+			t.Errorf("networkdIPv4OnlyConfig missing %q", want)
 		}
 	}
 }

@@ -163,6 +163,15 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 			logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
 			preStart := func() error {
 				s.useShift, _ = session.ConfigureUIDMapping(s.containerName, a.cfg.Incus.DisableShift, logFn)
+				// Restricted/allowlist disable IPv6 in the container (post-start,
+				// via the network manager). Pre-seed an IPv4-only networkd config
+				// so the link reaches "configured" and systemd-networkd-wait-online
+				// does not hang (#548). Non-fatal.
+				if m := a.cfg.Network.Mode; m != "" && m != config.NetworkModeOpen {
+					if err := container.ConfigureNetworkdIPv4Only(s.containerName); err != nil {
+						logFn(fmt.Sprintf("Warning: networkd IPv4-only config not applied: %v", err))
+					}
+				}
 				s.containerWorkspace = a.resolveContainerWorkspacePath(s.absWorkspace)
 				return a.applyWorkspaceMounts(mgr, s.containerName, s.absWorkspace, &s.containerWorkspace, s.mountConfig, s.useShift, false)
 			}
