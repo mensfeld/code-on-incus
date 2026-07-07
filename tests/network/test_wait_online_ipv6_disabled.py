@@ -25,17 +25,18 @@ import subprocess
 
 import pytest
 
-# Runs inside the coi container. Polls (up to ~40s) until the boot transaction
-# is terminal OR eth0 reaches the "configured" setup state, instead of a fixed
-# sleep — the pre-fix hang left eth0 permanently at "routable (configuring)", so
-# a fixed snapshot could sample too early on a slow runner.
+# Runs inside the coi container. Polls until the boot transaction is TERMINAL
+# (running/degraded) rather than using a fixed sleep. The #548 hang is precisely
+# "boot never becomes terminal because systemd-networkd-wait-online is wedged",
+# so reaching a terminal state IS the proof the fix worked. We deliberately do
+# NOT break early on eth0 reaching "(configured)": networkd can finish a few
+# seconds before the rest of the boot transaction, and sampling then would see a
+# still-"starting" system that is perfectly healthy (a false failure).
 _BOOT_INSPECT = r"""
 set +e
-for _ in $(seq 1 40); do
+for _ in $(seq 1 60); do
   s=$(systemctl is-system-running 2>/dev/null)
-  net=$(networkctl status eth0 --no-pager 2>/dev/null)
   case "$s" in running|degraded) break;; esac
-  case "$net" in *"(configured)"*) break;; esac
   sleep 1
 done
 echo "SYSTEM_STATE=$(systemctl is-system-running 2>/dev/null)"
