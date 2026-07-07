@@ -57,6 +57,12 @@
 
 [git]
 # writable_hooks = false         # allow the container to write .git/hooks (security-sensitive)
+# name  = "Jane Dev"             # pin the container commit identity (overrides host git config)
+# email = "jane@corp.example"    # ...both name+email required to take effect
+# seed_host_identity = true      # default: copy host `git config --global` user.name/email into the
+                                 # container. Set false to keep only the fail-closed guard.
+                                 # (name/email/seed_host_identity are trusted-scope only — ignored in
+                                 #  a project .coi/config.toml)
 
 [ssh]
 # forward_agent = false          # forward the host SSH agent into the container

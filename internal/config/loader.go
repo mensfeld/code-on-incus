@@ -222,18 +222,42 @@ func sanitizeUntrustedSecurity(s *SecurityConfig, path string) {
 	s.HostImmutable = nil
 }
 
-// sanitizeUntrustedGit drops git settings that weaken protection from an
-// untrusted source. git.writable_hooks=true makes .git/hooks writable inside the
-// container (filterWritableGitHooks removes it from the read-only set), so it is
-// honored only from trusted-scope config. nil is a no-op.
+// sanitizeUntrustedGit drops git settings that weaken protection or would let an
+// untrusted source pick the container's commit identity. Honored only from
+// trusted-scope config:
+//   - git.writable_hooks=true makes .git/hooks writable inside the container
+//     (filterWritableGitHooks removes it from the read-only set).
+//   - git.name / git.email choose the commit author installed in the container;
+//     a cloned/agent-planted repo must not decide who its commits appear to be
+//     authored by (the whole reason COI reads only the host's *global* git
+//     config, never project-local). Stripped so the field is honored only from
+//     ~/.coi/config.toml / $COI_CONFIG.
+//   - git.seed_host_identity governs reading the host identity; git-identity
+//     behavior is entirely trusted-scope, so it is dropped from untrusted config
+//     too (a project config must not flip whether the host identity is used).
+//
+// nil is a no-op.
 func sanitizeUntrustedGit(g *GitConfig, path string) {
-	if g == nil || g.WritableHooks == nil {
+	if g == nil {
 		return
 	}
-	if *g.WritableHooks {
-		warnUntrustedDowngrade(path, "git.writable_hooks")
+	if g.WritableHooks != nil {
+		if *g.WritableHooks {
+			warnUntrustedDowngrade(path, "git.writable_hooks")
+		}
+		g.WritableHooks = nil
 	}
-	g.WritableHooks = nil
+	if g.Name != "" || g.Email != "" {
+		fmt.Fprintf(os.Stderr,
+			"WARNING: ignoring 'git.name'/'git.email' in project config %s; a project "+
+				"checkout must not choose the container commit identity. Move it to "+
+				"~/.coi/config.toml or set COI_CONFIG to apply it.\n", path)
+		g.Name = ""
+		g.Email = ""
+	}
+	// A project config must not influence git-identity behavior at all; drop the
+	// toggle silently (neither value is a protection downgrade on its own).
+	g.SeedHostIdentity = nil
 }
 
 // sanitizeUntrustedEnvCommands strips env_commands (and their timeout) from an
