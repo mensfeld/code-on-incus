@@ -153,6 +153,118 @@ func TestProfileInheritanceMountsInherited(t *testing.T) {
 	}
 }
 
+func TestProfileInheritanceSocketsInherited(t *testing.T) {
+	cfg := GetDefaultConfig()
+	cfg.Profiles["parent"] = ProfileConfig{
+		Sockets: []SocketEntry{
+			{Host: "~/.gnupg/S.gpg-agent", Container: "/home/code/.gnupg/S.gpg-agent"},
+		},
+	}
+	cfg.Profiles["child"] = ProfileConfig{
+		Inherits: "parent",
+		Container: ContainerConfig{
+			Image: "child-image",
+		},
+		// No sockets defined — should inherit parent's
+	}
+
+	if err := cfg.ResolveProfileInheritance(); err != nil {
+		t.Fatalf("ResolveProfileInheritance() failed: %v", err)
+	}
+
+	child := cfg.Profiles["child"]
+	if len(child.Sockets) != 1 {
+		t.Fatalf("Expected 1 socket inherited from parent, got %d", len(child.Sockets))
+	}
+	if child.Sockets[0].Host != "~/.gnupg/S.gpg-agent" {
+		t.Errorf("Expected inherited socket host '~/.gnupg/S.gpg-agent', got %q", child.Sockets[0].Host)
+	}
+}
+
+func TestProfileInheritanceSocketsReplace(t *testing.T) {
+	cfg := GetDefaultConfig()
+	cfg.Profiles["parent"] = ProfileConfig{
+		Sockets: []SocketEntry{
+			{Host: "~/.gnupg/S.gpg-agent", Container: "/home/code/.gnupg/S.gpg-agent"},
+		},
+	}
+	cfg.Profiles["child"] = ProfileConfig{
+		Inherits: "parent",
+		Sockets: []SocketEntry{
+			{Host: "~/.docker.sock", Container: "/var/run/docker.sock"},
+		},
+	}
+
+	if err := cfg.ResolveProfileInheritance(); err != nil {
+		t.Fatalf("ResolveProfileInheritance() failed: %v", err)
+	}
+
+	child := cfg.Profiles["child"]
+	if len(child.Sockets) != 1 || child.Sockets[0].Host != "~/.docker.sock" {
+		t.Errorf("Expected child sockets to replace parent's, got %v", child.Sockets)
+	}
+}
+
+func TestProfileInheritanceEnvCommandsMerge(t *testing.T) {
+	cfg := GetDefaultConfig()
+	cfg.Profiles["parent"] = ProfileConfig{
+		EnvCommands: map[string]string{
+			"GH_TOKEN":  "gh auth token",
+			"NPM_TOKEN": "cat ~/.npmrc",
+		},
+	}
+	cfg.Profiles["child"] = ProfileConfig{
+		Inherits: "parent",
+		EnvCommands: map[string]string{
+			"NPM_TOKEN": "vault read npm",    // override
+			"AWS_TOKEN": "aws sts get-token", // new
+		},
+	}
+
+	if err := cfg.ResolveProfileInheritance(); err != nil {
+		t.Fatalf("ResolveProfileInheritance() failed: %v", err)
+	}
+
+	child := cfg.Profiles["child"]
+	if child.EnvCommands["GH_TOKEN"] != "gh auth token" {
+		t.Errorf("Expected GH_TOKEN inherited, got %q", child.EnvCommands["GH_TOKEN"])
+	}
+	if child.EnvCommands["NPM_TOKEN"] != "vault read npm" {
+		t.Errorf("Expected NPM_TOKEN overridden by child, got %q", child.EnvCommands["NPM_TOKEN"])
+	}
+	if child.EnvCommands["AWS_TOKEN"] != "aws sts get-token" {
+		t.Errorf("Expected AWS_TOKEN=child value, got %q", child.EnvCommands["AWS_TOKEN"])
+	}
+}
+
+func TestProfileInheritanceEnvCommandsClear(t *testing.T) {
+	cfg := GetDefaultConfig()
+	cfg.Profiles["parent"] = ProfileConfig{
+		EnvCommands: map[string]string{
+			"SECRET_CMD": "cat /host/secret",
+			"KEEP_CMD":   "echo keep",
+		},
+	}
+	cfg.Profiles["child"] = ProfileConfig{
+		Inherits: "parent",
+		EnvCommands: map[string]string{
+			"SECRET_CMD": "", // Clear inherited value
+		},
+	}
+
+	if err := cfg.ResolveProfileInheritance(); err != nil {
+		t.Fatalf("ResolveProfileInheritance() failed: %v", err)
+	}
+
+	child := cfg.Profiles["child"]
+	if _, exists := child.EnvCommands["SECRET_CMD"]; exists {
+		t.Error("Expected SECRET_CMD to be cleared by empty string")
+	}
+	if child.EnvCommands["KEEP_CMD"] != "echo keep" {
+		t.Errorf("Expected KEEP_CMD inherited, got %q", child.EnvCommands["KEEP_CMD"])
+	}
+}
+
 func TestProfileInheritanceForwardEnvReplace(t *testing.T) {
 	cfg := GetDefaultConfig()
 	cfg.Profiles["parent"] = ProfileConfig{
