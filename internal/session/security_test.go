@@ -148,7 +148,7 @@ func TestSetupSecurityMounts_SymlinkRejection(t *testing.T) {
 	}
 }
 
-func TestSetupSecurityMounts_GitSymlinkSkipped(t *testing.T) {
+func TestSetupSecurityMounts_GitSymlinkWarns(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "security-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
@@ -167,14 +167,16 @@ func TestSetupSecurityMounts_GitSymlinkSkipped(t *testing.T) {
 		t.Fatalf("Failed to create .git symlink: %v", err)
 	}
 
-	// Should skip .git/hooks when .git is a symlink (no error, just skip)
 	_, err = SetupSecurityMounts(nil, tmpDir, "/workspace", []string{".git/hooks"}, false, nil)
-	if err != nil {
-		t.Errorf("Expected nil error when .git is symlink, got: %v", err)
+	if err == nil {
+		t.Fatal("Expected warning error when .git is symlink, got nil")
+	}
+	if !strings.Contains(err.Error(), ".git is a symlink") {
+		t.Errorf("Expected .git symlink warning, got: %v", err)
 	}
 }
 
-func TestSetupSecurityMounts_GitFileSkipped(t *testing.T) {
+func TestSetupSecurityMounts_GitFileWarns(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "security-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
@@ -187,10 +189,40 @@ func TestSetupSecurityMounts_GitFileSkipped(t *testing.T) {
 		t.Fatalf("Failed to create .git file: %v", err)
 	}
 
-	// Should skip .git/hooks when .git is a file (no error, just skip)
 	_, err = SetupSecurityMounts(nil, tmpDir, "/workspace", []string{".git/hooks"}, false, nil)
+	if err == nil {
+		t.Fatal("Expected warning error when .git is file, got nil")
+	}
+	if !strings.Contains(err.Error(), ".git is a file") {
+		t.Errorf("Expected .git file warning, got: %v", err)
+	}
+}
+
+func TestSetupSecurityMounts_GitFileWarningDoesNotSkipOtherPaths(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "security-test-*")
 	if err != nil {
-		t.Errorf("Expected nil error when .git is file, got: %v", err)
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	if err := os.WriteFile(filepath.Join(tmpDir, ".git"), []byte("gitdir: /some/path"), 0o644); err != nil {
+		t.Fatalf("Failed to create .git file: %v", err)
+	}
+	vscodeDir := filepath.Join(tmpDir, ".vscode")
+	if err := os.Mkdir(vscodeDir, 0o755); err != nil {
+		t.Fatalf("Failed to create .vscode: %v", err)
+	}
+
+	rec := &recordingDevices{}
+	_, err = SetupSecurityMounts(rec, tmpDir, "/workspace", []string{".git/hooks", ".vscode"}, false, nil)
+	if err == nil {
+		t.Fatal("Expected warning error when .git is file, got nil")
+	}
+	if len(rec.mounts) != 1 {
+		t.Fatalf("Expected one non-git protected mount, got %d", len(rec.mounts))
+	}
+	if rec.mounts[0].path != "/workspace/.vscode" {
+		t.Errorf("Expected .vscode to remain protected, got mount path %q", rec.mounts[0].path)
 	}
 }
 
