@@ -106,10 +106,9 @@ func (a *App) buildCommand(cmd *cobra.Command, args []string) error {
 
 		// Validate the agent selection (#454) and warn if the image would be built
 		// without the tool the user actually runs.
-		if err := validateBuildAgents(p.Container.Build.Agents); err != nil {
+		if err := prepareBuildAgents(p.Container.Build.Agents, effectiveToolName(a.cfg, p)); err != nil {
 			return err
 		}
-		warnIfToolNotBuilt(a.cfg, p)
 
 		opts := image.BuildOptions{
 			Force:       buildForce,
@@ -251,14 +250,22 @@ func (a *App) buildAllProfiles() error {
 			if p.Container.Build.Base != "" {
 				coiBaseImage = p.Container.Build.Base
 			}
+			// Validate the agent selection (#454) and warn if the image would be
+			// built without the tool the user runs — same as the single-build path.
+			if err := prepareBuildAgents(p.Container.Build.Agents, effectiveToolName(a.cfg, p)); err != nil {
+				buildErrors = append(buildErrors, fmt.Sprintf("  profile '%s': %v", profileName, err))
+				errored++
+				continue
+			}
 			opts := image.BuildOptions{
 				Force:       buildForce,
 				ImageType:   "coi",
 				BaseImage:   coiBaseImage,
 				AliasName:   image.CoiAlias,
-				Description: "coi image (Docker + build tools + Claude CLI + GitHub CLI)",
+				Description: "coi image (Docker + build tools + AI agents + GitHub CLI)",
 				Compression: p.Container.Build.Compression,
 				StoragePool: buildPool,
+				Agents:      p.Container.Build.Agents,
 				Logger:      func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) },
 			}
 			result := image.NewBuilder(opts).Build()
@@ -352,27 +359,43 @@ func validateBuildAgents(agents []string) error {
 	return nil
 }
 
-// warnIfToolNotBuilt warns when an explicit agents list omits the tool the user runs,
-// so the "image built without your tool -> cryptic exit 127 later" footgun surfaces now.
-func warnIfToolNotBuilt(cfg *config.Config, p *config.ProfileConfig) {
-	agents := p.Container.Build.Agents
-	if len(agents) == 0 {
-		return // unset installs all agents
-	}
-	toolName := cfg.Tool.Name
+// effectiveToolName resolves the AI tool the user actually runs: the profile's
+// [tool] name override when set, else the top-level config, defaulting to claude.
+// p may be nil (e.g. the auto-build path, which works from an already-resolved cfg).
+func effectiveToolName(cfg *config.Config, p *config.ProfileConfig) string {
+	name := cfg.Tool.Name
 	if p != nil && p.Tool != nil && p.Tool.Name != "" {
-		toolName = p.Tool.Name
+		name = p.Tool.Name
+	}
+	if name == "" {
+		name = "claude"
+	}
+	return name
+}
+
+// prepareBuildAgents validates the [container.build] agents selection and warns
+// when it omits the tool the user runs, so the "image built without your tool ->
+// cryptic exit 127 later" footgun surfaces at build time. Shared by every
+// coi-default build entry point — `coi build`, `coi build --all`, and the
+// auto-build on `coi run`/`coi shell` — so they cannot drift. Issue #454.
+func prepareBuildAgents(agents []string, toolName string) error {
+	if err := validateBuildAgents(agents); err != nil {
+		return err
+	}
+	if len(agents) == 0 {
+		return nil // unset installs all agents
 	}
 	if toolName == "" {
 		toolName = "claude"
 	}
 	for _, a := range agents {
 		if a == toolName {
-			return
+			return nil
 		}
 	}
 	fmt.Fprintf(os.Stderr,
 		"Warning: building the image without your configured tool %q (agents = %s); "+
 			"add %q to [container.build] agents or change [tool] name, or coi shell/run will fail\n",
 		toolName, strings.Join(agents, ", "), toolName)
+	return nil
 }

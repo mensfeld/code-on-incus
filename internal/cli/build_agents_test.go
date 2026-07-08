@@ -3,13 +3,18 @@ package cli
 import (
 	"strings"
 	"testing"
+
+	"github.com/mensfeld/code-on-incus/internal/config"
+	"github.com/mensfeld/code-on-incus/internal/tool"
 )
 
 func TestValidateBuildAgents(t *testing.T) {
 	if err := validateBuildAgents(nil); err != nil {
 		t.Errorf("empty (all agents) must be valid, got %v", err)
 	}
-	if err := validateBuildAgents([]string{"claude", "opencode", "pi"}); err != nil {
+	// Derive the valid case from the registry so this stays honest when a new
+	// agent is added (rather than hardcoding the current three).
+	if err := validateBuildAgents(tool.ListSupported()); err != nil {
 		t.Errorf("all supported agents must be valid, got %v", err)
 	}
 	err := validateBuildAgents([]string{"claude", "bogus"})
@@ -18,5 +23,55 @@ func TestValidateBuildAgents(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "bogus") {
 		t.Errorf("error should name the offending agent, got %v", err)
+	}
+}
+
+func TestEffectiveToolName(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Tool.Name = "claude"
+
+	// Nil profile falls back to the top-level config (auto-build path).
+	if got := effectiveToolName(cfg, nil); got != "claude" {
+		t.Errorf("nil profile should use cfg tool, got %q", got)
+	}
+
+	// A profile [tool] name overrides the top-level config.
+	p := &config.ProfileConfig{Tool: &config.ToolConfig{Name: "opencode"}}
+	if got := effectiveToolName(cfg, p); got != "opencode" {
+		t.Errorf("profile tool should override, got %q", got)
+	}
+
+	// An empty profile tool name does not clobber the config value.
+	p = &config.ProfileConfig{Tool: &config.ToolConfig{Name: ""}}
+	if got := effectiveToolName(cfg, p); got != "claude" {
+		t.Errorf("empty profile tool should fall back to cfg, got %q", got)
+	}
+
+	// Nothing configured anywhere defaults to claude.
+	if got := effectiveToolName(&config.Config{}, nil); got != "claude" {
+		t.Errorf("unset tool should default to claude, got %q", got)
+	}
+}
+
+func TestPrepareBuildAgents(t *testing.T) {
+	// Empty selection installs all agents — always valid, never warns.
+	if err := prepareBuildAgents(nil, "claude"); err != nil {
+		t.Errorf("empty agents must be valid, got %v", err)
+	}
+
+	// An unknown agent is a hard error (fail fast, before any build).
+	if err := prepareBuildAgents([]string{"bogus"}, "claude"); err == nil {
+		t.Fatal("unknown agent must error")
+	}
+
+	// A selection that includes the configured tool is fine (warn is non-fatal
+	// anyway; here it must not fire and must not error).
+	if err := prepareBuildAgents([]string{"claude", "pi"}, "claude"); err != nil {
+		t.Errorf("valid selection must not error, got %v", err)
+	}
+
+	// A selection that omits the configured tool warns but is non-fatal.
+	if err := prepareBuildAgents([]string{"opencode"}, "claude"); err != nil {
+		t.Errorf("omitting the tool must warn, not error, got %v", err)
 	}
 }
