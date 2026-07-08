@@ -46,6 +46,11 @@
       "items": { "$ref": "#/$defs/SocketEntry" },
       "description": "Host Unix sockets to forward into the container"
     },
+    "credentials": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/CredentialEntry" },
+      "description": "Host credential files to copy into the container: named catalog bundles or ad-hoc host/container pairs"
+    },
     "network":    { "$ref": "#/$defs/NetworkConfig" },
     "paths":      { "$ref": "#/$defs/PathsConfig" },
     "incus":      { "$ref": "#/$defs/IncusConfig" },

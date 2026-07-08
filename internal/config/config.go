@@ -541,6 +541,7 @@ func synthesizeDefaultProfile(cfg *Config) ProfileConfig {
 		Network:     &network,
 		Mounts:      cloneSlice(cfg.Mounts.Default),
 		Sockets:     cloneSlice(cfg.Sockets),
+		Credentials: cloneSlice(cfg.Credentials),
 		Paths:       &paths,
 		Incus:       &incus,
 		Git:         &git,
@@ -755,6 +756,9 @@ func (c *Config) Merge(other *Config) {
 	}
 	if len(other.Sockets) > 0 {
 		c.Sockets = append(c.Sockets, other.Sockets...)
+	}
+	if len(other.Credentials) > 0 {
+		c.Credentials = append(c.Credentials, other.Credentials...)
 	}
 
 	mergePathsInto(&c.Paths, &other.Paths)

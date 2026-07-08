@@ -56,7 +56,7 @@ func TestGetProfileSchema_AllDefsPresent(t *testing.T) {
 		"BuildConfig", "ContainerConfig",
 		"CPULimits", "MemoryLimits", "DiskLimits", "RuntimeLimits", "LimitsConfig",
 		"ClaudeToolConfig", "ToolConfig",
-		"MountEntry", "SocketEntry",
+		"MountEntry", "SocketEntry", "CredentialEntry",
 		"NetworkLoggingConfig", "NetworkConfig",
 		"PathsConfig", "IncusConfig",
 		"GitConfig", "SSHConfig",

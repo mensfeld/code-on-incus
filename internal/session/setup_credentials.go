@@ -27,8 +27,7 @@ func setupCredentials(mgr container.ContainerManager, homeDir string, entries []
 		}
 
 		destDir := filepath.Dir(dest)
-		mkdirCmd := fmt.Sprintf("mkdir -p %s", destDir)
-		if _, err := mgr.ExecCommand(mkdirCmd, container.ExecCommandOptions{Capture: true}); err != nil {
+		if err := mgr.ExecArgs([]string{"mkdir", "-p", destDir}, container.ExecCommandOptions{}); err != nil {
 			return fmt.Errorf("failed to create %s: %w", destDir, err)
 		}
 
