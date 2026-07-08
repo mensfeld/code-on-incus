@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/BurntSushi/toml"
 )
@@ -32,6 +33,7 @@ type Config struct {
 	Shell              ShellConfig              `toml:"shell"`
 	Mounts             MountsConfig             `toml:"mounts"`
 	Sockets            []SocketEntry            `toml:"sockets"`
+	Credentials        []CredentialEntry        `toml:"credentials"`
 	Limits             LimitsConfig             `toml:"limits"`
 	Git                GitConfig                `toml:"git"`
 	SSH                SSHConfig                `toml:"ssh"`
@@ -290,6 +292,7 @@ type ProfileConfig struct {
 	Tool        *ToolConfig       `toml:"tool"`
 	Mounts      []MountEntry      `toml:"mounts"`
 	Sockets     []SocketEntry     `toml:"sockets"`
+	Credentials []CredentialEntry `toml:"credentials"`
 	Network     *NetworkConfig    `toml:"network"`
 	ForwardEnv  []string          `toml:"forward_env"`
 	Source      string            `toml:"-"` // Where this profile was loaded from (not serialized)
@@ -355,6 +358,26 @@ type SocketEntry struct {
 	// entry came from an untrusted, project-scope config file. Forwarding a host
 	// socket exposes a host capability, so untrusted entries are gated behind
 	// explicit trust (`coi trust`), like escaping mounts.
+	Untrusted  bool   `toml:"-"`
+	SourcePath string `toml:"-"`
+}
+
+// CredentialEntry represents a single host credential source to copy into a
+// container: either a reference to a named catalog bundle (see
+// internal/tool/credentials), or an ad-hoc host/container file pair.
+// Exactly one of Bundle, or Host+Container, must be set.
+type CredentialEntry struct {
+	Bundle    string `toml:"bundle"`    // catalog bundle name, e.g. "ollama"
+	Host      string `toml:"host"`      // ad-hoc host path (supports ~ expansion)
+	Container string `toml:"container"` // ad-hoc container path (must be absolute)
+	Mode      string `toml:"mode"`      // optional chmod mode, e.g. "0600"
+
+	// Untrusted/SourcePath are set programmatically (never from TOML) when
+	// this entry came from an untrusted, project-scope config file. Only
+	// ad-hoc entries (Bundle == "") are ever marked Untrusted. A bundle
+	// reference can only select a name from coi's own vetted catalog, not an
+	// attacker-chosen host path, so it carries the same trust level the
+	// builtin tool credential seeding already has.
 	Untrusted  bool   `toml:"-"`
 	SourcePath string `toml:"-"`
 }
@@ -932,6 +955,9 @@ func (c *Config) ApplyProfile(name string) error {
 	if len(profile.Sockets) > 0 {
 		c.Sockets = append(c.Sockets, profile.Sockets...)
 	}
+	if len(profile.Credentials) > 0 {
+		c.Credentials = append(c.Credentials, profile.Credentials...)
+	}
 
 	// Apply struct sections
 	if profile.Limits != nil {
@@ -1400,6 +1426,31 @@ func (p *ProfileConfig) Validate(name string) error {
 		}
 		if m.Container == "" {
 			return fmt.Errorf("profile '%s': mount[%d] is missing 'container' path", name, i)
+		}
+	}
+
+	// Validate credential entries: exactly one of bundle or host+container.
+	for i, cr := range p.Credentials {
+		hasBundle := cr.Bundle != ""
+		hasAdHoc := cr.Host != "" || cr.Container != ""
+		if hasBundle && hasAdHoc {
+			return fmt.Errorf("profile '%s': credentials[%d] must set either 'bundle' or 'host'+'container', not both", name, i)
+		}
+		if !hasBundle && !hasAdHoc {
+			return fmt.Errorf("profile '%s': credentials[%d] must set either 'bundle' or 'host'+'container'", name, i)
+		}
+		if hasAdHoc {
+			if cr.Host == "" {
+				return fmt.Errorf("profile '%s': credentials[%d] is missing 'host' path", name, i)
+			}
+			if cr.Container == "" {
+				return fmt.Errorf("profile '%s': credentials[%d] is missing 'container' path", name, i)
+			}
+		}
+		if cr.Mode != "" {
+			if _, err := strconv.ParseUint(cr.Mode, 8, 32); err != nil {
+				return fmt.Errorf("profile '%s': credentials[%d] has invalid 'mode' %q (must be an octal file mode, e.g. \"0600\"): %w", name, i, cr.Mode, err)
+			}
 		}
 	}
 
