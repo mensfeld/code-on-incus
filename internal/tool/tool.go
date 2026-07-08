@@ -3,15 +3,31 @@ package tool
 import (
 	"bytes"
 	_ "embed"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"text/template"
+
+	"github.com/mensfeld/code-on-incus/internal/tool/credentials"
 )
 
 //go:embed templates/sandbox_context.md.tmpl
 var sandboxContextTemplate string
+
+// mustBundle looks up a named credential bundle from the embedded catalog
+// (internal/tool/credentials). Panics if missing — a builtin tool
+// referencing an unknown bundle name is a programming error (a typo in this
+// package or a catalog entry that was renamed/removed), not a runtime
+// condition to recover from.
+func mustBundle(name string) credentials.Bundle {
+	b, ok := credentials.Lookup(name)
+	if !ok {
+		panic(fmt.Sprintf("tool: unknown credential bundle %q", name))
+	}
+	return b
+}
 
 // Tool represents an AI coding tool that can be run in COI containers
 type Tool interface {
@@ -92,7 +108,7 @@ func (c *ClaudeTool) Binary() string {
 }
 
 func (c *ClaudeTool) ConfigDirName() string {
-	return ".claude"
+	return mustBundle("claude").ConfigDir
 }
 
 func (c *ClaudeTool) SessionsDirName() string {
@@ -175,23 +191,25 @@ func (c *ClaudeTool) GetSandboxSettings() map[string]interface{} {
 
 // EssentialConfigFiles implements ToolWithConfigDirFiles.
 func (c *ClaudeTool) EssentialConfigFiles() []string {
-	return []string{".credentials.json", "config.yml", "settings.json", "CLAUDE.md"}
+	return mustBundle("claude").Files
 }
 
 // SandboxSettingsFileName implements ToolWithConfigDirFiles.
-func (c *ClaudeTool) SandboxSettingsFileName() string { return "settings.json" }
+func (c *ClaudeTool) SandboxSettingsFileName() string {
+	return mustBundle("claude").SandboxSettingsFile
+}
 
 // StateConfigFileName implements ToolWithConfigDirFiles.
 // Claude uses ~/.claude.json as a sibling state file next to ~/.claude/.
-func (c *ClaudeTool) StateConfigFileName() string { return ".claude.json" }
+func (c *ClaudeTool) StateConfigFileName() string { return mustBundle("claude").StateFile }
 
 // AlwaysSetupConfig implements ToolWithConfigDirFiles.
 // Claude needs credentials from ~/.claude, so skip setup when host dir is missing.
-func (c *ClaudeTool) AlwaysSetupConfig() bool { return false }
+func (c *ClaudeTool) AlwaysSetupConfig() bool { return mustBundle("claude").AlwaysSetup }
 
 // AutoContextFile implements ToolWithAutoContextFile.
 // Claude Code automatically reads ~/.claude/CLAUDE.md as user-level instructions.
-func (c *ClaudeTool) AutoContextFile() string { return ".claude/CLAUDE.md" }
+func (c *ClaudeTool) AutoContextFile() string { return mustBundle("claude").AutoContextFile }
 
 // SetEffortLevel sets the effort level for Claude Code.
 // Valid values: "low", "medium", "high", "xhigh", "max", "auto".
