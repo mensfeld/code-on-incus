@@ -6,8 +6,10 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/image"
+	"github.com/mensfeld/code-on-incus/internal/tool"
 	"github.com/spf13/cobra"
 )
 
@@ -102,14 +104,22 @@ func (a *App) buildCommand(cmd *cobra.Command, args []string) error {
 			coiBaseImage = p.Container.Build.Base
 		}
 
+		// Validate the agent selection (#454) and warn if the image would be built
+		// without the tool the user actually runs.
+		if err := validateBuildAgents(p.Container.Build.Agents); err != nil {
+			return err
+		}
+		warnIfToolNotBuilt(a.cfg, p)
+
 		opts := image.BuildOptions{
 			Force:       buildForce,
 			ImageType:   "coi",
 			BaseImage:   coiBaseImage,
 			AliasName:   image.CoiAlias,
-			Description: "coi image (Docker + build tools + Claude CLI + GitHub CLI)",
+			Description: "coi image (Docker + build tools + AI agents + GitHub CLI)",
 			Compression: p.Container.Build.Compression,
 			StoragePool: buildPool,
+			Agents:      p.Container.Build.Agents,
 			Logger: func(msg string) {
 				fmt.Fprintf(os.Stderr, "%s\n", msg)
 			},
@@ -320,4 +330,49 @@ func (a *App) buildAllProfiles() error {
 		return fmt.Errorf("%d build(s) failed:\n%s", errored, strings.Join(buildErrors, "\n"))
 	}
 	return nil
+}
+
+// validateBuildAgents checks that every name in a [container.build] agents list is a
+// supported agent (the tool registry is the single source of truth). Empty is valid
+// (installs all supported agents). Issue #454.
+func validateBuildAgents(agents []string) error {
+	if len(agents) == 0 {
+		return nil
+	}
+	supported := tool.ListSupported()
+	known := make(map[string]bool, len(supported))
+	for _, s := range supported {
+		known[s] = true
+	}
+	for _, a := range agents {
+		if !known[a] {
+			return fmt.Errorf("unknown agent %q in [container.build] agents (supported: %s)", a, strings.Join(supported, ", "))
+		}
+	}
+	return nil
+}
+
+// warnIfToolNotBuilt warns when an explicit agents list omits the tool the user runs,
+// so the "image built without your tool -> cryptic exit 127 later" footgun surfaces now.
+func warnIfToolNotBuilt(cfg *config.Config, p *config.ProfileConfig) {
+	agents := p.Container.Build.Agents
+	if len(agents) == 0 {
+		return // unset installs all agents
+	}
+	toolName := cfg.Tool.Name
+	if p != nil && p.Tool != nil && p.Tool.Name != "" {
+		toolName = p.Tool.Name
+	}
+	if toolName == "" {
+		toolName = "claude"
+	}
+	for _, a := range agents {
+		if a == toolName {
+			return
+		}
+	}
+	fmt.Fprintf(os.Stderr,
+		"Warning: building the image without your configured tool %q (agents = %s); "+
+			"add %q to [container.build] agents or change [tool] name, or coi shell/run will fail\n",
+		toolName, strings.Join(agents, ", "), toolName)
 }

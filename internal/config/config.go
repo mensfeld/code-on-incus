@@ -49,6 +49,10 @@ type BuildConfig struct {
 	Script      string   `toml:"script"`      // Path to build script (relative to config file or absolute)
 	Commands    []string `toml:"commands"`    // Inline build commands (alternative to script)
 	Compression string   `toml:"compression"` // Image compression algorithm (e.g. "none", "gzip", "xz"; empty = Incus default)
+	// Agents selects which AI agents the base image installs (e.g. ["claude"]).
+	// Empty/unset installs all supported agents (the default). Names are validated
+	// against the tool registry at build time. Issue #454.
+	Agents []string `toml:"agents"`
 }
 
 // HasBuildConfig returns true if a build configuration is defined (script or commands)
@@ -1159,6 +1163,9 @@ func mergeBuildInto(dst *BuildConfig, src *BuildConfig) {
 	}
 	if src.Compression != "" {
 		dst.Compression = src.Compression
+	}
+	if len(src.Agents) > 0 {
+		dst.Agents = src.Agents
 	}
 }
 

@@ -226,6 +226,18 @@ func TestValidateProfileMap_AcceptsStructSupportedKeys(t *testing.T) {
 	}
 }
 
+// container.build.agents (#454) must validate as a string array.
+func TestValidateProfileMap_AcceptsBuildAgents(t *testing.T) {
+	profile := map[string]any{
+		"container": map[string]any{
+			"build": map[string]any{"agents": []any{"claude", "opencode"}},
+		},
+	}
+	if err := schema.ValidateProfileMap(profile); err != nil {
+		t.Fatalf("profile with [container.build] agents should validate, got: %v", err)
+	}
+}
+
 // stale_base_check is constrained to the enum the runtime understands.
 func TestValidateProfileMap_RejectsBadStaleBaseCheck(t *testing.T) {
 	profile := map[string]any{
