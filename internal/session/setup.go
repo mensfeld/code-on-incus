@@ -326,7 +326,7 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		// resources persist from creation; the run/shell reuse paths warn that
 		// trust changes need a recreate.) Idempotent with the CLI-level gate: on
 		// the normal CLI flow these are already filtered, so this drops nothing.
-		gatedMC, droppedM, gatedSC, droppedS := FilterTrusted(opts.MountConfig, opts.SocketConfig, opts.WorkspacePath)
+		gatedMC, droppedM, gatedSC, droppedS, _, _ := FilterTrusted(opts.MountConfig, opts.SocketConfig, nil, opts.WorkspacePath)
 		for _, m := range droppedM {
 			opts.Logger(fmt.Sprintf(
 				"Warning: ignoring untrusted mount from %s: %s -> %s (resolves outside the workspace; run 'coi trust' or set %s=1)",
