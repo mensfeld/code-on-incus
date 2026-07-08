@@ -31,11 +31,12 @@ type SetupOptions struct {
 	Persistent            bool // Keep container between sessions (don't delete on cleanup)
 	ResumeFromID          string
 	Slot                  int
-	MountConfig           *MountConfig  // Multi-mount support
-	SocketConfig          *SocketConfig // Forwarded host unix sockets
-	SessionsDir           string        // e.g., ~/.coi/sessions-claude
-	CLIConfigPath         string        // e.g., ~/.claude (host CLI config to copy credentials from)
-	Tool                  tool.Tool     // AI coding tool being used
+	MountConfig           *MountConfig      // Multi-mount support
+	SocketConfig          *SocketConfig     // Forwarded host unix sockets
+	CredentialConfig      *CredentialConfig // Configured [[credentials]] entries (catalog + ad-hoc)
+	SessionsDir           string            // e.g., ~/.coi/sessions-claude
+	CLIConfigPath         string            // e.g., ~/.claude (host CLI config to copy credentials from)
+	Tool                  tool.Tool         // AI coding tool being used
 	NetworkConfig         *config.NetworkConfig
 	DisableShift          bool                   // Disable UID shifting (for Colima/Lima environments)
 	LimitsConfig          *config.LimitsConfig   // Resource and time limits
@@ -319,14 +320,15 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 			}
 		}
 
-		// Defense-in-depth: gate untrusted out-of-workspace mounts AND untrusted
-		// forwarded sockets here, where a freshly-launched container is set up, so
-		// any caller of session.Setup that didn't pre-filter is still covered.
-		// (On container reuse this block is skipped along with the rest of setup —
+		// Defense-in-depth: gate untrusted out-of-workspace mounts, untrusted
+		// forwarded sockets, AND untrusted ad-hoc credential entries here,
+		// where a freshly-launched container is set up, so any caller of
+		// session.Setup that didn't pre-filter is still covered.
+		// (On container reuse this block is skipped along with the rest of setup;
 		// resources persist from creation; the run/shell reuse paths warn that
 		// trust changes need a recreate.) Idempotent with the CLI-level gate: on
 		// the normal CLI flow these are already filtered, so this drops nothing.
-		gatedMC, droppedM, gatedSC, droppedS, _, _ := FilterTrusted(opts.MountConfig, opts.SocketConfig, nil, opts.WorkspacePath)
+		gatedMC, droppedM, gatedSC, droppedS, gatedCC, droppedC := FilterTrusted(opts.MountConfig, opts.SocketConfig, opts.CredentialConfig, opts.WorkspacePath)
 		for _, m := range droppedM {
 			opts.Logger(fmt.Sprintf(
 				"Warning: ignoring untrusted mount from %s: %s -> %s (resolves outside the workspace; run 'coi trust' or set %s=1)",
@@ -337,8 +339,14 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 				"Warning: ignoring untrusted socket from %s: %s -> %s (run 'coi trust' or set %s=1)",
 				s.SourcePath, s.HostPath, s.ContainerPath, TrustEnvVar))
 		}
+		for _, c := range droppedC {
+			opts.Logger(fmt.Sprintf(
+				"Warning: ignoring untrusted credential entry from %s: %s -> %s (run 'coi trust' or set %s=1)",
+				c.SourcePath, c.HostPath, c.ContainerPath, TrustEnvVar))
+		}
 		opts.MountConfig = gatedMC
 		opts.SocketConfig = gatedSC
+		opts.CredentialConfig = gatedCC
 
 		// Mount all configured directories
 		if err := setupMounts(result.Manager, opts.MountConfig, useShift, opts.Logger); err != nil {
@@ -651,6 +659,17 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		}
 	}
 
+	// 9.5 Refresh/copy configured [[credentials]] entries (catalog bundles and
+	// ad-hoc). Independent of which Tool is selected. Re-run on every resume
+	// (idempotent) so a rotated host credential stays in sync; on a fresh
+	// session it's applied once at step 11 alongside CLI tool config.
+	if opts.ResumeFromID != "" && opts.CredentialConfig != nil && len(opts.CredentialConfig.Entries) > 0 {
+		opts.Logger("Refreshing configured credentials...")
+		if err := setupCredentials(result.Manager, result.HomeDir, opts.CredentialConfig.Entries, opts.Logger); err != nil {
+			opts.Logger(fmt.Sprintf("Warning: Could not refresh credentials: %v", err))
+		}
+	}
+
 	// 10. Workspace and configured mounts are already mounted (added before container start in step 5)
 	if skipLaunch {
 		opts.Logger("Reusing existing workspace and mount configurations")
@@ -692,6 +711,16 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 			}
 		} else if opts.Tool.ConfigDirName() == "" {
 			opts.Logger(fmt.Sprintf("Tool %s uses ENV-based auth, skipping config setup", opts.Tool.Name()))
+		}
+	}
+
+	// 11.5 Setup configured [[credentials]] entries (skip if resuming - the
+	// refresh above already handled it; skip on container reuse - persists
+	// from creation, matching how step 11 handles the builtin tool config).
+	if !skipLaunch && opts.ResumeFromID == "" && opts.CredentialConfig != nil && len(opts.CredentialConfig.Entries) > 0 {
+		opts.Logger("Setting up configured credentials...")
+		if err := setupCredentials(result.Manager, result.HomeDir, opts.CredentialConfig.Entries, opts.Logger); err != nil {
+			opts.Logger(fmt.Sprintf("Warning: Failed to setup credentials: %v", err))
 		}
 	}
 
