@@ -37,10 +37,11 @@ type runState struct {
 	// configure-container)
 	mgr                container.ContainerManager
 	wasRestarted       bool
-	useShift           bool                  // resolved by the launch phase's UID-mapping pre-start hook
-	containerWorkspace string                // in-container workspace path
-	mountConfig        *session.MountConfig  // trust-gated
-	socketConfig       *session.SocketConfig // trust-gated
+	useShift           bool                       // resolved by the launch phase's UID-mapping pre-start hook
+	containerWorkspace string                     // in-container workspace path
+	gitWorktree        *session.GitWorktreeLayout // external git dirs for a worktree checkout (#533), nil otherwise
+	mountConfig        *session.MountConfig       // trust-gated
+	socketConfig       *session.SocketConfig      // trust-gated
 
 	// After apply-network
 	socketEnv map[string]string
@@ -172,8 +173,19 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 						logFn(fmt.Sprintf("Warning: networkd IPv4-only config not applied: %v", err))
 					}
 				}
-				s.containerWorkspace = a.resolveContainerWorkspacePath(s.absWorkspace)
-				return a.applyWorkspaceMounts(mgr, s.containerName, s.absWorkspace, &s.containerWorkspace, s.mountConfig, s.useShift, false)
+				// Detect a git worktree checkout (.git is a file → external git dirs).
+				// A valid layout forces preserve-path so git's pointers resolve, and its
+				// internals are mounted + protected in applyWorkspaceMounts (#533).
+				layout, wtErr := session.ResolveGitWorktree(s.absWorkspace)
+				if wtErr != nil {
+					logFn(fmt.Sprintf("Warning: git worktree not mounted (%v); git commands may fail in the container", wtErr))
+				}
+				s.gitWorktree = layout
+				if layout != nil && session.WorkspaceUnderSystemDir(s.absWorkspace) {
+					return fmt.Errorf("git worktree workspace %q is under a system directory; cannot preserve its host path to mount git internals safely", s.absWorkspace)
+				}
+				s.containerWorkspace = a.resolveContainerWorkspacePath(s.absWorkspace, layout != nil)
+				return a.applyWorkspaceMounts(mgr, s.containerName, s.absWorkspace, &s.containerWorkspace, s.mountConfig, s.useShift, false, layout)
 			}
 
 			s.mgr = mgr
@@ -287,7 +299,9 @@ func (a *App) configureContainerRunPhase(s *runState) session.Phase {
 			// reused persistent container has work left here: resolve its existing
 			// workspace mount path from the container config.
 			if s.wasRestarted {
-				if err := a.applyWorkspaceMounts(s.mgr, s.containerName, s.absWorkspace, &s.containerWorkspace, s.mountConfig, !a.cfg.Incus.DisableShift, true); err != nil {
+				// Reuse: devices (incl. any worktree mounts) persist from creation, so
+				// applyWorkspaceMounts returns early without remounting; layout is nil.
+				if err := a.applyWorkspaceMounts(s.mgr, s.containerName, s.absWorkspace, &s.containerWorkspace, s.mountConfig, !a.cfg.Incus.DisableShift, true, nil); err != nil {
 					return nil, err
 				}
 			}
