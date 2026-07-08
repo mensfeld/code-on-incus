@@ -295,19 +295,8 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		preserveWorkspace := opts.PreserveWorkspacePath || worktreeLayout != nil
 		containerWorkspacePath := "/workspace"
 		if preserveWorkspace {
-			// Validate that the path doesn't conflict with critical system directories
-			cleanPath := filepath.Clean(opts.WorkspacePath)
-			disallowedPrefixes := []string{
-				"/etc", "/bin", "/sbin", "/usr", "/root", "/boot", "/sys", "/proc", "/dev", "/lib", "/lib64",
-			}
-			isDisallowed := false
-			for _, prefix := range disallowedPrefixes {
-				if cleanPath == prefix || strings.HasPrefix(cleanPath, prefix+"/") {
-					isDisallowed = true
-					break
-				}
-			}
-			if isDisallowed {
+			// Validate that the path doesn't conflict with critical system directories.
+			if WorkspaceUnderSystemDir(opts.WorkspacePath) {
 				if worktreeLayout != nil {
 					// Can't preserve the path, so the worktree's git pointers can't
 					// resolve and its internals can't be protected — fail closed.
@@ -315,7 +304,7 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 				}
 				opts.Logger(fmt.Sprintf("Warning: preserve_workspace_path requested for %q conflicts with system directories; using /workspace instead", opts.WorkspacePath))
 			} else {
-				containerWorkspacePath = cleanPath
+				containerWorkspacePath = filepath.Clean(opts.WorkspacePath)
 				opts.Logger(fmt.Sprintf("Adding workspace mount: %s -> %s (preserving host path)", opts.WorkspacePath, containerWorkspacePath))
 			}
 		}
@@ -376,7 +365,14 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		// SetupSecurityMounts expands the dynamic per-worktree git configs internally
 		// (issue #545 — the single chokepoint both session paths share) and returns
 		// the effective list used for logging + the immutable pass over the same set.
-		effectivePaths, err := SetupSecurityMounts(result.Manager, opts.WorkspacePath, containerWorkspacePath, opts.ProtectedPaths, useShift, opts.Security)
+		securityPaths := opts.ProtectedPaths
+		if worktreeLayout != nil {
+			// Workspace .git is a file; its .git/* defaults can't be protected here
+			// (they'd warn "gitdir indirection"). SetupCommonDirProtection covers the
+			// real internals; keep the non-.git protections.
+			securityPaths = StripGitProtectedPaths(securityPaths)
+		}
+		effectivePaths, err := SetupSecurityMounts(result.Manager, opts.WorkspacePath, containerWorkspacePath, securityPaths, useShift, opts.Security)
 		// Adopt the expanded list as the canonical protected set so downstream
 		// consumers (the SANDBOX_CONTEXT.md "Protected paths" listing built from
 		// opts.ProtectedPaths below) reflect what was actually mounted, including the

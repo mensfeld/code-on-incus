@@ -181,7 +181,7 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 					logFn(fmt.Sprintf("Warning: git worktree not mounted (%v); git commands may fail in the container", wtErr))
 				}
 				s.gitWorktree = layout
-				if layout != nil && workspaceUnderSystemDir(s.absWorkspace) {
+				if layout != nil && session.WorkspaceUnderSystemDir(s.absWorkspace) {
 					return fmt.Errorf("git worktree workspace %q is under a system directory; cannot preserve its host path to mount git internals safely", s.absWorkspace)
 				}
 				s.containerWorkspace = a.resolveContainerWorkspacePath(s.absWorkspace, layout != nil)

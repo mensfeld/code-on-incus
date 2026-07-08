@@ -63,12 +63,15 @@ func SetupSecurityMounts(mgr container.ContainerDevices, workspacePath, containe
 	return protectedPaths, nil
 }
 
-// setupProtectedPath mounts a single WORKSPACE-relative path as read-only.
+// setupProtectedPath mounts a single path as read-only
 func setupProtectedPath(mgr container.ContainerDevices, workspacePath, containerWorkspacePath, relPath string, useShift bool) error {
 	if err := validateRelPath(relPath); err != nil {
 		return err
 	}
 	cleaned := filepath.Clean(relPath)
+
+	hostPath := filepath.Join(workspacePath, cleaned)
+	containerPath := filepath.Join(containerWorkspacePath, cleaned)
 
 	// For .git paths, check if .git itself is valid FIRST (not a symlink or file)
 	// This must happen before we try to create .git/hooks. When .git is a file
@@ -93,49 +96,25 @@ func setupProtectedPath(mgr container.ContainerDevices, workspacePath, container
 		}
 	}
 
-	// Workspace root: synthesize missing default placeholders, no device prefix
-	// (preserves the existing device names).
-	return setupProtectedPathUnder(mgr, workspacePath, containerWorkspacePath, "", relPath, useShift, true)
-}
-
-// setupProtectedPathUnder mounts rootHost/relPath read-only at rootContainer/relPath.
-//
-// It is the shared tail for protecting paths under ANY root — the workspace, or an
-// external git common dir for worktree support (issue #533). devicePrefix keeps the
-// Incus device names unique across roots. When synthesize is true, absent default
-// paths are materialized as empty read-only placeholders (workspace behavior, closes
-// the planting attack on absent files); when false, an absent path is skipped
-// (os.ErrNotExist) and never created — used for the external common dir, which coi
-// must not mutate beyond what already exists.
-func setupProtectedPathUnder(mgr container.ContainerDevices, rootHost, rootContainer, devicePrefix, relPath string, useShift, synthesize bool) error {
-	if err := validateRelPath(relPath); err != nil {
-		return err
-	}
-	cleaned := filepath.Clean(relPath)
-	hostPath := filepath.Join(rootHost, cleaned)
-	containerPath := filepath.Join(rootContainer, cleaned)
-
-	if synthesize {
-		if err := ensureProtectedExists(rootHost, hostPath, cleaned); err != nil {
-			return err // os.ErrNotExist surfaces for unknown / user-added missing paths
-		}
+	if err := ensureProtectedExists(workspacePath, hostPath, cleaned); err != nil {
+		return err // os.ErrNotExist surfaces for unknown / user-added missing paths
 	}
 
-	// Use Lstat to avoid following symlinks (security measure).
+	// Use Lstat to avoid following symlinks (security measure)
 	info, err := os.Lstat(hostPath)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return os.ErrNotExist // protect-if-exists: nothing to protect here
-		}
-		return fmt.Errorf("failed to stat %s: %w", cleaned, err)
+		return fmt.Errorf("failed to stat %s after materialization: %w", cleaned, err)
 	}
 
-	// Security check: reject symlinks to prevent mounting arbitrary host paths.
+	// Security check: reject symlinks to prevent mounting arbitrary host paths
 	if info.Mode()&os.ModeSymlink != 0 {
 		return fmt.Errorf("%s is a symlink; refusing to mount for security reasons", cleaned)
 	}
 
-	deviceName := pathToDeviceName(devicePrefix + cleaned)
+	// Generate unique device name from path
+	deviceName := pathToDeviceName(cleaned)
+
+	// Mount as read-only
 	return mgr.MountDisk(deviceName, hostPath, containerPath, useShift, true)
 }
 

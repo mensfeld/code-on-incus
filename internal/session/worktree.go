@@ -1,6 +1,8 @@
 package session
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -10,6 +12,25 @@ import (
 	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
 )
+
+// systemDirPrefixes are the critical directories a workspace may not be mounted
+// at its host path (preserve-path). Shared by the shell and run entrypoints and
+// the worktree fail-closed check so they cannot drift.
+var systemDirPrefixes = []string{
+	"/etc", "/bin", "/sbin", "/usr", "/root", "/boot", "/sys", "/proc", "/dev", "/lib", "/lib64",
+}
+
+// WorkspaceUnderSystemDir reports whether the workspace path is at or under a
+// critical system directory, where mounting it at its host path is disallowed.
+func WorkspaceUnderSystemDir(absWorkspace string) bool {
+	clean := filepath.Clean(absWorkspace)
+	for _, prefix := range systemDirPrefixes {
+		if clean == prefix || strings.HasPrefix(clean, prefix+"/") {
+			return true
+		}
+	}
+	return false
+}
 
 // GitWorktreeLayout describes the external git directories referenced by a
 // worktree checkout whose `.git` is a file (not a directory).
@@ -199,44 +220,108 @@ func MountGitWorktreeDirs(mgr container.ContainerDevices, layout *GitWorktreeLay
 	return nil
 }
 
+// commonDirSink is an RCE-sink path relative to the git common dir.
+type commonDirSink struct {
+	rel   string
+	isDir bool
+}
+
 // SetupCommonDirProtection layers read-only mounts over the RCE-sink paths inside
 // the external git common dir (issue #533) — the same protection #474 applies to a
 // normal repo's `.git`, extended to the second root. Paths are relative to the common
-// dir (no ".git/" prefix, because the common dir IS the git dir). Uses protect-if-
-// exists (never synthesizes into the shared bare repo). Because the layout is mounted
-// preserve-path, the container path equals the host path.
+// dir (no ".git/" prefix, because the common dir IS the git dir). Because the layout
+// is mounted preserve-path, the container path equals the host path.
 //
-// writableHooks mirrors the workspace `git.writable_hooks` opt-out. Returns the list
-// of protected relative paths (for logging) and an aggregated warning error.
+// The common dir is mounted read-write (so commits work), so an ABSENT or symlinked
+// sink would otherwise be plantable by a contained agent (a #474 regression). To match
+// the workspace side — which synthesizes empty read-only placeholders for absent sinks
+// — each sink is covered by mounting EITHER the real path read-only (when it exists as
+// a regular file/dir) OR an empty read-only placeholder over it (when absent, a symlink,
+// or the wrong type). The empty overlay is a coi-owned source, so the shared bare repo
+// is never mutated. config.worktree is covered for EVERY worktree admin dir, since the
+// host may have extensions.worktreeConfig=true and the dir is read-write.
+//
+// writableHooks mirrors the workspace `git.writable_hooks` opt-out. Returns the list of
+// protected relative paths (for logging) and an aggregated warning error.
 func SetupCommonDirProtection(mgr container.ContainerDevices, commonDir string, useShift, writableHooks bool, sec *config.SecurityConfig) ([]string, error) {
 	if sec != nil && sec.DisableProtection {
 		return nil, nil
 	}
-	rels := []string{"config", "info/attributes"}
-	if !writableHooks {
-		rels = append([]string{"hooks"}, rels...)
+	emptyFile, emptyDir, err := ensureMaskSources()
+	if err != nil {
+		return nil, fmt.Errorf("create git common-dir protection sources: %w", err)
 	}
-	rels = append(rels, discoverCommonDirWorktreeConfigs(commonDir)...)
+
+	sinks := []commonDirSink{{"config", false}, {filepath.Join("info", "attributes"), false}}
+	if !writableHooks {
+		sinks = append([]commonDirSink{{"hooks", true}}, sinks...)
+	}
+	if entries, e := os.ReadDir(filepath.Join(commonDir, "worktrees")); e == nil {
+		for _, en := range entries {
+			if en.IsDir() {
+				sinks = append(sinks, commonDirSink{filepath.Join("worktrees", en.Name(), "config.worktree"), false})
+			}
+		}
+	}
 
 	var protected, warnings []string
-	for _, rel := range rels {
-		if sec != nil && sec.IsWritablePath(rel) {
+	for _, s := range sinks {
+		if sec != nil && sec.IsWritablePath(s.rel) {
 			continue
 		}
-		err := setupProtectedPathUnder(mgr, commonDir, commonDir, "gitcommon/", rel, useShift, false)
-		switch {
-		case err == nil:
-			protected = append(protected, rel)
-		case errors.Is(err, os.ErrNotExist):
-			// protect-if-exists: sink absent in this repo, nothing to lock down.
-		default:
-			warnings = append(warnings, fmt.Sprintf("%s: %v", rel, err))
+		if err := protectCommonDirSink(mgr, commonDir, s, emptyFile, emptyDir, useShift); err != nil {
+			warnings = append(warnings, fmt.Sprintf("%s: %v", s.rel, err))
+			continue
 		}
+		protected = append(protected, s.rel)
 	}
 	if len(warnings) > 0 {
 		return protected, errors.New(strings.Join(warnings, "; "))
 	}
 	return protected, nil
+}
+
+// protectCommonDirSink read-only-mounts one common-dir sink at its (preserve-path)
+// host==container path: the real path when it exists as a clean regular file/dir, else
+// an empty read-only placeholder so the read-write common-dir mount cannot be used to
+// create or swap it.
+func protectCommonDirSink(mgr container.ContainerDevices, commonDir string, s commonDirSink, emptyFile, emptyDir string, useShift bool) error {
+	path := filepath.Join(commonDir, s.rel)
+	source := path
+	info, err := os.Lstat(path)
+	if err != nil || info.Mode()&os.ModeSymlink != 0 || info.IsDir() != s.isDir {
+		// Absent, a symlink, or the wrong type: overlay an empty read-only placeholder.
+		source = emptyFile
+		if s.isDir {
+			source = emptyDir
+		}
+	}
+	return mgr.MountDisk(commonDirDeviceName(s.rel), source, path, useShift, true)
+}
+
+// commonDirDeviceName derives a unique, valid Incus device name for a common-dir sink.
+// Hashing (like maskDeviceName) is collision-free across arbitrary worktree names, which
+// pathToDeviceName is not (it strips '.' and maps '/'→'-').
+func commonDirDeviceName(rel string) string {
+	sum := sha256.Sum256([]byte("gitcommon/" + rel))
+	return "gitc-" + hex.EncodeToString(sum[:])[:16]
+}
+
+// StripGitProtectedPaths removes workspace-relative `.git` / `.git/*` entries from a
+// protected-paths list. For a worktree checkout the workspace `.git` is a FILE, so
+// those entries can't be protected there (they'd each trip the gitdir-indirection
+// warning); the real internals are protected via SetupCommonDirProtection instead.
+// Non-.git entries (.husky, .vscode, .coi, .claude/settings*) are kept.
+func StripGitProtectedPaths(paths []string) []string {
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		cleaned := filepath.Clean(p)
+		if cleaned == ".git" || strings.HasPrefix(cleaned, ".git"+string(filepath.Separator)) {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
 }
 
 // containsGitHooksPath reports whether the workspace protected set still includes
@@ -251,29 +336,6 @@ func containsGitHooksPath(paths []string) bool {
 		}
 	}
 	return false
-}
-
-// discoverCommonDirWorktreeConfigs enumerates existing
-// <commonDir>/worktrees/*/config.worktree files (the per-worktree config RCE sink),
-// mirroring ExpandGitWorktreeProtectedPaths but rooted at the common dir.
-func discoverCommonDirWorktreeConfigs(commonDir string) []string {
-	entries, err := os.ReadDir(filepath.Join(commonDir, "worktrees"))
-	if err != nil {
-		return nil
-	}
-	var out []string
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		rel := filepath.Join("worktrees", e.Name(), "config.worktree")
-		info, err := os.Lstat(filepath.Join(commonDir, rel))
-		if err != nil || info.Mode()&os.ModeSymlink != 0 || info.IsDir() {
-			continue
-		}
-		out = append(out, rel)
-	}
-	return out
 }
 
 // pathInsideWorkspace reports whether any of the given paths resolves to a

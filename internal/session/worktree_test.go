@@ -170,6 +170,36 @@ func TestResolveGitWorktree_MissingHeadRefused(t *testing.T) {
 	}
 }
 
+func TestStripGitProtectedPaths(t *testing.T) {
+	in := []string{".git/hooks", ".git/config", ".git", ".husky", ".vscode", ".claude/settings.json"}
+	got := StripGitProtectedPaths(in)
+	want := []string{".husky", ".vscode", ".claude/settings.json"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("got[%d]=%q want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestWorkspaceUnderSystemDir(t *testing.T) {
+	cases := map[string]bool{
+		"/usr/local/x":  true,
+		"/etc":          true,
+		"/lib64/x":      true,
+		"/home/u/proj":  false,
+		"/etcfoo":       false, // prefix but not a path component
+		"/tmp/pytest/x": false,
+	}
+	for path, want := range cases {
+		if got := WorkspaceUnderSystemDir(path); got != want {
+			t.Errorf("WorkspaceUnderSystemDir(%q) = %v, want %v", path, got, want)
+		}
+	}
+}
+
 func TestResolveGitWorktree_InsideWorkspaceIsNoop(t *testing.T) {
 	// A worktree whose gitdir resolves inside the workspace needs no external
 	// mount; the workspace mount already covers it.

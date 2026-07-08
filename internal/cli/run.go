@@ -451,28 +451,13 @@ func (a *App) resolveContainerWorkspacePath(absWorkspace string, forcePreserve b
 	if !a.cfg.Paths.PreserveWorkspacePath && !forcePreserve {
 		return "/workspace"
 	}
-	cleanPath := filepath.Clean(absWorkspace)
-	if workspaceUnderSystemDir(absWorkspace) {
+	if session.WorkspaceUnderSystemDir(absWorkspace) {
 		// A worktree caller pre-checks this and hard-errors (it can't work at
 		// /workspace); here it's the plain preserve_workspace_path fallback.
 		fmt.Fprintf(os.Stderr, "Warning: preserve_workspace_path requested for %q conflicts with system directories; using /workspace instead\n", absWorkspace)
 		return "/workspace"
 	}
-	return cleanPath
-}
-
-// workspaceUnderSystemDir reports whether the workspace path is at or under a
-// critical system directory, where mounting it at its host path is disallowed.
-func workspaceUnderSystemDir(absWorkspace string) bool {
-	cleanPath := filepath.Clean(absWorkspace)
-	for _, prefix := range []string{
-		"/etc", "/bin", "/sbin", "/usr", "/root", "/boot", "/sys", "/proc", "/dev", "/lib", "/lib64",
-	} {
-		if cleanPath == prefix || strings.HasPrefix(cleanPath, prefix+"/") {
-			return true
-		}
-	}
-	return false
+	return filepath.Clean(absWorkspace)
 }
 
 // applyWorkspaceMounts mounts the workspace and all configured additional directories
@@ -550,6 +535,12 @@ func addMount(mgr container.ContainerManager, mount session.MountEntry, useShift
 // applySecurityMounts sets up read-only protection mounts and optional host immutable flags.
 func (a *App) applySecurityMounts(mgr container.ContainerManager, absWorkspace, containerWorkspacePath, containerName string, useShift bool, worktree *session.GitWorktreeLayout) error {
 	protectedPaths := filterWritableGitHooks(a.cfg.Security.GetEffectiveProtectedPaths(), a.cfg)
+	if worktree != nil {
+		// The workspace .git is a file; its .git/* defaults can't be protected here
+		// (they'd each warn "gitdir indirection") — SetupCommonDirProtection covers
+		// the real internals below. Keep the non-.git protections (.vscode, ...).
+		protectedPaths = session.StripGitProtectedPaths(protectedPaths)
+	}
 	// SetupSecurityMounts expands the dynamic per-worktree git configs internally
 	// (issue #545 — the single chokepoint both `coi run` and `coi shell` share) and
 	// returns the effective list to drive logging + the immutable pass over the same
