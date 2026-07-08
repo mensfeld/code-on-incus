@@ -1,6 +1,6 @@
 # Credential Catalog & Generic `[[credentials]]` Seeding Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Task headers use stable kebab-case slugs, not integer ordinals — cite the slug (e.g. `credential-catalog`) in commit messages and cross-references, not "Task 1".
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Task headers use stable kebab-case slugs, not integer ordinals; cite the slug (e.g. `credential-catalog`) in commit messages and cross-references, not "Task 1".
 
 **Goal:** Let coi seed named or ad-hoc host credential files (SSH keys, tokens, config dirs) into containers for both the three builtin AI tools (Claude/OpenCode/Pi) and third-party providers like Ollama, from one shared catalog and a new profile-level `[[credentials]]` config section.
 
@@ -10,10 +10,10 @@
 
 ## Global Constraints
 
-- Go, no new third-party dependencies — reuse `github.com/BurntSushi/toml` (already imported by `internal/session/trust.go` and used throughout `internal/config`).
+- Go, no new third-party dependencies, reuse `github.com/BurntSushi/toml` (already imported by `internal/session/trust.go` and used throughout `internal/config`).
 - Follow existing code style: plain `testing` package (no testify), table-free simple `t.Errorf`/`t.Fatalf` assertions, matching every existing test file in this repo.
 - Every new/modified exported function needs a doc comment starting with its name, matching existing convention throughout `internal/session`, `internal/config`, `internal/tool`.
-- Never rewrite an existing task's tests to make them pass — if a signature change breaks an existing test, update the call site to the new signature and confirm the test's original intent is preserved.
+- Never rewrite an existing task's tests to make them pass, if a signature change breaks an existing test, update the call site to the new signature and confirm the test's original intent is preserved.
 - Commit after each task once its tests pass. Do not batch commits across tasks.
 
 ---
@@ -35,7 +35,7 @@
 | `internal/cli/credential_parser_test.go` | Create | Parser tests: bundle expansion, ad-hoc expansion, unknown-bundle error |
 | `internal/session/trust.go` | Modify | `untrustedCredentials`, extend `sourceFingerprint`/`trustedSources`/`FilterTrusted`/`TrustSources`/`UntrustedSourcePaths` to cover credentials |
 | `internal/session/trust_test.go` | Modify (full replacement) | Update every call site for the new signatures + add credential-specific cases |
-| `internal/cli/run.go` | Modify | `gateRunForwarding`'s `FilterTrusted` call updated for the new signature (mechanical — run path doesn't pre-filter credentials) |
+| `internal/cli/run.go` | Modify | `gateRunForwarding`'s `FilterTrusted` call updated for the new signature (mechanical, run path doesn't pre-filter credentials) |
 | `internal/cli/trust.go` | Modify | `runTrust`/`runUntrust` parse and thread `CredentialConfig` so `coi trust`/`coi untrust` cover ad-hoc credentials |
 | `internal/session/setup_credentials.go` | Create | `setupCredentials`: push + chown + optional chmod per entry |
 | `internal/session/setup_credentials_integration_test.go` | Create | Real-container integration test (skipped without local Incus), mirrors `context_file_integration_test.go` |
@@ -44,7 +44,7 @@
 
 ---
 
-### Task: credential-catalog — Embedded Credential Bundle Catalog
+### Task: credential-catalog - Embedded Credential Bundle Catalog
 
 **Files:**
 - Create: `internal/tool/credentials/catalog.toml`
@@ -52,7 +52,7 @@
 - Test: `internal/tool/credentials/catalog_test.go`
 
 **Interfaces:**
-- Produces: `credentials.Bundle{ConfigDir, Files, StateFile, SandboxSettingsFile, AlwaysSetup, AutoContextFile, Mode string/[]string/bool}`, `credentials.Lookup(name string) (Bundle, bool)`, `credentials.Names() []string` — consumed by Task `builtin-tool-catalog-wiring` and Task `session-credential-parser`.
+- Produces: `credentials.Bundle{ConfigDir, Files, StateFile, SandboxSettingsFile, AlwaysSetup, AutoContextFile, Mode string/[]string/bool}`, `credentials.Lookup(name string) (Bundle, bool)`, `credentials.Names() []string`, consumed by Task `builtin-tool-catalog-wiring` and Task `session-credential-parser`.
 
 - [ ] **Step 1: Write the catalog data file**
 
@@ -60,11 +60,11 @@ Create `internal/tool/credentials/catalog.toml`:
 
 ```toml
 # Named credential bundles. `claude`, `opencode`, and `pi` back the builtin
-# Tool implementations' ToolWithConfigDirFiles methods (internal/tool) — these
+# Tool implementations' ToolWithConfigDirFiles methods (internal/tool), these
 # values must stay in sync with what setupCLIConfig expects. Other entries
 # (e.g. `ollama`) are third-party bundles referenced from profile
 # [[credentials]] entries via `bundle = "<name>"`; only config_dir, files, and
-# (optionally) mode apply to those — sandbox_settings_file/state_file/
+# (optionally) mode apply to those, sandbox_settings_file/state_file/
 # always_setup/auto_context_file are only meaningful for tools consumed
 # through internal/tool's ToolWithConfigDirFiles interface.
 
@@ -190,7 +190,7 @@ func TestNames_Sorted(t *testing.T) {
 }
 
 // TestClaudeBundle_MatchesHardcodedValues locks the claude catalog entry to
-// the values ClaudeTool hardcoded before the catalog existed — a regression
+// the values ClaudeTool hardcoded before the catalog existed, a regression
 // guard for the refactor (task builtin-tool-catalog-wiring) that points
 // ClaudeTool's ToolWithConfigDirFiles methods at this bundle instead.
 func TestClaudeBundle_MatchesHardcodedValues(t *testing.T) {
@@ -286,7 +286,7 @@ func TestOllamaBundle_Shape(t *testing.T) {
 - [ ] **Step 4: Run the tests**
 
 Run: `go test ./internal/tool/credentials/...`
-Expected: PASS (all tests above pass against the catalog.toml written in Step 1 — this is a data file plus its own regression lock, not a red/green TDD cycle).
+Expected: PASS (all tests above pass against the catalog.toml written in Step 1, this is a data file plus its own regression lock, not a red/green TDD cycle).
 
 - [ ] **Step 5: Commit**
 
@@ -298,7 +298,7 @@ Add embedded credential bundle catalog (task credential-catalog)
 Introduces internal/tool/credentials with named bundles for claude,
 opencode, pi (mirroring today's hardcoded ToolWithConfigDirFiles values
 exactly) plus a new curated ollama bundle. Not yet wired into the builtin
-tools — that's task builtin-tool-catalog-wiring.
+tools, that's task builtin-tool-catalog-wiring.
 
 Part of #549.
 EOF
@@ -307,7 +307,7 @@ EOF
 
 ---
 
-### Task: builtin-tool-catalog-wiring — Point Builtin Tools at the Catalog
+### Task: builtin-tool-catalog-wiring - Point Builtin Tools at the Catalog
 
 **Files:**
 - Modify: `internal/tool/tool.go:176-194` (ClaudeTool's `ToolWithConfigDirFiles` methods + `AutoContextFile`)
@@ -316,9 +316,9 @@ EOF
 
 **Interfaces:**
 - Consumes: `credentials.Lookup(name string) (credentials.Bundle, bool)` from task `credential-catalog`.
-- Produces: no new exported surface — `ClaudeTool`/`OpencodeTool`/`PiTool` keep their existing method signatures; only the method *bodies* change. Existing callers (`internal/session/setup_config.go`, `internal/cli/phases_shell.go`, etc.) are unaffected.
+- Produces: no new exported surface. `ClaudeTool`/`OpencodeTool`/`PiTool` keep their existing method signatures; only the method *bodies* change. Existing callers (`internal/session/setup_config.go`, `internal/cli/phases_shell.go`, etc.) are unaffected.
 
-This task is a pure refactor with an existing regression safety net: `internal/tool/tool_test.go`, `internal/tool/opencode_test.go`, and `internal/tool/pi_test.go` already assert the exact values these methods must keep returning (`TestClaudeTool_EssentialConfigFiles_IncludesCLAUDEMD`, `TestOpencodeTool_EssentialConfigFiles`, `TestPiTool_EssentialConfigFiles`, `TestClaudeTool_AutoContextFile`, and the `ConfigDirName`/`SandboxSettingsFileName`/`StateConfigFileName`/`AlwaysSetupConfig` assertions in each file). No new tests are needed — this task's "test" step is confirming those existing tests still pass unchanged.
+This task is a pure refactor with an existing regression safety net: `internal/tool/tool_test.go`, `internal/tool/opencode_test.go`, and `internal/tool/pi_test.go` already assert the exact values these methods must keep returning (`TestClaudeTool_EssentialConfigFiles_IncludesCLAUDEMD`, `TestOpencodeTool_EssentialConfigFiles`, `TestPiTool_EssentialConfigFiles`, `TestClaudeTool_AutoContextFile`, and the `ConfigDirName`/`SandboxSettingsFileName`/`StateConfigFileName`/`AlwaysSetupConfig` assertions in each file). No new tests are needed: this task's "test" step is confirming those existing tests still pass unchanged.
 
 - [ ] **Step 1: Confirm the existing characterization tests pass before touching anything**
 
@@ -346,7 +346,7 @@ import (
 
 ```go
 // mustBundle looks up a named credential bundle from the embedded catalog
-// (internal/tool/credentials). Panics if missing — a builtin tool
+// (internal/tool/credentials). Panics if missing: a builtin tool
 // referencing an unknown bundle name is a programming error (a typo in this
 // package or a catalog entry that was renamed/removed), not a runtime
 // condition to recover from.
@@ -359,7 +359,7 @@ func mustBundle(name string) credentials.Bundle {
 }
 ```
 
-(`fmt` is not currently imported by `tool.go` — add it to the import block as shown above.)
+(`fmt` is not currently imported by `tool.go`; add it to the import block as shown above.)
 
 - [ ] **Step 3: Replace `ClaudeTool`'s `ToolWithConfigDirFiles` methods and `AutoContextFile`**
 
@@ -458,7 +458,7 @@ func (p *PiTool) AlwaysSetupConfig() bool { return mustBundle("pi").AlwaysSetup 
 - [ ] **Step 6: Run the full tool package tests, and the wider suite, to confirm no regressions**
 
 Run: `go test ./internal/tool/... ./internal/session/... ./internal/cli/...`
-Expected: PASS — every existing test (including the characterization tests from Step 1, and `internal/session`'s `setup_claude_test.go`/`setup_opencode_test.go`/`setup_pi_test.go` which exercise these tools indirectly) passes unchanged.
+Expected: PASS (every existing test, including the characterization tests from Step 1, and `internal/session`'s `setup_claude_test.go`/`setup_opencode_test.go`/`setup_pi_test.go` which exercise these tools indirectly, passes unchanged).
 
 - [ ] **Step 7: Commit**
 
@@ -469,7 +469,7 @@ Point builtin tools at the credential catalog (task builtin-tool-catalog-wiring)
 
 ClaudeTool/OpencodeTool/PiTool's ToolWithConfigDirFiles methods now look up
 their config-dir metadata from internal/tool/credentials instead of
-hardcoding it — same values, single source of truth shared with the new
+hardcoding it: same values, single source of truth shared with the new
 profile-level [[credentials]] feature. Pure refactor: existing tests are
 unchanged and pass.
 
@@ -480,14 +480,14 @@ EOF
 
 ---
 
-### Task: config-credential-entry — Profile & Config Schema
+### Task: config-credential-entry - Profile & Config Schema
 
 **Files:**
 - Modify: `internal/config/config.go` (add `CredentialEntry`, `Config.Credentials`, `ProfileConfig.Credentials`, `ApplyProfile` merge, `Validate` checks; add `strconv` import)
 - Test: `internal/config/credential_entry_test.go`
 
 **Interfaces:**
-- Produces: `config.CredentialEntry{Bundle, Host, Container, Mode string; Untrusted bool; SourcePath string}`, `Config.Credentials []CredentialEntry`, `ProfileConfig.Credentials []CredentialEntry` — consumed by task `session-credential-parser`.
+- Produces: `config.CredentialEntry{Bundle, Host, Container, Mode string; Untrusted bool; SourcePath string}`, `Config.Credentials []CredentialEntry`, `ProfileConfig.Credentials []CredentialEntry`, consumed by task `session-credential-parser`.
 
 - [ ] **Step 1: Write the failing validation tests**
 
@@ -608,7 +608,7 @@ type CredentialEntry struct {
 
 	// Untrusted/SourcePath are set programmatically (never from TOML) when
 	// this entry came from an untrusted, project-scope config file. Only
-	// ad-hoc entries (Bundle == "") are ever marked Untrusted — a bundle
+	// ad-hoc entries (Bundle == "") are ever marked Untrusted, a bundle
 	// reference can only select a name from coi's own vetted catalog, not an
 	// attacker-chosen host path, so it carries the same trust level the
 	// builtin tool credential seeding already has.
@@ -677,7 +677,7 @@ In `internal/config/config.go`, add right after the existing mount-entry validat
 - [ ] **Step 8: Run the tests to verify they pass**
 
 Run: `go test ./internal/config/... -v`
-Expected: PASS — the new tests pass, and every pre-existing `internal/config` test still passes.
+Expected: PASS (the new tests pass, and every pre-existing `internal/config` test still passes).
 
 - [ ] **Step 9: Commit**
 
@@ -698,7 +698,7 @@ EOF
 
 ---
 
-### Task: session-credential-parser — Session Types & Config Parsing
+### Task: session-credential-parser - Session Types & Config Parsing
 
 **Files:**
 - Modify: `internal/session/types.go` (add `CredentialEntry`, `CredentialConfig`)
@@ -707,7 +707,7 @@ EOF
 
 **Interfaces:**
 - Consumes: `config.CredentialEntry`/`Config.Credentials` from task `config-credential-entry`; `credentials.Lookup`/`credentials.Names` from task `credential-catalog`.
-- Produces: `session.CredentialEntry{HostPath, ContainerPath, Mode, BundleName string; Untrusted bool; SourcePath string}`, `session.CredentialConfig{Entries []CredentialEntry}`, `cli.ParseCredentialConfig(cfg *config.Config) (*session.CredentialConfig, error)`, `cli.warnDroppedCredentials(dropped []session.CredentialEntry)` — consumed by task `trust-gating-credentials` and task `setup-credentials-application`.
+- Produces: `session.CredentialEntry{HostPath, ContainerPath, Mode, BundleName string; Untrusted bool; SourcePath string}`, `session.CredentialConfig{Entries []CredentialEntry}`, `cli.ParseCredentialConfig(cfg *config.Config) (*session.CredentialConfig, error)`, `cli.warnDroppedCredentials(dropped []session.CredentialEntry)`, consumed by task `trust-gating-credentials` and task `setup-credentials-application`.
 
 - [ ] **Step 1: Add the session-layer types**
 
@@ -720,23 +720,23 @@ In `internal/session/types.go`, add after the `SocketConfig` type (end of file):
 // bundle (see internal/tool/credentials) or an ad-hoc profile entry.
 type CredentialEntry struct {
 	HostPath string // Absolute path on host (expanded)
-	// ContainerPath is either absolute (ad-hoc entries — used as-is, exactly
+	// ContainerPath is either absolute (ad-hoc entries, used as-is, exactly
 	// like MountEntry.ContainerPath) or relative to the container's home
-	// directory (bundle entries — resolved by setupCredentials at apply
+	// directory (bundle entries, resolved by setupCredentials at apply
 	// time, since the home directory, e.g. /root vs /home/code, isn't known
 	// until the container exists).
 	ContainerPath string
 	Mode          string // Optional chmod mode, e.g. "0600"; "" = leave as pushed
 
 	// BundleName is set when this entry was expanded from a named catalog
-	// bundle. Bundle-sourced entries are never gated by trust — see
+	// bundle. Bundle-sourced entries are never gated by trust, see
 	// Untrusted below.
 	BundleName string
 
 	// Untrusted is true when this entry came from an untrusted (project-scope)
 	// config file AND is an ad-hoc entry (BundleName == ""). SourcePath is
 	// that file's absolute path. Used to gate ad-hoc credential entries whose
-	// source config isn't trusted, behind `coi trust` — mirroring
+	// source config isn't trusted, behind `coi trust`, mirroring
 	// SocketEntry, since a credential file (like a forwarded socket) has no
 	// "within workspace" notion that would make it safe to leave ungated.
 	Untrusted  bool
@@ -899,7 +899,7 @@ import (
 )
 
 // warnDroppedCredentials prints a per-entry warning for untrusted, unapproved
-// ad-hoc credential entries. Only ad-hoc entries are ever dropped here —
+// ad-hoc credential entries. Only ad-hoc entries are ever dropped here;
 // catalog-referenced entries are never gated (see session.CredentialEntry.Untrusted).
 func warnDroppedCredentials(dropped []session.CredentialEntry) {
 	for _, c := range dropped {
@@ -985,7 +985,7 @@ ParseCredentialConfig resolves [[credentials]] bundle references against
 the catalog (fail-fast on an unknown name) and expands ad-hoc entries the
 same way ParseMountConfig does.
 
-Not yet trust-gated or applied at session setup — that's tasks
+Not yet trust-gated or applied at session setup, that's tasks
 trust-gating-credentials and setup-credentials-application.
 
 Part of #549.
@@ -995,7 +995,7 @@ EOF
 
 ---
 
-### Task: trust-gating-credentials — Extend Trust Gating to Ad-Hoc Credentials
+### Task: trust-gating-credentials - Extend Trust Gating to Ad-Hoc Credentials
 
 **Files:**
 - Modify: `internal/session/trust.go`
@@ -1005,16 +1005,16 @@ EOF
 
 **Interfaces:**
 - Consumes: `session.CredentialEntry`/`CredentialConfig` from task `session-credential-parser`; `cli.ParseCredentialConfig` from the same task.
-- Produces: `FilterTrusted(mc *MountConfig, sc *SocketConfig, cc *CredentialConfig, workspace string) (*MountConfig, []MountEntry, *SocketConfig, []SocketEntry, *CredentialConfig, []CredentialEntry)`, `TrustSources(mc, sc, cc, workspace) ([]string, error)`, `UntrustedSourcePaths(mc, sc, cc) []string` — consumed by task `setup-credentials-application` and by `internal/cli/trust.go`/`internal/cli/run.go` (already updated in this task).
+- Produces: `FilterTrusted(mc *MountConfig, sc *SocketConfig, cc *CredentialConfig, workspace string) (*MountConfig, []MountEntry, *SocketConfig, []SocketEntry, *CredentialConfig, []CredentialEntry)`, `TrustSources(mc, sc, cc, workspace) ([]string, error)`, `UntrustedSourcePaths(mc, sc, cc) []string`, consumed by task `setup-credentials-application` and by `internal/cli/trust.go`/`internal/cli/run.go` (already updated in this task).
 
-This task changes the signature of five existing functions in `internal/session/trust.go` (`sourceFingerprint`, `trustedSources`, `FilterTrusted`, `TrustSources`, `UntrustedSourcePaths`), each gaining a `creds`/`cc` parameter. Every existing call site — in `trust.go` itself, `trust_test.go`, `internal/cli/run.go`, and `internal/cli/trust.go` — must be updated in the same commit; the code will not compile otherwise. Because `trust_test.go` calls these functions in ~20 places, Step 2 below is a full-file replacement rather than a line-by-line diff, to avoid an inconsistent partial edit.
+This task changes the signature of five existing functions in `internal/session/trust.go` (`sourceFingerprint`, `trustedSources`, `FilterTrusted`, `TrustSources`, `UntrustedSourcePaths`), each gaining a `creds`/`cc` parameter. Every existing call site, in `trust.go` itself, `trust_test.go`, `internal/cli/run.go`, and `internal/cli/trust.go`, must be updated in the same commit; the code will not compile otherwise. Because `trust_test.go` calls these functions in ~20 places, Step 2 below is a full-file replacement rather than a line-by-line diff, to avoid an inconsistent partial edit.
 
 - [ ] **Step 1: Add `untrustedCredentials` and extend the five functions in `internal/session/trust.go`**
 
 Add this function directly after `untrustedSockets` (after line 188):
 
 ```go
-// untrustedCredentials returns the untrusted ad-hoc credential entries — the
+// untrustedCredentials returns the untrusted ad-hoc credential entries, the
 // gated set. Like a forwarded socket, a credential entry has no "within
 // workspace" notion, so ALL untrusted ad-hoc entries need approval. Entries
 // resolved from a named catalog bundle are never marked Untrusted by
@@ -1235,7 +1235,7 @@ Replace `UntrustedSourcePaths` (lines 359-388) with:
 
 ```go
 // UntrustedSourcePaths returns the distinct source config paths of untrusted
-// mounts, sockets, and ad-hoc credential entries — the keys under which trust
+// mounts, sockets, and ad-hoc credential entries, the keys under which trust
 // is recorded. `coi untrust` uses this to revoke by the exact stored key
 // (resolved at load) rather than reconstructing it, which would diverge on
 // symlinked/alias/non-default paths.
@@ -1682,7 +1682,7 @@ func TestFilterTrusted_NoEscapingIsNoop(t *testing.T) {
 
 - [ ] **Step 3: Update `internal/cli/run.go`'s `gateRunForwarding`**
 
-The run path doesn't pre-filter credentials early (no pre-start ordering need — see task `setup-credentials-application`), so this call site passes `nil` and discards the two new return values. In `internal/cli/run.go`, replace line 576:
+The run path doesn't pre-filter credentials early (no pre-start ordering need; see task `setup-credentials-application`), so this call site passes `nil` and discards the two new return values. In `internal/cli/run.go`, replace line 576:
 
 ```go
 	keptMC, droppedM, keptSC, droppedS, _, _ := session.FilterTrusted(mc, sc, nil, workspace)
@@ -1748,7 +1748,7 @@ In `runUntrust` (`internal/cli/trust.go`), replace lines 117-129:
 - [ ] **Step 5: Run the tests**
 
 Run: `go test ./internal/session/... ./internal/cli/... -v`
-Expected: PASS — all new and pre-existing tests pass; `go build ./...` succeeds (confirming every call site compiles).
+Expected: PASS (all new and pre-existing tests pass; `go build ./...` succeeds, confirming every call site compiles).
 
 Run: `go build ./...`
 Expected: no errors.
@@ -1762,7 +1762,7 @@ Extend trust gating to ad-hoc credential entries (task trust-gating-credentials)
 
 Ad-hoc [[credentials]] entries from untrusted project-scope config are
 gated the same way forwarded sockets already are (no "within workspace"
-exemption — a credential file has no legitimate in-workspace case).
+exemption: a credential file has no legitimate in-workspace case).
 Catalog-referenced entries (bundle = "...") are never gated, matching the
 trust level builtin tool credential seeding already has, since the host
 path is fixed by coi's own catalog rather than chosen by the untrusted
@@ -1775,7 +1775,7 @@ EOF
 
 ---
 
-### Task: setup-credentials-application — Apply Credentials at Session Setup
+### Task: setup-credentials-application - Apply Credentials at Session Setup
 
 **Files:**
 - Create: `internal/session/setup_credentials.go`
@@ -1785,7 +1785,7 @@ EOF
 
 **Interfaces:**
 - Consumes: `session.CredentialEntry`/`CredentialConfig` (task `session-credential-parser`), `FilterTrusted` (task `trust-gating-credentials`), `container.ContainerManager` (`PushFile`, `Chown`, `ExecArgs`, `ExecCommand`), `container.CodeUID`.
-- Produces: `setupCredentials(mgr container.ContainerManager, homeDir string, entries []CredentialEntry, logger func(string)) error` — internal to `internal/session`, called only from `setup.go`.
+- Produces: `setupCredentials(mgr container.ContainerManager, homeDir string, entries []CredentialEntry, logger func(string)) error`, internal to `internal/session`, called only from `setup.go`.
 
 - [ ] **Step 1: Write `internal/session/setup_credentials.go`**
 
@@ -1803,7 +1803,7 @@ import (
 // setupCredentials copies each configured credential entry (catalog bundle or
 // ad-hoc) from host to container, chowns it to the container's code user, and
 // chmods it if Mode is set. Tolerant of a missing host file (e.g. the user
-// hasn't signed into the referenced provider yet) — logs and skips rather
+// hasn't signed into the referenced provider yet), logs and skips rather
 // than failing the whole session. Safe to call again on session resume: each
 // entry is independently idempotent (re-push, re-chown, re-chmod).
 func setupCredentials(mgr container.ContainerManager, homeDir string, entries []CredentialEntry, logger func(string)) error {
@@ -1862,7 +1862,7 @@ Replace the existing trust-gate block (lines 322-341):
 		// forwarded sockets, AND untrusted ad-hoc credential entries here,
 		// where a freshly-launched container is set up, so any caller of
 		// session.Setup that didn't pre-filter is still covered.
-		// (On container reuse this block is skipped along with the rest of setup —
+		// (On container reuse this block is skipped along with the rest of setup;
 		// resources persist from creation; the run/shell reuse paths warn that
 		// trust changes need a recreate.) Idempotent with the CLI-level gate: on
 		// the normal CLI flow these are already filtered, so this drops nothing.
@@ -2044,7 +2044,7 @@ CredentialEntry. Runs on every session resume (idempotent refresh) and once
 on fresh-session setup (skipped on persistent-container reuse, matching the
 existing CLI-config setup step). Wired into the same trust-gate chokepoint
 as mounts/sockets in session.Setup, and parsed alongside them in
-phases_shell.go — coi shell/run now seed [[credentials]] end to end.
+phases_shell.go: coi shell/run now seed [[credentials]] end to end.
 
 Closes #549.
 EOF
