@@ -74,7 +74,11 @@ func setupProtectedPath(mgr container.ContainerDevices, workspacePath, container
 	containerPath := filepath.Join(containerWorkspacePath, cleaned)
 
 	// For .git paths, check if .git itself is valid FIRST (not a symlink or file)
-	// This must happen before we try to create .git/hooks
+	// This must happen before we try to create .git/hooks. When .git is a file
+	// (worktree/submodule) the real internals live outside the workspace and are
+	// mounted + protected separately via the git-worktree layout (issue #533);
+	// surface the indirection here so a non-worktree caller does not silently lose
+	// protection.
 	if strings.HasPrefix(cleaned, ".git"+string(filepath.Separator)) || cleaned == ".git" {
 		gitDir := filepath.Join(workspacePath, ".git")
 		gitInfo, err := os.Lstat(gitDir)
@@ -84,10 +88,6 @@ func setupProtectedPath(mgr container.ContainerDevices, workspacePath, container
 			}
 			return fmt.Errorf("failed to stat .git: %w", err)
 		}
-		// Gitdir indirection means the mounted workspace does not contain the
-		// real git internals. Surface this instead of silently pretending the
-		// workspace is not a repo; otherwise worktrees/submodules lose hook/config
-		// protection without an operator-visible clue (issue #533).
 		if gitInfo.Mode()&os.ModeSymlink != 0 {
 			return fmt.Errorf("%w: .git is a symlink, so git commands may fail and git protected paths cannot be mounted from the workspace", errGitDirIndirection)
 		}
