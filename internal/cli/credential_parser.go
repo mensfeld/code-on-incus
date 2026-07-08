@@ -11,7 +11,7 @@ import (
 )
 
 // warnDroppedCredentials prints a per-entry warning for untrusted, unapproved
-// ad-hoc credential entries. Only ad-hoc entries are ever dropped here —
+// ad-hoc credential entries. Only ad-hoc entries are ever dropped here;
 // catalog-referenced entries are never gated (see session.CredentialEntry.Untrusted).
 func warnDroppedCredentials(dropped []session.CredentialEntry) {
 	for _, c := range dropped {
