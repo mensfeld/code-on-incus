@@ -21,6 +21,13 @@
     "compression": {
       "type": "string",
       "description": "Image compression algorithm (e.g. \"none\", \"gzip\", \"xz\"; empty = Incus default)"
+    },
+    "agents": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "AI agents to install in the base image (e.g. [\"claude\", \"opencode\"]); empty/unset installs all supported agents"
     }
   }
 }
