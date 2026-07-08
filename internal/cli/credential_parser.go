@@ -2,27 +2,12 @@ package cli
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/session"
 	"github.com/mensfeld/code-on-incus/internal/tool/credentials"
 )
-
-// warnDroppedCredentials prints a per-entry warning for untrusted, unapproved
-// ad-hoc credential entries. Only ad-hoc entries are ever dropped here;
-// catalog-referenced entries are never gated (see session.CredentialEntry.Untrusted).
-func warnDroppedCredentials(dropped []session.CredentialEntry) {
-	for _, c := range dropped {
-		fmt.Fprintf(os.Stderr,
-			"WARNING: ignoring untrusted credential entry from project config %s:\n"+
-				"         host %q -> %q would be copied into the container.\n"+
-				"         Run 'coi trust' to approve it (re-approval is required if the\n"+
-				"         config later changes), or set %s=1 for CI/automation.\n",
-			c.SourcePath, c.HostPath, c.ContainerPath, session.TrustEnvVar)
-	}
-}
 
 // ParseCredentialConfig creates a CredentialConfig from config file
 // [[credentials]] entries. A bundle reference (entry.Bundle != "") expands
