@@ -196,7 +196,12 @@ def test_absent_worktree_config_not_plantable(coi_binary, cleanup_containers, wt
     assert result.returncode != 0, (
         f"planting config.worktree must fail:\n{result.stdout}{result.stderr}"
     )
-    assert not target.exists(), "host must not gain a planted config.worktree"
+    # An empty read-only placeholder may exist as the bind-mount point (like the
+    # workspace side synthesizes placeholders), but it must carry NO planted content.
+    planted = target.read_text() if target.exists() else ""
+    assert "hooksPath" not in planted and planted.strip() == "", (
+        f"config.worktree must not contain planted content, got: {planted!r}"
+    )
 
 
 def test_poisoned_gitdir_pointer_refused(coi_binary, cleanup_containers, wt_cleanup, tmp_path):
