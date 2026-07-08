@@ -509,6 +509,7 @@ func synthesizeDefaultProfile(cfg *Config) ProfileConfig {
 
 	container := cfg.Container
 	container.Build.Commands = cloneSlice(cfg.Container.Build.Commands)
+	container.Build.Agents = cloneSlice(cfg.Container.Build.Agents)
 
 	p := ProfileConfig{
 		Container:   container,

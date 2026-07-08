@@ -16,6 +16,8 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 BUILD_SH = Path(__file__).resolve().parents[2] / "profiles" / "default" / "build.sh"
 
 # Stub the per-agent installers + log as markers, then source ONLY the real
@@ -81,3 +83,56 @@ def test_unknown_agent_warns_and_skips():
     agents, out = _run(coi_agents="claude bogus")
     assert agents == ["claude"], agents
     assert "WARNING" in out and "bogus" in out, out
+
+
+# --- end-to-end via the real coi binary (config -> validation) ---------------
+
+
+def _skip_without_incus(coi_binary):
+    if (
+        subprocess.run(
+            [coi_binary, "image", "exists", "coi-default"], capture_output=True
+        ).returncode
+        != 0
+    ):
+        pytest.skip("coi base image not available")
+
+
+def test_coi_build_rejects_unknown_agent(coi_binary, workspace_dir):
+    """`coi build` fails fast with a clear error when [container.build] agents names an
+    unsupported agent — validation happens before any image build, so this is cheap and
+    proves the config -> default-profile -> validate wiring end to end (#454)."""
+    _skip_without_incus(coi_binary)
+    coi_dir = Path(workspace_dir) / ".coi"
+    coi_dir.mkdir(exist_ok=True)
+    (coi_dir / "config.toml").write_text(
+        '[container]\nimage = "coi-default"\n\n[container.build]\nagents = ["bogus"]\n'
+    )
+    result = subprocess.run(
+        [coi_binary, "build"], capture_output=True, text=True, timeout=120, cwd=workspace_dir
+    )
+    combined = (result.stdout + result.stderr).lower()
+    assert result.returncode != 0, (
+        f"unknown agent must fail the build:\n{result.stdout}{result.stderr}"
+    )
+    assert "unknown agent" in combined and "bogus" in combined, combined
+
+
+def test_coi_build_warns_when_configured_tool_not_built(coi_binary, workspace_dir):
+    """`coi build` warns when the agents list omits the tool the config runs, before
+    building. Gated on an existing coi-default (no --force) so it warns then skips —
+    no expensive rebuild."""
+    _skip_without_incus(coi_binary)
+    coi_dir = Path(workspace_dir) / ".coi"
+    coi_dir.mkdir(exist_ok=True)
+    (coi_dir / "config.toml").write_text(
+        '[tool]\nname = "claude"\n\n[container]\nimage = "coi-default"\n\n'
+        '[container.build]\nagents = ["opencode"]\n'
+    )
+    result = subprocess.run(
+        [coi_binary, "build"], capture_output=True, text=True, timeout=120, cwd=workspace_dir
+    )
+    combined = result.stdout + result.stderr
+    # Warn fired (tool 'claude' not in agents) and the build did not error out.
+    assert "claude" in combined.lower() and "warning" in combined.lower(), combined
+    assert result.returncode == 0, f"warn is non-fatal; build should skip/succeed:\n{combined}"
