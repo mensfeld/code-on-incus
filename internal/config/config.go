@@ -1109,6 +1109,9 @@ func mergeProfiles(parent, child ProfileConfig) ProfileConfig {
 	if result.Sockets == nil {
 		result.Sockets = parent.Sockets
 	}
+	if result.Credentials == nil {
+		result.Credentials = parent.Credentials
+	}
 	if result.ForwardEnv == nil {
 		result.ForwardEnv = parent.ForwardEnv
 	}
