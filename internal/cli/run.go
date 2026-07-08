@@ -447,27 +447,38 @@ func (a *App) overlayWorkspaceConfig(absWorkspace string) error {
 // resolveContainerWorkspacePath returns the path inside the container where the
 // workspace should be mounted. When preserve_workspace_path is set it mirrors
 // the host path, falling back to /workspace if the path conflicts with system dirs.
-func (a *App) resolveContainerWorkspacePath(absWorkspace string) string {
-	if !a.cfg.Paths.PreserveWorkspacePath {
+func (a *App) resolveContainerWorkspacePath(absWorkspace string, forcePreserve bool) string {
+	if !a.cfg.Paths.PreserveWorkspacePath && !forcePreserve {
 		return "/workspace"
 	}
 	cleanPath := filepath.Clean(absWorkspace)
-	disallowedPrefixes := []string{
-		"/etc", "/bin", "/sbin", "/usr", "/root", "/boot", "/sys", "/proc", "/dev", "/lib", "/lib64",
-	}
-	for _, prefix := range disallowedPrefixes {
-		if cleanPath == prefix || strings.HasPrefix(cleanPath, prefix+"/") {
-			fmt.Fprintf(os.Stderr, "Warning: preserve_workspace_path requested for %q conflicts with system directories; using /workspace instead\n", absWorkspace)
-			return "/workspace"
-		}
+	if workspaceUnderSystemDir(absWorkspace) {
+		// A worktree caller pre-checks this and hard-errors (it can't work at
+		// /workspace); here it's the plain preserve_workspace_path fallback.
+		fmt.Fprintf(os.Stderr, "Warning: preserve_workspace_path requested for %q conflicts with system directories; using /workspace instead\n", absWorkspace)
+		return "/workspace"
 	}
 	return cleanPath
+}
+
+// workspaceUnderSystemDir reports whether the workspace path is at or under a
+// critical system directory, where mounting it at its host path is disallowed.
+func workspaceUnderSystemDir(absWorkspace string) bool {
+	cleanPath := filepath.Clean(absWorkspace)
+	for _, prefix := range []string{
+		"/etc", "/bin", "/sbin", "/usr", "/root", "/boot", "/sys", "/proc", "/dev", "/lib", "/lib64",
+	} {
+		if cleanPath == prefix || strings.HasPrefix(cleanPath, prefix+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // applyWorkspaceMounts mounts the workspace and all configured additional directories
 // into the container, then applies security (read-only) mounts. For restarted persistent
 // containers it retrieves the existing workspace path from the container config instead.
-func (a *App) applyWorkspaceMounts(mgr container.ContainerManager, containerName, absWorkspace string, containerWorkspacePath *string, mountConfig *session.MountConfig, useShift, wasRestarted bool) error {
+func (a *App) applyWorkspaceMounts(mgr container.ContainerManager, containerName, absWorkspace string, containerWorkspacePath *string, mountConfig *session.MountConfig, useShift, wasRestarted bool, worktree *session.GitWorktreeLayout) error {
 	if wasRestarted {
 		fmt.Fprintf(os.Stderr, "Reusing existing workspace mount...\n")
 		*containerWorkspacePath = mgr.GetWorkspacePath()
@@ -481,6 +492,16 @@ func (a *App) applyWorkspaceMounts(mgr container.ContainerManager, containerName
 	}
 	if err := mgr.MountDisk("workspace", absWorkspace, *containerWorkspacePath, useShift, false); err != nil {
 		return fmt.Errorf("failed to mount workspace: %w", err)
+	}
+
+	// Mount the worktree's external git common dir read-write at its host path so
+	// git resolves; its RCE sinks are re-covered read-only in applySecurityMounts
+	// (issue #533). Must precede the security mounts so the overlays layer on top.
+	if worktree != nil {
+		if err := session.MountGitWorktreeDirs(mgr, worktree, useShift); err != nil {
+			return fmt.Errorf("failed to mount git worktree dirs: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "Mounted git worktree common dir (read-write): %s\n", worktree.CommonDir)
 	}
 
 	if err := session.ValidateMounts(mountConfig); err != nil {
@@ -497,7 +518,7 @@ func (a *App) applyWorkspaceMounts(mgr container.ContainerManager, containerName
 	// Called unconditionally: applySecurityMounts internally skips the read-only
 	// protected_paths when disable_protection is set (GetEffectiveProtectedPaths
 	// returns nil), but secret-path masking is a separate opt-in that still runs.
-	if err := a.applySecurityMounts(mgr, absWorkspace, *containerWorkspacePath, containerName, useShift); err != nil {
+	if err := a.applySecurityMounts(mgr, absWorkspace, *containerWorkspacePath, containerName, useShift, worktree); err != nil {
 		return err
 	}
 	return nil
@@ -527,7 +548,7 @@ func addMount(mgr container.ContainerManager, mount session.MountEntry, useShift
 }
 
 // applySecurityMounts sets up read-only protection mounts and optional host immutable flags.
-func (a *App) applySecurityMounts(mgr container.ContainerManager, absWorkspace, containerWorkspacePath, containerName string, useShift bool) error {
+func (a *App) applySecurityMounts(mgr container.ContainerManager, absWorkspace, containerWorkspacePath, containerName string, useShift bool, worktree *session.GitWorktreeLayout) error {
 	protectedPaths := filterWritableGitHooks(a.cfg.Security.GetEffectiveProtectedPaths(), a.cfg)
 	// SetupSecurityMounts expands the dynamic per-worktree git configs internally
 	// (issue #545 — the single chokepoint both `coi run` and `coi shell` share) and
@@ -548,6 +569,21 @@ func (a *App) applySecurityMounts(mgr container.ContainerManager, absWorkspace, 
 		immutablePaths := session.ApplyImmutable(absWorkspace, effectivePaths, containerName, logFn)
 		if len(immutablePaths) > 0 {
 			fmt.Fprintf(os.Stderr, "Host-side immutable protection applied: %s\n", strings.Join(immutablePaths, ", "))
+		}
+	}
+
+	// Extend read-only protection to the external git common dir for a worktree
+	// checkout (#533): the same #474 hook/config lockdown applied to the real
+	// internals the workspace-relative pass above cannot reach. Mount-only (the
+	// host-immutable belt is deferred; the read-only mount is the primary control).
+	if worktree != nil {
+		writableHooks := config.BoolVal(a.cfg.Git.WritableHooks)
+		cProtected, cErr := session.SetupCommonDirProtection(mgr, worktree.CommonDir, useShift, writableHooks, &a.cfg.Security)
+		if cErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: some git common-dir protections not applied: %v\n", cErr)
+		}
+		if len(cProtected) > 0 {
+			fmt.Fprintf(os.Stderr, "Protected git common-dir paths (read-only): %s\n", strings.Join(cProtected, ", "))
 		}
 	}
 

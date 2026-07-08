@@ -279,10 +279,22 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		// idmapApplied signal is not needed here.
 		useShift, _ := ConfigureUIDMapping(result.ContainerName, opts.DisableShift, opts.Logger)
 
-		// Add disk devices BEFORE starting container
+		// Add disk devices BEFORE starting container.
+		// Detect a git worktree checkout (.git is a file whose real git internals
+		// live outside the workspace). A valid layout forces preserve-path so git's
+		// pointers resolve identically host<->container, and its external git dirs
+		// are mounted + protected below (issue #533). A pointer that fails the safety
+		// guard is not mounted; git fails loudly rather than exposing a mis-pointed dir.
+		worktreeLayout, wtErr := ResolveGitWorktree(opts.WorkspacePath)
+		if wtErr != nil {
+			opts.Logger(fmt.Sprintf("Warning: git worktree not mounted (%v); git commands may fail in the container", wtErr))
+		}
+		worktreeWritableHooks := !containsGitHooksPath(opts.ProtectedPaths)
+
 		// Determine container mount path - either /workspace (default) or same as host path
+		preserveWorkspace := opts.PreserveWorkspacePath || worktreeLayout != nil
 		containerWorkspacePath := "/workspace"
-		if opts.PreserveWorkspacePath {
+		if preserveWorkspace {
 			// Validate that the path doesn't conflict with critical system directories
 			cleanPath := filepath.Clean(opts.WorkspacePath)
 			disallowedPrefixes := []string{
@@ -296,18 +308,32 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 				}
 			}
 			if isDisallowed {
+				if worktreeLayout != nil {
+					// Can't preserve the path, so the worktree's git pointers can't
+					// resolve and its internals can't be protected — fail closed.
+					return nil, fmt.Errorf("git worktree workspace %q is under a system directory; cannot preserve its host path to mount git internals safely", opts.WorkspacePath)
+				}
 				opts.Logger(fmt.Sprintf("Warning: preserve_workspace_path requested for %q conflicts with system directories; using /workspace instead", opts.WorkspacePath))
 			} else {
 				containerWorkspacePath = cleanPath
 				opts.Logger(fmt.Sprintf("Adding workspace mount: %s -> %s (preserving host path)", opts.WorkspacePath, containerWorkspacePath))
 			}
 		}
-		if containerWorkspacePath == "/workspace" && !opts.PreserveWorkspacePath {
+		if containerWorkspacePath == "/workspace" && !preserveWorkspace {
 			opts.Logger(fmt.Sprintf("Adding workspace mount: %s -> %s", opts.WorkspacePath, containerWorkspacePath))
 		}
 		result.ContainerWorkspacePath = containerWorkspacePath
 		if err := result.Manager.MountDisk("workspace", opts.WorkspacePath, containerWorkspacePath, useShift, false); err != nil {
 			return nil, fmt.Errorf("failed to add workspace device: %w", err)
+		}
+		// Mount the worktree's external git common dir (read-write, at its host path)
+		// so git resolves; its RCE sinks are re-covered read-only after the security
+		// mounts below (issue #533).
+		if worktreeLayout != nil {
+			if err := MountGitWorktreeDirs(result.Manager, worktreeLayout, useShift); err != nil {
+				return nil, fmt.Errorf("failed to mount git worktree dirs: %w", err)
+			}
+			opts.Logger(fmt.Sprintf("Mounted git worktree common dir (read-write): %s", worktreeLayout.CommonDir))
 		}
 
 		// Configure /tmp tmpfs size (prevent space exhaustion during builds/operations)
@@ -365,6 +391,20 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 			protectedPaths := GetProtectedPathsForLogging(opts.WorkspacePath, effectivePaths)
 			if len(protectedPaths) > 0 {
 				opts.Logger(fmt.Sprintf("Protected paths (mounted read-only): %s", strings.Join(protectedPaths, ", ")))
+			}
+		}
+
+		// Extend the read-only protection to the external git common dir (issue #533):
+		// the same #474 hook/config lockdown applied to the worktree's real internals,
+		// which the workspace-relative pass above cannot reach. Mount-only (the
+		// host-immutable belt is deferred; the read-only mount is the primary control).
+		if worktreeLayout != nil {
+			cProtected, cErr := SetupCommonDirProtection(result.Manager, worktreeLayout.CommonDir, useShift, worktreeWritableHooks, opts.Security)
+			if cErr != nil {
+				opts.Logger(fmt.Sprintf("Warning: some git common-dir protections not applied: %v", cErr))
+			}
+			if len(cProtected) > 0 {
+				opts.Logger(fmt.Sprintf("Protected git common-dir paths (read-only): %s", strings.Join(cProtected, ", ")))
 			}
 		}
 
