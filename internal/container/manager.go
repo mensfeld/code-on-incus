@@ -333,6 +333,18 @@ func (m *Manager) PushFile(source, destination string) error {
 
 // PullDirectory pulls a directory from the container recursively
 func (m *Manager) PullDirectory(containerPath, localPath string) error {
+	// Fail fast, before anything is transferred. This function used to clear
+	// the way for the final rename with os.RemoveAll(localPath),
+	// which recursively deleted whole host trees when a caller passed
+	// an existing directory such as "../" as the destination.
+	// Refusing an existing destination keeps every deletion
+	// explicit and owned by the caller.
+	if _, err := os.Lstat(localPath); err == nil {
+		return fmt.Errorf("destination %q already exists; remove it or choose another name", localPath)
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+
 	// Incus creates a subdirectory when pulling, so we pull to a temp location
 	// then move the contents to the desired location
 	tempDir, err := os.MkdirTemp("", "coi-pull-*")
@@ -385,9 +397,6 @@ func (m *Manager) PullDirectory(containerPath, localPath string) error {
 	if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
 		return err
 	}
-
-	// Remove destination if it exists
-	os.RemoveAll(localPath)
 
 	// Rename (move) the pulled directory to the final location
 	// If rename fails with cross-device error, fall back to copy via a temp dir

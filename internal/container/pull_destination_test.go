@@ -24,6 +24,42 @@ func TestPullFileRefusesDirectoryDestination(t *testing.T) {
 	}
 }
 
+// TestPullDirectoryRefusesExistingDestination verifies PullDirectory's
+// fail-fast guard: any existing destination (directory or file) is refused
+// before anything is transferred, and nothing is deleted. This is the
+// regression guard for the data-wipe bug where an existing destination was
+// recursively cleared with os.RemoveAll. The nonexistent container proves
+// incus is never contacted.
+func TestPullDirectoryRefusesExistingDestination(t *testing.T) {
+	mgr := NewManager("coi-test-no-such-container")
+	dest := t.TempDir()
+	sentinel := filepath.Join(dest, "sentinel.txt")
+	if err := os.WriteFile(sentinel, []byte("keep me"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Existing directory destination.
+	err := mgr.PullDirectory("/root/.claude", dest)
+	if err == nil {
+		t.Fatal("expected error for existing directory destination, got nil")
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("expected 'already exists' error, got: %v", err)
+	}
+	if _, err := os.Stat(sentinel); err != nil {
+		t.Fatalf("sentinel file was lost: %v", err)
+	}
+
+	// Existing file destination.
+	err = mgr.PullDirectory("/root/.claude", sentinel)
+	if err == nil {
+		t.Fatal("expected error for existing file destination, got nil")
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("expected 'already exists' error, got: %v", err)
+	}
+}
+
 // TestPullFileDirectoryGuardKeepsContents verifies the guard leaves the
 // destination directory and its contents untouched.
 func TestPullFileDirectoryGuardKeepsContents(t *testing.T) {
