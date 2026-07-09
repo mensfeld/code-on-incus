@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/mensfeld/code-on-incus/internal/container"
@@ -77,9 +78,15 @@ var filePullCmd = &cobra.Command{
 	Short: "Pull a file or directory from a container",
 	Long: `Pull a file or directory from a container to the host.
 
-Example:
-  # Pull directory (e.g., save Claude session data)
-  coi file pull -r my-container:/root/.claude ./saved-sessions/session-123/`,
+Examples:
+  # Pull a file into the current directory
+  coi file pull my-container:/tmp/results.txt .
+
+  # Pull a file to an exact path (overwrites an existing file)
+  coi file pull my-container:/tmp/results.txt ./results-v2.txt
+
+  # Pull a directory (e.g., save Claude session data)
+  coi file pull -r my-container:/root/.claude ./saved-sessions/session-123`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		source := args[0]
@@ -95,24 +102,80 @@ Example:
 		containerName := parts[0]
 		remotePath := parts[1]
 
+		// Resolve the exact final target and enforce the overwrite policy
+		// before any transfer, so a bad destination fails with nothing touched.
+		target, err := resolvePullDestination(localPath, remotePath, recursive)
+		if err != nil {
+			return &ExitCodeError{Code: 2, Message: err.Error()}
+		}
+
 		mgr := container.NewManager(containerName)
 
-		// For now, always pull recursively if -r is specified
 		if recursive {
-			if err := mgr.PullDirectory(remotePath, localPath); err != nil {
+			if err := mgr.PullDirectory(remotePath, target); err != nil {
 				return fmt.Errorf("failed to pull directory: %v", err)
 			}
-			fmt.Fprintf(os.Stderr, "Pulled directory %s:%s -> %s\n", containerName, remotePath, localPath)
+			fmt.Fprintf(os.Stderr, "Pulled directory %s:%s -> %s\n", containerName, remotePath, target)
 		} else {
-			// Pull single file - use the same PullDirectory but with single file path
-			if err := mgr.PullDirectory(remotePath, localPath); err != nil {
+			if err := mgr.PullFile(remotePath, target); err != nil {
+				if strings.Contains(err.Error(), "directory") || strings.Contains(err.Error(), "recursive") {
+					return fmt.Errorf("failed to pull file: %v (to pull a directory, use -r)", err)
+				}
 				return fmt.Errorf("failed to pull file: %v", err)
 			}
-			fmt.Fprintf(os.Stderr, "Pulled file %s:%s -> %s\n", containerName, remotePath, localPath)
+			fmt.Fprintf(os.Stderr, "Pulled file %s:%s -> %s\n", containerName, remotePath, target)
 		}
 
 		return nil
 	},
+}
+
+// resolvePullDestination enforces the overwrite policy for `coi file pull`,
+// returning the final host path the pulled entry will be renamed to.
+//
+// Rules:
+//   - A trailing separator requires an existing directory: fail fast otherwise.
+//   - An existing-directory destination means "place the pulled entry inside it",
+//     like cp/scp/incus convention: final target is <localPath>/<base(remote)>.
+//   - The final target must not already exist, with one exception:
+//     a single file pull may overwrite an existing non-directory.
+//   - Nothing is ever deleted on the user's behalf:
+//     replacing a directory always requires removing it explicitly first.
+func resolvePullDestination(localPath, remotePath string, recursive bool) (string, error) {
+	base := filepath.Base(strings.TrimSuffix(remotePath, "/"))
+	if base == "/" || base == "." || base == "" {
+		return "", fmt.Errorf("cannot derive a file name from remote path %q", remotePath)
+	}
+
+	trailingSep := strings.HasSuffix(localPath, "/")
+	info, statErr := os.Stat(localPath)
+	switch {
+	case statErr == nil && info.IsDir():
+		localPath = filepath.Join(localPath, base)
+	case statErr == nil && trailingSep:
+		return "", fmt.Errorf("destination %q is not a directory", localPath)
+	case statErr != nil && !os.IsNotExist(statErr):
+		return "", statErr
+	case statErr != nil && trailingSep:
+		return "", fmt.Errorf("destination %q does not exist: a trailing slash requires an existing directory (create it first, or drop the slash to pull to that exact path)", localPath)
+	}
+
+	// Overwrite policy at the final target. Lstat: a symlink counts as the
+	// link itself, which a single-file pull may replace (never write through).
+	fi, err := os.Lstat(localPath)
+	if os.IsNotExist(err) {
+		return localPath, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if fi.IsDir() {
+		return "", fmt.Errorf("destination %q already exists; remove it or choose another name", localPath)
+	}
+	if recursive {
+		return "", fmt.Errorf("destination %q already exists and is not a directory; remove it or choose another name", localPath)
+	}
+	return localPath, nil
 }
 
 func init() {

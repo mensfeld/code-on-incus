@@ -412,6 +412,80 @@ func (m *Manager) PullDirectory(containerPath, localPath string) error {
 	return nil
 }
 
+// PullFile pulls a single file from the container to the host.
+// The destination's parent is created if missing.
+// If localPath is an existing file, it is replaced atomically.
+// If localPath is an existing directory, nothing happens and an error is returned.
+// Content is staged in a temp directory first, so a failed transfer cannot leave a truncated file behind.
+func (m *Manager) PullFile(containerPath, localPath string) error {
+	if !strings.HasPrefix(containerPath, "/") {
+		containerPath = "/" + containerPath
+	}
+
+	if fi, err := os.Lstat(localPath); err == nil && fi.IsDir() {
+		return fmt.Errorf("destination %q is an existing directory; remove it or choose another name", localPath)
+	} else if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+
+	// Create staging dir
+	tempDir, err := os.MkdirTemp("", "coi-pull-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Pull into the staging dir
+	source := m.ContainerName + containerPath
+	cmdArgs := buildIncusCommand("file", "pull", source, tempDir)
+	cmd := execIncusCommand(cmdArgs)
+	var stderr bytes.Buffer
+	cmd.Stdout = nil
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		stderrMsg := strings.TrimSpace(stderr.String())
+		if stderrMsg == "" {
+			return err
+		}
+		return fmt.Errorf("%s: %w", stderrMsg, err)
+	}
+
+	staged := filepath.Join(tempDir, filepath.Base(strings.TrimSuffix(containerPath, "/")))
+	fi, err := os.Lstat(staged)
+	if err != nil {
+		return fmt.Errorf("pulled file missing from staging directory: %w", err)
+	}
+	// Container content is untrusted so only materialize regular files on the host.
+	// (same as sanitizePulledTree)
+	if !fi.Mode().IsRegular() {
+		return fmt.Errorf("refusing to pull %s: not a regular file", containerPath)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
+		return err
+	}
+
+	if err := os.Rename(staged, localPath); err != nil {
+		if isCrossDeviceError(err) {
+			// Copy to a temp file on the destination filesystem, then rename
+			// so the destination is still replaced atomically.
+			tempDestDir, err := os.MkdirTemp(filepath.Dir(localPath), "coi-pull-*")
+			if err != nil {
+				return err
+			}
+			defer os.RemoveAll(tempDestDir)
+
+			tempTarget := filepath.Join(tempDestDir, filepath.Base(localPath))
+			if err := copyFile(staged, tempTarget); err != nil {
+				return err
+			}
+			return os.Rename(tempTarget, localPath)
+		}
+		return err
+	}
+	return nil
+}
+
 // isCrossDeviceError checks if the error is a cross-device link error (EXDEV)
 func isCrossDeviceError(err error) bool {
 	var linkErr *os.LinkError
