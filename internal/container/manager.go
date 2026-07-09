@@ -333,6 +333,18 @@ func (m *Manager) PushFile(source, destination string) error {
 
 // PullDirectory pulls a directory from the container recursively
 func (m *Manager) PullDirectory(containerPath, localPath string) error {
+	// Fail fast, before anything is transferred. This function used to clear
+	// the way for the final rename with os.RemoveAll(localPath),
+	// which recursively deleted whole host trees when a caller passed
+	// an existing directory such as "../" as the destination.
+	// Refusing an existing destination keeps every deletion
+	// explicit and owned by the caller.
+	if _, err := os.Lstat(localPath); err == nil {
+		return fmt.Errorf("destination %q already exists; remove it or choose another name", localPath)
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+
 	// Incus creates a subdirectory when pulling, so we pull to a temp location
 	// then move the contents to the desired location
 	tempDir, err := os.MkdirTemp("", "coi-pull-*")
@@ -386,9 +398,6 @@ func (m *Manager) PullDirectory(containerPath, localPath string) error {
 		return err
 	}
 
-	// Remove destination if it exists
-	os.RemoveAll(localPath)
-
 	// Rename (move) the pulled directory to the final location
 	// If rename fails with cross-device error, fall back to copy via a temp dir
 	if err := os.Rename(pulledDir, localPath); err != nil {
@@ -403,6 +412,102 @@ func (m *Manager) PullDirectory(containerPath, localPath string) error {
 			// Copy into a temp target, then atomically rename to the final location
 			tempTarget := filepath.Join(tempDestDir, filepath.Base(localPath))
 			if err := copyDirRecursive(pulledDir, tempTarget); err != nil {
+				return err
+			}
+			return os.Rename(tempTarget, localPath)
+		}
+		return err
+	}
+	return nil
+}
+
+// ErrRemoteIsDirectory is returned by PullFile when the remote source is a
+// directory, which requires a recursive pull. Callers can errors.Is against it
+// (rather than sniffing error text) to suggest the -r flag.
+var ErrRemoteIsDirectory = errors.New("remote path is a directory; use a recursive pull")
+
+// PullFile pulls a single file from the container to the host.
+// The destination's parent is created if missing.
+// If localPath is an existing file, it is replaced atomically.
+// If localPath is an existing directory, nothing happens and an error is returned.
+// Content is staged in a temp directory first, so a failed transfer cannot leave a truncated file behind.
+func (m *Manager) PullFile(containerPath, localPath string) error {
+	if !strings.HasPrefix(containerPath, "/") {
+		containerPath = "/" + containerPath
+	}
+
+	if fi, err := os.Lstat(localPath); err == nil && fi.IsDir() {
+		return fmt.Errorf("destination %q is an existing directory; remove it or choose another name", localPath)
+	} else if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+
+	// Create staging dir
+	tempDir, err := os.MkdirTemp("", "coi-pull-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Pull into the staging dir
+	source := m.ContainerName + containerPath
+	cmdArgs := buildIncusCommand("file", "pull", source, tempDir)
+	cmd := execIncusCommand(cmdArgs)
+	var stderr bytes.Buffer
+	cmd.Stdout = nil
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		stderrMsg := strings.TrimSpace(stderr.String())
+		// incus reports a non-recursive pull of a directory via stderr; surface it as
+		// a typed error so the CLI can suggest -r without sniffing text itself.
+		if strings.Contains(stderrMsg, "directory") || strings.Contains(stderrMsg, "recursive") {
+			return fmt.Errorf("%s: %w", stderrMsg, ErrRemoteIsDirectory)
+		}
+		if stderrMsg == "" {
+			return err
+		}
+		return fmt.Errorf("%s: %w", stderrMsg, err)
+	}
+
+	// Take whatever incus staged rather than assuming its basename: a single-file
+	// pull writes exactly one entry into the (empty) staging dir.
+	entries, err := os.ReadDir(tempDir)
+	if err != nil {
+		return err
+	}
+	if len(entries) != 1 {
+		return fmt.Errorf("expected exactly one entry in staging directory, got %d", len(entries))
+	}
+	staged := filepath.Join(tempDir, entries[0].Name())
+	fi, err := os.Lstat(staged)
+	if err != nil {
+		return fmt.Errorf("pulled file missing from staging directory: %w", err)
+	}
+	if fi.IsDir() {
+		return fmt.Errorf("refusing to pull %s: %w", containerPath, ErrRemoteIsDirectory)
+	}
+	// Container content is untrusted so only materialize regular files on the host
+	// (drop symlinks/special files, same policy as sanitizePulledTree for trees).
+	if !fi.Mode().IsRegular() {
+		return fmt.Errorf("refusing to pull %s: not a regular file", containerPath)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
+		return err
+	}
+
+	if err := os.Rename(staged, localPath); err != nil {
+		if isCrossDeviceError(err) {
+			// Copy to a temp file on the destination filesystem, then rename
+			// so the destination is still replaced atomically.
+			tempDestDir, err := os.MkdirTemp(filepath.Dir(localPath), "coi-pull-*")
+			if err != nil {
+				return err
+			}
+			defer os.RemoveAll(tempDestDir)
+
+			tempTarget := filepath.Join(tempDestDir, filepath.Base(localPath))
+			if err := copyFile(staged, tempTarget); err != nil {
 				return err
 			}
 			return os.Rename(tempTarget, localPath)
