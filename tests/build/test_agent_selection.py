@@ -13,6 +13,7 @@ install functions as markers, and assert the dispatch. Hermetic: no network, no 
 """
 
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -136,3 +137,74 @@ def test_coi_build_warns_when_configured_tool_not_built(coi_binary, workspace_di
     # Warn fired (tool 'claude' not in agents) and the build did not error out.
     assert "claude" in combined.lower() and "warning" in combined.lower(), combined
     assert result.returncode == 0, f"warn is non-fatal; build should skip/succeed:\n{combined}"
+
+
+def test_slim_build_installs_only_selected_agents(coi_binary, workspace_dir, tmp_path):
+    """End-to-end proof (#454, review finding 4): a real `coi build` with
+    agents=["claude"] produces a coi-default image that HAS claude but NOT opencode/pi.
+
+    This is the one link the unit + hermetic tests cannot cover on their own — it
+    exercises the whole chain for real: project config -> BuildOptions.Agents ->
+    agentEnv -> COI_AGENTS env -> ExecCommand -> build.sh's install_selected_agents ->
+    the actual installed binary set. The shared coi-default image is backed up and
+    restored so sibling tests in this lane are unaffected. Slow (a real image build);
+    only runs where coi-default + incus already exist (the core-build CI lane)."""
+    _skip_without_incus(coi_binary)
+    if shutil.which("incus") is None:
+        pytest.skip("incus CLI not available")
+
+    # Restore source for the shared image: prefer the pristine CI cache tarball
+    # (always the full, all-agents image); fall back to a local export otherwise.
+    ci_cache = "/tmp/coi-image.tar.gz"
+    if os.path.exists(ci_cache):
+        backup_tar = ci_cache
+    else:
+        exp = subprocess.run(
+            ["incus", "image", "export", "coi-default", str(tmp_path / "coi-default-backup")],
+            capture_output=True, text=True, timeout=300,
+        )
+        if exp.returncode != 0:
+            pytest.skip(f"could not back up coi-default: {exp.stderr}")
+        backups = list(tmp_path.glob("coi-default-backup*"))
+        if not backups:
+            pytest.skip("image export produced no tarball to restore from")
+        backup_tar = str(backups[0])
+
+    coi_dir = Path(workspace_dir) / ".coi"
+    coi_dir.mkdir(exist_ok=True)
+    (coi_dir / "config.toml").write_text(
+        '[container]\nimage = "coi-default"\n\n[container.build]\nagents = ["claude"]\n'
+    )
+
+    try:
+        build = subprocess.run(
+            [coi_binary, "build", "--force"],
+            capture_output=True, text=True, timeout=1500, cwd=workspace_dir,
+        )
+        assert build.returncode == 0, f"slim build failed:\n{build.stdout}{build.stderr}"
+
+        # Inspect the built image via a throwaway container: claude present, the two
+        # unselected agents absent. `command -v` failing is exactly the runtime footgun
+        # the selector must avoid for the configured tool, so it is the right probe.
+        probe = subprocess.run(
+            [coi_binary, "run", "--workspace", workspace_dir, "--", "bash", "-lc",
+             "for a in claude opencode pi; do "
+             "command -v \"$a\" >/dev/null 2>&1 && echo HAVE:$a || echo MISS:$a; done"],
+            capture_output=True, text=True, timeout=300,
+        )
+        out = probe.stdout + probe.stderr
+        assert probe.returncode == 0, f"probe run failed:\n{out}"
+        assert "HAVE:claude" in out, f"claude must be installed with agents=[claude]:\n{out}"
+        assert "MISS:opencode" in out, f"opencode must be ABSENT with agents=[claude]:\n{out}"
+        assert "MISS:pi" in out, f"pi must be ABSENT with agents=[claude]:\n{out}"
+    finally:
+        # Restore the shared coi-default (full agents) for sibling tests in this lane.
+        subprocess.run(["incus", "image", "delete", "coi-default"],
+                       capture_output=True, text=True, timeout=120)
+        restore = subprocess.run(
+            ["incus", "image", "import", backup_tar, "--alias", "coi-default"],
+            capture_output=True, text=True, timeout=300,
+        )
+        assert restore.returncode == 0, (
+            f"failed to restore shared coi-default from {backup_tar}: {restore.stderr}"
+        )
