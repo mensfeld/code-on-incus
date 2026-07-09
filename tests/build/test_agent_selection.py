@@ -140,7 +140,7 @@ def test_coi_build_warns_when_configured_tool_not_built(coi_binary, workspace_di
     assert result.returncode == 0, f"warn is non-fatal; build should skip/succeed:\n{combined}"
 
 
-def test_slim_build_installs_only_selected_agents(coi_binary, workspace_dir, tmp_path):
+def test_slim_build_installs_only_selected_agents(coi_binary, workspace_dir):
     """End-to-end proof (#454, review finding 4): a real `coi build` with
     agents=["claude"] produces a coi-default image that HAS claude but NOT opencode/pi.
 
@@ -154,10 +154,10 @@ def test_slim_build_installs_only_selected_agents(coi_binary, workspace_dir, tmp
     if shutil.which("incus") is None:
         pytest.skip("incus CLI not available")
 
-    # Capture the original image so it can be restored afterwards. `coi build --force`
-    # only re-points the coi-default alias at the new (slim) image; the original full
-    # image stays in the store, so restoring is normally just re-aliasing its
-    # fingerprint. Keep an export as a fallback in case the original is ever removed.
+    # Capture the original image fingerprint so it can be restored afterwards. `coi
+    # build --force` re-points the coi-default alias at the freshly built (slim) image
+    # and leaves the original in the store, so restoring is just deleting the slim image
+    # and re-aliasing this fingerprint — no multi-hundred-MB export needed.
     info = subprocess.run(
         ["incus", "image", "info", "coi-default"], capture_output=True, text=True, timeout=60
     )
@@ -165,15 +165,6 @@ def test_slim_build_installs_only_selected_agents(coi_binary, workspace_dir, tmp
     if info.returncode != 0 or not m:
         pytest.skip("could not read coi-default fingerprint to back it up")
     orig_fp = m.group(1)
-
-    exp = subprocess.run(
-        ["incus", "image", "export", "coi-default", str(tmp_path / "coi-default-backup")],
-        capture_output=True,
-        text=True,
-        timeout=300,
-    )
-    backups = list(tmp_path.glob("coi-default-backup*"))
-    backup_tar = str(backups[0]) if (exp.returncode == 0 and backups) else None
 
     coi_dir = Path(workspace_dir) / ".coi"
     coi_dir.mkdir(exist_ok=True)
@@ -216,50 +207,56 @@ def test_slim_build_installs_only_selected_agents(coi_binary, workspace_dir, tmp
         assert "MISS:opencode" in out, f"opencode must be ABSENT with agents=[claude]:\n{out}"
         assert "MISS:pi" in out, f"pi must be ABSENT with agents=[claude]:\n{out}"
     finally:
-        # Restore the shared coi-default for sibling tests in this lane. `coi build
-        # --force` moved the alias to the slim image but left the original in the store,
-        # so re-pointing the alias is enough (and avoids a fingerprint collision on
-        # re-import). Fall back to importing the export only if the original is gone.
+        # Restore the shared coi-default for sibling tests in this lane (which run in
+        # randomized order, so a slip here cascades). `coi build --force` re-pointed
+        # coi-default at the slim image and left the original in the store. Delete the
+        # slim image — which drops its coi-default alias AND reclaims disk in one step —
+        # then re-alias the original fingerprint. Deleting the image first means the
+        # subsequent alias create cannot fail with "already exists", and the alias is
+        # re-created immediately, so coi-default is never left unaliased on this path.
         cur = subprocess.run(
             ["incus", "image", "info", "coi-default"], capture_output=True, text=True, timeout=60
         )
         mcur = re.search(r"Fingerprint:\s*([0-9a-f]+)", cur.stdout)
         slim_fp = mcur.group(1) if mcur else None
 
-        subprocess.run(
-            ["incus", "image", "alias", "delete", "coi-default"],
-            capture_output=True,
-            text=True,
-            timeout=60,
+        orig_present = (
+            subprocess.run(
+                ["incus", "image", "info", orig_fp], capture_output=True, text=True, timeout=60
+            ).returncode
+            == 0
         )
-        still = subprocess.run(
-            ["incus", "image", "info", orig_fp], capture_output=True, text=True, timeout=60
-        )
-        if still.returncode == 0:
+
+        # Only act when the build actually produced a distinct slim image and the
+        # original survives. Otherwise (build skipped/failed -> still original, or the
+        # original is somehow gone) coi-default already resolves to a working image, so
+        # leave it as-is rather than risk unaliasing the shared image.
+        if orig_present and slim_fp and slim_fp != orig_fp:
+            subprocess.run(
+                ["incus", "image", "delete", slim_fp], capture_output=True, text=True, timeout=120
+            )
             restore = subprocess.run(
                 ["incus", "image", "alias", "create", "coi-default", orig_fp],
                 capture_output=True,
                 text=True,
                 timeout=60,
             )
-        elif backup_tar:
-            restore = subprocess.run(
-                ["incus", "image", "import", backup_tar, "--alias", "coi-default"],
-                capture_output=True,
-                text=True,
-                timeout=300,
-            )
-        else:
-            restore = still
-        assert restore.returncode == 0, (
-            f"failed to restore shared coi-default: {restore.stdout}{restore.stderr}"
-        )
-
-        # Reclaim disk: drop the now-orphaned slim image (core-build is image-intensive).
-        if slim_fp and slim_fp != orig_fp:
-            subprocess.run(
-                ["incus", "image", "delete", slim_fp],
-                capture_output=True,
-                text=True,
-                timeout=120,
+            if restore.returncode != 0:
+                # The slim delete didn't drop the alias (e.g. image was locked); force
+                # it off and recreate so coi-default ends up on the original image.
+                subprocess.run(
+                    ["incus", "image", "alias", "delete", "coi-default"],
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                )
+                restore = subprocess.run(
+                    ["incus", "image", "alias", "create", "coi-default", orig_fp],
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                )
+            assert restore.returncode == 0, (
+                f"failed to re-alias coi-default to the original image: "
+                f"{restore.stdout}{restore.stderr}"
             )
