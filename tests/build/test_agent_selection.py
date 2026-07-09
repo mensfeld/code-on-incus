@@ -161,7 +161,9 @@ def test_slim_build_installs_only_selected_agents(coi_binary, workspace_dir, tmp
     else:
         exp = subprocess.run(
             ["incus", "image", "export", "coi-default", str(tmp_path / "coi-default-backup")],
-            capture_output=True, text=True, timeout=300,
+            capture_output=True,
+            text=True,
+            timeout=300,
         )
         if exp.returncode != 0:
             pytest.skip(f"could not back up coi-default: {exp.stderr}")
@@ -179,7 +181,10 @@ def test_slim_build_installs_only_selected_agents(coi_binary, workspace_dir, tmp
     try:
         build = subprocess.run(
             [coi_binary, "build", "--force"],
-            capture_output=True, text=True, timeout=1500, cwd=workspace_dir,
+            capture_output=True,
+            text=True,
+            timeout=1500,
+            cwd=workspace_dir,
         )
         assert build.returncode == 0, f"slim build failed:\n{build.stdout}{build.stderr}"
 
@@ -187,10 +192,20 @@ def test_slim_build_installs_only_selected_agents(coi_binary, workspace_dir, tmp
         # unselected agents absent. `command -v` failing is exactly the runtime footgun
         # the selector must avoid for the configured tool, so it is the right probe.
         probe = subprocess.run(
-            [coi_binary, "run", "--workspace", workspace_dir, "--", "bash", "-lc",
-             "for a in claude opencode pi; do "
-             "command -v \"$a\" >/dev/null 2>&1 && echo HAVE:$a || echo MISS:$a; done"],
-            capture_output=True, text=True, timeout=300,
+            [
+                coi_binary,
+                "run",
+                "--workspace",
+                workspace_dir,
+                "--",
+                "bash",
+                "-lc",
+                "for a in claude opencode pi; do "
+                'command -v "$a" >/dev/null 2>&1 && echo HAVE:$a || echo MISS:$a; done',
+            ],
+            capture_output=True,
+            text=True,
+            timeout=300,
         )
         out = probe.stdout + probe.stderr
         assert probe.returncode == 0, f"probe run failed:\n{out}"
@@ -199,11 +214,14 @@ def test_slim_build_installs_only_selected_agents(coi_binary, workspace_dir, tmp
         assert "MISS:pi" in out, f"pi must be ABSENT with agents=[claude]:\n{out}"
     finally:
         # Restore the shared coi-default (full agents) for sibling tests in this lane.
-        subprocess.run(["incus", "image", "delete", "coi-default"],
-                       capture_output=True, text=True, timeout=120)
+        subprocess.run(
+            ["incus", "image", "delete", "coi-default"], capture_output=True, text=True, timeout=120
+        )
         restore = subprocess.run(
             ["incus", "image", "import", backup_tar, "--alias", "coi-default"],
-            capture_output=True, text=True, timeout=300,
+            capture_output=True,
+            text=True,
+            timeout=300,
         )
         assert restore.returncode == 0, (
             f"failed to restore shared coi-default from {backup_tar}: {restore.stderr}"
