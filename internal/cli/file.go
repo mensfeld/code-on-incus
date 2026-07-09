@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -118,7 +119,7 @@ Examples:
 			fmt.Fprintf(os.Stderr, "Pulled directory %s:%s -> %s\n", containerName, remotePath, target)
 		} else {
 			if err := mgr.PullFile(remotePath, target); err != nil {
-				if strings.Contains(err.Error(), "directory") || strings.Contains(err.Error(), "recursive") {
+				if errors.Is(err, container.ErrRemoteIsDirectory) {
 					return fmt.Errorf("failed to pull file: %v (to pull a directory, use -r)", err)
 				}
 				return fmt.Errorf("failed to pull file: %v", err)
@@ -139,25 +140,44 @@ Examples:
 //     like cp/scp/incus convention: final target is <localPath>/<base(remote)>.
 //   - The final target must not already exist, with one exception:
 //     a single file pull may overwrite an existing non-directory.
+//   - Symlinks are never followed: a symlink destination is treated as the link
+//     itself (a single file pull replaces the link; it is never written through
+//     into the link's target), so content can never land outside the given tree.
 //   - Nothing is ever deleted on the user's behalf:
 //     replacing a directory always requires removing it explicitly first.
 func resolvePullDestination(localPath, remotePath string, recursive bool) (string, error) {
 	base := filepath.Base(strings.TrimSuffix(remotePath, "/"))
-	if base == "/" || base == "." || base == "" {
+	if base == "/" || base == "." || base == ".." || base == "" {
 		return "", fmt.Errorf("cannot derive a file name from remote path %q", remotePath)
 	}
 
 	trailingSep := strings.HasSuffix(localPath, "/")
-	info, statErr := os.Stat(localPath)
+	// Lstat a slash-trimmed path, never Stat: judge a symlink as the link itself and
+	// never follow it. Stat — or even Lstat on a path with a trailing slash, which
+	// the kernel resolves as a directory — would follow a symlink-to-directory and
+	// write the pulled entry THROUGH the link, landing content outside the visible
+	// tree. Only a real directory means "place inside"; a symlink is handled by the
+	// overwrite policy below (a single-file pull may replace the link; recursive
+	// refuses), so content can never escape the given path.
+	statPath := strings.TrimRight(localPath, "/")
+	if statPath == "" {
+		statPath = localPath
+	}
+	info, statErr := os.Lstat(statPath)
 	switch {
 	case statErr == nil && info.IsDir():
-		localPath = filepath.Join(localPath, base)
+		localPath = filepath.Join(statPath, base)
 	case statErr == nil && trailingSep:
 		return "", fmt.Errorf("destination %q is not a directory", localPath)
 	case statErr != nil && !os.IsNotExist(statErr):
 		return "", statErr
 	case statErr != nil && trailingSep:
 		return "", fmt.Errorf("destination %q does not exist: a trailing slash requires an existing directory (create it first, or drop the slash to pull to that exact path)", localPath)
+	default:
+		// Fall-through (nonexistent exact path, or an existing non-directory the
+		// overwrite policy will judge): use the trimmed path so the Lstat below never
+		// follows a trailing-slash symlink either.
+		localPath = statPath
 	}
 
 	// Overwrite policy at the final target. Lstat: a symlink counts as the

@@ -421,6 +421,11 @@ func (m *Manager) PullDirectory(containerPath, localPath string) error {
 	return nil
 }
 
+// ErrRemoteIsDirectory is returned by PullFile when the remote source is a
+// directory, which requires a recursive pull. Callers can errors.Is against it
+// (rather than sniffing error text) to suggest the -r flag.
+var ErrRemoteIsDirectory = errors.New("remote path is a directory; use a recursive pull")
+
 // PullFile pulls a single file from the container to the host.
 // The destination's parent is created if missing.
 // If localPath is an existing file, it is replaced atomically.
@@ -453,19 +458,36 @@ func (m *Manager) PullFile(containerPath, localPath string) error {
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		stderrMsg := strings.TrimSpace(stderr.String())
+		// incus reports a non-recursive pull of a directory via stderr; surface it as
+		// a typed error so the CLI can suggest -r without sniffing text itself.
+		if strings.Contains(stderrMsg, "directory") || strings.Contains(stderrMsg, "recursive") {
+			return fmt.Errorf("%s: %w", stderrMsg, ErrRemoteIsDirectory)
+		}
 		if stderrMsg == "" {
 			return err
 		}
 		return fmt.Errorf("%s: %w", stderrMsg, err)
 	}
 
-	staged := filepath.Join(tempDir, filepath.Base(strings.TrimSuffix(containerPath, "/")))
+	// Take whatever incus staged rather than assuming its basename: a single-file
+	// pull writes exactly one entry into the (empty) staging dir.
+	entries, err := os.ReadDir(tempDir)
+	if err != nil {
+		return err
+	}
+	if len(entries) != 1 {
+		return fmt.Errorf("expected exactly one entry in staging directory, got %d", len(entries))
+	}
+	staged := filepath.Join(tempDir, entries[0].Name())
 	fi, err := os.Lstat(staged)
 	if err != nil {
 		return fmt.Errorf("pulled file missing from staging directory: %w", err)
 	}
-	// Container content is untrusted so only materialize regular files on the host.
-	// (same as sanitizePulledTree)
+	if fi.IsDir() {
+		return fmt.Errorf("refusing to pull %s: %w", containerPath, ErrRemoteIsDirectory)
+	}
+	// Container content is untrusted so only materialize regular files on the host
+	// (drop symlinks/special files, same policy as sanitizePulledTree for trees).
 	if !fi.Mode().IsRegular() {
 		return fmt.Errorf("refusing to pull %s: not a regular file", containerPath)
 	}

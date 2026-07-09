@@ -171,3 +171,55 @@ func TestResolvePullDestinationDotAndParent(t *testing.T) {
 		t.Fatalf("target = %q, want %q", got, "example.output")
 	}
 }
+
+// TestResolvePullDestinationSymlinks pins that a symlink destination is treated as
+// the link itself and never followed — content can never be written THROUGH a
+// symlink (into its target dir, outside the visible tree). A refactor back to
+// os.Stat, or Lstat on a trailing-slash path, would fail these.
+func TestResolvePullDestinationSymlinks(t *testing.T) {
+	dir := t.TempDir()
+
+	realDir := filepath.Join(dir, "realdir")
+	if err := os.Mkdir(realDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	realFile := filepath.Join(dir, "realfile.txt")
+	if err := os.WriteFile(realFile, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	linkToDir := filepath.Join(dir, "link-to-dir")
+	if err := os.Symlink(realDir, linkToDir); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	linkToFile := filepath.Join(dir, "link-to-file")
+	if err := os.Symlink(realFile, linkToFile); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	// Single-file pull onto a symlink-to-file: replace the link itself, never write
+	// through to realFile.
+	if got, err := resolvePullDestination(linkToFile, "/tmp/out.txt", false); err != nil {
+		t.Fatalf("symlink-to-file single pull: unexpected error: %v", err)
+	} else if got != linkToFile {
+		t.Fatalf("symlink-to-file target = %q, want the link path %q (never written through)", got, linkToFile)
+	}
+
+	// Single-file pull onto a symlink-to-dir: must NOT resolve inside realDir; the
+	// link is the (replaceable) entry, not followed into its target.
+	if got, err := resolvePullDestination(linkToDir, "/tmp/out.txt", false); err != nil {
+		t.Fatalf("symlink-to-dir single pull: unexpected error: %v", err)
+	} else if got != linkToDir {
+		t.Fatalf("symlink-to-dir target = %q, want the link path %q — content must not be written through into %q",
+			got, linkToDir, realDir)
+	}
+
+	// A trailing slash on a symlink-to-dir must not follow it into the target dir.
+	if got, err := resolvePullDestination(linkToDir+"/", "/tmp/out.txt", false); err == nil {
+		t.Fatalf("trailing slash on a symlink should fail (not a real directory), got target %q", got)
+	}
+
+	// Recursive pull onto a symlink-to-dir is refused, never written through.
+	if _, err := resolvePullDestination(linkToDir, "/root/.claude", true); err == nil {
+		t.Fatal("recursive pull onto a symlink-to-dir should be refused")
+	}
+}
