@@ -514,7 +514,7 @@ func (b *Builder) runBuildScriptResolved(resolvedScript string) error {
 	}
 
 	b.opts.Logger("Executing build script...")
-	execOpts := container.ExecCommandOptions{Capture: false, Env: agentEnv(b.opts.Agents)}
+	execOpts := b.buildScriptExecOpts()
 	if _, err := b.mgr.ExecCommand("/tmp/build.sh", execOpts); err != nil {
 		return fmt.Errorf("build script failed: %w", err)
 	}
@@ -683,4 +683,11 @@ func agentEnv(agents []string) map[string]string {
 		return nil
 	}
 	return map[string]string{"COI_AGENTS": strings.Join(agents, ",")}
+}
+
+// buildScriptExecOpts builds the exec options used to run build.sh in the build
+// container. It threads the agent selection through COI_AGENTS (#454); kept as a
+// method so the wiring is unit-testable without launching a container.
+func (b *Builder) buildScriptExecOpts() container.ExecCommandOptions {
+	return container.ExecCommandOptions{Capture: false, Env: agentEnv(b.opts.Agents)}
 }
