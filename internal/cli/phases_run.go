@@ -276,13 +276,14 @@ func (a *App) configureContainerRunPhase(s *runState) session.Phase {
 				}
 			}
 
+			logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
+
 			fmt.Fprintf(os.Stderr, "Waiting for container to be ready...\n")
-			if err := waitForContainer(s.mgr, 30); err != nil {
+			if err := session.WaitForReady(s.mgr, 30, logFn); err != nil {
 				return nil, err
 			}
 
 			if !s.wasRestarted {
-				logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
 				if err := session.ConfigureDockerDaemon(s.mgr, logFn); err != nil {
 					fmt.Fprintf(os.Stderr, "Warning: failed to configure Docker daemon: %v\n", err)
 				}

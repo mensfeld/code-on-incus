@@ -550,7 +550,7 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 
 	// 6. Wait for ready
 	opts.Logger("Waiting for container to be ready...")
-	if err := waitForReady(result.Manager, 30, opts.Logger); err != nil {
+	if err := WaitForReady(result.Manager, 30, opts.Logger); err != nil {
 		return nil, err
 	}
 
@@ -858,8 +858,13 @@ func shellEscape(s string) string {
 	return "'" + escaped + "'"
 }
 
-// waitForReady waits for container to be ready
-func waitForReady(mgr container.ContainerManager, maxRetries int, logger func(string)) error {
+// WaitForReady waits for the container to be ready: running AND able to
+// execute a command. It polls once per second for maxRetries seconds. This is
+// the single readiness chokepoint for every launch path (shell, run) — coi
+// run's former private copy had no sleep between retries, so its effective
+// wait was a few seconds of back-to-back exec round-trips instead of the
+// intended window, and the two implementations had drifted.
+func WaitForReady(mgr container.ContainerManager, maxRetries int, logger func(string)) error {
 	for i := 0; i < maxRetries; i++ {
 		running, err := mgr.Running()
 		if err != nil {
