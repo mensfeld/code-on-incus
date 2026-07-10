@@ -234,7 +234,7 @@ coi build --all --force
 ```
 
 **What's included in the `coi-default` image:**
-- Ubuntu 22.04 base with Docker (full Docker-in-container support)
+- Ubuntu 24.04 base with Docker (full Docker-in-container support)
 - **mise** (polyglot runtime manager) — Python 3, pnpm, TypeScript, tsx pre-installed; add more with `mise use go@latest`, `mise use ruby@3`, etc.
 - Node.js 22 LTS (system, for Claude CLI) + npm
 - Claude Code CLI (default AI tool) + GitHub CLI (`gh`)
@@ -305,7 +305,7 @@ coi clean --pools             # Detect containers in unused storage pools
 coi update
 ```
 
-> **Upgrading to 0.9?** 0.9 is a security-hardening release that tightens what an untrusted project `.coi/config.toml` can do (out-of-workspace mounts and forwarded sockets now require `coi trust`; project configs can no longer weaken network isolation). See the [Upgrading from 0.8 to 0.9 guide](https://github.com/mensfeld/code-on-incus/wiki/Migration-Guide#upgrading-from-08-to-09).
+> **Upgrading to 0.10?** 0.10 removes all config-shaped CLI flags (`--image`, `--persistent`, `--tmux`, `--tool`, `coi build --compression`, `coi shutdown --timeout`) and the legacy `CLAUDE_ON_INCUS_*` / `COI_LIMIT_*` env-var overrides — everything config-shaped now lives in config files and profiles, and a removed flag fails with a hint naming its replacement key. See the [Upgrading from 0.9 to 0.10 guide](https://github.com/mensfeld/code-on-incus/wiki/Migration-Guide#upgrading-from-09-to-010) (the [0.8→0.9 notes](https://github.com/mensfeld/code-on-incus/wiki/Migration-Guide#upgrading-from-08-to-09) are there too).
 
 ### Container Aliases
 
@@ -513,15 +513,14 @@ See the [Container Lifecycle and Sessions guide](https://github.com/mensfeld/cod
 - **Workspace files**: Always saved (regardless of mode)
 - **Session data**: Always saved to `~/.coi/sessions-<tool>/`
 - **Ephemeral mode** (default): Container deleted after exit, session preserved
-- **Persistent mode** (`--persistent`): Container kept with all installed packages
+- **Persistent mode** (`[container] persistent = true` in config or a profile): Container kept with all installed packages
 - **Resume** (`--resume`): Restore AI conversation in fresh/existing container
 
 **Quick reference:**
 ```bash
-coi shell --persistent        # Keep container between sessions
 coi shell --resume            # Resume previous conversation
 coi attach                    # Reconnect to running container
-coi persist                   # Convert ephemeral session to persistent
+coi persist <container>       # Convert a running ephemeral session to persistent
 coi unfreeze <name>           # Unfreeze paused/frozen container
 coi unfreeze                  # Unfreeze all frozen COI containers
 close                         # Properly stop container (inside, safe alias for poweroff)

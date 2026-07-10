@@ -26,10 +26,11 @@ force-killing if necessary.
 Use 'coi list' to see active containers.
 
 Examples:
-  coi shutdown claude-abc12345-1             # Graceful shutdown (60s timeout)
-  coi shutdown --timeout=30 claude-abc12345-1  # 30 second timeout
-  coi shutdown --all                         # Shutdown all containers
-  coi shutdown --all --force                 # Shutdown all without confirmation
+  coi shutdown coi-abc12345-1     # Graceful shutdown (60s grace window by default)
+  coi shutdown --all              # Shutdown all containers
+  coi shutdown --all --force      # Shutdown all without confirmation
+
+The grace window is configurable via [container] shutdown_timeout (seconds).
 `,
 	RunE: shutdownCommand,
 }
