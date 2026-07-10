@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -46,7 +47,7 @@ Examples:
 func init() {
 	listCmd.Flags().BoolVarP(&listAll, "all", "a", false, "Show saved sessions in addition to active containers")
 	listCmd.Flags().StringVar(&listFormat, "format", "text", "Output format: text or json")
-	listCmd.Flags().StringVar(&listStatus, "status", "", "Show only containers with this status: running, stopped, or frozen")
+	listCmd.Flags().StringVar(&listStatus, "status", "", "Show only containers with this status: "+strings.Join(validStatusFilters, ", "))
 	listCmd.Flags().BoolVar(&listRunning, "running", false, "Show only running containers (alias for --status running)")
 	listCmd.Flags().BoolVar(&listStopped, "stopped", false, "Show only stopped containers (alias for --status stopped)")
 }
@@ -57,8 +58,10 @@ func listCommand(cmd *cobra.Command, args []string) error {
 		return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid format '%s': must be 'text' or 'json'", listFormat)}
 	}
 
-	// Resolve the status filter before touching Incus so flag misuse fails fast
-	statusFilter, err := resolveStatusFilter(listStatus, listRunning, listStopped)
+	// Resolve the status filter before touching Incus so flag misuse fails
+	// fast. Changed() rather than a non-empty check so an explicitly passed
+	// empty value (--status "") is rejected instead of silently unfiltered.
+	statusFilter, err := resolveStatusFilter(cmd.Flags().Changed("status"), listStatus, listRunning, listStopped)
 	if err != nil {
 		return &ExitCodeError{Code: 2, Message: err.Error()}
 	}
@@ -204,14 +207,26 @@ func listActiveContainers() ([]ContainerInfo, error) {
 	return result, nil
 }
 
+// validStatusFilters is the single source of the --status vocabulary: it
+// drives the validation, the error message, and the flag help. The values are
+// every status Incus reports for an instance, lowercase — matching is
+// case-insensitive (see filterContainersByStatus), so lowercase is the
+// canonical form throughout the filter path.
+var validStatusFilters = []string{
+	"running", "stopped", "frozen",
+	"error", "starting", "stopping", "freezing", "thawed", "aborting", "ready",
+}
+
 // resolveStatusFilter merges --status and the --running/--stopped shorthands
-// into a single canonical Incus status ("Running", "Stopped", "Frozen"), or ""
-// when no filter was requested. Combining any two of the flags is an error:
+// into a single lowercase status, or "" when no filter was requested.
+// statusSet reports whether --status was passed at all (flag.Changed), so an
+// explicitly empty value is rejected like any other invalid one instead of
+// silently disabling the filter. Combining any two of the flags is an error:
 // even a consistent pair like --running --status running is rejected, so
 // scripts don't grow invocations that look like they stack two filters.
-func resolveStatusFilter(status string, running, stopped bool) (string, error) {
+func resolveStatusFilter(statusSet bool, status string, running, stopped bool) (string, error) {
 	flagsSet := 0
-	if status != "" {
+	if statusSet {
 		flagsSet++
 	}
 	if running {
@@ -226,22 +241,18 @@ func resolveStatusFilter(status string, running, stopped bool) (string, error) {
 
 	switch {
 	case running:
-		return "Running", nil
+		return "running", nil
 	case stopped:
-		return "Stopped", nil
-	case status == "":
+		return "stopped", nil
+	case !statusSet:
 		return "", nil
 	}
 
-	switch strings.ToLower(status) {
-	case "running":
-		return "Running", nil
-	case "stopped":
-		return "Stopped", nil
-	case "frozen":
-		return "Frozen", nil
+	lower := strings.ToLower(status)
+	if slices.Contains(validStatusFilters, lower) {
+		return lower, nil
 	}
-	return "", fmt.Errorf("invalid status '%s': must be 'running', 'stopped', or 'frozen'", status)
+	return "", fmt.Errorf("invalid status '%s': must be one of %s", status, strings.Join(validStatusFilters, ", "))
 }
 
 // filterContainersByStatus returns only the containers matching the given

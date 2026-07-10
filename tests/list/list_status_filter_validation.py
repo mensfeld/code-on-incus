@@ -19,6 +19,36 @@ def test_list_invalid_status_value(coi_binary):
     assert "running" in result.stderr, "Should list the valid values"
 
 
+def test_list_explicit_empty_status(coi_binary):
+    """Test that an explicitly empty --status is rejected, not silently unfiltered."""
+
+    result = subprocess.run(
+        [coi_binary, "list", "--status", ""],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert result.returncode == 2, f"Should exit with code 2, got {result.returncode}"
+    assert "invalid status" in result.stderr.lower(), "Should show status validation error"
+
+
+def test_list_shorthand_empty_status_conflict(coi_binary):
+    """Test that --running plus an explicitly empty --status still trips mutual exclusion."""
+
+    result = subprocess.run(
+        [coi_binary, "list", "--running", "--status", ""],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert result.returncode == 2, f"Should exit with code 2, got {result.returncode}"
+    assert "mutually exclusive" in result.stderr.lower(), (
+        "Should explain the flags are mutually exclusive"
+    )
+
+
 def test_list_running_stopped_conflict(coi_binary):
     """Test that --running and --stopped cannot be combined."""
 
