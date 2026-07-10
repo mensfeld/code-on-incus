@@ -205,6 +205,58 @@ func TestProfileInheritanceSocketsReplace(t *testing.T) {
 	}
 }
 
+func TestProfileInheritanceCredentialsInherited(t *testing.T) {
+	cfg := GetDefaultConfig()
+	cfg.Profiles["parent"] = ProfileConfig{
+		Credentials: []CredentialEntry{
+			{Bundle: "ollama"},
+		},
+	}
+	cfg.Profiles["child"] = ProfileConfig{
+		Inherits: "parent",
+		Container: ContainerConfig{
+			Image: "child-image",
+		},
+		// No credentials defined, should inherit parent's
+	}
+
+	if err := cfg.ResolveProfileInheritance(); err != nil {
+		t.Fatalf("ResolveProfileInheritance() failed: %v", err)
+	}
+
+	child := cfg.Profiles["child"]
+	if len(child.Credentials) != 1 {
+		t.Fatalf("Expected 1 credential inherited from parent, got %d", len(child.Credentials))
+	}
+	if child.Credentials[0].Bundle != "ollama" {
+		t.Errorf("Expected inherited credential bundle 'ollama', got %q", child.Credentials[0].Bundle)
+	}
+}
+
+func TestProfileInheritanceCredentialsReplace(t *testing.T) {
+	cfg := GetDefaultConfig()
+	cfg.Profiles["parent"] = ProfileConfig{
+		Credentials: []CredentialEntry{
+			{Bundle: "ollama"},
+		},
+	}
+	cfg.Profiles["child"] = ProfileConfig{
+		Inherits: "parent",
+		Credentials: []CredentialEntry{
+			{Bundle: "aws"},
+		},
+	}
+
+	if err := cfg.ResolveProfileInheritance(); err != nil {
+		t.Fatalf("ResolveProfileInheritance() failed: %v", err)
+	}
+
+	child := cfg.Profiles["child"]
+	if len(child.Credentials) != 1 || child.Credentials[0].Bundle != "aws" {
+		t.Errorf("Expected child credentials to replace parent's, got %v", child.Credentials)
+	}
+}
+
 func TestProfileInheritanceEnvCommandsMerge(t *testing.T) {
 	cfg := GetDefaultConfig()
 	cfg.Profiles["parent"] = ProfileConfig{

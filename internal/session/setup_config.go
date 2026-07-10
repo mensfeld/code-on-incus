@@ -168,15 +168,15 @@ func setupCLIConfig(mgr container.ContainerManager, hostCLIConfigPath, homeDir s
 
 	logger(fmt.Sprintf("Copying essential CLI config files from %s", hostCLIConfigPath))
 	for _, filename := range essentialFiles {
+		// Same seeding primitive as [[credentials]] entries (see
+		// setup_credentials.go), so the builtin-tool and generic copy paths
+		// cannot drift. The per-file chown is new here but strictly safer:
+		// files are correctly owned even if setup aborts before the
+		// recursive config-dir chown below.
 		srcPath := filepath.Join(hostCLIConfigPath, filename)
-		if _, err := os.Stat(srcPath); err == nil {
-			destPath := filepath.Join(stateDir, filename)
-			logger(fmt.Sprintf("  - Copying %s", filename))
-			if err := mgr.PushFile(srcPath, destPath); err != nil {
-				logger(fmt.Sprintf("  - Warning: Failed to copy %s: %v", filename, err))
-			}
-		} else {
-			logger(fmt.Sprintf("  - Skipping %s (not found)", filename))
+		destPath := filepath.Join(stateDir, filename)
+		if err := seedHostFile(mgr, srcPath, destPath, homeDir, "", logger); err != nil {
+			return err
 		}
 	}
 

@@ -39,3 +39,37 @@ type SocketEntry struct {
 type SocketConfig struct {
 	Sockets []SocketEntry
 }
+
+// CredentialEntry represents a single host file to copy into a container: a
+// host path pushed to a container path, chowned to the container's code
+// user, and chmod'd to Mode if set. Expanded either from a named catalog
+// bundle (see internal/tool/credentials) or an ad-hoc profile entry.
+type CredentialEntry struct {
+	HostPath string // Absolute path on host (expanded)
+	// ContainerPath is either absolute (ad-hoc entries, used as-is, exactly
+	// like MountEntry.ContainerPath) or relative to the container's home
+	// directory (bundle entries, resolved by setupCredentials at apply
+	// time, since the home directory, e.g. /root vs /home/code, isn't known
+	// until the container exists).
+	ContainerPath string
+	Mode          string // Optional chmod mode, e.g. "0600"; "" = leave as pushed
+
+	// BundleName is set when this entry was expanded from a named catalog
+	// bundle. Bundle-sourced entries are never gated by trust; see
+	// Untrusted below.
+	BundleName string
+
+	// Untrusted is true when this entry came from an untrusted (project-scope)
+	// config file AND is an ad-hoc entry (BundleName == ""). SourcePath is
+	// that file's absolute path. Used to gate ad-hoc credential entries whose
+	// source config isn't trusted, behind `coi trust`, mirroring
+	// SocketEntry, since a credential file (like a forwarded socket) has no
+	// "within workspace" notion that would make it safe to leave ungated.
+	Untrusted  bool
+	SourcePath string
+}
+
+// CredentialConfig holds all credential entries for a session.
+type CredentialConfig struct {
+	Entries []CredentialEntry
+}

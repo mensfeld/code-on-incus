@@ -66,18 +66,23 @@ func (a *App) runTrust(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("invalid socket configuration: %w", err)
 	}
+	cc, err := ParseCredentialConfig(a.cfg)
+	if err != nil {
+		return fmt.Errorf("invalid credential configuration: %w", err)
+	}
 
-	sources, err := session.TrustSources(mc, sc, absWorkspace)
+	sources, err := session.TrustSources(mc, sc, cc, absWorkspace)
 	if err != nil {
 		return fmt.Errorf("failed to record trust: %w", err)
 	}
 	if len(sources) == 0 {
 		fmt.Fprintln(os.Stderr,
-			"Nothing to trust: no project-config mounts resolve outside the workspace and no sockets are forwarded.")
+			"Nothing to trust: no project-config mounts resolve outside the workspace, no sockets "+
+				"are forwarded, and no ad-hoc credential entries are configured.")
 		return nil
 	}
 	for _, s := range sources {
-		fmt.Fprintf(os.Stderr, "Trusted out-of-workspace mounts and forwarded sockets from %s\n", s)
+		fmt.Fprintf(os.Stderr, "Trusted out-of-workspace mounts, forwarded sockets, and credential entries from %s\n", s)
 	}
 	return nil
 }
@@ -122,11 +127,16 @@ func (a *App) runUntrust(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("invalid socket configuration: %w", err)
 	}
+	cc, err := ParseCredentialConfig(a.cfg)
+	if err != nil {
+		return fmt.Errorf("invalid credential configuration: %w", err)
+	}
 
 	// Revoke by the exact stored keys (the loaded SourcePaths), plus the
 	// conventional project-config path as a fallback for the case where the
-	// config no longer declares the previously-trusted mounts or sockets.
-	sources := session.UntrustedSourcePaths(mc, sc)
+	// config no longer declares the previously-trusted mounts, sockets, or
+	// credential entries.
+	sources := session.UntrustedSourcePaths(mc, sc, cc)
 	conventional := filepath.Join(absWorkspace, ".coi", "config.toml")
 	if abs, e := filepath.Abs(conventional); e == nil {
 		conventional = abs

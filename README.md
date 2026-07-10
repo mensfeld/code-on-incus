@@ -108,6 +108,7 @@ See the [Supported Tools wiki page](https://github.com/mensfeld/code-on-incus/wi
 **Host Integration**
 - SSH agent forwarding - Use git-over-SSH inside containers without copying private keys (`[ssh] forward_agent = true`)
 - Host socket forwarding - Forward arbitrary host Unix sockets into the container (`[[sockets]]`) so the host endpoint never enters the container — the building block for credential brokers (mint short-lived tokens on the host, fetch them on demand inside). Untrusted project-config sockets are gated behind `coi trust`
+- Credential catalog - Copy third-party provider credentials into the container via `[[credentials]]` entries (config or profile): reference a named catalog bundle (`bundle = "ollama"`) or declare an ad-hoc host/container file pair for anything not yet cataloged. `claude`/`opencode`/`pi`'s own credential files come from the same built-in catalog. Ad-hoc entries from an untrusted project `.coi/config.toml` are gated behind `coi trust`; catalog references carry the same trust level the built-in tool credentials already have
 - Environment variable forwarding - Selectively forward host env vars by name (`forward_env` in config)
 - Command-sourced env vars - Mint a fresh secret per session by running a host command at start and injecting its output as an env var (`[defaults.env_commands]`) — for short-lived API keys/tokens. Trusted-scope config only
 - Host timezone inheritance - Containers automatically inherit the host's timezone (configurable via `[timezone]` config)
@@ -446,14 +447,15 @@ Place a `.coi/config.toml` in any repository root to auto-configure COI for that
 
 See the [Configuration wiki page](https://github.com/mensfeld/code-on-incus/wiki/Configuration) for the full config reference, per-repo setup, profiles, and environment variables.
 
-### Forwarding host sockets & minting secrets
+### Forwarding host sockets, minting secrets & copying credential files
 
-Two ways to give containerized tools credentials without the secret living in your host env or static config:
+Three ways to give containerized tools credentials:
 
 - **`[[sockets]]`** forwards any host Unix socket into the container via an Incus proxy device, so the host endpoint never crosses in — the building block for **credential brokers** (a host process mints short-lived tokens; an in-container `credential_process` fetches them on demand).
 - **`[defaults.env_commands]`** runs a host command at session start and injects its trimmed stdout as an env var — for plain env-var credentials (e.g. an AWS Bedrock bearer token). Trade-off: the value lives in the container env for the session, so prefer the broker for high-value/rotatable secrets.
+- **`[[credentials]]`** copies static credential files from host to container at session setup — for tools that read credentials from disk rather than an env var. Use `bundle = "ollama"` to reference a name from COI's built-in catalog (the same catalog `claude`/`opencode`/`pi` use for their own credentials), or set `host`/`container` (plus optional `mode`) for an ad-hoc file not yet in the catalog. Missing host files are skipped with a log line rather than failing the session.
 
-Both are honored only from trusted-scope config; sockets from an untrusted project `.coi/config.toml` are gated behind `coi trust`, and `env_commands` from one is ignored. See the [Configuration wiki page](https://github.com/mensfeld/code-on-incus/wiki/Configuration) for full examples and the trust model.
+Sockets and ad-hoc `[[credentials]]` entries are gated behind `coi trust` when they come from an untrusted project `.coi/config.toml`; `env_commands` from one is ignored outright; catalog-referenced credentials are never gated (the host path is fixed by COI's own catalog, not the referencing config). See the [Configuration wiki page](https://github.com/mensfeld/code-on-incus/wiki/Configuration) for full examples and the trust model.
 
 ## Profiles
 

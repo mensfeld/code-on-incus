@@ -139,6 +139,7 @@ func loadConfigFileScoped(cfg *Config, path string, trusted bool) error {
 		sanitizeUntrustedConfig(&fileCfg, path)
 		markUntrustedMounts(fileCfg.Mounts.Default, path)
 		markUntrustedSockets(fileCfg.Sockets, path)
+		markUntrustedCredentials(fileCfg.Credentials, path)
 	}
 
 	configDir := filepath.Dir(path)
@@ -338,6 +339,25 @@ func markUntrustedSockets(sockets []SocketEntry, path string) {
 	}
 }
 
+// markUntrustedCredentials tags credential entries from an untrusted source so
+// ad-hoc entries are gated behind explicit trust at apply time
+// (internal/session/trust.go). Like markUntrustedMounts, a path-resolution
+// error falls back to the raw path rather than failing open and copying an
+// ungated host credential file. Catalog-referenced entries (Bundle != "") are
+// also marked Untrusted here for consistency, but the trust-gating logic in
+// internal/session/trust.go never gates on Bundle-sourced entries regardless
+// of this flag — see CredentialEntry's own doc comment for why.
+func markUntrustedCredentials(creds []CredentialEntry, path string) {
+	src := path
+	if abs, err := filepath.Abs(path); err == nil {
+		src = abs
+	}
+	for i := range creds {
+		creds[i].Untrusted = true
+		creds[i].SourcePath = src
+	}
+}
+
 // isTrustedProfileDir reports whether a profiles parent directory is
 // user-controlled (trusted): the user's ~/.coi or the directory of an explicit
 // $COI_CONFIG. The project workspace's ./.coi is untrusted — a cloned repo can
@@ -437,6 +457,7 @@ func loadProfileDirectories(cfg *Config, configDir string, trusted bool) error {
 			sanitizeUntrustedGit(profileCfg.Git, profileConfigPath)
 			markUntrustedMounts(profileCfg.Mounts, profileConfigPath)
 			markUntrustedSockets(profileCfg.Sockets, profileConfigPath)
+			markUntrustedCredentials(profileCfg.Credentials, profileConfigPath)
 			if len(profileCfg.EnvCommands) > 0 {
 				fmt.Fprintf(os.Stderr,
 					"WARNING: ignoring 'env_commands' in project profile %s; running a "+

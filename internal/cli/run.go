@@ -578,7 +578,7 @@ func (a *App) applySecurityMounts(mgr container.ContainerManager, absWorkspace, 
 // container keeps its creation-time mount devices, so for those we only warn
 // that trust changes won't take effect until the container is recreated.
 func (a *App) gateRunForwarding(mc *session.MountConfig, sc *session.SocketConfig, workspace string, wasRestarted bool) (*session.MountConfig, *session.SocketConfig) {
-	keptMC, droppedM, keptSC, droppedS := session.FilterTrusted(mc, sc, workspace)
+	keptMC, droppedM, keptSC, droppedS, _, _ := session.FilterTrusted(mc, sc, nil, workspace)
 	if wasRestarted {
 		if len(droppedM) > 0 {
 			fmt.Fprintf(os.Stderr,

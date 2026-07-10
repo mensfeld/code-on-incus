@@ -187,27 +187,48 @@ func untrustedSockets(sockets []SocketEntry) []SocketEntry {
 	return out
 }
 
-// sourceFingerprint returns a stable sha256 over the gated mounts and sockets a
-// single source declares (order-independent). Adding/removing/changing any gated
-// mount or socket changes the hash and re-arms the trust prompt; unrelated config
-// edits do not. Lines are type-prefixed and %q-quoted so distinct sets cannot
-// collide via embedded separators.
-func sourceFingerprint(mounts []MountEntry, sockets []SocketEntry) string {
-	lines := make([]string, 0, len(mounts)+len(sockets))
+// untrustedCredentials returns the untrusted ad-hoc credential entries, the
+// gated set. Like a forwarded socket, a credential entry has no "within
+// workspace" notion, so ALL untrusted ad-hoc entries need approval. Entries
+// resolved from a named catalog bundle are never marked Untrusted by
+// ParseCredentialConfig (their host path is fixed by coi's own catalog, not
+// chosen by the referencing config); BundleName == "" is checked here too as
+// a second line of defense.
+func untrustedCredentials(creds []CredentialEntry) []CredentialEntry {
+	var out []CredentialEntry
+	for _, c := range creds {
+		if c.Untrusted && c.HostPath != "" && c.BundleName == "" {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// sourceFingerprint returns a stable sha256 over the gated mounts, sockets,
+// and ad-hoc credential entries a single source declares (order-independent).
+// Adding/removing/changing any gated resource changes the hash and re-arms
+// the trust prompt; unrelated config edits do not. Lines are type-prefixed
+// and %q-quoted so distinct sets cannot collide via embedded separators.
+func sourceFingerprint(mounts []MountEntry, sockets []SocketEntry, creds []CredentialEntry) string {
+	lines := make([]string, 0, len(mounts)+len(sockets)+len(creds))
 	for _, m := range mounts {
 		lines = append(lines, fmt.Sprintf("mount:%q|%q|%t", m.HostPath, m.ContainerPath, m.Readonly))
 	}
 	for _, s := range sockets {
 		lines = append(lines, fmt.Sprintf("socket:%q|%q|%q", s.HostPath, s.ContainerPath, s.EnvVar))
 	}
+	for _, c := range creds {
+		lines = append(lines, fmt.Sprintf("credential:%q|%q|%q", c.HostPath, c.ContainerPath, c.Mode))
+	}
 	sort.Strings(lines)
 	sum := sha256.Sum256([]byte(strings.Join(lines, "\n")))
 	return hex.EncodeToString(sum[:])
 }
 
-// trustedSources computes, per source path, whether the source's gated mounts
-// and sockets are all approved (combined fingerprint matches the store).
-func trustedSources(mc *MountConfig, sc *SocketConfig, workspace string, store map[string]string) map[string]bool {
+// trustedSources computes, per source path, whether the source's gated
+// mounts, sockets, and ad-hoc credentials are all approved (combined
+// fingerprint matches the store).
+func trustedSources(mc *MountConfig, sc *SocketConfig, cc *CredentialConfig, workspace string, store map[string]string) map[string]bool {
 	mountsBySrc := map[string][]MountEntry{}
 	if mc != nil {
 		for _, m := range escapingUntrustedMounts(mc.Mounts, workspace) {
@@ -220,6 +241,12 @@ func trustedSources(mc *MountConfig, sc *SocketConfig, workspace string, store m
 			socketsBySrc[s.SourcePath] = append(socketsBySrc[s.SourcePath], s)
 		}
 	}
+	credsBySrc := map[string][]CredentialEntry{}
+	if cc != nil {
+		for _, c := range untrustedCredentials(cc.Entries) {
+			credsBySrc[c.SourcePath] = append(credsBySrc[c.SourcePath], c)
+		}
+	}
 	srcs := map[string]bool{}
 	for src := range mountsBySrc {
 		srcs[src] = true
@@ -227,21 +254,25 @@ func trustedSources(mc *MountConfig, sc *SocketConfig, workspace string, store m
 	for src := range socketsBySrc {
 		srcs[src] = true
 	}
+	for src := range credsBySrc {
+		srcs[src] = true
+	}
 	out := map[string]bool{}
 	for src := range srcs {
-		out[src] = store[src] != "" && store[src] == sourceFingerprint(mountsBySrc[src], socketsBySrc[src])
+		out[src] = store[src] != "" && store[src] == sourceFingerprint(mountsBySrc[src], socketsBySrc[src], credsBySrc[src])
 	}
 	return out
 }
 
-// FilterTrusted removes untrusted mounts that escape the workspace and untrusted
-// forwarded sockets, unless their source's combined fingerprint is recorded as
-// trusted (or COI_TRUST_ALL is set). Returns filtered configs plus the dropped
-// mounts/sockets (so the caller can warn). Trusted-scope and in-workspace mounts
-// are never gated.
-func FilterTrusted(mc *MountConfig, sc *SocketConfig, workspace string) (*MountConfig, []MountEntry, *SocketConfig, []SocketEntry) {
+// FilterTrusted removes untrusted mounts that escape the workspace, untrusted
+// forwarded sockets, and untrusted ad-hoc credential entries, unless their
+// source's combined fingerprint is recorded as trusted (or COI_TRUST_ALL is
+// set). Returns filtered configs plus the dropped resources (so the caller
+// can warn). Trusted-scope and in-workspace mounts are never gated;
+// catalog-referenced credential entries (BundleName != "") are never gated.
+func FilterTrusted(mc *MountConfig, sc *SocketConfig, cc *CredentialConfig, workspace string) (*MountConfig, []MountEntry, *SocketConfig, []SocketEntry, *CredentialConfig, []CredentialEntry) {
 	if TrustAllViaEnv() {
-		return mc, nil, sc, nil
+		return mc, nil, sc, nil, cc, nil
 	}
 	// Cheap exit when there's nothing gated, before loading the store.
 	var escMounts []MountEntry
@@ -252,12 +283,16 @@ func FilterTrusted(mc *MountConfig, sc *SocketConfig, workspace string) (*MountC
 	if sc != nil {
 		untSockets = untrustedSockets(sc.Sockets)
 	}
-	if len(escMounts) == 0 && len(untSockets) == 0 {
-		return mc, nil, sc, nil
+	var untCreds []CredentialEntry
+	if cc != nil {
+		untCreds = untrustedCredentials(cc.Entries)
+	}
+	if len(escMounts) == 0 && len(untSockets) == 0 && len(untCreds) == 0 {
+		return mc, nil, sc, nil, cc, nil
 	}
 
 	store, _ := loadTrustStore() // missing/unreadable store → nothing trusted
-	trusted := trustedSources(mc, sc, workspace, store)
+	trusted := trustedSources(mc, sc, cc, workspace, store)
 
 	keptMC := mc
 	var droppedMounts []MountEntry
@@ -284,13 +319,27 @@ func FilterTrusted(mc *MountConfig, sc *SocketConfig, workspace string) (*MountC
 			keptSC.Sockets = append(keptSC.Sockets, s)
 		}
 	}
-	return keptMC, droppedMounts, keptSC, droppedSockets
+
+	keptCC := cc
+	var droppedCreds []CredentialEntry
+	if cc != nil {
+		keptCC = &CredentialConfig{Entries: make([]CredentialEntry, 0, len(cc.Entries))}
+		for _, c := range cc.Entries {
+			if c.Untrusted && c.HostPath != "" && c.BundleName == "" && !trusted[c.SourcePath] {
+				droppedCreds = append(droppedCreds, c)
+				continue
+			}
+			keptCC.Entries = append(keptCC.Entries, c)
+		}
+	}
+
+	return keptMC, droppedMounts, keptSC, droppedSockets, keptCC, droppedCreds
 }
 
-// TrustSources records trust for every source that declares gated mounts and/or
-// sockets in mc/sc, pinning the current combined fingerprint. Returns the set of
-// source paths that were trusted.
-func TrustSources(mc *MountConfig, sc *SocketConfig, workspace string) ([]string, error) {
+// TrustSources records trust for every source that declares gated mounts,
+// sockets, and/or ad-hoc credentials in mc/sc/cc, pinning the current
+// combined fingerprint. Returns the set of source paths that were trusted.
+func TrustSources(mc *MountConfig, sc *SocketConfig, cc *CredentialConfig, workspace string) ([]string, error) {
 	mountsBySrc := map[string][]MountEntry{}
 	if mc != nil {
 		for _, m := range escapingUntrustedMounts(mc.Mounts, workspace) {
@@ -303,11 +352,20 @@ func TrustSources(mc *MountConfig, sc *SocketConfig, workspace string) ([]string
 			socketsBySrc[s.SourcePath] = append(socketsBySrc[s.SourcePath], s)
 		}
 	}
+	credsBySrc := map[string][]CredentialEntry{}
+	if cc != nil {
+		for _, c := range untrustedCredentials(cc.Entries) {
+			credsBySrc[c.SourcePath] = append(credsBySrc[c.SourcePath], c)
+		}
+	}
 	srcs := map[string]bool{}
 	for src := range mountsBySrc {
 		srcs[src] = true
 	}
 	for src := range socketsBySrc {
+		srcs[src] = true
+	}
+	for src := range credsBySrc {
 		srcs[src] = true
 	}
 	if len(srcs) == 0 {
@@ -319,7 +377,7 @@ func TrustSources(mc *MountConfig, sc *SocketConfig, workspace string) ([]string
 	}
 	out := make([]string, 0, len(srcs))
 	for src := range srcs {
-		store[src] = sourceFingerprint(mountsBySrc[src], socketsBySrc[src])
+		store[src] = sourceFingerprint(mountsBySrc[src], socketsBySrc[src], credsBySrc[src])
 		out = append(out, src)
 	}
 	sort.Strings(out)
@@ -357,10 +415,11 @@ func ListTrusted() (map[string]string, error) {
 }
 
 // UntrustedSourcePaths returns the distinct source config paths of untrusted
-// mounts and sockets — the keys under which trust is recorded. `coi untrust` uses
-// this to revoke by the exact stored key (resolved at load) rather than
-// reconstructing it, which would diverge on symlinked/alias/non-default paths.
-func UntrustedSourcePaths(mc *MountConfig, sc *SocketConfig) []string {
+// mounts, sockets, and ad-hoc credential entries, the keys under which trust
+// is recorded. `coi untrust` uses this to revoke by the exact stored key
+// (resolved at load) rather than reconstructing it, which would diverge on
+// symlinked/alias/non-default paths.
+func UntrustedSourcePaths(mc *MountConfig, sc *SocketConfig, cc *CredentialConfig) []string {
 	seen := map[string]bool{}
 	var out []string
 	add := func(src string) {
@@ -380,6 +439,13 @@ func UntrustedSourcePaths(mc *MountConfig, sc *SocketConfig) []string {
 		for _, s := range sc.Sockets {
 			if s.Untrusted {
 				add(s.SourcePath)
+			}
+		}
+	}
+	if cc != nil {
+		for _, c := range cc.Entries {
+			if c.Untrusted && c.BundleName == "" {
+				add(c.SourcePath)
 			}
 		}
 	}
