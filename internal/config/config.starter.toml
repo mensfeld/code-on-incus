@@ -19,6 +19,12 @@
 # storage_pool = ""              # Incus storage pool ("" = Incus default)
 # stale_base_check = "warn"      # warn | error | off — flag when the base image is outdated
 
+# [container.build]              # how `coi build` builds the base image
+# base = "ubuntu:24.04"          # base image to build from
+# compression = "none"          # image compression: none | gzip | xz ("" = Incus default)
+# agents = ["claude"]            # AI agents to install (subset of claude/opencode/pi);
+#                                #   omit to install all supported agents (the default)
+
 [defaults]
 # model = "claude-sonnet-4-5"    # default model for the AI tool
 # Forward host env vars into the container BY NAME (values read at session start, never stored):

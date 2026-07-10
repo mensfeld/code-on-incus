@@ -291,6 +291,7 @@ coi trust                       # approve   (coi trust --list to view, coi untru
 
 # List active containers and saved sessions
 coi list --all
+coi list --running              # Only running containers (also: --stopped, --status frozen)
 
 # Gracefully shutdown / force kill containers
 coi shutdown coi-abc12345-1

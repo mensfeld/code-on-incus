@@ -25,6 +25,16 @@ import (
 	"github.com/mensfeld/code-on-incus/internal/vmhost"
 )
 
+// waitProbeReady waits up to 30s for a just-launched probe container via the
+// shared session.WaitForReady chokepoint (silent logger — health probes don't
+// narrate). The former hand-rolled loops here retried through transient
+// ContainerRunning errors; WaitForReady fails fast on them instead, which for
+// a probe is the same verdict (an erroring incus is a failed check) delivered
+// sooner.
+func waitProbeReady(containerName string) bool {
+	return session.WaitForReady(context.Background(), container.NewManager(containerName), 30, func(string) {}) == nil
+}
+
 // CheckOS reports the operating system information
 func CheckOS() HealthCheck {
 	// Get OS and architecture
@@ -863,21 +873,7 @@ func CheckContainerConnectivity(imageName string) HealthCheck {
 	}()
 
 	// Wait for container to be ready and have network (up to 30 seconds)
-	var containerReady bool
-	for i := 0; i < 30; i++ {
-		running, err := container.ContainerRunning(containerName)
-		if err == nil && running {
-			// Try a simple command to verify container is responsive
-			_, err := container.IncusOutput("exec", containerName, "--", "echo", "ready")
-			if err == nil {
-				containerReady = true
-				break
-			}
-		}
-		time.Sleep(1 * time.Second)
-	}
-
-	if !containerReady {
+	if !waitProbeReady(containerName) {
 		return HealthCheck{
 			Name:    "container_connectivity",
 			Status:  StatusFailed,
@@ -1073,20 +1069,7 @@ func CheckNetworkRestriction(imageName string) HealthCheck {
 	}()
 
 	// Wait for container to be ready and have network (up to 30 seconds)
-	var containerReady bool
-	for i := 0; i < 30; i++ {
-		running, err := container.ContainerRunning(containerName)
-		if err == nil && running {
-			_, err := container.IncusOutput("exec", containerName, "--", "echo", "ready")
-			if err == nil {
-				containerReady = true
-				break
-			}
-		}
-		time.Sleep(1 * time.Second)
-	}
-
-	if !containerReady {
+	if !waitProbeReady(containerName) {
 		return HealthCheck{
 			Name:    "network_restriction",
 			Status:  StatusFailed,
@@ -1261,18 +1244,7 @@ func CheckSecretMasking(imageName string) HealthCheck {
 		_ = container.DeleteContainer(containerName)
 	}()
 
-	// Wait for readiness (mirrors CheckNetworkRestriction).
-	ready := false
-	for i := 0; i < 30; i++ {
-		if running, err := container.ContainerRunning(containerName); err == nil && running {
-			if _, err := container.IncusOutput("exec", containerName, "--", "echo", "ready"); err == nil {
-				ready = true
-				break
-			}
-		}
-		time.Sleep(1 * time.Second)
-	}
-	if !ready {
+	if !waitProbeReady(containerName) {
 		return HealthCheck{Name: name, Status: StatusFailed, Message: "Test container failed to start within timeout"}
 	}
 
@@ -1373,17 +1345,7 @@ func CheckHostCredentialIsolation(imageName string) HealthCheck {
 		_ = container.DeleteContainer(containerName)
 	}()
 
-	ready := false
-	for i := 0; i < 30; i++ {
-		if running, err := container.ContainerRunning(containerName); err == nil && running {
-			if _, err := container.IncusOutput("exec", containerName, "--", "echo", "ready"); err == nil {
-				ready = true
-				break
-			}
-		}
-		time.Sleep(1 * time.Second)
-	}
-	if !ready {
+	if !waitProbeReady(containerName) {
 		return HealthCheck{Name: name, Status: StatusFailed, Message: "Test container failed to start within timeout"}
 	}
 

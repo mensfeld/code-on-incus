@@ -242,7 +242,7 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 func (a *App) configureContainerRunPhase(s *runState) session.Phase {
 	return session.PhaseFunc{
 		PhaseName: "configure-container",
-		RunFn: func(_ context.Context) (session.Teardown, error) {
+		RunFn: func(ctx context.Context) (session.Teardown, error) {
 			if !s.wasRestarted {
 				limitsConfig := &a.cfg.Limits
 				if hasAnyLimits(limitsConfig) {
@@ -276,13 +276,16 @@ func (a *App) configureContainerRunPhase(s *runState) session.Phase {
 				}
 			}
 
-			fmt.Fprintf(os.Stderr, "Waiting for container to be ready...\n")
-			if err := waitForContainer(s.mgr, 30); err != nil {
-				return nil, err
+			logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
+
+			// ctx is the pipeline's signal-cancelled context (run.go's
+			// NotifyContext), so Ctrl+C aborts the wait instead of polling
+			// out the window against a container teardown already deleted.
+			if err := session.WaitForReady(ctx, s.mgr, a.cfg.Container.ReadyTimeoutSeconds(), logFn); err != nil {
+				return nil, session.AnnotateReadyTimeout(err, &a.cfg.Limits)
 			}
 
 			if !s.wasRestarted {
-				logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
 				if err := session.ConfigureDockerDaemon(s.mgr, logFn); err != nil {
 					fmt.Fprintf(os.Stderr, "Warning: failed to configure Docker daemon: %v\n", err)
 				}

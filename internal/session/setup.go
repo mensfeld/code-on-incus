@@ -54,6 +54,7 @@ type SetupOptions struct {
 	AutoContext           *bool                  // Auto-inject sandbox context into tool's native system (default: true)
 	HostImmutable         bool                   // Apply chattr +i on host-side protected paths (set by CLI from config)
 	Alias                 string                 // Human-friendly alias for this container (set user.coi.alias)
+	ReadyTimeout          int                    // Seconds to wait for the container to become ready (<=0 = default 30)
 	Logger                func(string)
 	ContainerName         string // Use existing container (for testing) - skips container creation
 }
@@ -557,9 +558,12 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 	}
 
 	// 6. Wait for ready
-	opts.Logger("Waiting for container to be ready...")
-	if err := waitForReady(result.Manager, 30, opts.Logger); err != nil {
-		return nil, err
+	readyTimeout := opts.ReadyTimeout
+	if readyTimeout <= 0 {
+		readyTimeout = 30
+	}
+	if err := WaitForReady(ctx, result.Manager, readyTimeout, opts.Logger); err != nil {
+		return nil, AnnotateReadyTimeout(err, opts.LimitsConfig)
 	}
 
 	// 6.1. Configure Docker bridge CIDR to prevent IP conflicts with the host
@@ -887,8 +891,21 @@ func shellEscape(s string) string {
 	return "'" + escaped + "'"
 }
 
-// waitForReady waits for container to be ready
-func waitForReady(mgr container.ContainerManager, maxRetries int, logger func(string)) error {
+// ErrNotReady is the sentinel wrapped by WaitForReady's timeout error, so
+// callers can tell "the window expired" apart from cancellation or probe
+// errors (e.g. to attach cause hints — see AnnotateReadyTimeout).
+var ErrNotReady = errors.New("container failed to become ready")
+
+// WaitForReady waits for the container to be ready: running AND able to
+// execute a command. It probes once per second for up to maxRetries seconds
+// and honors ctx cancellation between probes (a SIGINT-cancelled context
+// stops the wait immediately instead of sleeping out the window against a
+// container the signal handler already tore down). This is the single
+// readiness chokepoint for every wait-for-container path (shell, run, health
+// probes) — private copies of this loop drift, as coi run's no-sleep variant
+// proved.
+func WaitForReady(ctx context.Context, mgr container.ContainerManager, maxRetries int, logger func(string)) error {
+	logger("Waiting for container to be ready...")
 	for i := 0; i < maxRetries; i++ {
 		running, err := mgr.Running()
 		if err != nil {
@@ -903,13 +920,50 @@ func waitForReady(mgr container.ContainerManager, maxRetries int, logger func(st
 			}
 		}
 
-		time.Sleep(1 * time.Second)
-		if i%5 == 0 && i > 0 {
-			logger(fmt.Sprintf("Still waiting... (%ds)", i))
+		// No sleep after the final probe — it would delay the error for
+		// nothing. The last iteration falls straight through to the timeout.
+		if i == maxRetries-1 {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(1 * time.Second):
+		}
+		if (i+1)%5 == 0 {
+			logger(fmt.Sprintf("Still waiting... (%ds)", i+1))
 		}
 	}
 
-	return fmt.Errorf("container failed to become ready after %d seconds", maxRetries)
+	return fmt.Errorf("%w after %d seconds", ErrNotReady, maxRetries)
+}
+
+// AnnotateReadyTimeout appends a cause hint to a WaitForReady timeout when
+// disk I/O limits were active during boot: a low configured rate (e.g.
+// read = "100kB") throttles the container's root disk while it is still
+// booting and can starve startup past the readiness window — a failure mode
+// that otherwise presents as a bare, misleading timeout. Errors other than
+// the ErrNotReady timeout (cancellation, probe failures) pass through
+// unchanged.
+func AnnotateReadyTimeout(err error, limitsCfg *config.LimitsConfig) error {
+	if err == nil || limitsCfg == nil || !errors.Is(err, ErrNotReady) {
+		return err
+	}
+	var active []string
+	if limitsCfg.Disk.Read != "" {
+		active = append(active, "read="+limitsCfg.Disk.Read)
+	}
+	if limitsCfg.Disk.Write != "" {
+		active = append(active, "write="+limitsCfg.Disk.Write)
+	}
+	if limitsCfg.Disk.Max != "" {
+		active = append(active, "max="+limitsCfg.Disk.Max)
+	}
+	if len(active) == 0 {
+		return err
+	}
+	return fmt.Errorf("%w (note: [limits.disk] %s was active while the container booted — a low disk I/O rate can starve startup past the readiness window)",
+		err, strings.Join(active, " "))
 }
 
 // DetectCodeUser returns true if the named user account exists inside

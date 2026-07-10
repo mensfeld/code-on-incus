@@ -34,6 +34,7 @@ type ContainerDevices interface {
 type ContainerFiles interface {
 	GetWorkspacePath() string
 	PushFile(source, destination string) error
+	PullFile(containerPath, localPath string) error
 	PullDirectory(containerPath, localPath string) error
 	PushDirectory(localPath, containerPath string) error
 	Chown(path string, uid, gid int) error
