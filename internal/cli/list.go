@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/mensfeld/code-on-incus/internal/container"
@@ -14,8 +15,11 @@ import (
 )
 
 var (
-	listAll    bool
-	listFormat string
+	listAll     bool
+	listFormat  string
+	listStatus  string
+	listRunning bool
+	listStopped bool
 )
 
 var listCmd = &cobra.Command{
@@ -25,9 +29,16 @@ var listCmd = &cobra.Command{
 
 By default, shows only active containers. Use --all to also show saved sessions.
 
+Status filters (--running, --stopped, --status) narrow the active-containers
+section only; saved sessions shown by --all have no container status and are
+never filtered.
+
 Examples:
   coi list
   coi list --all
+  coi list --running
+  coi list --stopped
+  coi list --status frozen
 `,
 	RunE: listCommand,
 }
@@ -35,12 +46,21 @@ Examples:
 func init() {
 	listCmd.Flags().BoolVarP(&listAll, "all", "a", false, "Show saved sessions in addition to active containers")
 	listCmd.Flags().StringVar(&listFormat, "format", "text", "Output format: text or json")
+	listCmd.Flags().StringVar(&listStatus, "status", "", "Show only containers with this status: running, stopped, or frozen")
+	listCmd.Flags().BoolVar(&listRunning, "running", false, "Show only running containers (alias for --status running)")
+	listCmd.Flags().BoolVar(&listStopped, "stopped", false, "Show only stopped containers (alias for --status stopped)")
 }
 
 func listCommand(cmd *cobra.Command, args []string) error {
 	// Validate format value
 	if listFormat != "text" && listFormat != "json" {
 		return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid format '%s': must be 'text' or 'json'", listFormat)}
+	}
+
+	// Resolve the status filter before touching Incus so flag misuse fails fast
+	statusFilter, err := resolveStatusFilter(listStatus, listRunning, listStopped)
+	if err != nil {
+		return &ExitCodeError{Code: 2, Message: err.Error()}
 	}
 
 	// Get configured tool to determine tool-specific sessions directory
@@ -61,6 +81,12 @@ func listCommand(cmd *cobra.Command, args []string) error {
 	containers, err := listActiveContainers()
 	if err != nil {
 		return fmt.Errorf("failed to list containers: %w", err)
+	}
+
+	// Status filters constrain only the active-containers section; saved
+	// sessions have no container status and are left untouched
+	if statusFilter != "" {
+		containers = filterContainersByStatus(containers, statusFilter)
 	}
 
 	// Build maps of container name -> workspace and container name -> persistent from saved sessions
@@ -176,6 +202,59 @@ func listActiveContainers() ([]ContainerInfo, error) {
 	}
 
 	return result, nil
+}
+
+// resolveStatusFilter merges --status and the --running/--stopped shorthands
+// into a single canonical Incus status ("Running", "Stopped", "Frozen"), or ""
+// when no filter was requested. Combining any two of the flags is an error:
+// even a consistent pair like --running --status running is rejected, so
+// scripts don't grow invocations that look like they stack two filters.
+func resolveStatusFilter(status string, running, stopped bool) (string, error) {
+	flagsSet := 0
+	if status != "" {
+		flagsSet++
+	}
+	if running {
+		flagsSet++
+	}
+	if stopped {
+		flagsSet++
+	}
+	if flagsSet > 1 {
+		return "", fmt.Errorf("--running, --stopped, and --status are mutually exclusive: pass at most one")
+	}
+
+	switch {
+	case running:
+		return "Running", nil
+	case stopped:
+		return "Stopped", nil
+	case status == "":
+		return "", nil
+	}
+
+	switch strings.ToLower(status) {
+	case "running":
+		return "Running", nil
+	case "stopped":
+		return "Stopped", nil
+	case "frozen":
+		return "Frozen", nil
+	}
+	return "", fmt.Errorf("invalid status '%s': must be 'running', 'stopped', or 'frozen'", status)
+}
+
+// filterContainersByStatus returns only the containers matching the given
+// status. Case-insensitive so a change in Incus status casing can't silently
+// empty the filtered output.
+func filterContainersByStatus(containers []ContainerInfo, status string) []ContainerInfo {
+	filtered := make([]ContainerInfo, 0, len(containers))
+	for _, c := range containers {
+		if strings.EqualFold(c.Status, status) {
+			filtered = append(filtered, c)
+		}
+	}
+	return filtered
 }
 
 // listSavedSessions lists all saved sessions
