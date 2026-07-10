@@ -84,7 +84,7 @@ sudo -n nft list ruleset
 | `libsystemd-dev` | systemd development headers | Building COI with NFT support |
 | `nftables` | Kernel packet filtering | Runtime network monitoring |
 | `systemd-journal` group | Read kernel logs without sudo | Runtime log access |
-| Passwordless sudo (via `/etc/sudoers.d/coi`) | Manage nft rules without prompts | Rule creation/deletion |
+| Passwordless sudo (via `/etc/sudoers.d/coi-nft`) | Manage nft rules without prompts | Rule creation/deletion |
 
 ## Configuration
 
@@ -108,13 +108,13 @@ lima_host = ""                   # For macOS: "lima-default" (empty for Linux)
 
 ### Rate Limiting Strategy
 
-NFT monitoring uses **priority-based rate limiting** to prevent log explosion:
+NFT monitoring uses **tiered rate limiting** to prevent log explosion:
 
-1. **Unlimited (Priority -10)** - Always logged:
+1. **Unlimited** - Always logged:
    - Suspicious traffic (metadata, RFC1918, C2 ports)
    - DNS queries (port 53)
 
-2. **Rate Limited (Priority -5)** - Limited to N packets/second:
+2. **Rate Limited** - Limited to N packets/second:
    - Normal traffic (default: 100/second)
 
 This ensures critical threats are never missed while preventing performance impact from high-volume benign traffic.
@@ -123,29 +123,29 @@ This ensures critical threats are never missed while preventing performance impa
 
 ### nftables LOG Rules
 
-When a container starts, COI adds LOG rules to the nftables FORWARD chain:
+When a container starts, COI **inserts** LOG rules at the top of the `ip filter FORWARD` chain (nftables has no per-rule priority — only chains carry one; `nft insert` places these ahead of any later verdict rules):
 
 ```bash
 # Rule 1: Always log suspicious destinations (no rate limit)
-nft add rule ip filter FORWARD priority -10 \
+nft insert rule ip filter FORWARD \
     ip saddr 10.47.62.50 \
     ip daddr { 169.254.169.254, 192.168.0.0/16 } \
     log prefix "NFT_SUSPICIOUS[10.47.62.50]: "
 
 # Rule 2: Always log DNS queries
-nft add rule ip filter FORWARD priority -10 \
+nft insert rule ip filter FORWARD \
     ip saddr 10.47.62.50 udp dport 53 \
     log prefix "NFT_DNS[10.47.62.50]: "
 
 # Rule 3: Rate-limited logging for all other traffic
-nft add rule ip filter FORWARD priority -5 \
+nft insert rule ip filter FORWARD \
     ip saddr 10.47.62.50 \
     limit rate 100/second \
     log prefix "NFT_COI[10.47.62.50]: "
 ```
 
 **Key Points:**
-- Rules run **before** firewall (priority -5/-10 vs 0+)
+- LOG rules sit at the **top of the FORWARD chain**, so they log before any firewall verdict rules further down
 - No verdict - packets continue to firewall rules
 - Scoped by container IP - only logs that container's traffic
 - Unique prefix allows filtering in journald
@@ -291,7 +291,7 @@ coi health --format=json | jq '.checks | {nftables, systemd_journal, libsystemd}
 3. **Sudo password required**
    ```bash
    # Check sudoers file
-   sudo cat /etc/sudoers.d/coi
+   sudo cat /etc/sudoers.d/coi-nft
    # Should allow NOPASSWD for nft commands
    ```
 

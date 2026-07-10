@@ -1,6 +1,6 @@
 # Credential Catalog & Generic `[[credentials]]` Seeding
 
-**Status:** Approved, ready for implementation planning
+**Status:** Implemented — shipped in v0.10.0 (PR #573)
 **Related:** [#549](https://github.com/mensfeld/code-on-incus/issues/549)
 
 ## Problem
