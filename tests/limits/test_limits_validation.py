@@ -175,30 +175,35 @@ allowance = "{allowance}"
 
 
 def test_valid_disk_io_formats(coi_binary, workspace_dir, cleanup_containers):
-    """Test that valid disk I/O formats are accepted."""
-    valid_formats = ["10MB", "100kB", "1GB", "1000iops"]
+    """Test that a valid disk I/O limit is accepted and applied end to end.
 
-    for io_rate in valid_formats:
-        config_dir = Path(workspace_dir) / ".coi"
-        config_dir.mkdir(exist_ok=True)
-        (config_dir / "config.toml").write_text(
-            f"""
+    One boot with a generous limit only. The format matrix (kB/GB/iops/...)
+    lives in Go unit tests (internal/limits/validator_test.go): booting with a
+    pathological rate like 100kB applies the throttle to the container's root
+    disk BEFORE the readiness wait, so boot only completes in time when the
+    host page cache absorbs the I/O — a recurring CI flake, not a validation
+    check.
+    """
+    config_dir = Path(workspace_dir) / ".coi"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "config.toml").write_text(
+        """
 [limits.disk]
-read = "{io_rate}"
+read = "10MB"
 """
-        )
+    )
 
-        result = subprocess.run(
-            [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
-            capture_output=True,
-            text=True,
-            timeout=120,
-            cwd=workspace_dir,
-        )
+    result = subprocess.run(
+        [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        cwd=workspace_dir,
+    )
 
-        assert result.returncode == 0, (
-            f"Disk I/O '{io_rate}' should be valid. stderr: {result.stderr}"
-        )
+    assert result.returncode == 0, (
+        f"Disk I/O '10MB' should be valid and bootable. stderr: {result.stderr}"
+    )
 
 
 def test_invalid_disk_io_formats(coi_binary, workspace_dir):

@@ -212,28 +212,6 @@ func launchOrReuseContainer(mgr container.ContainerManager, img, pool, container
 	return nil
 }
 
-// waitForContainer waits for container to be ready
-func waitForContainer(mgr container.ContainerManager, maxRetries int) error {
-	for i := 0; i < maxRetries; i++ {
-		running, err := mgr.Running()
-		if err != nil {
-			return err
-		}
-		if running {
-			// Additional check: try to execute a simple command
-			_, err := mgr.ExecCommand("echo ready", container.ExecCommandOptions{Capture: true})
-			if err == nil {
-				return nil
-			}
-		}
-		// Wait before retry
-		if i < maxRetries-1 {
-			fmt.Fprintf(os.Stderr, ".")
-		}
-	}
-	return fmt.Errorf("container failed to become ready")
-}
-
 // ensureBridgeTrustedZone ensures the Incus bridge has iptables FORWARD ACCEPT
 // rules before launching a container. Without this, DHCP replies are dropped and
 // the container never gets an IP when the FORWARD policy is DROP.
