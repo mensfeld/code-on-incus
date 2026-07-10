@@ -69,6 +69,7 @@ type ContainerConfig struct {
 	Image           string      `toml:"image"`
 	Persistent      *bool       `toml:"persistent"`
 	ShutdownTimeout int         `toml:"shutdown_timeout"` // Seconds to wait for graceful shutdown before force-killing (default: 60)
+	ReadyTimeout    int         `toml:"ready_timeout"`    // Seconds to wait for a launched container to become ready (default: 30)
 	StoragePool     string      `toml:"storage_pool"`
 	Alias           string      `toml:"alias"`
 	Build           BuildConfig `toml:"build"`
@@ -80,6 +81,7 @@ func (c *ContainerConfig) HasContainerConfig() bool {
 	return c.Image != "" ||
 		c.Persistent != nil ||
 		c.ShutdownTimeout != 0 ||
+		c.ReadyTimeout != 0 ||
 		c.StoragePool != "" ||
 		c.Alias != "" ||
 		c.StaleBaseCheck != "" ||
@@ -93,6 +95,18 @@ func (c *ContainerConfig) ShutdownTimeoutSeconds() int {
 		return 60
 	}
 	return c.ShutdownTimeout
+}
+
+// ReadyTimeoutSeconds returns the container-readiness window in seconds,
+// defaulting to 30 when unset. Like the shutdown window, how long to wait
+// for a boot is policy, not a per-invocation whim — slow hosts (nested
+// virtualization, cold storage pools, loaded CI runners) occasionally need
+// more than the default.
+func (c *ContainerConfig) ReadyTimeoutSeconds() int {
+	if c.ReadyTimeout <= 0 {
+		return 30
+	}
+	return c.ReadyTimeout
 }
 
 // TimezoneConfig contains timezone settings for containers
@@ -1013,6 +1027,9 @@ func mergeContainerInto(dst *ContainerConfig, src *ContainerConfig) {
 	}
 	if src.ShutdownTimeout != 0 {
 		dst.ShutdownTimeout = src.ShutdownTimeout
+	}
+	if src.ReadyTimeout != 0 {
+		dst.ReadyTimeout = src.ReadyTimeout
 	}
 	if src.StoragePool != "" {
 		dst.StoragePool = src.StoragePool

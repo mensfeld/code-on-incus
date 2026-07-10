@@ -26,6 +26,10 @@
       "type": "integer",
       "description": "Seconds to wait for graceful shutdown before force-killing (default: 60)"
     },
+    "ready_timeout": {
+      "type": "integer",
+      "description": "Seconds to wait for a launched container to become ready (default: 30)"
+    },
     "stale_base_check": {
       "type": "string",
       "enum": ["error", "warn", "off"],

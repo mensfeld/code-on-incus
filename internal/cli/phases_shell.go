@@ -353,6 +353,7 @@ func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.P
 				ContainerName:         containerName,
 				Timezone:              resolvedTimezone,
 				Alias:                 a.cfg.Container.Alias,
+				ReadyTimeout:          a.cfg.Container.ReadyTimeoutSeconds(),
 			}
 			return nil, nil
 		},

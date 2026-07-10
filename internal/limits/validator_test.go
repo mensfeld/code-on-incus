@@ -48,6 +48,100 @@ func TestValidateDiskIO(t *testing.T) {
 	}
 }
 
+// The matrices below are the authoritative format coverage for the remaining
+// validators — the same consolidation as TestValidateDiskIO. The e2e tests in
+// tests/limits/test_limits_validation.py boot ONE container per limit family
+// with a representative value; string-syntax acceptance is checked here.
+
+func TestValidateCPUCount(t *testing.T) {
+	for _, count := range []string{"", "1", "2", "0-3", "0,1,3", "0-1,3"} {
+		if err := ValidateCPUCount(count); err != nil {
+			t.Errorf("ValidateCPUCount(%q) should be valid, got: %v", count, err)
+		}
+	}
+	for _, count := range []string{"abc", "1.5", "-1", "1-", "a-b", "0-3,", "1 2"} {
+		if err := ValidateCPUCount(count); err == nil {
+			t.Errorf("ValidateCPUCount(%q) should be rejected", count)
+		}
+	}
+}
+
+func TestValidateCPUAllowance(t *testing.T) {
+	for _, allowance := range []string{"", "50%", "100%", "25ms/100ms", "10ms/50ms"} {
+		if err := ValidateCPUAllowance(allowance); err != nil {
+			t.Errorf("ValidateCPUAllowance(%q) should be valid, got: %v", allowance, err)
+		}
+	}
+	for _, allowance := range []string{"abc", "200", "50", "25/100", "50 %", "25ms/100"} {
+		if err := ValidateCPUAllowance(allowance); err == nil {
+			t.Errorf("ValidateCPUAllowance(%q) should be rejected", allowance)
+		}
+	}
+}
+
+func TestValidateMemoryLimit(t *testing.T) {
+	for _, limit := range []string{"", "512MiB", "1GiB", "2GB", "50%", "100KiB", "1TiB"} {
+		if err := ValidateMemoryLimit(limit); err != nil {
+			t.Errorf("ValidateMemoryLimit(%q) should be valid, got: %v", limit, err)
+		}
+	}
+	for _, limit := range []string{"2", "abc", "2XB", "100%%", "512 MiB", "-1GiB"} {
+		if err := ValidateMemoryLimit(limit); err == nil {
+			t.Errorf("ValidateMemoryLimit(%q) should be rejected", limit)
+		}
+	}
+}
+
+func TestValidateMemorySwap(t *testing.T) {
+	for _, swap := range []string{"", "true", "false", "1GiB", "50%"} {
+		if err := ValidateMemorySwap(swap); err != nil {
+			t.Errorf("ValidateMemorySwap(%q) should be valid, got: %v", swap, err)
+		}
+	}
+	for _, swap := range []string{"yes", "no", "abc", "2XB"} {
+		if err := ValidateMemorySwap(swap); err == nil {
+			t.Errorf("ValidateMemorySwap(%q) should be rejected", swap)
+		}
+	}
+}
+
+func TestValidateDurationFormats(t *testing.T) {
+	for _, duration := range []string{"", "30s", "5m", "2h", "1h30m"} {
+		if err := ValidateDuration(duration); err != nil {
+			t.Errorf("ValidateDuration(%q) should be valid, got: %v", duration, err)
+		}
+	}
+	for _, duration := range []string{"2x", "-1h", "abc", "100", "0s"} {
+		if err := ValidateDuration(duration); err == nil {
+			t.Errorf("ValidateDuration(%q) should be rejected", duration)
+		}
+	}
+}
+
+func TestValidatePriorityRange(t *testing.T) {
+	for _, priority := range []int{0, 5, 10} {
+		if err := ValidatePriority(priority); err != nil {
+			t.Errorf("ValidatePriority(%d) should be valid, got: %v", priority, err)
+		}
+	}
+	for _, priority := range []int{-1, 11, 100} {
+		if err := ValidatePriority(priority); err == nil {
+			t.Errorf("ValidatePriority(%d) should be rejected", priority)
+		}
+	}
+}
+
+func TestValidateMaxProcesses(t *testing.T) {
+	for _, maxProc := range []int{0, 1, 1000} {
+		if err := ValidateMaxProcesses(maxProc); err != nil {
+			t.Errorf("ValidateMaxProcesses(%d) should be valid, got: %v", maxProc, err)
+		}
+	}
+	if err := ValidateMaxProcesses(-1); err == nil {
+		t.Error("ValidateMaxProcesses(-1) should be rejected")
+	}
+}
+
 func TestValidateAllReportsDiskFields(t *testing.T) {
 	errs := ValidateAll(
 		CPULimits{},

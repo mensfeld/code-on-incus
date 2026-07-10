@@ -242,7 +242,7 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 func (a *App) configureContainerRunPhase(s *runState) session.Phase {
 	return session.PhaseFunc{
 		PhaseName: "configure-container",
-		RunFn: func(_ context.Context) (session.Teardown, error) {
+		RunFn: func(ctx context.Context) (session.Teardown, error) {
 			if !s.wasRestarted {
 				limitsConfig := &a.cfg.Limits
 				if hasAnyLimits(limitsConfig) {
@@ -278,9 +278,11 @@ func (a *App) configureContainerRunPhase(s *runState) session.Phase {
 
 			logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
 
-			fmt.Fprintf(os.Stderr, "Waiting for container to be ready...\n")
-			if err := session.WaitForReady(s.mgr, 30, logFn); err != nil {
-				return nil, err
+			// ctx is the pipeline's signal-cancelled context (run.go's
+			// NotifyContext), so Ctrl+C aborts the wait instead of polling
+			// out the window against a container teardown already deleted.
+			if err := session.WaitForReady(ctx, s.mgr, a.cfg.Container.ReadyTimeoutSeconds(), logFn); err != nil {
+				return nil, session.AnnotateReadyTimeout(err, &a.cfg.Limits)
 			}
 
 			if !s.wasRestarted {
