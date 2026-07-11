@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -760,13 +761,50 @@ func ImageExists(aliasName string) (bool, error) {
 
 // ListContainers lists all containers matching a name pattern
 func ListContainers(pattern string) ([]string, error) {
+	infos, err := ListContainersInfo(pattern)
+	if err != nil {
+		return nil, err
+	}
+	var matching []string
+	for _, c := range infos {
+		matching = append(matching, c.Name)
+	}
+	return matching, nil
+}
+
+// ContainerBrief is the per-container slice of `incus list --format=json`
+// that iterating commands need without further round-trips: the running
+// state (instead of a per-container `incus list <name>` re-fetch) and the
+// recorded session UID metadata (instead of an `id -u` exec probe).
+type ContainerBrief struct {
+	Name    string
+	Running bool
+	// CodeUID is the parsed CodeUIDMetadataKey metadata; nil when absent
+	// or invalid — callers fall back to probing.
+	CodeUID *int
+}
+
+// CodeUIDMetadataKey is the container config key recording the UID sessions
+// in a container exec as (and therefore where per-user resources like the
+// tmux socket at /tmp/tmux-<uid> live). Written by session setup, read by
+// out-of-session consumers (coi tmux, coi attach) so producer and consumers
+// share one authority. Like user.coi.alias, it is plain instance config:
+// readable without exec'ing into the container, even while stopped, and
+// independent of the invoking project's [incus] code_user name.
+const CodeUIDMetadataKey = "user.coi.uid"
+
+// ListContainersInfo lists containers matching a name pattern with their
+// status and recorded session UID, all from the single `incus list` call.
+func ListContainersInfo(pattern string) ([]ContainerBrief, error) {
 	output, err := IncusOutput("list", "--format=json")
 	if err != nil {
 		return nil, err
 	}
 
 	var containers []struct {
-		Name string `json:"name"`
+		Name   string            `json:"name"`
+		Status string            `json:"status"`
+		Config map[string]string `json:"config"`
 	}
 
 	if err := json.Unmarshal([]byte(output), &containers); err != nil {
@@ -779,11 +817,21 @@ func ListContainers(pattern string) ([]string, error) {
 		return nil, fmt.Errorf("invalid pattern: %w", err)
 	}
 
-	var matching []string
+	var matching []ContainerBrief
 	for _, c := range containers {
-		if re.MatchString(c.Name) {
-			matching = append(matching, c.Name)
+		if !re.MatchString(c.Name) {
+			continue
 		}
+		brief := ContainerBrief{
+			Name:    c.Name,
+			Running: strings.EqualFold(c.Status, "Running"),
+		}
+		if raw, ok := c.Config[CodeUIDMetadataKey]; ok {
+			if uid, err := strconv.Atoi(strings.TrimSpace(raw)); err == nil {
+				brief.CodeUID = &uid
+			}
+		}
+		matching = append(matching, brief)
 	}
 
 	return matching, nil

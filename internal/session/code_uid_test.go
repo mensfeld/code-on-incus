@@ -90,6 +90,46 @@ func TestResolveCodeUID(t *testing.T) {
 	}
 }
 
+// TestEffectiveCodeUID pins the resolution order: recorded user.coi.uid
+// metadata wins without touching the probe; a metadata miss falls back to
+// the probe; probe errors propagate (never silently root).
+func TestEffectiveCodeUID(t *testing.T) {
+	recordedHit := func(string) (int, bool) { return 501, true }
+	recordedMiss := func(string) (int, bool) { return 0, false }
+
+	// Metadata hit: probe must not even run (fake would error if consulted)
+	uid, err := effectiveCodeUID(recordedHit, &fakeExec{err: errors.New("probe must not run")}, "c", "code")
+	if err != nil || uid != 501 {
+		t.Errorf("metadata hit: got (%d, %v), want (501, nil)", uid, err)
+	}
+
+	// Metadata miss: probe result is used
+	uid, err = effectiveCodeUID(recordedMiss, &fakeExec{out: "1000\n"}, "c", "code")
+	if err != nil || uid != 1000 {
+		t.Errorf("metadata miss: got (%d, %v), want (1000, nil)", uid, err)
+	}
+
+	// Metadata miss + probe failure: error propagates
+	if _, err = effectiveCodeUID(recordedMiss, &fakeExec{err: errors.New("incus unreachable")}, "c", "code"); err == nil {
+		t.Error("probe failure should propagate, not resolve to root")
+	}
+}
+
+func TestParseRecordedUID(t *testing.T) {
+	if uid, ok := parseRecordedUID("501\n", nil); !ok || uid != 501 {
+		t.Errorf("valid value: got (%d, %v), want (501, true)", uid, ok)
+	}
+	if _, ok := parseRecordedUID("", nil); ok {
+		t.Error("unset key (empty output) must not parse as a UID")
+	}
+	if _, ok := parseRecordedUID("junk", nil); ok {
+		t.Error("non-integer metadata must not parse as a UID")
+	}
+	if _, ok := parseRecordedUID("1000", errors.New("incus down")); ok {
+		t.Error("read error must report absence, triggering the probe fallback")
+	}
+}
+
 // TestDetectCodeUser pins the shared probe's classification through the
 // second consumer: existence, id-reported absence, and incus-level failures
 // must be told apart identically to ResolveCodeUID (single probeCodeUser).

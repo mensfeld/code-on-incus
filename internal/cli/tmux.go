@@ -11,10 +11,12 @@ import (
 )
 
 // tmuxExecUser resolves the UID whose per-user tmux socket
-// (/tmp/tmux-<uid>/default) the tmux commands must target (#588); see
-// session.ResolveCodeUID for why this is probed per container.
-func tmuxExecUser(mgr container.ContainerManager) (*int, error) {
-	uid, err := session.ResolveCodeUID(mgr, container.CodeUser)
+// (/tmp/tmux-<uid>/default) the tmux commands must target (#588): the
+// container's recorded user.coi.uid metadata (written by session setup, the
+// same authority the session was created with), falling back to a live
+// probe for pre-metadata containers.
+func tmuxExecUser(mgr container.ContainerManager, containerName string) (*int, error) {
+	uid, err := session.EffectiveCodeUID(mgr, containerName, container.CodeUser)
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve container code user: %w", err)
 	}
@@ -82,7 +84,7 @@ func tmuxSendCommand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("container %s is not running", containerName)
 	}
 
-	user, err := tmuxExecUser(mgr)
+	user, err := tmuxExecUser(mgr, containerName)
 	if err != nil {
 		return err
 	}
@@ -120,7 +122,7 @@ func tmuxCaptureCommand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("container %s is not running", containerName)
 	}
 
-	user, err := tmuxExecUser(mgr)
+	user, err := tmuxExecUser(mgr, containerName)
 	if err != nil {
 		return err
 	}
@@ -149,8 +151,9 @@ func tmuxListCommand(cmd *cobra.Command, args []string) error {
 		return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid format '%s': must be 'text' or 'json'", tmuxFormat)}
 	}
 
-	// List all running containers with configured prefix
-	containers, err := container.ListContainers("coi-.*")
+	// One incus call yields names, running state, AND each container's
+	// recorded session UID — no per-container status re-fetch or UID probe.
+	containers, err := container.ListContainersInfo("coi-.*")
 	if err != nil {
 		return fmt.Errorf("failed to list containers: %w", err)
 	}
@@ -163,26 +166,26 @@ func tmuxListCommand(cmd *cobra.Command, args []string) error {
 
 	var sessions []tmuxEntry
 	for _, c := range containers {
-		mgr := container.NewManager(c)
-
-		// Check if container is running
-		running, err := mgr.Running()
-		if err != nil || !running {
+		if !c.Running {
 			continue
 		}
+		mgr := container.NewManager(c.Name)
 
-		// Resolve the per-container code UID. Unlike a failed Running()
-		// check (container is gone), a probe failure can hit a live
-		// container with a live session — warn instead of silently
+		// Recorded metadata from the list call; probe only pre-metadata
+		// containers. Unlike a stopped container, a probe failure can hit
+		// a live container with a live session — warn instead of silently
 		// omitting it from the listing.
-		user, err := tmuxExecUser(mgr)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: skipping %s: %v\n", c, err)
-			continue
+		user := c.CodeUID
+		if user == nil {
+			user, err = tmuxExecUser(mgr, c.Name)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: skipping %s: %v\n", c.Name, err)
+				continue
+			}
 		}
 
 		// Check if tmux session exists
-		tmuxSession := fmt.Sprintf("coi-%s", c)
+		tmuxSession := fmt.Sprintf("coi-%s", c.Name)
 		checkCmd := fmt.Sprintf("tmux has-session -t %s 2>/dev/null", tmuxSession)
 
 		opts := container.ExecCommandOptions{
@@ -193,7 +196,7 @@ func tmuxListCommand(cmd *cobra.Command, args []string) error {
 
 		_, err = mgr.ExecCommand(checkCmd, opts)
 		if err == nil {
-			sessions = append(sessions, tmuxEntry{Container: c, Session: tmuxSession})
+			sessions = append(sessions, tmuxEntry{Container: c.Name, Session: tmuxSession})
 		}
 	}
 

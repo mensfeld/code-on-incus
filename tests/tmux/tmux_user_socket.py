@@ -11,10 +11,12 @@ session "worked", but that flow never happens in the product.
 
 Covers:
 1. Default code user (uid 1000 in coi-default)
-2. A remapped code user (uid 501 — the [incus] code_uid / raw.idmap family
+2. The recorded user.coi.uid metadata being preferred over a live probe
+   (session at uid 501 with passwd still at 1000 — only metadata finds it)
+3. A remapped code user (uid 501 — the [incus] code_uid / raw.idmap family
    from the issue report, simulated with usermod like
    remapContainerUserIfNeeded does)
-3. That the helpers create no root tmux socket as a side effect
+4. That the helpers create no root tmux socket as a side effect
 """
 
 import subprocess
@@ -106,6 +108,35 @@ def test_tmux_helpers_target_code_user_session(coi_binary, cleanup_containers, w
 
     tmux_session = create_session_as(coi_binary, container_name, 1000)
     assert_helpers_work(coi_binary, container_name, tmux_session, "TMUX_588_CODE_USER")
+    assert_no_root_socket(coi_binary, container_name)
+
+    run_coi(coi_binary, ["container", "delete", container_name, "--force"])
+
+
+def test_tmux_helpers_prefer_recorded_uid_metadata(coi_binary, cleanup_containers, workspace_dir):
+    """capture/send/list must honor the user.coi.uid metadata over a probe.
+
+    Discriminating setup: the session is created as uid 501 and user.coi.uid
+    records 501, but the container's passwd still maps code to 1000 — so a
+    live `id -u code` probe would answer 1000 and target the wrong socket.
+    Only reading the recorded metadata (the authority session setup writes)
+    finds the session. This mirrors a container whose session was created
+    under another project's config.
+    """
+    container_name = calculate_container_name(workspace_dir, 3)
+    launch_container(coi_binary, container_name)
+
+    # Record the session UID like session setup does — passwd is untouched.
+    result = subprocess.run(
+        ["incus", "config", "set", container_name, "user.coi.uid=501"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, f"Setting metadata should succeed. stderr: {result.stderr}"
+
+    tmux_session = create_session_as(coi_binary, container_name, 501)
+    assert_helpers_work(coi_binary, container_name, tmux_session, "TMUX_588_METADATA_UID")
     assert_no_root_socket(coi_binary, container_name)
 
     run_coi(coi_binary, ["container", "delete", container_name, "--force"])

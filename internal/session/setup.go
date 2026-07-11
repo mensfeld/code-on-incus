@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -69,6 +68,7 @@ type SetupResult struct {
 	Logger                 *logger.SessionLogger
 	HomeDir                string
 	RunAsRoot              bool
+	ExecUID                int // UID sessions exec as (0 = root); recorded as user.coi.uid metadata
 	Image                  string
 	ContainerWorkspacePath string            // Path where workspace is mounted inside container (default: /workspace)
 	SSHAgentSocketPath     string            // SSH agent socket path in container (empty if not forwarded)
@@ -609,6 +609,36 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		}
 	}
 
+	// 6.5.1. Resolve and record the session exec UID — the single authority
+	// shared by session creation (buildContainerEnv execs the tmux session as
+	// result.ExecUID) and by out-of-session consumers (coi tmux / coi attach
+	// read the user.coi.uid metadata), so producer and consumers cannot land
+	// on different /tmp/tmux-<uid> sockets (#588).
+	if skipLaunch {
+		// Reused container: its creation-time state is authoritative, not the
+		// current config — no remap runs on reuse, so a changed [incus]
+		// code_uid must NOT move the session onto a socket the container's
+		// user never had. Prefer the recorded metadata; probe (and record)
+		// for pre-metadata containers.
+		uid, err := EffectiveCodeUID(result.Manager, containerName, container.CodeUser)
+		if err != nil {
+			uid = container.CodeUID
+			if result.RunAsRoot {
+				uid = 0
+			}
+			opts.Logger(fmt.Sprintf("Warning: could not resolve session UID: %v — using configured %d", err, uid))
+		}
+		result.ExecUID = uid
+	} else {
+		result.ExecUID = 0
+		if hasCodeUser {
+			result.ExecUID = container.CodeUID // remap above makes this the actual UID
+		}
+		if err := RecordCodeUID(containerName, result.ExecUID); err != nil {
+			opts.Logger(fmt.Sprintf("Warning: could not record session UID metadata: %v", err))
+		}
+	}
+
 	// 6.6. Forward host sockets (proxy devices must be added to a running
 	// container). The SSH agent (opts.ForwardSSHAgent) is a built-in entry that
 	// reads the live $SSH_AUTH_SOCK; configured [[sockets]] follow (already
@@ -965,89 +995,4 @@ func AnnotateReadyTimeout(err error, limitsCfg *config.LimitsConfig) error {
 	}
 	return fmt.Errorf("%w (note: [limits.disk] %s was active while the container booted — a low disk I/O rate can starve startup past the readiness window)",
 		err, strings.Join(active, " "))
-}
-
-// DetectCodeUser returns true if the named user account exists inside
-// the running container. It is used to decide whether to run sessions
-// as `code` or fall back to root — replacing the old broken heuristic
-// that matched the image alias literally against "coi-default" and
-// misclassified every custom image built from it as a root image.
-//
-// Implemented on probeCodeUser (shared with ResolveCodeUID): "user not
-// present" is recognized by `id`'s own stderr, while incus-level exec
-// failures return an error so the caller can decide whether to warn or
-// fall back. See probeCodeUser for the argv-injection defence notes.
-func DetectCodeUser(mgr container.ContainerExecution, codeUser string) (bool, error) {
-	_, exists, err := probeCodeUser(mgr, codeUser)
-	return exists, err
-}
-
-// codeUserMissing reports whether a probe error means `id` itself ran and
-// said the account doesn't exist — as opposed to an incus-level failure
-// (daemon unreachable, container stopped mid-race, permission denied,
-// missing binary) that ALSO surfaces as *container.ExitError from the CLI
-// exec path, with the same non-zero exit code. The stderr text is the only
-// reliable discriminator: `id` (GNU coreutils and busybox alike) says
-// "no such user"/"unknown user", incus's own failures say "Error: ...".
-// Only a genuine no-such-user may fall back to root — misclassifying an
-// infra failure would silently misdirect callers to root's tmux socket,
-// the exact #588 failure mode.
-func codeUserMissing(err error) bool {
-	var exitErr *container.ExitError
-	if !errors.As(err, &exitErr) {
-		return false
-	}
-	stderr := strings.ToLower(exitErr.Stderr)
-	return strings.Contains(stderr, "no such user") || strings.Contains(stderr, "unknown user")
-}
-
-// probeCodeUser is the ONE code-user probe shared by DetectCodeUser and
-// ResolveCodeUID (so their error taxonomies cannot drift): it runs
-// `id -u <codeUser>` in the container and returns (uid, true, nil) when the
-// account exists, (0, false, nil) when `id` reports it missing, and an error
-// for anything else — including incus-level exec failures, which are
-// distinguished from "no such user" by stderr (see codeUserMissing).
-//
-// codeUser is passed as a raw argv entry to `id` rather than interpolated
-// into a shell string — defence-in-depth against a maliciously crafted
-// [incus] code_user config value: `id` receives it as a single argument and
-// reports "no such user"; the shell never sees it.
-func probeCodeUser(mgr container.ContainerExecution, codeUser string) (int, bool, error) {
-	out, err := mgr.ExecArgsCapture(
-		[]string{"id", "-u", codeUser},
-		container.ExecCommandOptions{Capture: true},
-	)
-	if err != nil {
-		if codeUserMissing(err) {
-			return 0, false, nil
-		}
-		return 0, false, err
-	}
-	uid, err := strconv.Atoi(strings.TrimSpace(out))
-	if err != nil {
-		return 0, false, fmt.Errorf("unexpected `id -u %s` output %q: %w", codeUser, out, err)
-	}
-	return uid, true, nil
-}
-
-// ResolveCodeUID returns the UID the container's code user ACTUALLY has,
-// probed from the container itself, or root (0) when the account doesn't
-// exist — images without a code user run their sessions, and therefore
-// their tmux server, as root. Callers that must talk to a session's
-// per-user resources (e.g. the tmux socket at /tmp/tmux-<uid>, #588) need
-// this rather than the config-derived container.CodeUID: after an
-// in-container remap (remapContainerUserIfNeeded / [incus] code_uid) the
-// two can differ. Note the probe uses the CURRENT config's code_user NAME,
-// so it resolves cross-config UID variance but not a container created
-// under a different [incus] code_user name (custom-image corner case —
-// such containers probe as "no user" and resolve to root).
-func ResolveCodeUID(mgr container.ContainerExecution, codeUser string) (int, error) {
-	uid, exists, err := probeCodeUser(mgr, codeUser)
-	if err != nil {
-		return 0, err
-	}
-	if !exists {
-		return 0, nil // no code user: sessions run as root
-	}
-	return uid, nil
 }

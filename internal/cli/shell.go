@@ -239,10 +239,10 @@ func buildCLICommand(sessionID string, useResumeFlag, restoreOnly bool, sessions
 // It sets HOME, TERM (sanitized), IS_SANDBOX, merges config environment, resolves forward_env, and
 // runs env_commands (host commands whose trimmed stdout is injected). A failing env_command is fatal.
 func (a *App) buildContainerEnv(result *session.SetupResult) (map[string]string, *int, error) {
-	user := container.CodeUID
-	if result.RunAsRoot {
-		user = 0
-	}
+	// Exec as the UID setup resolved AND recorded as user.coi.uid — the same
+	// authority coi tmux / coi attach read back, so the session's tmux socket
+	// and its consumers agree by construction (#588).
+	user := result.ExecUID
 	userPtr := &user
 
 	containerEnv := map[string]string{

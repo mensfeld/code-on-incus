@@ -138,7 +138,7 @@ func attachToContainer(containerName string) error {
 	// the tmux socket lives at /tmp/tmux-<uid> of whoever created the
 	// session, which config can misstate after remaps or for root-session
 	// images (#588 — same resolution as the coi tmux helpers).
-	user, err := tmuxExecUser(mgr)
+	user, err := tmuxExecUser(mgr, containerName)
 	if err != nil {
 		return err
 	}
@@ -183,7 +183,7 @@ func attachToContainerWithBash(containerName string) error {
 
 	// Execute bash as the container's actual code user (same resolution as
 	// tmux attach above — config-derived CodeUID can misstate it, #588)
-	user, err := tmuxExecUser(mgr)
+	user, err := tmuxExecUser(mgr, containerName)
 	if err != nil {
 		return err
 	}
