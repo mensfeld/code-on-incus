@@ -292,6 +292,7 @@ type PortInfo struct {
 	Name          string // "" for pool ports
 	HostPort      int
 	ContainerPort int
+	Listen        string // host listen address ("", "127.0.0.1" and "0.0.0.0" mean localhost works)
 	Pool          bool   // identity-mapped pool port (host == container number)
 	EnvVar        string // COI_PORT_<NAME> for named entries, "" for pool
 }
@@ -349,6 +350,7 @@ type contextTemplateData struct {
 	HasExtraMounts      bool
 	HasPorts            bool
 	PoolPortsDesc       string // e.g. "23410, 23411, 23412" (identity-mapped)
+	FirstPoolPort       string // first pool port, for the concrete usage example
 	NamedPortsDesc      string // one line per named mapping
 	ResourceLimits      string // e.g., "2 CPUs, 2GiB memory"
 	HasResourceLimits   bool
@@ -469,12 +471,21 @@ func RenderContextFileContent(info ContextInfo) string {
 			if p.Pool {
 				pool = append(pool, fmt.Sprintf("%d", p.HostPort))
 			} else {
-				named = append(named, fmt.Sprintf("- %s: bind container port %d — the user reaches it at http://localhost:%d (%s=%d)",
-					p.Name, p.ContainerPort, p.HostPort, p.EnvVar, p.HostPort))
+				// A pin to a specific non-loopback listen address is NOT
+				// reachable via the host's localhost — name the real address.
+				host := "localhost"
+				if p.Listen != "" && p.Listen != "127.0.0.1" && p.Listen != "0.0.0.0" {
+					host = p.Listen
+				}
+				named = append(named, fmt.Sprintf("- %s: bind container port %d — the user reaches it at http://%s:%d (%s=%d)",
+					p.Name, p.ContainerPort, host, p.HostPort, p.EnvVar, p.HostPort))
 			}
 		}
 		data.PoolPortsDesc = strings.Join(pool, ", ")
 		data.NamedPortsDesc = strings.Join(named, "\n")
+		if len(pool) > 0 {
+			data.FirstPoolPort = pool[0]
+		}
 	}
 
 	// Resource limits

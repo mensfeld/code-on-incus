@@ -124,10 +124,57 @@ func TestResolvePortsCapacity(t *testing.T) {
 	}
 }
 
-// fakePublisher records device adds; failNames simulates bind races.
+func TestResolvePortsSlotBounds(t *testing.T) {
+	withPortProbe(t, allFree)
+	for _, slot := range []int{0, -1, 11} {
+		if _, err := ResolvePorts(&PortConfig{Pool: 1}, "/ws", slot); err == nil {
+			t.Errorf("slot %d must be rejected: it would allocate inside another workspace's block", slot)
+		}
+	}
+	// Boundary slots are fine
+	for _, slot := range []int{1, 10} {
+		if _, err := ResolvePorts(&PortConfig{Pool: 1}, "/ws", slot); err != nil {
+			t.Errorf("slot %d must be accepted: %v", slot, err)
+		}
+	}
+}
+
+func TestResolvePortsNameCollisionsAreHardErrors(t *testing.T) {
+	withPortProbe(t, allFree)
+
+	// Distinct names collapsing to one device name (lossy sanitization)
+	_, err := ResolvePorts(&PortConfig{Ports: []PortEntry{
+		{Name: "web_1", ContainerPort: 3000},
+		{Name: "web-1", ContainerPort: 4000},
+	}}, "/ws", 1)
+	if err == nil || !strings.Contains(err.Error(), "collides") {
+		t.Errorf("device-name collision must be a hard error, got: %v", err)
+	}
+
+	// A map entry squatting the pool's synthetic device name
+	_, err = ResolvePorts(&PortConfig{Pool: 1, Ports: []PortEntry{
+		{Name: "pool-1", ContainerPort: 3000},
+	}}, "/ws", 1)
+	if err == nil || !strings.Contains(err.Error(), "collides") {
+		t.Errorf("collision with a pool device must be a hard error, got: %v", err)
+	}
+}
+
+func TestRemoveStalePortDevices(t *testing.T) {
+	pub := &fakePublisher{devices: []string{"root", "coi-port-web", "socket-0", "coi-port-pool-1"}}
+	RemoveStalePortDevices(pub, func(string) {})
+	if len(pub.removed) != 2 || pub.removed[0] != "coi-port-web" || pub.removed[1] != "coi-port-pool-1" {
+		t.Errorf("expected exactly the coi-port-* devices removed, got %v", pub.removed)
+	}
+}
+
+// fakePublisher records device adds; failNames simulates bind races. It also
+// implements the scrubber side (ListDevices/RemoveDevice) for the stale-device
+// cleanup test.
 type fakePublisher struct {
 	added     []string
 	removed   []string
+	devices   []string
 	failNames map[string]bool
 }
 
@@ -142,6 +189,10 @@ func (f *fakePublisher) AddHostPortDevice(name, listenAddr string, hostPort, con
 func (f *fakePublisher) RemoveDevice(name string) error {
 	f.removed = append(f.removed, name)
 	return nil
+}
+
+func (f *fakePublisher) ListDevices() ([]string, error) {
+	return f.devices, nil
 }
 
 func TestPublishResolvedPorts(t *testing.T) {
@@ -167,9 +218,10 @@ func TestPublishResolvedPorts(t *testing.T) {
 	if env["COI_PORT_WEB"] == "" {
 		t.Error("COI_PORT_WEB missing")
 	}
-	// devices removed-then-added (stale-device tolerance)
-	if len(pub.removed) != 3 {
-		t.Errorf("expected 3 stale-device removals, got %d", len(pub.removed))
+	// Publishing is a plain add: stale devices are stripped up front by
+	// RemoveStalePortDevices, never per-entry here.
+	if len(pub.removed) != 0 {
+		t.Errorf("publish must not remove devices, removed %v", pub.removed)
 	}
 
 	// A bind race drops only the affected entry and keeps env truthful

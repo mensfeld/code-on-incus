@@ -108,10 +108,6 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 	result.ContainerName = containerName
 	result.Manager = container.NewManager(containerName)
 
-	// Port plan (filled pre-launch on the fresh path, at publish time on
-	// reuse); see ResolvePorts/PublishResolvedPorts.
-	var resolvedPorts []PublishedPort
-
 	hostHome, _ := os.UserHomeDir() // empty string on failure; logger.New handles it
 	result.Logger = logger.New(containerName, hostHome)
 	if w := result.Logger.InitWarning(); w != "" {
@@ -225,6 +221,11 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 				// The resume case covers post-reboot Incus stateful restore: a non-persistent
 				// container may be Running because Incus restored it; --resume should reuse it.
 				opts.Logger("Container already running, reusing...")
+				// Strip the previous session's port devices NOW, before the
+				// port preflight below bind-probes: their live forkproxy
+				// listeners would otherwise make the session collide with its
+				// own ports (pinned entries hard-fail, pool numbers drift).
+				RemoveStalePortDevices(result.Manager, opts.Logger)
 				skipLaunch = true
 			} else {
 				// A running container exists for this slot but we're not resuming or in
@@ -237,6 +238,11 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 				// Restart the stopped container
 				// This includes: persistent containers OR containers specified via --container flag
 				opts.Logger("Starting existing container...")
+				// Strip stale port devices while STOPPED: they would re-bind
+				// their old host ports at start (colliding with the preflight
+				// below, or failing the start outright if another process took
+				// a port meanwhile). The current plan is re-published later.
+				RemoveStalePortDevices(result.Manager, opts.Logger)
 				if err := result.Manager.Start(); err != nil {
 					return nil, fmt.Errorf("failed to start container: %w", err)
 				}
@@ -269,6 +275,63 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 				time.Sleep(500 * time.Millisecond)
 			}
 		}
+	}
+
+	// 4.6. Defense-in-depth: gate untrusted out-of-workspace mounts, untrusted
+	// forwarded sockets, untrusted ad-hoc credential entries, AND untrusted
+	// port publications at the single chokepoint every caller passes through.
+	// This deliberately runs on the REUSE paths too: sockets, credentials
+	// (resume), and ports are re-applied from the current config every
+	// session, so gating only at creation would let an untrusted repo config
+	// smuggle them onto a reused container. Mount devices are the exception —
+	// they persist from creation and can't be re-gated here, so on reuse we
+	// warn instead. Idempotent with the CLI-level gate: on the normal CLI
+	// flow these are already filtered, so this drops nothing.
+	gatedMC, droppedM, gatedSC, droppedS, gatedCC, droppedC, gatedPC, droppedP := FilterTrusted(opts.MountConfig, opts.SocketConfig, opts.CredentialConfig, opts.PortConfig, opts.WorkspacePath)
+	if skipLaunch && len(droppedM) > 0 {
+		opts.Logger(fmt.Sprintf(
+			"Warning: %d untrusted mount(s) remain attached from when this container was created; recreate it (coi kill + relaunch) to apply mount-trust changes",
+			len(droppedM),
+		))
+	} else {
+		for _, m := range droppedM {
+			opts.Logger(fmt.Sprintf(
+				"Warning: ignoring untrusted mount from %s: %s -> %s (resolves outside the workspace; run 'coi trust' or set %s=1)",
+				m.SourcePath, m.HostPath, m.ContainerPath, TrustEnvVar,
+			))
+		}
+	}
+	for _, s := range droppedS {
+		opts.Logger(fmt.Sprintf(
+			"Warning: ignoring untrusted socket from %s: %s -> %s (run 'coi trust' or set %s=1)",
+			s.SourcePath, s.HostPath, s.ContainerPath, TrustEnvVar,
+		))
+	}
+	for _, c := range droppedC {
+		opts.Logger(fmt.Sprintf(
+			"Warning: ignoring untrusted credential entry from %s: %s -> %s (run 'coi trust' or set %s=1)",
+			c.SourcePath, c.HostPath, c.ContainerPath, TrustEnvVar,
+		))
+	}
+	for _, p := range droppedP {
+		opts.Logger(fmt.Sprintf(
+			"Warning: ignoring untrusted %s from %s (a repo declaring host listeners can squat localhost ports; run 'coi trust' or set %s=1)",
+			DescribeDroppedPort(p), p.SourcePath, TrustEnvVar,
+		))
+	}
+	opts.MountConfig = gatedMC
+	opts.SocketConfig = gatedSC
+	opts.CredentialConfig = gatedCC
+	opts.PortConfig = gatedPC
+
+	// 4.7. Preflight the port plan BEFORE any container is created (fresh
+	// path) and AFTER stale port devices were stripped (reuse path, step 4):
+	// pinned host ports that are already taken abort here with a clear
+	// error, and auto/pool ports get their final numbers (busy ones skipped
+	// forward within the slot block). See ResolvePorts.
+	resolvedPorts, err := ResolvePorts(opts.PortConfig, opts.WorkspacePath, opts.Slot)
+	if err != nil {
+		return nil, fmt.Errorf("port preflight failed: %w", err)
 	}
 
 	// 5. Create and configure container (but don't start yet if we need to add devices)
@@ -342,53 +405,6 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 			} else {
 				opts.Logger(fmt.Sprintf("Set /tmp size to %s", opts.LimitsConfig.Disk.TmpfsSize))
 			}
-		}
-
-		// Defense-in-depth: gate untrusted out-of-workspace mounts, untrusted
-		// forwarded sockets, AND untrusted ad-hoc credential entries here,
-		// where a freshly-launched container is set up, so any caller of
-		// session.Setup that didn't pre-filter is still covered.
-		// (On container reuse this block is skipped along with the rest of setup;
-		// resources persist from creation; the run/shell reuse paths warn that
-		// trust changes need a recreate.) Idempotent with the CLI-level gate: on
-		// the normal CLI flow these are already filtered, so this drops nothing.
-		gatedMC, droppedM, gatedSC, droppedS, gatedCC, droppedC, gatedPC, droppedP := FilterTrusted(opts.MountConfig, opts.SocketConfig, opts.CredentialConfig, opts.PortConfig, opts.WorkspacePath)
-		for _, m := range droppedM {
-			opts.Logger(fmt.Sprintf(
-				"Warning: ignoring untrusted mount from %s: %s -> %s (resolves outside the workspace; run 'coi trust' or set %s=1)",
-				m.SourcePath, m.HostPath, m.ContainerPath, TrustEnvVar,
-			))
-		}
-		for _, s := range droppedS {
-			opts.Logger(fmt.Sprintf(
-				"Warning: ignoring untrusted socket from %s: %s -> %s (run 'coi trust' or set %s=1)",
-				s.SourcePath, s.HostPath, s.ContainerPath, TrustEnvVar,
-			))
-		}
-		for _, c := range droppedC {
-			opts.Logger(fmt.Sprintf(
-				"Warning: ignoring untrusted credential entry from %s: %s -> %s (run 'coi trust' or set %s=1)",
-				c.SourcePath, c.HostPath, c.ContainerPath, TrustEnvVar,
-			))
-		}
-		for _, p := range droppedP {
-			opts.Logger(fmt.Sprintf(
-				"Warning: ignoring untrusted port from %s: %q container:%d (a repo declaring host listeners can squat localhost ports; run 'coi trust' or set %s=1)",
-				p.SourcePath, p.Name, p.ContainerPort, TrustEnvVar,
-			))
-		}
-		opts.MountConfig = gatedMC
-		opts.SocketConfig = gatedSC
-		opts.CredentialConfig = gatedCC
-		opts.PortConfig = gatedPC
-
-		// Preflight the port plan BEFORE any container is created: pinned
-		// host ports that are already taken abort here with a clear error,
-		// and auto/pool ports get their final numbers (busy ones skipped
-		// forward within the slot block). See ResolvePorts.
-		resolvedPorts, err = ResolvePorts(opts.PortConfig, opts.WorkspacePath, opts.Slot)
-		if err != nil {
-			return nil, fmt.Errorf("port preflight failed: %w", err)
 		}
 
 		// Mount all configured directories
@@ -646,16 +662,8 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 	// sockets but pointing the other way): agent-started services become
 	// reachable as localhost:<port>, with the mapping exported to the
 	// session env (COI_PORTS / COI_PORT_<NAME>) and the sandbox context
-	// file (#558). Runs on reuse too — devices are re-added so allocation
-	// or config changes take effect. On the reuse path the resolve happens
-	// here (the pre-launch preflight block is skipped with the rest of
-	// fresh-launch setup; nothing was created, so a late error is safe).
-	if resolvedPorts == nil {
-		resolvedPorts, err = ResolvePorts(opts.PortConfig, opts.WorkspacePath, opts.Slot)
-		if err != nil {
-			return nil, fmt.Errorf("port preflight failed: %w", err)
-		}
-	}
+	// file (#558). The plan was trust-gated and resolved at step 4.6/4.7
+	// (after stale devices were stripped on reuse), so this is a plain add.
 	result.PublishedPorts, result.PortsEnv = PublishResolvedPorts(result.Manager, resolvedPorts, opts.Logger)
 
 	// 6.6.1. Prevent git from guessing commit identity from the container user.

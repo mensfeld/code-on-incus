@@ -16,6 +16,7 @@ a taken pinned port aborts the session BEFORE any container is created.
 
 import hashlib
 import os
+import re
 import socket
 import subprocess
 import time
@@ -23,7 +24,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from support.helpers import calculate_container_name
+from support.helpers import calculate_container_name, write_workspace_container_config
 
 SENTINEL = "PORT_SENTINEL_9917"
 
@@ -108,8 +109,6 @@ container = 3000
     # Ports come from this workspace's deterministic block; busy host ports
     # may shift entries forward within it, so assert membership + ordering
     # rather than exact values (the reachability tests pin the semantics).
-    import re
-
     m = re.search(r"POOL=\[(\d+) (\d+)\] WEB=\[(\d+)\]", result.stdout)
     assert m, f"env vars missing or malformed. Got:\n{result.stdout}\nstderr:{result.stderr}"
     p1, p2, web = int(m.group(1)), int(m.group(2)), int(m.group(3))
@@ -198,6 +197,60 @@ pool = 1
             proc.wait(timeout=60)
         except subprocess.TimeoutExpired:
             proc.kill()
+
+
+def test_ports_survive_persistent_reuse(coi_binary, cleanup_containers, workspace_dir):
+    """Reusing a persistent container must not collide with its own previous
+    port devices (regression: the stale proxy device re-bound the pinned host
+    port at start, so every reuse died with 'already in use'; pool/auto
+    numbers drifted forward each session)."""
+    pin = free_host_port()
+    write_ports_config(
+        workspace_dir,
+        f"""
+[ports]
+pool = 2
+
+[[ports.map]]
+name = "web"
+container = 8000
+host = {pin}
+""",
+    )
+    write_workspace_container_config(workspace_dir, persistent=True)
+
+    pools = []
+    for attempt in (1, 2):
+        result = subprocess.run(
+            [
+                coi_binary,
+                "run",
+                "--workspace",
+                workspace_dir,
+                "--",
+                "sh",
+                "-c",
+                'echo "POOL=[$COI_PORTS] WEB=[$COI_PORT_WEB]"',
+            ],
+            capture_output=True,
+            text=True,
+            timeout=180,
+            cwd=workspace_dir,
+        )
+        assert result.returncode == 0, f"run {attempt} must succeed. stderr: {result.stderr}"
+        assert "already in use" not in result.stderr, (
+            f"run {attempt} collided with its own previous devices. stderr: {result.stderr}"
+        )
+        assert f"WEB=[{pin}]" in result.stdout, (
+            f"run {attempt}: pinned port must stay {pin}. stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+        m = re.search(r"POOL=\[(\d+ \d+)\]", result.stdout)
+        assert m, f"run {attempt}: pool env missing. stdout: {result.stdout}"
+        pools.append(m.group(1))
+
+    # Pool numbers must not drift when the container is reused (the old bug:
+    # the session's own stale devices held them, pushing the pool forward).
+    assert pools[0] == pools[1], f"pool drifted across reuse: {pools[0]} -> {pools[1]}"
 
 
 def test_pinned_port_conflict_aborts_before_launch(coi_binary, cleanup_containers, workspace_dir):

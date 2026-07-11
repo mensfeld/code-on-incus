@@ -149,6 +149,22 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 			pc := ParsePortConfig(a.cfg)
 			s.mountConfig, s.socketConfig, s.portConfig = a.gateRunForwarding(mc, sc, pc, s.absWorkspace, s.wasRestarted)
 
+			// A reused persistent container still carries the previous
+			// session's port devices; strip them while it is STOPPED so they
+			// neither fail the start (a stale device whose old host port is
+			// now taken aborts the whole container start) nor linger for
+			// entries that were removed or untrusted since. The current plan
+			// is re-published after start.
+			// (Only when stopped: a RUNNING container belongs to a concurrent
+			// session — launchOrReuseContainer refuses it below — and its live
+			// port forwards must not be yanked here.)
+			if s.wasRestarted {
+				if running, _ := mgr.Running(); !running {
+					logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
+					session.RemoveStalePortDevices(mgr, logFn)
+				}
+			}
+
 			// Preflight the port plan BEFORE launching: pinned host ports
 			// already in use abort here; auto/pool ports get their final
 			// numbers (see session.ResolvePorts).

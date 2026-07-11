@@ -89,7 +89,7 @@ This container has ports published to the host machine.
 
 **Free ports for anything you start**: {{.PoolPortsDesc}}
 
-These are identity-mapped: if you bind a server to one of these port numbers inside the container (bind to 0.0.0.0 or 127.0.0.1 — both work), the user reaches it at `http://localhost:<the same number>` on their machine. When you start a web server or any service the user should access, bind it to one of these ports (e.g. `--port {{"{{first of the list}}"}}`) and tell the user the localhost URL. The list is also in the `COI_PORTS` environment variable.
+These are identity-mapped: if you bind a server to one of these port numbers inside the container (bind to 0.0.0.0 or 127.0.0.1 — both work), the user reaches it at `http://localhost:<the same number>` on their machine. When you start a web server or any service the user should access, bind it to one of these ports (e.g. `--port {{.FirstPoolPort}}`) and tell the user the localhost URL. The list is also in the `COI_PORTS` environment variable.
 {{- end}}
 {{- if .NamedPortsDesc}}
 

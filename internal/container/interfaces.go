@@ -26,6 +26,7 @@ type ContainerDevices interface {
 	AddProxyDevice(name, connect, listen string, uid, gid int) error
 	AddHostPortDevice(name, listenAddr string, hostPort, containerPort int) error
 	RemoveDevice(name string) error
+	ListDevices() ([]string, error)
 	SetTmpfsSize(size string) error
 }
 

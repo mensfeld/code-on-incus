@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"os/user"
@@ -133,9 +134,11 @@ func (m *Manager) AddProxyDevice(name, connect, listen string, uid, gid int) err
 // deliberately not used — the userspace forkproxy keeps COI's nft isolation
 // rules untouched (#558).
 func (m *Manager) AddHostPortDevice(name, listenAddr string, hostPort, containerPort int) error {
+	// net.JoinHostPort brackets IPv6 addresses ([::1]:8080) — Incus's proxy
+	// address parser requires that form; a bare "tcp:::1:8080" is rejected.
 	args := []string{
 		"config", "device", "add", m.ContainerName, name, "proxy",
-		fmt.Sprintf("listen=tcp:%s:%d", listenAddr, hostPort),
+		"listen=tcp:" + net.JoinHostPort(listenAddr, strconv.Itoa(hostPort)),
 		fmt.Sprintf("connect=tcp:127.0.0.1:%d", containerPort),
 		"bind=host",
 	}
@@ -145,6 +148,22 @@ func (m *Manager) AddHostPortDevice(name, listenAddr string, hostPort, container
 // RemoveDevice removes a device from the container (silently ignores if not found)
 func (m *Manager) RemoveDevice(name string) error {
 	return IncusExecQuiet("config", "device", "remove", m.ContainerName, name)
+}
+
+// ListDevices returns the names of the container's config devices
+// (`incus config device list`), one per line. Works on stopped containers.
+func (m *Manager) ListDevices() ([]string, error) {
+	out, err := IncusOutput("config", "device", "list", m.ContainerName)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, line := range strings.Split(out, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			names = append(names, line)
+		}
+	}
+	return names, nil
 }
 
 // SetTmpfsSize configures the tmpfs size for /tmp in the container

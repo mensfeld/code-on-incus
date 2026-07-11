@@ -183,6 +183,59 @@ func TestFilterTrusted_NeverGatesBundleCredentials(t *testing.T) {
 	}
 }
 
+func TestFilterTrusted_GatesUntrustedPorts(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv(TrustEnvVar, "")
+	ws := t.TempDir()
+	src := filepath.Join(ws, ".coi", "config.toml")
+
+	pc := &PortConfig{
+		Pool:           3,
+		PoolUntrusted:  true,
+		PoolSourcePath: src,
+		Ports: []PortEntry{
+			{Name: "pg", ContainerPort: 5432, HostPort: 5432, Untrusted: true, SourcePath: src},
+			{Name: "web", ContainerPort: 3000},
+		},
+	}
+
+	_, _, _, _, _, _, keptPC, dropped := FilterTrusted(nil, nil, nil, pc, ws)
+	if len(dropped) != 2 { // the pg entry plus the synthetic pool entry
+		t.Fatalf("expected untrusted entry + pool dropped, got %+v", dropped)
+	}
+	if keptPC.Pool != 0 {
+		t.Errorf("untrusted pool with no trusted fallback must drop to 0, got %d", keptPC.Pool)
+	}
+	if len(keptPC.Ports) != 1 || keptPC.Ports[0].Name != "web" {
+		t.Errorf("expected only the trusted-scope entry kept, got %+v", keptPC.Ports)
+	}
+}
+
+func TestFilterTrusted_UntrustedPoolRestoresTrustedFallback(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv(TrustEnvVar, "")
+	ws := t.TempDir()
+	src := filepath.Join(ws, ".coi", "config.toml")
+
+	// An untrusted repo pool=5 overwrote the user's own trusted pool=3 at
+	// merge time; dropping the overlay must restore 3, not disable the pool.
+	pc := &PortConfig{Pool: 5, PoolUntrusted: true, PoolSourcePath: src, PoolTrustedFallback: 3}
+
+	_, _, _, _, _, _, keptPC, dropped := FilterTrusted(nil, nil, nil, pc, ws)
+	if keptPC.Pool != 3 {
+		t.Errorf("dropped untrusted pool must restore the trusted fallback, got %d", keptPC.Pool)
+	}
+	if keptPC.PoolUntrusted {
+		t.Error("restored pool must not stay flagged untrusted")
+	}
+	if len(dropped) != 1 || dropped[0].Name != "pool of 5 ports" {
+		t.Errorf("dropped pool must be reported readably, got %+v", dropped)
+	}
+	if DescribeDroppedPort(dropped[0]) != "port pool of 5 ports" {
+		t.Errorf("DescribeDroppedPort rendering: %q", DescribeDroppedPort(dropped[0]))
+	}
+}
+
 func TestFilterTrusted_TrustAllEnvBypasses(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv(TrustEnvVar, "1")

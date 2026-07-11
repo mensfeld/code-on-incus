@@ -380,10 +380,11 @@ func FilterTrusted(mc *MountConfig, sc *SocketConfig, cc *CredentialConfig, pc *
 	var droppedPorts []PortEntry
 	if pc != nil {
 		keptPC = &PortConfig{
-			Pool:           pc.Pool,
-			PoolUntrusted:  pc.PoolUntrusted,
-			PoolSourcePath: pc.PoolSourcePath,
-			Ports:          make([]PortEntry, 0, len(pc.Ports)),
+			Pool:                pc.Pool,
+			PoolUntrusted:       pc.PoolUntrusted,
+			PoolSourcePath:      pc.PoolSourcePath,
+			PoolTrustedFallback: pc.PoolTrustedFallback,
+			Ports:               make([]PortEntry, 0, len(pc.Ports)),
 		}
 		for _, p := range pc.Ports {
 			if p.Untrusted && p.ContainerPort != 0 && !trusted[p.SourcePath] {
@@ -394,13 +395,18 @@ func FilterTrusted(mc *MountConfig, sc *SocketConfig, cc *CredentialConfig, pc *
 		}
 		if pc.Pool > 0 && pc.PoolUntrusted && !trusted[pc.PoolSourcePath] {
 			// Report the dropped pool as a synthetic entry so callers can
-			// warn uniformly; ContainerPort 0 marks it as the pool.
+			// warn uniformly; ContainerPort 0 marks it as the pool (see
+			// DescribeDroppedPort for how it is rendered).
 			droppedPorts = append(droppedPorts, PortEntry{
-				Name:       fmt.Sprintf("pool(%d)", pc.Pool),
+				Name:       fmt.Sprintf("pool of %d ports", pc.Pool),
 				SourcePath: pc.PoolSourcePath,
 				Untrusted:  true,
 			})
-			keptPC.Pool = 0
+			// An untrusted overlay must not disable the user's own pool: fall
+			// back to the last trusted value it overwrote (0 if none).
+			keptPC.Pool = pc.PoolTrustedFallback
+			keptPC.PoolUntrusted = false
+			keptPC.PoolSourcePath = ""
 		}
 	}
 

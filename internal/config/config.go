@@ -429,8 +429,12 @@ type PortsConfig struct {
 	// trusted+untrusted scopes gate independently. A repo declaring host
 	// listeners can squat well-known localhost ports, so untrusted
 	// pool/entries are gated behind explicit trust (`coi trust`).
-	PoolUntrusted  bool   `toml:"-"`
-	PoolSourcePath string `toml:"-"`
+	// PoolTrustedFallback remembers a trusted pool value that an untrusted
+	// overlay overwrote, so the trust gate restores it instead of dropping
+	// the user's own pool to zero (see mergePortsInto).
+	PoolUntrusted       bool   `toml:"-"`
+	PoolSourcePath      string `toml:"-"`
+	PoolTrustedFallback int    `toml:"-"`
 }
 
 // HasPorts reports whether the section declares anything to publish.
@@ -1129,22 +1133,42 @@ func mergeContainerInto(dst *ContainerConfig, src *ContainerConfig) {
 	mergeBuildInto(&dst.Build, &src.Build)
 }
 
-// mergePortsInto overlays src's ports section onto dst: a non-zero pool
-// wins, map entries append, and the untrusted provenance of the overlaying
-// source is preserved on what it contributed (section-level flags follow the
-// most recently contributing source, which for the untrusted-overlay case is
-// the project config being merged last).
+// mergePortsInto overlays src's ports section onto dst: a non-zero pool wins
+// (pool provenance follows the winning source), and map entries with a name
+// dst already has REPLACE the earlier entry while new names append — so
+// re-applying a profile synthesized from the merged config (the "default"
+// profile) is a no-op instead of doubling every entry, and a later scope can
+// override an earlier entry's ports without duplicating its device name.
+// When an UNTRUSTED pool overwrites a trusted one, the trusted value is
+// remembered in PoolTrustedFallback so the trust gate can fall back to it
+// instead of silently disabling the user's own pool.
 func mergePortsInto(dst, src *PortsConfig) {
 	if src == nil || !src.HasPorts() {
 		return
 	}
 	if src.Pool > 0 {
+		switch {
+		case src.PoolUntrusted && dst.Pool > 0 && !dst.PoolUntrusted:
+			dst.PoolTrustedFallback = dst.Pool
+		case !src.PoolUntrusted:
+			dst.PoolTrustedFallback = 0 // a trusted winner needs no fallback
+		}
 		dst.Pool = src.Pool
-	}
-	dst.Map = append(dst.Map, src.Map...)
-	if src.Pool > 0 && src.PoolUntrusted {
-		dst.PoolUntrusted = true
+		dst.PoolUntrusted = src.PoolUntrusted
 		dst.PoolSourcePath = src.PoolSourcePath
+	}
+	for _, e := range src.Map {
+		replaced := false
+		for i := range dst.Map {
+			if dst.Map[i].Name == e.Name {
+				dst.Map[i] = e
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			dst.Map = append(dst.Map, e)
+		}
 	}
 }
 

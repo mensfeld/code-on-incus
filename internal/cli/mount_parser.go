@@ -41,15 +41,17 @@ func warnDroppedSockets(dropped []session.SocketEntry) {
 	}
 }
 
-// ParseSocketConfig creates a SocketConfig from config file [[sockets]] entries.
 // warnDroppedPorts prints a per-port warning for untrusted, unapproved
 // published-port entries (a repo declaring host listeners can squat
 // well-known localhost ports).
 func warnDroppedPorts(dropped []session.PortEntry) {
 	for _, p := range dropped {
 		fmt.Fprintf(os.Stderr,
-			"Warning: ignoring untrusted port from %s: %q container:%d (run 'coi trust' or set %s=1)\n",
-			p.SourcePath, p.Name, p.ContainerPort, session.TrustEnvVar)
+			"WARNING: ignoring untrusted %s from project config %s:\n"+
+				"         a repo declaring host listeners can squat well-known localhost ports.\n"+
+				"         Run 'coi trust' to approve it (re-approval is required if the\n"+
+				"         config later changes), or set %s=1 for CI/automation.\n",
+			session.DescribeDroppedPort(p), p.SourcePath, session.TrustEnvVar)
 	}
 }
 
@@ -59,10 +61,11 @@ func warnDroppedPorts(dropped []session.PortEntry) {
 // slot is known.
 func ParsePortConfig(cfg *config.Config) *session.PortConfig {
 	pc := &session.PortConfig{
-		Pool:           cfg.Ports.Pool,
-		PoolUntrusted:  cfg.Ports.PoolUntrusted,
-		PoolSourcePath: cfg.Ports.PoolSourcePath,
-		Ports:          []session.PortEntry{},
+		Pool:                cfg.Ports.Pool,
+		PoolUntrusted:       cfg.Ports.PoolUntrusted,
+		PoolSourcePath:      cfg.Ports.PoolSourcePath,
+		PoolTrustedFallback: cfg.Ports.PoolTrustedFallback,
+		Ports:               []session.PortEntry{},
 	}
 	for _, p := range cfg.Ports.Map {
 		pc.Ports = append(pc.Ports, session.PortEntry{
@@ -77,6 +80,7 @@ func ParsePortConfig(cfg *config.Config) *session.PortConfig {
 	return pc
 }
 
+// ParseSocketConfig creates a SocketConfig from config file [[sockets]] entries.
 func ParseSocketConfig(cfg *config.Config) (*session.SocketConfig, error) {
 	sc := &session.SocketConfig{Sockets: []session.SocketEntry{}}
 	for i, s := range cfg.Sockets {

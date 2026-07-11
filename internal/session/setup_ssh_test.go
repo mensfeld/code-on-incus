@@ -44,9 +44,12 @@ func (f *fakeForwarder) RemoveDevice(name string) error {
 	return nil
 }
 
+func (f *fakeForwarder) ListDevices() ([]string, error) { return nil, nil }
+
 func (f *fakeForwarder) Exec(_ ...string) error                                    { return nil }
 func (f *fakeForwarder) ExecArgs(_ []string, _ container.ExecCommandOptions) error { return nil }
 func (f *fakeForwarder) ExecHostCommand(_ string, _ bool) (string, error)          { return "", nil }
+
 func (f *fakeForwarder) ExecArgsCapture(_ []string, _ container.ExecCommandOptions) (string, error) {
 	return "", nil
 }

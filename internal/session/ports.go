@@ -77,6 +77,17 @@ func portDeviceName(name string) string {
 	}, name))
 }
 
+// DescribeDroppedPort renders a trust-gated dropped port for warnings. The
+// dropped pool is reported by FilterTrusted as a synthetic entry with
+// ContainerPort 0, which would otherwise print as a nonsensical
+// `"pool(3)" container:0`.
+func DescribeDroppedPort(p PortEntry) string {
+	if p.ContainerPort == 0 {
+		return "port " + p.Name // synthetic pool entry, e.g. "pool of 3 ports"
+	}
+	return fmt.Sprintf("port %q (container:%d)", p.Name, p.ContainerPort)
+}
+
 // hostPortFree bind-probes a host port. Overridable in unit tests.
 var hostPortFree = func(listen string, port int) bool {
 	l, err := net.Listen("tcp", net.JoinHostPort(listen, strconv.Itoa(port)))
@@ -103,6 +114,14 @@ var hostPortFree = func(listen string, port int) bool {
 func ResolvePorts(pc *PortConfig, workspacePath string, slot int) ([]PublishedPort, error) {
 	if !pc.HasPorts() {
 		return nil, nil
+	}
+
+	// The allocation layout only holds for slots inside one workspace
+	// neighborhood; a larger (or non-positive) slot would silently compute
+	// ports inside ANOTHER workspace's block. Container naming tolerates any
+	// --slot value, so this is checked here, where it becomes harmful.
+	if maxSlots := neighborhoodSize / slotStride; slot < 1 || slot > maxSlots {
+		return nil, fmt.Errorf("[ports] requires a slot between 1 and %d (got %d): auto-allocated ports are laid out in per-slot blocks of %d", maxSlots, slot, slotStride)
 	}
 
 	autoNeeded := pc.Pool
@@ -147,6 +166,28 @@ func ResolvePorts(pc *PortConfig, workspacePath string, slot int) ([]PublishedPo
 		})
 	}
 
+	// Device and env names are derived from entry names by a LOSSY mapping
+	// (non-alphanumerics collapse), and merged configs can carry entries from
+	// several scopes that per-profile validation never saw together — so
+	// near-duplicates ("web_1" vs "web-1", or a literal "pool-1" vs the
+	// pool's synthetic device) must be a hard error here, not a silent
+	// last-writer-wins clobber at publish time.
+	seenDevice := map[string]string{}
+	seenEnv := map[string]string{}
+	for _, p := range resolved { // the pool's synthetic names claim theirs first
+		seenDevice[p.DeviceName] = p.Name
+	}
+	for _, e := range pc.Ports {
+		if prev, ok := seenDevice[portDeviceName(e.Name)]; ok {
+			return nil, fmt.Errorf("ports.map %q collides with %q: both map to device %q — rename one", e.Name, prev, portDeviceName(e.Name))
+		}
+		seenDevice[portDeviceName(e.Name)] = e.Name
+		if prev, ok := seenEnv[portEnvVar(e.Name)]; ok {
+			return nil, fmt.Errorf("ports.map %q collides with %q: both map to env var %s — rename one", e.Name, prev, portEnvVar(e.Name))
+		}
+		seenEnv[portEnvVar(e.Name)] = e.Name
+	}
+
 	for _, e := range pc.Ports {
 		listen := e.Listen
 		if listen == "" {
@@ -180,16 +221,44 @@ func ResolvePorts(pc *PortConfig, workspacePath string, slot int) ([]PublishedPo
 // kept small so it can be faked in unit tests (like socketForwarder).
 type portPublisher interface {
 	AddHostPortDevice(name, listenAddr string, hostPort, containerPort int) error
+}
+
+// portDeviceScrubber is the container API slice RemoveStalePortDevices needs.
+type portDeviceScrubber interface {
+	ListDevices() ([]string, error)
 	RemoveDevice(name string) error
+}
+
+// RemoveStalePortDevices strips ALL coi-port-* proxy devices from a reused
+// container BEFORE ports are resolved. This matters twice over: the previous
+// session's devices re-bind their host ports the moment the container runs,
+// so a later bind-probe would see the session's OWN ports as busy (pinned
+// entries would hard-fail every reuse, pool numbers would drift); and devices
+// whose entries were renamed, deleted, or newly dropped by the trust gate
+// would otherwise keep publishing forever. The current session's devices are
+// re-added by PublishResolvedPorts. No-op on containers without port devices.
+func RemoveStalePortDevices(mgr portDeviceScrubber, logger func(string)) {
+	devices, err := mgr.ListDevices()
+	if err != nil {
+		logger(fmt.Sprintf("Warning: could not list devices to clean stale port publications: %v", err))
+		return
+	}
+	for _, d := range devices {
+		if strings.HasPrefix(d, "coi-port-") {
+			if err := mgr.RemoveDevice(d); err != nil {
+				logger(fmt.Sprintf("Warning: could not remove stale port device %s: %v", d, err))
+			}
+		}
+	}
 }
 
 // PublishResolvedPorts attaches a proxy device per resolved port and returns
 // the live set plus the session env: COI_PORT_<NAME> per map entry and
 // COI_PORTS with the space-separated pool numbers. Per-entry failures (a
 // port grabbed since the preflight) are logged as warnings, not fatal — the
-// entry is simply absent so env and context stay truthful. Devices are
-// removed and re-added so reused/persistent containers pick up allocation
-// or config changes instead of failing on a stale device.
+// entry is simply absent so env and context stay truthful. Reused containers
+// have their previous port devices stripped up front (RemoveStalePortDevices,
+// before the bind-probe), so publishing is a plain add.
 func PublishResolvedPorts(mgr portPublisher, resolved []PublishedPort, logger func(string)) ([]PublishedPort, map[string]string) {
 	if len(resolved) == 0 {
 		return nil, nil
@@ -198,7 +267,6 @@ func PublishResolvedPorts(mgr portPublisher, resolved []PublishedPort, logger fu
 	env := map[string]string{}
 	var poolPorts []string
 	for _, p := range resolved {
-		_ = mgr.RemoveDevice(p.DeviceName) // stale device from a previous session; quiet if absent
 		if err := mgr.AddHostPortDevice(p.DeviceName, p.Listen, p.HostPort, p.ContainerPort); err != nil {
 			logger(fmt.Sprintf("Warning: could not publish port %q (%s:%d -> container:%d): %v — was the host port grabbed since preflight?",
 				p.Name, p.Listen, p.HostPort, p.ContainerPort, err))
@@ -228,6 +296,7 @@ func publishedPortInfos(ports []PublishedPort) []tool.PortInfo {
 			Name:          p.Name,
 			HostPort:      p.HostPort,
 			ContainerPort: p.ContainerPort,
+			Listen:        p.Listen,
 			Pool:          p.Pool,
 			EnvVar:        p.EnvVar,
 		})

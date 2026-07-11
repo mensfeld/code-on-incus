@@ -68,8 +68,11 @@ type PortConfig struct {
 
 	// PoolUntrusted/PoolSourcePath: set when the pool value came from an
 	// untrusted project-scope config (map entries carry per-entry flags).
-	PoolUntrusted  bool
-	PoolSourcePath string
+	// PoolTrustedFallback is the trusted pool value the untrusted overlay
+	// overwrote, restored by FilterTrusted when the overlay is unapproved.
+	PoolUntrusted       bool
+	PoolSourcePath      string
+	PoolTrustedFallback int
 }
 
 // HasPorts reports whether there is anything to publish.
