@@ -318,9 +318,7 @@ pool = 1
         m = re.search(r"POOL=\[(\d+)\]", result.stdout)
         assert m, f"pool env missing. stdout: {result.stdout}\nstderr: {result.stderr}"
         port = int(m.group(1))
-        assert port != expected, (
-            f"busy port {expected} must be skipped, but was allocated anyway"
-        )
+        assert port != expected, f"busy port {expected} must be skipped, but was allocated anyway"
         assert expected < port < expected + 10, (
             f"skip must stay within this slot's block [{expected}, {expected + 9}], got {port}"
         )
