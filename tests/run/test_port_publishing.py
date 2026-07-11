@@ -15,6 +15,7 @@ a taken pinned port aborts the session BEFORE any container is created.
 """
 
 import hashlib
+import json
 import os
 import re
 import socket
@@ -251,6 +252,28 @@ host = {pin}
     # Pool numbers must not drift when the container is reused (the old bug:
     # the session's own stale devices held them, pushing the pool forward).
     assert pools[0] == pools[1], f"pool drifted across reuse: {pools[0]} -> {pools[1]}"
+
+    # `coi list --format json` surfaces the published ports, parsed from the
+    # same incus list payload (the persistent container keeps its devices
+    # while stopped): pool ports as bare numbers, named entries as
+    # name:host->container.
+    listed = subprocess.run(
+        [coi_binary, "list", "--format", "json"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=workspace_dir,
+    )
+    assert listed.returncode == 0, f"coi list failed. stderr: {listed.stderr}"
+    data = json.loads(listed.stdout)
+    container_name = calculate_container_name(workspace_dir, 1)
+    ours = [c for c in data["active_containers"] if c["name"] == container_name]
+    assert ours, f"container {container_name} missing from coi list. Got: {data}"
+    ports = ours[0]["published_ports"]
+    assert f"web:{pin}->8000" in ports, f"pinned entry missing from coi list ports: {ports}"
+    pool_numbers = pools[0].split(" ")
+    for p in pool_numbers:
+        assert p in ports, f"pool port {p} missing from coi list ports: {ports}"
 
 
 def test_busy_pool_port_skips_forward(coi_binary, cleanup_containers, workspace_dir):

@@ -1,6 +1,9 @@
 package cli
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestResolveStatusFilter(t *testing.T) {
 	tests := []struct {
@@ -116,9 +119,50 @@ func TestFilterContainersByStatus(t *testing.T) {
 		want := newContainers()
 		filterContainersByStatus(containers, "running")
 		for i := range want {
-			if containers[i] != want[i] {
+			if !reflect.DeepEqual(containers[i], want[i]) {
 				t.Errorf("input[%d] was mutated: got %+v, want %+v", i, containers[i], want[i])
 			}
 		}
 	})
+}
+
+// extractPublishedPorts must render coi-port-* proxy devices from the incus
+// list JSON: pool devices as the bare identity number, named entries as
+// name:host->container (listen address prefixed when not loopback), sorted by
+// host port, ignoring non-port devices entirely.
+func TestExtractPublishedPorts(t *testing.T) {
+	c := map[string]interface{}{
+		"expanded_devices": map[string]interface{}{
+			"root":     map[string]interface{}{"type": "disk", "pool": "default"},
+			"socket-0": map[string]interface{}{"type": "proxy", "listen": "unix:/run/x.sock", "connect": "unix:/tmp/x.sock"},
+			"coi-port-pool-1": map[string]interface{}{
+				"type": "proxy", "listen": "tcp:127.0.0.1:23410", "connect": "tcp:127.0.0.1:23410",
+			},
+			"coi-port-web": map[string]interface{}{
+				"type": "proxy", "listen": "tcp:127.0.0.1:23412", "connect": "tcp:127.0.0.1:3000",
+			},
+			"coi-port-lan": map[string]interface{}{
+				"type": "proxy", "listen": "tcp:0.0.0.0:8080", "connect": "tcp:127.0.0.1:8080",
+			},
+			"coi-port-v6": map[string]interface{}{
+				"type": "proxy", "listen": "tcp:[::1]:9090", "connect": "tcp:127.0.0.1:3001",
+			},
+		},
+	}
+
+	got := extractPublishedPorts(c)
+	want := []string{"lan:0.0.0.0:8080->8080", "v6:::1:9090->3001", "23410", "web:23412->3000"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("port[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+
+	// No devices → nothing rendered
+	if got := extractPublishedPorts(map[string]interface{}{}); len(got) != 0 {
+		t.Errorf("expected no ports without expanded_devices, got %v", got)
+	}
 }
