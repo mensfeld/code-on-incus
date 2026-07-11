@@ -45,12 +45,19 @@ def test_tmux_send_command(coi_binary, cleanup_containers, workspace_dir):
     tmux_session = f"coi-{container_name}"
 
     # Start a tmux session with a shell
+    # Create the session as the code user (uid 1000 in coi-default), matching
+    # what `coi shell --background` produces — tmux sockets are per-user, and
+    # the helpers must find the code user's socket, not root's (#588).
     result = subprocess.run(
         [
             coi_binary,
             "container",
             "exec",
             container_name,
+            "--user",
+            "1000",
+            "--group",
+            "1000",
             "--",
             "tmux",
             "new-session",
@@ -92,6 +99,10 @@ def test_tmux_send_command(coi_binary, cleanup_containers, workspace_dir):
             "container",
             "exec",
             "--capture",
+            "--user",
+            "1000",
+            "--group",
+            "1000",
             container_name,
             "--",
             "tmux",

@@ -134,10 +134,16 @@ func attachToContainer(containerName string) error {
 	// Get workspace path from container's device config
 	workspacePath := mgr.GetWorkspacePath()
 
-	// Execute as code user with proper environment setup
-	user := container.CodeUID
+	// Attach as the container's ACTUAL code UID, not the config-derived one:
+	// the tmux socket lives at /tmp/tmux-<uid> of whoever created the
+	// session, which config can misstate after remaps or for root-session
+	// images (#588 — same resolution as the coi tmux helpers).
+	user, err := tmuxExecUser(mgr)
+	if err != nil {
+		return err
+	}
 	opts := container.ExecCommandOptions{
-		User:        &user,
+		User:        user,
 		Cwd:         workspacePath,
 		Interactive: true,
 		Env: map[string]string{
@@ -148,7 +154,7 @@ func attachToContainer(containerName string) error {
 	// Use ExecArgs instead of ExecCommand to avoid bash -c wrapper
 	// tmux attach needs direct terminal access
 	commandArgs := []string{"tmux", "attach", "-t", tmuxSessionName}
-	err := mgr.ExecArgs(commandArgs, opts)
+	err = mgr.ExecArgs(commandArgs, opts)
 	if err != nil {
 		errStr := err.Error()
 		// Exit status 143 = SIGTERM (128+15), happens when container shuts down
@@ -175,15 +181,19 @@ func attachToContainerWithBash(containerName string) error {
 	// Get workspace path from container's device config
 	workspacePath := mgr.GetWorkspacePath()
 
-	// Execute bash as code user
-	user := container.CodeUID
+	// Execute bash as the container's actual code user (same resolution as
+	// tmux attach above — config-derived CodeUID can misstate it, #588)
+	user, err := tmuxExecUser(mgr)
+	if err != nil {
+		return err
+	}
 	opts := container.ExecCommandOptions{
-		User:        &user,
+		User:        user,
 		Cwd:         workspacePath,
 		Interactive: true,
 	}
 
-	_, err := mgr.ExecCommand("exec bash", opts)
+	_, err = mgr.ExecCommand("exec bash", opts)
 	if err != nil {
 		// Handle expected exit conditions gracefully
 		errStr := err.Error()
