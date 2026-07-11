@@ -18,9 +18,10 @@ func allFree(string, int) bool { return true }
 
 func TestAllocateHostPort(t *testing.T) {
 	ws := "/some/workspace"
-	// Deterministic
-	if AllocateHostPort(ws, 1, 0) != AllocateHostPort(ws, 1, 0) {
-		t.Error("allocation must be deterministic")
+	// Deterministic across calls
+	first := AllocateHostPort(ws, 1, 0)
+	if again := AllocateHostPort(ws, 1, 0); again != first {
+		t.Errorf("allocation must be deterministic: %d then %d", first, again)
 	}
 	// Slot stride: slot 2 is exactly one block above slot 1
 	if AllocateHostPort(ws, 2, 0)-AllocateHostPort(ws, 1, 0) != slotStride {
@@ -137,6 +138,7 @@ func (f *fakePublisher) AddHostPortDevice(name, listenAddr string, hostPort, con
 	f.added = append(f.added, fmt.Sprintf("%s=%s:%d->%d", name, listenAddr, hostPort, containerPort))
 	return nil
 }
+
 func (f *fakePublisher) RemoveDevice(name string) error {
 	f.removed = append(f.removed, name)
 	return nil

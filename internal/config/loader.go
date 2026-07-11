@@ -433,7 +433,8 @@ func loadProfileDirectories(cfg *Config, configDir string, trusted bool) error {
 			return fmt.Errorf(
 				"profile %q defined in multiple locations:\n  %s\n  %s\n"+
 					"Rename one of them or delete the duplicate so it's clear which profile is being used",
-				profileName, existing.Source, profileConfigPath)
+				profileName, existing.Source, profileConfigPath,
+			)
 		}
 
 		var profileCfg ProfileConfig

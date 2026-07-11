@@ -153,7 +153,8 @@ func (a *App) runCommand(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	return pipeline.Run(ctx,
+	return pipeline.Run(
+		ctx,
 		a.validateEnvRunPhase(s),
 		a.launchContainerRunPhase(s),
 		a.configureContainerRunPhase(s),

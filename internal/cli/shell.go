@@ -115,7 +115,8 @@ func (a *App) shellCommand(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	return pipeline.Run(ctx,
+	return pipeline.Run(
+		ctx,
 		a.resolveWorkspacePhase(cmd, s),
 		a.validateEnvPhase(cmd, s),
 		a.configureSessionPhase(cmd, s),

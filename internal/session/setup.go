@@ -356,22 +356,26 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		for _, m := range droppedM {
 			opts.Logger(fmt.Sprintf(
 				"Warning: ignoring untrusted mount from %s: %s -> %s (resolves outside the workspace; run 'coi trust' or set %s=1)",
-				m.SourcePath, m.HostPath, m.ContainerPath, TrustEnvVar))
+				m.SourcePath, m.HostPath, m.ContainerPath, TrustEnvVar,
+			))
 		}
 		for _, s := range droppedS {
 			opts.Logger(fmt.Sprintf(
 				"Warning: ignoring untrusted socket from %s: %s -> %s (run 'coi trust' or set %s=1)",
-				s.SourcePath, s.HostPath, s.ContainerPath, TrustEnvVar))
+				s.SourcePath, s.HostPath, s.ContainerPath, TrustEnvVar,
+			))
 		}
 		for _, c := range droppedC {
 			opts.Logger(fmt.Sprintf(
 				"Warning: ignoring untrusted credential entry from %s: %s -> %s (run 'coi trust' or set %s=1)",
-				c.SourcePath, c.HostPath, c.ContainerPath, TrustEnvVar))
+				c.SourcePath, c.HostPath, c.ContainerPath, TrustEnvVar,
+			))
 		}
 		for _, p := range droppedP {
 			opts.Logger(fmt.Sprintf(
 				"Warning: ignoring untrusted port from %s: %q container:%d (a repo declaring host listeners can squat localhost ports; run 'coi trust' or set %s=1)",
-				p.SourcePath, p.Name, p.ContainerPort, TrustEnvVar))
+				p.SourcePath, p.Name, p.ContainerPort, TrustEnvVar,
+			))
 		}
 		opts.MountConfig = gatedMC
 		opts.SocketConfig = gatedSC
