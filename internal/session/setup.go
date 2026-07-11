@@ -35,6 +35,7 @@ type SetupOptions struct {
 	MountConfig           *MountConfig      // Multi-mount support
 	SocketConfig          *SocketConfig     // Forwarded host unix sockets
 	CredentialConfig      *CredentialConfig // Configured [[credentials]] entries (catalog + ad-hoc)
+	PortConfig            *PortConfig       // Configured [[ports]] entries to publish on the host (#558)
 	SessionsDir           string            // e.g., ~/.coi/sessions-claude
 	CLIConfigPath         string            // e.g., ~/.claude (host CLI config to copy credentials from)
 	Tool                  tool.Tool         // AI coding tool being used
@@ -73,6 +74,8 @@ type SetupResult struct {
 	ContainerWorkspacePath string            // Path where workspace is mounted inside container (default: /workspace)
 	SSHAgentSocketPath     string            // SSH agent socket path in container (empty if not forwarded)
 	SocketEnv              map[string]string // env var name -> in-container path for all forwarded sockets
+	PortsEnv               map[string]string // env var name -> host port for all published [[ports]]
+	PublishedPorts         []PublishedPort   // ports published on the host this session (for the context file)
 	Timezone               string            // Resolved timezone applied to the container (empty = UTC)
 	HasImmutableProtection bool              // True if host-side immutable attribute was applied to protected paths
 }
@@ -104,6 +107,10 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 	}
 	result.ContainerName = containerName
 	result.Manager = container.NewManager(containerName)
+
+	// Port plan (filled pre-launch on the fresh path, at publish time on
+	// reuse); see ResolvePorts/PublishResolvedPorts.
+	var resolvedPorts []PublishedPort
 
 	hostHome, _ := os.UserHomeDir() // empty string on failure; logger.New handles it
 	result.Logger = logger.New(containerName, hostHome)
@@ -345,7 +352,7 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		// resources persist from creation; the run/shell reuse paths warn that
 		// trust changes need a recreate.) Idempotent with the CLI-level gate: on
 		// the normal CLI flow these are already filtered, so this drops nothing.
-		gatedMC, droppedM, gatedSC, droppedS, gatedCC, droppedC := FilterTrusted(opts.MountConfig, opts.SocketConfig, opts.CredentialConfig, opts.WorkspacePath)
+		gatedMC, droppedM, gatedSC, droppedS, gatedCC, droppedC, gatedPC, droppedP := FilterTrusted(opts.MountConfig, opts.SocketConfig, opts.CredentialConfig, opts.PortConfig, opts.WorkspacePath)
 		for _, m := range droppedM {
 			opts.Logger(fmt.Sprintf(
 				"Warning: ignoring untrusted mount from %s: %s -> %s (resolves outside the workspace; run 'coi trust' or set %s=1)",
@@ -361,9 +368,24 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 				"Warning: ignoring untrusted credential entry from %s: %s -> %s (run 'coi trust' or set %s=1)",
 				c.SourcePath, c.HostPath, c.ContainerPath, TrustEnvVar))
 		}
+		for _, p := range droppedP {
+			opts.Logger(fmt.Sprintf(
+				"Warning: ignoring untrusted port from %s: %q container:%d (a repo declaring host listeners can squat localhost ports; run 'coi trust' or set %s=1)",
+				p.SourcePath, p.Name, p.ContainerPort, TrustEnvVar))
+		}
 		opts.MountConfig = gatedMC
 		opts.SocketConfig = gatedSC
 		opts.CredentialConfig = gatedCC
+		opts.PortConfig = gatedPC
+
+		// Preflight the port plan BEFORE any container is created: pinned
+		// host ports that are already taken abort here with a clear error,
+		// and auto/pool ports get their final numbers (busy ones skipped
+		// forward within the slot block). See ResolvePorts.
+		resolvedPorts, err = ResolvePorts(opts.PortConfig, opts.WorkspacePath, opts.Slot)
+		if err != nil {
+			return nil, fmt.Errorf("port preflight failed: %w", err)
+		}
 
 		// Mount all configured directories
 		if err := setupMounts(result.Manager, opts.MountConfig, useShift, opts.Logger); err != nil {
@@ -616,6 +638,22 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 	result.SocketEnv = ForwardConfiguredSockets(result.Manager, opts.SocketConfig, opts.ForwardSSHAgent, opts.Logger)
 	result.SSHAgentSocketPath = result.SocketEnv["SSH_AUTH_SOCK"]
 
+	// 6.6.05. Publish configured [ports] on the host (proxy devices, like
+	// sockets but pointing the other way): agent-started services become
+	// reachable as localhost:<port>, with the mapping exported to the
+	// session env (COI_PORTS / COI_PORT_<NAME>) and the sandbox context
+	// file (#558). Runs on reuse too — devices are re-added so allocation
+	// or config changes take effect. On the reuse path the resolve happens
+	// here (the pre-launch preflight block is skipped with the rest of
+	// fresh-launch setup; nothing was created, so a late error is safe).
+	if resolvedPorts == nil {
+		resolvedPorts, err = ResolvePorts(opts.PortConfig, opts.WorkspacePath, opts.Slot)
+		if err != nil {
+			return nil, fmt.Errorf("port preflight failed: %w", err)
+		}
+	}
+	result.PublishedPorts, result.PortsEnv = PublishResolvedPorts(result.Manager, resolvedPorts, opts.Logger)
+
 	// 6.6.1. Prevent git from guessing commit identity from the container user.
 	// Setting user.useConfigOnly=true forces git to refuse commits until
 	// user.name and user.email are explicitly configured, which ensures AI
@@ -826,6 +864,7 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 			ForwardedEnvVars:   opts.ForwardedEnvVars,
 			Timezone:           result.Timezone,
 			ExtraMounts:        extraMounts,
+			PublishedPorts:     publishedPortInfos(result.PublishedPorts),
 			CPULimit:           cpuLimit,
 			MemoryLimit:        memoryLimit,
 			MaxDuration:        maxDuration,

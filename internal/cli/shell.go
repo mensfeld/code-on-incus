@@ -257,6 +257,12 @@ func (a *App) buildContainerEnv(result *session.SetupResult) (map[string]string,
 		containerEnv[env] = path
 	}
 
+	// Published [[ports]]: tell the session which host port each service
+	// landed on (COI_PORT_<NAME> -> host port, #558).
+	for env, port := range result.PortsEnv {
+		containerEnv[env] = port
+	}
+
 	// Set TZ if timezone was configured
 	if result.Timezone != "" {
 		containerEnv["TZ"] = result.Timezone

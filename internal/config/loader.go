@@ -139,6 +139,7 @@ func loadConfigFileScoped(cfg *Config, path string, trusted bool) error {
 		sanitizeUntrustedConfig(&fileCfg, path)
 		markUntrustedMounts(fileCfg.Mounts.Default, path)
 		markUntrustedSockets(fileCfg.Sockets, path)
+		markUntrustedPorts(&fileCfg.Ports, path)
 		markUntrustedCredentials(fileCfg.Credentials, path)
 	}
 
@@ -339,6 +340,29 @@ func markUntrustedSockets(sockets []SocketEntry, path string) {
 	}
 }
 
+// markUntrustedPorts tags a [ports] section from an untrusted source so it
+// is gated behind explicit trust (internal/session/trust.go): a repo
+// declaring host listeners can squat well-known localhost ports (e.g. a fake
+// postgres on 5432 capturing the host's own local connections). The flag is
+// section-level and covers the pool and every map entry.
+func markUntrustedPorts(ports *PortsConfig, path string) {
+	if ports == nil || !ports.HasPorts() {
+		return
+	}
+	src := path
+	if abs, err := filepath.Abs(path); err == nil {
+		src = abs
+	}
+	if ports.Pool > 0 {
+		ports.PoolUntrusted = true
+		ports.PoolSourcePath = src
+	}
+	for i := range ports.Map {
+		ports.Map[i].Untrusted = true
+		ports.Map[i].SourcePath = src
+	}
+}
+
 // markUntrustedCredentials tags credential entries from an untrusted source so
 // ad-hoc entries are gated behind explicit trust at apply time
 // (internal/session/trust.go). Like markUntrustedMounts, a path-resolution
@@ -457,6 +481,7 @@ func loadProfileDirectories(cfg *Config, configDir string, trusted bool) error {
 			sanitizeUntrustedGit(profileCfg.Git, profileConfigPath)
 			markUntrustedMounts(profileCfg.Mounts, profileConfigPath)
 			markUntrustedSockets(profileCfg.Sockets, profileConfigPath)
+			markUntrustedPorts(profileCfg.Ports, profileConfigPath)
 			markUntrustedCredentials(profileCfg.Credentials, profileConfigPath)
 			if len(profileCfg.EnvCommands) > 0 {
 				fmt.Fprintf(os.Stderr,

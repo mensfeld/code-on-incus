@@ -204,12 +204,27 @@ func untrustedCredentials(creds []CredentialEntry) []CredentialEntry {
 	return out
 }
 
+// untrustedPorts returns the untrusted published-port entries — the gated
+// set. A host port listener exposes a host capability (and can squat
+// well-known localhost ports another host process would connect to), so ALL
+// untrusted entries need approval, like forwarded sockets.
+func untrustedPorts(ports []PortEntry) []PortEntry {
+	var out []PortEntry
+	for _, p := range ports {
+		if p.Untrusted && p.ContainerPort != 0 {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // sourceFingerprint returns a stable sha256 over the gated mounts, sockets,
-// and ad-hoc credential entries a single source declares (order-independent).
+// ad-hoc credential, and published-port entries a single source declares
+// (order-independent).
 // Adding/removing/changing any gated resource changes the hash and re-arms
 // the trust prompt; unrelated config edits do not. Lines are type-prefixed
 // and %q-quoted so distinct sets cannot collide via embedded separators.
-func sourceFingerprint(mounts []MountEntry, sockets []SocketEntry, creds []CredentialEntry) string {
+func sourceFingerprint(mounts []MountEntry, sockets []SocketEntry, creds []CredentialEntry, ports []PortEntry, pool int) string {
 	lines := make([]string, 0, len(mounts)+len(sockets)+len(creds))
 	for _, m := range mounts {
 		lines = append(lines, fmt.Sprintf("mount:%q|%q|%t", m.HostPath, m.ContainerPath, m.Readonly))
@@ -220,6 +235,12 @@ func sourceFingerprint(mounts []MountEntry, sockets []SocketEntry, creds []Crede
 	for _, c := range creds {
 		lines = append(lines, fmt.Sprintf("credential:%q|%q|%q", c.HostPath, c.ContainerPath, c.Mode))
 	}
+	for _, p := range ports {
+		lines = append(lines, fmt.Sprintf("port:%q|%d|%d|%q", p.Name, p.ContainerPort, p.HostPort, p.Listen))
+	}
+	if pool > 0 {
+		lines = append(lines, fmt.Sprintf("port-pool:%d", pool))
+	}
 	sort.Strings(lines)
 	sum := sha256.Sum256([]byte(strings.Join(lines, "\n")))
 	return hex.EncodeToString(sum[:])
@@ -228,7 +249,7 @@ func sourceFingerprint(mounts []MountEntry, sockets []SocketEntry, creds []Crede
 // trustedSources computes, per source path, whether the source's gated
 // mounts, sockets, and ad-hoc credentials are all approved (combined
 // fingerprint matches the store).
-func trustedSources(mc *MountConfig, sc *SocketConfig, cc *CredentialConfig, workspace string, store map[string]string) map[string]bool {
+func trustedSources(mc *MountConfig, sc *SocketConfig, cc *CredentialConfig, pc *PortConfig, workspace string, store map[string]string) map[string]bool {
 	mountsBySrc := map[string][]MountEntry{}
 	if mc != nil {
 		for _, m := range escapingUntrustedMounts(mc.Mounts, workspace) {
@@ -247,6 +268,16 @@ func trustedSources(mc *MountConfig, sc *SocketConfig, cc *CredentialConfig, wor
 			credsBySrc[c.SourcePath] = append(credsBySrc[c.SourcePath], c)
 		}
 	}
+	portsBySrc := map[string][]PortEntry{}
+	poolBySrc := map[string]int{}
+	if pc != nil {
+		for _, p := range untrustedPorts(pc.Ports) {
+			portsBySrc[p.SourcePath] = append(portsBySrc[p.SourcePath], p)
+		}
+		if pc.Pool > 0 && pc.PoolUntrusted {
+			poolBySrc[pc.PoolSourcePath] = pc.Pool
+		}
+	}
 	srcs := map[string]bool{}
 	for src := range mountsBySrc {
 		srcs[src] = true
@@ -257,9 +288,15 @@ func trustedSources(mc *MountConfig, sc *SocketConfig, cc *CredentialConfig, wor
 	for src := range credsBySrc {
 		srcs[src] = true
 	}
+	for src := range portsBySrc {
+		srcs[src] = true
+	}
+	for src := range poolBySrc {
+		srcs[src] = true
+	}
 	out := map[string]bool{}
 	for src := range srcs {
-		out[src] = store[src] != "" && store[src] == sourceFingerprint(mountsBySrc[src], socketsBySrc[src], credsBySrc[src])
+		out[src] = store[src] != "" && store[src] == sourceFingerprint(mountsBySrc[src], socketsBySrc[src], credsBySrc[src], portsBySrc[src], poolBySrc[src])
 	}
 	return out
 }
@@ -270,9 +307,9 @@ func trustedSources(mc *MountConfig, sc *SocketConfig, cc *CredentialConfig, wor
 // set). Returns filtered configs plus the dropped resources (so the caller
 // can warn). Trusted-scope and in-workspace mounts are never gated;
 // catalog-referenced credential entries (BundleName != "") are never gated.
-func FilterTrusted(mc *MountConfig, sc *SocketConfig, cc *CredentialConfig, workspace string) (*MountConfig, []MountEntry, *SocketConfig, []SocketEntry, *CredentialConfig, []CredentialEntry) {
+func FilterTrusted(mc *MountConfig, sc *SocketConfig, cc *CredentialConfig, pc *PortConfig, workspace string) (*MountConfig, []MountEntry, *SocketConfig, []SocketEntry, *CredentialConfig, []CredentialEntry, *PortConfig, []PortEntry) {
 	if TrustAllViaEnv() {
-		return mc, nil, sc, nil, cc, nil
+		return mc, nil, sc, nil, cc, nil, pc, nil
 	}
 	// Cheap exit when there's nothing gated, before loading the store.
 	var escMounts []MountEntry
@@ -287,12 +324,18 @@ func FilterTrusted(mc *MountConfig, sc *SocketConfig, cc *CredentialConfig, work
 	if cc != nil {
 		untCreds = untrustedCredentials(cc.Entries)
 	}
-	if len(escMounts) == 0 && len(untSockets) == 0 && len(untCreds) == 0 {
-		return mc, nil, sc, nil, cc, nil
+	var untPorts []PortEntry
+	untPool := false
+	if pc != nil {
+		untPorts = untrustedPorts(pc.Ports)
+		untPool = pc.Pool > 0 && pc.PoolUntrusted
+	}
+	if len(escMounts) == 0 && len(untSockets) == 0 && len(untCreds) == 0 && len(untPorts) == 0 && !untPool {
+		return mc, nil, sc, nil, cc, nil, pc, nil
 	}
 
 	store, _ := loadTrustStore() // missing/unreadable store → nothing trusted
-	trusted := trustedSources(mc, sc, cc, workspace, store)
+	trusted := trustedSources(mc, sc, cc, pc, workspace, store)
 
 	keptMC := mc
 	var droppedMounts []MountEntry
@@ -333,13 +376,41 @@ func FilterTrusted(mc *MountConfig, sc *SocketConfig, cc *CredentialConfig, work
 		}
 	}
 
-	return keptMC, droppedMounts, keptSC, droppedSockets, keptCC, droppedCreds
+	keptPC := pc
+	var droppedPorts []PortEntry
+	if pc != nil {
+		keptPC = &PortConfig{
+			Pool:           pc.Pool,
+			PoolUntrusted:  pc.PoolUntrusted,
+			PoolSourcePath: pc.PoolSourcePath,
+			Ports:          make([]PortEntry, 0, len(pc.Ports)),
+		}
+		for _, p := range pc.Ports {
+			if p.Untrusted && p.ContainerPort != 0 && !trusted[p.SourcePath] {
+				droppedPorts = append(droppedPorts, p)
+				continue
+			}
+			keptPC.Ports = append(keptPC.Ports, p)
+		}
+		if pc.Pool > 0 && pc.PoolUntrusted && !trusted[pc.PoolSourcePath] {
+			// Report the dropped pool as a synthetic entry so callers can
+			// warn uniformly; ContainerPort 0 marks it as the pool.
+			droppedPorts = append(droppedPorts, PortEntry{
+				Name:       fmt.Sprintf("pool(%d)", pc.Pool),
+				SourcePath: pc.PoolSourcePath,
+				Untrusted:  true,
+			})
+			keptPC.Pool = 0
+		}
+	}
+
+	return keptMC, droppedMounts, keptSC, droppedSockets, keptCC, droppedCreds, keptPC, droppedPorts
 }
 
 // TrustSources records trust for every source that declares gated mounts,
 // sockets, and/or ad-hoc credentials in mc/sc/cc, pinning the current
 // combined fingerprint. Returns the set of source paths that were trusted.
-func TrustSources(mc *MountConfig, sc *SocketConfig, cc *CredentialConfig, workspace string) ([]string, error) {
+func TrustSources(mc *MountConfig, sc *SocketConfig, cc *CredentialConfig, pc *PortConfig, workspace string) ([]string, error) {
 	mountsBySrc := map[string][]MountEntry{}
 	if mc != nil {
 		for _, m := range escapingUntrustedMounts(mc.Mounts, workspace) {
@@ -358,6 +429,16 @@ func TrustSources(mc *MountConfig, sc *SocketConfig, cc *CredentialConfig, works
 			credsBySrc[c.SourcePath] = append(credsBySrc[c.SourcePath], c)
 		}
 	}
+	portsBySrc := map[string][]PortEntry{}
+	poolBySrc := map[string]int{}
+	if pc != nil {
+		for _, p := range untrustedPorts(pc.Ports) {
+			portsBySrc[p.SourcePath] = append(portsBySrc[p.SourcePath], p)
+		}
+		if pc.Pool > 0 && pc.PoolUntrusted {
+			poolBySrc[pc.PoolSourcePath] = pc.Pool
+		}
+	}
 	srcs := map[string]bool{}
 	for src := range mountsBySrc {
 		srcs[src] = true
@@ -366,6 +447,12 @@ func TrustSources(mc *MountConfig, sc *SocketConfig, cc *CredentialConfig, works
 		srcs[src] = true
 	}
 	for src := range credsBySrc {
+		srcs[src] = true
+	}
+	for src := range portsBySrc {
+		srcs[src] = true
+	}
+	for src := range poolBySrc {
 		srcs[src] = true
 	}
 	if len(srcs) == 0 {
@@ -377,7 +464,7 @@ func TrustSources(mc *MountConfig, sc *SocketConfig, cc *CredentialConfig, works
 	}
 	out := make([]string, 0, len(srcs))
 	for src := range srcs {
-		store[src] = sourceFingerprint(mountsBySrc[src], socketsBySrc[src], credsBySrc[src])
+		store[src] = sourceFingerprint(mountsBySrc[src], socketsBySrc[src], credsBySrc[src], portsBySrc[src], poolBySrc[src])
 		out = append(out, src)
 	}
 	sort.Strings(out)
@@ -419,7 +506,7 @@ func ListTrusted() (map[string]string, error) {
 // is recorded. `coi untrust` uses this to revoke by the exact stored key
 // (resolved at load) rather than reconstructing it, which would diverge on
 // symlinked/alias/non-default paths.
-func UntrustedSourcePaths(mc *MountConfig, sc *SocketConfig, cc *CredentialConfig) []string {
+func UntrustedSourcePaths(mc *MountConfig, sc *SocketConfig, cc *CredentialConfig, pc *PortConfig) []string {
 	seen := map[string]bool{}
 	var out []string
 	add := func(src string) {
@@ -447,6 +534,16 @@ func UntrustedSourcePaths(mc *MountConfig, sc *SocketConfig, cc *CredentialConfi
 			if c.Untrusted && c.BundleName == "" {
 				add(c.SourcePath)
 			}
+		}
+	}
+	if pc != nil {
+		for _, p := range pc.Ports {
+			if p.Untrusted {
+				add(p.SourcePath)
+			}
+		}
+		if pc.PoolUntrusted {
+			add(pc.PoolSourcePath)
 		}
 	}
 	sort.Strings(out)

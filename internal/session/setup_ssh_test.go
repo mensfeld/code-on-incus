@@ -35,6 +35,10 @@ func (f *fakeForwarder) AddProxyDevice(name, connect, listen string, uid, gid in
 	return nil
 }
 
+func (f *fakeForwarder) AddHostPortDevice(name, listenAddr string, hostPort, containerPort int) error {
+	return nil
+}
+
 func (f *fakeForwarder) RemoveDevice(name string) error {
 	f.removed = append(f.removed, name)
 	return nil

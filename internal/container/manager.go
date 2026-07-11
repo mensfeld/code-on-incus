@@ -126,6 +126,22 @@ func (m *Manager) AddProxyDevice(name, connect, listen string, uid, gid int) err
 	return IncusExec(args...)
 }
 
+// AddHostPortDevice publishes a container TCP port on the host via a proxy
+// device: it listens on listenAddr:hostPort in the HOST namespace and
+// connects to 127.0.0.1:containerPort inside the container (bind=host), so
+// even dev servers bound to container-localhost are reachable. NAT mode is
+// deliberately not used — the userspace forkproxy keeps COI's nft isolation
+// rules untouched (#558).
+func (m *Manager) AddHostPortDevice(name, listenAddr string, hostPort, containerPort int) error {
+	args := []string{
+		"config", "device", "add", m.ContainerName, name, "proxy",
+		fmt.Sprintf("listen=tcp:%s:%d", listenAddr, hostPort),
+		fmt.Sprintf("connect=tcp:127.0.0.1:%d", containerPort),
+		"bind=host",
+	}
+	return IncusExec(args...)
+}
+
 // RemoveDevice removes a device from the container (silently ignores if not found)
 func (m *Manager) RemoveDevice(name string) error {
 	return IncusExecQuiet("config", "device", "remove", m.ContainerName, name)
