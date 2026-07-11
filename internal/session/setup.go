@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -996,4 +997,34 @@ func DetectCodeUser(mgr container.ContainerExecution, codeUser string) (bool, er
 		return false, nil
 	}
 	return false, err
+}
+
+// ResolveCodeUID returns the UID the container's code user ACTUALLY has,
+// probed from the container itself (`id -u <code_user>`), or root (0) when
+// the account doesn't exist — images without a code user run their sessions,
+// and therefore their tmux server, as root. Callers that must talk to a
+// session's per-user resources (e.g. the tmux socket at /tmp/tmux-<uid>,
+// #588) need this rather than the config-derived container.CodeUID: after an
+// in-container remap (remapContainerUserIfNeeded / [incus] code_uid) the two
+// differ, and cross-project commands like `coi tmux list` visit containers
+// created under other configs. Probe failures other than "no such user"
+// (incus connectivity, etc.) are returned so callers don't silently fall
+// back to root — the exact misdirection this helper exists to prevent.
+func ResolveCodeUID(mgr container.ContainerExecution, codeUser string) (int, error) {
+	out, err := mgr.ExecArgsCapture(
+		[]string{"id", "-u", codeUser},
+		container.ExecCommandOptions{Capture: true},
+	)
+	if err != nil {
+		var exitErr *container.ExitError
+		if errors.As(err, &exitErr) {
+			return 0, nil // no code user: sessions run as root
+		}
+		return 0, err
+	}
+	uid, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil {
+		return 0, fmt.Errorf("unexpected `id -u %s` output %q: %w", codeUser, out, err)
+	}
+	return uid, nil
 }

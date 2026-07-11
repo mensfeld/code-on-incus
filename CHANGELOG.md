@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 0.10.1 (Unreleased)
+
+### Fixed
+
+- **`coi tmux capture` / `send` / `list` no longer exec as root against the code user's tmux session (#588)** — tmux sessions are per-user (`/tmp/tmux-<uid>/default`), and `coi shell --background` creates its session as the container's `code` user, but the three helper commands exec'd `tmux` without a user and defaulted to root: `capture`/`send` failed with "error connecting to /tmp/tmux-0/default" and `list` silently reported "No active sessions" while a session was running. Each command now probes the target container for the code user's ACTUAL UID (new `session.ResolveCodeUID`: `id -u`, falling back to root for images without a code user, whose sessions genuinely run as root) and execs tmux as that user — probing beats trusting `[incus] code_uid` config, since the container-side UID differs after remaps (`raw.idmap`, `usermod`) and `coi tmux list` visits containers created under other projects' configs. Probe connectivity failures surface as errors instead of silently misdirecting to root. The tmux e2e tests were part of the bug's cover: they created their sessions via a root `coi container exec`, a flow the product never produces — they now create sessions as the code user, and a new regression test covers the default UID, a remapped UID 501 (the reporting environment), and that the helpers never create a root `/tmp/tmux-0` socket as a side effect.
+
 ## 0.10.0 (2026-07-10)
 
 ### Breaking Changes
