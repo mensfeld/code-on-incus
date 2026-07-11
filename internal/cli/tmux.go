@@ -3,19 +3,16 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/session"
 	"github.com/spf13/cobra"
 )
 
-// tmuxExecUser resolves the UID whose tmux socket the helpers must talk to:
-// the container's ACTUAL code-user UID (or root for images without one).
-// tmux sessions are per-user (/tmp/tmux-<uid>/default) and `coi shell
-// --background` creates them as the code user, so execing tmux as root
-// connects to the wrong socket (#588). Probed per container because the UID
-// varies with remaps ([incus] code_uid / raw.idmap) and `coi tmux list`
-// crosses projects with different configs.
+// tmuxExecUser resolves the UID whose per-user tmux socket
+// (/tmp/tmux-<uid>/default) the tmux commands must target (#588); see
+// session.ResolveCodeUID for why this is probed per container.
 func tmuxExecUser(mgr container.ContainerManager) (*int, error) {
 	uid, err := session.ResolveCodeUID(mgr, container.CodeUser)
 	if err != nil {
@@ -174,10 +171,13 @@ func tmuxListCommand(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
-		// Resolve the per-container code UID; skip containers we can't
-		// probe (same tolerance as the Running() check above)
+		// Resolve the per-container code UID. Unlike a failed Running()
+		// check (container is gone), a probe failure can hit a live
+		// container with a live session — warn instead of silently
+		// omitting it from the listing.
 		user, err := tmuxExecUser(mgr)
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: skipping %s: %v\n", c, err)
 			continue
 		}
 
