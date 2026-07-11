@@ -253,6 +253,58 @@ host = {pin}
     assert pools[0] == pools[1], f"pool drifted across reuse: {pools[0]} -> {pools[1]}"
 
 
+def test_busy_pool_port_skips_forward(coi_binary, cleanup_containers, workspace_dir):
+    """A pool port whose deterministic number is already taken on the host is
+    skipped forward within the slot block (auto ports move; only pins abort)."""
+    expected = expected_pool_port(workspace_dir)
+    blocker = socket.socket()
+    try:
+        try:
+            blocker.bind(("127.0.0.1", expected))
+            blocker.listen(1)
+        except OSError:
+            # Another process already holds the deterministic port — equally
+            # good for this test: it is busy either way.
+            pass
+        write_ports_config(
+            workspace_dir,
+            """
+[ports]
+pool = 1
+""",
+        )
+        result = subprocess.run(
+            [
+                coi_binary,
+                "run",
+                "--workspace",
+                workspace_dir,
+                "--",
+                "sh",
+                "-c",
+                'echo "POOL=[$COI_PORTS]"',
+            ],
+            capture_output=True,
+            text=True,
+            timeout=180,
+            cwd=workspace_dir,
+        )
+        assert result.returncode == 0, (
+            f"a busy AUTO port must not abort the session. stderr: {result.stderr}"
+        )
+        m = re.search(r"POOL=\[(\d+)\]", result.stdout)
+        assert m, f"pool env missing. stdout: {result.stdout}\nstderr: {result.stderr}"
+        port = int(m.group(1))
+        assert port != expected, (
+            f"busy port {expected} must be skipped, but was allocated anyway"
+        )
+        assert expected < port < expected + 10, (
+            f"skip must stay within this slot's block [{expected}, {expected + 9}], got {port}"
+        )
+    finally:
+        blocker.close()
+
+
 def test_pinned_port_conflict_aborts_before_launch(coi_binary, cleanup_containers, workspace_dir):
     """A taken pinned host port fails the preflight: clear error, no container."""
     blocker = socket.socket()
