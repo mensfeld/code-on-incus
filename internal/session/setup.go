@@ -208,7 +208,7 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 	// "container not ready" only after the full ready_timeout wait.
 	if opts.ContainerName != "" {
 		if !exists {
-			return nil, fmt.Errorf("container %q does not exist; create it first, or omit --container to launch a new one", opts.ContainerName)
+			return nil, fmt.Errorf("container '%s' not found - omit --container to launch a new container for this workspace", opts.ContainerName)
 		}
 		skipLaunch = true
 		opts.Logger("Using existing container, skipping creation...")

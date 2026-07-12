@@ -5,7 +5,7 @@ Test for coi shell --container <missing> - error handling.
 A non-existent name used to silently skip both the reuse and the creation
 branches, then fail with a misleading "container not ready" only after the
 full ready_timeout wait (~30s). It must instead fail FAST with a clear
-"does not exist" error.
+"not found" error.
 """
 
 import subprocess
@@ -43,7 +43,7 @@ def test_shell_container_not_found(coi_binary, cleanup_containers, workspace_dir
 
     err = result.stderr + result.stdout
     assert missing in err, f"error should name the missing container. Got:\n{err}"
-    assert "does not exist" in err, f"error should say the container does not exist. Got:\n{err}"
+    assert "not found" in err, f"error should say the container was not found. Got:\n{err}"
     assert "not ready" not in err.lower(), (
         f"must not fall through to the misleading readiness-timeout error. Got:\n{err}"
     )
