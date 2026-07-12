@@ -97,6 +97,14 @@ def test_slow_shutdown_removes_ephemeral(coi_binary, cleanup_containers, workspa
     child.send("sudo systemctl poweroff")
     time.sleep(0.3)
     child.send("\x0d")
+    # Leave the shell right away so the coi process regains control (EOF) at
+    # the START of the guest shutdown. With a non-forced poweroff the exec
+    # session otherwise survives deep into the shutdown and cleanup would
+    # find the container already stopped — no in-flight window to test.
+    time.sleep(1)
+    child.send("exit")
+    time.sleep(0.3)
+    child.send("\x0d")
 
     try:
         child.expect(EOF, timeout=90)
@@ -119,6 +127,10 @@ def test_slow_shutdown_removes_ephemeral(coi_binary, cleanup_containers, workspa
     # the ephemeral container must be recognized as stopped and removed.
     deleted = wait_for_specific_container_deletion(container_name, timeout=120)
 
+    assert "Container is shutting down, waiting" in output, (
+        f"cleanup must detect the in-flight shutdown (the guest is pinned in "
+        f"'stopping' when EOF arrives). Got:\n{output}"
+    )
     assert "Container kept running" not in output, (
         f"a slow poweroff must not be mislabeled as a normal exit. Got:\n{output}"
     )

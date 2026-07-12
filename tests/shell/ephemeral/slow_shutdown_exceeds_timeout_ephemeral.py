@@ -94,6 +94,14 @@ def test_slow_shutdown_exceeding_timeout_is_forced(coi_binary, cleanup_container
     child.send("sudo systemctl poweroff")
     time.sleep(0.3)
     child.send("\x0d")
+    # Leave the shell right away so the coi process regains control (EOF) at
+    # the START of the guest shutdown. With a non-forced poweroff the exec
+    # session otherwise survives deep into the shutdown and cleanup would
+    # find the container already stopped — no in-flight window to test.
+    time.sleep(1)
+    child.send("exit")
+    time.sleep(0.3)
+    child.send("\x0d")
 
     try:
         child.expect(EOF, timeout=90)
