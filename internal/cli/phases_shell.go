@@ -413,6 +413,9 @@ func (a *App) setupContainerPhase(s *shellState) session.Phase {
 					Tool:           s.toolInstance,
 					NetworkManager: s.result.NetworkManager,
 					SessionLogger:  s.result.Logger,
+					// Bound the wait for an in-flight `close`/poweroff by the
+					// same budget graceful shutdowns get everywhere else.
+					ShutdownTimeout: a.cfg.Container.ShutdownTimeout,
 				}
 				if err := session.Cleanup(cleanupOpts); err != nil {
 					fmt.Fprintf(os.Stderr, "Cleanup error: %v\n", err)

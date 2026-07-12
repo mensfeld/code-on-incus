@@ -28,6 +28,50 @@ type CleanupOptions struct {
 	NetworkManager network.NetworkManager
 	SessionLogger  *logger.SessionLogger
 	Logger         func(string)
+	// ShutdownTimeout is how long (seconds) to wait for an in-progress guest
+	// shutdown (`close`/poweroff) to finish before treating the container as
+	// still running; <=0 uses the [container] shutdown_timeout default (60).
+	ShutdownTimeout int
+}
+
+// guestShutdownInProgress reports whether the container's systemd is mid
+// shutdown. `systemctl is-system-running` prints the manager state and exits
+// non-zero for anything but "running", so classify by stdout: "stopping"
+// means a poweroff/close is in flight, any other state means the guest is up
+// and the user simply left the shell. When exec yields NO state at all (a
+// guest late in poweroff may already refuse execs — but a broken exec
+// transport looks identical) briefly re-check whether the container stops on
+// its own before concluding it is a normal exit.
+func guestShutdownInProgress(mgr container.ContainerManager) bool {
+	for i := 0; i < 6; i++ {
+		out, _ := mgr.ExecCommand("systemctl is-system-running", container.ExecCommandOptions{Capture: true})
+		switch state := strings.TrimSpace(out); state {
+		case "stopping":
+			return true
+		case "":
+			if running, _ := mgr.Running(); !running {
+				return true
+			}
+			time.Sleep(500 * time.Millisecond)
+		default:
+			// "running", "degraded", "maintenance", ... — the guest is up.
+			return false
+		}
+	}
+	return false
+}
+
+// waitForStopped polls until the container stops or the timeout elapses;
+// reports whether it stopped.
+func waitForStopped(mgr container.ContainerManager, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if running, _ := mgr.Running(); !running {
+			return true
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return false
 }
 
 // Cleanup stops and deletes a container, optionally saving session data
@@ -71,30 +115,42 @@ func Cleanup(opts CleanupOptions) error {
 		}
 	}
 
+	// Determine the container's end state. `close`/poweroff powers the guest
+	// off, but the shell dies at the START of that shutdown, so "running
+	// right now" is ambiguous: ask the guest's systemd whether a shutdown is
+	// in flight instead of guessing from a fixed wait. The old fixed ~5s
+	// poll mislabeled any slower shutdown as a normal `exit`, leaking
+	// ephemeral containers and printing "kept running" over a stopping one.
+	running := false
+	if exists {
+		running, _ = mgr.Running()
+		if running && guestShutdownInProgress(mgr) {
+			timeout := opts.ShutdownTimeout
+			if timeout <= 0 {
+				timeout = 60
+			}
+			opts.Logger("Container is shutting down, waiting for it to stop...")
+			running = !waitForStopped(mgr, time.Duration(timeout)*time.Second)
+		}
+	}
+
 	// Handle container based on persistence mode
 	if opts.Persistent {
-		// Persistent mode: keep container regardless of whether it is running or stopped.
-		if exists {
+		// Persistent mode: keep the container — and report its ACTUAL state,
+		// so a `close` doesn't get answered with "use 'coi attach'".
+		switch {
+		case !exists:
+			opts.Logger("Container no longer exists - nothing to keep")
+		case running:
 			opts.Logger("Container kept running - use 'coi attach' to reconnect, 'coi shutdown' to stop, or 'coi kill' to force stop")
-		} else {
-			opts.Logger("Container was stopped but kept for reuse")
+		default:
+			opts.Logger("Container kept (stopped) - run 'coi shell' in this workspace to start it again")
 		}
 	} else {
 		// Non-persistent mode: behavior depends on how user exited.
 		// - Container still running (user typed 'exit' or detached): keep it running.
-		// - Container stopped (user ran 'sudo poweroff'): delete it.
+		// - Container stopped or shutting down (user ran 'close'/'sudo poweroff'): delete it.
 		if exists {
-			// Check if container is stopped, with retries to handle shutdown delay.
-			// Poweroff/shutdown can take several seconds to complete.
-			running := true
-			for i := 0; i < 10; i++ {
-				time.Sleep(500 * time.Millisecond)
-				running, _ = mgr.Running()
-				if !running {
-					break
-				}
-			}
-
 			if running {
 				// Container still running - user exited normally, keep it for potential re-attach.
 				opts.Logger("Container kept running - use 'coi attach' to reconnect, 'coi shutdown' to stop, or 'coi kill' to force stop")
