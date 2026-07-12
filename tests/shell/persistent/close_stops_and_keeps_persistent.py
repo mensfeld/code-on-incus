@@ -78,7 +78,18 @@ def test_close_stops_and_keeps_persistent(coi_binary, cleanup_containers, worksp
     child.send("exit")
     time.sleep(0.3)
     child.send("\x0d")
-    time.sleep(5)
+    time.sleep(3)
+
+    # Verify we actually reached bash before typing power commands into it:
+    # a slow dummy exit would otherwise swallow the command and the failure
+    # would masquerade as a shutdown-detection bug.
+    with with_live_screen(child) as monitor:
+        time.sleep(1)
+        child.send("echo $((12345+54321))")
+        time.sleep(0.5)
+        child.send("\x0d")
+        in_bash = wait_for_text_in_monitor(monitor, "66666", timeout=20)
+        assert in_bash, "Should be in bash shell after exiting the dummy tool"
 
     # Power the container off with the `close` wrapper
     child.send("close")

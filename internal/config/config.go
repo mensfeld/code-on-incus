@@ -92,11 +92,16 @@ func (c *ContainerConfig) HasContainerConfig() bool {
 		c.Build.HasBuildConfig()
 }
 
+// DefaultShutdownTimeoutSeconds is the graceful-shutdown window applied when
+// [container] shutdown_timeout is unset — the single source for every
+// consumer (coi shutdown, session cleanup's wait for an in-flight poweroff).
+const DefaultShutdownTimeoutSeconds = 60
+
 // ShutdownTimeoutSeconds returns the graceful-shutdown window in seconds,
-// defaulting to 60 when unset.
+// defaulting to DefaultShutdownTimeoutSeconds when unset.
 func (c *ContainerConfig) ShutdownTimeoutSeconds() int {
 	if c.ShutdownTimeout <= 0 {
-		return 60
+		return DefaultShutdownTimeoutSeconds
 	}
 	return c.ShutdownTimeout
 }

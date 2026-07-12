@@ -1,23 +1,21 @@
 """
-Test for coi shell (ephemeral) - a SLOW guest shutdown must still end with
-the container removed.
+Test for coi shell (ephemeral) - a guest shutdown that OUTLASTS the graceful
+window must be force-stopped and removed, not relabeled "kept running".
 
-Cleanup distinguishes "user powered the container off" (delete it) from
-"user typed exit" (keep it for re-attach) by polling the container state for
-a fixed ~5s after the shell ends. Any shutdown slower than that window was
-mislabeled as a normal exit: cleanup printed "Container kept running - use
-'coi attach' to reconnect..." and the ephemeral container was never removed
-(it finished stopping moments later and lingered as a stopped leftover).
+Stock systemd gives service stops a 90s budget (DefaultTimeoutStopSec) while
+COI's [container] shutdown_timeout defaults to 60s, so "detected shutdown
+outlives the wait" is reachable with completely ordinary units. When that
+happens the cleanup must escalate exactly like `coi shutdown` does after its
+graceful window — force the stop and honor the ephemeral contract (delete) —
+instead of relapsing into the "Container kept running - use 'coi attach'"
+mislabel it was built to fix.
 
-The stock power wrappers (`close`/`poweroff`/...) use `systemctl --force
-poweroff`, which skips unit stop jobs and usually finishes inside the old
-window — which is exactly why the plain poweroff tests never caught this.
-This test pins the guest in "stopping" deterministically: a transient unit
-with a slow ExecStop plus a NON-forced `systemctl poweroff` (which honors
-unit stops) keeps the container shutting down for ~30s.
+This test makes the overrun cheap: shutdown_timeout is pinned to 5s and a
+transient unit holds the guest in "stopping" for ~30s.
 """
 
 import time
+from pathlib import Path
 
 from pexpect import EOF, TIMEOUT
 
@@ -33,15 +31,19 @@ from support.helpers import (
 )
 
 
-def test_slow_shutdown_removes_ephemeral(coi_binary, cleanup_containers, workspace_dir):
+def test_slow_shutdown_exceeding_timeout_is_forced(coi_binary, cleanup_containers, workspace_dir):
     """
     Flow:
-    1. Start coi shell (ephemeral), exit the dummy tool to bash
-    2. Install a transient unit whose ExecStop sleeps 30s
-    3. Power off WITHOUT --force so the slow unit stop is honored
-    4. The shell dies early in the shutdown; the guest keeps stopping ~30s
-    5. Cleanup must still recognize the poweroff and DELETE the container
+    1. Pin [container] shutdown_timeout = 5 in the workspace config
+    2. Start coi shell (ephemeral), exit the dummy tool to bash
+    3. Install a transient unit whose ExecStop sleeps ~30s, poweroff non-forced
+    4. Cleanup detects the shutdown, waits 5s, must FORCE the stop
+    5. The ephemeral container must be removed; no "kept running" mislabel
     """
+    coi_dir = Path(workspace_dir) / ".coi"
+    coi_dir.mkdir(exist_ok=True)
+    (coi_dir / "config.toml").write_text("[container]\nshutdown_timeout = 5\n")
+
     env = {"COI_USE_DUMMY": "1"}
 
     child = spawn_coi(
@@ -63,9 +65,7 @@ def test_slow_shutdown_removes_ephemeral(coi_binary, cleanup_containers, workspa
     child.send("\x0d")
     time.sleep(3)
 
-    # Verify we actually reached bash before typing power commands into it:
-    # a slow dummy exit would otherwise swallow the command and the failure
-    # would masquerade as a shutdown-detection bug.
+    # Verify we actually reached bash before typing power commands into it.
     with with_live_screen(child) as monitor:
         time.sleep(1)
         child.send("echo $((12345+54321))")
@@ -74,8 +74,8 @@ def test_slow_shutdown_removes_ephemeral(coi_binary, cleanup_containers, workspa
         in_bash = wait_for_text_in_monitor(monitor, "66666", timeout=20)
         assert in_bash, "Should be in bash shell after exiting the dummy tool"
 
-    # A transient unit whose stop takes ~30s: this holds the whole (non-forced)
-    # shutdown in "stopping" well past cleanup's old fixed polling window.
+    # Slow-stop unit: the (non-forced) shutdown stays in "stopping" ~30s,
+    # far past the 5s graceful window configured above.
     with with_live_screen(child) as monitor:
         time.sleep(1)
         child.send(
@@ -87,13 +87,10 @@ def test_slow_shutdown_removes_ephemeral(coi_binary, cleanup_containers, workspa
         started = wait_for_text_in_monitor(monitor, "SLOWSTOP_READY", timeout=20)
         assert started, "transient slow-stop unit should start"
 
-    # Verify container is running before shutdown
     assert container_name in get_container_list(), (
         f"Container {container_name} should be running before poweroff"
     )
 
-    # Non-forced poweroff honors the slow unit stop (the wrappers' --force
-    # would skip it and stop too fast to reproduce the race)
     child.send("sudo systemctl poweroff")
     time.sleep(0.3)
     child.send("\x0d")
@@ -123,18 +120,16 @@ def test_slow_shutdown_removes_ephemeral(coi_binary, cleanup_containers, workspa
     except Exception:
         child.close(force=True)
 
-    # The user powered the container off: however slow the guest shutdown is,
-    # the ephemeral container must be recognized as stopped and removed.
-    deleted = wait_for_specific_container_deletion(container_name, timeout=120)
+    deleted = wait_for_specific_container_deletion(container_name, timeout=90)
 
-    assert "Container is shutting down, waiting" in output, (
-        f"cleanup must detect the in-flight shutdown (the guest is pinned in "
-        f"'stopping' when EOF arrives). Got:\n{output}"
+    assert "forcing the stop" in output, (
+        f"a shutdown outlasting the graceful window must be escalated to a force stop. "
+        f"Got:\n{output}"
     )
     assert "Container kept running" not in output, (
-        f"a slow poweroff must not be mislabeled as a normal exit. Got:\n{output}"
+        f"a detected shutdown must never relapse into the 'kept running' mislabel. Got:\n{output}"
     )
     assert deleted, (
-        f"Ephemeral container {container_name} must be removed after a slow poweroff "
-        f"(waited 120s). Output:\n{output}"
+        f"Ephemeral container {container_name} must be removed after the forced stop "
+        f"(waited 90s). Output:\n{output}"
     )

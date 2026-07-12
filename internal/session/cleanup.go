@@ -3,12 +3,16 @@ package session
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
+	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/logger"
 	"github.com/mensfeld/code-on-incus/internal/network"
@@ -29,49 +33,138 @@ type CleanupOptions struct {
 	SessionLogger  *logger.SessionLogger
 	Logger         func(string)
 	// ShutdownTimeout is how long (seconds) to wait for an in-progress guest
-	// shutdown (`close`/poweroff) to finish before treating the container as
-	// still running; <=0 uses the [container] shutdown_timeout default (60).
+	// shutdown (`close`/poweroff) to finish before forcing the stop; <=0
+	// uses config.DefaultShutdownTimeoutSeconds (callers should pass
+	// cfg.Container.ShutdownTimeoutSeconds()).
 	ShutdownTimeout int
 }
 
-// guestShutdownInProgress reports whether the container's systemd is mid
-// shutdown. `systemctl is-system-running` prints the manager state and exits
-// non-zero for anything but "running", so classify by stdout: "stopping"
-// means a poweroff/close is in flight, any other state means the guest is up
-// and the user simply left the shell. When exec yields NO state at all (a
-// guest late in poweroff may already refuse execs — but a broken exec
-// transport looks identical) briefly re-check whether the container stops on
-// its own before concluding it is a normal exit.
-func guestShutdownInProgress(mgr container.ContainerManager) bool {
+// guestProber is the manager slice the shutdown-detection helpers need;
+// narrow so unit tests can fake it.
+type guestProber interface {
+	ExecCommand(command string, opts container.ExecCommandOptions) (string, error)
+	Running() (bool, error)
+}
+
+// probeExecTimeout bounds one guest probe: cleanup must never hang, and the
+// exec transport CAN wedge against a dying (or responder-frozen) container.
+const probeExecTimeout = 10 * time.Second
+
+// Synthetic states probeGuestState derives from the probe's failure shape,
+// distinct from anything `systemctl is-system-running` prints itself.
+const (
+	guestStateBusDown   = "coi:bus-down"   // guest answered: its D-Bus is gone (systemd tearing down)
+	guestStateNoSystemd = "coi:no-systemd" // systemctl missing: this image can never answer
+	guestStateNoAnswer  = "coi:no-answer"  // transport error or timeout: no evidence either way
+)
+
+// probeGuestState runs `systemctl is-system-running` in the guest with a
+// hard deadline and returns systemd's manager state ("stopping", "running",
+// "degraded", ...) or one of the synthetic coi: states above. The command
+// exits non-zero for every state except "running", so classification uses
+// stdout first and the stderr of the ExitError second (the #588/#590 lesson:
+// an incus-level failure and an in-guest failure arrive as the same error
+// shape and MUST be told apart before deciding a container's fate).
+func probeGuestState(mgr guestProber) string {
+	type result struct {
+		out string
+		err error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		out, err := mgr.ExecCommand("systemctl is-system-running", container.ExecCommandOptions{Capture: true})
+		ch <- result{out, err}
+	}()
+	select {
+	case r := <-ch:
+		if state := strings.TrimSpace(r.out); state != "" {
+			return state
+		}
+		var exitErr *container.ExitError
+		if errors.As(r.err, &exitErr) {
+			switch stderr := exitErr.Stderr; {
+			case strings.Contains(stderr, "Failed to connect to bus"):
+				// systemctl ran but systemd's bus is gone — on a container
+				// that still reports Running, that IS the shutdown tail.
+				return guestStateBusDown
+			case strings.Contains(stderr, "command not found"):
+				return guestStateNoSystemd
+			}
+		}
+		return guestStateNoAnswer
+	case <-time.After(probeExecTimeout):
+		// Abandon the wedged exec goroutine; the process is exiting soon
+		// anyway, and blocking teardown forever is the one forbidden outcome.
+		return guestStateNoAnswer
+	}
+}
+
+// guestShutdownInProgress reports whether the guest is mid shutdown.
+// "stopping" (or an answered-but-bus-down probe) means a poweroff/close is
+// in flight; any healthy manager state means the user simply left the shell.
+// "offline"/"unknown"/no answer are AMBIGUOUS — systemd can print those in
+// the sub-second tail of a poweroff (/run unmounted, SystemState query
+// failing) and a flaking exec transport looks identical — so those re-check
+// the container state and retry briefly instead of concluding either way.
+func guestShutdownInProgress(mgr guestProber) bool {
 	for i := 0; i < 6; i++ {
-		out, _ := mgr.ExecCommand("systemctl is-system-running", container.ExecCommandOptions{Capture: true})
-		switch state := strings.TrimSpace(out); state {
-		case "stopping":
+		switch state := probeGuestState(mgr); state {
+		case "stopping", guestStateBusDown:
 			return true
-		case "":
-			if running, _ := mgr.Running(); !running {
+		case "running", "degraded", "maintenance", "initializing", "starting":
+			return false
+		case guestStateNoSystemd:
+			// This image can never answer — don't burn the retry budget on
+			// every single exit there.
+			return false
+		default: // "offline", "unknown", coi:no-answer, anything unforeseen
+			if running, err := mgr.Running(); err == nil && !running {
 				return true
 			}
-			time.Sleep(500 * time.Millisecond)
-		default:
-			// "running", "degraded", "maintenance", ... — the guest is up.
-			return false
+			if i < 5 {
+				time.Sleep(500 * time.Millisecond)
+			}
 		}
 	}
 	return false
 }
 
-// waitForStopped polls until the container stops or the timeout elapses;
-// reports whether it stopped.
-func waitForStopped(mgr container.ContainerManager, timeout time.Duration) bool {
+// containerRunning reports the container's state and whether it could be
+// determined at all. A daemon hiccup must not read as "stopped" — that is
+// what would route an ephemeral cleanup into force-delete of a live
+// container, or print "kept (stopped)" over a running one.
+func containerRunning(mgr guestProber) (running, ok bool) {
+	var err error
+	for i := 0; i < 3; i++ {
+		if running, err = mgr.Running(); err == nil {
+			return running, true
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	return false, false
+}
+
+// waitForStopped polls until the container verifiably stops (an error-free
+// "not running" answer — daemon errors don't count), the timeout elapses, or
+// the user interrupts. Ctrl+C must not be a no-op here: this wait can hold
+// the terminal for the whole graceful-shutdown window, and the shell's own
+// signal plumbing is already disarmed by the time the deferred teardown runs.
+func waitForStopped(mgr guestProber, timeout time.Duration) (stopped, interrupted bool) {
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sig)
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if running, _ := mgr.Running(); !running {
-			return true
+		if running, err := mgr.Running(); err == nil && !running {
+			return true, false
 		}
-		time.Sleep(500 * time.Millisecond)
+		select {
+		case <-sig:
+			return false, true
+		case <-time.After(500 * time.Millisecond):
+		}
 	}
-	return false
+	return false, false
 }
 
 // Cleanup stops and deletes a container, optionally saving session data
@@ -109,9 +202,11 @@ func Cleanup(opts CleanupOptions) error {
 	// saveSessionData handles the mid-shutdown race internally: on a transient SFTP
 	// error it waits for the container to fully stop, then retries using incus's
 	// direct file-access path (no SFTP) so the save succeeds in every exit scenario.
+	saveFailed := false
 	if opts.SaveSession && exists && opts.SessionID != "" && opts.SessionsDir != "" && opts.Tool != nil && opts.Tool.ConfigDirName() != "" {
 		if err := saveSessionData(mgr, opts.ContainerName, opts.SessionID, opts.Persistent, opts.ProfileName, opts.Workspace, opts.SessionsDir, opts.Tool, opts.Logger); err != nil {
 			opts.Logger(fmt.Sprintf("Warning: Failed to save session data: %v", err))
+			saveFailed = true
 		}
 	}
 
@@ -123,14 +218,43 @@ func Cleanup(opts CleanupOptions) error {
 	// ephemeral containers and printing "kept running" over a stopping one.
 	running := false
 	if exists {
-		running, _ = mgr.Running()
-		if running && guestShutdownInProgress(mgr) {
+		var known bool
+		running, known = containerRunning(mgr)
+		switch {
+		case !known:
+			// Incus can't answer right now: fail safe. Claim nothing about
+			// the state and do nothing destructive.
+			opts.Logger("Warning: could not determine container state (incus unreachable) - leaving the container untouched")
+			running = true
+		case running && guestShutdownInProgress(mgr):
 			timeout := opts.ShutdownTimeout
 			if timeout <= 0 {
-				timeout = 60
+				timeout = config.DefaultShutdownTimeoutSeconds
 			}
 			opts.Logger("Container is shutting down, waiting for it to stop...")
-			running = !waitForStopped(mgr, time.Duration(timeout)*time.Second)
+			stopped, interrupted := waitForStopped(mgr, time.Duration(timeout)*time.Second)
+			if !stopped {
+				// The shutdown is positively known at this point — finish the
+				// job rather than relapse into "kept running" (stock systemd
+				// units get 90s stop budgets, longer than our default window;
+				// this is the same escalation `coi shutdown` applies after
+				// its graceful window).
+				if interrupted {
+					opts.Logger("Interrupted - forcing the stop...")
+				} else {
+					opts.Logger(fmt.Sprintf("Still shutting down after %ds - forcing the stop...", timeout))
+				}
+				if err := mgr.Stop(true); err != nil {
+					opts.Logger(fmt.Sprintf("Warning: force stop failed: %v", err))
+				}
+			}
+			// Re-read the final state; if incus can't answer, the shutdown we
+			// positively detected is the best evidence — treat as stopped.
+			if r, ok := containerRunning(mgr); ok {
+				running = r
+			} else {
+				running = false
+			}
 		}
 	}
 
@@ -169,6 +293,10 @@ func Cleanup(opts CleanupOptions) error {
 				// Now delete container
 				if err := mgr.Delete(true); err != nil {
 					opts.Logger(fmt.Sprintf("Warning: Failed to delete container: %v", err))
+				} else if saveFailed {
+					// Don't claim the data is safe when the save above failed —
+					// with the container gone it is unrecoverable.
+					opts.Logger("Container removed (session data could NOT be saved - see the warning above)")
 				} else {
 					opts.Logger("Container removed (session data saved for --resume)")
 				}
@@ -243,12 +371,7 @@ func saveSessionData(mgr container.ContainerManager, containerName string, sessi
 		if attempt > 0 {
 			// SFTP failed — wait for the container to fully stop so incus
 			// uses direct file access (not SFTP) on the next attempt.
-			for i := 0; i < 10; i++ {
-				time.Sleep(500 * time.Millisecond)
-				if running, _ := mgr.Running(); !running {
-					break
-				}
-			}
+			waitForStopped(mgr, 5*time.Second)
 		}
 		pullErr = mgr.PullDirectory(stateDir, localConfigDir)
 		if pullErr == nil {
