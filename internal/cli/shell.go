@@ -115,7 +115,8 @@ func (a *App) shellCommand(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	return pipeline.Run(ctx,
+	return pipeline.Run(
+		ctx,
 		a.resolveWorkspacePhase(cmd, s),
 		a.validateEnvPhase(cmd, s),
 		a.configureSessionPhase(cmd, s),
@@ -255,6 +256,12 @@ func (a *App) buildContainerEnv(result *session.SetupResult) (map[string]string,
 	// plus any configured [[sockets]] entries with an `env` name).
 	for env, path := range result.SocketEnv {
 		containerEnv[env] = path
+	}
+
+	// Published [[ports]]: tell the session which host port each service
+	// landed on (COI_PORT_<NAME> -> host port, #558).
+	for env, port := range result.PortsEnv {
+		containerEnv[env] = port
 	}
 
 	// Set TZ if timezone was configured

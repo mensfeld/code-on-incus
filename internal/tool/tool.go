@@ -287,6 +287,16 @@ type ToolWithPreLaunch interface {
 	PreLaunch() [][]string
 }
 
+// PortInfo describes one container port published on the host.
+type PortInfo struct {
+	Name          string // "" for pool ports
+	HostPort      int
+	ContainerPort int
+	Listen        string // host listen address ("", "127.0.0.1" and "0.0.0.0" mean localhost works)
+	Pool          bool   // identity-mapped pool port (host == container number)
+	EnvVar        string // COI_PORT_<NAME> for named entries, "" for pool
+}
+
 // MountInfo describes an extra directory mounted into the container.
 type MountInfo struct {
 	ContainerPath string
@@ -308,6 +318,7 @@ type ContextInfo struct {
 	ForwardedEnvVars   []string    // Names of host environment variables forwarded into the container
 	Timezone           string      // IANA timezone (e.g., "America/New_York"), empty = UTC
 	ExtraMounts        []MountInfo // Additional mounted paths beyond workspace
+	PublishedPorts     []PortInfo  // Container ports published on the host (#558)
 	CPULimit           string      // e.g., "2" or "0-3", empty = unlimited
 	MemoryLimit        string      // e.g., "2GiB", empty = unlimited
 	MaxDuration        string      // e.g., "2h", empty = unlimited
@@ -337,6 +348,10 @@ type contextTemplateData struct {
 	TimezoneDesc        string
 	ExtraMounts         string // Comma-joined container paths
 	HasExtraMounts      bool
+	HasPorts            bool
+	PoolPortsDesc       string // e.g. "23410, 23411, 23412" (identity-mapped)
+	FirstPoolPort       string // first pool port, for the concrete usage example
+	NamedPortsDesc      string // one line per named mapping
 	ResourceLimits      string // e.g., "2 CPUs, 2GiB memory"
 	HasResourceLimits   bool
 	MaxDuration         string
@@ -445,6 +460,32 @@ func RenderContextFileContent(info ContextInfo) string {
 		}
 		data.ExtraMounts = strings.Join(paths, ", ")
 		data.HasExtraMounts = true
+	}
+
+	// Published ports (#558)
+	if len(info.PublishedPorts) > 0 {
+		data.HasPorts = true
+		var pool []string
+		var named []string
+		for _, p := range info.PublishedPorts {
+			if p.Pool {
+				pool = append(pool, fmt.Sprintf("%d", p.HostPort))
+			} else {
+				// A pin to a specific non-loopback listen address is NOT
+				// reachable via the host's localhost — name the real address.
+				host := "localhost"
+				if p.Listen != "" && p.Listen != "127.0.0.1" && p.Listen != "0.0.0.0" {
+					host = p.Listen
+				}
+				named = append(named, fmt.Sprintf("- %s: bind container port %d — the user reaches it at http://%s:%d (%s=%d)",
+					p.Name, p.ContainerPort, host, p.HostPort, p.EnvVar, p.HostPort))
+			}
+		}
+		data.PoolPortsDesc = strings.Join(pool, ", ")
+		data.NamedPortsDesc = strings.Join(named, "\n")
+		if len(pool) > 0 {
+			data.FirstPoolPort = pool[0]
+		}
 	}
 
 	// Resource limits

@@ -42,6 +42,9 @@ type runState struct {
 	gitWorktree        *session.GitWorktreeLayout // external git dirs for a worktree checkout (#533), nil otherwise
 	mountConfig        *session.MountConfig       // trust-gated
 	socketConfig       *session.SocketConfig      // trust-gated
+	portConfig         *session.PortConfig        // trust-gated [[ports]] to publish (#558)
+	slot               int                        // resolved slot number (for port allocation)
+	resolvedPorts      []session.PublishedPort    // preflighted port plan (see session.ResolvePorts)
 
 	// After apply-network
 	socketEnv map[string]string
@@ -90,6 +93,7 @@ func (a *App) validateEnvRunPhase(s *runState) session.Phase {
 				}
 			}
 			s.containerName = session.ContainerName(s.absWorkspace, slotNum)
+			s.slot = slotNum
 
 			img := ResolveImageName(a.cfg)
 			if err := AutoBuildIfNeeded(a.cfg, img); err != nil {
@@ -142,7 +146,32 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 			}
 			// One combined trust gate over mounts + sockets, so the per-source
 			// fingerprint matches what `coi trust` recorded.
-			s.mountConfig, s.socketConfig = a.gateRunForwarding(mc, sc, s.absWorkspace, s.wasRestarted)
+			pc := ParsePortConfig(a.cfg)
+			s.mountConfig, s.socketConfig, s.portConfig = a.gateRunForwarding(mc, sc, pc, s.absWorkspace, s.wasRestarted)
+
+			// A reused persistent container still carries the previous
+			// session's port devices; strip them while it is STOPPED so they
+			// neither fail the start (a stale device whose old host port is
+			// now taken aborts the whole container start) nor linger for
+			// entries that were removed or untrusted since. The current plan
+			// is re-published after start.
+			// (Only when stopped: a RUNNING container belongs to a concurrent
+			// session — launchOrReuseContainer refuses it below — and its live
+			// port forwards must not be yanked here.)
+			if s.wasRestarted {
+				if running, _ := mgr.Running(); !running {
+					logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
+					session.RemoveStalePortDevices(mgr, logFn)
+				}
+			}
+
+			// Preflight the port plan BEFORE launching: pinned host ports
+			// already in use abort here; auto/pool ports get their final
+			// numbers (see session.ResolvePorts).
+			s.resolvedPorts, err = session.ResolvePorts(s.portConfig, s.absWorkspace, s.slot)
+			if err != nil {
+				return nil, fmt.Errorf("port preflight failed: %w", err)
+			}
 
 			// Pre-start hook: runs AFTER init but BEFORE first start (fresh
 			// launches only; reused persistent containers keep their creation-time
@@ -326,6 +355,18 @@ func (a *App) applyNetworkRunPhase(s *runState) session.Phase {
 		PhaseName: "apply-network",
 		RunFn: func(ctx context.Context) (session.Teardown, error) {
 			s.socketEnv = a.applyForwardSockets(s.mgr, s.socketConfig)
+
+			// Publish [ports] on the host (localhost:<port> -> container)
+			// and expose the mapping to the command env (COI_PORTS /
+			// COI_PORT_<NAME>).
+			logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
+			_, portsEnv := session.PublishResolvedPorts(s.mgr, s.resolvedPorts, logFn)
+			for k, v := range portsEnv {
+				if s.socketEnv == nil {
+					s.socketEnv = map[string]string{}
+				}
+				s.socketEnv[k] = v
+			}
 
 			nm, err := a.applyNetworkIsolation(ctx, s.containerName)
 			if err != nil {

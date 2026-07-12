@@ -316,6 +316,7 @@ func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.P
 			if err != nil {
 				return nil, fmt.Errorf("invalid credential configuration: %w", err)
 			}
+			portConfig := ParsePortConfig(a.cfg)
 			// Untrusted mounts/sockets are gated at the session.Setup chokepoint
 			// (combined trust fingerprint over both); pass them through unfiltered.
 			if err := session.ValidateMounts(mountConfig); err != nil {
@@ -337,6 +338,7 @@ func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.P
 				MountConfig:           mountConfig,
 				SocketConfig:          socketConfig,
 				CredentialConfig:      credConfig,
+				PortConfig:            portConfig,
 				SessionsDir:           sessionsDir,
 				CLIConfigPath:         cliConfigPath,
 				Tool:                  ti,

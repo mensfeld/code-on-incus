@@ -153,7 +153,8 @@ func (a *App) runCommand(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	return pipeline.Run(ctx,
+	return pipeline.Run(
+		ctx,
 		a.validateEnvRunPhase(s),
 		a.launchContainerRunPhase(s),
 		a.configureContainerRunPhase(s),
@@ -577,8 +578,8 @@ func (a *App) applySecurityMounts(mgr container.ContainerManager, absWorkspace, 
 // every launch, so the gate always applies to them; a reused persistent
 // container keeps its creation-time mount devices, so for those we only warn
 // that trust changes won't take effect until the container is recreated.
-func (a *App) gateRunForwarding(mc *session.MountConfig, sc *session.SocketConfig, workspace string, wasRestarted bool) (*session.MountConfig, *session.SocketConfig) {
-	keptMC, droppedM, keptSC, droppedS, _, _ := session.FilterTrusted(mc, sc, nil, workspace)
+func (a *App) gateRunForwarding(mc *session.MountConfig, sc *session.SocketConfig, pc *session.PortConfig, workspace string, wasRestarted bool) (*session.MountConfig, *session.SocketConfig, *session.PortConfig) {
+	keptMC, droppedM, keptSC, droppedS, _, _, keptPC, droppedP := session.FilterTrusted(mc, sc, nil, pc, workspace)
 	if wasRestarted {
 		if len(droppedM) > 0 {
 			fmt.Fprintf(os.Stderr,
@@ -590,7 +591,8 @@ func (a *App) gateRunForwarding(mc *session.MountConfig, sc *session.SocketConfi
 		warnDroppedMounts(droppedM)
 	}
 	warnDroppedSockets(droppedS)
-	return keptMC, keptSC
+	warnDroppedPorts(droppedP)
+	return keptMC, keptSC, keptPC
 }
 
 // applyForwardSockets forwards the host SSH agent (when ssh.forward_agent is

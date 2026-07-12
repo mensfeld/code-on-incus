@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -143,6 +146,14 @@ type ContainerInfo struct {
 	// being used, not the configured one.
 	Pool  string
 	Alias string
+	// Ports are the container's published host ports (its coi-port-* proxy
+	// devices), parsed from the same expanded_devices JSON — no extra Incus
+	// calls. Identity-mapped pool ports render as the bare number ("23410"),
+	// named entries as "<name>:<host>-><container>" (with the listen address
+	// prefixed when it is not loopback). Bound on the host while the
+	// container is Running; on a stopped persistent container they are the
+	// last session's publications, re-resolved at the next start.
+	Ports []string
 }
 
 // SessionInfo holds information about a saved session
@@ -201,6 +212,7 @@ func listActiveContainers() ([]ContainerInfo, error) {
 			IPv4:      ipv4,
 			Pool:      pool,
 			Alias:     containerAlias,
+			Ports:     extractPublishedPorts(c),
 		})
 	}
 
@@ -351,6 +363,79 @@ func extractRootPool(c map[string]interface{}) string {
 	return pool
 }
 
+// poolDeviceName matches the synthetic device suffix of identity-mapped pool
+// ports (coi-port-pool-<n>); ResolvePorts rejects user entries that would
+// collide with it, so the match is unambiguous.
+var poolDeviceName = regexp.MustCompile(`^pool-\d+$`)
+
+// extractPublishedPorts renders the container's coi-port-* proxy devices from
+// expanded_devices (already in the `incus list --format=json` payload — no
+// extra Incus calls). Sorted by host port for stable output.
+func extractPublishedPorts(c map[string]interface{}) []string {
+	expanded, ok := c["expanded_devices"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	type portDev struct {
+		name          string
+		listenAddr    string
+		hostPort      int
+		containerPort int
+	}
+	var devs []portDev
+	for devName, raw := range expanded {
+		suffix, isPort := strings.CutPrefix(devName, "coi-port-")
+		if !isPort {
+			continue
+		}
+		dev, ok := raw.(map[string]interface{})
+		if !ok || dev["type"] != "proxy" {
+			continue
+		}
+		listen, _ := dev["listen"].(string)
+		connect, _ := dev["connect"].(string)
+		addr, hostPort, ok1 := parseProxyTCPAddr(listen)
+		_, containerPort, ok2 := parseProxyTCPAddr(connect)
+		if !ok1 || !ok2 {
+			continue
+		}
+		devs = append(devs, portDev{suffix, addr, hostPort, containerPort})
+	}
+	sort.Slice(devs, func(i, j int) bool { return devs[i].hostPort < devs[j].hostPort })
+
+	out := make([]string, 0, len(devs))
+	for _, d := range devs {
+		if poolDeviceName.MatchString(d.name) && d.hostPort == d.containerPort {
+			out = append(out, strconv.Itoa(d.hostPort)) // pool: the ONE number both sides use
+			continue
+		}
+		host := strconv.Itoa(d.hostPort)
+		if d.listenAddr != "" && d.listenAddr != "127.0.0.1" {
+			host = d.listenAddr + ":" + host
+		}
+		out = append(out, fmt.Sprintf("%s:%s->%d", d.name, host, d.containerPort))
+	}
+	return out
+}
+
+// parseProxyTCPAddr splits an Incus proxy address spec ("tcp:127.0.0.1:23410",
+// "tcp:[::1]:8080") into address and port.
+func parseProxyTCPAddr(spec string) (addr string, port int, ok bool) {
+	rest, found := strings.CutPrefix(spec, "tcp:")
+	if !found {
+		return "", 0, false
+	}
+	i := strings.LastIndex(rest, ":")
+	if i < 0 {
+		return "", 0, false
+	}
+	p, err := strconv.Atoi(rest[i+1:])
+	if err != nil {
+		return "", 0, false
+	}
+	return strings.Trim(rest[:i], "[]"), p, true
+}
+
 // extractEth0IPv4 extracts the IPv4 address from the eth0 interface
 func extractEth0IPv4(container map[string]interface{}) string {
 	// Get state object
@@ -402,14 +487,15 @@ func outputJSON(containers []ContainerInfo, sessions []SessionInfo,
 	enrichedContainers := make([]map[string]interface{}, 0, len(containers))
 	for _, c := range containers {
 		item := map[string]interface{}{
-			"name":       c.Name,
-			"status":     c.Status,
-			"created_at": c.CreatedAt,
-			"image":      c.Image,
-			"persistent": persistent[c.Name],
-			"ipv4":       c.IPv4,
-			"pool":       c.Pool,
-			"alias":      c.Alias,
+			"name":            c.Name,
+			"status":          c.Status,
+			"created_at":      c.CreatedAt,
+			"image":           c.Image,
+			"persistent":      persistent[c.Name],
+			"ipv4":            c.IPv4,
+			"pool":            c.Pool,
+			"alias":           c.Alias,
+			"published_ports": append([]string{}, c.Ports...), // non-nil: stable JSON shape ([] not null)
 		}
 		if ws, ok := workspaces[c.Name]; ok {
 			item["workspace"] = ws
@@ -468,6 +554,9 @@ func outputText(containers []ContainerInfo, sessions []SessionInfo,
 			}
 			if c.Pool != "" {
 				fmt.Printf("    Pool: %s\n", c.Pool)
+			}
+			if len(c.Ports) > 0 {
+				fmt.Printf("    Ports: %s\n", strings.Join(c.Ports, ", "))
 			}
 			// Show workspace if we have it from session metadata
 			if workspace, ok := workspaces[c.Name]; ok && workspace != "" {

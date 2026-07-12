@@ -1,0 +1,29 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "A container TCP port published on the host (localhost by default) via an Incus proxy device",
+  "required": ["name", "container"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Identifier for the port; exposed to the session as COI_PORT_<NAME>"
+    },
+    "container": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535,
+      "description": "TCP port inside the container"
+    },
+    "host": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535,
+      "description": "Exact host port to bind (omit for stable auto-allocation per workspace/slot)"
+    },
+    "listen": {
+      "type": "string",
+      "description": "Host listen address (default \"127.0.0.1\"; \"0.0.0.0\" exposes to the LAN)"
+    }
+  }
+}

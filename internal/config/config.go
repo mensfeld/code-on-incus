@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -33,6 +34,7 @@ type Config struct {
 	Shell              ShellConfig              `toml:"shell"`
 	Mounts             MountsConfig             `toml:"mounts"`
 	Sockets            []SocketEntry            `toml:"sockets"`
+	Ports              PortsConfig              `toml:"ports"`
 	Credentials        []CredentialEntry        `toml:"credentials"`
 	Limits             LimitsConfig             `toml:"limits"`
 	Git                GitConfig                `toml:"git"`
@@ -310,6 +312,7 @@ type ProfileConfig struct {
 	Tool        *ToolConfig       `toml:"tool"`
 	Mounts      []MountEntry      `toml:"mounts"`
 	Sockets     []SocketEntry     `toml:"sockets"`
+	Ports       *PortsConfig      `toml:"ports"`
 	Credentials []CredentialEntry `toml:"credentials"`
 	Network     *NetworkConfig    `toml:"network"`
 	ForwardEnv  []string          `toml:"forward_env"`
@@ -396,6 +399,58 @@ type CredentialEntry struct {
 	// reference can only select a name from coi's own vetted catalog, not an
 	// attacker-chosen host path, so it carries the same trust level the
 	// builtin tool credential seeding already has.
+	Untrusted  bool   `toml:"-"`
+	SourcePath string `toml:"-"`
+}
+
+// PortsConfig publishes container TCP ports on the host via Incus proxy
+// devices, so agent-started services inside a container are reachable as
+// localhost:<port> on the host (#558). Two complementary forms:
+//
+//   - Pool: N identity-mapped ports per session (host port == container
+//     port), allocated per (workspace, slot) — see internal/session
+//     AllocateHostPort — and announced to the agent via the sandbox context
+//     file and COI_PORTS. Zero per-service declarations: the agent binds
+//     any pool port and the user opens the SAME number on localhost.
+//   - Map: named entries for services with fixed container ports (e.g. a
+//     compose stack's postgres on 5432); host side auto-allocated or pinned.
+//
+// Allocation is deterministic with no coordination state, so the section is
+// safe to share via profiles: parallel slots and different workspaces get
+// distinct, stable ports by construction. Pinned host ports are bind-probed
+// before any container work and abort the session if taken.
+type PortsConfig struct {
+	Pool int         `toml:"pool"` // Number of identity-mapped ports to publish (0 = none)
+	Map  []PortEntry `toml:"map"`  // Named fixed-container-port publications
+
+	// PoolUntrusted/PoolSourcePath are set programmatically (never from
+	// TOML) when the pool value came from an untrusted, project-scope config
+	// file; map entries carry their own per-entry flags so mixed
+	// trusted+untrusted scopes gate independently. A repo declaring host
+	// listeners can squat well-known localhost ports, so untrusted
+	// pool/entries are gated behind explicit trust (`coi trust`).
+	// PoolTrustedFallback remembers a trusted pool value that an untrusted
+	// overlay overwrote, so the trust gate restores it instead of dropping
+	// the user's own pool to zero (see mergePortsInto).
+	PoolUntrusted       bool   `toml:"-"`
+	PoolSourcePath      string `toml:"-"`
+	PoolTrustedFallback int    `toml:"-"`
+}
+
+// HasPorts reports whether the section declares anything to publish.
+func (p *PortsConfig) HasPorts() bool {
+	return p != nil && (p.Pool > 0 || len(p.Map) > 0)
+}
+
+// PortEntry is one named [[ports.map]] publication.
+type PortEntry struct {
+	Name      string `toml:"name"`      // Identifier; exposed as COI_PORT_<NAME> (upper-cased)
+	Container int    `toml:"container"` // TCP port inside the container (1-65535)
+	Host      int    `toml:"host"`      // Optional exact host port (0 = auto per workspace/slot)
+	Listen    string `toml:"listen"`    // Host listen address (default "127.0.0.1")
+
+	// Untrusted/SourcePath: set programmatically for entries from an
+	// untrusted, project-scope config file (see PortsConfig).
 	Untrusted  bool   `toml:"-"`
 	SourcePath string `toml:"-"`
 }
@@ -560,6 +615,7 @@ func synthesizeDefaultProfile(cfg *Config) ProfileConfig {
 		Network:     &network,
 		Mounts:      cloneSlice(cfg.Mounts.Default),
 		Sockets:     cloneSlice(cfg.Sockets),
+		Ports:       clonePortsConfig(&cfg.Ports),
 		Credentials: cloneSlice(cfg.Credentials),
 		Paths:       &paths,
 		Incus:       &incus,
@@ -776,6 +832,7 @@ func (c *Config) Merge(other *Config) {
 	if len(other.Sockets) > 0 {
 		c.Sockets = append(c.Sockets, other.Sockets...)
 	}
+	mergePortsInto(&c.Ports, &other.Ports)
 	if len(other.Credentials) > 0 {
 		c.Credentials = append(c.Credentials, other.Credentials...)
 	}
@@ -978,6 +1035,9 @@ func (c *Config) ApplyProfile(name string) error {
 	if len(profile.Sockets) > 0 {
 		c.Sockets = append(c.Sockets, profile.Sockets...)
 	}
+	if profile.Ports != nil {
+		mergePortsInto(&c.Ports, profile.Ports)
+	}
 	if len(profile.Credentials) > 0 {
 		c.Credentials = append(c.Credentials, profile.Credentials...)
 	}
@@ -1073,6 +1133,54 @@ func mergeContainerInto(dst *ContainerConfig, src *ContainerConfig) {
 	mergeBuildInto(&dst.Build, &src.Build)
 }
 
+// mergePortsInto overlays src's ports section onto dst: a non-zero pool wins
+// (pool provenance follows the winning source), and map entries with a name
+// dst already has REPLACE the earlier entry while new names append — so
+// re-applying a profile synthesized from the merged config (the "default"
+// profile) is a no-op instead of doubling every entry, and a later scope can
+// override an earlier entry's ports without duplicating its device name.
+// When an UNTRUSTED pool overwrites a trusted one, the trusted value is
+// remembered in PoolTrustedFallback so the trust gate can fall back to it
+// instead of silently disabling the user's own pool.
+func mergePortsInto(dst, src *PortsConfig) {
+	if src == nil || !src.HasPorts() {
+		return
+	}
+	if src.Pool > 0 {
+		switch {
+		case src.PoolUntrusted && dst.Pool > 0 && !dst.PoolUntrusted:
+			dst.PoolTrustedFallback = dst.Pool
+		case !src.PoolUntrusted:
+			dst.PoolTrustedFallback = 0 // a trusted winner needs no fallback
+		}
+		dst.Pool = src.Pool
+		dst.PoolUntrusted = src.PoolUntrusted
+		dst.PoolSourcePath = src.PoolSourcePath
+	}
+	for _, e := range src.Map {
+		replaced := false
+		for i := range dst.Map {
+			if dst.Map[i].Name == e.Name {
+				dst.Map[i] = e
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			dst.Map = append(dst.Map, e)
+		}
+	}
+}
+
+func clonePortsConfig(src *PortsConfig) *PortsConfig {
+	if src == nil {
+		return nil
+	}
+	out := *src
+	out.Map = cloneSlice(src.Map)
+	return &out
+}
+
 // maxInheritanceDepth is the maximum allowed inheritance chain depth
 const maxInheritanceDepth = 10
 
@@ -1134,6 +1242,9 @@ func mergeProfiles(parent, child ProfileConfig) ProfileConfig {
 	}
 	if result.Sockets == nil {
 		result.Sockets = parent.Sockets
+	}
+	if result.Ports == nil {
+		result.Ports = parent.Ports
 	}
 	if result.Credentials == nil {
 		result.Credentials = parent.Credentials
@@ -1483,6 +1594,35 @@ func (p *ProfileConfig) Validate(name string) error {
 			if _, err := strconv.ParseUint(cr.Mode, 8, 32); err != nil {
 				return fmt.Errorf("profile '%s': credentials[%d] has invalid 'mode' %q (must be an octal file mode, e.g. \"0600\"): %w", name, i, cr.Mode, err)
 			}
+		}
+	}
+
+	// Validate port entries: name required and unique, container port in
+	// range, optional host pin in range, listen a bare address if set.
+	seenPortNames := map[string]bool{}
+	var portEntries []PortEntry
+	if p.Ports != nil {
+		if p.Ports.Pool < 0 || p.Ports.Pool > 10 {
+			return fmt.Errorf("profile '%s': [ports] pool must be 0-10, got %d", name, p.Ports.Pool)
+		}
+		portEntries = p.Ports.Map
+	}
+	for i, pe := range portEntries {
+		if pe.Name == "" {
+			return fmt.Errorf("profile '%s': ports[%d] is missing 'name'", name, i)
+		}
+		if seenPortNames[pe.Name] {
+			return fmt.Errorf("profile '%s': ports[%d] duplicates name %q", name, i, pe.Name)
+		}
+		seenPortNames[pe.Name] = true
+		if pe.Container < 1 || pe.Container > 65535 {
+			return fmt.Errorf("profile '%s': ports[%d] (%s) 'container' must be a TCP port (1-65535), got %d", name, i, pe.Name, pe.Container)
+		}
+		if pe.Host != 0 && (pe.Host < 1 || pe.Host > 65535) {
+			return fmt.Errorf("profile '%s': ports[%d] (%s) 'host' must be a TCP port (1-65535) or omitted for auto-allocation, got %d", name, i, pe.Name, pe.Host)
+		}
+		if pe.Listen != "" && net.ParseIP(pe.Listen) == nil {
+			return fmt.Errorf("profile '%s': ports[%d] (%s) 'listen' must be an IP address (e.g. \"127.0.0.1\"), got %q", name, i, pe.Name, pe.Listen)
 		}
 	}
 

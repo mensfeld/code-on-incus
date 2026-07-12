@@ -38,28 +38,28 @@ func tc(host, container, mode string, untrusted bool, src string) CredentialEntr
 
 // filterMounts is a thin shim over FilterTrusted for the mounts-only tests.
 func filterMounts(mc *MountConfig, ws string) (*MountConfig, []MountEntry) {
-	keptMC, dropped, _, _, _, _ := FilterTrusted(mc, nil, nil, ws)
+	keptMC, dropped, _, _, _, _, _, _ := FilterTrusted(mc, nil, nil, nil, ws)
 	return keptMC, dropped
 }
 
 // filterCreds is a thin shim over FilterTrusted for the credentials-only tests.
 func filterCreds(cc *CredentialConfig, ws string) (*CredentialConfig, []CredentialEntry) {
-	_, _, _, _, keptCC, dropped := FilterTrusted(nil, nil, cc, ws)
+	_, _, _, _, keptCC, dropped, _, _ := FilterTrusted(nil, nil, cc, nil, ws)
 	return keptCC, dropped
 }
 
 func TestSourceFingerprint_OrderIndependentAndSensitive(t *testing.T) {
 	a := []MountEntry{tm("/h1", "/c1", false, true, "s"), tm("/h2", "/c2", true, true, "s")}
 	b := []MountEntry{tm("/h2", "/c2", true, true, "s"), tm("/h1", "/c1", false, true, "s")}
-	if sourceFingerprint(a, nil, nil) != sourceFingerprint(b, nil, nil) {
+	if sourceFingerprint(a, nil, nil, nil, 0) != sourceFingerprint(b, nil, nil, nil, 0) {
 		t.Error("fingerprint should be order-independent")
 	}
 	roChanged := []MountEntry{tm("/h1", "/c1", true, true, "s"), tm("/h2", "/c2", true, true, "s")}
-	if sourceFingerprint(a, nil, nil) == sourceFingerprint(roChanged, nil, nil) {
+	if sourceFingerprint(a, nil, nil, nil, 0) == sourceFingerprint(roChanged, nil, nil, nil, 0) {
 		t.Error("fingerprint should change when a readonly flag changes")
 	}
 	removed := []MountEntry{tm("/h1", "/c1", false, true, "s")}
-	if sourceFingerprint(a, nil, nil) == sourceFingerprint(removed, nil, nil) {
+	if sourceFingerprint(a, nil, nil, nil, 0) == sourceFingerprint(removed, nil, nil, nil, 0) {
 		t.Error("fingerprint should change when a mount is removed")
 	}
 }
@@ -68,10 +68,10 @@ func TestSourceFingerprint_CoversSockets(t *testing.T) {
 	mounts := []MountEntry{tm("/h1", "/c1", false, true, "s")}
 	sockA := []SocketEntry{ts("/run/a.sock", "/c/a.sock", "A_SOCK", true, "s")}
 	sockB := []SocketEntry{ts("/run/b.sock", "/c/a.sock", "A_SOCK", true, "s")}
-	if sourceFingerprint(mounts, nil, nil) == sourceFingerprint(mounts, sockA, nil) {
+	if sourceFingerprint(mounts, nil, nil, nil, 0) == sourceFingerprint(mounts, sockA, nil, nil, 0) {
 		t.Error("adding a socket should change the fingerprint")
 	}
-	if sourceFingerprint(mounts, sockA, nil) == sourceFingerprint(mounts, sockB, nil) {
+	if sourceFingerprint(mounts, sockA, nil, nil, 0) == sourceFingerprint(mounts, sockB, nil, nil, 0) {
 		t.Error("changing a socket host path should change the fingerprint")
 	}
 	sockTwoA := []SocketEntry{
@@ -82,7 +82,7 @@ func TestSourceFingerprint_CoversSockets(t *testing.T) {
 		ts("/run/b.sock", "/c/b.sock", "B", true, "s"),
 		ts("/run/a.sock", "/c/a.sock", "A", true, "s"),
 	}
-	if sourceFingerprint(mounts, sockTwoA, nil) != sourceFingerprint(mounts, sockTwoB, nil) {
+	if sourceFingerprint(mounts, sockTwoA, nil, nil, 0) != sourceFingerprint(mounts, sockTwoB, nil, nil, 0) {
 		t.Error("fingerprint should be order-independent across sockets")
 	}
 }
@@ -91,10 +91,10 @@ func TestSourceFingerprint_CoversCredentials(t *testing.T) {
 	mounts := []MountEntry{tm("/h1", "/c1", false, true, "s")}
 	credA := []CredentialEntry{tc("/home/u/.ollama/id_ed25519", ".ollama/id_ed25519", "0600", true, "s")}
 	credB := []CredentialEntry{tc("/home/u/.ollama/id_ed25519", ".ollama/id_ed25519", "0644", true, "s")}
-	if sourceFingerprint(mounts, nil, nil) == sourceFingerprint(mounts, nil, credA) {
+	if sourceFingerprint(mounts, nil, nil, nil, 0) == sourceFingerprint(mounts, nil, credA, nil, 0) {
 		t.Error("adding a credential entry should change the fingerprint")
 	}
-	if sourceFingerprint(mounts, nil, credA) == sourceFingerprint(mounts, nil, credB) {
+	if sourceFingerprint(mounts, nil, credA, nil, 0) == sourceFingerprint(mounts, nil, credB, nil, 0) {
 		t.Error("changing a credential entry's mode should change the fingerprint")
 	}
 }
@@ -132,7 +132,7 @@ func TestFilterTrusted_GatesUntrustedSockets(t *testing.T) {
 		ts("/run/trusted.sock", "/c/t.sock", "T", false, ""),
 	}}
 
-	_, _, keptSC, dropped, _, _ := FilterTrusted(nil, sc, nil, ws)
+	_, _, keptSC, dropped, _, _, _, _ := FilterTrusted(nil, sc, nil, nil, ws)
 	if len(dropped) != 1 || dropped[0].EnvVar != "BROKER" {
 		t.Fatalf("expected the untrusted socket dropped, got %+v", dropped)
 	}
@@ -183,6 +183,59 @@ func TestFilterTrusted_NeverGatesBundleCredentials(t *testing.T) {
 	}
 }
 
+func TestFilterTrusted_GatesUntrustedPorts(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv(TrustEnvVar, "")
+	ws := t.TempDir()
+	src := filepath.Join(ws, ".coi", "config.toml")
+
+	pc := &PortConfig{
+		Pool:           3,
+		PoolUntrusted:  true,
+		PoolSourcePath: src,
+		Ports: []PortEntry{
+			{Name: "pg", ContainerPort: 5432, HostPort: 5432, Untrusted: true, SourcePath: src},
+			{Name: "web", ContainerPort: 3000},
+		},
+	}
+
+	_, _, _, _, _, _, keptPC, dropped := FilterTrusted(nil, nil, nil, pc, ws)
+	if len(dropped) != 2 { // the pg entry plus the synthetic pool entry
+		t.Fatalf("expected untrusted entry + pool dropped, got %+v", dropped)
+	}
+	if keptPC.Pool != 0 {
+		t.Errorf("untrusted pool with no trusted fallback must drop to 0, got %d", keptPC.Pool)
+	}
+	if len(keptPC.Ports) != 1 || keptPC.Ports[0].Name != "web" {
+		t.Errorf("expected only the trusted-scope entry kept, got %+v", keptPC.Ports)
+	}
+}
+
+func TestFilterTrusted_UntrustedPoolRestoresTrustedFallback(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv(TrustEnvVar, "")
+	ws := t.TempDir()
+	src := filepath.Join(ws, ".coi", "config.toml")
+
+	// An untrusted repo pool=5 overwrote the user's own trusted pool=3 at
+	// merge time; dropping the overlay must restore 3, not disable the pool.
+	pc := &PortConfig{Pool: 5, PoolUntrusted: true, PoolSourcePath: src, PoolTrustedFallback: 3}
+
+	_, _, _, _, _, _, keptPC, dropped := FilterTrusted(nil, nil, nil, pc, ws)
+	if keptPC.Pool != 3 {
+		t.Errorf("dropped untrusted pool must restore the trusted fallback, got %d", keptPC.Pool)
+	}
+	if keptPC.PoolUntrusted {
+		t.Error("restored pool must not stay flagged untrusted")
+	}
+	if len(dropped) != 1 || dropped[0].Name != "pool of 5 ports" {
+		t.Errorf("dropped pool must be reported readably, got %+v", dropped)
+	}
+	if DescribeDroppedPort(dropped[0]) != "port pool of 5 ports" {
+		t.Errorf("DescribeDroppedPort rendering: %q", DescribeDroppedPort(dropped[0]))
+	}
+}
+
 func TestFilterTrusted_TrustAllEnvBypasses(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv(TrustEnvVar, "1")
@@ -198,7 +251,7 @@ func TestFilterTrusted_TrustAllEnvBypasses(t *testing.T) {
 	cc := &CredentialConfig{Entries: []CredentialEntry{
 		tc("/home/u/.aws/credentials", "/home/code/.aws/credentials", "0600", true, src),
 	}}
-	_, droppedM, _, droppedS, _, droppedC := FilterTrusted(mc, sc, cc, ws)
+	_, droppedM, _, droppedS, _, droppedC, _, _ := FilterTrusted(mc, sc, cc, nil, ws)
 	if len(droppedM) != 0 || len(droppedS) != 0 || len(droppedC) != 0 {
 		t.Fatalf("COI_TRUST_ALL=1 should bypass gating, got droppedM=%+v droppedS=%+v droppedC=%+v", droppedM, droppedS, droppedC)
 	}
@@ -216,7 +269,7 @@ func TestTrustThenRevokeOnMountChange(t *testing.T) {
 		t.Fatal("escaping untrusted mount should be gated before trust")
 	}
 
-	sources, err := TrustSources(mc, nil, nil, ws)
+	sources, err := TrustSources(mc, nil, nil, nil, ws)
 	if err != nil || len(sources) != 1 || sources[0] != src {
 		t.Fatalf("TrustSources: sources=%v err=%v", sources, err)
 	}
@@ -244,23 +297,23 @@ func TestTrust_CombinedMountSocketAndCredentialSource(t *testing.T) {
 	sc := &SocketConfig{Sockets: []SocketEntry{ts("/run/host.sock", "/c/host.sock", "BROKER", true, src)}}
 	cc := &CredentialConfig{Entries: []CredentialEntry{tc("/home/u/.aws/credentials", "/home/code/.aws/credentials", "0600", true, src)}}
 
-	_, dM, _, dS, _, dC := FilterTrusted(mc, sc, cc, ws)
+	_, dM, _, dS, _, dC, _, _ := FilterTrusted(mc, sc, cc, nil, ws)
 	if len(dM) != 1 || len(dS) != 1 || len(dC) != 1 {
 		t.Fatalf("all three should be gated before trust, dM=%d dS=%d dC=%d", len(dM), len(dS), len(dC))
 	}
 
-	sources, err := TrustSources(mc, sc, cc, ws)
+	sources, err := TrustSources(mc, sc, cc, nil, ws)
 	if err != nil || len(sources) != 1 {
 		t.Fatalf("TrustSources: sources=%v err=%v", sources, err)
 	}
-	_, dM, _, dS, _, dC = FilterTrusted(mc, sc, cc, ws)
+	_, dM, _, dS, _, dC, _, _ = FilterTrusted(mc, sc, cc, nil, ws)
 	if len(dM) != 0 || len(dS) != 0 || len(dC) != 0 {
 		t.Fatalf("all three should be trusted after approval, dM=%d dS=%d dC=%d", len(dM), len(dS), len(dC))
 	}
 
 	// Changing the credential entry alone re-arms the combined fingerprint.
 	ccChanged := &CredentialConfig{Entries: []CredentialEntry{tc("/home/u/.aws/credentials", "/home/code/.aws/credentials", "0644", true, src)}}
-	_, dM, _, dS, _, dC = FilterTrusted(mc, sc, ccChanged, ws)
+	_, dM, _, dS, _, dC, _, _ = FilterTrusted(mc, sc, ccChanged, nil, ws)
 	if len(dM) != 1 || len(dS) != 1 || len(dC) != 1 {
 		t.Fatalf("changing the credential entry should re-arm gating for the whole source, dM=%d dS=%d dC=%d", len(dM), len(dS), len(dC))
 	}
@@ -274,7 +327,7 @@ func TestUntrustSources(t *testing.T) {
 	src := filepath.Join(ws, ".coi", "config.toml")
 	mc := &MountConfig{Mounts: []MountEntry{tm(outside, "/c", false, true, src)}}
 
-	if _, err := TrustSources(mc, nil, nil, ws); err != nil {
+	if _, err := TrustSources(mc, nil, nil, nil, ws); err != nil {
 		t.Fatal(err)
 	}
 	if _, dropped := filterMounts(mc, ws); len(dropped) != 0 {
@@ -365,7 +418,7 @@ func TestUntrustedSourcePaths(t *testing.T) {
 		ts("/z", "/cz", "Z", true, srcB),
 		ts("/t", "/ct", "T", false, ""),
 	}}
-	got := UntrustedSourcePaths(mc, sc, nil)
+	got := UntrustedSourcePaths(mc, sc, nil, nil)
 	want := []string{srcA, srcB}
 	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("UntrustedSourcePaths = %v, want sorted distinct %v", got, want)
@@ -379,7 +432,7 @@ func TestUntrustedSourcePaths_IncludesCredentialsButNotBundles(t *testing.T) {
 		tc("/x", "/cx", "", true, srcA),
 		{HostPath: "/y", ContainerPath: "/cy", BundleName: "ollama", Untrusted: true, SourcePath: srcA}, // bundle -> excluded
 	}}
-	got := UntrustedSourcePaths(nil, nil, cc)
+	got := UntrustedSourcePaths(nil, nil, cc, nil)
 	if len(got) != 1 || got[0] != srcA {
 		t.Fatalf("UntrustedSourcePaths = %v, want [%s]", got, srcA)
 	}
