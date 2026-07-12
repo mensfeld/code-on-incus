@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## 0.10.1 (Unreleased)
+## 0.10.1 (2026-07-12)
 
 ### New Features
 
