@@ -166,3 +166,22 @@ func TestExtractPublishedPorts(t *testing.T) {
 		t.Errorf("expected no ports without expanded_devices, got %v", got)
 	}
 }
+
+// The containers section heading follows the status filter (#592): unfiltered
+// output keeps the historical "Active Containers:", a filter names the state
+// instead of claiming e.g. stopped containers are active.
+func TestContainersHeading(t *testing.T) {
+	cases := map[string]string{
+		"":         "Active Containers:",
+		"running":  "Running Containers:",
+		"stopped":  "Stopped Containers:",
+		"frozen":   "Frozen Containers:",
+		"error":    "Error Containers:",
+		"starting": "Starting Containers:",
+	}
+	for filter, want := range cases {
+		if got := containersHeading(filter); got != want {
+			t.Errorf("containersHeading(%q) = %q, want %q", filter, got, want)
+		}
+	}
+}
