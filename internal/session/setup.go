@@ -196,15 +196,22 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 	// 4. Check if container already exists
 	var skipLaunch bool
 
-	// If using existing container, skip launch
-	if opts.ContainerName != "" {
-		skipLaunch = true
-		opts.Logger("Using existing container, skipping creation...")
-	}
-
 	exists, err = result.Manager.Exists()
 	if err != nil {
 		return nil, fmt.Errorf("failed to check if container exists: %w", err)
+	}
+
+	// An explicitly named container (--container) is attached to, never
+	// created — so it must already exist. Without this guard a missing name
+	// silently skips both the reuse branch (exists is false) and the
+	// creation branch (skipLaunch is true), then fails with a misleading
+	// "container not ready" only after the full ready_timeout wait.
+	if opts.ContainerName != "" {
+		if !exists {
+			return nil, fmt.Errorf("container '%s' not found - omit --container to launch a new container for this workspace", opts.ContainerName)
+		}
+		skipLaunch = true
+		opts.Logger("Using existing container, skipping creation...")
 	}
 
 	if exists {
