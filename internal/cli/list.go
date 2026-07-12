@@ -130,7 +130,7 @@ func listCommand(cmd *cobra.Command, args []string) error {
 		return outputJSON(containers, sessions, containerWorkspaces, containerPersistent)
 	}
 
-	return outputText(containers, sessions, containerWorkspaces, containerPersistent)
+	return outputText(containers, sessions, containerWorkspaces, containerPersistent, statusFilter)
 }
 
 // ContainerInfo holds information about a container
@@ -522,13 +522,26 @@ func outputJSON(containers []ContainerInfo, sessions []SessionInfo,
 	return nil
 }
 
+// containersHeading names the containers section after the active status
+// filter: the unfiltered default stays "Active Containers:" (backward
+// compatible), while `--stopped` gets "Stopped Containers:" instead of
+// claiming stopped containers are active (#592). statusFilter is canonical
+// lowercase (see resolveStatusFilter).
+func containersHeading(statusFilter string) string {
+	if statusFilter == "" {
+		return "Active Containers:"
+	}
+	return strings.ToUpper(statusFilter[:1]) + statusFilter[1:] + " Containers:"
+}
+
 // outputText formats container and session data as human-readable text
 func outputText(containers []ContainerInfo, sessions []SessionInfo,
-	workspaces map[string]string, persistent map[string]bool,
+	workspaces map[string]string, persistent map[string]bool, statusFilter string,
 ) error {
-	// Active Containers section
-	fmt.Println("Active Containers:")
-	fmt.Println("------------------")
+	// Containers section, titled after the active filter
+	heading := containersHeading(statusFilter)
+	fmt.Println(heading)
+	fmt.Println(strings.Repeat("-", len(heading)))
 
 	if len(containers) == 0 {
 		fmt.Println("  (none)")

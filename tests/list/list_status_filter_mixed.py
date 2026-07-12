@@ -68,6 +68,9 @@ def test_list_status_filter_mixed(coi_binary, cleanup_containers, workspace_dir)
     assert stopped_name not in result.stdout, (
         f"Stopped container should be hidden with --running. Got:\n{result.stdout}"
     )
+    assert "Running Containers:" in result.stdout, (
+        f"--running should retitle the section (#592). Got:\n{result.stdout}"
+    )
 
     # === Phase 3: --stopped shows only the stopped container ===
 
@@ -83,6 +86,12 @@ def test_list_status_filter_mixed(coi_binary, cleanup_containers, workspace_dir)
     )
     assert running_name not in result.stdout, (
         f"Running container should be hidden with --stopped. Got:\n{result.stdout}"
+    )
+    assert "Stopped Containers:" in result.stdout, (
+        f"--stopped must not claim stopped containers are active (#592). Got:\n{result.stdout}"
+    )
+    assert "Active Containers:" not in result.stdout, (
+        f"the old misleading heading must be gone under a filter (#592). Got:\n{result.stdout}"
     )
 
     # === Phase 4: --status filters JSON output the same way ===
