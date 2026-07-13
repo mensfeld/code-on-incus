@@ -16,21 +16,28 @@ var (
 )
 
 var shutdownCmd = &cobra.Command{
-	Use:     "shutdown [container-name...]",
-	Aliases: []string{"close"},
-	Short:   "Gracefully stop and delete containers",
+	Use: "shutdown [container-name...]",
+	// 'close' echoes the verb users already type INSIDE a container, so it is
+	// accepted here too. SuggestFor catches the near-miss typo, which cobra
+	// would otherwise resolve against command names only (and point at 'logs').
+	Aliases:    []string{"close"},
+	SuggestFor: []string{"clos"},
+	Short:      "Gracefully stop and delete containers",
 	Long: `Gracefully stop and delete one or more containers by name.
 
 This attempts a graceful shutdown first, waiting for the timeout before
-force-killing if necessary.
+force-killing if necessary. The container is then DELETED — including a
+persistent one, whose state does not survive this.
 
-'coi close' is an alias for this command — the host-side mirror of the
-in-container 'close' wrapper (which powers the container off from inside).
+'coi close' is an accepted alias for this command. Note it is NOT the same as
+the 'close' wrapper INSIDE a container: that one only powers the guest off
+(a persistent container is kept and reused next session), while this deletes
+the container. To merely stop a container, power it off from inside.
 
 Use 'coi list' to see active containers.
 
 Examples:
-  coi shutdown coi-abc12345-1     # Graceful shutdown (60s grace window by default)
+  coi shutdown coi-abc12345-1     # Graceful shutdown, then delete (60s grace window by default)
   coi close coi-abc12345-1        # Same thing, via the alias
   coi shutdown --all              # Shutdown all containers
   coi shutdown --all --force      # Shutdown all without confirmation

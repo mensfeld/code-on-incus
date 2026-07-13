@@ -527,7 +527,7 @@ coi unfreeze <name>           # Unfreeze paused/frozen container
 coi unfreeze                  # Unfreeze all frozen COI containers
 close                         # Properly stop container (inside, safe alias for poweroff)
 coi shutdown <name>           # Graceful stop (outside)
-coi close <name>              # Same as 'coi shutdown' — host-side mirror of the inside 'close'
+coi close <name>              # Alias for 'coi shutdown' (NB: stops AND deletes, unlike the inside 'close')
 ```
 
 ## Network Isolation

@@ -4,7 +4,7 @@
 
 ### New Features
 
-- **`coi close` is an alias for `coi shutdown` (#593)** — the host-side mirror of the in-container `close` wrapper (which powers the container off from inside). `coi close <name>` / `coi close --all` behave exactly like `coi shutdown`, flags and all; the alias is listed in `coi shutdown --help` and resolved by shell completion.
+- **`coi close` is an accepted alias for `coi shutdown` (#593)** — `coi close <name>` / `coi close --all` behave exactly like `coi shutdown`, flags and all, and the mistyped `coi clos` now suggests it. **It is not the same as the `close` wrapper INSIDE a container**: that one only powers the guest off (a persistent container is kept and reused next session), whereas `coi shutdown`/`coi close` gracefully stops and then **deletes** the container. To merely stop a container, power it off from inside. (Note: shells will not tab-suggest `close` — cobra completes command names only, not aliases.)
 
 ### Fixed
 
