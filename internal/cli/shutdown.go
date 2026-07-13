@@ -16,17 +16,22 @@ var (
 )
 
 var shutdownCmd = &cobra.Command{
-	Use:   "shutdown [container-name...]",
-	Short: "Gracefully stop and delete containers",
+	Use:     "shutdown [container-name...]",
+	Aliases: []string{"close"},
+	Short:   "Gracefully stop and delete containers",
 	Long: `Gracefully stop and delete one or more containers by name.
 
 This attempts a graceful shutdown first, waiting for the timeout before
 force-killing if necessary.
 
+'coi close' is an alias for this command — the host-side mirror of the
+in-container 'close' wrapper (which powers the container off from inside).
+
 Use 'coi list' to see active containers.
 
 Examples:
   coi shutdown coi-abc12345-1     # Graceful shutdown (60s grace window by default)
+  coi close coi-abc12345-1        # Same thing, via the alias
   coi shutdown --all              # Shutdown all containers
   coi shutdown --all --force      # Shutdown all without confirmation
 
