@@ -4,7 +4,7 @@
 
 ### New Features
 
-- **`coi close` is an accepted alias for `coi shutdown` (#593)** — `coi close <name>` / `coi close --all` behave exactly like `coi shutdown`, flags and all, and the mistyped `coi clos` now suggests it. **It is not the same as the `close` wrapper INSIDE a container**: that one only powers the guest off (a persistent container is kept and reused next session), whereas `coi shutdown`/`coi close` gracefully stops and then **deletes** the container. To merely stop a container, power it off from inside. (Note: shells will not tab-suggest `close` — cobra completes command names only, not aliases.)
+- **`coi close` is an accepted alias for `coi shutdown` (#593)** — echoing the `close` verb users already type inside a container. `coi close <name>` / `coi close --all` behave exactly like `coi shutdown`, flags and all, and the mistyped `coi clos` now suggests it. For the usual ephemeral container it matches the in-container `close` (both end with the container gone); the two differ for a **persistent** container, which the in-container `close` keeps (stopped, reused next session) but `coi shutdown`/`coi close` deletes. (Shells will not tab-suggest `close` — cobra completes command names only, never aliases.)
 
 ### Fixed
 

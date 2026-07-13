@@ -26,13 +26,15 @@ var shutdownCmd = &cobra.Command{
 	Long: `Gracefully stop and delete one or more containers by name.
 
 This attempts a graceful shutdown first, waiting for the timeout before
-force-killing if necessary. The container is then DELETED — including a
-persistent one, whose state does not survive this.
+force-killing if necessary. The container is then deleted — including a
+PERSISTENT one, which this removes rather than keeping for reuse.
 
-'coi close' is an accepted alias for this command. Note it is NOT the same as
-the 'close' wrapper INSIDE a container: that one only powers the guest off
-(a persistent container is kept and reused next session), while this deletes
-the container. To merely stop a container, power it off from inside.
+'coi close' is an accepted alias for this command. It matches the 'close'
+wrapper used INSIDE a container for the usual (ephemeral) case — both end
+with the container gone. They differ for a persistent container: powering it
+off from inside keeps it (stopped) for the next session, whereas this deletes
+it. To stop a persistent container without losing it, power it off from
+inside, or use 'coi shell' and exit.
 
 Use 'coi list' to see active containers.
 
