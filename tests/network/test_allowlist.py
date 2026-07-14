@@ -18,6 +18,29 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from support.helpers import wait_for_firewall_rules
 
 
+def get_container_ip(container_name):
+    """The container's IPv4 address, or None.
+
+    Allowlist rules and nft set names are keyed on this address.
+    """
+    result = subprocess.run(
+        ["incus", "list", container_name, "--format=json"],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+    for entry in json.loads(result.stdout):
+        if entry.get("name") != container_name:
+            continue
+        for addr in entry.get("state", {}).get("network", {}).get("eth0", {}).get("addresses", []):
+            if addr.get("family") == "inet":
+                return addr.get("address")
+    return None
+
+
 def test_allowlist_mode_allows_specified_domains(coi_binary, workspace_dir, cleanup_containers):
     """
     Test that allowlist mode allows access to domains in allowed_domains.
@@ -688,23 +711,47 @@ refresh_interval_minutes = 30
             f"firewall rules not applied for {container_name}"
         )
 
+        # Allowed addresses live in the container's nft sets, and the accept rules
+        # reference those sets by name rather than naming each address. So the L4
+        # scoping is asserted on the rules that admit the sets — and the address
+        # itself is asserted to be in a set, which is what those rules admit.
+        ip = get_container_ip(container_name)
+        assert ip, f"could not determine the IP of {container_name}"
+        ident = ip.replace(".", "_")
+
         chain = subprocess.run(
             ["sudo", "-n", "nft", "list", "chain", "ip", "coi", "forward"],
             capture_output=True,
             text=True,
             timeout=10,
         )
-        # Scope the assertions to the rule line(s) for THIS test's allowed IP, not
-        # the whole shared chain — otherwise a leftover/concurrent allowlist rule
-        # could satisfy the substrings even if 1.1.1.1's rule were emitted unscoped.
-        ip_rules = [ln for ln in chain.stdout.splitlines() if "1.1.1.1" in ln]
-        assert ip_rules, f"no allow rules for 1.1.1.1:\n{chain.stdout}"
-        joined = "\n".join(ip_rules)
+        # Scope the assertions to the rule line(s) for THIS container, not the whole
+        # shared chain — otherwise a leftover/concurrent allowlist rule could satisfy
+        # the substrings even if this container's rules were emitted unscoped.
+        set_rules = [
+            ln
+            for ln in chain.stdout.splitlines()
+            if f"@coi_s_{ident}" in ln or f"@coi_d_{ident}" in ln
+        ]
+        assert set_rules, f"no allowlist set rules for {ip}:\n{chain.stdout}"
+        joined = "\n".join(set_rules)
         assert "l4proto" in joined, (
-            f"expected TCP/UDP (l4proto) scoping on the 1.1.1.1 rule:\n{joined}"
+            f"expected TCP/UDP (l4proto) scoping on the allowlist set rules:\n{joined}"
         )
         assert "echo-request" in joined and "10/second" in joined, (
-            f"expected rate-limited (10/second) ICMP echo on the 1.1.1.1 rule:\n{joined}"
+            f"expected rate-limited (10/second) ICMP echo on the allowlist set rules:\n{joined}"
+        )
+
+        # And the configured address must actually be in the static set those rules
+        # admit — otherwise the scoping above would be guarding nothing.
+        static_set = subprocess.run(
+            ["sudo", "-n", "nft", "list", "set", "ip", "coi", f"coi_s_{ident}"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert "1.1.1.1" in static_set.stdout, (
+            f"1.1.1.1 is allowlisted but not in the static set:\n{static_set.stdout}"
         )
     finally:
         os.unlink(config_file)

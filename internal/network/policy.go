@@ -8,30 +8,20 @@ import (
 
 // AllowPolicy is the compiled form of [network] allowed_domains.
 //
-// It splits the configured entries into the two things the firewall treats
-// very differently:
+// It splits the configured entries into the two things allowlist mode treats
+// differently:
 //
-//   - Literal addresses (raw IPv4, CIDR) are installed directly into the
-//     container's static nft set. They need no DNS at all.
-//   - Names (exact hostnames and "*." wildcards) are enforced at resolution
-//     time by DNSProxy: a name that matches the policy has its answer's A
-//     records added to the container's dynamic nft set before the answer is
-//     handed back, so the container can only ever dial an address the firewall
-//     already trusts.
-//
-// Matching a name at query time — rather than resolving it up front and pinning
-// the result — is what makes wildcards work. The old resolve-and-pin path
-// handled "*.example.com" by resolving the *base* domain, which for a large
-// CDN or cloud frontend returns an address set with no overlap at all with the
-// subdomains actually being dialled.
+//   - Literal addresses (raw IPv4, CIDR) go straight into the container's static
+//     nft set. They involve no name resolution at all.
+//   - Names are resolved once, on the host. Their addresses go into the dynamic
+//     nft set AND into the container's /etc/hosts. With DNS egress blocked, that
+//     hosts file is the container's only route from a name to an address — so the
+//     two sides cannot disagree, and the container cannot reach an address the
+//     firewall has not already been given.
 type AllowPolicy struct {
 	staticCIDRs []string
 	exact       map[string]bool
-	// suffixes hold the "." + base form of each wildcard, so a HasSuffix test
-	// matches subdomains at any depth without matching a sibling like
-	// "notexample.com".
-	suffixes []string
-	names    []string
+	names       []string
 }
 
 // NewAllowPolicy compiles allowed_domains entries into an AllowPolicy.
@@ -41,13 +31,9 @@ type AllowPolicy struct {
 //	1.2.3.4              raw IPv4 address
 //	10.0.0.0/8           IPv4 CIDR
 //	api.example.com      exact hostname
-//	*.example.com        example.com and any subdomain of it, at any depth
 //
-// A "*" anywhere other than as a leading "*." is rejected. Entries like
-// "*-aiplatform.googleapis.com" look plausible but are not wildcards; the old
-// resolver passed them to DNS verbatim, where they failed to resolve and were
-// then silently dropped from the allowlist, leaving the user with a firewall
-// that quietly did not cover what they asked for. Failing loudly is the point.
+// Wildcards are rejected — see the error text below for why, and for what to
+// write instead.
 func NewAllowPolicy(entries []string) (*AllowPolicy, error) {
 	p := &AllowPolicy{exact: make(map[string]bool)}
 
@@ -79,22 +65,30 @@ func NewAllowPolicy(entries []string) (*AllowPolicy, error) {
 			}
 			p.staticCIDRs = append(p.staticCIDRs, ip.To4().String()+"/32")
 
-		case strings.HasPrefix(entry, "*."):
-			base := entry[2:]
-			if base == "" || strings.Contains(base, "*") {
-				return nil, fmt.Errorf("invalid wildcard %q in allowed_domains: expected the form \"*.example.com\"", raw)
-			}
-			// The wildcard covers its own base too: "*.example.com" allows
-			// "example.com". This matches how dnsmasq and most firewall
-			// allowlists read a wildcard, and is what users expect.
-			p.exact[base] = true
-			p.suffixes = append(p.suffixes, "."+base)
-			p.names = append(p.names, base)
-
 		case strings.Contains(entry, "*"):
+			// Wildcards cannot be honoured, so they are rejected rather than
+			// quietly mishandled.
+			//
+			// Allowlist mode resolves each name up front and writes the answer into
+			// the container's /etc/hosts, which — with DNS blocked — is the only
+			// place the container can get an address from. A wildcard has no answer
+			// to write: you cannot know which subdomains will be asked for, so there
+			// is nothing to put in the file and nothing to put in the firewall.
+			// Supporting one would require a live resolver running for the whole life
+			// of the container, which is exactly the moving part this design removes.
+			//
+			// The previous implementation pretended otherwise: it stripped the "*."
+			// and resolved the BASE domain, whose addresses have no overlap at all
+			// with the subdomains actually dialled (googleapis.com resolves to
+			// 142.250.130.x; us-central1-aiplatform.googleapis.com to 172.217.112-119.4).
+			// The result was a firewall that permitted a set of addresses nothing
+			// would ever connect to, and a user who believed they were covered.
+			// Failing loudly is strictly better than that.
 			return nil, fmt.Errorf(
-				"invalid entry %q in allowed_domains: a wildcard must be written as a leading \"*.\" label "+
-					"(for example \"*.googleapis.com\"); partial-label wildcards are not supported", raw)
+				"wildcard %q in allowed_domains is not supported: allowlist mode resolves each name up front, "+
+					"so it cannot know which subdomains a wildcard will cover. List the exact hostnames "+
+					"(for example \"us-central1-aiplatform.googleapis.com\", \"oauth2.googleapis.com\"), "+
+					"or allow the provider's published IP ranges as CIDRs (for example \"142.250.0.0/15\")", raw)
 
 		default:
 			p.exact[entry] = true
@@ -105,33 +99,10 @@ func NewAllowPolicy(entries []string) (*AllowPolicy, error) {
 	return p, nil
 }
 
-// Allows reports whether qname is permitted by the policy. The name may carry a
-// trailing dot and any casing; both are normalised.
-func (p *AllowPolicy) Allows(qname string) bool {
-	name := strings.ToLower(strings.TrimSuffix(qname, "."))
-	if name == "" {
-		return false
-	}
-	if p.exact[name] {
-		return true
-	}
-	for _, suffix := range p.suffixes {
-		if strings.HasSuffix(name, suffix) {
-			return true
-		}
-	}
-	return false
-}
-
 // StaticCIDRs returns the literal address entries, in CIDR form, for the static
 // nft set. Raw IPs come back as /32.
 func (p *AllowPolicy) StaticCIDRs() []string { return p.staticCIDRs }
 
-// Names returns the name entries (wildcards reduced to their base domain).
-// DNSProxy enforces these; the refresher also resolves them to prewarm the
-// dynamic set so the container is not blocked on a cold cache at boot.
+// Names returns the hostname entries. These are resolved on the host; the answers
+// go into both the container's dynamic nft set and its /etc/hosts.
 func (p *AllowPolicy) Names() []string { return p.names }
-
-// HasNames reports whether any name entry exists. When false the allowlist is
-// purely address-based and the DNS proxy has nothing to enforce.
-func (p *AllowPolicy) HasNames() bool { return len(p.names) > 0 }

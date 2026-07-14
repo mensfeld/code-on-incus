@@ -3,6 +3,7 @@ package network
 import (
 	"os/exec"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/mensfeld/code-on-incus/internal/config"
@@ -34,19 +35,24 @@ func nftDump(t *testing.T) string {
 	return string(out)
 }
 
+func applyTestAllowlist(t *testing.T, f *NftManager, staticCIDRs []string) {
+	t.Helper()
+	cfg := &config.NetworkConfig{Mode: config.NetworkModeAllowlist}
+	if err := f.ApplyAllowlist(cfg, staticCIDRs); err != nil {
+		t.Fatalf("ApplyAllowlist: %v", err)
+	}
+}
+
 // TestAllowlistSets_Lifecycle exercises the set-based allowlist end to end
-// against the real kernel: rules reference the sets, static and dynamic elements
-// land in the right set, and teardown removes both rules and sets.
+// against the real kernel: rules reference the sets, static and resolved
+// addresses land in the right set, and teardown removes both rules and sets.
 func TestAllowlistSets_Lifecycle(t *testing.T) {
 	skipUnlessNft(t)
 
 	f := NewNftManager(testContainerIP, testGatewayIP)
-	t.Cleanup(func() { _ = f.RemoveRules() })
+	t.Cleanup(func() { _ = DeleteCOIFilterRulesForIP(testContainerIP) })
 
-	cfg := &config.NetworkConfig{Mode: config.NetworkModeAllowlist}
-	if err := f.ApplyAllowlist(cfg, []string{"8.8.8.8/32", "192.0.2.0/24"}); err != nil {
-		t.Fatalf("ApplyAllowlist: %v", err)
-	}
+	applyTestAllowlist(t, f, []string{"8.8.8.8/32", "192.0.2.0/24"})
 
 	dump := nftDump(t)
 
@@ -62,25 +68,22 @@ func TestAllowlistSets_Lifecycle(t *testing.T) {
 		}
 	}
 
-	// Literal entries land in the static set.
 	for _, want := range []string{"8.8.8.8", "192.0.2.0/24"} {
 		if !strings.Contains(dump, want) {
 			t.Errorf("expected static element %s in the ruleset\n%s", want, dump)
 		}
 	}
 
-	// Default deny must still be the last word.
 	if !strings.Contains(dump, "reject") {
 		t.Errorf("expected a default reject rule\n%s", dump)
 	}
 
-	// A DNS-learned address goes into the dynamic set, with a timeout.
 	if err := f.AllowDynamicIPs([]string{"172.217.112.4"}, 300); err != nil {
 		t.Fatalf("AllowDynamicIPs: %v", err)
 	}
 	dump = nftDump(t)
 	if !strings.Contains(dump, "172.217.112.4") {
-		t.Errorf("expected the DNS-learned address in the dynamic set\n%s", dump)
+		t.Errorf("expected the resolved address in the dynamic set\n%s", dump)
 	}
 	if !strings.Contains(dump, "timeout") {
 		t.Errorf("dynamic elements must carry a timeout so a rotated-out address expires\n%s", dump)
@@ -103,32 +106,157 @@ func TestAllowlistSets_Lifecycle(t *testing.T) {
 	}
 }
 
-// TestDeleteCOIFilterRulesForIP_RemovesSetsAndIntercept guards the teardown path
-// that kill, orphan cleanup and setup's stale-rule purge all share.
+// TestApplyAllowlist_BlocksDNSInBothChains is the guard for the invariant the
+// whole mode rests on: the container has no route to a nameserver, so the
+// /etc/hosts file COI writes is its only way to turn a name into an address. Give
+// it any resolver and it can learn an address the firewall has never seen — the
+// exact host/container divergence that made allowlist mode flap against rotating
+// cloud frontends.
 //
-// Allowlist mode installs three kinds of host-side state — forward rules, two nft
-// sets, and a DNAT redirect — but the shared by-IP teardown only knew about the
-// rules. Sets and intercepts would accumulate on the host across sessions, and a
-// stale DNAT rule would black-hole DNS for whatever container was assigned that
-// IP next.
-func TestDeleteCOIFilterRulesForIP_RemovesSetsAndIntercept(t *testing.T) {
+// It takes two chains, and missing either leaves the hole wide open:
+//
+//   - forward, for an off-box resolver like 8.8.8.8;
+//   - input, for the bridge's own dnsmasq — that traffic is addressed to the HOST,
+//     so it is delivered via the input hook and never traverses the forward chain
+//     at all. This is the easy one to forget, and forgetting it would silently
+//     make everything else pointless.
+func TestApplyAllowlist_BlocksDNSInBothChains(t *testing.T) {
 	skipUnlessNft(t)
 
 	f := NewNftManager(testContainerIP, testGatewayIP)
 	t.Cleanup(func() { _ = DeleteCOIFilterRulesForIP(testContainerIP) })
 
-	cfg := &config.NetworkConfig{Mode: config.NetworkModeAllowlist}
-	if err := f.ApplyAllowlist(cfg, []string{"8.8.8.8/32"}); err != nil {
-		t.Fatalf("ApplyAllowlist: %v", err)
+	applyTestAllowlist(t, f, nil)
+
+	forward := nftDump(t)
+	if !strings.Contains(forward, "dport 53") {
+		t.Errorf("forward chain must reject DNS to off-box resolvers\n%s", forward)
 	}
+
+	// The DNS reject has to precede the set-accept rules. A resolver that happens
+	// to sit inside an allowlisted CIDR would otherwise be reachable on port 53
+	// and could hand the container any address it liked.
+	dnsAt := strings.Index(forward, "dport 53")
+	setAt := strings.Index(forward, "@"+staticSetName(testContainerIP))
+	if dnsAt == -1 || setAt == -1 || dnsAt > setAt {
+		t.Errorf("the DNS reject must come BEFORE the allowlist set rules, or a resolver inside an "+
+			"allowlisted CIDR stays reachable on port 53\n%s", forward)
+	}
+
+	out, err := exec.Command("sudo", "-n", "nft", "list", "chain", "ip", "coi", "input").CombinedOutput()
+	if err != nil {
+		t.Fatalf("the coi input chain must exist — without it the container simply asks the bridge's "+
+			"dnsmasq and resolves whatever it likes: %v", err)
+	}
+	input := string(out)
+	if !strings.Contains(input, testContainerIP) || !strings.Contains(input, "dport 53") {
+		t.Errorf("input chain must block the container's DNS to the bridge resolver\n%s", input)
+	}
+}
+
+// TestAllowDynamicIPs_IsIdempotent verifies that re-adding an address refreshes
+// its timeout rather than failing, so the refresher can run repeatedly.
+func TestAllowDynamicIPs_IsIdempotent(t *testing.T) {
+	skipUnlessNft(t)
+
+	f := NewNftManager(testContainerIP, testGatewayIP)
+	t.Cleanup(func() { _ = DeleteCOIFilterRulesForIP(testContainerIP) })
+	applyTestAllowlist(t, f, nil)
+
+	for i := 0; i < 3; i++ {
+		if err := f.AllowDynamicIPs([]string{"172.217.112.4"}, 300); err != nil {
+			t.Fatalf("AllowDynamicIPs call %d: %v", i+1, err)
+		}
+	}
+
+	if got := len(f.dynSeenSnapshot()); got != 1 {
+		t.Errorf("expected 1 tracked address, got %d", got)
+	}
+	if !strings.Contains(nftDump(t), "172.217.112.4") {
+		t.Error("the address should be present after repeated adds")
+	}
+}
+
+// TestAllowDynamicIPs_ConcurrentCallersNeverAnswerBeforeInstall guards the
+// install-before-use invariant under concurrency.
+//
+// An earlier version recorded addresses in its bookkeeping map, released the
+// lock, and only then shelled out to nft — so a second caller saw them as already
+// installed, skipped the nft call, and returned while the first caller's exec was
+// still running. Anything acting on that return would have been working with an
+// address the kernel did not yet have.
+func TestAllowDynamicIPs_ConcurrentCallersNeverAnswerBeforeInstall(t *testing.T) {
+	skipUnlessNft(t)
+
+	f := NewNftManager(testContainerIP, testGatewayIP)
+	t.Cleanup(func() { _ = DeleteCOIFilterRulesForIP(testContainerIP) })
+	applyTestAllowlist(t, f, nil)
+
+	const goroutines = 8
+	ips := []string{"172.217.112.4", "172.217.113.4"}
+
+	var wg sync.WaitGroup
+	errs := make([]error, goroutines)
+	missing := make([]string, goroutines)
+	start := make(chan struct{})
+
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			<-start // maximise overlap
+			if err := f.AllowDynamicIPs(ips, 300); err != nil {
+				errs[n] = err
+				return
+			}
+			// AllowDynamicIPs has returned, so the kernel must already hold every
+			// address this caller was told about.
+			out, err := exec.Command("sudo", "-n", "nft", "list", "set", "ip", "coi",
+				dynamicSetName(testContainerIP)).CombinedOutput()
+			if err != nil {
+				errs[n] = err
+				return
+			}
+			for _, ip := range ips {
+				if !strings.Contains(string(out), ip) {
+					missing[n] = ip
+					return
+				}
+			}
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	for i := 0; i < goroutines; i++ {
+		if errs[i] != nil {
+			t.Fatalf("goroutine %d: %v", i, errs[i])
+		}
+		if missing[i] != "" {
+			t.Errorf("goroutine %d returned from AllowDynamicIPs while %s was still absent from the "+
+				"kernel set — a caller acting on that return would use an address the firewall rejects",
+				i, missing[i])
+		}
+	}
+}
+
+// TestDeleteCOIFilterRulesForIP_RemovesEverything guards the teardown path that
+// kill, orphan cleanup and setup's stale-rule purge all share.
+//
+// Allowlist mode installs state in three places — forward rules, the input-chain
+// DNS block, and two nft sets — but the shared by-IP teardown originally knew only
+// about the forward rules, so the rest accumulated on the host across sessions.
+func TestDeleteCOIFilterRulesForIP_RemovesEverything(t *testing.T) {
+	skipUnlessNft(t)
+
+	f := NewNftManager(testContainerIP, testGatewayIP)
+	t.Cleanup(func() { _ = DeleteCOIFilterRulesForIP(testContainerIP) })
+
+	applyTestAllowlist(t, f, []string{"8.8.8.8/32"})
 	if err := f.AllowDynamicIPs([]string{"172.217.112.4"}, 300); err != nil {
 		t.Fatalf("AllowDynamicIPs: %v", err)
 	}
-	if err := EnsureDNSIntercept(testContainerIP, testGatewayIP, 15353); err != nil {
-		t.Fatalf("EnsureDNSIntercept: %v", err)
-	}
 
-	// The by-IP entry point must clean up everything, not just the rules.
 	if err := DeleteCOIFilterRulesForIP(testContainerIP); err != nil {
 		t.Fatalf("DeleteCOIFilterRulesForIP: %v", err)
 	}
@@ -143,87 +271,13 @@ func TestDeleteCOIFilterRulesForIP_RemovesSetsAndIntercept(t *testing.T) {
 		}
 	}
 
-	nat, err := exec.Command("sudo", "-n", "nft", "list", "table", "ip", coiNatTable).CombinedOutput()
-	if err == nil && strings.Contains(string(nat), dnsInterceptComment(testContainerIP)) {
-		t.Errorf("the DNS intercept leaked — it would black-hole DNS for the next container "+
-			"assigned %s\n%s", testContainerIP, nat)
+	input, err := exec.Command("sudo", "-n", "nft", "list", "chain", "ip", "coi", "input").CombinedOutput()
+	if err == nil && strings.Contains(string(input), testContainerIP) {
+		t.Errorf("the input-chain DNS block leaked\n%s", input)
 	}
 
 	// Teardown must be idempotent: orphan cleanup can race a normal teardown.
 	if err := DeleteCOIFilterRulesForIP(testContainerIP); err != nil {
 		t.Errorf("second teardown should be a no-op, got: %v", err)
-	}
-}
-
-// TestAllowDynamicIPs_IsIdempotent verifies that re-adding an address refreshes
-// its timeout rather than failing. The DNS proxy calls this on every answer, so
-// a second query for a name it already resolved must not error.
-func TestAllowDynamicIPs_IsIdempotent(t *testing.T) {
-	skipUnlessNft(t)
-
-	f := NewNftManager(testContainerIP, testGatewayIP)
-	t.Cleanup(func() { _ = f.RemoveRules() })
-
-	cfg := &config.NetworkConfig{Mode: config.NetworkModeAllowlist}
-	if err := f.ApplyAllowlist(cfg, nil); err != nil {
-		t.Fatalf("ApplyAllowlist: %v", err)
-	}
-
-	for i := 0; i < 3; i++ {
-		if err := f.AllowDynamicIPs([]string{"172.217.112.4"}, 300); err != nil {
-			t.Fatalf("AllowDynamicIPs call %d: %v", i+1, err)
-		}
-	}
-
-	// The hot-path cache means only the first call should have reached nft; the
-	// element still has nearly all of its life left on calls 2 and 3.
-	if got := len(f.dynSeenSnapshot()); got != 1 {
-		t.Errorf("expected 1 tracked dynamic address, got %d", got)
-	}
-	if !strings.Contains(nftDump(t), "172.217.112.4") {
-		t.Error("the address should be present after repeated adds")
-	}
-}
-
-// TestDNSIntercept_Lifecycle verifies the DNAT redirect that makes the allowlist
-// enforceable rather than merely cooperative: it catches a container's DNS no
-// matter which nameserver the container aims at.
-func TestDNSIntercept_Lifecycle(t *testing.T) {
-	skipUnlessNft(t)
-
-	t.Cleanup(func() { _ = RemoveDNSIntercept(testContainerIP) })
-
-	if err := EnsureDNSIntercept(testContainerIP, testGatewayIP, 15353); err != nil {
-		t.Fatalf("EnsureDNSIntercept: %v", err)
-	}
-	// Idempotent — setup may run more than once.
-	if err := EnsureDNSIntercept(testContainerIP, testGatewayIP, 15353); err != nil {
-		t.Fatalf("EnsureDNSIntercept (second call): %v", err)
-	}
-
-	out, err := exec.Command("sudo", "-n", "nft", "list", "table", "ip", coiNatTable).CombinedOutput()
-	if err != nil {
-		t.Fatalf("listing %s: %v", coiNatTable, err)
-	}
-	dump := string(out)
-
-	if strings.Count(dump, dnsInterceptComment(testContainerIP)) != 1 {
-		t.Errorf("expected exactly one intercept rule after two calls\n%s", dump)
-	}
-	if !strings.Contains(dump, "dnat to 10.99.99.1:15353") {
-		t.Errorf("expected the DNAT redirect to the COI resolver\n%s", dump)
-	}
-	// The redirect must not be scoped to port 53 on a particular nameserver — the
-	// whole point is that it catches an agent pointing resolv.conf anywhere.
-	if !strings.Contains(dump, "dport 53") {
-		t.Errorf("expected the redirect to match destination port 53\n%s", dump)
-	}
-
-	if err := RemoveDNSIntercept(testContainerIP); err != nil {
-		t.Fatalf("RemoveDNSIntercept: %v", err)
-	}
-	out, _ = exec.Command("sudo", "-n", "nft", "list", "table", "ip", coiNatTable).CombinedOutput()
-	if strings.Contains(string(out), dnsInterceptComment(testContainerIP)) {
-		t.Errorf("intercept rule survived teardown\n%s", out)
 	}
 }
