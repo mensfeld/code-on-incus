@@ -164,17 +164,12 @@ func (f *NftManager) ApplyAllowlist(cfg *config.NetworkConfig, staticCIDRs []str
 	return nil
 }
 
-// RemoveRules removes all nftables rules for this container's IP, then the sets
-// they referenced. Order matters: the kernel refuses to delete a set that a rule
-// still names.
+// RemoveRules removes every host-side artefact COI installed for this container:
+// rules, allowlist sets and the DNS intercept. See DeleteCOIFilterRulesForIP,
+// which is the shared implementation and the same path kill and orphan cleanup
+// take.
 func (f *NftManager) RemoveRules() error {
-	if f.containerIP == "" {
-		return nil
-	}
-	if err := deleteNFTRulesByComment("coi-" + f.containerIP); err != nil {
-		return err
-	}
-	return f.removeAllowlistSets()
+	return DeleteCOIFilterRulesForIP(f.containerIP)
 }
 
 // ReplaceAllowlist re-syncs the static allowlist entries for this container.
@@ -583,9 +578,29 @@ func ListCOIFilterRuleIPs() (map[string][]string, error) {
 	return result, nil
 }
 
-// DeleteCOIFilterRulesForIP removes all ip coi forward rules for the given container IP.
+// DeleteCOIFilterRulesForIP removes every host-side artefact COI installed for a
+// container IP: its forward rules, then its allowlist sets, then its DNS
+// intercept.
+//
+// This is the single teardown entry point used by kill, orphan cleanup and
+// setup's stale-rule purge, so it must account for everything allowlist mode
+// creates. Rules go first — the kernel refuses to drop a set that a rule still
+// references — and the DNAT redirect goes last, because leaving it behind would
+// black-hole DNS for whatever container is assigned this IP next.
+//
+// It is safe for containers that never had sets or an intercept (open and
+// restricted mode): removing something that was never created is a no-op.
 func DeleteCOIFilterRulesForIP(ip string) error {
-	return deleteNFTRulesByComment("coi-" + ip)
+	if ip == "" {
+		return nil
+	}
+	if err := deleteNFTRulesByComment("coi-" + ip); err != nil {
+		return err
+	}
+	if err := removeAllowlistSetsForIP(ip); err != nil {
+		return err
+	}
+	return RemoveDNSIntercept(ip)
 }
 
 // GetContainerIP retrieves the IPv4 address of a container from Incus
