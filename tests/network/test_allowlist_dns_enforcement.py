@@ -215,26 +215,23 @@ def test_dns_is_blocked_entirely(coi_binary, workspace_dir, cleanup_containers):
     """
     name = start_ready_container(coi_binary, workspace_dir)
 
-    gateway = container_exec(
-        coi_binary, name, "ip route | awk '/default/ {print $3}'"
-    ).stdout.strip()
-    assert gateway, "could not determine the container's gateway"
+    _, gateway_out = container_exec(coi_binary, name, "ip route | awk '/default/ {print $3}'")
+    gateway = gateway_out.strip().splitlines()[-1] if gateway_out.strip() else ""
+    assert gateway, f"could not determine the container's gateway: {gateway_out!r}"
 
-    # The bridge's own resolver — the one an input rule is needed for.
-    bridge_dns = container_exec(
-        coi_binary,
-        name,
-        f"getent ahostsv4 example.com 2>/dev/null; dig +time=2 +tries=1 @{gateway} example.com",
-    )
-    assert "NOERROR" not in bridge_dns.stdout, (
+    # The bridge's own resolver. This is the one that needs an INPUT rule: its
+    # traffic is addressed to the host, so it never traverses the forward chain and
+    # a forward-only block would leave it wide open.
+    _, bridge_dns = container_exec(coi_binary, name, f"dig +time=2 +tries=1 @{gateway} example.com")
+    assert "NOERROR" not in bridge_dns, (
         f"the container resolved a name via the bridge resolver at {gateway} — DNS is not blocked "
-        f"and the allowlist can be bypassed\n{bridge_dns.stdout}"
+        f"and the allowlist can be bypassed\n{bridge_dns}"
     )
 
-    # An off-box resolver.
-    public_dns = container_exec(coi_binary, name, "dig +time=2 +tries=1 @8.8.8.8 example.com")
-    assert "NOERROR" not in public_dns.stdout, (
-        f"the container resolved a name via 8.8.8.8 — DNS is not blocked\n{public_dns.stdout}"
+    # An off-box resolver, caught by the forward chain.
+    _, public_dns = container_exec(coi_binary, name, "dig +time=2 +tries=1 @8.8.8.8 example.com")
+    assert "NOERROR" not in public_dns, (
+        f"the container resolved a name via 8.8.8.8 — DNS is not blocked\n{public_dns}"
     )
 
 
