@@ -163,26 +163,35 @@ func (f *NftManager) AllowDynamicIPs(ips []string, ttl uint32) error {
 	return nil
 }
 
-// removeAllowlistSets deletes the container's sets. Rules referencing a set must
-// be gone first or the kernel refuses with EBUSY, so RemoveRules calls this only
-// after deleting the rules.
-func (f *NftManager) removeAllowlistSets() error {
-	if f.containerIP == "" {
+// removeAllowlistSetsForIP deletes a container's allowlist sets.
+//
+// Rules referencing a set must be gone first or the kernel refuses with EBUSY,
+// so callers delete rules before calling this. A set that was never created (a
+// container in open or restricted mode) is not an error during teardown.
+func removeAllowlistSetsForIP(containerIP string) error {
+	if containerIP == "" {
 		return nil
 	}
 	var firstErr error
-	for _, name := range []string{staticSetName(f.containerIP), dynamicSetName(f.containerIP)} {
+	for _, name := range []string{staticSetName(containerIP), dynamicSetName(containerIP)} {
 		if _, err := runNFTCommand("delete", "set", "ip", "coi", name); err != nil {
-			// A set that was never created is not an error during teardown.
-			if !strings.Contains(err.Error(), "No such file") && !strings.Contains(err.Error(), "does not exist") {
-				if firstErr == nil {
-					firstErr = err
-				}
-				logWarnf("Warning: failed to delete nft set %s: %v", name, err)
+			if isNftNotFound(err) {
+				continue
 			}
+			if firstErr == nil {
+				firstErr = err
+			}
+			logWarnf("Warning: failed to delete nft set %s: %v", name, err)
 		}
 	}
 	return firstErr
+}
+
+// isNftNotFound reports whether an nft error means "it isn't there", which is
+// success as far as teardown is concerned.
+func isNftNotFound(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "No such file") || strings.Contains(msg, "does not exist")
 }
 
 // dynSeenSnapshot returns the dynamic addresses this manager believes it has

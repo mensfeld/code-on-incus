@@ -103,6 +103,58 @@ func TestAllowlistSets_Lifecycle(t *testing.T) {
 	}
 }
 
+// TestDeleteCOIFilterRulesForIP_RemovesSetsAndIntercept guards the teardown path
+// that kill, orphan cleanup and setup's stale-rule purge all share.
+//
+// Allowlist mode installs three kinds of host-side state — forward rules, two nft
+// sets, and a DNAT redirect — but the shared by-IP teardown only knew about the
+// rules. Sets and intercepts would accumulate on the host across sessions, and a
+// stale DNAT rule would black-hole DNS for whatever container was assigned that
+// IP next.
+func TestDeleteCOIFilterRulesForIP_RemovesSetsAndIntercept(t *testing.T) {
+	skipUnlessNft(t)
+
+	f := NewNftManager(testContainerIP, testGatewayIP)
+	t.Cleanup(func() { _ = DeleteCOIFilterRulesForIP(testContainerIP) })
+
+	cfg := &config.NetworkConfig{Mode: config.NetworkModeAllowlist}
+	if err := f.ApplyAllowlist(cfg, []string{"8.8.8.8/32"}); err != nil {
+		t.Fatalf("ApplyAllowlist: %v", err)
+	}
+	if err := f.AllowDynamicIPs([]string{"172.217.112.4"}, 300); err != nil {
+		t.Fatalf("AllowDynamicIPs: %v", err)
+	}
+	if err := EnsureDNSIntercept(testContainerIP, testGatewayIP, 15353); err != nil {
+		t.Fatalf("EnsureDNSIntercept: %v", err)
+	}
+
+	// The by-IP entry point must clean up everything, not just the rules.
+	if err := DeleteCOIFilterRulesForIP(testContainerIP); err != nil {
+		t.Fatalf("DeleteCOIFilterRulesForIP: %v", err)
+	}
+
+	dump := nftDump(t)
+	if strings.Contains(dump, testContainerIP) {
+		t.Errorf("forward rules for %s survived teardown\n%s", testContainerIP, dump)
+	}
+	for _, set := range []string{staticSetName(testContainerIP), dynamicSetName(testContainerIP)} {
+		if strings.Contains(dump, set) {
+			t.Errorf("set %s leaked — it would accumulate on the host across sessions\n%s", set, dump)
+		}
+	}
+
+	nat, err := exec.Command("sudo", "-n", "nft", "list", "table", "ip", coiNatTable).CombinedOutput()
+	if err == nil && strings.Contains(string(nat), dnsInterceptComment(testContainerIP)) {
+		t.Errorf("the DNS intercept leaked — it would black-hole DNS for the next container "+
+			"assigned %s\n%s", testContainerIP, nat)
+	}
+
+	// Teardown must be idempotent: orphan cleanup can race a normal teardown.
+	if err := DeleteCOIFilterRulesForIP(testContainerIP); err != nil {
+		t.Errorf("second teardown should be a no-op, got: %v", err)
+	}
+}
+
 // TestAllowDynamicIPs_IsIdempotent verifies that re-adding an address refreshes
 // its timeout rather than failing. The DNS proxy calls this on every answer, so
 // a second query for a name it already resolved must not error.
