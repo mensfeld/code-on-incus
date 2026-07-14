@@ -72,12 +72,30 @@ func IncusExecInteractive(args ...string) error {
 }
 
 // IncusExecQuietContext executes an Incus command silently with context support
+// IncusExecQuietContext runs an Incus command without writing to the terminal,
+// but still reports WHY it failed.
+//
+// "Quiet" previously meant discarding stderr outright, so a failure surfaced as
+// a bare "exit status 1" with the cause thrown away — `coi kill` could only tell
+// you "Failed to delete <container>: exit status 1", which is not something
+// anyone can act on. Incus's message is captured and attached to the error
+// instead; callers that want silence get silence, callers that hit an error get
+// the reason.
 func IncusExecQuietContext(ctx context.Context, args ...string) error {
 	cmdArgs := buildIncusCommand(args...)
 	cmd := execIncusCommandContext(ctx, cmdArgs)
+
+	var stderr bytes.Buffer
 	cmd.Stdout = nil
-	cmd.Stderr = nil
-	return cmd.Run()
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return fmt.Errorf("%w: %s", err, msg)
+		}
+		return err
+	}
+	return nil
 }
 
 // IncusExecQuiet executes an Incus command silently (suppress stdout/stderr)
