@@ -671,6 +671,27 @@ func StopContainerQuiet(ctx context.Context, containerName string, force bool) (
 	return IncusOutputContext(ctx, args...)
 }
 
+// IsNotFoundErr reports whether an Incus error means the instance is not there.
+//
+// For anything whose goal is "this container should be gone", that is success,
+// not failure. Deletion races are routine: stopping a container ends the session
+// that owns it, and that session then deletes its own ephemeral container — so a
+// concurrent `coi kill` can find the instance already removed between checking
+// that it exists and deleting it. Treating that as an error made `coi kill`
+// report "No containers were killed" and exit non-zero about a container that
+// had, in fact, been killed.
+//
+// Matching on the message is unpleasant but is what the Incus CLI gives us; it
+// exits 1 for every failure and distinguishes them only in stderr.
+func IsNotFoundErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "instance not found") ||
+		strings.Contains(msg, "not found") && strings.Contains(msg, "instance")
+}
+
 // DeleteContainer deletes a container forcefully
 func DeleteContainer(containerName string) error {
 	return IncusExecQuiet("delete", containerName, "--force")
