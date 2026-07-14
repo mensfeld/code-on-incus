@@ -51,15 +51,19 @@ func (r *Resolver) ResolveDomain(domain string) ([]string, error) {
 		return []string{ipNet.String()}, nil
 	}
 
-	// Wildcard domain — strip prefix, resolve base domain (best-effort)
-	effectiveDomain := domain
-	if strings.HasPrefix(domain, "*.") {
-		effectiveDomain = domain[2:]
-		if effectiveDomain == "" {
-			return nil, fmt.Errorf("invalid wildcard entry %q: missing base domain", domain)
-		}
-		logInfof("  %s: wildcard — resolving base domain %q (best-effort, not all IPs guaranteed)", domain, effectiveDomain)
+	// A wildcard has no meaningful resolution and must never be passed here.
+	//
+	// This function used to "support" one by stripping the "*." and resolving the
+	// BASE domain, which is where the original bug lived: googleapis.com resolves
+	// to 142.250.130.x, while us-central1-aiplatform.googleapis.com — the address
+	// the container actually dials — is 172.217.112-119.4. Not one address in
+	// common. The allowlist was populated with addresses nothing would ever connect
+	// to, and nothing said so. AllowPolicy now rejects wildcards up front; this
+	// guard makes sure no other caller can quietly reintroduce the old behaviour.
+	if strings.Contains(domain, "*") {
+		return nil, fmt.Errorf("cannot resolve wildcard %q: list exact hostnames or a CIDR instead", domain)
 	}
+	effectiveDomain := domain
 
 	// Try TTL-aware DNS query first
 	result, err := QueryDNS(effectiveDomain)

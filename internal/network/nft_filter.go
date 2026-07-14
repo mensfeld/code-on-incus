@@ -76,17 +76,18 @@ func (f *NftManager) ApplyRestricted(cfg *config.NetworkConfig) error {
 	return nil
 }
 
-// ApplyAllowlist applies allowlist mode rules: accept traffic to the container's
-// two allowlist sets, reject everything else.
+// ApplyAllowlist applies allowlist mode rules: block all DNS, accept traffic to
+// the container's allowlist sets, reject everything else.
 //
 // The rules installed here are fixed for the life of the container — they name
 // the sets, not the addresses. Everything that varies (a domain's addresses
-// rotating, a new subdomain being resolved) is an element operation on a set,
-// applied atomically by the kernel. See nftset.go.
+// rotating out of DNS) is an element operation on a set, applied atomically by
+// the kernel. See nftset.go.
 //
-// staticCIDRs are the literal IP/CIDR entries from allowed_domains; they are
-// installed immediately and never expire. Name entries are not resolved here at
-// all — DNSProxy adds their addresses to the dynamic set as it answers queries.
+// staticCIDRs are the literal IP/CIDR entries from allowed_domains. Resolved name
+// entries land in the dynamic set, and the same addresses are written into the
+// container's /etc/hosts (see hosts.go) — which, with DNS blocked, is the
+// container's only route from a name to an address.
 func (f *NftManager) ApplyAllowlist(cfg *config.NetworkConfig, staticCIDRs []string) error {
 	if err := EnsureBaseRules(); err != nil {
 		logWarnf("Warning: failed to ensure base rules: %v", err)
@@ -99,24 +100,27 @@ func (f *NftManager) ApplyAllowlist(cfg *config.NetworkConfig, staticCIDRs []str
 		return err
 	}
 
-	// The gateway carries DHCP and DNS, so name the services this rule is for
-	// rather than accepting every port to the bridge address.
+	// Block DNS before anything else is allowed. This is what makes the hosts file
+	// authoritative: with no way to query a nameserver, the container cannot learn
+	// an address the firewall has not already been told about, and the host/container
+	// divergence that this whole mode exists to prevent has nowhere to occur.
 	//
-	// Be aware this rule is largely vestigial: traffic addressed to the host's
-	// own bridge address is delivered through the input hook and never traverses
-	// the forward chain, so it does not gate DNS reaching the proxy — the host's
-	// input policy does. It is kept because it costs nothing and documents intent,
-	// but do not mistake it for the control that lets the container talk to the
-	// resolver.
+	// It has to be done in TWO chains. Traffic to an off-box resolver (8.8.8.8) is
+	// forwarded, so the forward chain catches it — and it must be rejected BEFORE
+	// the set rules, or a resolver that happens to sit inside an allowlisted CIDR
+	// would be reachable on port 53 and could hand the container any address it
+	// liked. Traffic to the bridge's own resolver is addressed to the host, so it
+	// never traverses the forward chain at all; only an input rule can stop it.
+	if err := f.blockDNS(); err != nil {
+		return err
+	}
+
+	// DHCP still has to work. The lease is what gives the container the address
+	// every one of these rules is keyed on.
 	if f.gatewayIP != "" {
-		gw := f.gatewayIP + "/32"
-		if err := f.addRuleWithMatch(f.containerIP, gw,
-			[]string{"udp", "dport", "{", "53,", "67,", "68", "}"}, "accept"); err != nil {
-			return fmt.Errorf("failed to add gateway DNS/DHCP allow rule: %w", err)
-		}
-		if err := f.addRuleWithMatch(f.containerIP, gw,
-			[]string{"tcp", "dport", "53"}, "accept"); err != nil {
-			return fmt.Errorf("failed to add gateway DNS/TCP allow rule: %w", err)
+		if err := f.addRuleWithMatch(f.containerIP, f.gatewayIP+"/32",
+			[]string{"udp", "dport", "{", "67,", "68", "}"}, "accept"); err != nil {
+			return fmt.Errorf("failed to add gateway DHCP allow rule: %w", err)
 		}
 	}
 
@@ -584,11 +588,12 @@ func ListCOIFilterRuleIPs() (map[string][]string, error) {
 //
 // This is the single teardown entry point used by kill, orphan cleanup and
 // setup's stale-rule purge, so it must account for everything allowlist mode
-// creates. Rules go first — the kernel refuses to drop a set that a rule still
-// references — and the DNAT redirect goes last, because leaving it behind would
-// black-hole DNS for whatever container is assigned this IP next.
+// creates: forward rules, the input-chain DNS block, and the two allowlist sets.
 //
-// It is safe for containers that never had sets or an intercept (open and
+// Rules go first, in both chains — the kernel refuses to drop a set that a rule
+// still references.
+//
+// It is safe for containers that never had sets or a DNS block (open and
 // restricted mode): removing something that was never created is a no-op.
 func DeleteCOIFilterRulesForIP(ip string) error {
 	if ip == "" {
@@ -597,10 +602,10 @@ func DeleteCOIFilterRulesForIP(ip string) error {
 	if err := deleteNFTRulesByComment("coi-" + ip); err != nil {
 		return err
 	}
-	if err := removeAllowlistSetsForIP(ip); err != nil {
+	if err := removeInputRulesForIP(ip); err != nil {
 		return err
 	}
-	return RemoveDNSIntercept(ip)
+	return removeAllowlistSetsForIP(ip)
 }
 
 // GetContainerIP retrieves the IPv4 address of a container from Incus

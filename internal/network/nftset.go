@@ -107,39 +107,57 @@ func (f *NftManager) AddStaticIPs(cidrs []string) error {
 }
 
 // AllowDynamicIPs adds DNS-learned addresses to the dynamic set with a timeout
-// derived from the answer's TTL.
+// derived from the answer's TTL. It returns only once the kernel has the
+// addresses, so a caller that answers a DNS query afterwards knows the firewall
+// already trusts what it is about to hand over.
 //
-// It is called on the DNS hot path — once per resolved answer — so it keeps an
-// in-process record of what it has already installed and skips the nft exec
-// while an element still has most of its lifetime left. Without that, a busy
-// agent would shell out to nft on every single query.
+// The lock is deliberately held across the nft call. The proxy serves UDP and
+// TCP concurrently and the DNS library runs a goroutine per query, so two
+// queries for the same name overlap routinely. An earlier version recorded the
+// addresses in dynSeen, released the lock, and only then shelled out to nft —
+// which let a second goroutine see them as "already installed", skip the nft
+// call, and answer while the first goroutine's exec was still in flight. The
+// container could then dial an address the kernel set did not contain yet: the
+// original bug, reproduced with a smaller window. Serialising here costs one
+// exec's latency on concurrent first-resolutions of the same name and buys the
+// invariant the whole design rests on.
+//
+// dynSeen is what keeps this off the hot path: it is a record of what has
+// already been installed, so a repeat query for a name whose elements still have
+// most of their life left costs no exec at all.
 func (f *NftManager) AllowDynamicIPs(ips []string, ttl uint32) error {
 	if f.containerIP == "" || len(ips) == 0 {
 		return nil
 	}
 
 	timeout := elementTimeout(ttl)
-	now := time.Now()
 
 	f.dynMu.Lock()
+	defer f.dynMu.Unlock()
+
 	if f.dynSeen == nil {
 		f.dynSeen = make(map[string]time.Time)
 	}
+	now := time.Now()
+
+	// Drop addresses whose kernel elements have already expired. Without this the
+	// map only ever grows — one entry per address ever resolved — which for an
+	// agent working through many wildcard subdomains is an unbounded leak.
+	for ip, expiry := range f.dynSeen {
+		if now.After(expiry) {
+			delete(f.dynSeen, ip)
+		}
+	}
+
 	var stale []string
 	for _, ip := range ips {
 		expiry, known := f.dynSeen[ip]
 		// Refresh once an element is past half its life. Re-adding resets the
-		// kernel timeout, so this keeps live addresses from ever expiring while
-		// still in use, without an nft call per query.
+		// kernel timeout, so a live address never expires while still in use.
 		if !known || now.After(expiry.Add(-timeout/2)) {
 			stale = append(stale, ip)
 		}
 	}
-	for _, ip := range stale {
-		f.dynSeen[ip] = now.Add(timeout)
-	}
-	f.dynMu.Unlock()
-
 	if len(stale) == 0 {
 		return nil
 	}
@@ -151,14 +169,13 @@ func (f *NftManager) AllowDynamicIPs(ips []string, ttl uint32) error {
 	}
 
 	if err := f.addSetElements(dynamicSetName(f.containerIP), elements); err != nil {
-		// The optimistic bookkeeping above already marked these as installed.
-		// Roll it back so the next query retries rather than assuming success.
-		f.dynMu.Lock()
-		for _, ip := range stale {
-			delete(f.dynSeen, ip)
-		}
-		f.dynMu.Unlock()
 		return err
+	}
+
+	// Record only after the kernel has them, so a failed exec cannot leave an
+	// address marked as installed when it is not.
+	for _, ip := range stale {
+		f.dynSeen[ip] = now.Add(timeout)
 	}
 	return nil
 }

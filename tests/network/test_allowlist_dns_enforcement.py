@@ -1,23 +1,25 @@
 """
-Integration tests for DNS-enforced allowlist mode.
+Integration tests for allowlist mode's deterministic name resolution.
 
-Allowlist mode does not pre-resolve `allowed_domains` and pin the resulting IPs.
-It makes COI the container's resolver — transparently, via a prerouting DNAT on
-port 53 — and installs an answer's addresses into the container's nftables set
-*before* handing the answer back. The container therefore cannot be told about an
-address the firewall does not already trust.
+Allowlist mode does not let the container resolve names itself. COI resolves the
+allowlisted hostnames on the host, installs those addresses in the firewall, and
+writes the SAME addresses into the container's /etc/hosts. All DNS egress is then
+blocked, so that hosts file is the container's only route from a name to an
+address.
 
-These tests pin the properties that the previous resolve-then-pin design could
-not hold:
+That equality is the point. The old design resolved on the host, pinned the
+result, and left the container to resolve independently — and for any domain
+behind a rotating pool of frontend addresses (every Google API endpoint) the
+container routinely got a different member of the pool, one the firewall had
+never seen. The packet hit the default reject and the agent died mid-task with
+"Unable to connect", healing seconds later when a retry happened to land on an
+address that had been pinned.
 
-  * every address the container is handed is already in the firewall (the core
-    invariant; the old design resolved on the HOST and hoped the container would
-    later agree, which fails for any domain behind a rotating frontend pool);
-  * wildcards cover subdomains, matched on the name being queried rather than by
-    resolving the base domain (which returns an entirely different address set);
-  * DNS is intercepted, so pointing resolv.conf at a public resolver does not
-    escape the policy;
-  * a config that cannot be honoured fails loudly instead of being skipped.
+Nothing has to stay running for the new guarantee to hold: the hosts file and the
+firewall are both already in place and they already agree. It survives `coi`
+exiting, the user detaching from tmux, or the process being killed — which is
+exactly what an in-process DNS proxy could not do, since `coi shell --background`
+returns immediately and the container outlives it.
 """
 
 import json
@@ -30,20 +32,17 @@ import time
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from support.helpers import extract_container_name, wait_for_firewall_rules
 
-# A domain behind a large, rotating pool of frontend addresses. This is the shape
-# that broke the old design: the host and the container resolve independently and
-# get different members of the same pool, so a pinned snapshot goes stale between
-# one query and the next. Every Google API endpoint behaves this way, which is why
-# Claude-via-Vertex users hit it constantly and direct api.anthropic.com users
-# (one stable address) essentially never did.
-ROTATING_DOMAIN = "oauth2.googleapis.com"
-ROTATING_WILDCARD = "*.googleapis.com"
+# A host behind a large, rotating pool of frontend addresses — the shape that
+# broke the old design. It answers with several addresses at once, and the
+# container may pick any of them, so every one must be in both the hosts file and
+# the firewall.
+ROTATING_HOST = "oauth2.googleapis.com"
 
 ALLOWLIST_CONFIG = f"""
 [network]
 mode = "allowlist"
 allowed_domains = [
-    "{ROTATING_WILDCARD}",
+    "{ROTATING_HOST}",
     "registry.npmjs.org",
 ]
 allow_local_network_access = false
@@ -54,8 +53,8 @@ refresh_interval_minutes = 30
 def start_allowlist_container(coi_binary, workspace_dir, config_body):
     """Launch a background container with the given [network] config.
 
-    Returns (container_name, launch_result). Caller asserts on the result when it
-    expects a failure.
+    Returns (container_name, launch_result). The caller asserts on the result when
+    it expects a failure.
     """
     with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as f:
         f.write(config_body)
@@ -118,10 +117,9 @@ def nft_coi_table():
 
 
 def resolve_in_container(coi_binary, container_name, name):
-    """Resolve a name from inside the container, as the agent's HTTP client would.
+    """Resolve a name inside the container, as the agent's HTTP client would.
 
-    Returns the list of IPv4 addresses the container was handed (empty if the
-    lookup failed or was refused).
+    Returns the addresses the container was handed (empty if it could not resolve).
     """
     result = container_exec(coi_binary, container_name, f"getent ahostsv4 {name}")
     if result.returncode != 0:
@@ -134,201 +132,190 @@ def resolve_in_container(coi_binary, container_name, name):
     return ips
 
 
-def test_every_address_handed_to_the_container_is_already_allowed(
-    coi_binary, workspace_dir, cleanup_containers
-):
-    """The core invariant of DNS-enforced allowlisting.
-
-    Whatever the container resolves an allowed name to, the firewall must already
-    permit — because COI answered the query and installed the addresses first.
-
-    Under the old design this could not be guaranteed: COI resolved the domain on
-    the host, pinned that snapshot, and the container then resolved the same name
-    independently. For a rotating frontend pool it routinely got a *different*
-    member of the pool, hit the default reject, and the agent died mid-task with
-    "Unable to connect" — healing on its own moments later when a retry happened to
-    land on an address that had been pinned.
-    """
-    name, result = start_allowlist_container(coi_binary, workspace_dir, ALLOWLIST_CONFIG)
+def start_ready_container(coi_binary, workspace_dir, config=ALLOWLIST_CONFIG):
+    """Launch a container and wait for its firewall rules. Returns the name."""
+    name, result = start_allowlist_container(coi_binary, workspace_dir, config)
     assert result.returncode == 0, f"container failed to start: {result.stderr}"
     assert name, f"no container name in output: {result.stdout}{result.stderr}"
-
     assert wait_for_firewall_rules(name, timeout=40), "firewall rules were not applied in time"
+    return name
 
-    ips = resolve_in_container(coi_binary, name, ROTATING_DOMAIN)
-    assert ips, f"the container could not resolve the allowlisted domain {ROTATING_DOMAIN}"
+
+def test_every_address_the_container_can_resolve_is_already_allowed(
+    coi_binary, workspace_dir, cleanup_containers
+):
+    """The core invariant: the container cannot resolve to an address the firewall lacks.
+
+    It resolves through /etc/hosts, which COI wrote from the same answer it fed the
+    firewall. There is no second source of addresses, so the two cannot disagree.
+    """
+    name = start_ready_container(coi_binary, workspace_dir)
+
+    ips = resolve_in_container(coi_binary, name, ROTATING_HOST)
+    assert ips, f"the container could not resolve the allowlisted host {ROTATING_HOST}"
 
     table = nft_coi_table()
     missing = [ip for ip in ips if ip not in table]
     assert not missing, (
-        f"the container was handed {missing} for {ROTATING_DOMAIN}, but those addresses are "
-        f"not in the firewall — a connection to them would be rejected. This is exactly the "
-        f"race DNS-enforced allowlisting exists to eliminate.\n\n{table}"
+        f"the container resolved {ROTATING_HOST} to {missing}, but those addresses are not in the "
+        f"firewall — a connection to them would be rejected. This is the divergence the design "
+        f"exists to make impossible.\n\n{table}"
     )
 
 
-def test_wildcard_covers_subdomains(coi_binary, workspace_dir, cleanup_containers):
-    """`*.googleapis.com` must cover its subdomains.
-
-    The old resolver handled a wildcard by stripping the "*." and resolving the
-    BASE domain, whose addresses have zero overlap with the regional endpoints a
-    client actually dials. A user who allowlisted a wildcard got a firewall that
-    permitted a set of addresses nothing would ever connect to.
-    """
-    name, result = start_allowlist_container(coi_binary, workspace_dir, ALLOWLIST_CONFIG)
-    assert result.returncode == 0, f"container failed to start: {result.stderr}"
-    assert wait_for_firewall_rules(name, timeout=40), "firewall rules were not applied in time"
-
-    # Two different subdomains, neither of which is the configured base domain.
-    for subdomain in ("oauth2.googleapis.com", "storage.googleapis.com"):
-        ips = resolve_in_container(coi_binary, name, subdomain)
-        assert ips, f"{subdomain} should be covered by {ROTATING_WILDCARD} but did not resolve"
-
-        table = nft_coi_table()
-        missing = [ip for ip in ips if ip not in table]
-        assert not missing, (
-            f"{subdomain}: {missing} handed to the container but not allowed\n{table}"
-        )
-
-
-def test_unlisted_domain_is_refused(coi_binary, workspace_dir, cleanup_containers):
-    """A name outside the allowlist must not resolve at all."""
-    name, result = start_allowlist_container(coi_binary, workspace_dir, ALLOWLIST_CONFIG)
-    assert result.returncode == 0, f"container failed to start: {result.stderr}"
-    assert wait_for_firewall_rules(name, timeout=40), "firewall rules were not applied in time"
-
-    ips = resolve_in_container(coi_binary, name, "example.com")
-    assert not ips, f"example.com is not allowlisted but resolved to {ips}"
-
-
-def test_dns_interception_survives_a_hijacked_resolv_conf(
+def test_hosts_file_holds_every_address_and_is_delimited(
     coi_binary, workspace_dir, cleanup_containers
 ):
-    """Pointing resolv.conf at a public resolver must not escape the policy.
+    """COI's managed block must carry every address, without clobbering the rest of /etc/hosts.
 
-    This is what makes the allowlist enforceable rather than merely cooperative.
-    In-container root can rewrite /etc/resolv.conf, and COI historically shipped
-    8.8.8.8 and 1.1.1.1 as literal allowlist entries — so an agent could simply
-    resolve names COI never saw. A prerouting DNAT on port 53 now redirects the
-    query to COI's resolver whatever nameserver the client aims at.
+    A rotating frontend answers with several addresses and the container may pick
+    any of them; writing only the first would leave it working until that one
+    address went away.
     """
-    name, result = start_allowlist_container(coi_binary, workspace_dir, ALLOWLIST_CONFIG)
-    assert result.returncode == 0, f"container failed to start: {result.stderr}"
-    assert wait_for_firewall_rules(name, timeout=40), "firewall rules were not applied in time"
+    name = start_ready_container(coi_binary, workspace_dir)
 
-    # Bypass systemd-resolved entirely and aim straight at a public resolver.
+    hosts = container_exec(coi_binary, name, "cat /etc/hosts")
+    assert hosts.returncode == 0, f"could not read /etc/hosts: {hosts.stderr}"
+    content = hosts.stdout
+
+    assert "BEGIN coi allowlist" in content, f"COI's managed block is missing:\n{content}"
+    assert "END coi allowlist" in content, f"COI's managed block is unterminated:\n{content}"
+
+    # Everything outside the markers must survive — the container needs localhost.
+    assert "localhost" in content, f"the pre-existing hosts entries were clobbered:\n{content}"
+
+    for host in (ROTATING_HOST, "registry.npmjs.org"):
+        assert host in content, f"{host} is allowlisted but absent from /etc/hosts:\n{content}"
+
+    # Every address in the file must also be in the firewall.
+    table = nft_coi_table()
+    for line in content.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[1] == ROTATING_HOST:
+            assert parts[0] in table, (
+                f"/etc/hosts offers the container {parts[0]} for {ROTATING_HOST}, "
+                f"but the firewall does not allow it\n{table}"
+            )
+
+
+def test_dns_is_blocked_entirely(coi_binary, workspace_dir, cleanup_containers):
+    """The container must have no route to any nameserver.
+
+    Leave it one and it can resolve a name to an address the firewall has never
+    seen, which is the whole failure mode. Both directions have to be closed: an
+    off-box resolver (forwarded, caught by the forward chain) and the bridge's own
+    dnsmasq (addressed to the HOST, so it never traverses the forward chain and
+    needs an input rule).
+    """
+    name = start_ready_container(coi_binary, workspace_dir)
+
+    gateway = container_exec(
+        coi_binary, name, "ip route | awk '/default/ {print $3}'"
+    ).stdout.strip()
+    assert gateway, "could not determine the container's gateway"
+
+    # The bridge's own resolver — the one an input rule is needed for.
+    bridge_dns = container_exec(
+        coi_binary,
+        name,
+        f"getent ahostsv4 example.com 2>/dev/null; dig +time=2 +tries=1 @{gateway} example.com",
+    )
+    assert "NOERROR" not in bridge_dns.stdout, (
+        f"the container resolved a name via the bridge resolver at {gateway} — DNS is not blocked "
+        f"and the allowlist can be bypassed\n{bridge_dns.stdout}"
+    )
+
+    # An off-box resolver.
+    public_dns = container_exec(coi_binary, name, "dig +time=2 +tries=1 @8.8.8.8 example.com")
+    assert "NOERROR" not in public_dns.stdout, (
+        f"the container resolved a name via 8.8.8.8 — DNS is not blocked\n{public_dns.stdout}"
+    )
+
+
+def test_hijacking_resolv_conf_gains_nothing(coi_binary, workspace_dir, cleanup_containers):
+    """Root inside the container can rewrite resolv.conf, and it buys them nothing.
+
+    DNS egress is blocked at the host, so pointing the resolver anywhere at all is
+    inert. The allowlisted names still resolve (they come from /etc/hosts), and
+    everything else still does not.
+    """
+    name = start_ready_container(coi_binary, workspace_dir)
+
     hijack = container_exec(coi_binary, name, "echo 'nameserver 8.8.8.8' > /etc/resolv.conf")
     assert hijack.returncode == 0, f"could not rewrite resolv.conf: {hijack.stderr}"
 
-    # An allowlisted name still resolves — the query was redirected to COI, which
-    # permits it — and its addresses are in the firewall.
-    allowed = resolve_in_container(coi_binary, name, ROTATING_DOMAIN)
-    assert allowed, "an allowlisted domain should still resolve through the intercepted resolver"
-    table = nft_coi_table()
-    missing = [ip for ip in allowed if ip not in table]
-    assert not missing, f"{missing} handed to the container but not allowed\n{table}"
+    # Allowlisted names keep working: they never needed DNS.
+    allowed = resolve_in_container(coi_binary, name, ROTATING_HOST)
+    assert allowed, "an allowlisted host should still resolve from /etc/hosts after the hijack"
 
-    # An unlisted name is still refused. If 8.8.8.8 had actually answered, this
-    # would have resolved and the interception would be broken.
+    # Anything else still does not resolve.
     denied = resolve_in_container(coi_binary, name, "example.com")
     assert not denied, (
         f"example.com resolved to {denied} after resolv.conf was pointed at 8.8.8.8 — "
-        "DNS interception is not in effect and the allowlist can be bypassed"
+        "DNS is not actually blocked and the allowlist can be bypassed"
     )
 
 
-def test_rules_reference_sets_not_individual_addresses(
-    coi_binary, workspace_dir, cleanup_containers
-):
-    """Rules must name the container's nft sets, not each address.
+def test_unlisted_domain_is_unreachable(coi_binary, workspace_dir, cleanup_containers):
+    """A host outside the allowlist has no address and no route."""
+    name = start_ready_container(coi_binary, workspace_dir)
 
-    This is what removed the fail-closed refresh window. The old refresher appended
-    a fresh batch of accept rules BEHIND the still-present default reject, then
-    deleted the stale handles one `sudo nft` exec at a time; until that finished,
-    any address only in the new batch was rejected — so the firewall was at its
-    most closed exactly when an address had rotated and the container most needed
-    the new one. Set elements are applied atomically by the kernel, so there is no
-    window to be caught in.
-    """
-    name, result = start_allowlist_container(coi_binary, workspace_dir, ALLOWLIST_CONFIG)
-    assert result.returncode == 0, f"container failed to start: {result.stderr}"
-    assert wait_for_firewall_rules(name, timeout=40), "firewall rules were not applied in time"
-
-    ip = container_ip(name)
-    assert ip, "could not determine the container's IP"
-    ident = ip.replace(".", "_")
-
-    table = nft_coi_table()
-    for expected_set in (f"coi_s_{ident}", f"coi_d_{ident}"):
-        assert expected_set in table, f"expected the {expected_set} set to exist\n{table}"
-        assert f"@{expected_set}" in table, (
-            f"expected a rule referencing @{expected_set} rather than per-address rules\n{table}"
-        )
-
-    assert "reject" in table, f"default deny is missing\n{table}"
-
-
-def test_dns_learned_addresses_carry_a_timeout(coi_binary, workspace_dir, cleanup_containers):
-    """DNS-learned addresses expire rather than being evicted on the next refresh.
-
-    A large frontend round-robins across a pool far bigger than any single answer,
-    so replacing the set wholesale would keep evicting addresses that are still
-    live and still in use by an open session. Elements carry a TTL + grace timeout
-    instead.
-    """
-    name, result = start_allowlist_container(coi_binary, workspace_dir, ALLOWLIST_CONFIG)
-    assert result.returncode == 0, f"container failed to start: {result.stderr}"
-    assert wait_for_firewall_rules(name, timeout=40), "firewall rules were not applied in time"
-
-    ips = resolve_in_container(coi_binary, name, ROTATING_DOMAIN)
-    assert ips, f"could not resolve {ROTATING_DOMAIN}"
-
-    ip = container_ip(name)
-    ident = ip.replace(".", "_")
-
-    result = subprocess.run(
-        ["sudo", "-n", "nft", "list", "set", "ip", "coi", f"coi_d_{ident}"],
-        capture_output=True,
-        text=True,
-        timeout=15,
-        check=False,
+    assert not resolve_in_container(coi_binary, name, "example.com"), (
+        "example.com is not allowlisted"
     )
-    assert result.returncode == 0, f"could not read the dynamic set: {result.stderr}"
-    assert "timeout" in result.stdout, (
-        f"dynamic set elements must carry a timeout so a rotated-out address expires "
-        f"rather than lingering forever\n{result.stdout}"
+
+    curl = container_exec(
+        coi_binary, name, "curl -s --max-time 8 -o /dev/null -w '%{http_code}' https://example.com"
+    )
+    assert curl.returncode != 0, "a non-allowlisted host must not be reachable"
+
+
+def test_allowlisted_domain_is_reachable(coi_binary, workspace_dir, cleanup_containers):
+    """The allowlist has to actually work, not merely block."""
+    name = start_ready_container(coi_binary, workspace_dir)
+
+    curl = container_exec(
+        coi_binary,
+        name,
+        "curl -s --max-time 20 -o /dev/null -w '%{http_code}' https://registry.npmjs.org",
+        timeout=40,
+    )
+    assert curl.returncode == 0, f"an allowlisted host must be reachable: {curl.stderr}"
+    assert curl.stdout.strip().startswith("2") or curl.stdout.strip().startswith("3"), (
+        f"unexpected status from an allowlisted host: {curl.stdout}"
     )
 
 
-def test_partial_label_wildcard_fails_loudly(coi_binary, workspace_dir, cleanup_containers):
-    """A config that cannot be honoured must not start a container.
+def test_wildcard_fails_loudly(coi_binary, workspace_dir, cleanup_containers):
+    """A wildcard cannot be honoured, so it must not start a container.
 
-    `*-aiplatform.googleapis.com` looks like a reasonable way to allow every
-    regional Vertex endpoint, and it is exactly what someone reaching for Vertex
-    would write. The old resolver did not recognise it as a wildcard, passed it to
-    DNS verbatim, watched it fail to resolve, and then dropped it from the
-    allowlist WITHOUT stopping — leaving a firewall that quietly did not cover what
-    the config asked for.
+    Allowlist mode resolves each name up front and writes the answer into
+    /etc/hosts. A wildcard has no answer to write — you cannot know which
+    subdomains will be asked for. The old resolver pretended otherwise: it stripped
+    the "*." and resolved the BASE domain, whose addresses have no overlap with the
+    subdomains actually dialled, leaving a firewall that permitted addresses
+    nothing would ever connect to.
     """
     bad_config = """
 [network]
 mode = "allowlist"
 allowed_domains = [
-    "*-aiplatform.googleapis.com",
+    "*.googleapis.com",
 ]
 """
     name, result = start_allowlist_container(coi_binary, workspace_dir, bad_config)
 
     assert result.returncode != 0, (
-        "a partial-label wildcard cannot be enforced and must fail the launch, "
-        f"but the container started (name={name})"
+        f"a wildcard cannot be enforced and must fail the launch, but the container started (name={name})"
     )
     output = result.stdout + result.stderr
-    assert "*." in output, f"the error should name the supported wildcard form:\n{output}"
+    assert "exact hostnames" in output or "CIDR" in output, (
+        f"the error must tell the user what to write instead:\n{output}"
+    )
 
 
-def test_literal_addresses_are_allowed_without_dns(coi_binary, workspace_dir, cleanup_containers):
-    """Raw IPs and CIDRs go straight into the static set and need no resolution."""
+def test_literal_addresses_need_no_dns(coi_binary, workspace_dir, cleanup_containers):
+    """Raw IPs and CIDRs go straight into the static set; no resolution involved."""
     config = """
 [network]
 mode = "allowlist"
@@ -338,13 +325,9 @@ allowed_domains = [
     "registry.npmjs.org",
 ]
 """
-    name, result = start_allowlist_container(coi_binary, workspace_dir, config)
-    assert result.returncode == 0, f"container failed to start: {result.stderr}"
-    assert wait_for_firewall_rules(name, timeout=40), "firewall rules were not applied in time"
+    name = start_ready_container(coi_binary, workspace_dir, config)
 
-    ip = container_ip(name)
-    ident = ip.replace(".", "_")
-
+    ident = container_ip(name).replace(".", "_")
     result = subprocess.run(
         ["sudo", "-n", "nft", "list", "set", "ip", "coi", f"coi_s_{ident}"],
         capture_output=True,
@@ -359,17 +342,12 @@ allowed_domains = [
         )
 
 
-def test_teardown_removes_sets_and_the_dns_intercept(coi_binary, workspace_dir, cleanup_containers):
-    """Teardown must remove rules, sets and the DNAT redirect.
+def test_teardown_removes_rules_and_sets(coi_binary, workspace_dir, cleanup_containers):
+    """Teardown must remove forward rules, the input-chain DNS block, and both sets.
 
-    Rule order matters: the kernel refuses to drop a set a rule still references,
-    and a stale DNAT rule would black-hole DNS for whatever container gets that IP
-    next.
+    Order matters: the kernel refuses to drop a set a rule still references.
     """
-    name, result = start_allowlist_container(coi_binary, workspace_dir, ALLOWLIST_CONFIG)
-    assert result.returncode == 0, f"container failed to start: {result.stderr}"
-    assert wait_for_firewall_rules(name, timeout=40), "firewall rules were not applied in time"
-
+    name = start_ready_container(coi_binary, workspace_dir)
     ip = container_ip(name)
     ident = ip.replace(".", "_")
     assert f"coi_d_{ident}" in nft_coi_table(), "the dynamic set should exist while running"
@@ -384,18 +362,21 @@ def test_teardown_removes_sets_and_the_dns_intercept(coi_binary, workspace_dir, 
     deadline = time.time() + 30
     while time.time() < deadline:
         table = nft_coi_table()
-        nat = subprocess.run(
-            ["sudo", "-n", "nft", "list", "table", "ip", "coi_nat"],
+        input_chain = subprocess.run(
+            ["sudo", "-n", "nft", "list", "chain", "ip", "coi", "input"],
             capture_output=True,
             text=True,
             timeout=15,
             check=False,
         ).stdout
-        if f"coi_s_{ident}" not in table and f"coi_d_{ident}" not in table and ip not in nat:
+        if (
+            f"coi_s_{ident}" not in table
+            and f"coi_d_{ident}" not in table
+            and ip not in input_chain
+        ):
             return
         time.sleep(1)
 
     raise AssertionError(
-        f"allowlist sets or the DNS intercept for {ip} survived teardown\n"
-        f"coi table:\n{nft_coi_table()}"
+        f"allowlist rules or sets for {ip} survived teardown\ncoi table:\n{nft_coi_table()}"
     )
