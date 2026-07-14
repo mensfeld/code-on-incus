@@ -19,12 +19,12 @@
     "allowed_domains": {
       "type": "array",
       "items": { "type": "string" },
-      "description": "Domains allowed when mode is \"allowlist\". RFC 1918 ranges are always blocked in allowlist mode."
+      "description": "Destinations allowed when mode is \"allowlist\". Accepts exact hostnames (\"api.anthropic.com\"), wildcards (\"*.googleapis.com\", which covers the base domain and any subdomain), raw IPv4 addresses (\"8.8.8.8\") and IPv4 CIDRs (\"10.0.0.0/8\"). Names are enforced at DNS resolution time: COI is the container's resolver, and installs an answer's addresses in the firewall before returning them, so a domain behind a rotating set of frontend IPs stays reachable. A wildcard must be a leading \"*.\" label; a partial-label form such as \"*-aiplatform.googleapis.com\" is rejected. RFC 1918 ranges are always blocked in allowlist mode."
     },
     "refresh_interval_minutes": {
       "type": "integer",
       "minimum": 0,
-      "description": "How often to refresh DNS-resolved allowlist rules (minutes)"
+      "description": "How often to re-resolve allowlisted domains to refresh their firewall entries (minutes). This is a safety net: the DNS proxy already installs addresses as the container resolves them."
     },
     "allow_local_network_access": {
       "type": "boolean",

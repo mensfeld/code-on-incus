@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"reflect"
-	"sort"
 	"strings"
 	"time"
 )
@@ -167,38 +165,6 @@ func (r *Resolver) GetMinTTL() uint32 {
 	}
 
 	return minTTL
-}
-
-// IPsUnchanged checks if resolved IPs differ from cache
-func (r *Resolver) IPsUnchanged(newIPs map[string][]string) bool {
-	// Quick check: different number of domains
-	if len(newIPs) != len(r.cache.Domains) {
-		return false
-	}
-
-	// Check each domain
-	for domain, newDomainIPs := range newIPs {
-		cachedIPs, exists := r.cache.Domains[domain]
-		if !exists {
-			return false // New domain
-		}
-
-		// Sort both slices for comparison
-		sortedNew := make([]string, len(newDomainIPs))
-		copy(sortedNew, newDomainIPs)
-		sort.Strings(sortedNew)
-
-		sortedCached := make([]string, len(cachedIPs))
-		copy(sortedCached, cachedIPs)
-		sort.Strings(sortedCached)
-
-		// Compare sorted slices
-		if !reflect.DeepEqual(sortedNew, sortedCached) {
-			return false
-		}
-	}
-
-	return true
 }
 
 // UpdateCache updates the cache with new IPs and TTLs

@@ -547,6 +547,46 @@ mode = "restricted"   # Default — blocks private networks, allows internet
 # mode = "open"       # No restrictions (trusted projects only)
 ```
 
+### Allowlist mode
+
+Allowlist mode is enforced at DNS resolution time. COI becomes the container's
+resolver — transparently, so it applies no matter which nameserver the container
+is pointed at — and every address it returns for an allowed name is installed in
+the firewall *before* the answer is handed over. The container cannot be told
+about an address the firewall does not already trust.
+
+This matters for any domain that lives behind a rotating pool of frontend IPs,
+which is most of the cloud. Resolving such a domain up front and pinning the
+result cannot work: the container resolves independently a moment later, gets a
+different address from the same pool, and the firewall rejects it.
+
+```toml
+[network]
+mode = "allowlist"
+allowed_domains = [
+    "api.anthropic.com",       # exact hostname
+    "*.googleapis.com",        # base domain and any subdomain
+    "10.0.0.0/8",              # IPv4 CIDR — no DNS involved
+    "8.8.8.8",                 # raw IPv4 address
+]
+```
+
+A wildcard must be a leading `*.` label. A partial-label form like
+`*-aiplatform.googleapis.com` is rejected outright rather than silently ignored.
+
+**Claude via GCP Vertex AI or AWS Bedrock** needs the provider's endpoints
+allowlisted alongside your other domains:
+
+```toml
+# Vertex
+allowed_domains = ["*.googleapis.com", ...]
+# Bedrock
+allowed_domains = ["*.amazonaws.com", ...]
+```
+
+Queries for names outside the allowlist are refused and logged, which doubles as
+a record of what an agent tried to reach.
+
 ## Security Monitoring
 
 COI includes **built-in security monitoring** to detect and respond to malicious behavior in real-time:

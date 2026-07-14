@@ -27,13 +27,24 @@ code_user = "code"
 mode = "restricted"
 block_private_networks = true
 block_metadata_endpoint = true
+# In allowlist mode these are enforced at DNS resolution time: COI resolves the
+# name and installs the answer's addresses in the firewall before handing the
+# answer to the container. Wildcards ("*.example.com") cover the base domain and
+# any subdomain. Literal IPs and CIDRs ("8.8.8.8", "10.0.0.0/8") are allowed
+# directly and skip DNS.
+#
+# Note there are deliberately no public resolvers here. The container's DNS is
+# redirected to COI's resolver whatever nameserver it aims at, so allowlisting
+# 8.8.8.8 would buy nothing except a channel for resolving names COI never saw.
 allowed_domains = [
-    "8.8.8.8",
-    "1.1.1.1",
     "registry.npmjs.org",
     "npm.pkg.github.com",
     "api.anthropic.com",
     "platform.claude.com",
+    # Claude via GCP Vertex AI:
+    # "*.googleapis.com",
+    # Claude via AWS Bedrock:
+    # "*.amazonaws.com",
 ]
 allow_local_network_access = false
 refresh_interval_minutes = 30
