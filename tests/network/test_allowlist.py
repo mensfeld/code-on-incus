@@ -231,10 +231,17 @@ refresh_interval_minutes = 30
         assert result.returncode != 0, (
             f"Should not reach blocked domain github.com: {result.stderr}"
         )
-        # Accept either explicit rejection or timeout (exit code 124) as valid blocking
+        # A blocked domain now fails EARLIER than it used to. It has no entry in the
+        # container's /etc/hosts and DNS is denied, so curl cannot even resolve it
+        # ("Could not resolve host", exit 6) and never gets as far as a refused
+        # connection. Resolution failure, connection refusal and timeout are all
+        # valid evidence the domain is blocked.
+        is_unresolvable = (
+            "Could not resolve host" in result.stderr or "exit status 6" in result.stderr
+        )
         is_rejected = "Connection refused" in result.stderr or "Failed to connect" in result.stderr
         is_timeout = "exit status 124" in result.stderr or result.returncode == 124
-        assert is_rejected or is_timeout, (
+        assert is_unresolvable or is_rejected or is_timeout, (
             f"Expected connection failure for blocked domain: {result.stderr}"
         )
 
