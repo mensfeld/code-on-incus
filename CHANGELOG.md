@@ -30,6 +30,8 @@
 
 - **A container in allowlist mode can no longer reach any nameserver** — DNS egress is blocked in two chains: `forward` (for an off-box resolver such as `8.8.8.8`) and `input` (for the bridge's own dnsmasq, whose traffic is addressed to the host and therefore never traverses the forward chain at all). Previously the default `allowed_domains` even shipped `8.8.8.8` and `1.1.1.1` as literal entries, which let a container resolve anything it liked; those are gone. Without a resolver, a container cannot learn an address the firewall has not already been given.
 
+- **`coi kill` no longer fails when the container is already gone** — stopping a container ends the coi session that owns it, and that session then deletes its own ephemeral container. `coi kill` therefore raced that cleanup: it checked the instance existed, stopped it, cleaned up its firewall rules, and by the time it issued the delete the instance was gone — which it reported as `Failed to delete <name>: exit status 1`, printed "No containers were killed", and exited non-zero, about a container it had in fact just killed. An instance that is already absent now counts as killed. Genuine failures (a busy volume, an unreachable daemon) are still reported.
+
 - **`coi kill` now reports why a delete failed** — `IncusExecQuiet` discarded stderr, so a failure surfaced as a bare `exit status 1` with the cause thrown away. Quiet now means "do not write to the terminal", not "hide the reason it failed".
 
 ## 0.10.1 (2026-07-12)
