@@ -74,14 +74,21 @@ def start_allowlist_container(coi_binary, workspace_dir, config_body):
 
 
 def container_exec(coi_binary, container_name, command, timeout=30):
-    """Run a shell command inside the container."""
-    return subprocess.run(
+    """Run a shell command inside the container and return (returncode, output).
+
+    `coi container exec` routes the command's stdout to ITS stderr (see
+    IncusExecContext, which sets cmd.Stdout = os.Stderr), so a test that reads only
+    .stdout sees nothing at all. Both streams are merged here — reading the wrong
+    one makes every assertion below vacuous.
+    """
+    result = subprocess.run(
         [coi_binary, "container", "exec", container_name, "--", "bash", "-c", command],
         capture_output=True,
         text=True,
         timeout=timeout,
         check=False,
     )
+    return result.returncode, (result.stdout or "") + (result.stderr or "")
 
 
 def container_ip(container_name):
@@ -121,13 +128,13 @@ def resolve_in_container(coi_binary, container_name, name):
 
     Returns the addresses the container was handed (empty if it could not resolve).
     """
-    result = container_exec(coi_binary, container_name, f"getent ahostsv4 {name}")
-    if result.returncode != 0:
+    rc, out = container_exec(coi_binary, container_name, f"getent ahostsv4 {name}")
+    if rc != 0:
         return []
     ips = []
-    for line in result.stdout.splitlines():
+    for line in out.splitlines():
         parts = line.split()
-        if parts and parts[0] not in ips:
+        if parts and parts[0].count(".") == 3 and parts[0] not in ips:
             ips.append(parts[0])
     return ips
 
@@ -174,9 +181,8 @@ def test_hosts_file_holds_every_address_and_is_delimited(
     """
     name = start_ready_container(coi_binary, workspace_dir)
 
-    hosts = container_exec(coi_binary, name, "cat /etc/hosts")
-    assert hosts.returncode == 0, f"could not read /etc/hosts: {hosts.stderr}"
-    content = hosts.stdout
+    rc, content = container_exec(coi_binary, name, "cat /etc/hosts")
+    assert rc == 0, f"could not read /etc/hosts: {content}"
 
     assert "BEGIN coi allowlist" in content, f"COI's managed block is missing:\n{content}"
     assert "END coi allowlist" in content, f"COI's managed block is unterminated:\n{content}"
@@ -241,8 +247,8 @@ def test_hijacking_resolv_conf_gains_nothing(coi_binary, workspace_dir, cleanup_
     """
     name = start_ready_container(coi_binary, workspace_dir)
 
-    hijack = container_exec(coi_binary, name, "echo 'nameserver 8.8.8.8' > /etc/resolv.conf")
-    assert hijack.returncode == 0, f"could not rewrite resolv.conf: {hijack.stderr}"
+    rc, out = container_exec(coi_binary, name, "echo 'nameserver 8.8.8.8' > /etc/resolv.conf")
+    assert rc == 0, f"could not rewrite resolv.conf: {out}"
 
     # Allowlisted names keep working: they never needed DNS.
     allowed = resolve_in_container(coi_binary, name, ROTATING_HOST)
@@ -264,26 +270,24 @@ def test_unlisted_domain_is_unreachable(coi_binary, workspace_dir, cleanup_conta
         "example.com is not allowlisted"
     )
 
-    curl = container_exec(
+    rc, _ = container_exec(
         coi_binary, name, "curl -s --max-time 8 -o /dev/null -w '%{http_code}' https://example.com"
     )
-    assert curl.returncode != 0, "a non-allowlisted host must not be reachable"
+    assert rc != 0, "a non-allowlisted host must not be reachable"
 
 
 def test_allowlisted_domain_is_reachable(coi_binary, workspace_dir, cleanup_containers):
     """The allowlist has to actually work, not merely block."""
     name = start_ready_container(coi_binary, workspace_dir)
 
-    curl = container_exec(
+    rc, out = container_exec(
         coi_binary,
         name,
         "curl -s --max-time 20 -o /dev/null -w '%{http_code}' https://registry.npmjs.org",
         timeout=40,
     )
-    assert curl.returncode == 0, f"an allowlisted host must be reachable: {curl.stderr}"
-    assert curl.stdout.strip().startswith("2") or curl.stdout.strip().startswith("3"), (
-        f"unexpected status from an allowlisted host: {curl.stdout}"
-    )
+    assert rc == 0, f"an allowlisted host must be reachable: {out}"
+    assert "200" in out or "30" in out, f"unexpected status from an allowlisted host: {out}"
 
 
 def test_wildcard_fails_loudly(coi_binary, workspace_dir, cleanup_containers):
