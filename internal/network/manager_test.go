@@ -2,7 +2,6 @@ package network
 
 import (
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/mensfeld/code-on-incus/internal/config"
@@ -15,12 +14,27 @@ type stubNft struct {
 	calls          []string
 	failOn         string
 	lastAllowedIPs []string // IPs passed to the most recent ReplaceAllowlist call
+	dynamicIPs     []string // IPs installed into the dynamic set, cumulative
+	lastDynamicTTL uint32   // TTL of the most recent AllowDynamicIPs call
 }
 
 func (s *stubNft) ApplyAllowlist(_ *config.NetworkConfig, allowedIPs []string) error {
 	s.calls = append(s.calls, "ApplyAllowlist")
+	s.lastAllowedIPs = allowedIPs
 	if s.failOn == "ApplyAllowlist" {
 		return errors.New("stub: ApplyAllowlist failed")
+	}
+	return nil
+}
+
+// AllowDynamicIPs makes stubNft satisfy dynAllower, so Manager.nftSetAllower
+// routes DNS-learned addresses here instead of to the real nft set.
+func (s *stubNft) AllowDynamicIPs(ips []string, ttl uint32) error {
+	s.calls = append(s.calls, "AllowDynamicIPs")
+	s.dynamicIPs = append(s.dynamicIPs, ips...)
+	s.lastDynamicTTL = ttl
+	if s.failOn == "AllowDynamicIPs" {
+		return errors.New("stub: AllowDynamicIPs failed")
 	}
 	return nil
 }
@@ -60,128 +74,118 @@ func (s *stubNft) called(method string) bool {
 }
 
 // newManagerForRefreshTest builds a Manager wired for refreshAllowedIPs tests.
-// Use raw IPv4 strings as "domains" to avoid real DNS lookups: ResolveDomain
-// returns them immediately without a network call.
+//
+// Domains under the ".invalid" TLD are guaranteed by RFC 2606 never to resolve,
+// so ResolveAll falls back to the seeded cache without depending on a live
+// upstream answer. That keeps the refresher's behaviour under test rather than
+// the network's.
 func newManagerForRefreshTest(t *testing.T, stub *stubNft, cachedIPs map[string][]string, domains []string) *Manager {
 	t.Helper()
 	cache := &IPCache{
 		Domains: cachedIPs,
 		TTLs:    make(map[string]uint32),
 	}
+	policy, err := NewAllowPolicy(domains)
+	if err != nil {
+		t.Fatalf("NewAllowPolicy(%v): %v", domains, err)
+	}
 	return &Manager{
 		config:       &config.NetworkConfig{AllowedDomains: domains},
 		nft:          stub,
+		policy:       policy,
 		resolver:     NewResolver(cache),
 		cacheManager: NewCacheManager(t.TempDir()),
 		logger:       logger.NewDiscard(),
 	}
 }
 
-// TestRefreshAllowedIPs_CallsReplaceAllowlistOnChange verifies that when the
-// resolved IPs differ from the cache, refreshAllowedIPs calls ReplaceAllowlist
-// and never calls the old Remove+reapply sequence.
-func TestRefreshAllowedIPs_CallsReplaceAllowlistOnChange(t *testing.T) {
+// TestRefreshAllowedIPs_InstallsIntoDynamicSet verifies that the refresher feeds
+// resolved addresses into the container's dynamic set.
+func TestRefreshAllowedIPs_InstallsIntoDynamicSet(t *testing.T) {
 	stub := &stubNft{}
-	// Cache holds "9.9.9.9"; resolving the raw IP "8.8.8.8" returns "8.8.8.8",
-	// so IPsUnchanged returns false and the update path runs.
 	m := newManagerForRefreshTest(t, stub,
-		map[string][]string{"8.8.8.8": {"9.9.9.9"}},
-		[]string{"8.8.8.8"},
+		map[string][]string{"stale.example.invalid": {"9.9.9.9"}},
+		[]string{"stale.example.invalid"},
 	)
 
 	if _, err := m.refreshAllowedIPs(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if !stub.called("ReplaceAllowlist") {
-		t.Errorf("ReplaceAllowlist was not called; calls: %v", stub.calls)
+	if !stub.called("AllowDynamicIPs") {
+		t.Errorf("AllowDynamicIPs was not called; calls: %v", stub.calls)
 	}
-	if stub.called("RemoveRules") {
-		t.Errorf("RemoveRules must not be called from refreshAllowedIPs; calls: %v", stub.calls)
-	}
-	// The old 3-step sequence was: ApplyAllowlist, RemoveRules, ApplyAllowlist.
-	// After the fix neither RemoveRules nor a bare ApplyAllowlist should appear.
-	for _, c := range stub.calls {
-		if c == "ApplyAllowlist" {
-			t.Errorf("ApplyAllowlist should not be called directly from refreshAllowedIPs; calls: %v", stub.calls)
-			break
-		}
-	}
-
-	// The resolved IP for the raw domain "8.8.8.8" must be passed through.
 	found := false
-	for _, ip := range stub.lastAllowedIPs {
-		if ip == "8.8.8.8" {
+	for _, ip := range stub.dynamicIPs {
+		if ip == "9.9.9.9" {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("expected \"8.8.8.8\" in allowedIPs passed to ReplaceAllowlist, got: %v", stub.lastAllowedIPs)
+		t.Errorf("expected the resolved address in the dynamic set, got: %v", stub.dynamicIPs)
 	}
 }
 
-// TestRefreshAllowedIPs_NoNftCallsWhenUnchanged verifies that when resolved IPs
-// match the cache, refreshAllowedIPs makes no nft calls at all.
-func TestRefreshAllowedIPs_NoNftCallsWhenUnchanged(t *testing.T) {
+// TestRefreshAllowedIPs_NeverRewritesRules is the regression guard for the bug
+// this design replaced.
+//
+// The old refresher rebuilt the whole rule set on every change: it appended a
+// fresh batch of accept rules *behind* the still-present default reject, then
+// deleted the previous handles one exec at a time. For the length of that
+// teardown, any address present only in the new batch was rejected — so the
+// firewall was at its most closed exactly when an address had just rotated and
+// the container most needed the new one.
+//
+// Rules now reference nft sets by name and never change. Refreshing must
+// therefore touch elements only, never rules.
+func TestRefreshAllowedIPs_NeverRewritesRules(t *testing.T) {
 	stub := &stubNft{}
-	// Cache and resolution both return "8.8.8.8" → IPsUnchanged = true.
 	m := newManagerForRefreshTest(t, stub,
-		map[string][]string{"8.8.8.8": {"8.8.8.8"}},
-		[]string{"8.8.8.8"},
+		map[string][]string{"stale.example.invalid": {"9.9.9.9"}},
+		[]string{"stale.example.invalid"},
 	)
+
+	if _, err := m.refreshAllowedIPs(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, forbidden := range []string{"ReplaceAllowlist", "ApplyAllowlist", "RemoveRules"} {
+		if stub.called(forbidden) {
+			t.Errorf("refreshAllowedIPs must not call %s — rules are stable and only set elements change; calls: %v",
+				forbidden, stub.calls)
+		}
+	}
+}
+
+// TestRefreshAllowedIPs_LiteralEntriesAreNotResolved verifies that raw IP and
+// CIDR entries are treated as static set elements, installed once at setup, and
+// are never handed to the resolver or re-installed by the refresher.
+func TestRefreshAllowedIPs_LiteralEntriesAreNotResolved(t *testing.T) {
+	stub := &stubNft{}
+	m := newManagerForRefreshTest(t, stub, map[string][]string{}, []string{"8.8.8.8", "10.0.0.0/8"})
 
 	if _, err := m.refreshAllowedIPs(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	if len(stub.calls) != 0 {
-		t.Errorf("expected no nft calls when IPs are unchanged, got: %v", stub.calls)
+		t.Errorf("an allowlist of only literal addresses gives the refresher nothing to do, got calls: %v", stub.calls)
 	}
 }
 
-// TestRefreshAllowedIPs_PropagatesReplaceAllowlistError verifies that a failure
-// in ReplaceAllowlist is surfaced as an error from refreshAllowedIPs.
-func TestRefreshAllowedIPs_PropagatesReplaceAllowlistError(t *testing.T) {
-	stub := &stubNft{failOn: "ReplaceAllowlist"}
-	m := newManagerForRefreshTest(t, stub,
-		map[string][]string{"8.8.8.8": {"9.9.9.9"}},
-		[]string{"8.8.8.8"},
-	)
-
-	_, err := m.refreshAllowedIPs()
-	if err == nil {
-		t.Fatal("expected an error when ReplaceAllowlist fails, got nil")
-	}
-	if !strings.Contains(err.Error(), "failed to update nft rules") {
-		t.Errorf("unexpected error message: %v", err)
-	}
-}
-
-// TestRefreshAllowedIPs_ReplaceAllowlistCalledOnce verifies that even when
-// multiple domains change, ReplaceAllowlist is called exactly once.
-func TestRefreshAllowedIPs_ReplaceAllowlistCalledOnce(t *testing.T) {
+// TestRefreshAllowedIPs_NoPolicyIsNoOp guards the restricted/open-mode paths,
+// where no allowlist policy is ever compiled.
+func TestRefreshAllowedIPs_NoPolicyIsNoOp(t *testing.T) {
 	stub := &stubNft{}
-	m := newManagerForRefreshTest(t, stub,
-		map[string][]string{
-			"1.1.1.1": {"9.9.9.9"}, // stale IP for domain "1.1.1.1"
-			"8.8.8.8": {"9.9.9.9"}, // stale IP for domain "8.8.8.8"
-		},
-		[]string{"1.1.1.1", "8.8.8.8"},
-	)
+	m := newManagerForRefreshTest(t, stub, map[string][]string{}, []string{"example.invalid"})
+	m.policy = nil
 
 	if _, err := m.refreshAllowedIPs(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-
-	count := 0
-	for _, c := range stub.calls {
-		if c == "ReplaceAllowlist" {
-			count++
-		}
-	}
-	if count != 1 {
-		t.Errorf("expected ReplaceAllowlist called exactly once, got %d; calls: %v", count, stub.calls)
+	if len(stub.calls) != 0 {
+		t.Errorf("expected no nft calls without a policy, got: %v", stub.calls)
 	}
 }
 

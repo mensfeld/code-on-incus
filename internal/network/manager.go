@@ -48,6 +48,11 @@ type Manager struct {
 	// iptables fallback (when FORWARD DROP is set and bridge rules are missing)
 	iptablesBridgeName string
 
+	// Allowlist mode: the compiled policy, and the resolver that enforces it by
+	// installing each answer's addresses before handing the answer back.
+	policy   *AllowPolicy
+	dnsProxy *DNSProxy
+
 	// Refresher lifecycle (for allowlist mode)
 	refreshCtx    context.Context
 	refreshCancel context.CancelFunc
@@ -228,9 +233,18 @@ func (m *Manager) setupRestricted(ctx context.Context, containerName string) err
 	return nil
 }
 
-// setupAllowlist configures allowlist mode with DNS resolution and refresh
+// setupAllowlist configures allowlist mode.
+//
+// The allowlist is enforced at DNS resolution time: COI becomes the container's
+// resolver (transparently — see dnsintercept.go), and every address it hands
+// back for an allowed name is installed in the container's nft set before the
+// answer is returned. The container therefore cannot learn about an address the
+// firewall does not already trust, which is what makes the mode exact.
+//
+// Literal IP/CIDR entries in allowed_domains skip DNS entirely and go straight
+// into the static set.
 func (m *Manager) setupAllowlist(ctx context.Context, containerName string) error {
-	m.logger.Println("Network mode: allowlist (domain-based filtering)")
+	m.logger.Println("Network mode: allowlist (DNS-enforced domain filtering)")
 
 	// Check if nft is available (and that sudo is permitted by config)
 	if !NftUsable(m.config) {
@@ -242,6 +256,12 @@ func (m *Manager) setupAllowlist(ctx context.Context, containerName string) erro
 		return fmt.Errorf("allowlist mode requires at least one allowed domain")
 	}
 
+	policy, err := NewAllowPolicy(m.config.AllowedDomains)
+	if err != nil {
+		return fmt.Errorf("invalid allowed_domains: %w", err)
+	}
+	m.policy = policy
+
 	// Get container IP
 	containerIP, err := GetContainerIP(containerName)
 	if err != nil {
@@ -250,13 +270,15 @@ func (m *Manager) setupAllowlist(ctx context.Context, containerName string) erro
 	m.containerIP = containerIP
 	m.logger.Printf("Container IP: %s", containerIP)
 
-	// Get gateway IP
+	// The gateway address is where the DNS proxy listens and where the intercept
+	// rule redirects to, so allowlist mode cannot proceed without it. Failing
+	// here is fail-closed: the boot block stays in place and the container has no
+	// egress at all.
 	gatewayIP, err := getContainerGatewayIP(containerName)
 	if err != nil {
-		m.logger.Errorf("Warning: Could not auto-detect gateway IP: %v", err)
-	} else {
-		m.logger.Printf("Gateway IP: %s", gatewayIP)
+		return fmt.Errorf("failed to determine gateway IP (required for DNS-enforced allowlist): %w", err)
 	}
+	m.logger.Printf("Gateway IP: %s", gatewayIP)
 
 	// Disable IPv6 inside the container (defence-in-depth; reversible by
 	// in-container root, so the host-side drop below is the enforced boundary).
@@ -276,7 +298,88 @@ func (m *Manager) setupAllowlist(ctx context.Context, containerName string) erro
 	m.nft = NewNftManager(containerIP, gatewayIP)
 	m.purgeStaleRulesForIP(containerIP)
 
-	// Load IP cache
+	// Install the rules and the static (literal IP/CIDR) entries. The rules name
+	// the container's sets, not individual addresses, so they are stable for the
+	// life of the container.
+	staticCIDRs := policy.StaticCIDRs()
+	if err := m.nft.ApplyAllowlist(m.config, staticCIDRs); err != nil {
+		return fmt.Errorf("failed to apply nft rules: %w", err)
+	}
+	m.logger.Printf("nft rules applied for container %s (%d literal address entries, %d domain patterns)",
+		containerName, len(staticCIDRs), len(policy.Names()))
+
+	// Stand up the resolver and put it in front of the container. Both steps are
+	// fatal on failure: without them the container would be left with an
+	// allowlist that only ever contains its literal entries, and every domain
+	// would silently fail to resolve.
+	if err := m.startDNSProxy(gatewayIP, containerIP); err != nil {
+		return err
+	}
+
+	m.logger.Println("  Allowing only allowlisted domains (enforced at DNS resolution)")
+	m.logger.Println("  Blocking all RFC1918 private networks")
+	m.logger.Println("  Blocking cloud metadata endpoints")
+
+	// Prewarm the dynamic set by resolving the configured names up front, so a
+	// container that somehow bypasses the proxy — or one whose first connection
+	// races its own first query — is not starting from an empty set. This is a
+	// safety net, not the enforcement path.
+	minTTL := m.prewarmDynamicSet(containerName)
+
+	// Keep the background refresher running as a second safety net: it re-adds
+	// the configured names' addresses, which refreshes their set-element timeouts
+	// even for a container sitting idle.
+	m.startRefresher(ctx, minTTL)
+
+	return nil
+}
+
+// startDNSProxy binds the DNS proxy to the gateway address and redirects the
+// container's port-53 traffic to it.
+func (m *Manager) startDNSProxy(gatewayIP, containerIP string) error {
+	proxy, err := NewDNSProxy(m.policy, m.nftSetAllower(), m.logger)
+	if err != nil {
+		return fmt.Errorf("failed to create DNS proxy: %w", err)
+	}
+	if err := proxy.Start(gatewayIP); err != nil {
+		return fmt.Errorf("failed to start DNS proxy: %w", err)
+	}
+	m.dnsProxy = proxy
+	m.logger.Printf("DNS proxy listening on %s:%d", gatewayIP, proxy.Port())
+
+	if err := EnsureDNSIntercept(containerIP, gatewayIP, proxy.Port()); err != nil {
+		proxy.Stop()
+		m.dnsProxy = nil
+		return fmt.Errorf("failed to redirect container DNS to the COI resolver: %w", err)
+	}
+	m.logger.Printf("DNS intercept installed: %s:53 -> %s:%d", containerIP, gatewayIP, proxy.Port())
+	return nil
+}
+
+// nftSetAllower exposes the nft manager's dynamic-set writer to the DNS proxy.
+// Returns nil when the nft manager is a test stub that cannot install elements.
+func (m *Manager) nftSetAllower() dynAllower {
+	if a, ok := m.nft.(dynAllower); ok {
+		return a
+	}
+	return noopAllower{}
+}
+
+// noopAllower stands in when the nft layer cannot install set elements (tests).
+type noopAllower struct{}
+
+func (noopAllower) AllowDynamicIPs([]string, uint32) error { return nil }
+
+// prewarmDynamicSet resolves the policy's name entries once and seeds their
+// addresses into the dynamic set. Returns the minimum TTL seen, for scheduling
+// the refresher. Failures are warnings: the DNS proxy is the enforcement path,
+// and it will install addresses as the container asks for them.
+func (m *Manager) prewarmDynamicSet(containerName string) uint32 {
+	names := m.policy.Names()
+	if len(names) == 0 {
+		return 0
+	}
+
 	cache, err := m.cacheManager.Load(containerName)
 	if err != nil {
 		m.logger.Errorf("Warning: Failed to load cache: %v", err)
@@ -286,66 +389,40 @@ func (m *Manager) setupAllowlist(ctx context.Context, containerName string) erro
 			LastUpdate: time.Time{},
 		}
 	}
-
-	// Initialize resolver with cache
 	m.resolver = NewResolver(cache)
 
-	// Resolve domains
-	m.logger.Printf("Resolving %d allowed domains...", len(m.config.AllowedDomains))
-	domainIPs, err := m.resolver.ResolveAll(m.config.AllowedDomains)
+	m.logger.Printf("Prewarming allowlist with %d domains...", len(names))
+	domainIPs, err := m.resolver.ResolveAll(names)
 	if err != nil && len(domainIPs) == 0 {
-		return fmt.Errorf("failed to resolve any allowed domains: %w", err)
+		m.logger.Errorf("Warning: prewarm resolved no domains: %v", err)
+		return 0
 	}
 
-	// Log resolution results
-	totalIPs := countIPs(domainIPs)
-	m.logger.Printf("Resolved %d domains to %d IPs", len(domainIPs), totalIPs)
-	for domain, ips := range domainIPs {
-		m.logger.Printf("  %s -> %d IPs", domain, len(ips))
-	}
+	m.installResolved(domainIPs)
 
-	// Save resolved IPs to cache
 	m.resolver.UpdateCache(domainIPs)
 	if err := m.cacheManager.Save(containerName, m.resolver.GetCache()); err != nil {
 		m.logger.Errorf("Warning: Failed to save cache: %v", err)
 	}
 
-	// Collect all unique IPs from resolved domains
-	allowedIPs := collectUniqueIPs(domainIPs)
-
-	// Apply allowlist mode rules
-	if err := m.nft.ApplyAllowlist(m.config, allowedIPs); err != nil {
-		return fmt.Errorf("failed to apply nft rules: %w", err)
-	}
-
-	m.logger.Printf("nft rules applied for container %s", containerName)
-	m.logger.Println("  Allowing only specified domains")
-	m.logger.Println("  Blocking all RFC1918 private networks")
-	m.logger.Println("  Blocking cloud metadata endpoints")
-
-	// Compute initial refresh interval from DNS TTLs
-	minTTL := m.resolver.GetMinTTL()
-
-	// Start background refresher with TTL-aware interval
-	m.startRefresher(ctx, minTTL)
-
-	return nil
+	return m.resolver.GetMinTTL()
 }
 
-// collectUniqueIPs extracts all unique IPs from domain resolution map
-func collectUniqueIPs(domainIPs map[string][]string) []string {
-	uniqueIPs := make(map[string]bool)
-	for _, ips := range domainIPs {
-		for _, ip := range ips {
-			uniqueIPs[ip] = true
+// installResolved adds resolved addresses to the dynamic set, using each
+// domain's own TTL to derive its element timeout.
+func (m *Manager) installResolved(domainIPs map[string][]string) {
+	allower := m.nftSetAllower()
+	for domain, ips := range domainIPs {
+		if len(ips) == 0 {
+			continue
 		}
+		ttl := m.resolver.DomainTTLs[domain]
+		if err := allower.AllowDynamicIPs(ips, ttl); err != nil {
+			m.logger.Errorf("Warning: failed to allow %d addresses for %s: %v", len(ips), domain, err)
+			continue
+		}
+		m.logger.Printf("  %s -> %d addresses", domain, len(ips))
 	}
-
-	result := make([]string, 0, len(uniqueIPs))
-	for ip := range uniqueIPs {
-		result = append(result, ip)
-	}
-	return result
 }
 
 // computeRefreshInterval determines the refresh interval based on DNS TTL and config cap.
@@ -415,58 +492,61 @@ func (m *Manager) stopRefresher() {
 	}
 }
 
-// refreshAllowedIPs refreshes domain IPs and updates nft rules if changed.
-// Returns the minimum TTL from the new resolution for rescheduling.
+// refreshAllowedIPs re-resolves the policy's name entries and re-adds their
+// addresses to the dynamic set. Returns the minimum TTL for rescheduling.
+//
+// This is a safety net, not the enforcement path — DNSProxy installs addresses
+// as the container asks for them. The refresher exists so that an idle
+// container's set elements keep having their timeouts refreshed, and so a
+// container that bypasses the proxy still finds the configured domains reachable.
+//
+// Unlike the old implementation there is no "did anything change?" short-circuit
+// and no rule rewrite. Re-adding an element that is already present simply
+// refreshes its kernel timeout, and AllowDynamicIPs skips the nft call entirely
+// for elements that still have most of their life left — so an unchanged
+// allowlist costs nothing.
 func (m *Manager) refreshAllowedIPs() (uint32, error) {
-	// Resolve all domains again
-	newIPs, err := m.resolver.ResolveAll(m.config.AllowedDomains)
+	if m.policy == nil || m.resolver == nil {
+		return 0, nil
+	}
+	names := m.policy.Names()
+	if len(names) == 0 {
+		return 0, nil
+	}
+
+	newIPs, err := m.resolver.ResolveAll(names)
 	if err != nil && len(newIPs) == 0 {
 		return 0, fmt.Errorf("failed to resolve any domains")
 	}
 
-	newMinTTL := m.resolver.GetMinTTL()
+	m.installResolved(newIPs)
 
-	// Check if anything changed
-	if m.resolver.IPsUnchanged(newIPs) {
-		m.logger.Println("IP refresh: no changes detected")
-		return newMinTTL, nil
-	}
-
-	// Update nft rules with new IPs
-	totalIPs := countIPs(newIPs)
-	m.logger.Printf("IP refresh: updating nft rules with %d IPs", totalIPs)
-
-	// Replace rules atomically: snapshot old handles, append new rules, then
-	// delete only the old handles. This avoids any window where all rules are
-	// absent and the chain's default-accept policy would pass all traffic.
-	allowedIPs := collectUniqueIPs(newIPs)
-	if err := m.nft.ReplaceAllowlist(m.config, allowedIPs); err != nil {
-		return newMinTTL, fmt.Errorf("failed to update nft rules: %w", err)
-	}
-
-	// Update cache
 	m.resolver.UpdateCache(newIPs)
 	if err := m.cacheManager.Save(m.containerName, m.resolver.GetCache()); err != nil {
 		m.logger.Errorf("Warning: Failed to save cache: %v", err)
 	}
 
-	m.logger.Printf("IP refresh: successfully updated nft rules")
-	return newMinTTL, nil
-}
-
-// countIPs counts total IPs across all domains
-func countIPs(domainIPs map[string][]string) int {
-	count := 0
-	for _, ips := range domainIPs {
-		count += len(ips)
-	}
-	return count
+	return m.resolver.GetMinTTL(), nil
 }
 
 // Teardown removes network isolation for a container
 func (m *Manager) Teardown(ctx context.Context, containerName string) error {
 	// Stop background refresher if running (for allowlist mode)
 	m.stopRefresher()
+
+	// Stop the DNS proxy and drop the intercept rule that pointed at it. Do this
+	// before the filter rules come down: the intercept redirects the container's
+	// DNS to a listener that is about to disappear, and a stale DNAT rule would
+	// black-hole DNS for whatever gets this IP next.
+	if m.dnsProxy != nil {
+		m.dnsProxy.Stop()
+		m.dnsProxy = nil
+	}
+	if m.containerIP != "" {
+		if err := RemoveDNSIntercept(m.containerIP); err != nil {
+			m.logger.Errorf("Warning: failed to remove DNS intercept rule: %v", err)
+		}
+	}
 
 	// Clean up iptables bridge rules if we added them
 	if m.iptablesBridgeName != "" {
