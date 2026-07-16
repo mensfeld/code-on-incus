@@ -654,7 +654,18 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 			container.CodeUser, container.CodeUser, container.CodeUser,
 		)
 		if _, err := result.Manager.ExecCommand(remapCmd, container.ExecCommandOptions{Capture: true}); err != nil {
-			return nil, fmt.Errorf("failed to remap user %s to UID %d: %w", container.CodeUser, container.CodeUID, err)
+			// usermod -u walks the home directory chowning files it finds
+			// owned by the old UID, and the trailing chown -R repeats that
+			// walk explicitly — both hit any read-only mount already living
+			// under /home/<code> (protected paths, [[mounts]] entries) and
+			// exit non-zero even though the UID/GID change itself applied.
+			// Don't trust the exit code alone: probe whether the account
+			// really did move to the target UID before treating this as fatal.
+			actualUID, _, probeErr := probeCodeUser(result.Manager, container.CodeUser)
+			if probeErr != nil || actualUID != container.CodeUID {
+				return nil, fmt.Errorf("failed to remap user %s to UID %d: %w", container.CodeUser, container.CodeUID, err)
+			}
+			opts.Logger(fmt.Sprintf("Warning: UID/GID remap for %s succeeded but the home-directory ownership walk hit a read-only mount: %v", container.CodeUser, err))
 		}
 	}
 

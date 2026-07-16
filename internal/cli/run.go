@@ -254,7 +254,21 @@ func remapContainerUserIfNeeded(mgr container.ContainerManager, wasRestarted boo
 		container.CodeUID, container.CodeUID, container.CodeUser,
 	)
 	if _, err := mgr.ExecCommand(remapCmd, container.ExecCommandOptions{Capture: true}); err != nil {
-		return fmt.Errorf("failed to remap user %s to UID %d: %w", container.CodeUser, container.CodeUID, err)
+		// usermod -u, even without -m, walks the home directory chowning
+		// files it finds owned by the old UID — that walk hits any
+		// read-only mount already living under /home/<code> (e.g. a
+		// protected-path or user [[mounts]] entry, disk devices attach
+		// pre-start per #534) and usermod exits non-zero despite the
+		// actual UID/GID change having applied. Don't trust the exit
+		// code alone: probe whether the account really did move to the
+		// target UID before treating this as fatal.
+		actualUID, probeErr := session.ResolveCodeUID(mgr, container.CodeUser)
+		if probeErr != nil || actualUID != container.CodeUID {
+			return fmt.Errorf("failed to remap user %s to UID %d: %w", container.CodeUser, container.CodeUID, err)
+		}
+		fmt.Fprintf(os.Stderr,
+			"Warning: UID/GID remap for %s succeeded but the home-directory ownership walk hit a read-only mount: %v\n",
+			container.CodeUser, err)
 	}
 	// The home-ownership sweep is best-effort, separately from the remap
 	// itself: disk devices attach pre-start now (#534), so a user-configured
