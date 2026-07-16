@@ -384,12 +384,13 @@ func (m *Manager) installNames(containerName string) error {
 // installNames.
 func (m *Manager) syncResolved(domainIPs map[string][]string) error {
 	allower := m.nftSetAllower()
+	refreshInterval := m.dynamicElementLifetimeInterval()
 	for domain, ips := range domainIPs {
 		if len(ips) == 0 {
 			continue
 		}
 		ttl := m.resolver.DomainTTLs[domain]
-		if err := allower.AllowDynamicIPs(ips, ttl); err != nil {
+		if err := allower.AllowDynamicIPs(ips, ttl, refreshInterval); err != nil {
 			return fmt.Errorf("failed to allow %d addresses for %s: %w", len(ips), domain, err)
 		}
 		m.logger.Printf("  %s -> %v", domain, ips)
@@ -413,10 +414,26 @@ func (m *Manager) nftSetAllower() dynAllower {
 	return noopAllower{}
 }
 
+// dynamicElementLifetimeInterval reports the refresh cadence the dynamic set
+// elements must outlive, so their timeout can be sized to never expire before the
+// refresher renews them. It mirrors startRefresher exactly: 0 when refresh is
+// disabled — in which case the elements are installed permanently — otherwise the
+// same TTL-aware interval the refresher will actually sleep for.
+func (m *Manager) dynamicElementLifetimeInterval() time.Duration {
+	if m.config.RefreshIntervalMinutes <= 0 {
+		return 0 // refresh disabled → permanent elements (nothing will renew them)
+	}
+	var minTTL uint32
+	if m.resolver != nil {
+		minTTL = m.resolver.GetMinTTL()
+	}
+	return m.computeRefreshInterval(minTTL)
+}
+
 // noopAllower stands in when the nft layer cannot install set elements (tests).
 type noopAllower struct{}
 
-func (noopAllower) AllowDynamicIPs([]string, uint32) error { return nil }
+func (noopAllower) AllowDynamicIPs([]string, uint32, time.Duration) error { return nil }
 
 // computeRefreshInterval determines the refresh interval based on DNS TTL and config cap.
 // The configured refresh_interval_minutes acts as a maximum cap.

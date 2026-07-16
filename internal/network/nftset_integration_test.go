@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/mensfeld/code-on-incus/internal/config"
 )
@@ -15,6 +16,11 @@ import (
 const testContainerIP = "10.99.99.99"
 
 const testGatewayIP = "10.99.99.1"
+
+// testRefreshInterval is a representative enabled-refresh cadence, so dynamic
+// elements are installed with a timeout (not permanently) as they are in a real
+// allowlist session.
+const testRefreshInterval = 30 * time.Minute
 
 func skipUnlessNft(t *testing.T) {
 	t.Helper()
@@ -78,7 +84,7 @@ func TestAllowlistSets_Lifecycle(t *testing.T) {
 		t.Errorf("expected a default reject rule\n%s", dump)
 	}
 
-	if err := f.AllowDynamicIPs([]string{"172.217.112.4"}, 300); err != nil {
+	if err := f.AllowDynamicIPs([]string{"172.217.112.4"}, 300, testRefreshInterval); err != nil {
 		t.Fatalf("AllowDynamicIPs: %v", err)
 	}
 	dump = nftDump(t)
@@ -164,7 +170,7 @@ func TestAllowDynamicIPs_IsIdempotent(t *testing.T) {
 	applyTestAllowlist(t, f, nil)
 
 	for i := 0; i < 3; i++ {
-		if err := f.AllowDynamicIPs([]string{"172.217.112.4"}, 300); err != nil {
+		if err := f.AllowDynamicIPs([]string{"172.217.112.4"}, 300, testRefreshInterval); err != nil {
 			t.Fatalf("AllowDynamicIPs call %d: %v", i+1, err)
 		}
 	}
@@ -205,7 +211,7 @@ func TestAllowDynamicIPs_ConcurrentCallersNeverAnswerBeforeInstall(t *testing.T)
 		go func(n int) {
 			defer wg.Done()
 			<-start // maximise overlap
-			if err := f.AllowDynamicIPs(ips, 300); err != nil {
+			if err := f.AllowDynamicIPs(ips, 300, testRefreshInterval); err != nil {
 				errs[n] = err
 				return
 			}
@@ -253,7 +259,7 @@ func TestDeleteCOIFilterRulesForIP_RemovesEverything(t *testing.T) {
 	t.Cleanup(func() { _ = DeleteCOIFilterRulesForIP(testContainerIP) })
 
 	applyTestAllowlist(t, f, []string{"8.8.8.8/32"})
-	if err := f.AllowDynamicIPs([]string{"172.217.112.4"}, 300); err != nil {
+	if err := f.AllowDynamicIPs([]string{"172.217.112.4"}, 300, testRefreshInterval); err != nil {
 		t.Fatalf("AllowDynamicIPs: %v", err)
 	}
 

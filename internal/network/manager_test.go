@@ -3,6 +3,7 @@ package network
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/logger"
@@ -29,7 +30,7 @@ func (s *stubNft) ApplyAllowlist(_ *config.NetworkConfig, allowedIPs []string) e
 
 // AllowDynamicIPs makes stubNft satisfy dynAllower, so Manager.nftSetAllower
 // routes DNS-learned addresses here instead of to the real nft set.
-func (s *stubNft) AllowDynamicIPs(ips []string, ttl uint32) error {
+func (s *stubNft) AllowDynamicIPs(ips []string, ttl uint32, _ time.Duration) error {
 	s.calls = append(s.calls, "AllowDynamicIPs")
 	s.dynamicIPs = append(s.dynamicIPs, ips...)
 	s.lastDynamicTTL = ttl

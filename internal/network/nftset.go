@@ -30,11 +30,11 @@ import (
 // far bigger than any single answer, so a strict replace would keep evicting
 // addresses that are still perfectly live and still in use by an open session.
 const (
-	// dnsElementGrace is added to an answer's TTL to derive the element timeout,
-	// so an address outlives the DNS record that taught us about it. It is also
-	// the effective floor: a TTL of 0 — which is what Cloudflare serves for
-	// api.anthropic.com — still yields a full grace period rather than an element
-	// that expires the moment it is installed.
+	// dnsElementGrace is the safety margin an element is given ON TOP OF the
+	// refresh interval, so it never expires in the gap before the refresher
+	// renews it (see elementTimeout). A TTL of 0 — which is what Cloudflare serves
+	// for api.anthropic.com — still yields at least a full grace period rather than
+	// an element that expires the moment it is installed.
 	dnsElementGrace = 10 * time.Minute
 	// dnsElementMaxTimeout caps how long a stale address can linger.
 	dnsElementMaxTimeout = 12 * time.Hour
@@ -48,14 +48,35 @@ func nftIdent(containerIP string) string {
 func staticSetName(containerIP string) string  { return "coi_s_" + nftIdent(containerIP) }
 func dynamicSetName(containerIP string) string { return "coi_d_" + nftIdent(containerIP) }
 
-// elementTimeout derives an element timeout from a DNS answer's TTL: the TTL
-// plus a grace period, capped. The grace is what absorbs frontend rotation — an
-// address that drops out of DNS keeps working long enough that a request in
-// flight, or a session that is about to reconnect, does not simply fail.
-func elementTimeout(ttl uint32) time.Duration {
-	d := time.Duration(ttl)*time.Second + dnsElementGrace
-	if d > dnsElementMaxTimeout {
-		d = dnsElementMaxTimeout
+// elementTimeout derives a dynamic element's lifetime from a DNS answer's TTL
+// and the interval at which the refresher will re-confirm it.
+//
+// The element MUST outlive the refresh that renews it. If it expired first it
+// would drop out of the firewall while /etc/hosts still pointed at the address,
+// so the container would resolve an allowlisted name and have the connection
+// rejected — the exact host/container divergence this mode exists to prevent. So
+// the lifetime is the TTL plus BOTH a fixed grace and the refresh interval
+// itself: even a TTL-0 answer with the interval at its configured cap expires a
+// full grace period AFTER the refresh that would have renewed it, never before.
+//
+// refreshInterval <= 0 means the refresher is disabled. Nothing will ever re-add
+// the element, so it is installed permanently (timeout 0) — matching the old
+// static-rule behaviour where turning refresh off pinned the allowlist for the
+// life of the container, rather than letting it silently lapse after the grace.
+func elementTimeout(ttl uint32, refreshInterval time.Duration) time.Duration {
+	if refreshInterval <= 0 {
+		return 0 // permanent: there is no refresher to renew it
+	}
+	d := time.Duration(ttl)*time.Second + refreshInterval + dnsElementGrace
+	// The cap bounds how long a genuinely dead address lingers, but it must never
+	// fall below one refresh-plus-grace, or a long configured interval would
+	// recreate the very expiry gap this function exists to close.
+	maxTimeout := dnsElementMaxTimeout
+	if floor := refreshInterval + dnsElementGrace; floor > maxTimeout {
+		maxTimeout = floor
+	}
+	if d > maxTimeout {
+		d = maxTimeout
 	}
 	return d
 }
@@ -106,10 +127,13 @@ func (f *NftManager) AddStaticIPs(cidrs []string) error {
 	return f.addSetElements(staticSetName(f.containerIP), sorted)
 }
 
-// AllowDynamicIPs adds DNS-learned addresses to the dynamic set with a timeout
-// derived from the answer's TTL. It returns only once the kernel has the
-// addresses, so a caller that writes them into the container's /etc/hosts
-// afterwards knows the firewall already trusts what it is about to hand over.
+// AllowDynamicIPs adds DNS-learned addresses to the dynamic set, sized so each
+// element outlives the refresh that will renew it (see elementTimeout).
+// refreshInterval is the cadence the refresher will use — or <= 0 when refresh is
+// disabled, in which case the elements are installed permanently. It returns only
+// once the kernel has the addresses, so a caller that writes them into the
+// container's /etc/hosts afterwards knows the firewall already trusts what it is
+// about to hand over.
 //
 // The lock is deliberately held across the nft call. Setup installs the initial
 // answers while the background refresher may already be re-resolving on its own
@@ -121,15 +145,16 @@ func (f *NftManager) AddStaticIPs(cidrs []string) error {
 // contain yet: the original bug, reproduced with a smaller window. Serialising
 // here costs one exec's latency and buys the invariant the whole design rests on.
 //
-// dynSeen is what keeps this cheap: it is a record of what has already been
-// installed, so re-syncing a name whose elements still have most of their life
-// left costs no exec at all.
-func (f *NftManager) AllowDynamicIPs(ips []string, ttl uint32) error {
+// dynSeen is what keeps this cheap: it records what has already been installed
+// and when it expires, so re-syncing a name whose elements still have most of
+// their life left costs no exec at all. A permanent element carries the zero
+// time: it is never pruned and never re-added.
+func (f *NftManager) AllowDynamicIPs(ips []string, ttl uint32, refreshInterval time.Duration) error {
 	if f.containerIP == "" || len(ips) == 0 {
 		return nil
 	}
 
-	timeout := elementTimeout(ttl)
+	timeout := elementTimeout(ttl, refreshInterval) // 0 == permanent
 
 	f.dynMu.Lock()
 	defer f.dynMu.Unlock()
@@ -139,11 +164,12 @@ func (f *NftManager) AllowDynamicIPs(ips []string, ttl uint32) error {
 	}
 	now := time.Now()
 
-	// Drop addresses whose kernel elements have already expired. Without this the
-	// map only ever grows — one entry per address ever resolved — which for an
-	// agent working through many wildcard subdomains is an unbounded leak.
+	// Drop addresses whose kernel elements have already expired. Permanent
+	// elements carry a zero expiry and are never pruned here. Without this the map
+	// only ever grows — one entry per address ever resolved — which for an agent
+	// working through many subdomains is an unbounded leak.
 	for ip, expiry := range f.dynSeen {
-		if now.After(expiry) {
+		if !expiry.IsZero() && now.After(expiry) {
 			delete(f.dynSeen, ip)
 		}
 	}
@@ -151,9 +177,14 @@ func (f *NftManager) AllowDynamicIPs(ips []string, ttl uint32) error {
 	var stale []string
 	for _, ip := range ips {
 		expiry, known := f.dynSeen[ip]
-		// Refresh once an element is past half its life. Re-adding resets the
-		// kernel timeout, so a live address never expires while still in use.
-		if !known || now.After(expiry.Add(-timeout/2)) {
+		switch {
+		case !known:
+			stale = append(stale, ip)
+		case expiry.IsZero():
+			// already installed permanently — nothing to renew
+		case now.After(expiry.Add(-timeout / 2)):
+			// past half its life — re-add to reset the kernel timeout so a live
+			// address never expires while still in use
 			stale = append(stale, ip)
 		}
 	}
@@ -164,7 +195,11 @@ func (f *NftManager) AllowDynamicIPs(ips []string, ttl uint32) error {
 	secs := int(timeout.Seconds())
 	elements := make([]string, 0, len(stale))
 	for _, ip := range stale {
-		elements = append(elements, fmt.Sprintf("%s timeout %ds", ip, secs))
+		if timeout <= 0 {
+			elements = append(elements, ip) // permanent: no timeout attribute
+		} else {
+			elements = append(elements, fmt.Sprintf("%s timeout %ds", ip, secs))
+		}
 	}
 
 	if err := f.addSetElements(dynamicSetName(f.containerIP), elements); err != nil {
@@ -172,9 +207,14 @@ func (f *NftManager) AllowDynamicIPs(ips []string, ttl uint32) error {
 	}
 
 	// Record only after the kernel has them, so a failed exec cannot leave an
-	// address marked as installed when it is not.
+	// address marked as installed when it is not. A permanent element is recorded
+	// as the zero time so it is neither pruned nor renewed.
 	for _, ip := range stale {
-		f.dynSeen[ip] = now.Add(timeout)
+		if timeout <= 0 {
+			f.dynSeen[ip] = time.Time{}
+		} else {
+			f.dynSeen[ip] = now.Add(timeout)
+		}
 	}
 	return nil
 }
@@ -226,7 +266,7 @@ func (f *NftManager) dynSeenSnapshot() map[string]time.Time {
 // install DNS-learned addresses. Keeping it narrow lets the Manager's sync path
 // be tested with a stub in place of real nft.
 type dynAllower interface {
-	AllowDynamicIPs(ips []string, ttl uint32) error
+	AllowDynamicIPs(ips []string, ttl uint32, refreshInterval time.Duration) error
 }
 
 var _ dynAllower = (*NftManager)(nil)
