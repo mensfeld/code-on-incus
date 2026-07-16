@@ -108,23 +108,22 @@ func (f *NftManager) AddStaticIPs(cidrs []string) error {
 
 // AllowDynamicIPs adds DNS-learned addresses to the dynamic set with a timeout
 // derived from the answer's TTL. It returns only once the kernel has the
-// addresses, so a caller that answers a DNS query afterwards knows the firewall
-// already trusts what it is about to hand over.
+// addresses, so a caller that writes them into the container's /etc/hosts
+// afterwards knows the firewall already trusts what it is about to hand over.
 //
-// The lock is deliberately held across the nft call. The proxy serves UDP and
-// TCP concurrently and the DNS library runs a goroutine per query, so two
-// queries for the same name overlap routinely. An earlier version recorded the
-// addresses in dynSeen, released the lock, and only then shelled out to nft —
-// which let a second goroutine see them as "already installed", skip the nft
-// call, and answer while the first goroutine's exec was still in flight. The
-// container could then dial an address the kernel set did not contain yet: the
-// original bug, reproduced with a smaller window. Serialising here costs one
-// exec's latency on concurrent first-resolutions of the same name and buys the
-// invariant the whole design rests on.
+// The lock is deliberately held across the nft call. Setup installs the initial
+// answers while the background refresher may already be re-resolving on its own
+// goroutine, so two calls that touch the same address can overlap. An earlier
+// version recorded the addresses in dynSeen, released the lock, and only then
+// shelled out to nft — which let a concurrent caller see them as "already
+// installed", skip the nft call, and proceed while the first exec was still in
+// flight. The container could then be handed an address the kernel set did not
+// contain yet: the original bug, reproduced with a smaller window. Serialising
+// here costs one exec's latency and buys the invariant the whole design rests on.
 //
-// dynSeen is what keeps this off the hot path: it is a record of what has
-// already been installed, so a repeat query for a name whose elements still have
-// most of their life left costs no exec at all.
+// dynSeen is what keeps this cheap: it is a record of what has already been
+// installed, so re-syncing a name whose elements still have most of their life
+// left costs no exec at all.
 func (f *NftManager) AllowDynamicIPs(ips []string, ttl uint32) error {
 	if f.containerIP == "" || len(ips) == 0 {
 		return nil
@@ -223,8 +222,9 @@ func (f *NftManager) dynSeenSnapshot() map[string]time.Time {
 	return out
 }
 
-// dynAllower is the slice of NftManager that DNSProxy needs. Keeping it narrow
-// lets the proxy be tested without nft.
+// dynAllower is the slice of NftManager the resolver/refresher path needs to
+// install DNS-learned addresses. Keeping it narrow lets the Manager's sync path
+// be tested with a stub in place of real nft.
 type dynAllower interface {
 	AllowDynamicIPs(ips []string, ttl uint32) error
 }

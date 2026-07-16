@@ -21,8 +21,8 @@ type NftManager struct {
 
 	// dynSeen tracks the DNS-learned addresses already installed in the dynamic
 	// set, and when each one expires, so AllowDynamicIPs can skip the nft exec
-	// on the DNS hot path. Guarded by dynMu because the DNS proxy serves queries
-	// concurrently.
+	// when an address is still fresh. Guarded by dynMu so a re-sync from the
+	// background refresher cannot race a concurrent caller — see AllowDynamicIPs.
 	dynMu   sync.Mutex
 	dynSeen map[string]time.Time
 }
@@ -169,9 +169,9 @@ func (f *NftManager) ApplyAllowlist(cfg *config.NetworkConfig, staticCIDRs []str
 }
 
 // RemoveRules removes every host-side artefact COI installed for this container:
-// rules, allowlist sets and the DNS intercept. See DeleteCOIFilterRulesForIP,
-// which is the shared implementation and the same path kill and orphan cleanup
-// take.
+// forward rules, allowlist sets and the input-chain DNS block. See
+// DeleteCOIFilterRulesForIP, which is the shared implementation and the same path
+// kill and orphan cleanup take.
 func (f *NftManager) RemoveRules() error {
 	return DeleteCOIFilterRulesForIP(f.containerIP)
 }
@@ -188,9 +188,13 @@ func (f *NftManager) RemoveRules() error {
 // the duration of that teardown, any address present only in the new set was
 // rejected. That window is gone: there is nothing to tear down.
 //
-// Dynamic (DNS-learned) addresses are not touched here — DNSProxy owns them, and
-// re-adding an element refreshes its timeout rather than replacing it, so an
-// address that is still in use never expires out from under an open connection.
+// Dynamic (DNS-learned) addresses are not touched here — the resolver/refresher
+// path (installNames → syncResolved → AllowDynamicIPs) owns them, and re-adding
+// an element refreshes its timeout rather than replacing it, so an address that
+// is still in use never expires out from under an open connection.
+//
+// This method is retained on the nftRuler interface as the static-entry re-sync
+// primitive; a regression test pins that setup does not fall back to it.
 func (f *NftManager) ReplaceAllowlist(_ *config.NetworkConfig, staticCIDRs []string) error {
 	if f.containerIP == "" {
 		return nil
@@ -583,8 +587,8 @@ func ListCOIFilterRuleIPs() (map[string][]string, error) {
 }
 
 // DeleteCOIFilterRulesForIP removes every host-side artefact COI installed for a
-// container IP: its forward rules, then its allowlist sets, then its DNS
-// intercept.
+// container IP: its forward rules, then its input-chain DNS block, then its
+// allowlist sets.
 //
 // This is the single teardown entry point used by kill, orphan cleanup and
 // setup's stale-rule purge, so it must account for everything allowlist mode
