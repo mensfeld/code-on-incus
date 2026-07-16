@@ -234,16 +234,21 @@ func (m *Manager) setupRestricted(ctx context.Context, containerName string) err
 
 // setupAllowlist configures allowlist mode.
 //
-// The allowlist is enforced at DNS resolution time: COI becomes the container's
-// resolver (transparently — see dnsintercept.go), and every address it hands
-// back for an allowed name is installed in the container's nft set before the
-// answer is returned. The container therefore cannot learn about an address the
-// firewall does not already trust, which is what makes the mode exact.
+// Name resolution is made deterministic instead of live: COI resolves the
+// allowed hostnames on the host, installs those addresses in the container's nft
+// set, writes the SAME addresses into the container's /etc/hosts (see hosts.go),
+// and blocks all DNS egress (see dnsblock.go). With no route to a nameserver, the
+// hosts file COI wrote is the container's only way to turn a name into an address
+// — so it cannot learn about an address the firewall does not already trust, and
+// the host/container divergence this mode exists to prevent has nowhere to occur.
+//
+// Nothing has to stay running for that to hold, which is what makes it survive
+// coi exiting, a tmux detach, or a kill -9.
 //
 // Literal IP/CIDR entries in allowed_domains skip DNS entirely and go straight
 // into the static set.
 func (m *Manager) setupAllowlist(ctx context.Context, containerName string) error {
-	m.logger.Println("Network mode: allowlist (DNS-enforced domain filtering)")
+	m.logger.Println("Network mode: allowlist (deterministic name resolution, DNS blocked)")
 
 	// Check if nft is available (and that sudo is permitted by config)
 	if !NftUsable(m.config) {
@@ -269,13 +274,13 @@ func (m *Manager) setupAllowlist(ctx context.Context, containerName string) erro
 	m.containerIP = containerIP
 	m.logger.Printf("Container IP: %s", containerIP)
 
-	// The gateway address is where the DNS proxy listens and where the intercept
-	// rule redirects to, so allowlist mode cannot proceed without it. Failing
-	// here is fail-closed: the boot block stays in place and the container has no
-	// egress at all.
+	// The gateway address keys the DHCP accept rule (the lease is what gives the
+	// container the IP every other rule is keyed on), so allowlist mode cannot
+	// proceed without it. Failing here is fail-closed: the boot block stays in
+	// place and the container has no egress at all.
 	gatewayIP, err := getContainerGatewayIP(containerName)
 	if err != nil {
-		return fmt.Errorf("failed to determine gateway IP (required for DNS-enforced allowlist): %w", err)
+		return fmt.Errorf("failed to determine gateway IP (required for allowlist mode): %w", err)
 	}
 	m.logger.Printf("Gateway IP: %s", gatewayIP)
 
