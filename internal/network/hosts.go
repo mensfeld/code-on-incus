@@ -74,17 +74,33 @@ func renderHostsBlock(domainIPs map[string][]string) string {
 func WriteAllowlistHosts(containerName string, domainIPs map[string][]string) error {
 	block := renderHostsBlock(domainIPs)
 
+	// Strip the previous COI-managed block, then append a fresh one. awk is used
+	// deliberately instead of a sed '/BEGIN/,/END/d' range: a sed range deletes
+	// through to end-of-file when the END marker is missing, so a truncated or
+	// hand-mangled block would take every line after it — including the user's own
+	// entries — with it. This awk removes ONLY a properly terminated BEGIN..END
+	// block and re-emits an unterminated one untouched, so nothing outside a
+	// well-formed block is ever lost. The markers are passed as -v values and
+	// matched with index()==1 (literal prefix), so their parentheses and em dash
+	// need no regex escaping.
+	//
 	// The heredoc is quoted ('COI_HOSTS_EOF') so the shell performs no expansion
 	// on the content — a domain is not a shell word and must not be treated as one.
 	script := fmt.Sprintf(`set -e
 tmp=$(mktemp)
-sed '/^%s/,/^%s/d' /etc/hosts > "$tmp"
+awk -v b=%s -v e=%s '
+  index($0, b) == 1 { inblock = 1; buf = $0 ORS; next }
+  inblock && index($0, e) == 1 { inblock = 0; buf = ""; next }
+  inblock { buf = buf $0 ORS; next }
+  { print }
+  END { if (inblock) printf "%%s", buf }
+' /etc/hosts > "$tmp"
 cat >> "$tmp" <<'COI_HOSTS_EOF'
 %s
 COI_HOSTS_EOF
 cat "$tmp" > /etc/hosts
 rm -f "$tmp"
-`, regexpEscapeForSed(hostsBeginMarker), regexpEscapeForSed(hostsEndMarker), block)
+`, shellSingleQuote(hostsBeginMarker), shellSingleQuote(hostsEndMarker), block)
 
 	mgr := container.NewManager(containerName)
 	if _, err := mgr.ExecCommand(script, container.ExecCommandOptions{Capture: true}); err != nil {
@@ -93,17 +109,9 @@ rm -f "$tmp"
 	return nil
 }
 
-// regexpEscapeForSed escapes the characters that are special in a sed basic
-// regular expression. The markers contain "(" and ")" and an em dash; only the
-// BRE metacharacters need escaping, but escaping conservatively keeps the sed
-// address stable if the markers are ever reworded.
-func regexpEscapeForSed(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		if strings.ContainsRune(`.[]*^$\/`, r) {
-			b.WriteByte('\\')
-		}
-		b.WriteRune(r)
-	}
-	return b.String()
+// shellSingleQuote wraps s in single quotes for safe use as a single shell word,
+// escaping any embedded single quote. The hosts markers contain spaces and
+// parentheses, so they must be quoted before being passed as awk -v values.
+func shellSingleQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

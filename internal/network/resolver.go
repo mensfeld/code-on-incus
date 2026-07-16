@@ -63,10 +63,9 @@ func (r *Resolver) ResolveDomain(domain string) ([]string, error) {
 	if strings.Contains(domain, "*") {
 		return nil, fmt.Errorf("cannot resolve wildcard %q: list exact hostnames or a CIDR instead", domain)
 	}
-	effectiveDomain := domain
 
 	// Try TTL-aware DNS query first
-	result, err := QueryDNS(effectiveDomain)
+	result, err := QueryDNS(domain)
 	if err == nil && len(result.IPs) > 0 {
 		r.DomainTTLs[domain] = result.TTL
 		logInfof("  %s: resolved %d IPs (TTL: %ds)", domain, len(result.IPs), result.TTL)
@@ -83,7 +82,7 @@ func (r *Resolver) ResolveDomain(domain string) ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	addrs, lookupErr := net.DefaultResolver.LookupIP(ctx, "ip4", effectiveDomain)
+	addrs, lookupErr := net.DefaultResolver.LookupIP(ctx, "ip4", domain)
 	if lookupErr != nil {
 		return nil, fmt.Errorf("failed to resolve %s: %w", domain, lookupErr)
 	}

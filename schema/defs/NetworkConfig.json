@@ -24,7 +24,7 @@
     "refresh_interval_minutes": {
       "type": "integer",
       "minimum": 0,
-      "description": "How often to re-resolve allowlisted domains to refresh their firewall entries (minutes). This is a safety net: the DNS proxy already installs addresses as the container resolves them."
+      "description": "How often to re-resolve allowlisted domains and refresh their firewall entries and the container's /etc/hosts (minutes). Set to 0 to disable refreshing, which pins the addresses resolved at startup for the life of the container."
     },
     "allow_local_network_access": {
       "type": "boolean",

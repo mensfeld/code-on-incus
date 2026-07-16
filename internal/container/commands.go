@@ -71,7 +71,6 @@ func IncusExecInteractive(args ...string) error {
 	return cmd.Run()
 }
 
-// IncusExecQuietContext executes an Incus command silently with context support
 // IncusExecQuietContext runs an Incus command without writing to the terminal,
 // but still reports WHY it failed.
 //
@@ -682,14 +681,16 @@ func StopContainerQuiet(ctx context.Context, containerName string, force bool) (
 // had, in fact, been killed.
 //
 // Matching on the message is unpleasant but is what the Incus CLI gives us; it
-// exits 1 for every failure and distinguishes them only in stderr.
+// exits 1 for every failure and distinguishes them only in stderr. We match the
+// exact phrase Incus emits ("Instance not found") rather than a loose "not found"
+// AND "instance", so an unrelated failure that merely mentions an instance — a
+// busy storage volume, a missing network "for instance X" — is still reported
+// instead of being silently counted as a successful kill.
 func IsNotFoundErr(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "instance not found") ||
-		strings.Contains(msg, "not found") && strings.Contains(msg, "instance")
+	return strings.Contains(strings.ToLower(err.Error()), "instance not found")
 }
 
 // DeleteContainer deletes a container forcefully
