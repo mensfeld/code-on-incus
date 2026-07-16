@@ -88,7 +88,17 @@ func (f *NftManager) ApplyRestricted(cfg *config.NetworkConfig) error {
 // entries land in the dynamic set, and the same addresses are written into the
 // container's /etc/hosts (see hosts.go) — which, with DNS blocked, is the
 // container's only route from a name to an address.
+//
+// A gateway IP is mandatory: allowlist mode is default-reject, so DHCP lease
+// renewal has to be explicitly allowed or the lease eventually lapses and the
+// container loses the IP every rule here is keyed on. setupAllowlist already
+// fails closed when the gateway cannot be detected; this guard states the same
+// requirement at the point that consumes it.
 func (f *NftManager) ApplyAllowlist(cfg *config.NetworkConfig, staticCIDRs []string) error {
+	if f.gatewayIP == "" {
+		return fmt.Errorf("allowlist mode requires a gateway IP (for the DHCP renewal accept rule)")
+	}
+
 	if err := EnsureBaseRules(); err != nil {
 		logWarnf("Warning: failed to ensure base rules: %v", err)
 	}
@@ -116,12 +126,11 @@ func (f *NftManager) ApplyAllowlist(cfg *config.NetworkConfig, staticCIDRs []str
 	}
 
 	// DHCP still has to work. The lease is what gives the container the address
-	// every one of these rules is keyed on.
-	if f.gatewayIP != "" {
-		if err := f.addRuleWithMatch(f.containerIP, f.gatewayIP+"/32",
-			[]string{"udp", "dport", "{", "67,", "68", "}"}, "accept"); err != nil {
-			return fmt.Errorf("failed to add gateway DHCP allow rule: %w", err)
-		}
+	// every one of these rules is keyed on. The gateway is guaranteed present by
+	// the guard above, so this rule is unconditional.
+	if err := f.addRuleWithMatch(f.containerIP, f.gatewayIP+"/32",
+		[]string{"udp", "dport", "{", "67,", "68", "}"}, "accept"); err != nil {
+		return fmt.Errorf("failed to add gateway DHCP allow rule: %w", err)
 	}
 
 	if config.BoolVal(cfg.AllowLocalNetworkAccess) {

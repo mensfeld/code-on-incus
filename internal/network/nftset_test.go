@@ -1,9 +1,28 @@
 package network
 
 import (
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/mensfeld/code-on-incus/internal/config"
 )
+
+// TestApplyAllowlist_RequiresGateway pins that allowlist mode treats a missing
+// gateway as a hard error rather than silently omitting the DHCP renewal rule.
+// Allowlist mode is default-reject, so without that rule the container's DHCP
+// lease eventually lapses and it loses the IP every other rule is keyed on. The
+// guard is the first statement in ApplyAllowlist, so this needs no nft or sudo.
+func TestApplyAllowlist_RequiresGateway(t *testing.T) {
+	f := NewNftManager("10.0.0.50", "") // no gateway
+	err := f.ApplyAllowlist(&config.NetworkConfig{Mode: config.NetworkModeAllowlist}, nil)
+	if err == nil {
+		t.Fatal("ApplyAllowlist with no gateway must error, not silently skip the DHCP rule")
+	}
+	if !strings.Contains(err.Error(), "gateway") {
+		t.Errorf("error should name the missing gateway, got: %v", err)
+	}
+}
 
 // TestElementTimeout pins the invariant that a dynamic set element must outlive
 // the refresh that renews it. If an element expired first it would drop out of
