@@ -166,7 +166,7 @@ func (a *App) runCommand(cmd *cobra.Command, args []string) error {
 
 // launchOrReuseContainer restarts an existing persistent container, or
 // recreates / creates a fresh one on the given storage pool.
-func launchOrReuseContainer(mgr container.ContainerManager, img, pool, containerName string, containerExists, persistent bool, preStart func() error) error {
+func launchOrReuseContainer(mgr container.ContainerManager, img, pool, containerName string, containerExists, persistent bool, preStart, preRestart func() error) error {
 	if containerExists && persistent {
 		// Fail fast on an already-running container (another session may own
 		// it). Master's plain Start() errored here; StartWithIsolationFallback's
@@ -175,6 +175,16 @@ func launchOrReuseContainer(mgr container.ContainerManager, img, pool, container
 		// under the second.
 		if running, _ := mgr.Running(); running {
 			return fmt.Errorf("container %s is already running — another session may be using it; pick a different --slot or stop it first", containerName)
+		}
+		// Reconcile start-time-only state on the STOPPED container before starting:
+		// the workspace-sourced security devices are stripped and re-established
+		// against the current workspace, so a source removed while stopped can't
+		// wedge the start with "Missing source path" (issue #610). Mirrors preStart
+		// on the fresh path; must run before StartWithIsolationFallback.
+		if preRestart != nil {
+			if err := preRestart(); err != nil {
+				return fmt.Errorf("failed to reconcile container before restart: %w", err)
+			}
 		}
 		fmt.Fprintf(os.Stderr, "Restarting existing persistent container...\n")
 		// Start with the isolation fallback: the container's disk devices (set at

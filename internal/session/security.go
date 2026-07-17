@@ -63,6 +63,127 @@ func SetupSecurityMounts(mgr container.ContainerDevices, workspacePath, containe
 	return protectedPaths, nil
 }
 
+// securityDeviceStripper is the container API slice StripSecurityDevices needs.
+type securityDeviceStripper interface {
+	ListDevices() ([]string, error)
+	RemoveDevice(name string) error
+}
+
+// stripSecurityDevicePrefixes name the disk-device families whose host sources
+// are (re)established by the fresh-launch security setup: workspace-relative
+// protected paths (protect-), secret masks (mask-, sourced under ~/.coi/masks),
+// and the read-only git worktree common-dir overlays (gitc-). The read-WRITE base
+// mounts these overlay (workspace, git-worktree-common) are deliberately NOT here.
+var stripSecurityDevicePrefixes = []string{"protect-", "mask-", "gitc-"}
+
+// StripSecurityDevices removes the creation-time security device families (see
+// stripSecurityDevicePrefixes) from a REUSED persistent container, so the caller
+// can re-run the fresh-launch security setup as a clean re-add before restarting.
+//
+// This is the reuse-path analogue of RemoveStalePortDevices and the heart of the
+// issue #610 fix: on a fresh launch SetupSecurityMounts / SetupSecretMasks /
+// SetupCommonDirProtection materialize each source and attach the device, but on
+// reuse those functions never ran, so a device attached at first launch keeps its
+// original host source forever. If that source was removed from the workspace
+// while the container was stopped, Incus rejects the container at start with
+// `Missing source path`, and nothing self-heals it. Stripping here + re-running
+// the SAME validated setup means all the materialization, symlink-rejection,
+// type, and missing-path handling come from one place (the fresh-launch code)
+// rather than being re-derived, and protection is re-established to match the
+// CURRENT workspace (paths added, removed, or replaced since first launch).
+//
+// Best-effort: listing / per-device errors are logged, not fatal — a strip
+// failure must not be worse than the stale-device wedge it prevents. Must run
+// while the container is stopped, before start.
+func StripSecurityDevices(mgr securityDeviceStripper, logger func(string)) {
+	devices, err := mgr.ListDevices()
+	if err != nil {
+		logger(fmt.Sprintf("Warning: could not list devices to reconcile protected paths: %v", err))
+		return
+	}
+	for _, d := range devices {
+		for _, prefix := range stripSecurityDevicePrefixes {
+			if strings.HasPrefix(d, prefix) {
+				if err := mgr.RemoveDevice(d); err != nil {
+					logger(fmt.Sprintf("Warning: could not remove stale security device %s: %v", d, err))
+				}
+				break
+			}
+		}
+	}
+}
+
+// applySessionSecurity establishes the full read-only security layer for a coi
+// shell session: workspace-relative protected-path mounts (with the dynamic
+// worktree-config expansion), the external git common-dir protection for a
+// worktree checkout, the host-immutable belt, and secret-path masks. It is the
+// single implementation shared by BOTH the fresh-launch path and the
+// reuse/restart reconcile (issue #610), so both establish identical protection
+// against the CURRENT workspace from one place.
+//
+// Returns the effective (expanded) protected-path list — which the caller adopts
+// as canonical for downstream logging/context — and whether the host-immutable
+// attribute was applied. The error is non-nil only for a FAIL-CLOSED secret-mask
+// failure (a configured secret could not be masked); the caller must abort start
+// rather than launch with the secret exposed. Read-only protected-mount failures
+// are logged and non-fatal, matching prior behavior.
+func applySessionSecurity(mgr container.ContainerManager, opts SetupOptions, containerWorkspacePath string, useShift bool, worktreeLayout *GitWorktreeLayout, worktreeWritableHooks bool, containerName string) (effectivePaths []string, hasImmutable bool, err error) {
+	securityPaths := opts.ProtectedPaths
+	if worktreeLayout != nil {
+		// Workspace .git is a file; its .git/* defaults can't be protected here
+		// (they'd warn "gitdir indirection"). SetupCommonDirProtection covers the
+		// real internals; keep the non-.git protections.
+		securityPaths = StripGitProtectedPaths(securityPaths)
+	}
+	effectivePaths, mErr := SetupSecurityMounts(mgr, opts.WorkspacePath, containerWorkspacePath, securityPaths, useShift, opts.Security)
+	if mErr != nil {
+		opts.Logger(fmt.Sprintf("Warning: Failed to setup security mounts: %v", mErr))
+		// Non-fatal: continue even if a read-only protection mount fails.
+	} else if len(effectivePaths) > 0 {
+		if actual := GetProtectedPathsForLogging(opts.WorkspacePath, effectivePaths); len(actual) > 0 {
+			opts.Logger(fmt.Sprintf("Protected paths (mounted read-only): %s", strings.Join(actual, ", ")))
+		}
+	}
+
+	// Extend the read-only protection to the external git common dir (issue #533):
+	// the same #474 hook/config lockdown applied to the worktree's real internals,
+	// which the workspace-relative pass above cannot reach.
+	if worktreeLayout != nil {
+		cProtected, cErr := SetupCommonDirProtection(mgr, worktreeLayout.CommonDir, useShift, worktreeWritableHooks, opts.Security)
+		if cErr != nil {
+			opts.Logger(fmt.Sprintf("Warning: some git common-dir protections not applied: %v", cErr))
+		}
+		if len(cProtected) > 0 {
+			opts.Logger(fmt.Sprintf("Protected git common-dir paths (read-only): %s", strings.Join(cProtected, ", ")))
+		}
+	}
+
+	// Host-side immutable attribute for defense-in-depth. Runs even on a partial
+	// mount error, so it is gated on the effective list, not mErr.
+	if len(effectivePaths) > 0 && opts.HostImmutable {
+		if immutablePaths := ApplyImmutable(opts.WorkspacePath, effectivePaths, containerName, opts.Logger); len(immutablePaths) > 0 {
+			hasImmutable = true
+			opts.Logger(fmt.Sprintf("Host-side immutable protection applied: %s", strings.Join(immutablePaths, ", ")))
+		}
+	}
+
+	// Mask secret paths (issue #494) — independent of protected_paths. FAIL CLOSED:
+	// if a configured secret cannot be masked we must not launch with it exposed.
+	if len(opts.SecretPaths) > 0 {
+		masked, skipped, sErr := SetupSecretMasks(mgr, opts.WorkspacePath, containerWorkspacePath, opts.SecretPaths, useShift)
+		for _, s := range skipped {
+			opts.Logger(fmt.Sprintf("Warning: secret_paths entry %q is NOT masked (missing, or a symlink resolving outside the workspace) — it is not hidden from the agent", s))
+		}
+		if sErr != nil {
+			return effectivePaths, hasImmutable, fmt.Errorf("failed to mask secret paths: %w", sErr)
+		}
+		if len(masked) > 0 {
+			opts.Logger(fmt.Sprintf("Masked secret paths (hidden read-only): %s", strings.Join(masked, ", ")))
+		}
+	}
+	return effectivePaths, hasImmutable, nil
+}
+
 // setupProtectedPath mounts a single path as read-only
 func setupProtectedPath(mgr container.ContainerDevices, workspacePath, containerWorkspacePath, relPath string, useShift bool) error {
 	if err := validateRelPath(relPath); err != nil {
