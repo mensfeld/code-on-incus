@@ -626,24 +626,37 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 	if !skipLaunch && hasCodeUser && container.CodeUID != 1000 {
 		opts.Logger(fmt.Sprintf("Remapping user %s from UID 1000 to %d...", container.CodeUser, container.CodeUID))
 		remapCmd := fmt.Sprintf(
-			"groupmod -g %d %s && usermod -u %d -g %d %s && chown -R %s:%s /home/%s",
+			"groupmod -g %d %s && usermod -u %d -g %d %s",
 			container.CodeUID, container.CodeUser,
 			container.CodeUID, container.CodeUID, container.CodeUser,
-			container.CodeUser, container.CodeUser, container.CodeUser,
 		)
 		if _, err := result.Manager.ExecCommand(remapCmd, container.ExecCommandOptions{Capture: true}); err != nil {
-			// usermod -u walks the home directory chowning files it finds
-			// owned by the old UID, and the trailing chown -R repeats that
-			// walk explicitly — both hit any read-only mount already living
-			// under /home/<code> (protected paths, [[mounts]] entries) and
-			// exit non-zero even though the UID/GID change itself applied.
-			// Don't trust the exit code alone: probe whether the account
-			// really did move to the target UID before treating this as fatal.
+			// usermod -u, even without -m, walks the home directory chowning
+			// files it finds owned by the old UID — that walk hits any
+			// read-only mount already living under /home/<code> (protected
+			// paths, [[mounts]] entries; disk devices attach pre-start per
+			// #534) and usermod exits non-zero (E_HOMEDIR) despite the passwd
+			// update having already been committed. Don't trust the exit code
+			// alone: probe whether the account really did move to the target
+			// UID before treating this as fatal. groupmod ran first in the
+			// chain and usermod commits uid+gid in the same passwd write, so
+			// a confirmed UID implies the full remap landed.
 			actualUID, _, probeErr := probeCodeUser(result.Manager, container.CodeUser)
 			if probeErr != nil || actualUID != container.CodeUID {
 				return nil, fmt.Errorf("failed to remap user %s to UID %d: %w", container.CodeUser, container.CodeUID, err)
 			}
-			opts.Logger(fmt.Sprintf("Warning: UID/GID remap for %s succeeded but the home-directory ownership walk hit a read-only mount: %v", container.CodeUser, err))
+			opts.Logger(fmt.Sprintf("Warning: UID/GID remap for %s succeeded but usermod's home-directory ownership walk hit an unwritable path: %v", container.CodeUser, err))
+		}
+		// The home-ownership sweep is best-effort, separately from the remap
+		// itself (mirrors the coi run path, #534): a read-only mount under
+		// /home/<code> makes chown -R exit non-zero after fixing everything it
+		// could, which must not abort setup. Keeping it OUT of the fatal &&
+		// chain also means it still runs when usermod exited non-zero above —
+		// fused, the chain would skip it and leave writable home files owned
+		// by the old UID (the code user unable to write its own dotfiles).
+		chownCmd := fmt.Sprintf("chown -R %s:%s /home/%s", container.CodeUser, container.CodeUser, container.CodeUser)
+		if _, err := result.Manager.ExecCommand(chownCmd, container.ExecCommandOptions{Capture: true}); err != nil {
+			opts.Logger(fmt.Sprintf("Warning: could not chown all of /home/%s after UID remap (a read-only mount under it is expected to fail): %v", container.CodeUser, err))
 		}
 	}
 
