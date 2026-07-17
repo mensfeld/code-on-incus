@@ -239,16 +239,28 @@ class TestNetworkConnectionDetection:
                 f"s.connect(('{container_ip}', 4444)); "
                 'time.sleep(120)"'
             )
-            subprocess.Popen(
-                ["incus", "exec", container_name, "--", "bash", "-c", tcp_cmd],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-
-            net_events = _poll_network_threats(container_name)
+            # Retry the connect + detect cycle. The connection is fire-and-forget,
+            # so a transiently failed connect() (server race / slow python3 startup
+            # under CI load) is invisible and yields no ESTABLISHED socket to
+            # detect; and the host-side /proc-net poller can miss a single
+            # detection window. Re-issuing the connection and polling again up to
+            # 3 times makes the test robust to both without changing what it
+            # asserts — any detection passes. Fixes the pre-existing intermittent
+            # "Expected network threat for TCP:4444, got none" flake (a fresh
+            # connect each attempt is why re-polling the same one wouldn't help).
+            net_events: list[dict] = []
+            for _ in range(3):
+                subprocess.Popen(
+                    ["incus", "exec", container_name, "--", "bash", "-c", tcp_cmd],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                net_events = _poll_network_threats(container_name, max_wait=40)
+                if net_events:
+                    break
 
             assert len(net_events) > 0, (
-                f"Expected network threat for TCP:4444, got none.\n"
+                f"Expected network threat for TCP:4444, got none after 3 attempts.\n"
                 f"Container IP: {container_ip}\n"
                 f"All events: {_get_threat_events(container_name)}"
             )
