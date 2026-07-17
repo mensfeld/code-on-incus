@@ -17,6 +17,7 @@ interface inside the container and run a server there, then connect to it so
 the socket reaches ESTABLISHED state (stable) rather than SYN_SENT (fragile).
 """
 
+import contextlib
 import hashlib
 import json
 import os
@@ -122,6 +123,47 @@ def _cleanup(name: str, coi_binary: str) -> None:
     )
 
 
+def _incus_bash(container_name: str, script: str, timeout: int = 5) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["incus", "exec", container_name, "--", "bash", "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+
+
+def _start_http_server_4444(container_name: str) -> None:
+    """Start a background TCP server on port 4444 (python3 http.server needs no
+    extra packages). Fire-and-forget; the caller waits for it to listen."""
+    _incus_bash(
+        container_name,
+        "nohup python3 -m http.server 4444 --bind 0.0.0.0 </dev/null &>/dev/null &",
+        timeout=10,
+    )
+
+
+def _port4444_listening(container_name: str) -> bool:
+    return _incus_bash(container_name, "ss -tlnp 2>/dev/null | grep -q ':4444'").returncode == 0
+
+
+def _wait_port4444_listening(container_name: str, attempts: int = 15) -> bool:
+    # python3 startup can exceed a fixed sleep under CI load, so poll instead.
+    for _ in range(attempts):
+        if _port4444_listening(container_name):
+            return True
+        time.sleep(1)
+    return False
+
+
+def _port4444_established(container_name: str) -> bool:
+    """True once the in-container connect() has completed the TCP handshake (an
+    ESTABLISHED socket touching :4444 exists). Confirming this before polling
+    separates the two failure modes the single-shot test conflated: a failed
+    connect (retry it) vs. a real ESTABLISHED-but-undetected connection."""
+    r = _incus_bash(container_name, "ss -tn 2>/dev/null | grep -c 'ESTAB.*:4444'")
+    return r.stdout.strip() not in ("", "0")
+
+
 # ── shared monitoring config ──────────────────────────────────────────────────
 
 _MONITORING_CONFIG = """
@@ -181,6 +223,9 @@ class TestNetworkConnectionDetection:
             proc.terminate()
             pytest.skip(f"Container {container_name} not ready")
 
+        # Fire-and-forget connect processes, terminated in `finally` so up to
+        # three lingering `incus exec ... sleep(120)` sessions don't leak.
+        connect_procs: list[subprocess.Popen] = []
         try:
             # Get container's own IP so we can create a routable connection.
             # Use _wait_for_ip because DHCP may not have completed yet even
@@ -189,44 +234,12 @@ class TestNetworkConnectionDetection:
             if not container_ip:
                 pytest.skip(f"Could not get IP for {container_name}")
 
-            # Start a TCP server on port 4444 inside the container (background).
-            # Using python3 -m http.server so no extra packages are needed.
-            subprocess.run(
-                [
-                    "incus",
-                    "exec",
-                    container_name,
-                    "--",
-                    "bash",
-                    "-c",
-                    "nohup python3 -m http.server 4444 --bind 0.0.0.0 </dev/null &>/dev/null &",
-                ],
-                capture_output=True,
-                timeout=10,
-            )
-            # Poll until port 4444 is actually listening (up to 15 s).
-            # A fixed sleep of 2 s is too short under CI load — python3's startup
-            # can exceed it, leaving the connect() below with no server to reach,
-            # which means the connection never becomes ESTABLISHED and is
-            # never detected as a threat.
-            for _ in range(15):
-                ready = subprocess.run(
-                    [
-                        "incus",
-                        "exec",
-                        container_name,
-                        "--",
-                        "bash",
-                        "-c",
-                        "ss -tlnp 2>/dev/null | grep -q ':4444'",
-                    ],
-                    capture_output=True,
-                    timeout=5,
-                )
-                if ready.returncode == 0:
-                    break
-                time.sleep(1)
-            else:
+            # Start a TCP server on port 4444 inside the container and wait for it
+            # to listen before connecting (python3 startup can exceed a fixed
+            # sleep under CI load; connecting with no server would never ESTABLISH
+            # and so never be detected).
+            _start_http_server_4444(container_name)
+            if not _wait_port4444_listening(container_name):
                 pytest.skip("TCP server on port 4444 did not start within 15 s")
 
             # Connect from inside the container to container_ip:4444.
@@ -239,28 +252,49 @@ class TestNetworkConnectionDetection:
                 f"s.connect(('{container_ip}', 4444)); "
                 'time.sleep(120)"'
             )
-            # Retry the connect + detect cycle. The connection is fire-and-forget,
-            # so a transiently failed connect() (server race / slow python3 startup
-            # under CI load) is invisible and yields no ESTABLISHED socket to
-            # detect; and the host-side /proc-net poller can miss a single
-            # detection window. Re-issuing the connection and polling again up to
-            # 3 times makes the test robust to both without changing what it
-            # asserts — any detection passes. Fixes the pre-existing intermittent
-            # "Expected network threat for TCP:4444, got none" flake (a fresh
-            # connect each attempt is why re-polling the same one wouldn't help).
+            # Each attempt: (re)ensure the server listens, issue the connect,
+            # CONFIRM the socket actually reached ESTABLISHED, then poll for the
+            # threat. Verifying ESTABLISHED is what makes this robust AND
+            # diagnosable: a transiently failed connect (server race / slow
+            # python3 startup) is retried with a fresh connection, while an
+            # ESTABLISHED-but-undetected connection is surfaced as a real detector
+            # miss rather than an ambiguous "got none". Prior connect processes
+            # stay alive (sleep 120) and are cleaned up in `finally`.
             net_events: list[dict] = []
+            established = False
             for _ in range(3):
-                subprocess.Popen(
-                    ["incus", "exec", container_name, "--", "bash", "-c", tcp_cmd],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
+                if not _port4444_listening(container_name):
+                    _start_http_server_4444(container_name)
+                    _wait_port4444_listening(container_name)
+                connect_procs.append(
+                    subprocess.Popen(
+                        ["incus", "exec", container_name, "--", "bash", "-c", tcp_cmd],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
                 )
-                net_events = _poll_network_threats(container_name, max_wait=40)
+                # Wait for the handshake to complete before polling for detection.
+                for _ in range(10):
+                    if _port4444_established(container_name):
+                        established = True
+                        break
+                    time.sleep(1)
+                if not established:
+                    continue  # connect never took — retry with a fresh connection
+                net_events = _poll_network_threats(container_name, max_wait=30)
                 if net_events:
                     break
 
+            assert established, (
+                "TCP connection to :4444 never reached ESTABLISHED after 3 attempts — "
+                "the in-container connect() failed every time (server or routing "
+                "problem), so detection could not be exercised.\n"
+                f"Container IP: {container_ip}\n"
+                f"Port 4444 listening: {_port4444_listening(container_name)}"
+            )
             assert len(net_events) > 0, (
-                f"Expected network threat for TCP:4444, got none after 3 attempts.\n"
+                "Connection to :4444 was ESTABLISHED but no network threat was "
+                "detected — a real detector miss, not a connect flake.\n"
                 f"Container IP: {container_ip}\n"
                 f"All events: {_get_threat_events(container_name)}"
             )
@@ -268,6 +302,9 @@ class TestNetworkConnectionDetection:
                 f"Expected port 4444 in threat evidence, got:\n{json.dumps(net_events)}"
             )
         finally:
+            for p in connect_procs:
+                with contextlib.suppress(Exception):
+                    p.terminate()
             _cleanup(container_name, coi_binary)
 
     def test_suspicious_udp_port_detected(self, coi_binary, tmp_path, _monitoring_enabled):
