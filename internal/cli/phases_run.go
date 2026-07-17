@@ -217,6 +217,21 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 				return a.applyWorkspaceMounts(mgr, s.containerName, s.absWorkspace, &s.containerWorkspace, s.mountConfig, s.useShift, false, layout)
 			}
 
+			// preRestart reconciles a REUSED persistent container's security devices
+			// against the current workspace before it is restarted (issue #610). The
+			// creation-time protect-*/mask-*/gitc-* devices keep their original host
+			// sources; a source removed while the container was stopped would make
+			// Incus reject the container at start-validation. Read the existing
+			// workspace mount, re-resolve the worktree layout, strip those devices,
+			// and re-run the SAME security setup fresh launch uses (applySecurityMounts).
+			preRestart := func() error {
+				s.containerWorkspace = mgr.GetWorkspacePath()
+				layout, _ := session.ResolveGitWorktree(s.absWorkspace)
+				s.gitWorktree = layout
+				session.StripSecurityDevices(mgr, logFn)
+				return a.applySecurityMounts(mgr, s.absWorkspace, s.containerWorkspace, s.containerName, s.useShift, layout)
+			}
+
 			s.mgr = mgr
 			// The teardown pairs with THIS phase's acquisitions: the pre-start
 			// hook applies host-side immutable flags (chattr +i on protected
@@ -238,7 +253,7 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 				}
 			}
 
-			if err := launchOrReuseContainer(mgr, s.img, a.cfg.Container.StoragePool, s.containerName, containerExists, a.persistent, preStart); err != nil {
+			if err := launchOrReuseContainer(mgr, s.img, a.cfg.Container.StoragePool, s.containerName, containerExists, a.persistent, preStart, preRestart); err != nil {
 				// No teardown on a failed launch: launchOrReuseContainer already
 				// removed the half-created container when it was safe to (never a
 				// running one — a concurrent invocation may own it), and the
