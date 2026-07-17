@@ -123,45 +123,67 @@ def _cleanup(name: str, coi_binary: str) -> None:
     )
 
 
-def _incus_bash(container_name: str, script: str, timeout: int = 5) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["incus", "exec", container_name, "--", "bash", "-c", script],
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-    )
+def _incus_bash(container_name: str, script: str, timeout: int = 5):
+    """Run `bash -c script` in the container. Returns the CompletedProcess, or
+    None if the `incus exec` timed out — a slow exec under CI load must read as
+    "no answer / not ready", never crash the caller with an uncaught
+    TimeoutExpired (these predicates run in the test's critical section)."""
+    try:
+        return subprocess.run(
+            ["incus", "exec", container_name, "--", "bash", "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        return None
 
 
-def _start_http_server_4444(container_name: str) -> None:
-    """Start a background TCP server on port 4444 (python3 http.server needs no
-    extra packages). Fire-and-forget; the caller waits for it to listen."""
+def _start_http_server(container_name: str, port: int, bind: str = "0.0.0.0") -> None:
+    """Start a background TCP server on `port` (python3 http.server needs no extra
+    packages). Fire-and-forget; the caller waits for it to listen."""
     _incus_bash(
         container_name,
-        "nohup python3 -m http.server 4444 --bind 0.0.0.0 </dev/null &>/dev/null &",
+        f"nohup python3 -m http.server {port} --bind {bind} </dev/null &>/dev/null &",
         timeout=10,
     )
 
 
-def _port4444_listening(container_name: str) -> bool:
-    return _incus_bash(container_name, "ss -tlnp 2>/dev/null | grep -q ':4444'").returncode == 0
+def _port_listening(container_name: str, port: int) -> bool:
+    # `-H` (no header) is required: with a header, `grep -q .` would always match.
+    # An exact ss port filter avoids the substring false-positives of `grep :PORT`
+    # (which matched ephemeral ports like 44440-44449 and IPv6 hextets).
+    r = _incus_bash(container_name, f"ss -Htln 'sport = :{port}' 2>/dev/null | grep -q .")
+    return r is not None and r.returncode == 0
 
 
-def _wait_port4444_listening(container_name: str, attempts: int = 15) -> bool:
+def _wait_port_listening(container_name: str, port: int, attempts: int = 15) -> bool:
     # python3 startup can exceed a fixed sleep under CI load, so poll instead.
     for _ in range(attempts):
-        if _port4444_listening(container_name):
+        if _port_listening(container_name, port):
             return True
         time.sleep(1)
     return False
 
 
-def _port4444_established(container_name: str) -> bool:
-    """True once the in-container connect() has completed the TCP handshake (an
-    ESTABLISHED socket touching :4444 exists). Confirming this before polling
-    separates the two failure modes the single-shot test conflated: a failed
-    connect (retry it) vs. a real ESTABLISHED-but-undetected connection."""
-    r = _incus_bash(container_name, "ss -tn 2>/dev/null | grep -c 'ESTAB.*:4444'")
-    return r.stdout.strip() not in ("", "0")
+def _port_established(container_name: str, port: int) -> bool:
+    """True once a connection to/from `port` has completed the TCP handshake (an
+    ESTABLISHED socket with `port` as its source OR dest). The exact ss state+port
+    filter avoids matching an unrelated socket whose ephemeral port merely
+    contains the digits (a `grep :PORT` substring would)."""
+    r = _incus_bash(
+        container_name,
+        f"ss -Htn state established '( sport = :{port} or dport = :{port} )' 2>/dev/null | grep -q .",
+    )
+    return r is not None and r.returncode == 0
+
+
+def _wait_port_established(container_name: str, port: int, attempts: int = 10) -> bool:
+    for _ in range(attempts):
+        if _port_established(container_name, port):
+            return True
+        time.sleep(2)  # match the monitor's poll_interval_sec; no detection loss
+    return False
 
 
 # ── shared monitoring config ──────────────────────────────────────────────────
@@ -234,17 +256,8 @@ class TestNetworkConnectionDetection:
             if not container_ip:
                 pytest.skip(f"Could not get IP for {container_name}")
 
-            # Start a TCP server on port 4444 inside the container and wait for it
-            # to listen before connecting (python3 startup can exceed a fixed
-            # sleep under CI load; connecting with no server would never ESTABLISH
-            # and so never be detected).
-            _start_http_server_4444(container_name)
-            if not _wait_port4444_listening(container_name):
-                pytest.skip("TCP server on port 4444 did not start within 15 s")
-
-            # Connect from inside the container to container_ip:4444.
-            # The connection becomes ESTABLISHED and stays visible in
-            # /proc/<init_pid>/net/tcp across every 2-second poll cycle.
+            # Connect from inside the container to container_ip:4444, held open
+            # for 120s so it stays ESTABLISHED and visible across poll cycles.
             tcp_cmd = (
                 'python3 -c "'
                 "import socket, time; "
@@ -252,20 +265,18 @@ class TestNetworkConnectionDetection:
                 f"s.connect(('{container_ip}', 4444)); "
                 'time.sleep(120)"'
             )
-            # Each attempt: (re)ensure the server listens, issue the connect,
-            # CONFIRM the socket actually reached ESTABLISHED, then poll for the
-            # threat. Verifying ESTABLISHED is what makes this robust AND
-            # diagnosable: a transiently failed connect (server race / slow
-            # python3 startup) is retried with a fresh connection, while an
-            # ESTABLISHED-but-undetected connection is surfaced as a real detector
-            # miss rather than an ambiguous "got none". Prior connect processes
-            # stay alive (sleep 120) and are cleaned up in `finally`.
-            net_events: list[dict] = []
+            # Phase 1 — establish a real connection, retrying only the CONNECT: a
+            # fire-and-forget connect can transiently fail (server race / slow
+            # python3 startup under CI load). Each attempt (re)ensures the server
+            # listens, issues a connect, and confirms it reached ESTABLISHED before
+            # we rely on it. A server that won't come up is environmental → skip,
+            # matching how a missing server is handled.
             established = False
             for _ in range(3):
-                if not _port4444_listening(container_name):
-                    _start_http_server_4444(container_name)
-                    _wait_port4444_listening(container_name)
+                if not _port_listening(container_name, 4444):
+                    _start_http_server(container_name, 4444)
+                    if not _wait_port_listening(container_name, 4444):
+                        pytest.skip("TCP server on port 4444 did not start within 15 s")
                 connect_procs.append(
                     subprocess.Popen(
                         ["incus", "exec", container_name, "--", "bash", "-c", tcp_cmd],
@@ -273,16 +284,8 @@ class TestNetworkConnectionDetection:
                         stderr=subprocess.DEVNULL,
                     )
                 )
-                # Wait for the handshake to complete before polling for detection.
-                for _ in range(10):
-                    if _port4444_established(container_name):
-                        established = True
-                        break
-                    time.sleep(1)
-                if not established:
-                    continue  # connect never took — retry with a fresh connection
-                net_events = _poll_network_threats(container_name, max_wait=30)
-                if net_events:
+                if _wait_port_established(container_name, 4444):
+                    established = True
                     break
 
             assert established, (
@@ -290,8 +293,13 @@ class TestNetworkConnectionDetection:
                 "the in-container connect() failed every time (server or routing "
                 "problem), so detection could not be exercised.\n"
                 f"Container IP: {container_ip}\n"
-                f"Port 4444 listening: {_port4444_listening(container_name)}"
+                f"Port 4444 listening: {_port_listening(container_name, 4444)}"
             )
+
+            # Phase 2 — with a confirmed-live connection (held 120s), poll ONCE for
+            # detection with the full budget, so retrying the connect never eats
+            # into the detection-latency window.
+            net_events = _poll_network_threats(container_name, max_wait=75)
             assert len(net_events) > 0, (
                 "Connection to :4444 was ESTABLISHED but no network threat was "
                 "detected — a real detector miss, not a connect flake.\n"
@@ -408,21 +416,11 @@ class TestNetworkConnectionDetection:
             )
 
             # Start an HTTP server bound to the metadata endpoint IP.
-            subprocess.run(
-                [
-                    "incus",
-                    "exec",
-                    container_name,
-                    "--",
-                    "bash",
-                    "-c",
-                    "nohup python3 -m http.server 8080 --bind 169.254.169.254 </dev/null &>/dev/null &",
-                ],
-                capture_output=True,
-                timeout=10,
-            )
-            # Give the server a moment to start listening.
-            time.sleep(2)
+            # Poll until the server is listening rather than a fixed sleep — a 2 s
+            # sleep is too short under CI load (same race the TCP test hit).
+            _start_http_server(container_name, 8080, bind="169.254.169.254")
+            if not _wait_port_listening(container_name, 8080):
+                pytest.skip("metadata server on port 8080 did not start within 15 s")
 
             # Connect TCP to 169.254.169.254:8080 → ESTABLISHED, stable in
             # /proc/<init_pid>/net/tcp for the full duration of the test.
