@@ -29,7 +29,7 @@ from support.helpers import (
     spawn_coi,
     wait_for_container_ready,
     wait_for_prompt,
-    write_workspace_container_config,
+    write_trusted_coi_config,
 )
 
 
@@ -49,9 +49,18 @@ def _poweroff_and_close(child):
 
 
 def test_shell_resume_after_removed_protected_path(coi_binary, cleanup_containers, workspace_dir):
-    env = {"COI_USE_DUMMY": "1"}
+    # host_immutable is on by default, which chattr +i's protected paths; a
+    # persistent shell keeps those flags across poweroff, so the host .husky
+    # would be undeletable by this test. host_immutable is orthogonal to the #610
+    # device reconcile under test, so disable it via TRUSTED config (a
+    # protection-weakening toggle honored only from COI_CONFIG scope). The same
+    # trusted config carries [network] open and [container] persistent.
+    env = write_trusted_coi_config(
+        '[network]\nmode = "open"\n\n[container]\npersistent = true\n\n'
+        "[security]\nhost_immutable = false\n"
+    )
+    env["COI_USE_DUMMY"] = "1"
     container_name = calculate_container_name(workspace_dir, 1)
-    write_workspace_container_config(workspace_dir, persistent=True)
 
     # === Phase 1: first persistent shell session materializes .husky, then stops ===
     child = spawn_coi(coi_binary, ["shell"], cwd=workspace_dir, env=env, timeout=120)
