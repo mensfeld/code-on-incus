@@ -166,6 +166,18 @@ func (m *Manager) ListDevices() ([]string, error) {
 	return names, nil
 }
 
+// GetDeviceSource returns the host "source" of a device
+// (`incus config device get <container> <name> source`), trimmed. Returns an
+// empty string with no error when the device has no source key set. Works on
+// stopped containers.
+func (m *Manager) GetDeviceSource(name string) (string, error) {
+	out, err := IncusOutput("config", "device", "get", m.ContainerName, name, "source")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
 // SetTmpfsSize configures the tmpfs size for /tmp in the container
 // size should be a string like "2GiB", "1024MiB", etc.
 func (m *Manager) SetTmpfsSize(size string) error {

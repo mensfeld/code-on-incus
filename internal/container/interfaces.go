@@ -27,6 +27,7 @@ type ContainerDevices interface {
 	AddHostPortDevice(name, listenAddr string, hostPort, containerPort int) error
 	RemoveDevice(name string) error
 	ListDevices() ([]string, error)
+	GetDeviceSource(name string) (string, error)
 	SetTmpfsSize(size string) error
 }
 

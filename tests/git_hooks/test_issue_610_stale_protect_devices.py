@@ -16,20 +16,23 @@ On a FRESH launch this is fine — ``SetupSecurityMounts`` materializes the defa
 paths (creates ``.husky``/``.vscode`` dirs and ``.claude/settings*.json``
 placeholders) before attaching the device, so the source always exists.
 
-The bug is on **reuse/restart of a persistent container**. The reuse branches in
-``internal/session/setup.go`` (the running-reuse path around line 235 and the
-stopped-restart path around line 252) reconcile only *port* devices
-(``RemoveStalePortDevices``); they never re-run ``SetupSecurityMounts`` and never
-strip/reconcile the ``protect-*`` devices. So if a protected path is removed from
-the workspace while the container is stopped, the persistent container keeps a
-``protect-*`` device pointing at a now-missing source, and the next start fails.
-A fresh ``coi run`` does not self-heal it.
+The bug was on **reuse/restart of a persistent container**. The reuse branches in
+``internal/session/setup.go`` originally reconciled only *port* devices
+(``RemoveStalePortDevices``) and never re-ran ``SetupSecurityMounts`` nor
+reconciled the ``protect-*`` devices. So if a protected path was removed from the
+workspace while the container was stopped, the persistent container kept a
+``protect-*`` device pointing at a now-missing source, the next start failed, and
+a fresh ``coi run`` never self-healed it.
 
-These tests drive the real ``coi run`` persistent flow and assert the
-**post-fix** contract: a second run after removing a protected path must still
-succeed (and protection must be re-established). They FAIL today on purpose —
-they are red until the reuse branches reconcile disk devices. Do not mark them
-xfail; a red CI is the intended signal that the bug is still present.
+The fix adds ``ReconcileProtectedDevices`` to both reuse branches (before
+``mgr.Start()``): each ``protect-*`` device whose host source has gone is either
+re-materialized (COI's own default paths, so protection is preserved) or removed
+(user-added paths, where "gone" means "nothing to protect").
+
+These tests drive the real ``coi run`` persistent flow and are **regression
+guards** for that fix: a second run after removing a protected path must still
+succeed, and for a default path protection must be re-established. They were red
+before the reconcile landed; they must stay green after it.
 
 Each test uses a distinct ``--slot`` so they never collide (``cleanup_containers``
 tears down slots 1-10 for the workspace).

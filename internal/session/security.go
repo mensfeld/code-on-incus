@@ -63,6 +63,104 @@ func SetupSecurityMounts(mgr container.ContainerDevices, workspacePath, containe
 	return protectedPaths, nil
 }
 
+// protectedDeviceReconciler is the container API slice ReconcileProtectedDevices
+// needs. Kept narrow (like portDeviceScrubber) so the broad ContainerDevices
+// interface and its mocks are untouched.
+type protectedDeviceReconciler interface {
+	ListDevices() ([]string, error)
+	RemoveDevice(name string) error
+	GetDeviceSource(name string) (string, error)
+}
+
+// ReconcileProtectedDevices repairs stale protect-* disk devices on a REUSED
+// (persistent) container before it is restarted. SetupSecurityMounts runs only
+// on a fresh launch, so a protect-* device attached on the first launch keeps
+// pointing at its host source forever; if that source was removed from the
+// workspace while the container was stopped, Incus rejects the container at
+// start with `Missing source path` and a fresh coi invocation never reconciles
+// it (issue #610). This is the reuse-path analogue of RemoveStalePortDevices.
+//
+// For each protect-* device whose host source no longer exists it does one of:
+//   - re-materialize the source, when the path is one of COI's own default
+//     protected entries (an empty dir for .husky/.vscode/.git/hooks, an empty
+//     placeholder file for .claude/settings*.json and the .git config sinks).
+//     The existing device then validates again AND protection is preserved —
+//     removing the device instead would silently reopen the FLAWS Finding 2
+//     planting gap for a default path.
+//   - remove the device, when the path is a user-added entry (or otherwise not
+//     something COI materializes). "Path no longer on host" then means "nothing
+//     to protect", matching the fresh-launch behavior that skips missing
+//     user-added paths.
+//
+// Best-effort: device-listing / per-device errors are logged, not fatal — a
+// reconcile failure must not be worse than the stale-device wedge it prevents.
+// Scoped to the protect- prefix so the gitc-/mask-/coi-port- device families
+// (whose sources legitimately live outside the workspace) are left alone.
+func ReconcileProtectedDevices(mgr protectedDeviceReconciler, workspacePath string, logger func(string)) {
+	devices, err := mgr.ListDevices()
+	if err != nil {
+		logger(fmt.Sprintf("Warning: could not list devices to reconcile protected paths: %v", err))
+		return
+	}
+	for _, dev := range devices {
+		if !strings.HasPrefix(dev, "protect-") {
+			continue
+		}
+		source, err := mgr.GetDeviceSource(dev)
+		if err != nil || source == "" {
+			continue // can't determine the source — leave the device as-is
+		}
+		if _, statErr := os.Lstat(source); statErr == nil {
+			continue // source still present — device is fine
+		} else if !os.IsNotExist(statErr) {
+			continue // stat failed for some other reason — don't touch it
+		}
+
+		// Source is gone. Recover the workspace-relative path so we can decide
+		// whether to re-materialize (a COI default) or drop the device.
+		rel, relErr := filepath.Rel(workspacePath, source)
+		if relErr != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			// Source is not under the workspace (should not happen for a
+			// protect-* device) — remove it so it cannot wedge the start.
+			removeStaleProtectedDevice(mgr, dev, rel, logger)
+			continue
+		}
+
+		if rematerializeDefaultProtectedPath(workspacePath, source, rel) {
+			logger(fmt.Sprintf("Re-materialized protected path %s (was removed from the workspace)", rel))
+			continue
+		}
+		removeStaleProtectedDevice(mgr, dev, rel, logger)
+	}
+}
+
+// rematerializeDefaultProtectedPath recreates the host source for a protect-*
+// device IFF rel is one of COI's auto-materialized defaults, so the existing
+// read-only device validates again. Returns false (recreate nothing) for
+// user-added / non-materializable paths, and for .git/* entries when the
+// workspace .git is not a real directory (mirrors setupProtectedPath's guard so
+// a .git tree is never synthesized).
+func rematerializeDefaultProtectedPath(workspacePath, hostPath, rel string) bool {
+	cleaned := filepath.Clean(rel)
+	if cleaned == ".git" || strings.HasPrefix(cleaned, ".git"+string(filepath.Separator)) {
+		gitInfo, err := os.Lstat(filepath.Join(workspacePath, ".git"))
+		if err != nil || gitInfo.Mode()&os.ModeSymlink != 0 || !gitInfo.IsDir() {
+			return false // no real .git to hang these under — do not synthesize one
+		}
+	}
+	// ensureProtectedExists materializes the known default dir/file entries and
+	// returns os.ErrNotExist for anything it must not guess at (user-added paths).
+	return ensureProtectedExists(workspacePath, hostPath, cleaned) == nil
+}
+
+func removeStaleProtectedDevice(mgr protectedDeviceReconciler, dev, rel string, logger func(string)) {
+	if err := mgr.RemoveDevice(dev); err != nil {
+		logger(fmt.Sprintf("Warning: could not remove stale protected device %s (%s): %v", dev, rel, err))
+		return
+	}
+	logger(fmt.Sprintf("Removed stale protected device %s (%s no longer exists in the workspace)", dev, rel))
+}
+
 // setupProtectedPath mounts a single path as read-only
 func setupProtectedPath(mgr container.ContainerDevices, workspacePath, containerWorkspacePath, relPath string, useShift bool) error {
 	if err := validateRelPath(relPath); err != nil {

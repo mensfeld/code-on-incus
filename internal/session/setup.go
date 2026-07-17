@@ -233,6 +233,10 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 				// listeners would otherwise make the session collide with its
 				// own ports (pinned entries hard-fail, pool numbers drift).
 				RemoveStalePortDevices(result.Manager, opts.Logger)
+				// Repair protect-* devices whose workspace source was removed
+				// since the last launch, so protection stays consistent with the
+				// current workspace on reuse (issue #610).
+				ReconcileProtectedDevices(result.Manager, opts.WorkspacePath, opts.Logger)
 				skipLaunch = true
 			} else {
 				// A running container exists for this slot but we're not resuming or in
@@ -250,6 +254,11 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 				// below, or failing the start outright if another process took
 				// a port meanwhile). The current plan is re-published later.
 				RemoveStalePortDevices(result.Manager, opts.Logger)
+				// Repair protect-* devices whose workspace source was removed
+				// while the container was stopped BEFORE starting: Incus rejects
+				// a disk device with a missing source at start-validation, which
+				// a fresh coi invocation otherwise never reconciles (issue #610).
+				ReconcileProtectedDevices(result.Manager, opts.WorkspacePath, opts.Logger)
 				if err := result.Manager.Start(); err != nil {
 					return nil, fmt.Errorf("failed to start container: %w", err)
 				}
