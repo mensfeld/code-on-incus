@@ -1,75 +1,74 @@
-"""Reproduction tests for issue #610 — stale ``protect-*`` disk devices wedge a
-persistent container on restart.
+"""End-to-end regression tests for issue #610 — stale security disk devices must
+not wedge a persistent container on restart, and protection must be re-established.
 
 Background
 ----------
-COI protects security-sensitive paths by attaching one read-only Incus *disk*
-device per path (``protect-husky``, ``protect-claude-settingsjson``, ...) whose
-``source=`` points at ``<workspace>/<path>`` on the host. Incus validates every
-disk device's source at container **start**: if the source is missing it refuses
-to start the container with::
+COI protects security-sensitive paths by attaching one read-only Incus disk
+device per path (``protect-husky``, ``protect-claude-settingsjson``, secret-mask
+``mask-*`` and worktree ``gitc-*`` families) whose ``source=`` is a host path.
+Incus validates every disk device's source at container **start**: a missing
+source aborts the start with ``Missing source path``.
 
-    Failed start validation for device "protect-husky":
-    Missing source path "<workspace>/.husky" for disk "protect-husky"
+On a fresh launch the security setup materializes each source before attaching
+the device, so it always exists. But that setup runs ONLY on a fresh launch. On
+reuse/restart of a persistent container the creation-time devices keep their
+original sources; if a source was removed from the workspace while the container
+was stopped, the restart wedges and a fresh ``coi run`` never self-heals it
+(issue #610).
 
-On a FRESH launch this is fine — ``SetupSecurityMounts`` materializes the default
-paths (creates ``.husky``/``.vscode`` dirs and ``.claude/settings*.json``
-placeholders) before attaching the device, so the source always exists.
+The fix strips the workspace-sourced security devices (``protect-*``/``mask-*``/
+``gitc-*``) and RE-RUNS the same validated security setup a fresh launch uses,
+BEFORE start, on both restart seams (``coi run`` via a ``preRestart`` hook, and
+``coi shell`` — see tests/shell/persistent/). Because it re-runs the fresh-launch
+code, all the materialization / symlink-rejection / type / missing-path handling
+comes from one place, and protection is re-established to match the CURRENT
+workspace (paths added, removed, or replaced since first launch).
 
-The bug was on **reuse/restart of a persistent container**. The reuse branches in
-``internal/session/setup.go`` originally reconciled only *port* devices
-(``RemoveStalePortDevices``) and never re-ran ``SetupSecurityMounts`` nor
-reconciled the ``protect-*`` devices. So if a protected path was removed from the
-workspace while the container was stopped, the persistent container kept a
-``protect-*`` device pointing at a now-missing source, the next start failed, and
-a fresh ``coi run`` never self-healed it.
+These tests drive the real ``coi run`` persistent flow. Each maps to a reviewed
+failure mode:
 
-The fix adds ``ReconcileProtectedDevices`` to both reuse branches (before
-``mgr.Start()``): each ``protect-*`` device whose host source has gone is either
-re-materialized (COI's own default paths, so protection is preserved) or removed
-(user-added paths, where "gone" means "nothing to protect").
+- removed default dir / file / user path → restart must succeed (core wedge)
+- protection re-established (write blocked, placeholder empty) after restart
+- re-establishment after a removed path is later recreated
+- source replaced by a dangling symlink → must not wedge (Lstat gate)
+- parent directory replaced by a file (ENOTDIR) → must not wedge
+- default dir replaced by a file (type drift) → must not wedge
 
-These tests drive the real ``coi run`` persistent flow and are **regression
-guards** for that fix: a second run after removing a protected path must still
-succeed, and for a default path protection must be re-established. They were red
-before the reconcile landed; they must stay green after it.
-
-Each test uses a distinct ``--slot`` so they never collide (``cleanup_containers``
-tears down slots 1-10 for the workspace).
+Each test uses a unique workspace (pytest tmp_path) so container names never
+collide even though slots repeat.
 """
 
 import shutil
 import subprocess
-import time
 from pathlib import Path
 
 from support.helpers import calculate_container_name, write_workspace_container_config
 
+TIMEOUT = 180
+READONLY_MARKERS = ("read-only", "read only", "permission denied")
 
-def _first_persistent_run(coi_binary, workspace_dir, slot, marker):
-    """Run one persistent ``coi run`` that materializes the default protected
-    paths and leaves the container behind (stopped). Returns the container name.
-    """
-    result = subprocess.run(
-        [
-            coi_binary,
-            "run",
-            "--workspace",
-            workspace_dir,
-            "--slot",
-            str(slot),
-            "echo",
-            marker,
-        ],
+
+def _run(coi_binary, workspace_dir, slot, *cmd):
+    """Run one persistent ``coi run <cmd>`` in workspace_dir/slot."""
+    return subprocess.run(
+        [coi_binary, "run", "--workspace", workspace_dir, "--slot", str(slot), *cmd],
         capture_output=True,
         text=True,
-        timeout=180,
+        timeout=TIMEOUT,
     )
+
+
+def _first_persistent_run(coi_binary, workspace_dir, slot, marker):
+    """First persistent run: materializes the default protected paths and leaves
+    the container behind STOPPED. Asserts it exists AND is stopped, so the second
+    run is guaranteed to hit the stopped-restart branch (the one the fix targets),
+    not the running-reuse branch. Returns the container name.
+    """
+    result = _run(coi_binary, workspace_dir, slot, "echo", marker)
     assert result.returncode == 0, f"First persistent run should succeed. stderr: {result.stderr}"
     assert marker in (result.stdout + result.stderr), "First run should echo its marker"
 
     container_name = calculate_container_name(workspace_dir, slot)
-    # The container must have survived the first run (persistent mode).
     exists = subprocess.run(
         [coi_binary, "container", "exists", container_name],
         capture_output=True,
@@ -77,237 +76,245 @@ def _first_persistent_run(coi_binary, workspace_dir, slot, marker):
         timeout=30,
     )
     assert exists.returncode == 0, "Persistent container should still exist after first run"
+
+    # Must be STOPPED — otherwise the next run would reuse a RUNNING container (a
+    # branch that deliberately does not reconcile), giving a false green.
+    running = subprocess.run(
+        [coi_binary, "container", "running", container_name],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert running.returncode != 0, (
+        "Persistent container must be STOPPED between runs so the restart branch "
+        f"(and its reconcile) is exercised. `container running` stdout: {running.stdout}"
+    )
     return container_name
 
 
-def test_restart_after_removing_materialized_dir(coi_binary, cleanup_containers, workspace_dir):
-    """#610 core repro (directory device): a materialized default protected dir
-    (``.husky``) removed while the persistent container is stopped must not wedge
-    the next run.
+def _assert_restarted_ok(result, marker):
+    """Assert a reuse run succeeded, took the stopped-restart branch, and did not
+    hit the Incus start-validation wedge."""
+    combined = result.stdout + result.stderr
+    assert result.returncode == 0, f"Restart must succeed, not wedge. stderr:\n{combined}"
+    assert marker in combined, "Reuse run should execute its command"
+    assert "Missing source path" not in combined, (
+        f"Incus rejected a stale security device at start:\n{combined}"
+    )
+    assert "Restarting existing persistent container" in combined, (
+        "Reuse run must take the stopped-restart branch (where the reconcile runs), "
+        f"not launch fresh or reuse a running container. stderr:\n{combined}"
+    )
 
-    Today the second run fails because the ``protect-husky`` device references a
-    now-missing source and Incus rejects the container at start
-    (``Missing source path ".../.husky"``).
-    """
+
+def _attempt_write(coi_binary, workspace_dir, slot, rel_path, marker="pwn"):
+    """Attempt to write to a protected path from inside the container (itself a
+    reuse run). Returns the CompletedProcess."""
+    return _run(
+        coi_binary,
+        workspace_dir,
+        slot,
+        "--",
+        "sh",
+        "-c",
+        f"echo {marker} > /workspace/{rel_path}",
+    )
+
+
+def _assert_write_blocked(result):
+    combined = (result.stdout + result.stderr).lower()
+    assert result.returncode != 0, (
+        "Write to a re-protected path must fail from inside the container"
+    )
+    assert any(m in combined for m in READONLY_MARKERS), (
+        f"Expected a read-only/permission error, got:\n{result.stdout + result.stderr}"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Core wedge: a removed source must not block the restart.
+# --------------------------------------------------------------------------- #
+
+
+def test_restart_after_removing_materialized_dir(coi_binary, cleanup_containers, workspace_dir):
+    """Removed default DIRECTORY (.husky) → restart succeeds AND protection is
+    re-established (dir re-materialized, write blocked). Covers the core #610
+    wedge for a directory device."""
     slot = 3
     write_workspace_container_config(workspace_dir, persistent=True)
+    _first_persistent_run(coi_binary, workspace_dir, slot, "first-husky")
 
-    _first_persistent_run(coi_binary, workspace_dir, slot, "first-run-husky")
-
-    # COI materialized .husky on first run; confirm, then delete it to simulate a
-    # workspace that no longer has the path (orchestrator recreated it, cleanup, etc).
     husky = Path(workspace_dir) / ".husky"
     assert husky.exists(), ".husky should have been materialized by the first run"
     shutil.rmtree(husky)
-    assert not husky.exists()
 
-    time.sleep(1)
+    _assert_restarted_ok(
+        _run(coi_binary, workspace_dir, slot, "echo", "second-husky"), "second-husky"
+    )
 
-    # Second run reuses the stopped persistent container -> stopped-restart branch
-    # -> mgr.Start(). It must reconcile the stale protect-husky device and succeed.
-    result = subprocess.run(
-        [
-            coi_binary,
-            "run",
-            "--workspace",
-            workspace_dir,
-            "--slot",
-            str(slot),
-            "echo",
-            "second-run-husky",
-        ],
-        capture_output=True,
-        text=True,
-        timeout=180,
+    # Protection re-established: re-materialized on the host...
+    assert husky.exists() and husky.is_dir(), (
+        ".husky must be re-materialized as a dir after restart"
     )
-    combined = result.stdout + result.stderr
-    assert result.returncode == 0, (
-        "Second run must not be wedged by a stale protect-* device for a removed "
-        f"protected dir. stderr:\n{combined}"
-    )
-    assert "second-run-husky" in combined, "Second run should execute after reconcile"
-    assert "Missing source path" not in combined, (
-        f"Incus rejected a stale protect-* device at start:\n{combined}"
-    )
+    # ...and read-only inside the container.
+    _assert_write_blocked(_attempt_write(coi_binary, workspace_dir, slot, ".husky/pre-commit"))
 
 
 def test_restart_after_removing_materialized_file(coi_binary, cleanup_containers, workspace_dir):
-    """#610 repro (file device): a materialized default protected *file*
-    (``.claude/settings.json``) removed while stopped must not wedge the restart.
-
-    Distinct from the directory case: this device points at a regular-file
-    placeholder, exercising the file-type materialization path.
-    """
+    """Removed default FILE (.claude/settings.json) → restart succeeds AND the
+    placeholder is re-materialized EMPTY (anti-planting) and read-only. Covers the
+    file-device wedge + the empty-placeholder guarantee (FLAWS Finding 2)."""
     slot = 4
     write_workspace_container_config(workspace_dir, persistent=True)
-
-    _first_persistent_run(coi_binary, workspace_dir, slot, "first-run-claude")
+    _first_persistent_run(coi_binary, workspace_dir, slot, "first-claude")
 
     settings = Path(workspace_dir) / ".claude" / "settings.json"
     assert settings.exists(), ".claude/settings.json placeholder should have been materialized"
     settings.unlink()
-    assert not settings.exists()
 
-    time.sleep(1)
-
-    result = subprocess.run(
-        [
-            coi_binary,
-            "run",
-            "--workspace",
-            workspace_dir,
-            "--slot",
-            str(slot),
-            "echo",
-            "second-run-claude",
-        ],
-        capture_output=True,
-        text=True,
-        timeout=180,
-    )
-    combined = result.stdout + result.stderr
-    assert result.returncode == 0, (
-        "Second run must not be wedged by a stale protect-* device for a removed "
-        f"protected file. stderr:\n{combined}"
-    )
-    assert "second-run-claude" in combined, "Second run should execute after reconcile"
-    assert "Missing source path" not in combined, (
-        f"Incus rejected a stale protect-* device at start:\n{combined}"
+    _assert_restarted_ok(
+        _run(coi_binary, workspace_dir, slot, "echo", "second-claude"), "second-claude"
     )
 
-
-def test_protection_reestablished_after_restart(coi_binary, cleanup_containers, workspace_dir):
-    """#610 drift repro: after removing a protected path and restarting, COI must
-    not only start but also RE-materialize and RE-protect the path.
-
-    This pins the full fix contract, not just "does it boot": the reuse path
-    currently skips ``SetupSecurityMounts`` entirely, so even if the start
-    failure were papered over, protection would silently drift (the path would no
-    longer be read-only inside the container).
-    """
-    slot = 5
-    write_workspace_container_config(workspace_dir, persistent=True)
-
-    _first_persistent_run(coi_binary, workspace_dir, slot, "first-run-vscode")
-
-    vscode = Path(workspace_dir) / ".vscode"
-    assert vscode.exists(), ".vscode should have been materialized by the first run"
-    shutil.rmtree(vscode)
-    assert not vscode.exists()
-
-    time.sleep(1)
-
-    # Reuse: must start cleanly...
-    restart = subprocess.run(
-        [
-            coi_binary,
-            "run",
-            "--workspace",
-            workspace_dir,
-            "--slot",
-            str(slot),
-            "echo",
-            "restart-ok",
-        ],
-        capture_output=True,
-        text=True,
-        timeout=180,
+    assert settings.exists() and settings.is_file(), ".claude/settings.json must be re-materialized"
+    assert settings.read_text() == "", (
+        f"re-materialized placeholder must be EMPTY (anti-planting), got: {settings.read_text()!r}"
     )
-    combined = restart.stdout + restart.stderr
-    assert restart.returncode == 0, (
-        f"Restart after removing .vscode must succeed. stderr:\n{combined}"
-    )
-    assert "restart-ok" in combined
-
-    # ...and re-materialize the protected path on the host.
-    assert vscode.exists() and vscode.is_dir(), (
-        ".vscode must be re-materialized on the host after restart (protection reconcile)"
-    )
-
-    # ...and the re-established protection must actually be read-only in-container:
-    # a write from inside must fail and must not persist attacker content.
-    attack = subprocess.run(
-        [
-            coi_binary,
-            "run",
-            "--workspace",
-            workspace_dir,
-            "--slot",
-            str(slot),
-            "--",
-            "sh",
-            "-c",
-            "echo pwn > /workspace/.vscode/tasks.json",
-        ],
-        capture_output=True,
-        text=True,
-        timeout=180,
-    )
-    attack_out = (attack.stdout + attack.stderr).lower()
-    assert attack.returncode != 0, "Write into re-protected .vscode must fail from inside container"
-    assert (
-        "read-only" in attack_out or "read only" in attack_out or "permission denied" in attack_out
-    ), f"Expected a read-only/permission error, got:\n{attack.stdout + attack.stderr}"
-
-    tasks_json = vscode / "tasks.json"
-    if tasks_json.exists():
-        assert tasks_json.read_text() == "", "Attacker content must not persist to host .vscode"
+    _assert_write_blocked(_attempt_write(coi_binary, workspace_dir, slot, ".claude/settings.json"))
 
 
 def test_restart_after_removing_user_additional_protected_path(
     coi_binary, cleanup_containers, workspace_dir
 ):
-    """#610 breadth repro: the reconcile gap is not limited to COI's own default
-    paths. A user-declared ``additional_protected_paths`` entry that existed at
-    first launch (so a ``protect-*`` device was attached for it) and is later
-    removed while stopped wedges the restart exactly the same way.
-
-    This proves the fix must reconcile the whole protect-device class, not just
-    the auto-materialized defaults.
-    """
-    slot = 6
-
-    # Declare .idea as an extra protected path (project scope; conftest sets
-    # COI_TRUST_ALL=1 so project-scoped additional_protected_paths is honored).
+    """Removed user ``additional_protected_paths`` entry (.idea) → restart must
+    succeed. The stale device is dropped (a user path that no longer exists is
+    "nothing to protect", matching fresh-launch semantics) rather than wedging."""
+    slot = 5
     coi_dir = Path(workspace_dir) / ".coi"
     coi_dir.mkdir(parents=True, exist_ok=True)
     (coi_dir / "config.toml").write_text('[security]\nadditional_protected_paths = [".idea"]\n')
     write_workspace_container_config(workspace_dir, persistent=True)
 
-    # User-added paths are NOT auto-materialized — it must exist for a device to
-    # be attached. Pre-create it so the first run attaches protect-idea.
     idea = Path(workspace_dir) / ".idea"
     idea.mkdir()
     (idea / "workspace.xml").write_text("<project></project>")
 
-    _first_persistent_run(coi_binary, workspace_dir, slot, "first-run-idea")
-
+    _first_persistent_run(coi_binary, workspace_dir, slot, "first-idea")
     shutil.rmtree(idea)
-    assert not idea.exists()
 
-    time.sleep(1)
+    _assert_restarted_ok(
+        _run(coi_binary, workspace_dir, slot, "echo", "second-idea"), "second-idea"
+    )
 
-    result = subprocess.run(
-        [
-            coi_binary,
-            "run",
-            "--workspace",
-            workspace_dir,
-            "--slot",
-            str(slot),
-            "echo",
-            "second-idea",
-        ],
-        capture_output=True,
-        text=True,
-        timeout=180,
+
+def test_protection_reestablished_after_restart(coi_binary, cleanup_containers, workspace_dir):
+    """Removed default (.vscode) → after restart it must be re-materialized AND
+    read-only inside, and an attacker write must not persist. Pins the full
+    contract (re-establish protection, not just boot)."""
+    slot = 6
+    write_workspace_container_config(workspace_dir, persistent=True)
+    _first_persistent_run(coi_binary, workspace_dir, slot, "first-vscode")
+
+    vscode = Path(workspace_dir) / ".vscode"
+    assert vscode.exists(), ".vscode should have been materialized by the first run"
+    shutil.rmtree(vscode)
+
+    _assert_restarted_ok(_run(coi_binary, workspace_dir, slot, "echo", "restart-ok"), "restart-ok")
+    assert vscode.exists() and vscode.is_dir(), ".vscode must be re-materialized after restart"
+
+    _assert_write_blocked(_attempt_write(coi_binary, workspace_dir, slot, ".vscode/tasks.json"))
+    tasks_json = vscode / "tasks.json"
+    assert not tasks_json.exists() or tasks_json.read_text() == "", (
+        "attacker content must not persist to host .vscode"
     )
-    combined = result.stdout + result.stderr
-    assert result.returncode == 0, (
-        "Restart after removing a user additional_protected_path must not be wedged "
-        f"by its stale protect-* device. stderr:\n{combined}"
+
+
+def test_protection_reestablished_after_recreate(coi_binary, cleanup_containers, workspace_dir):
+    """Re-establishment across restarts: a user path removed (device dropped on
+    restart A) and later RECREATED must be protected again on restart B. Guards
+    the fix's re-run-every-restart property — a removed device is never
+    permanently lost."""
+    slot = 7
+    coi_dir = Path(workspace_dir) / ".coi"
+    coi_dir.mkdir(parents=True, exist_ok=True)
+    (coi_dir / "config.toml").write_text('[security]\nadditional_protected_paths = [".idea"]\n')
+    write_workspace_container_config(workspace_dir, persistent=True)
+
+    idea = Path(workspace_dir) / ".idea"
+    idea.mkdir()
+    (idea / "workspace.xml").write_text("<project></project>")
+    _first_persistent_run(coi_binary, workspace_dir, slot, "first-recreate")
+
+    # Restart A: path gone → device dropped, container boots.
+    shutil.rmtree(idea)
+    _assert_restarted_ok(_run(coi_binary, workspace_dir, slot, "echo", "restartA"), "restartA")
+
+    # Recreate the path on the host, then Restart B must re-protect it.
+    idea.mkdir()
+    (idea / "workspace.xml").write_text("<project></project>")
+    _assert_write_blocked(_attempt_write(coi_binary, workspace_dir, slot, ".idea/workspace.xml"))
+    assert (idea / "workspace.xml").read_text() == "<project></project>", (
+        "recreated .idea content must be preserved (protected read-only), not overwritten"
     )
-    assert "second-idea" in combined
-    assert "Missing source path" not in combined, (
-        f"Incus rejected a stale protect-* device at start:\n{combined}"
+
+
+# --------------------------------------------------------------------------- #
+# The staleness/validity of a source now comes from the fresh-launch primitives
+# (strip + re-run), so a source replaced by a symlink, an ENOTDIR parent, or a
+# wrong type must not wedge the restart.
+# --------------------------------------------------------------------------- #
+
+
+def test_restart_after_replacing_source_with_dangling_symlink(
+    coi_binary, cleanup_containers, workspace_dir
+):
+    """Source replaced by a DANGLING SYMLINK → restart must not wedge. A plain
+    Lstat 'exists' check would leave the stale device and Incus would still reject
+    the resolved-missing target at start; the strip + re-run refuses the symlink
+    (as fresh launch does) and starts cleanly."""
+    slot = 8
+    write_workspace_container_config(workspace_dir, persistent=True)
+    _first_persistent_run(coi_binary, workspace_dir, slot, "first-symlink")
+
+    vscode = Path(workspace_dir) / ".vscode"
+    shutil.rmtree(vscode)
+    vscode.symlink_to("does-not-exist")  # dangling symlink at the old source path
+
+    _assert_restarted_ok(
+        _run(coi_binary, workspace_dir, slot, "echo", "second-symlink"), "second-symlink"
+    )
+
+
+def test_restart_after_parent_directory_became_file(coi_binary, cleanup_containers, workspace_dir):
+    """Parent of a protected file replaced by a regular file (ENOTDIR) → restart
+    must not wedge. os.IsNotExist(ENOTDIR) is false, so a naive gate would keep
+    the stale .claude/settings.json device and wedge; the fix re-runs setup, can't
+    materialize under a file, and simply skips it — the container starts."""
+    slot = 9
+    write_workspace_container_config(workspace_dir, persistent=True)
+    _first_persistent_run(coi_binary, workspace_dir, slot, "first-enotdir")
+
+    claude = Path(workspace_dir) / ".claude"
+    shutil.rmtree(claude)
+    claude.write_text("not a directory")  # .claude is now a regular file
+
+    _assert_restarted_ok(
+        _run(coi_binary, workspace_dir, slot, "echo", "second-enotdir"), "second-enotdir"
+    )
+
+
+def test_restart_after_type_drift_dir_to_file(coi_binary, cleanup_containers, workspace_dir):
+    """Default DIRECTORY source replaced by a FILE (type drift) → restart must not
+    wedge. Existence-only checks would keep the device with a mismatched mount
+    type; strip + re-run handles the current on-disk type."""
+    slot = 10
+    write_workspace_container_config(workspace_dir, persistent=True)
+    _first_persistent_run(coi_binary, workspace_dir, slot, "first-typedrift")
+
+    husky = Path(workspace_dir) / ".husky"
+    shutil.rmtree(husky)
+    husky.write_text("now a file")  # .husky is now a regular file
+
+    _assert_restarted_ok(
+        _run(coi_binary, workspace_dir, slot, "echo", "second-typedrift"), "second-typedrift"
     )

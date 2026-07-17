@@ -44,8 +44,7 @@ func (f *fakeForwarder) RemoveDevice(name string) error {
 	return nil
 }
 
-func (f *fakeForwarder) ListDevices() ([]string, error)           { return nil, nil }
-func (f *fakeForwarder) GetDeviceSource(_ string) (string, error) { return "", nil }
+func (f *fakeForwarder) ListDevices() ([]string, error) { return nil, nil }
 
 func (f *fakeForwarder) Exec(_ ...string) error                                    { return nil }
 func (f *fakeForwarder) ExecArgs(_ []string, _ container.ExecCommandOptions) error { return nil }
