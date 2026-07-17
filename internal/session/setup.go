@@ -233,10 +233,15 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 				// listeners would otherwise make the session collide with its
 				// own ports (pinned entries hard-fail, pool numbers drift).
 				RemoveStalePortDevices(result.Manager, opts.Logger)
-				// Repair protect-* devices whose workspace source was removed
-				// since the last launch, so protection stays consistent with the
-				// current workspace on reuse (issue #610).
-				ReconcileProtectedDevices(result.Manager, opts.WorkspacePath, opts.Logger)
+				// Deliberately do NOT reconcile protect-* devices here. This
+				// branch reuses an already-RUNNING container, so (a) there is no
+				// Start(), hence no "Missing source path" start-validation to
+				// prevent — the #610 wedge only bites the stopped branch below —
+				// and (b) hot-removing a protect-* device from a live container
+				// would DROP a read-only protection mid-session: a source that
+				// went missing while still mounted keeps writes blocked, but
+				// RemoveDevice would reopen it to a possibly-malicious agent.
+				// Reconciliation happens on the next stopped->start cycle.
 				skipLaunch = true
 			} else {
 				// A running container exists for this slot but we're not resuming or in
