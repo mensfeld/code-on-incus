@@ -166,7 +166,7 @@ func (a *App) runCommand(cmd *cobra.Command, args []string) error {
 
 // launchOrReuseContainer restarts an existing persistent container, or
 // recreates / creates a fresh one on the given storage pool.
-func launchOrReuseContainer(mgr container.ContainerManager, img, pool, containerName string, containerExists, persistent bool, preStart func() error) error {
+func launchOrReuseContainer(mgr container.ContainerManager, img, pool, containerName string, containerExists, persistent bool, preStart, preRestart func() error) error {
 	if containerExists && persistent {
 		// Fail fast on an already-running container (another session may own
 		// it). Master's plain Start() errored here; StartWithIsolationFallback's
@@ -175,6 +175,16 @@ func launchOrReuseContainer(mgr container.ContainerManager, img, pool, container
 		// under the second.
 		if running, _ := mgr.Running(); running {
 			return fmt.Errorf("container %s is already running — another session may be using it; pick a different --slot or stop it first", containerName)
+		}
+		// Reconcile start-time-only state on the STOPPED container before starting:
+		// the workspace-sourced security devices are stripped and re-established
+		// against the current workspace, so a source removed while stopped can't
+		// wedge the start with "Missing source path" (issue #610). Mirrors preStart
+		// on the fresh path; must run before StartWithIsolationFallback.
+		if preRestart != nil {
+			if err := preRestart(); err != nil {
+				return fmt.Errorf("failed to reconcile container before restart: %w", err)
+			}
 		}
 		fmt.Fprintf(os.Stderr, "Restarting existing persistent container...\n")
 		// Start with the isolation fallback: the container's disk devices (set at
@@ -254,7 +264,21 @@ func remapContainerUserIfNeeded(mgr container.ContainerManager, wasRestarted boo
 		container.CodeUID, container.CodeUID, container.CodeUser,
 	)
 	if _, err := mgr.ExecCommand(remapCmd, container.ExecCommandOptions{Capture: true}); err != nil {
-		return fmt.Errorf("failed to remap user %s to UID %d: %w", container.CodeUser, container.CodeUID, err)
+		// usermod -u, even without -m, walks the home directory chowning
+		// files it finds owned by the old UID — that walk hits any
+		// read-only mount already living under /home/<code> (e.g. a
+		// protected-path or user [[mounts]] entry, disk devices attach
+		// pre-start per #534) and usermod exits non-zero despite the
+		// actual UID/GID change having applied. Don't trust the exit
+		// code alone: probe whether the account really did move to the
+		// target UID before treating this as fatal.
+		actualUID, probeErr := session.ResolveCodeUID(mgr, container.CodeUser)
+		if probeErr != nil || actualUID != container.CodeUID {
+			return fmt.Errorf("failed to remap user %s to UID %d: %w", container.CodeUser, container.CodeUID, err)
+		}
+		fmt.Fprintf(os.Stderr,
+			"Warning: UID/GID remap for %s succeeded but the home-directory ownership walk hit a read-only mount: %v\n",
+			container.CodeUser, err)
 	}
 	// The home-ownership sweep is best-effort, separately from the remap
 	// itself: disk devices attach pre-start now (#534), so a user-configured

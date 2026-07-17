@@ -233,6 +233,15 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 				// listeners would otherwise make the session collide with its
 				// own ports (pinned entries hard-fail, pool numbers drift).
 				RemoveStalePortDevices(result.Manager, opts.Logger)
+				// Deliberately do NOT reconcile protect-* devices here. This
+				// branch reuses an already-RUNNING container, so (a) there is no
+				// Start(), hence no "Missing source path" start-validation to
+				// prevent — the #610 wedge only bites the stopped branch below —
+				// and (b) hot-removing a protect-* device from a live container
+				// would DROP a read-only protection mid-session: a source that
+				// went missing while still mounted keeps writes blocked, but
+				// RemoveDevice would reopen it to a possibly-malicious agent.
+				// Reconciliation happens on the next stopped->start cycle.
 				skipLaunch = true
 			} else {
 				// A running container exists for this slot but we're not resuming or in
@@ -250,6 +259,28 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 				// below, or failing the start outright if another process took
 				// a port meanwhile). The current plan is re-published later.
 				RemoveStalePortDevices(result.Manager, opts.Logger)
+				// Reconcile the workspace-sourced security devices against the
+				// CURRENT workspace BEFORE start (issue #610). A protect-*/mask-*/
+				// gitc-* device attached at first launch keeps its original host
+				// source; if that source was removed while the container was stopped,
+				// Incus rejects the container at start-validation with "Missing
+				// source path" and no fresh coi invocation self-heals it. Strip those
+				// devices and re-run the SAME security setup a fresh launch uses, so
+				// materialization / symlink-rejection / type handling all come from
+				// one place and protection matches the current workspace.
+				reuseCWP := result.Manager.GetWorkspacePath()
+				result.ContainerWorkspacePath = reuseCWP
+				reuseLayout, _ := ResolveGitWorktree(opts.WorkspacePath)
+				reuseWritableHooks := !containsGitHooksPath(opts.ProtectedPaths)
+				StripSecurityDevices(result.Manager, opts.Logger)
+				reusePaths, reuseImmutable, reuseErr := applySessionSecurity(result.Manager, opts, reuseCWP, !opts.DisableShift, reuseLayout, reuseWritableHooks, containerName)
+				opts.ProtectedPaths = reusePaths
+				if reuseImmutable {
+					result.HasImmutableProtection = true
+				}
+				if reuseErr != nil {
+					return nil, reuseErr
+				}
 				if err := result.Manager.Start(); err != nil {
 					return nil, fmt.Errorf("failed to start container: %w", err)
 				}
@@ -419,75 +450,22 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 			return nil, err
 		}
 
-		// Protect security-sensitive paths by mounting read-only (security feature).
-		// This must be added after the workspace mount for the overlay to work.
-		// SetupSecurityMounts expands the dynamic per-worktree git configs internally
-		// (issue #545 — the single chokepoint both session paths share) and returns
-		// the effective list used for logging + the immutable pass over the same set.
-		securityPaths := opts.ProtectedPaths
-		if worktreeLayout != nil {
-			// Workspace .git is a file; its .git/* defaults can't be protected here
-			// (they'd warn "gitdir indirection"). SetupCommonDirProtection covers the
-			// real internals; keep the non-.git protections.
-			securityPaths = StripGitProtectedPaths(securityPaths)
-		}
-		effectivePaths, err := SetupSecurityMounts(result.Manager, opts.WorkspacePath, containerWorkspacePath, securityPaths, useShift, opts.Security)
+		// Protect security-sensitive paths (read-only mounts), extend protection to a
+		// worktree's external git common dir, apply the host-immutable belt, and mask
+		// secret paths — all via applySessionSecurity, the single implementation shared
+		// with the reuse/restart reconcile below (issue #610). Must be added after the
+		// workspace mount for the overlays to layer on top.
+		effectivePaths, hasImmutable, secErr := applySessionSecurity(result.Manager, opts, containerWorkspacePath, useShift, worktreeLayout, worktreeWritableHooks, containerName)
 		// Adopt the expanded list as the canonical protected set so downstream
 		// consumers (the SANDBOX_CONTEXT.md "Protected paths" listing built from
 		// opts.ProtectedPaths below) reflect what was actually mounted, including the
-		// per-worktree configs — matching pre-#545 behavior where the caller expanded
-		// in place. Returned even on partial error, so the record stays complete.
+		// per-worktree configs.
 		opts.ProtectedPaths = effectivePaths
-		if err != nil {
-			opts.Logger(fmt.Sprintf("Warning: Failed to setup security mounts: %v", err))
-			// Non-fatal: continue even if protection fails
-		} else if len(effectivePaths) > 0 {
-			// Log which paths were actually protected
-			protectedPaths := GetProtectedPathsForLogging(opts.WorkspacePath, effectivePaths)
-			if len(protectedPaths) > 0 {
-				opts.Logger(fmt.Sprintf("Protected paths (mounted read-only): %s", strings.Join(protectedPaths, ", ")))
-			}
+		if hasImmutable {
+			result.HasImmutableProtection = true
 		}
-
-		// Extend the read-only protection to the external git common dir (issue #533):
-		// the same #474 hook/config lockdown applied to the worktree's real internals,
-		// which the workspace-relative pass above cannot reach. Mount-only (the
-		// host-immutable belt is deferred; the read-only mount is the primary control).
-		if worktreeLayout != nil {
-			cProtected, cErr := SetupCommonDirProtection(result.Manager, worktreeLayout.CommonDir, useShift, worktreeWritableHooks, opts.Security)
-			if cErr != nil {
-				opts.Logger(fmt.Sprintf("Warning: some git common-dir protections not applied: %v", cErr))
-			}
-			if len(cProtected) > 0 {
-				opts.Logger(fmt.Sprintf("Protected git common-dir paths (read-only): %s", strings.Join(cProtected, ", ")))
-			}
-		}
-
-		// Apply host-side immutable attribute for defense-in-depth. Runs even on a
-		// partial mount error, so it is gated on the effective list, not err.
-		if len(effectivePaths) > 0 && opts.HostImmutable {
-			immutablePaths := ApplyImmutable(opts.WorkspacePath, effectivePaths, containerName, opts.Logger)
-			if len(immutablePaths) > 0 {
-				result.HasImmutableProtection = true
-				opts.Logger(fmt.Sprintf("Host-side immutable protection applied: %s", strings.Join(immutablePaths, ", ")))
-			}
-		}
-
-		// Mask secret paths (issue #494): mount an empty read-only file/dir over
-		// each resolved match so the contained agent can neither read nor modify
-		// repo-local secrets. Independent of protected_paths. FAIL CLOSED — if a
-		// configured secret cannot be masked we must not launch with it exposed.
-		if len(opts.SecretPaths) > 0 {
-			masked, skipped, err := SetupSecretMasks(result.Manager, opts.WorkspacePath, containerWorkspacePath, opts.SecretPaths, useShift)
-			for _, s := range skipped {
-				opts.Logger(fmt.Sprintf("Warning: secret_paths entry %q is NOT masked (missing, or a symlink resolving outside the workspace) — it is not hidden from the agent", s))
-			}
-			if err != nil {
-				return nil, fmt.Errorf("failed to mask secret paths: %w", err)
-			}
-			if len(masked) > 0 {
-				opts.Logger(fmt.Sprintf("Masked secret paths (hidden read-only): %s", strings.Join(masked, ", ")))
-			}
+		if secErr != nil {
+			return nil, secErr
 		}
 
 		// Apply resource limits before starting (if configured)
@@ -648,13 +626,37 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 	if !skipLaunch && hasCodeUser && container.CodeUID != 1000 {
 		opts.Logger(fmt.Sprintf("Remapping user %s from UID 1000 to %d...", container.CodeUser, container.CodeUID))
 		remapCmd := fmt.Sprintf(
-			"groupmod -g %d %s && usermod -u %d -g %d %s && chown -R %s:%s /home/%s",
+			"groupmod -g %d %s && usermod -u %d -g %d %s",
 			container.CodeUID, container.CodeUser,
 			container.CodeUID, container.CodeUID, container.CodeUser,
-			container.CodeUser, container.CodeUser, container.CodeUser,
 		)
 		if _, err := result.Manager.ExecCommand(remapCmd, container.ExecCommandOptions{Capture: true}); err != nil {
-			return nil, fmt.Errorf("failed to remap user %s to UID %d: %w", container.CodeUser, container.CodeUID, err)
+			// usermod -u, even without -m, walks the home directory chowning
+			// files it finds owned by the old UID — that walk hits any
+			// read-only mount already living under /home/<code> (protected
+			// paths, [[mounts]] entries; disk devices attach pre-start per
+			// #534) and usermod exits non-zero (E_HOMEDIR) despite the passwd
+			// update having already been committed. Don't trust the exit code
+			// alone: probe whether the account really did move to the target
+			// UID before treating this as fatal. groupmod ran first in the
+			// chain and usermod commits uid+gid in the same passwd write, so
+			// a confirmed UID implies the full remap landed.
+			actualUID, _, probeErr := probeCodeUser(result.Manager, container.CodeUser)
+			if probeErr != nil || actualUID != container.CodeUID {
+				return nil, fmt.Errorf("failed to remap user %s to UID %d: %w", container.CodeUser, container.CodeUID, err)
+			}
+			opts.Logger(fmt.Sprintf("Warning: UID/GID remap for %s succeeded but usermod's home-directory ownership walk hit an unwritable path: %v", container.CodeUser, err))
+		}
+		// The home-ownership sweep is best-effort, separately from the remap
+		// itself (mirrors the coi run path, #534): a read-only mount under
+		// /home/<code> makes chown -R exit non-zero after fixing everything it
+		// could, which must not abort setup. Keeping it OUT of the fatal &&
+		// chain also means it still runs when usermod exited non-zero above —
+		// fused, the chain would skip it and leave writable home files owned
+		// by the old UID (the code user unable to write its own dotfiles).
+		chownCmd := fmt.Sprintf("chown -R %s:%s /home/%s", container.CodeUser, container.CodeUser, container.CodeUser)
+		if _, err := result.Manager.ExecCommand(chownCmd, container.ExecCommandOptions{Capture: true}); err != nil {
+			opts.Logger(fmt.Sprintf("Warning: could not chown all of /home/%s after UID remap (a read-only mount under it is expected to fail): %v", container.CodeUser, err))
 		}
 	}
 
