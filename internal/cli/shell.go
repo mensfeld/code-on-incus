@@ -643,6 +643,26 @@ func startMonitoringDaemon(ctx context.Context, containerName, workspacePath str
 
 	auditLogPath := filepath.Join(homeDir, ".coi", "audit", containerName+".jsonl")
 
+	// In allowlist mode, keep the monitor in lockstep with the firewall: read the
+	// live nft allowlist set on every collection instead of trusting the static,
+	// independently-resolved snapshot. Without this the monitor and firewall
+	// resolve rotating frontends separately and drift, so a connection the firewall
+	// permits (and the container reached via /etc/hosts) looks unauthorized to the
+	// monitor and — under auto_pause_on_high — pauses the container mid-task. The
+	// static allowedCIDRs stay as the fallback (unresolvable IP / unreadable set).
+	var allowedCIDRsProvider func() []string
+	if cfg.Network.Mode == config.NetworkModeAllowlist {
+		if ip, ipErr := network.GetContainerIP(containerName); ipErr == nil && ip != "" {
+			allowedCIDRsProvider = func() []string {
+				cidrs, err := network.CurrentAllowlistCIDRs(ip)
+				if err != nil {
+					return nil // read failed — collector falls back to the static snapshot
+				}
+				return cidrs
+			}
+		}
+	}
+
 	// Create daemon config
 	daemonCfg := monitor.DaemonConfig{
 		ContainerName:             containerName,
@@ -650,6 +670,7 @@ func startMonitoringDaemon(ctx context.Context, containerName, workspacePath str
 		PollInterval:              time.Duration(cfg.Monitoring.PollIntervalSec) * time.Second,
 		AuditLogPath:              auditLogPath,
 		AllowedCIDRs:              allowedCIDRs,
+		AllowedCIDRsProvider:      allowedCIDRsProvider,
 		AllowedDomains:            cfg.Network.AllowedDomains,
 		GTFOBinsDir:               cfg.Detection.GTFOBinsDir,
 		SigmaDir:                  cfg.Detection.SigmaDir,
