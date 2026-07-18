@@ -210,8 +210,14 @@ type DaemonConfig struct {
 	WorkspacePath  string
 	PollInterval   time.Duration
 	AuditLogPath   string
-	AllowedCIDRs   []string // CIDR ranges for allowed networks
+	AllowedCIDRs   []string // CIDR ranges for allowed networks (static snapshot / fallback)
 	AllowedDomains []string // Domains from network allowlist
+
+	// AllowedCIDRsProvider, when set, is consulted on every collection for the
+	// CURRENT allowlist (e.g. the live nft set in allowlist mode) so the monitor
+	// stays in lockstep with the firewall rather than drifting from a frozen
+	// snapshot. Falls back to AllowedCIDRs when it returns nothing.
+	AllowedCIDRsProvider func() []string
 
 	// Detection database directories (populated from config.Detection)
 	GTFOBinsDir string // Local GTFOBins clone directory

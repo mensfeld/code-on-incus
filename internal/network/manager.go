@@ -414,20 +414,37 @@ func (m *Manager) nftSetAllower() dynAllower {
 	return noopAllower{}
 }
 
-// dynamicElementLifetimeInterval reports the refresh cadence the dynamic set
-// elements must outlive, so their timeout can be sized to never expire before the
-// refresher renews them. It mirrors startRefresher exactly: 0 when refresh is
-// disabled — in which case the elements are installed permanently — otherwise the
-// same TTL-aware interval the refresher will actually sleep for.
+// dynamicElementLifetimeInterval reports the kernel timeout to give DNS-learned
+// set elements. It is always 0 (permanent).
+//
+// A finite kernel timeout only stays safe if something re-adds the element before
+// it expires, and the only thing that would is the in-process refresher goroutine
+// — which cannot be relied on to outlive the container. `coi shell --background`
+// returns within seconds (and its deferred Teardown cancels the refresher);
+// detaching from tmux exits the process too. In both — the deployments the design
+// advertises as surviving a `coi` exit — the container keeps running with no
+// refresher, so a finite timeout would silently evict a still-valid address after
+// TTL+interval+grace (~20 min by default, 12 h cap) and the container would then
+// resolve an allowlisted name from /etc/hosts to an address the firewall no longer
+// holds, hit the default reject, and die mid-task with "Unable to connect" — the
+// exact failure this whole mode exists to prevent, now non-self-healing. This is
+// precisely the reasoning that removed the in-process DNS proxy (the container
+// outlives the coi process); it applies identically to the refresher.
+//
+// Permanent elements make the set survive a `coi` exit for the addresses the
+// container was actually handed (frozen /etc/hosts ⊆ permanent set — always
+// consistent, never a fresh-but-divergent state). The refresher, while it is
+// alive, still adds newly-rotated pool members and syncs /etc/hosts; it just no
+// longer bears the burden of keeping existing elements from expiring.
+//
+// Tradeoff: the set is no longer auto-pruned by kernel timeout, so it grows with
+// every rotated address over a very long session. Bounded in practice (an
+// ephemeral container's lifetime, a bounded frontend pool, and nft handles many
+// thousands of elements), but the proper way to bound it is refresher-driven
+// pruning of addresses that have dropped out of DNS — a follow-up, since eviction
+// must never race an in-flight connection and needs its own grace window.
 func (m *Manager) dynamicElementLifetimeInterval() time.Duration {
-	if m.config.RefreshIntervalMinutes <= 0 {
-		return 0 // refresh disabled → permanent elements (nothing will renew them)
-	}
-	var minTTL uint32
-	if m.resolver != nil {
-		minTTL = m.resolver.GetMinTTL()
-	}
-	return m.computeRefreshInterval(minTTL)
+	return 0 // permanent: the refresher cannot outlive the container, so nothing can renew a finite timeout
 }
 
 // noopAllower stands in when the nft layer cannot install set elements (tests).

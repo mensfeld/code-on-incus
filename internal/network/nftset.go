@@ -1,6 +1,7 @@
 package network
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -91,8 +92,17 @@ func (f *NftManager) ensureAllowlistSets() error {
 	// holds /32s with per-element expiry, so it needs `flags timeout`. They are
 	// kept separate deliberately: combining interval and timeout flags in one
 	// set is poorly supported across kernel versions.
+	//
+	// `auto-merge` is required, not cosmetic: without it the kernel rejects a set
+	// whose elements overlap or duplicate ("conflicting intervals specified"), and
+	// AddStaticIPs adds every literal entry in one transaction. A perfectly ordinary
+	// config — a CIDR plus an address inside it ("142.250.0.0/15" + one of its
+	// endpoints), two overlapping published ranges, or the same IP written as both
+	// "8.8.8.8" and "8.8.8.8/32" — would otherwise fail the whole transaction, and
+	// because setup is fail-closed the container would launch with no egress at all.
+	// auto-merge collapses overlaps and duplicates into the covering interval.
 	if _, err := runNFTCommand("add", "set", "ip", "coi", staticSetName(f.containerIP),
-		"{", "type", "ipv4_addr", ";", "flags", "interval", ";", "}"); err != nil {
+		"{", "type", "ipv4_addr", ";", "flags", "interval", ";", "auto-merge", ";", "}"); err != nil {
 		return fmt.Errorf("failed to create static allowlist set: %w", err)
 	}
 	if _, err := runNFTCommand("add", "set", "ip", "coi", dynamicSetName(f.containerIP),
@@ -217,6 +227,113 @@ func (f *NftManager) AllowDynamicIPs(ips []string, ttl uint32, refreshInterval t
 		}
 	}
 	return nil
+}
+
+// CurrentAllowlistCIDRs returns the addresses actually installed in a container's
+// allowlist sets right now — the static (literal) set and the dynamic (DNS-learned)
+// set combined, as CIDR strings.
+//
+// This is the firewall's live source of truth. The security monitor consumes it so
+// its "is this connection allowed?" decision is made against the exact set the
+// firewall enforces, instead of a second, independent DNS resolution that drifts
+// from it the moment a rotating cloud frontend hands out a different pool member —
+// which would otherwise flag a perfectly legitimate connection and, under
+// auto_pause_on_high, pause the container mid-task.
+//
+// Best-effort and fail-open for the CALLER's fallback: a missing set (open/
+// restricted mode, or teardown in progress) yields no elements and no error, so a
+// caller can distinguish "empty allowlist" from "could not read" and keep its own
+// snapshot on error.
+func CurrentAllowlistCIDRs(containerIP string) ([]string, error) {
+	if containerIP == "" {
+		return nil, nil
+	}
+	seen := make(map[string]struct{})
+	var out []string
+	for _, set := range []string{staticSetName(containerIP), dynamicSetName(containerIP)} {
+		output, err := runNFTCommand("-j", "list", "set", "ip", "coi", set)
+		if err != nil {
+			if isNftNotFound(err) {
+				continue // set not created for this container/mode — not an error
+			}
+			return nil, fmt.Errorf("failed to read allowlist set %s: %w", set, err)
+		}
+		cidrs, perr := parseNftSetElemCIDRs(output)
+		if perr != nil {
+			return nil, fmt.Errorf("failed to parse allowlist set %s: %w", set, perr)
+		}
+		for _, c := range cidrs {
+			if _, dup := seen[c]; dup {
+				continue
+			}
+			seen[c] = struct{}{}
+			out = append(out, c)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// parseNftSetElemCIDRs extracts the element addresses from `nft -j list set …`
+// output as CIDR strings. nft renders each element as one of three shapes: a bare
+// string ("8.8.8.8"), a prefix object ({"prefix":{"addr","len"}}), or a
+// timeout-wrapped element ({"elem":{"val": …}}) whose val is itself one of the
+// first two. A bare address is normalised to /32.
+func parseNftSetElemCIDRs(jsonOutput []byte) ([]string, error) {
+	var doc struct {
+		Nftables []struct {
+			Set *struct {
+				Elem []json.RawMessage `json:"elem"`
+			} `json:"set"`
+		} `json:"nftables"`
+	}
+	if err := json.Unmarshal(jsonOutput, &doc); err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, obj := range doc.Nftables {
+		if obj.Set == nil {
+			continue
+		}
+		for _, raw := range obj.Set.Elem {
+			if c := nftElemToCIDR(raw); c != "" {
+				out = append(out, c)
+			}
+		}
+	}
+	return out, nil
+}
+
+// nftElemToCIDR resolves one raw set element (in any of nft's three JSON shapes)
+// to a CIDR string, or "" if it carries no address.
+func nftElemToCIDR(raw json.RawMessage) string {
+	// Bare address string.
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		if strings.Contains(s, "/") {
+			return s
+		}
+		return s + "/32"
+	}
+	var m struct {
+		Prefix *struct {
+			Addr string `json:"addr"`
+			Len  int    `json:"len"`
+		} `json:"prefix"`
+		Elem *struct {
+			Val json.RawMessage `json:"val"`
+		} `json:"elem"`
+	}
+	if json.Unmarshal(raw, &m) != nil {
+		return ""
+	}
+	if m.Prefix != nil {
+		return fmt.Sprintf("%s/%d", m.Prefix.Addr, m.Prefix.Len)
+	}
+	if m.Elem != nil {
+		return nftElemToCIDR(m.Elem.Val) // timeout-wrapped: unwrap and recurse
+	}
+	return ""
 }
 
 // removeAllowlistSetsForIP deletes a container's allowlist sets.
