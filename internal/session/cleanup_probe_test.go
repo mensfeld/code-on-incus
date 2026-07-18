@@ -59,14 +59,24 @@ func TestGuestShutdownInProgress_Stopping(t *testing.T) {
 	}
 }
 
+// fastShutdown runs the detector with tiny timing so tests never sleep the real
+// window, while exercising the same logic (and the same healthyConfirmChecks).
+func fastShutdown(f *fakeProber) bool {
+	return shutdownInProgress(f, time.Millisecond, 100*time.Millisecond, healthyConfirmChecks)
+}
+
 func TestGuestShutdownInProgress_HealthyStatesAreUserExit(t *testing.T) {
 	for _, state := range []string{"running", "degraded", "maintenance", "initializing", "starting"} {
-		f := &fakeProber{outs: []string{state}}
-		if guestShutdownInProgress(f) {
-			t.Errorf("%q must classify as a normal exit", state)
+		// A healthy state must classify as a normal exit — but only after it
+		// PERSISTS (healthyConfirmChecks in a row), so a close's brief pre-stopping
+		// "running" can't be mistaken for it (issue #616).
+		outs := make([]string, healthyConfirmChecks)
+		for i := range outs {
+			outs[i] = state
 		}
-		if f.execs != 1 {
-			t.Errorf("%q: one probe should suffice, got %d", state, f.execs)
+		f := &fakeProber{outs: outs}
+		if fastShutdown(f) {
+			t.Errorf("%q sustained must classify as a normal exit", state)
 		}
 	}
 }
@@ -98,12 +108,12 @@ func TestGuestShutdownInProgress_NoSystemdFastExit(t *testing.T) {
 
 func TestGuestShutdownInProgress_AmbiguousThenStopped(t *testing.T) {
 	// "unknown"/"offline" (late-poweroff tail) is ambiguous; the container
-	// stopping during the retry window resolves it as a shutdown.
+	// stopping during the observation window resolves it as a shutdown.
 	f := &fakeProber{
 		outs:    []string{"unknown", "offline"},
 		running: func(call int) (bool, error) { return call < 1, nil },
 	}
-	if !guestShutdownInProgress(f) {
+	if !fastShutdown(f) {
 		t.Error("ambiguous states with the container then stopping must classify as shutdown")
 	}
 }
@@ -111,8 +121,8 @@ func TestGuestShutdownInProgress_AmbiguousThenStopped(t *testing.T) {
 func TestGuestShutdownInProgress_TransportErrorOnLiveContainer(t *testing.T) {
 	// Exec yields nothing, container stays verifiably running: user exit
 	// (after the bounded retries) — a broken exec must not delete containers.
-	f := &fakeProber{errs: []error{errors.New("x"), errors.New("x"), errors.New("x"), errors.New("x"), errors.New("x"), errors.New("x")}}
-	if guestShutdownInProgress(f) {
+	f := &fakeProber{errs: repeatErr(errors.New("x"), 200)}
+	if fastShutdown(f) {
 		t.Error("a persistently unanswerable probe on a running container must classify as a normal exit")
 	}
 }
@@ -121,10 +131,13 @@ func TestGuestShutdownInProgress_RunningErrorDoesNotCountAsStopped(t *testing.T)
 	// Incus daemon errors during the ambiguous branch must NOT be read as
 	// "container stopped" (the swallowed-error chain from the review).
 	f := &fakeProber{
-		outs:    []string{"unknown", "unknown", "unknown", "unknown", "unknown", "unknown"},
+		outs:    make([]string, 200), // all "" -> no-answer, ambiguous
 		running: func(int) (bool, error) { return false, errors.New("incus daemon restarting") },
 	}
-	if guestShutdownInProgress(f) {
+	for i := range f.outs {
+		f.outs[i] = "unknown"
+	}
+	if fastShutdown(f) {
 		t.Error("a Running() error must not be treated as evidence of a shutdown")
 	}
 }
@@ -161,5 +174,48 @@ func TestWaitForStopped(t *testing.T) {
 	stopped, _ = waitForStopped(f2, time.Second)
 	if stopped {
 		t.Error("Running() errors must not satisfy the stopped condition")
+	}
+}
+
+// ---- issue #616: `close` (systemctl --force poweroff) mislabeled "kept running" ----
+
+func repeatErr(err error, n int) []error {
+	out := make([]error, n)
+	for i := range out {
+		out[i] = err
+	}
+	return out
+}
+
+// Repro A — the pre-"stopping" race. `close` execs `systemctl --force poweroff`,
+// which ENQUEUES the poweroff and exits, ending the session before systemd flips
+// its manager state to "stopping". The first probe therefore catches a healthy
+// "running", and the container stops a moment later. Detection must not conclude
+// "normal exit" from that single hasty probe.
+func TestGuestShutdownInProgress_ClosePreStoppingRace_Regression(t *testing.T) {
+	f := &fakeProber{
+		outs:    []string{"running", "running", "running"},             // systemd not yet in "stopping"
+		running: func(call int) (bool, error) { return call < 2, nil }, // stops shortly after
+	}
+	if !fastShutdown(f) {
+		t.Error("issue #616: a close caught during systemd's pre-stopping window " +
+			"(probe says running, container then stops) must be detected as a shutdown, not 'kept running'")
+	}
+}
+
+// Repro B — the exec-goes-dark race. During `--force poweroff` the guest exec
+// transport is torn down before incus marks the container stopped, so the probe
+// returns no answer while Running() still reports true, and the container only
+// reaches "stopped" AFTER the old fixed 3s (6x500ms) retry budget. Detection must
+// observe the outside state long enough to see it stop.
+func TestGuestShutdownInProgress_CloseExecGoesDark_Regression(t *testing.T) {
+	const stopAfter = 10 // stops on the 11th Running() check — past the old 6-retry budget
+	f := &fakeProber{
+		errs:    repeatErr(errors.New("exec: connection reset by peer"), 60),
+		running: func(call int) (bool, error) { return call < stopAfter, nil },
+	}
+	if !fastShutdown(f) {
+		t.Error("issue #616: a close whose container reaches 'stopped' after the old retry budget " +
+			"must still be detected — observe the outside (incus) state until it stops")
 	}
 }
