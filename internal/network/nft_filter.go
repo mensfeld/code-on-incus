@@ -133,10 +133,30 @@ func (f *NftManager) ApplyAllowlist(cfg *config.NetworkConfig, staticCIDRs []str
 		return fmt.Errorf("failed to add gateway DHCP allow rule: %w", err)
 	}
 
+	// Private-network / link-local handling MUST precede the set-accept rules
+	// below. A resolved DNS answer — or a literal allowed_domains entry — that
+	// lands in a private or link-local range would otherwise be matched by the
+	// set-accept rule before any reject runs, opening a DNS-rebinding path to
+	// 169.254.169.254 (cloud metadata → credential theft) or to internal hosts.
+	// (Restricted mode already rejects these ahead of its permissive default;
+	// allowlist mode was rejecting them AFTER its set-accepts, so any set member
+	// in these ranges slipped straight through.) Semantics are unchanged from the
+	// previous placement — only the order is fixed.
+	//
+	// NB: this still keys off allow_local_network_access alone, as the previous
+	// code did; wiring allowlist mode to honor block_private_networks /
+	// block_metadata_endpoint independently (as restricted mode does) — and thus
+	// blocking metadata even when local access is on — is a separate follow-up.
 	if config.BoolVal(cfg.AllowLocalNetworkAccess) {
 		for _, cidr := range []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"} {
 			if err := f.addRule(f.containerIP, cidr, "accept"); err != nil {
 				return fmt.Errorf("failed to add RFC1918 allow rule: %w", err)
+			}
+		}
+	} else {
+		for _, cidr := range []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16"} {
+			if err := f.addRule(f.containerIP, cidr, "reject"); err != nil {
+				return fmt.Errorf("failed to add RFC1918/metadata block rule: %w", err)
 			}
 		}
 	}
@@ -158,14 +178,6 @@ func (f *NftManager) ApplyAllowlist(cfg *config.NetworkConfig, staticCIDRs []str
 		if err := f.addRuleWithMatch(f.containerIP, "@"+set,
 			[]string{"icmp", "type", "echo-request", "limit", "rate", "10/second"}, "accept"); err != nil {
 			return fmt.Errorf("failed to add allowlist ICMP rule for set %s: %w", set, err)
-		}
-	}
-
-	if !config.BoolVal(cfg.AllowLocalNetworkAccess) {
-		for _, cidr := range []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16"} {
-			if err := f.addRule(f.containerIP, cidr, "reject"); err != nil {
-				return fmt.Errorf("failed to add RFC1918 block rule: %w", err)
-			}
 		}
 	}
 

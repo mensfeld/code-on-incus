@@ -149,6 +149,17 @@ func TestApplyAllowlist_BlocksDNSInBothChains(t *testing.T) {
 			"allowlisted CIDR stays reachable on port 53\n%s", forward)
 	}
 
+	// H1 regression: the RFC1918 / link-local (cloud-metadata) reject must ALSO
+	// precede the set-accept rules. An allowlisted name that resolves (or is
+	// rebound) to 169.254.169.254 or an RFC1918 address would otherwise be matched
+	// by the set-accept before the reject runs — a path to the metadata endpoint
+	// (credential theft) or internal hosts.
+	metaAt := strings.Index(forward, "169.254.0.0/16")
+	if metaAt == -1 || metaAt > setAt {
+		t.Errorf("the RFC1918/metadata reject must come BEFORE the allowlist set rules, or an "+
+			"allowlisted name resolving into a private/metadata range reaches it\n%s", forward)
+	}
+
 	out, err := exec.Command("sudo", "-n", "nft", "list", "chain", "ip", "coi", "input").CombinedOutput()
 	if err != nil {
 		t.Fatalf("the coi input chain must exist — without it the container simply asks the bridge's "+
