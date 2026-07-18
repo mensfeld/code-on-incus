@@ -99,34 +99,78 @@ func probeGuestState(mgr guestProber) string {
 	}
 }
 
-// guestShutdownInProgress reports whether the guest is mid shutdown.
-// "stopping" (or an answered-but-bus-down probe) means a poweroff/close is
-// in flight; any healthy manager state means the user simply left the shell.
-// "offline"/"unknown"/no answer are AMBIGUOUS — systemd can print those in
-// the sub-second tail of a poweroff (/run unmounted, SystemState query
-// failing) and a flaking exec transport looks identical — so those re-check
-// the container state and retry briefly instead of concluding either way.
+// Shutdown-detection timing. A `close`/poweroff transitions the container to
+// stopped within seconds; a normal `exit` never does. We OBSERVE that from
+// outside incus (Running()) rather than predict it from a racy in-guest probe.
+const (
+	shutdownProbeInterval = 500 * time.Millisecond
+	// shutdownDetectWindow bounds how long we observe the container before
+	// concluding a normal exit. It must outlast a `close`'s stop time (the guest
+	// exec transport can go dark mid-`--force poweroff` while incus still reports
+	// Running for a few seconds) without hanging teardown indefinitely.
+	shutdownDetectWindow = 10 * time.Second
+	// healthyConfirmChecks is how many consecutive healthy systemd answers rule
+	// out a normal exit. A `close` briefly passes through a healthy "running"
+	// answer in the window between the poweroff being enqueued and systemd
+	// flipping to "stopping", so a SINGLE healthy probe cannot be trusted — that
+	// single-probe trust was the issue #616 misdetection ("Container kept running"
+	// printed over a container that was actually powering off).
+	healthyConfirmChecks = 3
+)
+
+// guestShutdownInProgress reports whether the session ended because the container
+// is shutting down (`close`/poweroff) rather than the user leaving the shell
+// (`exit`). See shutdownInProgress; this is the production entry point.
 func guestShutdownInProgress(mgr guestProber) bool {
-	for i := 0; i < 6; i++ {
-		switch state := probeGuestState(mgr); state {
+	return shutdownInProgress(mgr, shutdownProbeInterval, shutdownDetectWindow, healthyConfirmChecks)
+}
+
+// shutdownInProgress decides shutdown-vs-exit from the OUTSIDE container state as
+// the reliable signal, using the in-guest systemd probe only as an accelerator
+// that can ADD a positive detection but never veto one. Each poll, in order:
+//
+//   - container observed stopped (incus) -> shutdown (definitive; wins)
+//   - guest systemd says stopping/bus-down -> shutdown (fast positive)
+//   - guest healthy N polls in a row -> normal exit (N in a row rules out the
+//     brief pre-"stopping" window a close passes through)
+//   - image has no systemd -> normal exit (a close needs systemctl to fire)
+//   - offline/unknown/no-answer -> ambiguous; keep observing
+//
+// If the container is still running with no positive signal when the window
+// elapses, it was a normal exit. The function never returns true without
+// positive evidence (an observed stop, or systemd itself saying it is tearing
+// down), so it can never force-stop a container the user meant to keep.
+func shutdownInProgress(mgr guestProber, interval, window time.Duration, healthyToExit int) bool {
+	deadline := time.Now().Add(window)
+	healthy := 0
+	for {
+		// Definitive, from outside incus: the container actually stopped. Checked
+		// first each poll so a stop observed at any point wins immediately.
+		if running, err := mgr.Running(); err == nil && !running {
+			return true
+		}
+
+		switch probeGuestState(mgr) {
 		case "stopping", guestStateBusDown:
 			return true
 		case "running", "degraded", "maintenance", "initializing", "starting":
-			return false
+			if healthy++; healthy >= healthyToExit {
+				return false
+			}
 		case guestStateNoSystemd:
-			// This image can never answer — don't burn the retry budget on
-			// every single exit there.
+			// This image can never answer, and a `close` needs systemctl to fire
+			// in the first place — treat as a normal exit (the outside-state check
+			// above still catches an externally-stopped container).
 			return false
 		default: // "offline", "unknown", coi:no-answer, anything unforeseen
-			if running, err := mgr.Running(); err == nil && !running {
-				return true
-			}
-			if i < 5 {
-				time.Sleep(500 * time.Millisecond)
-			}
+			healthy = 0 // ambiguous — a healthy streak must be consecutive
 		}
+
+		if !time.Now().Before(deadline) {
+			return false
+		}
+		time.Sleep(interval)
 	}
-	return false
 }
 
 // containerRunning reports the container's state and whether it could be
