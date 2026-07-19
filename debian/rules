@@ -34,7 +34,7 @@ override_dh_auto_build:
 		-ldflags "-s -w -X $(IMPORT)/internal/cli.Version=$(VERSION)" \
 		-o coi ./cmd/coi
 
-# ponytail: integration tests need a live Incus daemon; not runnable on a builder.
+# Integration tests need a live Incus daemon; not runnable on a builder.
 override_dh_auto_test:
 
 # Go binaries strip clean with -s -w above; dwz cannot compress Go DWARF and errors.

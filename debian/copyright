@@ -10,9 +10,9 @@ Files: debian/*
 Copyright: 2026 William Black
 License: MIT
 
-# ponytail: vendor/ holds third-party Go modules, each under its own permissive
-# licence (MIT/BSD/Apache-2.0). A PPA does not require them enumerated here; if
-# this is ever submitted to the Debian archive, expand with per-module stanzas.
+# vendor/ holds third-party Go modules, each under its own permissive licence
+# (MIT/BSD/Apache-2.0). A PPA does not require them enumerated here; if this is
+# ever submitted to the Debian archive, expand with per-module stanzas.
 Files: vendor/*
 Copyright: various upstream authors
 License: MIT
