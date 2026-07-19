@@ -10,12 +10,59 @@ Files: debian/*
 Copyright: 2026 William Black
 License: MIT
 
-# vendor/ holds third-party Go modules, each under its own permissive licence
-# (MIT/BSD/Apache-2.0). A PPA does not require them enumerated here; if this is
-# ever submitted to the Debian archive, expand with per-module stanzas.
-Files: vendor/*
-Copyright: various upstream authors
+# Vendored Go modules (vendor/), each under its own upstream licence. Regenerate
+# with `go mod vendor`; if the dependency set changes, update the stanzas below.
+
+Files: vendor/github.com/BurntSushi/toml/*
+Copyright: 2013 TOML authors
 License: MIT
+
+Files: vendor/github.com/google/uuid/*
+Copyright: 2009, 2014 Google Inc.
+License: BSD-3-Clause
+
+Files: vendor/github.com/miekg/dns/*
+Copyright: 2009 The Go Authors
+           2011 Miek Gieben
+License: BSD-3-Clause
+
+Files: vendor/github.com/spf13/pflag/*
+Copyright: 2012 Alex Ogier
+           2012 The Go Authors
+License: BSD-3-Clause
+
+Files: vendor/golang.org/x/mod/*
+       vendor/golang.org/x/net/*
+       vendor/golang.org/x/sync/*
+       vendor/golang.org/x/sys/*
+       vendor/golang.org/x/text/*
+       vendor/golang.org/x/tools/*
+Copyright: 2009 The Go Authors
+License: BSD-3-Clause
+
+Files: vendor/github.com/coreos/go-systemd/*
+Copyright: 2018 CoreOS, Inc.
+License: Apache-2.0
+
+Files: vendor/github.com/inconshreveable/mousetrap/*
+Copyright: 2022 Alan Shreve (@inconshreveable)
+License: Apache-2.0
+
+Files: vendor/github.com/santhosh-tekuri/jsonschema/*
+Copyright: Santhosh Kumar Tekuri
+License: Apache-2.0
+
+Files: vendor/github.com/spf13/cobra/*
+Copyright: 2013-2023 The Cobra Authors
+License: Apache-2.0
+
+Files: vendor/gopkg.in/yaml.v3/*
+Copyright: 2011-2016 Canonical Ltd.
+           2006-2011 Kirill Simonov
+License: Apache-2.0 and MIT
+Comment: The go-yaml code is under Apache-2.0. The libyaml-derived parser files
+ (apic.go, emitterc.go, parserc.go, readerc.go, scannerc.go, writerc.go,
+ yamlh.go, yamlprivateh.go) are under MIT.
 
 License: MIT
  Permission is hereby granted, free of charge, to any person obtaining a
@@ -35,3 +82,44 @@ License: MIT
  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
  FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  DEALINGS IN THE SOFTWARE.
+
+License: BSD-3-Clause
+ Redistribution and use in source and binary forms, with or without
+ modification, are permitted provided that the following conditions are met:
+ .
+ 1. Redistributions of source code must retain the above copyright notice,
+    this list of conditions and the following disclaimer.
+ 2. Redistributions in binary form must reproduce the above copyright notice,
+    this list of conditions and the following disclaimer in the documentation
+    and/or other materials provided with the distribution.
+ 3. Neither the name of the copyright holder nor the names of its contributors
+    may be used to endorse or promote products derived from this software
+    without specific prior written permission.
+ .
+ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+ AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+ LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ POSSIBILITY OF SUCH DAMAGE.
+
+License: Apache-2.0
+ Licensed under the Apache License, Version 2.0 (the "License"); you may not
+ use these files except in compliance with the License. You may obtain a copy
+ of the License at
+ .
+     http://www.apache.org/licenses/LICENSE-2.0
+ .
+ Unless required by applicable law or agreed to in writing, software
+ distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+ License for the specific language governing permissions and limitations
+ under the License.
+ .
+ On Debian systems, the complete text of the Apache License, Version 2.0 can
+ be found in "/usr/share/common-licenses/Apache-2.0".

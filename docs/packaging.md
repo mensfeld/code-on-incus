@@ -163,7 +163,11 @@ distrobox enter code-on-incus-ubuntu
 
 - Source format is `3.0 (native)` for PPA simplicity (one tarball, no
   orig/quilt split). For a real Debian-archive submission, switch to
-  `3.0 (quilt)` and enumerate third-party licenses in `debian/copyright`.
+  `3.0 (quilt)`.
+- `debian/copyright` enumerates the licence of every vendored Go module
+  (`vendor/`). If `go mod vendor` changes the dependency set, update the
+  per-module `Files:` stanzas to match. Verify coverage with
+  `licensecheck -r vendor/`.
 - The series matrix in the workflow must stay in sync with what
   `longsleep/golang-backports` publishes.
 - `coi` shells out to the `incus` CLI and is non-functional without it, so the
