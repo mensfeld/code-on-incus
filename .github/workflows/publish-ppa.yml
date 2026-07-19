@@ -9,7 +9,7 @@ name: Publish to Launchpad PPA
 #
 # Requirements (configure once in the GitHub repo settings):
 #   Secrets:
-#     GPG_PRIVATE_KEY  - ASCII-armored private key, passphrase-less (see docs/packaging.md)
+#     GPG_PRIVATE_KEY  - ASCII-armored private key, passphrase-less (see docs/packaging-launchpad.md)
 #     GPG_KEY_ID       - the key's fingerprint or long key id, used to sign
 #   Variables:
 #     LAUNCHPAD_PPA    - dput target, e.g. "ppa:code-on-incus/ppa"

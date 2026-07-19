@@ -224,7 +224,7 @@ sudo apt install code-on-incus   # provides the `coi` command
 
 `incus` is a package dependency, so `apt` pulls it in automatically on **Ubuntu 24.04 (noble) and newer**. On **Ubuntu 22.04 (jammy)** Incus is not in the archive — add the [zabbly Incus repo](https://github.com/zabbly/incus) first, otherwise the install reports `incus` as uninstallable.
 
-After install, add yourself to the `incus-admin` group and start a fresh session (see the group note under manual installation above). Packaging internals live in [`docs/packaging.md`](docs/packaging.md).
+After install, add yourself to the `incus-admin` group and start a fresh session (see the group note under manual installation above). Packaging internals live in [`docs/packaging-launchpad.md`](docs/packaging-launchpad.md).
 
 ### Build Images
 
