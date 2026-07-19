@@ -212,6 +212,19 @@ curl -fsSL https://raw.githubusercontent.com/mensfeld/code-on-incus/master/insta
 
 **Manual installation:** Download the binary from [GitHub Releases](https://github.com/mensfeld/code-on-incus/releases), make it executable, and move to `/usr/local/bin/`. Requires Linux with Incus installed and user in the `incus-admin` group. **You must log out and back in** (or run `newgrp incus-admin`) after adding your user to the group — COI runs `incus` directly and requires the group to be active in your session. See the [Incus installation guide](https://linuxcontainers.org/incus/docs/main/installing/) for setting up Incus.
 
+### Fedora (Copr / DNF)
+
+Install from the [Copr project](https://copr.fedorainfracloud.org/coprs/g/code-on-incus/code-on-incus/) to get `coi` as a system package with automatic updates via `dnf`:
+
+```bash
+sudo dnf copr enable @code-on-incus/code-on-incus
+sudo dnf install code-on-incus   # provides the `coi` command
+```
+
+Builds are provided for **Fedora 43 and newer** (x86_64 and aarch64). `incus` is a package dependency, so `dnf` pulls it in automatically.
+
+After install, add yourself to the `incus-admin` group and start a fresh session (see the group note under manual installation above). Packaging internals live in [`docs/packaging-copr.md`](docs/packaging-copr.md).
+
 ### Build Images
 
 ```bash
