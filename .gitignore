@@ -60,3 +60,6 @@ test-config.toml
 # Backup files
 *.bck.yml
 *.backup
+
+# Go build cache/GOPATH used by debian/rules
+/_build/
