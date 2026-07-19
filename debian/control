@@ -1,0 +1,29 @@
+Source: code-on-incus
+Section: devel
+Priority: optional
+Maintainer: William Black <maciej@mensfeld.pl>
+Build-Depends: debhelper-compat (= 13),
+               golang-1.25-go,
+               pkg-config,
+               libsystemd-dev
+Standards-Version: 4.7.0
+Homepage: https://github.com/mensfeld/code-on-incus
+Vcs-Git: https://github.com/smokestacklightnin/code-on-incus.git
+Vcs-Browser: https://github.com/smokestacklightnin/code-on-incus
+Rules-Requires-Root: no
+
+Package: code-on-incus
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends},
+         libsystemd0
+Recommends: incus
+Description: isolated machines for AI coding agents, with active defense
+ Code on Incus (the "coi" command) gives each AI coding agent its own machine:
+ a full Incus system container with root access, systemd, Docker, and the
+ ability to install anything. Agents work as they would on a real server -
+ run services, manage packages, use cron - without touching the host.
+ .
+ Host credentials (SSH keys, environment variables, Git tokens) are never
+ exposed to the agent unless explicitly mounted. coi watches each container
+ and can pause or kill it automatically on suspicious activity such as reverse
+ shells, credential scanning, or data exfiltration.
