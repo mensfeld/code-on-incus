@@ -78,6 +78,7 @@ jobs:
           PPA: ${{ vars.LAUNCHPAD_PPA }}
         run: |
           set -euo pipefail
-          BASE="$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || echo dev)"
-          case "${GITHUB_REF_NAME:-}" in v*) BASE="${GITHUB_REF_NAME#v}";; esac
-          dput "$PPA" "../code-on-incus_${BASE}~${{ matrix.series }}1_source.changes"
+          # Upload exactly the source .changes the build step produced for this
+          # series, rather than reconstructing the version (robust for manual runs).
+          changes=$(ls ../code-on-incus_*~${{ matrix.series }}1_source.changes)
+          dput "$PPA" "$changes"
