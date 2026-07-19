@@ -37,8 +37,9 @@ require an SSH key or signing the Code of Conduct.
 
 ### 2. Create a GPG key
 
-The package `Maintainer` is the team, `Code on Incus <maciej@mensfeld.pl>`.
-The signing key does **not** need to match that — Launchpad validates the
+The package `Maintainer` is the upstream author, `Maciej Mensfeld
+<maciej@mensfeld.pl>`. The signing key does **not** need to match that —
+Launchpad validates the
 *signature*, not the maintainer field. What matters is that the key belongs to a
 Launchpad account (yours) with upload rights to the PPA. Use your own identity
 on the key:
@@ -47,7 +48,7 @@ on the key:
 gpg --full-generate-key
 #   Key type: RSA (default), 4096 bits, no expiry (or your preference)
 #   Real name: William Black
-#   Email:     maciej@mensfeld.pl
+#   Email:     <your-email>
 
 # Note the fingerprint / long key id:
 gpg --list-secret-keys --keyid-format=long
@@ -77,9 +78,8 @@ gpg --decrypt
 
 Already created: the **`code-on-incus`** team owns
 [`ppa:code-on-incus/ppa`](https://launchpad.net/~code-on-incus/+archive/ubuntu/ppa).
-Your Launchpad account (William Black, PPA owner) has upload rights, so uploads
-signed by your key are accepted — regardless of the package `Maintainer`, which
-is the team.
+Your Launchpad account (the PPA owner) has upload rights, so uploads signed by
+your key are accepted — regardless of the package `Maintainer`.
 
 ### 5. Add the Go 1.25 archive dependency (critical, not yet done)
 

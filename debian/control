@@ -1,7 +1,7 @@
 Source: code-on-incus
 Section: devel
 Priority: optional
-Maintainer: Code on Incus <maciej@mensfeld.pl>
+Maintainer: Maciej Mensfeld <maciej@mensfeld.pl>
 Build-Depends: debhelper-compat (= 13),
                golang-1.25-go,
                pkg-config,
