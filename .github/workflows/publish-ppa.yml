@@ -13,6 +13,8 @@ name: Publish to Launchpad PPA
 #     GPG_KEY_ID       - the key's fingerprint or long key id, used to sign
 #   Variables:
 #     LAUNCHPAD_PPA    - dput target, e.g. "ppa:code-on-incus/ppa"
+#     DEB_EMAIL        - changelog Changed-By email (required)
+#     DEB_FULLNAME     - changelog Changed-By name (optional, defaults to "Code on Incus")
 #
 # The signing key must have upload rights to LAUNCHPAD_PPA and its user-id email
 # must match debian/changelog's Maintainer. The PPA must have
@@ -68,8 +70,8 @@ jobs:
 
       - name: Build signed source package for ${{ matrix.series }}
         env:
-          DEBEMAIL: maciej@mensfeld.pl
-          DEBFULLNAME: William Black
+          DEBEMAIL: ${{ vars.DEB_EMAIL }}
+          DEBFULLNAME: ${{ vars.DEB_FULLNAME || 'Code on Incus' }}
           GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
         run: |
           set -euo pipefail

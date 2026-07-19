@@ -37,8 +37,11 @@ require an SSH key or signing the Code of Conduct.
 
 ### 2. Create a GPG key
 
-The changelog `Maintainer` is `William Black <maciej@mensfeld.pl>`, so the
-key's user id **must** use that same email.
+The package `Maintainer` is the team, `Code on Incus <maciej@mensfeld.pl>`.
+The signing key does **not** need to match that — Launchpad validates the
+*signature*, not the maintainer field. What matters is that the key belongs to a
+Launchpad account (yours) with upload rights to the PPA. Use your own identity
+on the key:
 
 ```bash
 gpg --full-generate-key
@@ -74,8 +77,9 @@ gpg --decrypt
 
 Already created: the **`code-on-incus`** team owns
 [`ppa:code-on-incus/ppa`](https://launchpad.net/~code-on-incus/+archive/ubuntu/ppa).
-Your Launchpad account (William Black, PPA owner) has upload rights, and its GPG
-key must match the `Maintainer` email above.
+Your Launchpad account (William Black, PPA owner) has upload rights, so uploads
+signed by your key are accepted — regardless of the package `Maintainer`, which
+is the team.
 
 ### 5. Add the Go 1.25 archive dependency (critical, not yet done)
 
@@ -124,9 +128,12 @@ tags — i.e. upstream once merged):
 | Secret   | `GPG_PRIVATE_KEY` | `gpg --armor --export-secret-keys <FPR>` output    |
 | Secret   | `GPG_KEY_ID`      | the key fingerprint / long id used to sign         |
 | Variable | `LAUNCHPAD_PPA`   | `ppa:code-on-incus/ppa`                            |
+| Variable | `DEB_EMAIL`       | changelog Changed-By email (required)              |
+| Variable | `DEB_FULLNAME`    | changelog Changed-By name (optional, default "Code on Incus") |
 
-The signing key must have upload rights to `ppa:code-on-incus/ppa` and its
-user-id email must match `debian/changelog`'s `Maintainer`.
+The signing key just needs upload rights to `ppa:code-on-incus/ppa`; it does not
+need to match the changelog `Maintainer` or `DEB_EMAIL` (Launchpad checks the
+signature, not those fields).
 
 A release then publishes to the PPA automatically:
 
