@@ -81,7 +81,10 @@ jobs:
           VER="${BASE}~${{ matrix.series }}1"
           dch -b -v "$VER" -D "${{ matrix.series }}" \
             "Automated PPA build of ${BASE} for ${{ matrix.series }}."
-          debuild -S -sa --no-lintian -k"$GPG_KEY_ID"
+          # --no-lintian is a debuild option and must precede dpkg-buildpackage args.
+          # -d skips the build-dep check: this is a source-only build (Launchpad
+          # compiles), so golang-1.25-go/libsystemd-dev need not be installed here.
+          debuild --no-lintian -S -sa -d -k"$GPG_KEY_ID"
 
       - name: Upload to PPA
         env:

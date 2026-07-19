@@ -100,7 +100,8 @@ go mod vendor                                   # make source offline-buildable
 # set the version + target series in the changelog
 dch -b -v "0.10.2~noble1" -D noble "Build 0.10.2 for noble."
 
-debuild -S -sa -k<YOUR_KEY_ID>                  # build + sign the SOURCE package
+debuild --no-lintian -S -sa -d -k<YOUR_KEY_ID>  # build + sign the SOURCE package
+                                                # -d: source-only, skip build-dep check
 dput ppa:code-on-incus/ppa \
      ../code-on-incus_0.10.2~noble1_source.changes
 ```
