@@ -47,7 +47,7 @@ on the key:
 ```bash
 gpg --full-generate-key
 #   Key type: RSA (default), 4096 bits, no expiry (or your preference)
-#   Real name: William Black
+#   Real name: <your-name>
 #   Email:     <your-email>
 
 # Note the fingerprint / long key id:
