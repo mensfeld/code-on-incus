@@ -15,8 +15,8 @@ Rules-Requires-Root: no
 Package: code-on-incus
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends},
-         libsystemd0
-Recommends: incus
+         libsystemd0,
+         incus
 Description: isolated machines for AI coding agents, with active defense
  Code on Incus (the "coi" command) gives each AI coding agent its own machine:
  a full Incus system container with root access, systemd, Docker, and the

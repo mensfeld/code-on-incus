@@ -159,5 +159,12 @@ distrobox enter code-on-incus-ubuntu
   `3.0 (quilt)` and enumerate third-party licenses in `debian/copyright`.
 - The series matrix in the workflow must stay in sync with what
   `longsleep/golang-backports` publishes.
+- `coi` shells out to the `incus` CLI and is non-functional without it, so the
+  package **`Depends: incus`**. `incus` is in the Ubuntu archive from noble
+  (24.04) onward, so it installs automatically there. On **jammy (22.04)**
+  `incus` is not in the archive; users must first add the
+  [zabbly](https://github.com/zabbly/incus) repo (its package is also named
+  `incus`), otherwise `apt install code-on-incus` reports `incus` as
+  uninstallable — which correctly signals the missing prerequisite.
 - Integration tests are skipped during the package build (they need a live
   Incus daemon).
