@@ -1,0 +1,83 @@
+name: Publish to Launchpad PPA
+
+# Builds a signed Debian *source* package per Ubuntu series and uploads it to a
+# Launchpad PPA. Launchpad then compiles the binaries on its build farm.
+#
+# Requirements (configure once in the GitHub repo settings):
+#   Secrets:
+#     GPG_PRIVATE_KEY  - ASCII-armored private key, passphrase-less (see docs/packaging.md)
+#     GPG_KEY_ID       - the key's fingerprint or long key id, used to sign
+#   Variables:
+#     LAUNCHPAD_PPA    - dput target, e.g. "ppa:smokestacklightnin/code-on-incus"
+#
+# The PPA must have ppa:longsleep/golang-backports added as an archive
+# dependency so its builders can resolve golang-1.25-go (see debian/README.source).
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Upload source (${{ matrix.series }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        # Keep in sync with the series longsleep/golang-backports publishes.
+        series: [jammy, noble, plucky, resolute]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # need tags for the version
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'   # only for `go mod vendor`; Launchpad does the real build
+
+      - name: Install packaging tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            devscripts debhelper dput dpkg-dev
+
+      - name: Import signing key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: printf '%s' "$GPG_PRIVATE_KEY" | gpg --batch --import
+
+      - name: Vendor Go modules (offline-buildable source)
+        run: go mod vendor
+
+      - name: Build signed source package for ${{ matrix.series }}
+        env:
+          DEBEMAIL: maciej@mensfeld.pl
+          DEBFULLNAME: William Black
+          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+        run: |
+          set -euo pipefail
+          BASE="$(dpkg-parsechangelog -SVersion | sed 's/[~-].*//')"
+          # For a tag push, prefer the tag as the base version.
+          case "${GITHUB_REF_NAME:-}" in v*) BASE="${GITHUB_REF_NAME#v}";; esac
+          VER="${BASE}~${{ matrix.series }}1"
+          dch -b -v "$VER" -D "${{ matrix.series }}" \
+            "Automated PPA build of ${BASE} for ${{ matrix.series }}."
+          debuild -S -sa --no-lintian -k"$GPG_KEY_ID"
+
+      - name: Upload to PPA
+        env:
+          PPA: ${{ vars.LAUNCHPAD_PPA }}
+        run: |
+          set -euo pipefail
+          BASE="$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || echo dev)"
+          case "${GITHUB_REF_NAME:-}" in v*) BASE="${GITHUB_REF_NAME#v}";; esac
+          dput "$PPA" "../code-on-incus_${BASE}~${{ matrix.series }}1_source.changes"
