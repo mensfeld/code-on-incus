@@ -143,20 +143,22 @@ git tag v0.10.2 && git push origin v0.10.2
 
 The workflow runs one job per series and uploads each in parallel.
 
-## Reproducing the build locally (distrobox)
+## Reproducing the build locally
 
-The Fedora host can't build `.deb`s, but a distrobox Ubuntu container can. This
-mirrors exactly what Launchpad does (backport PPA → Go 1.25 → offline build):
+Building `.deb`s needs a Debian/Ubuntu-based system. On a non-Debian host
+(Fedora, Arch, macOS, ...), run these steps inside an Ubuntu
+[distrobox](https://distrobox.it) container (`distrobox enter <name>`) instead.
+Either way this mirrors what Launchpad does (backport PPA → Go 1.25 → offline
+build):
 
 ```bash
-distrobox enter code-on-incus-ubuntu
-  sudo add-apt-repository -y ppa:longsleep/golang-backports
-  sudo apt-get update
-  sudo apt-get install -y devscripts build-essential fakeroot dpkg-dev \
-       debhelper pkg-config libsystemd-dev golang-1.25-go
-  cd /path/to/launchpad
-  go mod vendor
-  dpkg-buildpackage -us -uc -b        # produces ../code-on-incus_*.deb
+sudo add-apt-repository -y ppa:longsleep/golang-backports
+sudo apt-get update
+sudo apt-get install -y devscripts build-essential fakeroot dpkg-dev \
+     debhelper pkg-config libsystemd-dev golang-1.25-go
+cd /path/to/launchpad
+go mod vendor
+dpkg-buildpackage -us -uc -b        # produces ../code-on-incus_*.deb
 ```
 
 ## Notes / limitations
