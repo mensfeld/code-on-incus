@@ -111,9 +111,13 @@ sudo apt update && sudo apt install code-on-incus   # provides the `coi` command
 ## Automated upload (CI)
 
 `.github/workflows/publish-ppa.yml` builds and uploads a signed source package
-for every series on a `v*` tag push (or manual dispatch).
+for every series. It runs on the **same `v*.*.*` release tags as `release.yml`**,
+so cutting a release also publishes to the PPA (plus manual dispatch). The job
+**no-ops unless `LAUNCHPAD_PPA` is set**, so a fork or upstream without PPA
+credentials is never failed by it.
 
-Configure once in **GitHub repo → Settings**:
+Configure once in **GitHub repo → Settings** (in the repo that owns the release
+tags — i.e. upstream once merged):
 
 | Kind     | Name              | Value                                              |
 |----------|-------------------|----------------------------------------------------|
@@ -121,7 +125,10 @@ Configure once in **GitHub repo → Settings**:
 | Secret   | `GPG_KEY_ID`      | the key fingerprint / long id used to sign         |
 | Variable | `LAUNCHPAD_PPA`   | `ppa:code-on-incus/ppa`                            |
 
-Then:
+The signing key must have upload rights to `ppa:code-on-incus/ppa` and its
+user-id email must match `debian/changelog`'s `Maintainer`.
+
+A release then publishes to the PPA automatically:
 
 ```bash
 git tag v0.10.2 && git push origin v0.10.2
