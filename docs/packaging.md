@@ -166,5 +166,16 @@ distrobox enter code-on-incus-ubuntu
   [zabbly](https://github.com/zabbly/incus) repo (its package is also named
   `incus`), otherwise `apt install code-on-incus` reports `incus` as
   uninstallable — which correctly signals the missing prerequisite.
+- Other host tools are handled without extra hard dependencies:
+  - `nftables`, `iproute2`, `iptables`, `uidmap`, `rsync`, and `systemd`
+    (journalctl/systemctl) are pulled in transitively by `incus` (via
+    `incus-base`), so `coi`'s firewall/monitoring/cleanup paths get them for
+    free — no need to re-declare them.
+  - `sudo`, `git`, and `openssh-client` (used on the host for privileged
+    operations, git identity, and SSH-credential mounting) are `Recommends`:
+    installed by default, but `coi` still partly functions without each.
+  - Container-side tools (`tmux`, the agent tooling) run *inside* the Incus
+    container via `incus exec`, so they are provided by the container image,
+    not the host package.
 - Integration tests are skipped during the package build (they need a live
   Incus daemon).
