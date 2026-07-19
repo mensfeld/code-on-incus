@@ -212,6 +212,20 @@ curl -fsSL https://raw.githubusercontent.com/mensfeld/code-on-incus/master/insta
 
 **Manual installation:** Download the binary from [GitHub Releases](https://github.com/mensfeld/code-on-incus/releases), make it executable, and move to `/usr/local/bin/`. Requires Linux with Incus installed and user in the `incus-admin` group. **You must log out and back in** (or run `newgrp incus-admin`) after adding your user to the group — COI runs `incus` directly and requires the group to be active in your session. See the [Incus installation guide](https://linuxcontainers.org/incus/docs/main/installing/) for setting up Incus.
 
+### Ubuntu / Debian (APT)
+
+Install from the [Launchpad PPA](https://launchpad.net/~code-on-incus/+archive/ubuntu/ppa) to get `coi` as a system package with automatic updates via `apt`:
+
+```bash
+sudo add-apt-repository ppa:code-on-incus/ppa
+sudo apt update
+sudo apt install code-on-incus   # provides the `coi` command
+```
+
+`incus` is a package dependency, so `apt` pulls it in automatically on **Ubuntu 24.04 (noble) and newer**. On **Ubuntu 22.04 (jammy)** Incus is not in the archive — add the [zabbly Incus repo](https://github.com/zabbly/incus) first, otherwise the install reports `incus` as uninstallable.
+
+After install, add yourself to the `incus-admin` group and start a fresh session (see the group note under manual installation above). Packaging internals live in [`docs/packaging.md`](docs/packaging.md).
+
 ### Build Images
 
 ```bash
