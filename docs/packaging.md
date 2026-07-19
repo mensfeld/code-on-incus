@@ -70,17 +70,18 @@ the link inside:
 gpg --decrypt
 ```
 
-### 4. Create the PPA
+### 4. The PPA
 
-On your Launchpad profile: **Create a new PPA**. Name it, e.g. `code-on-incus`.
-Its dput target is then `ppa:<your-lp-user>/code-on-incus`.
+Already created: the **`code-on-incus`** team owns
+[`ppa:code-on-incus/ppa`](https://launchpad.net/~code-on-incus/+archive/ubuntu/ppa).
+Your Launchpad account (William Black, PPA owner) has upload rights, and its GPG
+key must match the `Maintainer` email above.
 
-### 5. Add the Go 1.25 archive dependency (critical)
+### 5. Add the Go 1.25 archive dependency (critical, not yet done)
 
 Without this, LTS builds fail with "golang-1.25-go has no installation candidate".
 
-1. Open your PPA → **View package details** → **Edit dependencies**
-   (`https://launchpad.net/~<you>/+archive/ubuntu/code-on-incus/+edit-dependencies`).
+1. Open <https://launchpad.net/~code-on-incus/+archive/ubuntu/ppa/+edit-dependencies>.
 2. Under "add a new dependency", add **`ppa:longsleep/golang-backports`**.
 3. Save.
 
@@ -96,14 +97,14 @@ go mod vendor                                   # make source offline-buildable
 dch -b -v "0.10.2~noble1" -D noble "Build 0.10.2 for noble."
 
 debuild -S -sa -k<YOUR_KEY_ID>                  # build + sign the SOURCE package
-dput ppa:<your-lp-user>/code-on-incus \
+dput ppa:code-on-incus/ppa \
      ../code-on-incus_0.10.2~noble1_source.changes
 ```
 
 Watch the build at your PPA's page. Once green, users install with:
 
 ```bash
-sudo add-apt-repository ppa:<your-lp-user>/code-on-incus
+sudo add-apt-repository ppa:code-on-incus/ppa
 sudo apt update && sudo apt install code-on-incus   # provides the `coi` command
 ```
 
@@ -118,7 +119,7 @@ Configure once in **GitHub repo → Settings**:
 |----------|-------------------|----------------------------------------------------|
 | Secret   | `GPG_PRIVATE_KEY` | `gpg --armor --export-secret-keys <FPR>` output    |
 | Secret   | `GPG_KEY_ID`      | the key fingerprint / long id used to sign         |
-| Variable | `LAUNCHPAD_PPA`   | e.g. `ppa:<your-lp-user>/code-on-incus`            |
+| Variable | `LAUNCHPAD_PPA`   | `ppa:code-on-incus/ppa`                            |
 
 Then:
 
