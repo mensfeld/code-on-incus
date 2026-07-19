@@ -4,20 +4,20 @@ name: Publish to Launchpad PPA
 # Launchpad PPA. Launchpad then compiles the binaries on its build farm.
 #
 # Runs on the same v*.*.* release tags as release.yml, so every release also
-# publishes to the PPA. The whole job no-ops unless the LAUNCHPAD_PPA variable is
-# set, so forks/upstream without PPA credentials configured are not failed.
+# publishes to the PPA. The dput target is hardcoded to ppa:code-on-incus/ppa.
+# The whole job no-ops unless the DEB_EMAIL variable is set, so forks/upstream
+# without PPA credentials configured are not failed.
 #
 # Requirements (configure once in the GitHub repo settings):
 #   Secrets:
 #     GPG_PRIVATE_KEY  - ASCII-armored private key, passphrase-less (see docs/packaging-launchpad.md)
 #     GPG_KEY_ID       - the key's fingerprint or long key id, used to sign
 #   Variables:
-#     LAUNCHPAD_PPA    - dput target, e.g. "ppa:code-on-incus/ppa"
-#     DEB_EMAIL        - changelog Changed-By email (required)
+#     DEB_EMAIL        - changelog Changed-By email (required; also the CI toggle)
 #     DEB_FULLNAME     - changelog Changed-By name (optional, defaults to "Code on Incus")
 #
-# The signing key must have upload rights to LAUNCHPAD_PPA and its user-id email
-# must match debian/changelog's Maintainer. The PPA must have
+# The signing key must have upload rights to ppa:code-on-incus/ppa and its
+# user-id email must match debian/changelog's Maintainer. The PPA must have
 # ppa:longsleep/golang-backports added as an archive dependency so its builders
 # can resolve golang-1.25-go (see debian/README.source).
 
@@ -36,8 +36,8 @@ permissions:
 jobs:
   publish:
     name: Upload source (${{ matrix.series }})
-    # Skip entirely when no PPA is configured (e.g. forks without credentials).
-    if: ${{ vars.LAUNCHPAD_PPA != '' }}
+    # Skip entirely when unconfigured (e.g. forks without credentials).
+    if: ${{ vars.DEB_EMAIL != '' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     strategy:
@@ -95,11 +95,9 @@ jobs:
           debuild --no-lintian -S -sa -d -k"$GPG_KEY_ID"
 
       - name: Upload to PPA
-        env:
-          PPA: ${{ vars.LAUNCHPAD_PPA }}
         run: |
           set -euo pipefail
           # Upload exactly the source .changes the build step produced for this
           # series, rather than reconstructing the version (robust for manual runs).
           changes=$(ls ../code-on-incus_*~${{ matrix.series }}1_source.changes)
-          dput "$PPA" "$changes"
+          dput ppa:code-on-incus/ppa "$changes"
