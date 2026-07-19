@@ -117,9 +117,10 @@ sudo apt update && sudo apt install code-on-incus   # provides the `coi` command
 
 `.github/workflows/publish-ppa.yml` builds and uploads a signed source package
 for every series. It runs on the **same `v*.*.*` release tags as `release.yml`**,
-so cutting a release also publishes to the PPA (plus manual dispatch). The job
-**no-ops unless `LAUNCHPAD_PPA` is set**, so a fork or upstream without PPA
-credentials is never failed by it.
+so cutting a release also publishes to the PPA (plus manual dispatch). The PPA
+target is hardcoded to `ppa:code-on-incus/ppa`. The job **no-ops unless
+`DEB_EMAIL` is set**, so a fork or upstream without PPA credentials is never
+failed by it.
 
 Configure once in **GitHub repo → Settings** (in the repo that owns the release
 tags — i.e. upstream once merged):
@@ -128,8 +129,7 @@ tags — i.e. upstream once merged):
 |----------|-------------------|----------------------------------------------------|
 | Secret   | `GPG_PRIVATE_KEY` | `gpg --armor --export-secret-keys <FPR>` output    |
 | Secret   | `GPG_KEY_ID`      | the key fingerprint / long id used to sign         |
-| Variable | `LAUNCHPAD_PPA`   | `ppa:code-on-incus/ppa`                            |
-| Variable | `DEB_EMAIL`       | changelog Changed-By email (required)              |
+| Variable | `DEB_EMAIL`       | changelog Changed-By email (required; CI toggle)   |
 | Variable | `DEB_FULLNAME`    | changelog Changed-By name (optional, default "Code on Incus") |
 
 The signing key just needs upload rights to `ppa:code-on-incus/ppa`; it does not
