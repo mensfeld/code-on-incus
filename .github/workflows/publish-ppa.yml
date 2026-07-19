@@ -43,8 +43,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Keep in sync with the series longsleep/golang-backports publishes.
-        series: [jammy, noble, plucky, resolute]
+        # Keep in sync with (a) the series longsleep/golang-backports publishes
+        # golang-1.25-go for, and (b) series Launchpad still builds (non-EOL).
+        # Interim (non-LTS) releases get 9 months of support: drop each past its
+        # EOL (a dead series fails every release), add new interims once the Go
+        # backport lands. EOL below = end of standard support.
+        series:
+          - jammy     # 22.04 LTS — EOL Apr 2027 (ESM to 2032)
+          - noble     # 24.04 LTS — EOL Apr 2029 (ESM to 2036)
+          - plucky    # 25.04     — EOL Jan 2026 (interim)
+          - resolute  # 25.10     — EOL Jul 2026 (interim)
     steps:
       - uses: actions/checkout@v4
         with:
