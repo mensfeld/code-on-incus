@@ -212,9 +212,11 @@ curl -fsSL https://raw.githubusercontent.com/mensfeld/code-on-incus/master/insta
 
 **Manual installation:** Download the binary from [GitHub Releases](https://github.com/mensfeld/code-on-incus/releases), make it executable, and move to `/usr/local/bin/`. Requires Linux with Incus installed and user in the `incus-admin` group. **You must log out and back in** (or run `newgrp incus-admin`) after adding your user to the group — COI runs `incus` directly and requires the group to be active in your session. See the [Incus installation guide](https://linuxcontainers.org/incus/docs/main/installing/) for setting up Incus.
 
-### Ubuntu / Debian (APT)
+### Ubuntu (APT)
 
-Install from the [Launchpad PPA](https://launchpad.net/~code-on-incus/+archive/ubuntu/ppa) to get `coi` as a system package with automatic updates via `apt`:
+Install from the [Launchpad PPA](https://launchpad.net/~code-on-incus/+archive/ubuntu/ppa) to get `coi` as a system package with automatic updates via `apt`. Supported series: **22.04 (jammy)**, **24.04 (noble)**, and **26.04 (resolute)**.
+
+> PPAs are built per Ubuntu series and are **not usable on Debian** — `add-apt-repository` is not standard there and no matching pocket exists. On Debian, use the install script or a manual binary install.
 
 ```bash
 sudo add-apt-repository ppa:code-on-incus/ppa
@@ -224,7 +226,11 @@ sudo apt install code-on-incus   # provides the `coi` command
 
 `incus` is a package dependency, so `apt` pulls it in automatically on **Ubuntu 24.04 (noble) and newer**. On **Ubuntu 22.04 (jammy)** Incus is not in the archive — add the [zabbly Incus repo](https://github.com/zabbly/incus) first, otherwise the install reports `incus` as uninstallable.
 
-After install, add yourself to the `incus-admin` group and start a fresh session (see the group note under manual installation above). Packaging internals live in [`docs/packaging-launchpad.md`](docs/packaging-launchpad.md).
+After install, add yourself to the `incus-admin` group and start a fresh session (see the group note under manual installation above).
+
+Updates come from `apt`, not from `coi update` — a packaged build refuses to self-update, since overwriting the dpkg-owned `/usr/bin/coi` would desync the package database and be reverted by the next `apt upgrade`. Use `sudo apt update && sudo apt upgrade code-on-incus`. (`coi update patterns` still works: the detection databases are not part of the package.)
+
+Packaging internals live in [`docs/packaging-launchpad.md`](docs/packaging-launchpad.md).
 
 ### Build Images
 
