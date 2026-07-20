@@ -51,8 +51,9 @@ jobs:
         series:
           - jammy     # 22.04 LTS — EOL Apr 2027 (ESM to 2032)
           - noble     # 24.04 LTS — EOL Apr 2029 (ESM to 2036)
-          - plucky    # 25.04     — EOL Jan 2026 (interim)
-          - resolute  # 25.10     — EOL Jul 2026 (interim)
+          - resolute  # 26.04 LTS — EOL Apr 2031 (ESM to 2036)
+        # Dropped once EOL: plucky (25.04, EOL Jan 2026),
+        # questing (25.10, EOL Jul 2026).
     steps:
       - uses: actions/checkout@v4
         with:
