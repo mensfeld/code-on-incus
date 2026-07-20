@@ -13,6 +13,11 @@ import (
 // Version is the current version of coi (injected via ldflags at build time)
 var Version = "dev"
 
+// InstallSource records how this binary was installed (injected via ldflags at
+// build time). Distro packaging sets it to "deb"; plain source builds leave it
+// "source". See installedFromPackage in update.go for why it matters.
+var InstallSource = "source"
+
 // App holds the shared CLI state that is populated from persistent flags and
 // config loading in PersistentPreRunE. Grouping this in a struct rather than
 // package-level vars makes it easier to construct an isolated instance in

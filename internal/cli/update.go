@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -47,7 +48,12 @@ Examples:
 		// Propagate --force from parent to the core update.
 		updateForce = updateAllForce
 
-		if err := updateCoreCommand(updateCoreCmd, args); err != nil {
+		// The detection databases live outside the package and can still be
+		// refreshed, so a packaged install skips only the binary step rather
+		// than failing the whole command.
+		if installedFromPackage() {
+			fmt.Println(packagedUpdateHint)
+		} else if err := updateCoreCommand(updateCoreCmd, args); err != nil {
 			return err
 		}
 		fmt.Println()
@@ -98,7 +104,28 @@ type githubAsset struct {
 	BrowserDownloadURL string `json:"browser_download_url"`
 }
 
+// installedFromPackage reports whether a system package manager owns this
+// binary (set via ldflags in debian/rules). Such a build must not self-update:
+// the installed path is dpkg-owned, so overwriting it in place desyncs dpkg's
+// file database and the next `apt upgrade` silently reverts the update.
+func installedFromPackage() bool { return InstallSource != "source" }
+
+// packagedUpdateHint is shown wherever a packaged install is refused the
+// binary update, so the user is never left without the working alternative.
+const packagedUpdateHint = `This coi was installed from a system package, which owns the binary.
+Update it with your package manager instead:
+
+    sudo apt update && sudo apt upgrade code-on-incus`
+
 func updateCoreCommand(cmd *cobra.Command, args []string) error {
+	// Refuse before anything else — before the dev-build check and before any
+	// GitHub query — so no code path can reach the in-place overwrite. --check
+	// only reads, so it stays available; --force is deliberately NOT an escape
+	// hatch, since the damage is to dpkg's state rather than to this process.
+	if installedFromPackage() && !updateCheck {
+		return errors.New(packagedUpdateHint)
+	}
+
 	currentVersion := Version
 	isDev := currentVersion == "dev"
 

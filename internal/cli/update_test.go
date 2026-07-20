@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -107,5 +108,39 @@ func TestRestoreCapability(t *testing.T) {
 			// Just verify it completes without error.
 			restoreCapability("/nonexistent/path")
 		})
+	}
+}
+
+func TestInstalledFromPackage(t *testing.T) {
+	orig := InstallSource
+	defer func() { InstallSource = orig }()
+
+	for src, want := range map[string]bool{"source": false, "deb": true} {
+		InstallSource = src
+		if got := installedFromPackage(); got != want {
+			t.Errorf("InstallSource=%q: got %v, want %v", src, got, want)
+		}
+	}
+}
+
+// A package-managed binary must never be overwritten in place: that desyncs
+// dpkg's file database and the next `apt upgrade` reverts it. The refusal has
+// to happen before any network call, and --force must not bypass it.
+func TestUpdateCoreRefusesPackagedInstall(t *testing.T) {
+	origSource, origCheck, origForce := InstallSource, updateCheck, updateForce
+	defer func() {
+		InstallSource, updateCheck, updateForce = origSource, origCheck, origForce
+	}()
+
+	InstallSource = "deb"
+	updateCheck = false
+	updateForce = true // deliberately not an escape hatch
+
+	err := updateCoreCommand(updateCoreCmd, nil)
+	if err == nil {
+		t.Fatal("packaged install self-updated; must refuse even with --force")
+	}
+	if !strings.Contains(err.Error(), "apt upgrade code-on-incus") {
+		t.Errorf("refusal must name the working alternative, got: %v", err)
 	}
 }
