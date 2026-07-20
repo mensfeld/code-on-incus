@@ -19,12 +19,23 @@ Architecture: any
 # journal via go-systemd's sdjournal, which dlopen()s libsystemd.so.0 at runtime
 # instead of linking it. dpkg-shlibdeps only sees link-time NEEDED entries, so it
 # cannot infer this dependency and it has to be declared by hand.
+# sudo is a hard dependency, not a convenience: the default network mode is
+# "restricted", whose setup fails closed when passwordless `sudo -n nft` is
+# unavailable, and that error aborts session setup outright. Running without
+# sudo requires deliberately turning the isolation off ([network] mode = "open"
+# or use_sudo = false), so a default-configured install needs it present.
 Depends: ${shlibs:Depends}, ${misc:Depends},
          libsystemd0,
-         incus
-Recommends: sudo,
-            git,
-            openssh-client
+         incus,
+         sudo
+# git only enriches: the host git identity read degrades to empty when git is
+# missing, and `coi update patterns` is the sole other user — the threat
+# detection falls back to a compiled-in pattern set without it.
+Recommends: git
+# coi never executes an OpenSSH binary. Agent forwarding just reads
+# $SSH_AUTH_SOCK and proxies that socket into the container, so openssh-client
+# is only relevant as the thing that would provide the agent in the first place.
+Suggests: openssh-client
 Description: isolated machines for AI coding agents, with active defense
  Code on Incus (the "coi" command) gives each AI coding agent its own machine:
  a full Incus system container with root access, systemd, Docker, and the

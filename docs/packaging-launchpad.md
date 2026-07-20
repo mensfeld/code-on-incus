@@ -215,9 +215,19 @@ dpkg-buildpackage -us -uc -b        # produces ../code-on-incus_*.deb
     (journalctl/systemctl) are pulled in transitively by `incus` (via
     `incus-base`), so `coi`'s firewall/monitoring/cleanup paths get them for
     free — no need to re-declare them.
-  - `sudo`, `git`, and `openssh-client` (used on the host for privileged
-    operations, git identity, and SSH-credential mounting) are `Recommends`:
-    installed by default, but `coi` still partly functions without each.
+  - **`sudo` is `Depends`.** The default `[network] mode = "restricted"` sets up
+    nftables via passwordless `sudo -n nft`; `setupRestricted` fails closed when
+    that is unavailable and the error aborts session setup
+    (`internal/session/setup.go`). Running without sudo means deliberately
+    disabling the isolation (`mode = "open"` or `use_sudo = false`), so a
+    default-configured install genuinely requires it.
+  - **`git` is `Recommends`.** The host git-identity read returns empty when git
+    is missing, and `coi update patterns` is its only other user — threat
+    detection falls back to a compiled-in pattern set, so nothing breaks.
+  - **`openssh-client` is `Suggests`.** `coi` never executes an OpenSSH binary:
+    agent forwarding reads `$SSH_AUTH_SOCK` and proxies that socket into the
+    container via an Incus device. It is relevant only as the package that would
+    supply the agent to begin with.
   - Container-side tools (`tmux`, the agent tooling) run *inside* the Incus
     container via `incus exec`, so they are provided by the container image,
     not the host package.
