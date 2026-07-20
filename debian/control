@@ -1,8 +1,10 @@
 Source: code-on-incus
 Section: devel
 Priority: optional
-Maintainer: Code on Incus <code-on-incus@lists.launchpad.net>
-XSBC-Original-Maintainer: Maciej Mensfeld <maciej@mensfeld.pl>
+# The code-on-incus team has no Launchpad mailing list, so an address there
+# would bounce silently. Bug reports are routed to GitHub via XB-Bugs below
+# rather than to this inbox.
+Maintainer: Maciej Mensfeld <maciej@mensfeld.pl>
 Build-Depends: debhelper-compat (= 13),
                golang-1.25-go,
                pkg-config,
@@ -15,6 +17,11 @@ Rules-Requires-Root: no
 
 Package: code-on-incus
 Architecture: any
+# Bugs go to GitHub, not Launchpad's tracker and not the Maintainer's inbox.
+# The XB- prefix is required: dpkg rejects a bare "Bugs:" here ("unknown
+# information field") and only XB-* fields propagate into the binary control,
+# where it lands as "Bugs:" for reportbug/apt to surface.
+XB-Bugs: https://github.com/mensfeld/code-on-incus/issues
 # libsystemd0 is NOT redundant with ${shlibs:Depends}: the NFT monitor reads the
 # journal via go-systemd's sdjournal, which dlopen()s libsystemd.so.0 at runtime
 # instead of linking it. dpkg-shlibdeps only sees link-time NEEDED entries, so it

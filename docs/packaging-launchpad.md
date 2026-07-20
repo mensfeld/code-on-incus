@@ -39,11 +39,17 @@ require an SSH key or signing the Code of Conduct.
 
 ### 2. Create a GPG key
 
-The package `Maintainer` is the packaging team, `Code on Incus
-<code-on-incus@lists.launchpad.net>`, with the upstream author recorded in
-`XSBC-Original-Maintainer`. The team holds it because that address receives
-Launchpad's build-failure and rejection mail, which is packaging traffic rather
-than upstream traffic.
+The package `Maintainer` is the upstream author, `Maciej Mensfeld
+<maciej@mensfeld.pl>`. There is deliberately no `XSBC-Original-Maintainer`: that
+field exists to preserve the *original* maintainer when a derivative takes over
+the `Maintainer` slot, so with upstream already named there it would only repeat
+the same person.
+
+Bug reports do **not** go to that inbox — `debian/control` sets
+`XB-Bugs: https://github.com/mensfeld/code-on-incus/issues`, which lands in the
+binary package as `Bugs:` and is what `reportbug`/`apt` surface. (The `XB-`
+prefix is required; dpkg rejects a bare `Bugs:` in `debian/control` and only
+`XB-*` fields propagate into the binary control.)
 
 The signing key does **not** need to match either field — Launchpad validates
 the *signature*, not the maintainer. What matters is that the key belongs to a
@@ -87,13 +93,11 @@ Already created: the **`code-on-incus`** team owns
 Your Launchpad account (the PPA owner) has upload rights, so uploads signed by
 your key are accepted — regardless of the package `Maintainer`.
 
-> **Check the team mailing list exists.** `debian/control` sets
-> `Maintainer: Code on Incus <code-on-incus@lists.launchpad.net>`, and that
-> address only resolves if the team has created a Launchpad mailing list —
-> Launchpad does **not** provision one automatically. If it does not exist,
-> build-failure mail bounces silently. Create it under
-> <https://launchpad.net/~code-on-incus/+mailinglist>, or change `Maintainer`
-> in `debian/control` to an address that already receives mail.
+> **No team mailing list exists.** `code-on-incus@lists.launchpad.net` is *not*
+> configured — Launchpad does not provision team lists automatically — so it is
+> deliberately not used anywhere. Launchpad addresses build and rejection mail
+> to the **uploader** (whoever's key signed) and to `Changed-By` (`DEB_EMAIL`),
+> both of which are real inboxes, so nothing depends on a list existing.
 
 ### 5. Add the Go 1.25 archive dependency (critical, not yet done)
 
