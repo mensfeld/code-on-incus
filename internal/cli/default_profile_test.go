@@ -101,8 +101,10 @@ func TestApplyDefaultProfileFallback_NoDefaultConfigured(t *testing.T) {
 	}
 }
 
-// A [defaults] profile naming an unknown profile is an error (ApplyProfile
-// re-checks existence, mirroring the startup guard).
+// A [defaults] profile naming an unknown profile is the single guard's job: it
+// errors at the apply site with an actionable message (not ApplyProfile's terser
+// wording), and only for commands that reach this fallback (coi shell/run) — so
+// unrelated commands never hit it.
 func TestApplyDefaultProfileFallback_MissingProfileErrors(t *testing.T) {
 	a, cmd := newProfileTestApp("ghost", map[string]config.ProfileConfig{})
 
@@ -110,21 +112,7 @@ func TestApplyDefaultProfileFallback_MissingProfileErrors(t *testing.T) {
 		t.Fatal("a default profile that names no known profile must error")
 	} else if !strings.Contains(err.Error(), "ghost") {
 		t.Errorf("error should name the missing profile, got: %v", err)
-	}
-}
-
-func TestDefaultProfileCheckExempt(t *testing.T) {
-	root := &cobra.Command{Use: "coi"}
-	profile := &cobra.Command{Use: "profile"}
-	list := &cobra.Command{Use: "list"}
-	profile.AddCommand(list)
-	shell := &cobra.Command{Use: "shell"}
-	root.AddCommand(profile, shell)
-
-	if !defaultProfileCheckExempt(list) {
-		t.Error("`coi profile list` must be exempt so a bad default profile can be diagnosed")
-	}
-	if defaultProfileCheckExempt(shell) {
-		t.Error("`coi shell` must NOT be exempt from the default-profile existence check")
+	} else if !strings.Contains(err.Error(), "profile list") {
+		t.Errorf("error should point the user at `coi profile list`, got: %v", err)
 	}
 }
