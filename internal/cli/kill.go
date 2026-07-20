@@ -155,12 +155,21 @@ func killCommand(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		// Delete container
-		if err := mgr.Delete(true); err != nil {
-			fmt.Fprintf(os.Stderr, "  Warning: Failed to delete %s: %v\n", name, err)
-		} else {
+		// Delete container.
+		//
+		// An instance that is already gone counts as killed. Stopping a container
+		// ends the coi session that owns it, and that session deletes its own
+		// ephemeral container — so the delete below routinely races that cleanup and
+		// finds the instance already removed. Reporting that as a failure meant
+		// `coi kill` printed "No containers were killed" and exited non-zero about a
+		// container it had, in fact, just killed.
+		err = mgr.Delete(true)
+		switch {
+		case err == nil, container.IsNotFoundErr(err):
 			killed++
 			fmt.Printf("  ✓ Killed %s\n", name)
+		default:
+			fmt.Fprintf(os.Stderr, "  Warning: Failed to delete %s: %v\n", name, err)
 		}
 	}
 

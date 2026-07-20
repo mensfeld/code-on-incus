@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
-	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mensfeld/code-on-incus/internal/config"
@@ -18,6 +18,13 @@ import (
 type NftManager struct {
 	containerIP string
 	gatewayIP   string
+
+	// dynSeen tracks the DNS-learned addresses already installed in the dynamic
+	// set, and when each one expires, so AllowDynamicIPs can skip the nft exec
+	// when an address is still fresh. Guarded by dynMu so a re-sync from the
+	// background refresher cannot race a concurrent caller — see AllowDynamicIPs.
+	dynMu   sync.Mutex
+	dynSeen map[string]time.Time
 }
 
 // NewNftManager creates a new nft manager for a container
@@ -25,6 +32,7 @@ func NewNftManager(containerIP, gatewayIP string) *NftManager {
 	return &NftManager{
 		containerIP: containerIP,
 		gatewayIP:   gatewayIP,
+		dynSeen:     make(map[string]time.Time),
 	}
 }
 
@@ -68,57 +76,108 @@ func (f *NftManager) ApplyRestricted(cfg *config.NetworkConfig) error {
 	return nil
 }
 
-// ApplyAllowlist applies allowlist mode rules (allow specific IPs, block all else)
-func (f *NftManager) ApplyAllowlist(cfg *config.NetworkConfig, allowedIPs []string) error {
+// ApplyAllowlist applies allowlist mode rules: block all DNS, accept traffic to
+// the container's allowlist sets, reject everything else.
+//
+// The rules installed here are fixed for the life of the container — they name
+// the sets, not the addresses. Everything that varies (a domain's addresses
+// rotating out of DNS) is an element operation on a set, applied atomically by
+// the kernel. See nftset.go.
+//
+// staticCIDRs are the literal IP/CIDR entries from allowed_domains. Resolved name
+// entries land in the dynamic set, and the same addresses are written into the
+// container's /etc/hosts (see hosts.go) — which, with DNS blocked, is the
+// container's only route from a name to an address.
+//
+// A gateway IP is mandatory: allowlist mode is default-reject, so DHCP lease
+// renewal has to be explicitly allowed or the lease eventually lapses and the
+// container loses the IP every rule here is keyed on. setupAllowlist already
+// fails closed when the gateway cannot be detected; this guard states the same
+// requirement at the point that consumes it.
+func (f *NftManager) ApplyAllowlist(cfg *config.NetworkConfig, staticCIDRs []string) error {
+	if f.gatewayIP == "" {
+		return fmt.Errorf("allowlist mode requires a gateway IP (for the DHCP renewal accept rule)")
+	}
+
 	if err := EnsureBaseRules(); err != nil {
 		logWarnf("Warning: failed to ensure base rules: %v", err)
 	}
 
-	if f.gatewayIP != "" {
-		if err := f.addRule(f.containerIP, f.gatewayIP+"/32", "accept"); err != nil {
-			return fmt.Errorf("failed to add gateway allow rule: %w", err)
-		}
+	if err := f.ensureAllowlistSets(); err != nil {
+		return err
+	}
+	if err := f.AddStaticIPs(staticCIDRs); err != nil {
+		return err
 	}
 
+	// Block DNS before anything else is allowed. This is what makes the hosts file
+	// authoritative: with no way to query a nameserver, the container cannot learn
+	// an address the firewall has not already been told about, and the host/container
+	// divergence that this whole mode exists to prevent has nowhere to occur.
+	//
+	// It has to be done in TWO chains. Traffic to an off-box resolver (8.8.8.8) is
+	// forwarded, so the forward chain catches it — and it must be rejected BEFORE
+	// the set rules, or a resolver that happens to sit inside an allowlisted CIDR
+	// would be reachable on port 53 and could hand the container any address it
+	// liked. Traffic to the bridge's own resolver is addressed to the host, so it
+	// never traverses the forward chain at all; only an input rule can stop it.
+	if err := f.blockDNS(); err != nil {
+		return err
+	}
+
+	// DHCP still has to work. The lease is what gives the container the address
+	// every one of these rules is keyed on. The gateway is guaranteed present by
+	// the guard above, so this rule is unconditional.
+	if err := f.addRuleWithMatch(f.containerIP, f.gatewayIP+"/32",
+		[]string{"udp", "dport", "{", "67,", "68", "}"}, "accept"); err != nil {
+		return fmt.Errorf("failed to add gateway DHCP allow rule: %w", err)
+	}
+
+	// Private-network / link-local handling MUST precede the set-accept rules
+	// below. A resolved DNS answer — or a literal allowed_domains entry — that
+	// lands in a private or link-local range would otherwise be matched by the
+	// set-accept rule before any reject runs, opening a DNS-rebinding path to
+	// 169.254.169.254 (cloud metadata → credential theft) or to internal hosts.
+	// (Restricted mode already rejects these ahead of its permissive default;
+	// allowlist mode was rejecting them AFTER its set-accepts, so any set member
+	// in these ranges slipped straight through.) Semantics are unchanged from the
+	// previous placement — only the order is fixed.
+	//
+	// NB: this still keys off allow_local_network_access alone, as the previous
+	// code did; wiring allowlist mode to honor block_private_networks /
+	// block_metadata_endpoint independently (as restricted mode does) — and thus
+	// blocking metadata even when local access is on — is a separate follow-up.
 	if config.BoolVal(cfg.AllowLocalNetworkAccess) {
 		for _, cidr := range []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"} {
 			if err := f.addRule(f.containerIP, cidr, "accept"); err != nil {
 				return fmt.Errorf("failed to add RFC1918 allow rule: %w", err)
 			}
 		}
-	}
-
-	// Sort IPs for deterministic rule ordering
-	sortedIPs := make([]string, len(allowedIPs))
-	copy(sortedIPs, allowedIPs)
-	sort.Strings(sortedIPs)
-
-	for _, ip := range sortedIPs {
-		dest := ip
-		if !strings.Contains(ip, "/") {
-			dest = ip + "/32"
-		}
-		// Allow TCP/UDP to allowlisted hosts — covers HTTPS, git, npm, DNS over
-		// UDP/53, and QUIC/HTTP3 over UDP/443. Other IP protocols (raw IP, GRE,
-		// SCTP, custom proto numbers) are NOT accepted and fall through to the
-		// default deny, closing non-TCP/UDP exfil channels to allowed hosts.
-		if err := f.addRuleWithMatch(f.containerIP, dest, []string{"meta", "l4proto", "{", "tcp,", "udp", "}"}, "accept"); err != nil {
-			return fmt.Errorf("failed to add allowlist L4 rule for %s: %w", ip, err)
-		}
-		// Allow rate-limited ICMP echo-request: ordinary (low-rate) ping and
-		// health checks work, but ICMP is throttled (~10/s, plus nft's default
-		// burst) so it cannot be a high-bandwidth covert channel. Excess echo and
-		// all other ICMP types fall through to the default deny.
-		if err := f.addRuleWithMatch(f.containerIP, dest, []string{"icmp", "type", "echo-request", "limit", "rate", "10/second"}, "accept"); err != nil {
-			return fmt.Errorf("failed to add allowlist ICMP rule for %s: %w", ip, err)
-		}
-	}
-
-	if !config.BoolVal(cfg.AllowLocalNetworkAccess) {
+	} else {
 		for _, cidr := range []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16"} {
 			if err := f.addRule(f.containerIP, cidr, "reject"); err != nil {
-				return fmt.Errorf("failed to add RFC1918 block rule: %w", err)
+				return fmt.Errorf("failed to add RFC1918/metadata block rule: %w", err)
 			}
+		}
+	}
+
+	// Two rules per set. Allow TCP/UDP to allowlisted hosts — covers HTTPS, git,
+	// npm, and QUIC/HTTP3 over UDP/443. Other IP protocols (raw IP, GRE, SCTP,
+	// custom proto numbers) are NOT accepted and fall through to the default
+	// deny, closing non-TCP/UDP exfil channels to allowed hosts.
+	//
+	// ICMP echo-request is allowed but rate-limited (~10/s plus nft's default
+	// burst) so ordinary ping and health checks work while ICMP cannot become a
+	// high-bandwidth covert channel. Excess echo and all other ICMP types fall
+	// through to the default deny.
+	for _, set := range []string{staticSetName(f.containerIP), dynamicSetName(f.containerIP)} {
+		if err := f.addRuleWithMatch(f.containerIP, "@"+set,
+			[]string{"meta", "l4proto", "{", "tcp,", "udp", "}"}, "accept"); err != nil {
+			return fmt.Errorf("failed to add allowlist L4 rule for set %s: %w", set, err)
+		}
+		if err := f.addRuleWithMatch(f.containerIP, "@"+set,
+			[]string{"icmp", "type", "echo-request", "limit", "rate", "10/second"}, "accept"); err != nil {
+			return fmt.Errorf("failed to add allowlist ICMP rule for set %s: %w", set, err)
 		}
 	}
 
@@ -130,51 +189,41 @@ func (f *NftManager) ApplyAllowlist(cfg *config.NetworkConfig, allowedIPs []stri
 	return nil
 }
 
-// RemoveRules removes all nftables rules for this container's IP
+// RemoveRules removes every host-side artefact COI installed for this container:
+// forward rules, allowlist sets and the input-chain DNS block. See
+// DeleteCOIFilterRulesForIP, which is the shared implementation and the same path
+// kill and orphan cleanup take.
 func (f *NftManager) RemoveRules() error {
-	if f.containerIP == "" {
-		return nil
-	}
-	return deleteNFTRulesByComment("coi-" + f.containerIP)
+	return DeleteCOIFilterRulesForIP(f.containerIP)
 }
 
-// ReplaceAllowlist atomically replaces the allowlist rules for this container.
-// It snapshots the existing rule handles first, appends the new rules, then
-// deletes only the old handles. The container therefore always has an active
-// rule set during the transition — there is never a window where all rules are
-// absent and the chain's default-accept policy would pass all traffic through.
+// ReplaceAllowlist re-syncs the static allowlist entries for this container.
 //
-// Rule-ordering note: nft evaluates rules in append order. During the brief
-// window between ApplyAllowlist (which appends new rules) and the deletion of
-// old handles, the chain contains both old and new rule sets. Because the old
-// default-reject rule precedes the new allow rules, any IP that is only in the
-// new set is unreachable until the old rules are deleted. This is intentional —
-// the transition errs toward denial rather than briefly permitting unintended
-// traffic.
-func (f *NftManager) ReplaceAllowlist(cfg *config.NetworkConfig, allowedIPs []string) error {
+// It no longer rewrites rules. The rules installed by ApplyAllowlist reference
+// the container's sets by name and are stable for the life of the container, so
+// updating the allowlist means adding set elements — which the kernel applies
+// atomically, with no window in which a stale rule shadows a fresh one.
+//
+// The old implementation appended a new rule set behind the still-present
+// default reject and then deleted the previous handles one exec at a time; for
+// the duration of that teardown, any address present only in the new set was
+// rejected. That window is gone: there is nothing to tear down.
+//
+// Dynamic (DNS-learned) addresses are not touched here — the resolver/refresher
+// path (installNames → syncResolved → AllowDynamicIPs) owns them, and re-adding
+// an element refreshes its timeout rather than replacing it, so an address that
+// is still in use never expires out from under an open connection.
+//
+// This method is retained on the nftRuler interface as the static-entry re-sync
+// primitive; a regression test pins that setup does not fall back to it.
+func (f *NftManager) ReplaceAllowlist(_ *config.NetworkConfig, staticCIDRs []string) error {
 	if f.containerIP == "" {
 		return nil
 	}
-
-	// Capture current handles before appending new rules so we can surgically
-	// remove them afterwards without touching the freshly-added entries.
-	oldHandles, err := nftGetHandlesByComment("coi-" + f.containerIP)
-	if err != nil {
-		return fmt.Errorf("failed to list current nft rules: %w", err)
-	}
-
-	if err := f.ApplyAllowlist(cfg, allowedIPs); err != nil {
+	if err := f.ensureAllowlistSets(); err != nil {
 		return err
 	}
-
-	// Remove only the old handles. New rules are already in the chain, so the
-	// container is never left without a filtering rule set.
-	for _, h := range oldHandles {
-		if _, delErr := runNFTCommand("delete", "rule", "ip", "coi", "forward", "handle", h); delErr != nil {
-			logWarnf("Warning: failed to delete stale nft rule handle %s: %v", h, delErr)
-		}
-	}
-	return nil
+	return f.AddStaticIPs(staticCIDRs)
 }
 
 // EnsureBaseRules creates the ip coi table/chain and adds the shared conntrack rule.
@@ -475,11 +524,6 @@ func nftRuleExistsWithCommentFamily(family, comment string) (bool, error) {
 	return strings.Contains(string(output), fmt.Sprintf(`comment "%s"`, comment)), nil
 }
 
-// nftGetHandlesByComment returns the handles of rules in ip coi forward that match comment.
-func nftGetHandlesByComment(comment string) ([]string, error) {
-	return nftGetHandlesByCommentFamily("ip", comment)
-}
-
 // nftGetHandlesByCommentFamily is the family-aware variant of
 // nftGetHandlesByComment ("ip" for IPv4, "ip6" for IPv6).
 func nftGetHandlesByCommentFamily(family, comment string) ([]string, error) {
@@ -563,9 +607,30 @@ func ListCOIFilterRuleIPs() (map[string][]string, error) {
 	return result, nil
 }
 
-// DeleteCOIFilterRulesForIP removes all ip coi forward rules for the given container IP.
+// DeleteCOIFilterRulesForIP removes every host-side artefact COI installed for a
+// container IP: its forward rules, then its input-chain DNS block, then its
+// allowlist sets.
+//
+// This is the single teardown entry point used by kill, orphan cleanup and
+// setup's stale-rule purge, so it must account for everything allowlist mode
+// creates: forward rules, the input-chain DNS block, and the two allowlist sets.
+//
+// Rules go first, in both chains — the kernel refuses to drop a set that a rule
+// still references.
+//
+// It is safe for containers that never had sets or a DNS block (open and
+// restricted mode): removing something that was never created is a no-op.
 func DeleteCOIFilterRulesForIP(ip string) error {
-	return deleteNFTRulesByComment("coi-" + ip)
+	if ip == "" {
+		return nil
+	}
+	if err := deleteNFTRulesByComment("coi-" + ip); err != nil {
+		return err
+	}
+	if err := removeInputRulesForIP(ip); err != nil {
+		return err
+	}
+	return removeAllowlistSetsForIP(ip)
 }
 
 // GetContainerIP retrieves the IPv4 address of a container from Incus
