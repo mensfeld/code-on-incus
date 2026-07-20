@@ -14,8 +14,10 @@ import (
 var Version = "dev"
 
 // InstallSource records how this binary was installed (injected via ldflags at
-// build time). Distro packaging sets it to "deb"; plain source builds leave it
-// "source". See installedFromPackage in update.go for why it matters.
+// build time). Packaging sets it to the package format that owns the binary —
+// "deb", "rpm", "arch", ... — while plain source builds leave it "source". Any
+// non-"source" value disables the self-updater; see installedFromPackage and
+// packageUpdateCommands in update.go.
 var InstallSource = "source"
 
 // App holds the shared CLI state that is populated from persistent flags and
