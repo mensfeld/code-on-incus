@@ -162,6 +162,35 @@ target is hardcoded to `ppa:code-on-incus/ppa`. The job **no-ops unless
 `DEB_EMAIL` is set**, so a fork or upstream without PPA credentials is never
 failed by it.
 
+### Relationship to `release.yml`
+
+The two workflows are **independent by design** — both fire on the same tag and
+run in parallel, and neither gates the other. Chaining them via `workflow_run`
+would break the version: that trigger runs in the default-branch context, so
+`GITHUB_REF_NAME` would be `master` and the tag-derived version would silently
+fall back to the committed changelog version.
+
+Two consequences worth knowing before cutting a tag:
+
+- **A failed `release.yml` does not prevent the PPA upload.** They are separate
+  jobs on the same trigger.
+- **Launchpad uploads are irreversible.** A version number can never be reused,
+  even after deleting the package from the PPA. Recovering from a bad upload
+  means bumping the trailing `.N` (`0.10.2~ubuntu24.04.2`), not re-uploading the
+  same version.
+
+`release.yml` also force-pushes a `latest` tag at the end. That does not match
+the `v*.*.*` filter, so it does not retrigger PPA publishing — keep that filter
+specific if the tag scheme ever changes.
+
+### Supply-chain notes
+
+Actions are pinned by commit SHA, matching `ci.yml` and `release.yml`. The Go
+module cache is disabled (`cache: false`) because `go mod vendor` output ships
+*inside* the source tarball Launchpad compiles — a poisoned cache would be baked
+into the published package, not just a local build. The checkout uses
+`persist-credentials: false` since the job never pushes.
+
 Configure once in **GitHub repo → Settings** (in the repo that owns the release
 tags — i.e. upstream once merged):
 
