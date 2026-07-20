@@ -8,12 +8,16 @@ Build-Depends: debhelper-compat (= 13),
                libsystemd-dev
 Standards-Version: 4.7.0
 Homepage: https://github.com/mensfeld/code-on-incus
-Vcs-Git: https://github.com/smokestacklightnin/code-on-incus.git
-Vcs-Browser: https://github.com/smokestacklightnin/code-on-incus
+Vcs-Git: https://github.com/mensfeld/code-on-incus.git
+Vcs-Browser: https://github.com/mensfeld/code-on-incus
 Rules-Requires-Root: no
 
 Package: code-on-incus
 Architecture: any
+# libsystemd0 is NOT redundant with ${shlibs:Depends}: the NFT monitor reads the
+# journal via go-systemd's sdjournal, which dlopen()s libsystemd.so.0 at runtime
+# instead of linking it. dpkg-shlibdeps only sees link-time NEEDED entries, so it
+# cannot infer this dependency and it has to be declared by hand.
 Depends: ${shlibs:Depends}, ${misc:Depends},
          libsystemd0,
          incus
