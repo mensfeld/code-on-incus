@@ -209,3 +209,17 @@ dpkg-buildpackage -us -uc -b        # produces ../code-on-incus_*.deb
     not the host package.
 - Integration tests are skipped during the package build (they need a live
   Incus daemon).
+- **The self-updater is disabled in packaged builds.** `debian/rules` stamps
+  `-X internal/cli.InstallSource=deb` next to the version ldflag, and
+  `coi update core` refuses when that is set to anything but `source`.
+  Otherwise it would overwrite the dpkg-owned `/usr/bin/coi` in place —
+  desyncing dpkg's file database, with the next `apt upgrade` silently
+  reverting the update. `--force` does not override this; `--check` still
+  works, as does `coi update patterns` (the detection databases are not
+  shipped in the package). Any future packaging target (rpm, Arch, ...) gets
+  the same protection by stamping its own `InstallSource` value; adding it to
+  `packageUpdateCommands` in `internal/cli/update.go` upgrades the message
+  from generic advice to that package manager's exact command.
+- Lintian runs as a separate **non-fatal** CI step rather than via `debuild`,
+  so packaging tags are visible in the log without a lintian regression
+  blocking a release. Read it when you touch `debian/`.
