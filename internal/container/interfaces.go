@@ -43,6 +43,7 @@ type ContainerFiles interface {
 	DirExists(path string) (bool, error)
 	FileExists(path string) (bool, error)
 	CreateFile(containerPath, content string) error
+	CreateFileWithOwner(containerPath, content string, uid, gid int, mode string) error
 }
 
 // ContainerSnapshot covers snapshot lifecycle operations.

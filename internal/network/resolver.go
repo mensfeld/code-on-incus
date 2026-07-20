@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"reflect"
-	"sort"
 	"strings"
 	"time"
 )
@@ -53,18 +51,21 @@ func (r *Resolver) ResolveDomain(domain string) ([]string, error) {
 		return []string{ipNet.String()}, nil
 	}
 
-	// Wildcard domain — strip prefix, resolve base domain (best-effort)
-	effectiveDomain := domain
-	if strings.HasPrefix(domain, "*.") {
-		effectiveDomain = domain[2:]
-		if effectiveDomain == "" {
-			return nil, fmt.Errorf("invalid wildcard entry %q: missing base domain", domain)
-		}
-		logInfof("  %s: wildcard — resolving base domain %q (best-effort, not all IPs guaranteed)", domain, effectiveDomain)
+	// A wildcard has no meaningful resolution and must never be passed here.
+	//
+	// This function used to "support" one by stripping the "*." and resolving the
+	// BASE domain, which is where the original bug lived: googleapis.com resolves
+	// to 142.250.130.x, while us-central1-aiplatform.googleapis.com — the address
+	// the container actually dials — is 172.217.112-119.4. Not one address in
+	// common. The allowlist was populated with addresses nothing would ever connect
+	// to, and nothing said so. AllowPolicy now rejects wildcards up front; this
+	// guard makes sure no other caller can quietly reintroduce the old behaviour.
+	if strings.Contains(domain, "*") {
+		return nil, fmt.Errorf("cannot resolve wildcard %q: list exact hostnames or a CIDR instead", domain)
 	}
 
 	// Try TTL-aware DNS query first
-	result, err := QueryDNS(effectiveDomain)
+	result, err := QueryDNS(domain)
 	if err == nil && len(result.IPs) > 0 {
 		r.DomainTTLs[domain] = result.TTL
 		logInfof("  %s: resolved %d IPs (TTL: %ds)", domain, len(result.IPs), result.TTL)
@@ -81,7 +82,7 @@ func (r *Resolver) ResolveDomain(domain string) ([]string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	addrs, lookupErr := net.DefaultResolver.LookupIP(ctx, "ip4", effectiveDomain)
+	addrs, lookupErr := net.DefaultResolver.LookupIP(ctx, "ip4", domain)
 	if lookupErr != nil {
 		return nil, fmt.Errorf("failed to resolve %s: %w", domain, lookupErr)
 	}
@@ -167,38 +168,6 @@ func (r *Resolver) GetMinTTL() uint32 {
 	}
 
 	return minTTL
-}
-
-// IPsUnchanged checks if resolved IPs differ from cache
-func (r *Resolver) IPsUnchanged(newIPs map[string][]string) bool {
-	// Quick check: different number of domains
-	if len(newIPs) != len(r.cache.Domains) {
-		return false
-	}
-
-	// Check each domain
-	for domain, newDomainIPs := range newIPs {
-		cachedIPs, exists := r.cache.Domains[domain]
-		if !exists {
-			return false // New domain
-		}
-
-		// Sort both slices for comparison
-		sortedNew := make([]string, len(newDomainIPs))
-		copy(sortedNew, newDomainIPs)
-		sort.Strings(sortedNew)
-
-		sortedCached := make([]string, len(cachedIPs))
-		copy(sortedCached, cachedIPs)
-		sort.Strings(sortedCached)
-
-		// Compare sorted slices
-		if !reflect.DeepEqual(sortedNew, sortedCached) {
-			return false
-		}
-	}
-
-	return true
 }
 
 // UpdateCache updates the cache with new IPs and TTLs

@@ -567,6 +567,57 @@ mode = "restricted"   # Default — blocks private networks, allows internet
 # mode = "open"       # No restrictions (trusted projects only)
 ```
 
+### Allowlist mode
+
+In allowlist mode the container does not resolve names itself. COI resolves the
+allowlisted hostnames on the host, installs those addresses in the firewall, and
+writes **the same addresses** into the container's `/etc/hosts`. DNS egress is
+then blocked, so that hosts file is the container's only way to turn a name into
+an address.
+
+That equality is the whole point: the container cannot reach an address the
+firewall has not already been given, because there is nowhere else for an address
+to come from. Nothing has to stay running for this to hold — it survives `coi`
+exiting, detaching from tmux, or the process being killed.
+
+```toml
+[network]
+mode = "allowlist"
+allowed_domains = [
+    "api.anthropic.com",       # exact hostname
+    "registry.npmjs.org",
+    "10.0.0.0/8",              # IPv4 CIDR — no name resolution involved
+    "8.8.8.8",                 # raw IPv4 address
+]
+```
+
+**Wildcards are not supported, and are rejected rather than quietly mishandled.**
+Because each name is resolved up front and written to `/etc/hosts`, there is no
+answer to write for `*.example.com` — you cannot know which subdomains will be
+asked for. List the exact hostnames, or allow the provider's published IP ranges
+as CIDRs.
+
+**Claude via GCP Vertex AI** — list the endpoints, which are enumerable:
+
+```toml
+allowed_domains = [
+    "us-central1-aiplatform.googleapis.com",   # your region
+    "oauth2.googleapis.com",
+    "sts.googleapis.com",
+]
+```
+
+Or, for blanket coverage without naming endpoints, use Google's published ranges
+(from `https://www.gstatic.com/ipranges/goog.json`) — these need no resolution at
+all:
+
+```toml
+allowed_domains = ["142.250.0.0/15", "172.217.0.0/16", "216.239.32.0/19"]
+```
+
+A host outside the allowlist has no address in `/etc/hosts` and no route through
+the firewall, so it fails to resolve and fails to connect.
+
 ## Security Monitoring
 
 COI includes **built-in security monitoring** to detect and respond to malicious behavior in real-time:

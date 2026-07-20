@@ -71,13 +71,30 @@ func IncusExecInteractive(args ...string) error {
 	return cmd.Run()
 }
 
-// IncusExecQuietContext executes an Incus command silently with context support
+// IncusExecQuietContext runs an Incus command without writing to the terminal,
+// but still reports WHY it failed.
+//
+// "Quiet" previously meant discarding stderr outright, so a failure surfaced as
+// a bare "exit status 1" with the cause thrown away — `coi kill` could only tell
+// you "Failed to delete <container>: exit status 1", which is not something
+// anyone can act on. Incus's message is captured and attached to the error
+// instead; callers that want silence get silence, callers that hit an error get
+// the reason.
 func IncusExecQuietContext(ctx context.Context, args ...string) error {
 	cmdArgs := buildIncusCommand(args...)
 	cmd := execIncusCommandContext(ctx, cmdArgs)
+
+	var stderr bytes.Buffer
 	cmd.Stdout = nil
-	cmd.Stderr = nil
-	return cmd.Run()
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return fmt.Errorf("%w: %s", err, msg)
+		}
+		return err
+	}
+	return nil
 }
 
 // IncusExecQuiet executes an Incus command silently (suppress stdout/stderr)
@@ -285,6 +302,26 @@ func IncusFilePushContext(ctx context.Context, source, destination string) error
 // IncusFilePush pushes a file into a container
 func IncusFilePush(source, destination string) error {
 	return IncusFilePushContext(context.Background(), source, destination)
+}
+
+// IncusFilePushWithOwnerContext pushes a file into a container with explicit
+// ownership and mode applied by the push itself. Without these flags incus
+// preserves the SOURCE file's owner and mode (--uid/--gid default to -1), so
+// a pushed host temp file lands owned by the host UID with its restrictive
+// mode — unreadable by other container users. Pushing with the flags leaves
+// no window or failure path where the file exists with the wrong attributes.
+func IncusFilePushWithOwnerContext(ctx context.Context, source, destination string, uid, gid int, mode string) error {
+	cmdArgs := buildIncusCommand("file", "push",
+		"--uid", fmt.Sprintf("%d", uid), "--gid", fmt.Sprintf("%d", gid), "--mode", mode,
+		source, destination)
+	cmd := execIncusCommandContext(ctx, cmdArgs)
+	return cmd.Run()
+}
+
+// IncusFilePushWithOwner pushes a file into a container with explicit
+// ownership and mode.
+func IncusFilePushWithOwner(source, destination string, uid, gid int, mode string) error {
+	return IncusFilePushWithOwnerContext(context.Background(), source, destination, uid, gid, mode)
 }
 
 // StartWithIsolationFallback starts a non-ephemeral container that may have
@@ -651,6 +688,29 @@ func StopContainerQuiet(ctx context.Context, containerName string, force bool) (
 		args = append(args, "--force")
 	}
 	return IncusOutputContext(ctx, args...)
+}
+
+// IsNotFoundErr reports whether an Incus error means the instance is not there.
+//
+// For anything whose goal is "this container should be gone", that is success,
+// not failure. Deletion races are routine: stopping a container ends the session
+// that owns it, and that session then deletes its own ephemeral container — so a
+// concurrent `coi kill` can find the instance already removed between checking
+// that it exists and deleting it. Treating that as an error made `coi kill`
+// report "No containers were killed" and exit non-zero about a container that
+// had, in fact, been killed.
+//
+// Matching on the message is unpleasant but is what the Incus CLI gives us; it
+// exits 1 for every failure and distinguishes them only in stderr. We match the
+// exact phrase Incus emits ("Instance not found") rather than a loose "not found"
+// AND "instance", so an unrelated failure that merely mentions an instance — a
+// busy storage volume, a missing network "for instance X" — is still reported
+// instead of being silently counted as a successful kill.
+func IsNotFoundErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "instance not found")
 }
 
 // DeleteContainer deletes a container forcefully
