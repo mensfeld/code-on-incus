@@ -98,13 +98,29 @@ versions — Launchpad rejects re-uploading the same version to two series):
 go mod vendor                                   # make source offline-buildable
 
 # set the version + target series in the changelog
-dch -b -v "0.10.2~noble1" -D noble "Build 0.10.2 for noble."
+dch -b -v "0.10.2~ubuntu24.04.1" -D noble "Build 0.10.2 for noble."
 
 debuild --no-lintian -S -sa -d -k<YOUR_KEY_ID>  # build + sign the SOURCE package
                                                 # -d: source-only, skip build-dep check
 dput ppa:code-on-incus/ppa \
-     ../code-on-incus_0.10.2~noble1_source.changes
+     ../code-on-incus_0.10.2~ubuntu24.04.1_source.changes
 ```
+
+### Version scheme
+
+Per-series versions are `<upstream>~ubuntu<XX.YY>.<N>` — e.g. `0.10.2~ubuntu24.04.1`.
+
+- **Numeric series, not the codename.** Codenames sort alphabetically and Ubuntu
+  restarts the alphabet every cycle (…zesty → artful). Under a `~noble1` style
+  scheme the next cycle's series would sort *below* the current one, so `apt`
+  would see a downgrade and refuse the upgrade after `do-release-upgrade`.
+  `ubuntu24.04` → `ubuntu26.04` → `ubuntu28.04` always sorts forward.
+- **No Debian revision.** `3.0 (native)` forbids a hyphen in the version, so the
+  usual `0.10.2-1~ubuntu24.04.1` form is not available here.
+- **`~` keeps these below a real archive version**, so if `code-on-incus` ever
+  lands in Ubuntu proper, the archive package wins over the PPA build.
+- **Bump the trailing `.N`** to re-upload the same upstream version to the same
+  series (Launchpad rejects a duplicate version).
 
 Watch the build at your PPA's page. Once green, users install with:
 
