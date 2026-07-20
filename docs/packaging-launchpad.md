@@ -99,13 +99,19 @@ your key are accepted — regardless of the package `Maintainer`.
 > to the **uploader** (whoever's key signed) and to `Changed-By` (`DEB_EMAIL`),
 > both of which are real inboxes, so nothing depends on a list existing.
 
-### 5. Add the Go 1.25 archive dependency (critical, not yet done)
+### 5. The Go 1.25 archive dependency (already added)
 
-Without this, LTS builds fail with "golang-1.25-go has no installation candidate".
+`ppa:longsleep/golang-backports` is configured as an archive dependency on the
+PPA. It is what lets the **jammy and noble** builders resolve `golang-1.25-go`;
+resolute finds it in universe and does not need it.
+
+If it is ever removed, those two builds fail with "golang-1.25-go has no
+installation candidate" while resolute still succeeds — a half-green run that
+reads like a flake rather than a missing prerequisite. To re-add it:
 
 1. Open <https://launchpad.net/~code-on-incus/+archive/ubuntu/ppa/+edit-dependencies>.
 2. Under "add a new dependency", add **`ppa:longsleep/golang-backports`**.
-3. Save.
+3. Save, then re-trigger the failed builds.
 
 ## Manual upload
 
