@@ -19,12 +19,12 @@
     "allowed_domains": {
       "type": "array",
       "items": { "type": "string" },
-      "description": "Domains allowed when mode is \"allowlist\". RFC 1918 ranges are always blocked in allowlist mode."
+      "description": "Destinations allowed when mode is \"allowlist\". Accepts exact hostnames (\"api.anthropic.com\"), raw IPv4 addresses (\"8.8.8.8\") and IPv4 CIDRs (\"10.0.0.0/8\"). COI resolves each hostname on the host, installs the addresses in the firewall, and writes the same addresses into the container's /etc/hosts; DNS egress is then blocked, so the container cannot reach an address the firewall was not given. Wildcards are NOT supported and are rejected: with names resolved up front there is no answer to write for a subdomain nobody has asked for yet. List exact hostnames, or the provider's published IP ranges as CIDRs. RFC 1918 ranges are always blocked in allowlist mode."
     },
     "refresh_interval_minutes": {
       "type": "integer",
       "minimum": 0,
-      "description": "How often to refresh DNS-resolved allowlist rules (minutes)"
+      "description": "How often to re-resolve allowlisted domains and refresh their firewall entries and the container's /etc/hosts (minutes). Set to 0 to disable refreshing, which pins the addresses resolved at startup for the life of the container."
     },
     "allow_local_network_access": {
       "type": "boolean",

@@ -54,7 +54,11 @@ def test_health_storage_pools_multi(coi_binary, workspace_dir):
             timeout=60,
             cwd=workspace_dir,
         )
-        assert result.returncode in (0, 1), f"health should exit 0 or 1. stderr: {result.stderr}"
+        # Exit 2 means a check FAILED; show the report so the failure names it.
+        assert result.returncode in (0, 1), (
+            f"health should exit 0 or 1, got {result.returncode}.\n"
+            f"--- report ---\n{result.stdout}\n--- stderr ---\n{result.stderr}"
+        )
 
         data = json.loads(result.stdout)
         details = data["checks"]["incus_storage_pools"]["details"]
