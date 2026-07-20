@@ -3,8 +3,13 @@ Packaging notes for code-on-incus
 
 Go 1.25 toolchain
 -----------------
-go.mod requires Go 1.25, which is not in the Ubuntu LTS archives (jammy ships
-1.18, noble 1.22). It is provided by:
+go.mod requires Go 1.25. Availability of `golang-1.25-go` differs per series:
+
+  * resolute (26.04)  - in the archive (universe). No PPA needed.
+  * noble   (24.04)   - NOT in the archive; needs the backports PPA.
+  * jammy   (22.04)   - NOT in the archive; needs the backports PPA.
+
+For the two LTS series that lack it, the toolchain comes from:
 
     ppa:longsleep/golang-backports   (package: golang-1.25-go)
 

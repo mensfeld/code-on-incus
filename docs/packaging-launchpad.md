@@ -12,11 +12,13 @@ and publishes an apt repository users can add.
 
 Two facts drive this project's packaging:
 
-1. **`go.mod` requires Go 1.25**, which the Ubuntu LTS archives do not carry
-   (jammy ships 1.18, noble 1.22). Go 1.25 comes from
-   [`ppa:longsleep/golang-backports`](https://launchpad.net/~longsleep/+archive/ubuntu/golang-backports)
-   (package `golang-1.25-go`), added to our PPA as an **archive dependency** so
-   the builders can resolve it.
+1. **`go.mod` requires Go 1.25**, and `golang-1.25-go` is only in the archive on
+   the newest series — resolute (26.04) has it in *universe*, while jammy (22.04)
+   and noble (24.04) do not. For those two it comes from
+   [`ppa:longsleep/golang-backports`](https://launchpad.net/~longsleep/+archive/ubuntu/golang-backports),
+   added to our PPA as an **archive dependency** so the builders can resolve it.
+   The archive dependency is therefore load-bearing for the LTS builds, not for
+   resolute.
 2. **Launchpad builders have no network.** Go modules are therefore *vendored*
    (`go mod vendor`) into the source tarball, and the build runs with
    `GOPROXY=off`. `vendor/` is intentionally not committed (see `.gitignore`);
