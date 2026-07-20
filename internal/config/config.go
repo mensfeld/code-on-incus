@@ -240,7 +240,15 @@ func (s *SecurityConfig) IsHostImmutableEnabled() bool {
 
 // DefaultsConfig contains default settings
 type DefaultsConfig struct {
-	Model       string            `toml:"model"`
+	Model string `toml:"model"`
+	// Profile names the profile to apply when `--profile` is not passed, so a
+	// user's opinionated setup applies without retyping it (#607). `coi` gives
+	// this profile; `coi --profile default` still gives the synthesized clone of
+	// global config. Honored ONLY from trusted-scope config (an untrusted
+	// project config redirecting the no-flag default could downgrade the user's
+	// chosen environment) — stripped from project config at load time. A name
+	// that does not resolve to a known profile is a hard error at startup.
+	Profile     string            `toml:"profile"`
 	ForwardEnv  []string          `toml:"forward_env"`
 	Environment map[string]string `toml:"environment"`
 	// EnvCommands maps env var names to host commands run at session start; the
@@ -808,6 +816,9 @@ func (c *Config) Merge(other *Config) {
 
 	if other.Defaults.Model != "" {
 		c.Defaults.Model = other.Defaults.Model
+	}
+	if other.Defaults.Profile != "" {
+		c.Defaults.Profile = other.Defaults.Profile
 	}
 	if len(other.Defaults.ForwardEnv) > 0 {
 		c.Defaults.ForwardEnv = MergeStringSliceUnique(c.Defaults.ForwardEnv, other.Defaults.ForwardEnv)

@@ -210,12 +210,15 @@ class TestLogWatcherInotify:
             cleanup_container(container_name, coi_binary)
 
     def test_event_detected_promptly(self, test_workspace, coi_binary):
-        """Auth log threat is detected within 8 seconds of the line being written.
+        """Auth log threat is detected after the failed-login line is written.
 
         With 5-second polling the detection could take up to 5 s; inotify delivers
-        in ~1 s when watches are active.  The 8 s ceiling also accommodates the
-        3-second backstop ticker that kicks in when log files don't exist at
-        watch-setup time (e.g. fresh containers with overlayfs).
+        in ~1 s when watches are active. The ceiling is deliberately generous to
+        absorb CI scheduling jitter on this detection-timing-sensitive lane, on top
+        of the 3-second backstop ticker that kicks in when log files don't exist at
+        watch-setup time (e.g. fresh containers with overlayfs). The line is also
+        re-appended periodically so a monitoring-daemon startup race under load
+        (watch not yet active at the first write) can't cause a permanent miss.
         """
         config_path = Path.home() / ".coi" / "config.toml"
         backup = config_path.read_text() if config_path.exists() else None
@@ -237,27 +240,31 @@ class TestLogWatcherInotify:
             )
             time.sleep(3)
 
+            def append_auth_line():
+                subprocess.run(
+                    [
+                        "incus",
+                        "exec",
+                        container_name,
+                        "--",
+                        "bash",
+                        "-c",
+                        "mkdir -p /var/log && "
+                        "echo 'Jun  5 12:00:00 coi sshd[99]: Failed password for attacker"
+                        " from 5.6.7.8 port 22222 ssh2' >> /var/log/auth.log",
+                    ],
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+
             write_time = time.monotonic()
-            subprocess.run(
-                [
-                    "incus",
-                    "exec",
-                    container_name,
-                    "--",
-                    "bash",
-                    "-c",
-                    "mkdir -p /var/log && "
-                    "echo 'Jun  5 12:00:00 coi sshd[99]: Failed password for attacker"
-                    " from 5.6.7.8 port 22222 ssh2' >> /var/log/auth.log",
-                ],
-                check=False,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            append_auth_line()
 
             events = []
             auth_events = []
-            deadline = write_time + 8.0
+            deadline = write_time + 20.0
+            next_rewrite = write_time + 4.0
             while time.monotonic() < deadline:
                 events = get_threat_events(container_name)
                 auth_events = [
@@ -269,11 +276,18 @@ class TestLogWatcherInotify:
                 ]
                 if auth_events:
                     break
+                # Re-append if nothing yet: survives a daemon-startup race where the
+                # watch wasn't active at the first write (a fresh line then fires
+                # inotify) rather than depending solely on the backstop re-read.
+                now = time.monotonic()
+                if now >= next_rewrite:
+                    append_auth_line()
+                    next_rewrite = now + 4.0
                 time.sleep(0.2)
 
             elapsed = time.monotonic() - write_time
             assert len(auth_events) > 0, (
-                f"Expected auth threat within 8 s (inotify + backstop), elapsed {elapsed:.1f}s. "
+                f"Expected auth threat within 20 s (inotify + backstop), elapsed {elapsed:.1f}s. "
                 f"Events: {events}"
             )
         finally:

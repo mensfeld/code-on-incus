@@ -109,6 +109,13 @@ func (a *App) runCommand(cmd *cobra.Command, args []string) error {
 	if err := a.overlayWorkspaceConfig(absWorkspace); err != nil {
 		return err
 	}
+	// No --profile given: fall back to [defaults] profile (#607). coi run has no
+	// alias/resume profile source, so this is the only fallback site it needs.
+	if applied, err := a.applyDefaultProfileFallback(cmd); err != nil {
+		return err
+	} else if applied {
+		a.persistent = config.BoolVal(a.cfg.Container.Persistent)
+	}
 	if a.cfg.Limits.Runtime.MaxDuration != "" {
 		if _, err := limits.ParseDuration(a.cfg.Limits.Runtime.MaxDuration); err != nil {
 			return fmt.Errorf("invalid max_duration: %w", err)

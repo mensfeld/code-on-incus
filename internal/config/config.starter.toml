@@ -27,6 +27,11 @@
 
 [defaults]
 # model = "claude-sonnet-4-5"    # default model for the AI tool
+# Profile to apply when --profile is not passed, so your setup applies without
+# retyping it. Plain `coi` uses this; `coi --profile default` still gives the
+# clean clone of this config. Trusted (global/COI_CONFIG) scope only — a project
+# config can't redirect your default. Must name an existing profile.
+# profile = "myprofile"
 # Forward host env vars into the container BY NAME (values read at session start, never stored):
 # forward_env = ["ANTHROPIC_API_KEY", "GITHUB_TOKEN"]
 # Inject fixed env vars into the container:
