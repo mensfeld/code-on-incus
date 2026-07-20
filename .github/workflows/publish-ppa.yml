@@ -11,8 +11,10 @@ name: Publish to Launchpad PPA
 # Requirements (configure once in the GitHub repo settings):
 #   Secrets:
 #     GPG_PRIVATE_KEY  - ASCII-armored private key, passphrase-less (see docs/packaging-launchpad.md)
-#     GPG_KEY_ID       - the key's fingerprint or long key id, used to sign
 #   Variables:
+#     GPG_KEY_ID       - the key's fingerprint or long key id, used to sign. A
+#                        variable, not a secret: key ids are public, and masking
+#                        it only makes signing failures harder to read in logs.
 #     DEB_EMAIL        - changelog Changed-By email (required; also the CI toggle)
 #     DEB_FULLNAME     - changelog Changed-By name (optional, defaults to "Code on Incus")
 #
@@ -83,7 +85,7 @@ jobs:
         env:
           DEBEMAIL: ${{ vars.DEB_EMAIL }}
           DEBFULLNAME: ${{ vars.DEB_FULLNAME || 'Code on Incus' }}
-          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+          GPG_KEY_ID: ${{ vars.GPG_KEY_ID }}
         run: |
           set -euo pipefail
           BASE="$(dpkg-parsechangelog -SVersion | sed 's/[~-].*//')"

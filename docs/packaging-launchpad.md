@@ -158,7 +158,7 @@ tags — i.e. upstream once merged):
 | Kind     | Name              | Value                                              |
 |----------|-------------------|----------------------------------------------------|
 | Secret   | `GPG_PRIVATE_KEY` | `gpg --armor --export-secret-keys <FPR>` output    |
-| Secret   | `GPG_KEY_ID`      | the key fingerprint / long id used to sign         |
+| Variable | `GPG_KEY_ID`      | key fingerprint / long id used to sign (public, so not a secret) |
 | Variable | `DEB_EMAIL`       | changelog Changed-By email (required; CI toggle)   |
 | Variable | `DEB_FULLNAME`    | changelog Changed-By name (optional, default "Code on Incus") |
 
