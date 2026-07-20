@@ -96,7 +96,7 @@ def test_explicit_profile_overrides_default(coi_binary, cleanup_containers, work
 
 
 def test_nonexistent_default_profile_hard_errors(coi_binary, cleanup_containers, workspace_dir):
-    """A [defaults] profile naming an unknown profile fails fast at startup."""
+    """A session command whose [defaults] profile names no profile fails fast."""
     env = write_trusted_coi_config('[defaults]\nprofile = "ghost"\n')
 
     result = subprocess.run(
@@ -110,8 +110,53 @@ def test_nonexistent_default_profile_hard_errors(coi_binary, cleanup_containers,
     combined = result.stdout + result.stderr
     assert result.returncode != 0, f"an invalid [defaults] profile must fail. Got:\n{combined}"
     assert "ghost" in combined, f"the error should name the missing profile. Got:\n{combined}"
+    assert "profile list" in combined, (
+        f"the error should point at `coi profile list`. Got:\n{combined}"
+    )
     assert "Launching container" not in combined, (
         f"it must fail before any container work. Got:\n{combined}"
+    )
+
+
+def test_operational_commands_unaffected_by_invalid_default_profile(
+    coi_binary, cleanup_containers, workspace_dir
+):
+    """A [defaults] profile typo must not break commands that never apply a profile.
+
+    The existence check lives at the apply site (coi shell/run), not in the global
+    pre-run hook, so operational/recovery commands keep working despite the typo.
+    """
+    env = write_trusted_coi_config('[defaults]\nprofile = "ghost"\n')
+
+    # coi list never applies a profile — it must work despite the typo.
+    listed = subprocess.run(
+        [coi_binary, "list", "--workspace", workspace_dir],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=workspace_dir,
+        env=env,
+    )
+    list_out = listed.stdout + listed.stderr
+    assert listed.returncode == 0, (
+        f"`coi list` must work despite an invalid [defaults] profile. Got:\n{list_out}"
+    )
+    assert "does not name a known profile" not in list_out, (
+        f"`coi list` must not surface the default-profile error. Got:\n{list_out}"
+    )
+
+    # coi kill is a recovery command — a typo must not block it either.
+    killed = subprocess.run(
+        [coi_binary, "kill", "--all"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        cwd=workspace_dir,
+        env=env,
+    )
+    kill_out = killed.stdout + killed.stderr
+    assert "does not name a known profile" not in kill_out, (
+        f"`coi kill` must not be blocked by an invalid [defaults] profile. Got:\n{kill_out}"
     )
 
 

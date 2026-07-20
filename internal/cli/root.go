@@ -77,20 +77,12 @@ Examples:
 			}
 		}
 
-		// Fail fast on a misconfigured [defaults] profile (#607): a name that
-		// resolves to no known profile would otherwise silently hand the user
-		// the synthesized default while they believe their setup is active. The
-		// profile itself is applied later, only when the user selects nothing
-		// else (see applyDefaultProfileFallback). Introspection/recovery
-		// commands are exempt so a typo can't lock the user out of listing
-		// profiles to find the right name.
-		if dp := app.cfg.Defaults.Profile; dp != "" && !defaultProfileCheckExempt(cmd) {
-			if app.cfg.GetProfile(dp) == nil {
-				return fmt.Errorf(
-					"[defaults] profile = %q does not name a known profile; "+
-						"run 'coi profile list' to see available profiles", dp)
-			}
-		}
+		// A misconfigured [defaults] profile is caught at the point it is
+		// applied (applyDefaultProfileFallback, only for coi shell/run), not
+		// here: this hook runs for EVERY command, so validating here would break
+		// unrelated operational commands (coi list/kill/clean/attach/…) on a
+		// typo — including the very commands used to recover — even though they
+		// never apply a profile (#607 follow-up).
 
 		// Apply Incus configuration from config file
 		container.Configure(app.cfg.Incus.Project, app.cfg.Incus.CodeUser, app.cfg.Incus.CodeUID)
@@ -114,27 +106,19 @@ Examples:
 	},
 }
 
-// defaultProfileCheckExempt reports whether the startup [defaults] profile
-// existence check should be skipped for this command. Introspection/recovery
-// commands stay usable even when the configured default profile is invalid, so
-// a typo doesn't lock the user out of the very commands that would help fix it.
-func defaultProfileCheckExempt(cmd *cobra.Command) bool {
-	for c := cmd; c != nil; c = c.Parent() {
-		switch c.Name() {
-		case "profile", "validate", "health", "completion", "help":
-			return true
-		}
-	}
-	return false
-}
-
 // applyDefaultProfileFallback applies [defaults] profile as the lowest-priority
 // source of a profile (#607): it takes effect only when the user selected no
 // profile by any other means — no --profile flag, no alias-saved profile, and
 // no resume-remembered profile. a.profile being empty is the signal that
 // nothing else claimed it (the explicit/alias/resume paths all set it when they
 // apply), so this applies at most once and can never stack on top of another
-// profile. Existence was validated at startup; ApplyProfile re-checks.
+// profile.
+//
+// This is the single guard for a misconfigured [defaults] profile: it runs only
+// for the commands that consume the default profile (coi shell/run), before any
+// container work, so a typo fails those sessions fast without breaking unrelated
+// commands. A name that resolves to no known profile is reported with an
+// actionable message rather than ApplyProfile's terser wording.
 //
 // It returns whether it applied a profile so the caller can recompute
 // a.persistent for its own context — the profile may set [container] persistent,
@@ -147,6 +131,11 @@ func (a *App) applyDefaultProfileFallback(cmd *cobra.Command) (bool, error) {
 	name := a.cfg.Defaults.Profile
 	if name == "" {
 		return false, nil
+	}
+	if a.cfg.GetProfile(name) == nil {
+		return false, fmt.Errorf(
+			"[defaults] profile = %q does not name a known profile; "+
+				"run 'coi profile list' to see available profiles", name)
 	}
 	if err := a.cfg.ApplyProfile(name); err != nil {
 		return false, err
