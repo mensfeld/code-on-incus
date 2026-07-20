@@ -304,6 +304,26 @@ func IncusFilePush(source, destination string) error {
 	return IncusFilePushContext(context.Background(), source, destination)
 }
 
+// IncusFilePushWithOwnerContext pushes a file into a container with explicit
+// ownership and mode applied by the push itself. Without these flags incus
+// preserves the SOURCE file's owner and mode (--uid/--gid default to -1), so
+// a pushed host temp file lands owned by the host UID with its restrictive
+// mode — unreadable by other container users. Pushing with the flags leaves
+// no window or failure path where the file exists with the wrong attributes.
+func IncusFilePushWithOwnerContext(ctx context.Context, source, destination string, uid, gid int, mode string) error {
+	cmdArgs := buildIncusCommand("file", "push",
+		"--uid", fmt.Sprintf("%d", uid), "--gid", fmt.Sprintf("%d", gid), "--mode", mode,
+		source, destination)
+	cmd := execIncusCommandContext(ctx, cmdArgs)
+	return cmd.Run()
+}
+
+// IncusFilePushWithOwner pushes a file into a container with explicit
+// ownership and mode.
+func IncusFilePushWithOwner(source, destination string, uid, gid int, mode string) error {
+	return IncusFilePushWithOwnerContext(context.Background(), source, destination, uid, gid, mode)
+}
+
 // StartWithIsolationFallback starts a non-ephemeral container that may have
 // security.idmap.isolated set, with automatic fallback if the host doesn't
 // support it. Intended for non-ephemeral containers (setup.go path, run's
