@@ -32,8 +32,10 @@ GO_LDFLAGS := -s -w \
 %:
 	dh $@
 
-# Replicate the upstream Makefile `build` target: stage the go:embed assets,
-# then build the single cmd/coi binary with the version stamped in.
+# Mirrors the upstream Makefile `build` target: stage the go:embed assets, then
+# build the single cmd/coi binary. Deliberately NOT identical to it — this adds
+# -trimpath (reproducible builds), -s -w (see override_dh_dwz), and the
+# InstallSource stamp, none of which apply to a developer's local build.
 override_dh_auto_build:
 	mkdir -p internal/image/embedded internal/config/embedded
 	cp profiles/default/config.toml internal/config/embedded/default_config.toml
@@ -45,6 +47,11 @@ override_dh_auto_test:
 
 # Go binaries strip clean with -s -w above; dwz cannot compress Go DWARF and errors.
 override_dh_dwz:
+
+# -s -w already discarded the symbol and DWARF tables, so the automatic -dbgsym
+# package would be an empty shell that is pointless to build and ship.
+override_dh_strip:
+	dh_strip --no-automatic-dbgsym
 
 override_dh_auto_install:
 	install -D -m0755 coi debian/code-on-incus/usr/bin/coi
