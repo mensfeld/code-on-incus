@@ -16,8 +16,9 @@ name: Publish to Launchpad PPA
 #     DEB_EMAIL        - changelog Changed-By email (required; also the CI toggle)
 #     DEB_FULLNAME     - changelog Changed-By name (optional, defaults to "Code on Incus")
 #
-# The signing key must have upload rights to ppa:code-on-incus/ppa and its
-# user-id email must match debian/changelog's Maintainer. The PPA must have
+# The signing key must have upload rights to ppa:code-on-incus/ppa. It does NOT
+# need to match debian/changelog's Maintainer or DEB_EMAIL — Launchpad validates
+# the signature, not those fields (see docs/packaging-launchpad.md). The PPA must have
 # ppa:longsleep/golang-backports added as an archive dependency so its builders
 # can resolve golang-1.25-go (see debian/README.source).
 
