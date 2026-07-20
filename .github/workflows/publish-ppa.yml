@@ -8,6 +8,21 @@ name: Publish to Launchpad PPA
 # The whole job no-ops unless the DEB_EMAIL variable is set, so forks/upstream
 # without PPA credentials configured are not failed.
 #
+# Relationship to release.yml — deliberately INDEPENDENT, not chained:
+#   * Both fire on the same tag push and run in parallel. Neither gates the
+#     other, so a PPA failure cannot block the GitHub release and vice versa.
+#   * Chaining via `workflow_run` would BREAK the version: that trigger runs in
+#     the default-branch context, so GITHUB_REF_NAME would be "master" and the
+#     tag-derived version below would silently fall back to the committed
+#     changelog version instead of the release version.
+#   * Consequence to know: if release.yml fails, this may still have uploaded.
+#     Launchpad uploads are IRREVERSIBLE — a version number can never be reused,
+#     so recovering means bumping the trailing .N (0.10.2~ubuntu24.04.2), not
+#     deleting and re-uploading.
+#   * release.yml force-pushes a `latest` tag at the end. That does not match
+#     the v*.*.* filter here, so it does not retrigger this workflow. Keep the
+#     filter specific if that tag scheme ever changes.
+#
 # Requirements (configure once in the GitHub repo settings):
 #   Secrets:
 #     GPG_PRIVATE_KEY  - ASCII-armored private key, passphrase-less (see docs/packaging-launchpad.md)
@@ -60,12 +75,22 @@ jobs:
         # Dropped once EOL: plucky (25.04, EOL Jan 2026),
         # questing (25.10, EOL Jul 2026).
     steps:
-      - uses: actions/checkout@v4
+      # Actions pinned by commit SHA, matching ci.yml/release.yml.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          # This job never pushes; don't leave the token in .git/config
+          # (zizmor: artipacked).
+          persist-credentials: false
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           # Only used for `go mod vendor`; Launchpad does the real build.
           go-version-file: go.mod
+          # No Go module cache here. `go mod vendor` output is shipped inside
+          # the source tarball that Launchpad compiles, so a poisoned cache
+          # written by another workflow would be baked into the published
+          # package rather than just a local build (zizmor: cache-poisoning).
+          cache: false
 
       - name: Install packaging tools
         run: |
