@@ -7,7 +7,7 @@ Copyright: 2026 Maciej Mensfeld
 License: MIT
 
 Files: debian/*
-Copyright: 2026 William Black
+Copyright: 2026 Maciej Mensfeld
 License: MIT
 
 # Vendored Go modules (vendor/), each under its own upstream licence. Regenerate
