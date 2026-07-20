@@ -28,9 +28,11 @@ Depends: ${shlibs:Depends}, ${misc:Depends},
          libsystemd0,
          incus,
          sudo
-# git only enriches: the host git identity read degrades to empty when git is
-# missing, and `coi update patterns` is the sole other user — the threat
-# detection falls back to a compiled-in pattern set without it.
+# git is not required to start a session, but without it the host git-identity
+# read comes back empty and COI keeps the fail-closed user.useConfigOnly guard,
+# so commits inside the container fail; `[git] name`/`email` recovers that
+# without the package. Its only other user is `coi update patterns` — threat
+# detection falls back to a compiled-in pattern set.
 Recommends: git
 # coi never executes an OpenSSH binary. Agent forwarding just reads
 # $SSH_AUTH_SOCK and proxies that socket into the container, so openssh-client

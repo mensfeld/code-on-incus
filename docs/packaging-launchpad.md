@@ -221,9 +221,14 @@ dpkg-buildpackage -us -uc -b        # produces ../code-on-incus_*.deb
     (`internal/session/setup.go`). Running without sudo means deliberately
     disabling the isolation (`mode = "open"` or `use_sudo = false`), so a
     default-configured install genuinely requires it.
-  - **`git` is `Recommends`.** The host git-identity read returns empty when git
-    is missing, and `coi update patterns` is its only other user — threat
-    detection falls back to a compiled-in pattern set, so nothing breaks.
+  - **`git` is `Recommends`.** Sessions still start without it, but the host
+    git-identity read returns empty, so COI leaves the fail-closed
+    `user.useConfigOnly=true` guard in place and commits *inside* the container
+    fail rather than being attributed to a fabricated author (#556). That is a
+    real degradation, not a crash, and it is recoverable without the package:
+    `[git] name`/`email` pin an identity explicitly. Its only other user is
+    `coi update patterns`; threat detection falls back to a compiled-in pattern
+    set (`internal/monitor/procwatcher.go`), so detection still works.
   - **`openssh-client` is `Suggests`.** `coi` never executes an OpenSSH binary:
     agent forwarding reads `$SSH_AUTH_SOCK` and proxies that socket into the
     container via an Incus device. It is relevant only as the package that would
