@@ -25,9 +25,14 @@ VERSION := $(shell dpkg-parsechangelog -SVersion | sed 's/[~-].*//')
 # InstallSource=deb makes `coi update core` refuse to overwrite the dpkg-owned
 # /usr/bin/coi behind the package manager's back; source builds default to
 # "source" and keep the self-updater.
+# -extldflags -Wl,-z,now: full RELRO. Go emits -z relro but not -z now, which
+# lintian reports as hardening-no-bindnow. Paired with -buildmode=pie in
+# override_dh_auto_build, this clears both hardening tags; coi is a security
+# tool, so shipping it without ASLR would be off-message.
 GO_LDFLAGS := -s -w \
 	-X $(IMPORT)/internal/cli.Version=$(VERSION) \
-	-X $(IMPORT)/internal/cli.InstallSource=deb
+	-X $(IMPORT)/internal/cli.InstallSource=deb \
+	-extldflags=-Wl,-z,now
 
 %:
 	dh $@
@@ -40,7 +45,7 @@ override_dh_auto_build:
 	mkdir -p internal/image/embedded internal/config/embedded
 	cp profiles/default/config.toml internal/config/embedded/default_config.toml
 	cp testdata/dummy/dummy internal/image/embedded/dummy
-	go build -trimpath -mod=vendor -ldflags "$(GO_LDFLAGS)" -o coi ./cmd/coi
+	go build -trimpath -buildmode=pie -mod=vendor -ldflags "$(GO_LDFLAGS)" -o coi ./cmd/coi
 
 # Integration tests need a live Incus daemon; not runnable on a builder.
 override_dh_auto_test:
