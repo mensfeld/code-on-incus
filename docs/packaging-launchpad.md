@@ -37,10 +37,14 @@ require an SSH key or signing the Code of Conduct.
 
 ### 2. Create a GPG key
 
-The package `Maintainer` is the upstream author, `Maciej Mensfeld
-<maciej@mensfeld.pl>`. The signing key does **not** need to match that —
-Launchpad validates the
-*signature*, not the maintainer field. What matters is that the key belongs to a
+The package `Maintainer` is the packaging team, `Code on Incus
+<code-on-incus@lists.launchpad.net>`, with the upstream author recorded in
+`XSBC-Original-Maintainer`. The team holds it because that address receives
+Launchpad's build-failure and rejection mail, which is packaging traffic rather
+than upstream traffic.
+
+The signing key does **not** need to match either field — Launchpad validates
+the *signature*, not the maintainer. What matters is that the key belongs to a
 Launchpad account (yours) with upload rights to the PPA. Use your own identity
 on the key:
 
@@ -80,6 +84,14 @@ Already created: the **`code-on-incus`** team owns
 [`ppa:code-on-incus/ppa`](https://launchpad.net/~code-on-incus/+archive/ubuntu/ppa).
 Your Launchpad account (the PPA owner) has upload rights, so uploads signed by
 your key are accepted — regardless of the package `Maintainer`.
+
+> **Check the team mailing list exists.** `debian/control` sets
+> `Maintainer: Code on Incus <code-on-incus@lists.launchpad.net>`, and that
+> address only resolves if the team has created a Launchpad mailing list —
+> Launchpad does **not** provision one automatically. If it does not exist,
+> build-failure mail bounces silently. Create it under
+> <https://launchpad.net/~code-on-incus/+mailinglist>, or change `Maintainer`
+> in `debian/control` to an address that already receives mail.
 
 ### 5. Add the Go 1.25 archive dependency (critical, not yet done)
 

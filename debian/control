@@ -1,7 +1,8 @@
 Source: code-on-incus
 Section: devel
 Priority: optional
-Maintainer: Maciej Mensfeld <maciej@mensfeld.pl>
+Maintainer: Code on Incus <code-on-incus@lists.launchpad.net>
+XSBC-Original-Maintainer: Maciej Mensfeld <maciej@mensfeld.pl>
 Build-Depends: debhelper-compat (= 13),
                golang-1.25-go,
                pkg-config,
