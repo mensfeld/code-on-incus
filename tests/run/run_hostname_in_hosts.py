@@ -5,21 +5,14 @@ Incus assigns the hostname at boot; /etc/hosts is baked into the image at build
 time with a different name.  Without /etc/rc.local adding the runtime hostname,
 sudo prints "unable to resolve host <name>" on every invocation.
 
-This test catches regressions.  It is marked xfail because CI uses a cached
-pre-built coi-default image; the fix only lands after the next fresh rebuild.
+This test catches regressions. The fix lives in build.sh (the
+coi-fix-hostname.service oneshot), and the CI image cache key includes
+internal/image/**, so the built image carries the fix — the test runs for real.
 """
 
 import subprocess
 
-import pytest
 
-
-@pytest.mark.xfail(
-    strict=True,
-    reason="CI uses a cached coi-default image that predates the hostname fix; "
-    "the test will become xpass once the cache is invalidated and the image is "
-    "rebuilt — at that point remove this marker so regressions are caught.",
-)
 def test_hostname_in_hosts(coi_binary, cleanup_containers, workspace_dir):
     """
     Verify that the container hostname resolves via /etc/hosts.
