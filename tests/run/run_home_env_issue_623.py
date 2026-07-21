@@ -10,26 +10,16 @@ resolves `~` or reads `--global` config breaks (`git config --global` fails with
 two paths are inconsistent.
 
 These tests assert the EXPECTED behavior (HOME present; `git config --global`
-works). They are marked xfail(strict) because the fix is not in yet:
-  * today they FAIL — which reproduces/documents the bug in CI as XFAIL while
-    keeping the suite green;
-  * once HOME is wired into appendEnvArgs they will pass, and strict xfail turns
-    that XPASS into a failure — a built-in reminder to drop this marker in the
-    fix PR (at which point these become ordinary passing regression tests).
+works). They FAIL on the current code — that is intentional: this is a repro that
+must turn CI red until the fix wires HOME into appendEnvArgs, at which point they
+become ordinary passing regression tests. Do not merge this until the fix lands.
 """
 
 import subprocess
 
-import pytest
-
 # The container's code user home; matches `coi shell`'s HOME (/home/<code_user>)
 # and the default image's `useradd -m` home for the `code` user.
 EXPECTED_HOME = "/home/code"
-
-pytestmark = pytest.mark.xfail(
-    strict=True,
-    reason="#623: coi run omits HOME from the exec env (appendEnvArgs); fix pending",
-)
 
 
 def test_run_sets_home(coi_binary, cleanup_containers, workspace_dir):
