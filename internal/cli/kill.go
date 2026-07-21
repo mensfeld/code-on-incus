@@ -169,7 +169,21 @@ func killCommand(cmd *cobra.Command, args []string) error {
 			killed++
 			fmt.Printf("  ✓ Killed %s\n", name)
 		default:
-			fmt.Fprintf(os.Stderr, "  Warning: Failed to delete %s: %v\n", name, err)
+			// A delete can also lose a race to a concurrent delete of the SAME
+			// instance (the session's own ephemeral cleanup, or another `coi kill`).
+			// Incus reports the loser with messages like "A matching non-reusable
+			// operation has now succeeded" — the instance is gone, but the error
+			// text varies by race window and incus version. Rather than pattern-
+			// match every phrasing, re-check the actual end state: if the instance
+			// is no longer there, the delete effectively succeeded and it counts as
+			// killed. Only a delete error that leaves the instance PRESENT is a real
+			// failure.
+			if exists, chkErr := mgr.Exists(); chkErr == nil && !exists {
+				killed++
+				fmt.Printf("  ✓ Killed %s\n", name)
+			} else {
+				fmt.Fprintf(os.Stderr, "  Warning: Failed to delete %s: %v\n", name, err)
+			}
 		}
 	}
 
