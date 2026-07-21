@@ -308,6 +308,18 @@ func remapContainerUserIfNeeded(mgr container.ContainerManager, wasRestarted boo
 // socketEnv maps env var names to container-side socket paths for every
 // forwarded socket (SSH_AUTH_SOCK plus any configured [[sockets]] entries).
 func (a *App) appendEnvArgs(incusArgs []string, tz string, socketEnv map[string]string) ([]string, error) {
+	// Baseline identity env (lowest priority — any config env below overrides).
+	// incus exec does not set HOME/USER for a --user exec, so without this a
+	// `coi run` command runs with no HOME — anything resolving ~ or reading a
+	// --global config breaks (`git config --global` -> "fatal: $HOME not set")
+	// (#623). Mirrors the HOME `coi shell` sets (buildContainerEnv); `coi run`
+	// always execs as the code user, whose home is /home/<code_user>.
+	incusArgs = append(incusArgs,
+		"--env", fmt.Sprintf("HOME=/home/%s", container.CodeUser),
+		"--env", fmt.Sprintf("USER=%s", container.CodeUser),
+		"--env", fmt.Sprintf("LOGNAME=%s", container.CodeUser),
+	)
+
 	// Timezone (lowest priority — user can override with config env)
 	if tz != "" {
 		incusArgs = append(incusArgs, "--env", fmt.Sprintf("TZ=%s", tz))

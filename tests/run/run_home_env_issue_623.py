@@ -9,10 +9,9 @@ resolves `~` or reads `--global` config breaks (`git config --global` fails with
 `fatal: $HOME not set`). `coi shell` DOES set HOME (buildContainerEnv), so the
 two paths are inconsistent.
 
-These tests assert the EXPECTED behavior (HOME present; `git config --global`
-works). They FAIL on the current code — that is intentional: this is a repro that
-must turn CI red until the fix wires HOME into appendEnvArgs, at which point they
-become ordinary passing regression tests. Do not merge this until the fix lands.
+These tests assert the behavior (HOME present; `git config --global` works). The
+fix wires HOME/USER/LOGNAME into `appendEnvArgs` (internal/cli/run.go), so these
+now pass and guard against a re-regression.
 """
 
 import subprocess
