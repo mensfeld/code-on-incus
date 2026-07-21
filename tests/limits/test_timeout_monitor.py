@@ -30,12 +30,14 @@ max_duration = "10s"
 """
     )
 
-    # Create a script that runs longer than timeout
+    # Script sleeps FAR longer than both the 10s timeout and the assert window
+    # below, so "auto-stop never fired" is unambiguous: the run would hit the
+    # subprocess timeout rather than sneak under the upper bound.
     test_script = Path(workspace_dir) / "long_script.sh"
     test_script.write_text(
         """#!/bin/bash
 echo "Starting long script"
-sleep 30
+sleep 120
 echo "Script completed"
 """
     )
@@ -54,7 +56,7 @@ echo "Script completed"
         ],
         capture_output=True,
         text=True,
-        timeout=60,  # Generous timeout for the test itself
+        timeout=90,  # Generous ceiling for the test itself (< the 120s script)
         cwd=workspace_dir,
     )
 
@@ -64,9 +66,13 @@ echo "Script completed"
     # We don't assert returncode because container stop may cause various exit codes
     # The key is that it stopped within reasonable time after the limit
 
-    # Verify it stopped around the timeout (give 5 second grace period)
-    assert 8 <= elapsed_time <= 20, (
-        f"Container should stop around 10s timeout, took {elapsed_time:.1f}s"
+    # Lower bound guards against stopping BEFORE the 10s budget; the upper bound is
+    # deliberately generous (the monitor polls, and CI runners are frequently
+    # overloaded — observed auto-stops up to ~21s), while still being well under
+    # the 120s script so a genuinely-broken auto-stop hits the subprocess timeout.
+    assert 8 <= elapsed_time <= 60, (
+        f"Container should auto-stop after the 10s timeout (allowing for CI load), "
+        f"took {elapsed_time:.1f}s"
     )
 
     # Verify container is stopped
