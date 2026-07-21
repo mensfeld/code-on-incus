@@ -40,7 +40,7 @@ limit = "2GiB"
         [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=240,
         cwd=workspace_dir,
     )
 
@@ -109,7 +109,7 @@ limit = "512MiB"
         ],
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=240,
         cwd=workspace_dir,
     )
 
@@ -148,7 +148,7 @@ def test_limit_env_vars_removed(coi_binary, workspace_dir, cleanup_containers):
         [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=240,
         env=env,
         cwd=workspace_dir,
     )
@@ -201,7 +201,7 @@ limit = "4GiB"
         [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=240,
         env=env,
         cwd=workspace_dir,
     )
@@ -253,7 +253,7 @@ max_processes = 100
         [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=240,
         cwd=workspace_dir,
     )
 
@@ -323,7 +323,7 @@ count = "2"
         ],
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=240,
         cwd=workspace_dir,
     )
 

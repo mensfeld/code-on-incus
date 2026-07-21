@@ -133,9 +133,13 @@ def test_health_security_posture_ok_on_default(coi_binary):
     """
     rc, sp = _run_health_json(coi_binary)
 
-    assert rc in [0, 1], f"Health check failed with exit {rc}"
+    # The aggregate health exit code reflects ALL checks (network/storage/incus/…),
+    # any of which can transiently fail under CI load and push the overall exit to
+    # 2 even when the security posture is fine. This test is specifically about the
+    # security_posture check, so assert on that status rather than the aggregate rc.
     assert sp["status"] == "ok", (
-        f"Default profile should have ok security posture. Got: {sp['status']} — {sp['message']}"
+        f"Default profile should have ok security posture (overall health exit {rc}). "
+        f"Got: {sp['status']} — {sp['message']}"
     )
 
 
