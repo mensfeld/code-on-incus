@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 
@@ -308,25 +309,48 @@ func remapContainerUserIfNeeded(mgr container.ContainerManager, wasRestarted boo
 // socketEnv maps env var names to container-side socket paths for every
 // forwarded socket (SSH_AUTH_SOCK plus any configured [[sockets]] entries).
 func (a *App) appendEnvArgs(incusArgs []string, tz string, socketEnv map[string]string) ([]string, error) {
-	// Timezone (lowest priority — user can override with config env)
+	// Assemble the environment in a map so precedence is deterministic: each
+	// source in turn overwrites the previous one (last-wins), and every key is
+	// emitted as a single --env flag below. This mirrors how `coi shell` builds
+	// its env (buildContainerEnv) and, crucially, does NOT depend on how incus
+	// resolves repeated --env flags — no key is ever passed twice.
+	//
+	// Order = increasing priority:
+	//   1. baseline identity (HOME/USER/LOGNAME)
+	//   2. timezone
+	//   3. forwarded sockets
+	//   4. [defaults].environment (+ profile environment)
+	//   5. forward_env (host values)
+	//   6. env_commands (freshly minted per session)
+	env := map[string]string{}
+
+	// Baseline identity. incus exec does not set HOME/USER for a --user exec, so
+	// without this a `coi run` command runs with no HOME — anything resolving ~
+	// or reading a --global config breaks (`git config --global` ->
+	// "fatal: $HOME not set", #623). `coi run` execs as the code user, whose home
+	// is /home/<code_user>. A user can still override any of these via
+	// [defaults].environment (they are applied later, below).
+	env["HOME"] = "/home/" + container.CodeUser
+	env["USER"] = container.CodeUser
+	env["LOGNAME"] = container.CodeUser
+
 	if tz != "" {
-		incusArgs = append(incusArgs, "--env", fmt.Sprintf("TZ=%s", tz))
+		env["TZ"] = tz
 	}
 
-	// Forwarded socket env vars
-	for env, path := range socketEnv {
-		incusArgs = append(incusArgs, "--env", fmt.Sprintf("%s=%s", env, path))
+	for name, path := range socketEnv {
+		env[name] = path
 	}
 
 	// Static environment from config (defaults.environment + profile environment)
 	for k, v := range a.cfg.Defaults.Environment {
-		incusArgs = append(incusArgs, "--env", fmt.Sprintf("%s=%s", k, v))
+		env[k] = v
 	}
 
 	// Resolve forward_env from config, look up host values
 	for _, name := range a.cfg.Defaults.ForwardEnv {
 		if val, ok := os.LookupEnv(name); ok {
-			incusArgs = append(incusArgs, "--env", fmt.Sprintf("%s=%s", name, val))
+			env[name] = val
 		} else {
 			fmt.Fprintf(os.Stderr, "Warning: forward_env variable %q is not set on host, skipping\n", name)
 		}
@@ -339,7 +363,17 @@ func (a *App) appendEnvArgs(incusArgs []string, tz string, socketEnv map[string]
 		return nil, err
 	}
 	for k, v := range envCommandValues {
-		incusArgs = append(incusArgs, "--env", fmt.Sprintf("%s=%s", k, v))
+		env[k] = v
+	}
+
+	// Emit each var once, in a stable (sorted) order for deterministic args.
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		incusArgs = append(incusArgs, "--env", fmt.Sprintf("%s=%s", k, env[k]))
 	}
 
 	return incusArgs, nil
