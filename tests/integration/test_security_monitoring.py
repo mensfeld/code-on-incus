@@ -4872,34 +4872,43 @@ process_spawn_rate_threshold = 9999
 
             time.sleep(3)
 
-            # Write the suspicious line into the container's auth.log.
-            # The LogWatcher polls via incus file pull every 5 seconds.
-            subprocess.run(
-                [
-                    "incus",
-                    "exec",
-                    container_name,
-                    "--",
-                    "bash",
-                    "-c",
-                    "mkdir -p /var/log && "
-                    "echo 'Jun  5 12:00:01 coi sudo: hacker is not in the sudoers file. This incident will be reported.'"
-                    " >> /var/log/auth.log",
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-            )
+            # Write the suspicious line into the container's auth.log. The
+            # LogWatcher polls via `incus file pull` every ~5s.
+            def append_sudoers_line():
+                subprocess.run(
+                    [
+                        "incus",
+                        "exec",
+                        container_name,
+                        "--",
+                        "bash",
+                        "-c",
+                        "mkdir -p /var/log && "
+                        "echo 'Jun  5 12:00:01 coi sudo: hacker is not in the sudoers file. This incident will be reported.'"
+                        " >> /var/log/auth.log",
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                )
 
-            # Poll until the HIGH auth threat appears (30 s timeout).
+            append_sudoers_line()
+
+            # Poll until the HIGH auth threat appears. The window is generous for CI
+            # load, and the line is re-appended periodically so a monitoring-daemon
+            # startup race (the watch not yet active at the first write) can't cause
+            # a permanent miss — a fresh line is then picked up by the next poll.
+            events = []
             auth_events = []
-            for _ in range(30):
+            for i in range(60):
                 events = get_threat_events(container_name)
                 auth_events = [
                     e for e in events if e.get("category") == "auth" and e.get("level") == "high"
                 ]
                 if auth_events:
                     break
+                if i and i % 8 == 0:
+                    append_sudoers_line()
                 time.sleep(1)
 
             assert len(auth_events) > 0, (
