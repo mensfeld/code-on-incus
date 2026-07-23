@@ -225,6 +225,7 @@ func init() {
 	rootCmd.AddCommand(fileCmd)      // New: coi file <subcommand>
 	rootCmd.AddCommand(cleanCmd)
 	rootCmd.AddCommand(killCmd)
+	rootCmd.AddCommand(hostsCmd) // coi hosts <add|list|remove> (#605)
 	rootCmd.AddCommand(persistCmd)
 	rootCmd.AddCommand(tmuxCmd)
 	rootCmd.AddCommand(versionCmd)

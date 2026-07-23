@@ -122,6 +122,9 @@ func (m *Manager) SetupForContainer(ctx context.Context, containerName string) e
 		}
 		// Open mode always lifts the boot block — errors above are non-fatal
 		// and the user has explicitly opted into unrestricted network access.
+		if err := m.applyUserHosts(containerName); err != nil {
+			return err
+		}
 		m.removeBootBlock(containerName)
 		return nil
 
@@ -140,7 +143,25 @@ func (m *Manager) SetupForContainer(ctx context.Context, containerName string) e
 	}
 
 	// Restricted or allowlist rules are now in place — lift the boot block.
+	if err := m.applyUserHosts(containerName); err != nil {
+		return err
+	}
 	m.removeBootBlock(containerName)
+	return nil
+}
+
+// applyUserHosts writes the configured [[network.hosts]] entries into the
+// container's /etc/hosts and makes them reachable under the active mode. Fatal on
+// failure and run BEFORE the boot block is lifted, so a bad host entry fails the
+// session closed rather than leaving a dead name or half-applied firewall rule.
+func (m *Manager) applyUserHosts(containerName string) error {
+	if len(m.config.Hosts) == 0 {
+		return nil
+	}
+	if err := ApplyUserHosts(containerName, m.config.Mode, m.config.Hosts); err != nil {
+		return fmt.Errorf("failed to apply [[network.hosts]]: %w", err)
+	}
+	m.logger.Printf("Applied %d configured host entr(y/ies) to /etc/hosts", len(m.config.Hosts))
 	return nil
 }
 
