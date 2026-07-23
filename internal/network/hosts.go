@@ -40,8 +40,11 @@ const (
 
 	// Static user host entries ([[network.hosts]] and `coi hosts`, #605) live in
 	// their OWN managed block, independent of the allowlist block above, so the
-	// two never clobber each other. It is emitted before the allowlist block so a
-	// user entry wins name resolution on a collision (glibc reads top-to-bottom).
+	// two never clobber each other. The two blocks are written independently; on
+	// the rare name that appears in both, glibc's first-match resolution picks
+	// whichever block is earlier in the file (the allowlist block, written at
+	// setup, precedes a user block appended later) — collisions are expected to
+	// be a non-case, since allowlisted domains and user host names don't overlap.
 	userHostsBeginMarker = "# BEGIN coi hosts (managed by coi — edits will be overwritten)"
 	userHostsEndMarker   = "# END coi hosts"
 )

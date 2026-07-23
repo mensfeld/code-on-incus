@@ -140,15 +140,21 @@ func AddUserHost(containerName string, mode config.NetworkMode, entry config.Hos
 	if mode == "" {
 		mode = config.NetworkModeRestricted
 	}
+	containerIP, err := GetContainerIP(containerName)
+	if err != nil {
+		return fmt.Errorf("failed to get container IP: %w", err)
+	}
+	// The runtime CLI is invoked with whatever config the caller happens to have,
+	// which may not be the one the container was launched with. Trusting it would
+	// let `coi hosts add` punch a restricted-style targeted allow through an
+	// allowlist container's RFC1918 block. Detect the container's ACTUAL mode and
+	// honor that instead.
+	mode = effectiveContainerMode(containerIP, mode)
 	if err := checkHostReachable(mode, entry.IP); err != nil {
 		return err
 	}
 	// Firewall reachability for just this address (open mode needs none).
 	if mode == config.NetworkModeRestricted || mode == config.NetworkModeAllowlist {
-		containerIP, err := GetContainerIP(containerName)
-		if err != nil {
-			return fmt.Errorf("failed to get container IP: %w", err)
-		}
 		if err := applyHostFirewall(mode, containerIP, entry); err != nil {
 			return err
 		}
@@ -159,6 +165,22 @@ func AddUserHost(containerName string, mode config.NetworkMode, entry config.Hos
 		return err
 	}
 	return WriteUserHosts(containerName, mergeHostEntry(existing, entry))
+}
+
+// effectiveContainerMode returns the mode the container is ACTUALLY enforcing,
+// used to override a possibly-stale caller-supplied mode for the runtime CLI. An
+// allowlist container has its named sets present — that presence is the tell, and
+// the case that matters for safety (never punch a hole through an allowlist
+// container). When no allowlist set exists, the container is restricted or open;
+// those are indistinguishable from nft state cheaply, and the difference is only
+// about reachability (not a downgrade), so the caller's mode is used.
+func effectiveContainerMode(containerIP string, configMode config.NetworkMode) config.NetworkMode {
+	if containerIP != "" {
+		if _, err := runNFTCommand("-j", "list", "set", "ip", "coi", staticSetName(containerIP)); err == nil {
+			return config.NetworkModeAllowlist
+		}
+	}
+	return configMode
 }
 
 // RemoveUserHost drops the given hostnames from the container's user-hosts block
@@ -191,24 +213,35 @@ func RemoveUserHost(containerName string, hostnames []string) ([]config.HostEntr
 	return kept, nil
 }
 
-// mergeHostEntry returns entries with `add` merged in: if its IP already exists,
-// the hostname sets are unioned; otherwise it is appended.
+// mergeHostEntry returns a NEW slice with `add` merged in: if its IP already
+// exists, the hostname sets are unioned; otherwise it is appended. It does not
+// mutate the input.
 func mergeHostEntry(entries []config.HostEntry, add config.HostEntry) []config.HostEntry {
-	for i, e := range entries {
-		if e.IP == add.IP {
-			seen := make(map[string]bool, len(e.Hostnames))
-			for _, n := range e.Hostnames {
-				seen[n] = true
-			}
-			for _, n := range add.Hostnames {
-				if !seen[n] {
-					entries[i].Hostnames = append(entries[i].Hostnames, n)
-				}
-			}
-			return entries
+	out := make([]config.HostEntry, 0, len(entries)+1)
+	merged := false
+	for _, e := range entries {
+		if e.IP != add.IP {
+			out = append(out, e)
+			continue
 		}
+		seen := make(map[string]bool, len(e.Hostnames))
+		names := append([]string(nil), e.Hostnames...)
+		for _, n := range names {
+			seen[n] = true
+		}
+		for _, n := range add.Hostnames {
+			if !seen[n] {
+				seen[n] = true
+				names = append(names, n)
+			}
+		}
+		out = append(out, config.HostEntry{IP: e.IP, Hostnames: names})
+		merged = true
 	}
-	return append(entries, add)
+	if !merged {
+		out = append(out, add)
+	}
+	return out
 }
 
 // applyHostFirewall applies reachability for a single entry under an enforcing
