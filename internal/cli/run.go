@@ -674,6 +674,15 @@ func (a *App) applyForwardSockets(mgr container.ContainerManager, socketConfig *
 func (a *App) applyNetworkIsolation(ctx context.Context, containerName string) (*network.Manager, error) {
 	networkConfig := a.cfg.Network
 	if networkConfig.Mode == "" || networkConfig.Mode == config.NetworkModeOpen {
+		// Open mode installs no isolation rules, but static [[network.hosts]]
+		// entries still apply — resolution only, since nothing is blocked. (The
+		// coi shell path calls SetupForContainer for every mode, so it already
+		// covers open; coi run short-circuits here, so apply them explicitly.)
+		if len(networkConfig.Hosts) > 0 {
+			if err := network.ApplyUserHosts(containerName, networkConfig.Mode, networkConfig.Hosts); err != nil {
+				return nil, fmt.Errorf("failed to apply [[network.hosts]]: %w", err)
+			}
+		}
 		return nil, nil
 	}
 	if changed, bridgeName, err := network.EnsureBridgeInTrustedZone(); err != nil {
