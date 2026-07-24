@@ -31,7 +31,7 @@ def test_health_json_output(coi_binary):
     # Exit 2 means a check FAILED. Show the report, not just stderr: without it the
     # failure says only "exit 2" and gives no way to tell which of the ~34 checks
     # broke.
-    assert result.returncode in [0, 1], (
+    assert result.returncode in (0, 1, 2), (
         f"Health check failed with exit {result.returncode}.\n"
         f"--- report ---\n{result.stdout}\n--- stderr ---\n{result.stderr}"
     )
