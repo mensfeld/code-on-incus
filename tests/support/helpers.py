@@ -1292,18 +1292,27 @@ def extract_container_name(result):
 
 
 def wait_for_container_started(coi_binary, container_name, timeout=90):
-    """Poll until the container is up AND systemd has finished booting.
+    """Poll until the container is up AND systemd's bus is reachable.
 
     `coi container launch` returning does not mean the guest has finished
     booting, and a bare `exec -- true` succeeding only proves the incus agent is
     up — systemd's D-Bus can still be initializing. `poweroff`/`close` talk to
     systemd over that bus, so issuing them in that window fails with
-    "Failed to connect to bus". Gate on `systemctl is-system-running` reporting a
-    *booted* state (`running` or `degraded` — both mean boot completed and the
-    bus is up; `is-system-running` exits non-zero for `degraded`, so match on the
-    reported state text, not the exit code) rather than a fixed `time.sleep()`.
+    "Failed to connect to bus".
+
+    Gate on `systemctl is-system-running` reporting any *live* state. We
+    deliberately do NOT require a fully-booted `running`/`degraded`: a COI
+    container can sit in `starting`/`initializing` for a long time under CI's
+    restricted network (waiting on network units), but the systemd bus is already
+    up in those states — which is all `poweroff`/`close` need. `offline` (no
+    systemd), an empty reply, or a "Failed to connect to bus" stderr (bus not up
+    yet) are treated as not-ready. `is-system-running` exits non-zero for several
+    of these states, so the reported state *text* is what matters, not the exit
+    code.
     """
+    live_states = ("running", "degraded", "starting", "initializing", "maintenance")
     deadline = time.monotonic() + timeout
+    last_state = "<never probed>"
     while time.monotonic() < deadline:
         running = subprocess.run(
             [coi_binary, "container", "running", container_name],
@@ -1326,9 +1335,15 @@ def wait_for_container_started(coi_binary, container_name, timeout=90):
                 text=True,
                 timeout=15,
             )
-            if probe.stdout.strip() in ("running", "degraded"):
+            last_state = (probe.stdout.strip() or probe.stderr.strip())[:80]
+            if probe.stdout.strip() in live_states:
                 return True
+        else:
+            last_state = f"not running ({(running.stderr or running.stdout).strip()[:60]})"
         time.sleep(1)
+    # Surface the last observed state so a future timeout is diagnosable rather
+    # than a bare "did not become ready" (pytest prints captured stdout on fail).
+    print(f"wait_for_container_started({container_name}) timed out; last state: {last_state}")
     return False
 
 
