@@ -127,6 +127,8 @@ def get_container_state(name):
         return "Unknown"
     containers = json.loads(result.stdout)
     return containers[0].get("status", "Unknown") if containers else "Unknown"
+
+
 def container_absent(name):
     """True when the container does not exist (was deleted), as opposed to a
     stopped or frozen container that still exists.
@@ -151,6 +153,8 @@ def container_absent(name):
     except json.JSONDecodeError:
         return False
     return len(containers) == 0
+
+
 def wait_for_container_running(name, timeout=60):
     """Wait for container to reach Running state with retries.
 
@@ -935,7 +939,9 @@ print("Task completed")
                 break
 
         # Verify container was killed
-        assert killed, f"Container should be auto-killed (stopped AND deleted) when inside process goes rogue (final observed state: {state!r})"
+        assert killed, (
+            f"Container should be auto-killed (stopped AND deleted) when inside process goes rogue (final observed state: {state!r})"
+        )
 
         # Verify threat detected in audit log
         events = get_threat_events(container_name)
@@ -1766,7 +1772,9 @@ class TestReverseShellPatterns:
                 killed = True
                 break
 
-        assert killed, f"Container should be killed (stopped AND deleted) on Python reverse shell detection (final observed state: {state!r})"
+        assert killed, (
+            f"Container should be killed (stopped AND deleted) on Python reverse shell detection (final observed state: {state!r})"
+        )
 
         # Verify threat logged
         events = get_threat_events(container_name)
@@ -1844,7 +1852,9 @@ class TestReverseShellPatterns:
             print(stderr_file.read_text())
         print("=== End Debug Log ===\n")
 
-        assert killed, f"Container should be killed (stopped AND deleted) on Perl reverse shell detection (final observed state: {state!r})"
+        assert killed, (
+            f"Container should be killed (stopped AND deleted) on Perl reverse shell detection (final observed state: {state!r})"
+        )
 
         # Verify threat logged
         events = get_threat_events(container_name)
@@ -1916,7 +1926,9 @@ class TestReverseShellPatterns:
                 )
             print("=== END DEBUG ===\n")
 
-        assert killed, f"Container should be killed (stopped AND deleted) on PHP reverse shell detection (final observed state: {state!r})"
+        assert killed, (
+            f"Container should be killed (stopped AND deleted) on PHP reverse shell detection (final observed state: {state!r})"
+        )
 
         # Verify threat logged
         events = get_threat_events(container_name)
@@ -1994,7 +2006,9 @@ class TestReverseShellPatterns:
                 )
             print("=== END DEBUG ===\n")
 
-        assert killed, f"Container should be killed (stopped AND deleted) on Ruby reverse shell detection (final observed state: {state!r})"
+        assert killed, (
+            f"Container should be killed (stopped AND deleted) on Ruby reverse shell detection (final observed state: {state!r})"
+        )
 
         events = get_threat_events(container_name)
         critical = [e for e in events if e.get("level") == "critical"]
@@ -2071,7 +2085,9 @@ class TestReverseShellPatterns:
                 )
             print("=== END DEBUG ===\n")
 
-        assert killed, f"Container should be killed (stopped AND deleted) on socat reverse shell detection (final observed state: {state!r})"
+        assert killed, (
+            f"Container should be killed (stopped AND deleted) on socat reverse shell detection (final observed state: {state!r})"
+        )
 
         events = get_threat_events(container_name)
         critical = [e for e in events if e.get("level") == "critical"]
@@ -2247,7 +2263,9 @@ mode = "restricted"
                         )
                 print("=== END DEBUG ===")
 
-            assert killed, f"Container should be killed (stopped AND deleted) when monitoring enabled via config (final observed state: {state!r})"
+            assert killed, (
+                f"Container should be killed (stopped AND deleted) when monitoring enabled via config (final observed state: {state!r})"
+            )
 
             # Wait a moment for audit log to be flushed
             time.sleep(2)
@@ -2496,7 +2514,9 @@ class TestMultipleThreats:
                 killed = True
                 break
 
-        assert killed, f"Container should be killed (stopped AND deleted) when CRITICAL threat present (final observed state: {state!r})"
+        assert killed, (
+            f"Container should be killed (stopped AND deleted) when CRITICAL threat present (final observed state: {state!r})"
+        )
 
         # Verify all threats are logged
         events = get_threat_events(container_name)
@@ -3359,7 +3379,9 @@ class TestThresholdBoundaries:
                 )
             print("=== END DEBUG ===\n")
 
-        assert killed, f"Container should be killed (stopped AND deleted) on bash -i reverse shell detection (final observed state: {state!r})"
+        assert killed, (
+            f"Container should be killed (stopped AND deleted) on bash -i reverse shell detection (final observed state: {state!r})"
+        )
 
         events = get_threat_events(container_name)
         critical = [e for e in events if e.get("level") == "critical"]
