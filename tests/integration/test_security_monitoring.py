@@ -193,6 +193,22 @@ def get_threat_events(container_name):
     return events
 
 
+def poll_network_threats(container_name, max_wait=45):
+    """Poll the audit log for `network`-category threats, up to max_wait seconds.
+
+    Network detection reads /proc/<init-pid>/net/* on a poll cycle, so a threat
+    can take several cycles to appear — a single fixed sleep races it. Returns the
+    list of network threats (possibly empty if none appeared within the budget).
+    """
+    deadline = time.monotonic() + max_wait
+    while time.monotonic() < deadline:
+        net = [e for e in get_threat_events(container_name) if e.get("category") == "network"]
+        if net:
+            return net
+        time.sleep(2)
+    return [e for e in get_threat_events(container_name) if e.get("category") == "network"]
+
+
 def _find_container_cgroup_path(container_name: str) -> str | None:
     """Discover the cgroup v2 path for a container by searching /sys/fs/cgroup."""
     import glob
@@ -1301,31 +1317,28 @@ time.sleep(60)
             stderr=subprocess.DEVNULL,
         )
 
-        # Wait for detection
-        time.sleep(10)
-
-        # Container may be killed if network threat detected as CRITICAL
-        # Wait for potential detection and response
-        for _ in range(10):
-            time.sleep(1)
-            state = get_container_state(container_name)
-            if state in ["Stopped", "Frozen", "Unknown"]:
-                break
-
-        # Check audit log for network threats
-        events = get_threat_events(container_name)
-        network_threats = [e for e in events if e.get("category") == "network"]
-
-        # Network monitoring might not catch this immediately, so we make this lenient
-        if len(network_threats) > 0:
-            # If network threat was detected, verify it's CRITICAL or HIGH
+        try:
+            # Poll for a network-category threat instead of a single fixed sleep.
+            # This is a best-effort connection (fire-and-forget to an external host
+            # that need not accept it), so if nothing is detected we skip honestly
+            # rather than pass vacuously. Reliable *unconditional* detection coverage
+            # lives in test_network_connection_detection.py (which establishes a
+            # stable ESTABLISHED connection); here we only validate the level when a
+            # threat does surface.
+            network_threats = poll_network_threats(container_name)
+            if not network_threats:
+                pytest.skip(
+                    "no network threat detected within the poll window (best-effort "
+                    "connection); see test_network_connection_detection.py for the "
+                    "reliable unconditional coverage"
+                )
             for threat in network_threats:
                 assert threat.get("level") in ["critical", "high"], (
                     f"Expected CRITICAL/HIGH network threat, got {threat.get('level')}"
                 )
-
-        proc.terminate()
-        cleanup_container(container_name, coi_binary)
+        finally:
+            proc.terminate()
+            cleanup_container(container_name, coi_binary)
 
     def test_metadata_endpoint_access_critical(self, test_workspace, enable_monitoring, coi_binary):
         """Test connection to cloud metadata endpoint triggers CRITICAL threat."""
@@ -1372,21 +1385,22 @@ time.sleep(60)
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(10)
-
-        # Check for threats (may or may not kill depending on timing)
-        events = get_threat_events(container_name)
-
-        # Metadata access detection depends on network monitoring being active
-        # This is a best-effort check
-        network_threats = [e for e in events if e.get("category") == "network"]
-        if len(network_threats) > 0:
-            # Should be CRITICAL for metadata endpoint
+        try:
+            # Best-effort connection (the metadata endpoint is blocked, so the SYN
+            # may never establish): poll, and skip honestly if nothing is detected
+            # rather than pass vacuously. test_network_connection_detection.py has
+            # the reliable unconditional metadata-endpoint coverage.
+            network_threats = poll_network_threats(container_name)
+            if not network_threats:
+                pytest.skip(
+                    "no network threat detected within the poll window (best-effort "
+                    "metadata connection); see test_network_connection_detection.py"
+                )
             critical = [e for e in network_threats if e.get("level") == "critical"]
             assert len(critical) > 0, "Metadata endpoint access should be CRITICAL"
-
-        proc.terminate()
-        cleanup_container(container_name, coi_binary)
+        finally:
+            proc.terminate()
+            cleanup_container(container_name, coi_binary)
 
     def test_suspicious_port_high_threat(self, test_workspace, enable_monitoring, coi_binary):
         """Test connection to suspicious ports (1234, 31337) triggers HIGH/CRITICAL threat."""
@@ -1447,19 +1461,22 @@ time.sleep(60)
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(10)
-
-        # Check for network threats - lenient check (network monitoring is best-effort)
-        events = get_threat_events(container_name)
-        network_threats = [e for e in events if e.get("category") == "network"]
-        if len(network_threats) > 0:
+        try:
+            # Best-effort connection (fire-and-forget to an external host): poll,
+            # then skip honestly if nothing surfaced rather than pass vacuously.
+            network_threats = poll_network_threats(container_name)
+            if not network_threats:
+                pytest.skip(
+                    "no network threat detected within the poll window (best-effort "
+                    "suspicious-port connection); see test_network_connection_detection.py"
+                )
             for threat in network_threats:
                 assert threat.get("level") in ["high", "critical"], (
                     f"Expected HIGH/CRITICAL for suspicious port, got {threat.get('level')}"
                 )
-
-        proc.terminate()
-        cleanup_container(container_name, coi_binary)
+        finally:
+            proc.terminate()
+            cleanup_container(container_name, coi_binary)
 
     def test_rfc1918_private_address_detection(self, test_workspace, enable_monitoring, coi_binary):
         """Test that connections to RFC1918 private addresses trigger a network threat."""
@@ -1526,19 +1543,22 @@ time.sleep(60)
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(10)
-
-        # Lenient check: if network threats are detected they must be HIGH or CRITICAL
-        events = get_threat_events(container_name)
-        network_threats = [e for e in events if e.get("category") == "network"]
-        if len(network_threats) > 0:
+        try:
+            # Best-effort connections (fire-and-forget to unrouted RFC1918 hosts):
+            # poll, then skip honestly if nothing surfaced rather than pass vacuously.
+            network_threats = poll_network_threats(container_name)
+            if not network_threats:
+                pytest.skip(
+                    "no network threat detected within the poll window (best-effort "
+                    "RFC1918 connections); see test_network_connection_detection.py"
+                )
             for threat in network_threats:
                 assert threat.get("level") in ["high", "critical"], (
                     f"Expected HIGH/CRITICAL for RFC1918 address, got {threat.get('level')}"
                 )
-
-        proc.terminate()
-        cleanup_container(container_name, coi_binary)
+        finally:
+            proc.terminate()
+            cleanup_container(container_name, coi_binary)
 
     def test_allowlist_mode_rfc1918_flagged(self, test_workspace, coi_binary):
         """Allowed-domain CIDRs must be passed to the monitoring daemon.
@@ -1617,15 +1637,19 @@ time.sleep(60)
                 stderr=subprocess.DEVNULL,
             )
 
-            time.sleep(10)
-
-            events = get_threat_events(container_name)
-            network_threats = [e for e in events if e.get("category") == "network"]
-            if len(network_threats) > 0:
-                for threat in network_threats:
-                    assert threat.get("level") in ["high", "critical"], (
-                        f"Expected HIGH/CRITICAL for RFC1918 in allowlist mode, got {threat.get('level')}"
-                    )
+            # Best-effort connection: poll, then skip honestly if nothing surfaced
+            # rather than pass vacuously.
+            network_threats = poll_network_threats(container_name)
+            if not network_threats:
+                pytest.skip(
+                    "no network threat detected within the poll window (best-effort "
+                    "RFC1918 connection in allowlist mode); see "
+                    "test_network_connection_detection.py"
+                )
+            for threat in network_threats:
+                assert threat.get("level") in ["high", "critical"], (
+                    f"Expected HIGH/CRITICAL for RFC1918 in allowlist mode, got {threat.get('level')}"
+                )
         finally:
             proc.terminate()
             cleanup_container(container_name, coi_binary)
@@ -1704,15 +1728,20 @@ time.sleep(120)
                 stderr=subprocess.DEVNULL,
             )
 
-            time.sleep(10)
-
-            events = get_threat_events(container_name)
-            network_threats = [e for e in events if e.get("category") == "network"]
-            if len(network_threats) > 0:
-                for threat in network_threats:
-                    assert threat.get("level") in ["high", "critical"], (
-                        f"Expected HIGH/CRITICAL for C2 port on loopback, got {threat.get('level')}"
-                    )
+            # Unlike the fire-and-forget tests above, this establishes a real,
+            # stable ESTABLISHED loopback connection (held 120s) on the suspicious
+            # port 1234, so detection is reliable — poll, then skip only if it truly
+            # never surfaced (environmental), otherwise assert the level.
+            network_threats = poll_network_threats(container_name)
+            if not network_threats:
+                pytest.skip(
+                    "no network threat detected for the loopback C2-port connection "
+                    "within the poll window; see test_network_connection_detection.py"
+                )
+            for threat in network_threats:
+                assert threat.get("level") in ["high", "critical"], (
+                    f"Expected HIGH/CRITICAL for C2 port on loopback, got {threat.get('level')}"
+                )
         finally:
             proc.terminate()
             cleanup_container(container_name, coi_binary)
