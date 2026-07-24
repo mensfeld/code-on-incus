@@ -129,6 +129,32 @@ def get_container_state(name):
     return containers[0].get("status", "Unknown") if containers else "Unknown"
 
 
+def container_absent(name):
+    """True when the container does not exist (was deleted), as opposed to a
+    stopped or frozen container that still exists.
+
+    A killed container is stopped AND deleted by the responder (killContainer:
+    StopContainerQuiet + `incus delete`), so its terminal state is *absent* from
+    `incus list`, not a non-Running status. Auto-kill tests poll on this rather
+    than accepting "Stopped"/"Frozen"/"Unknown": auto-PAUSE freezes a container
+    without deleting it, so a kill test that accepted "Frozen" would pass even if
+    auto-kill had silently degraded to auto-pause.
+    """
+    result = subprocess.run(
+        ["incus", "list", name, "--format=json"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    if result.returncode != 0:
+        return False
+    try:
+        containers = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return False
+    return len(containers) == 0
+
+
 def wait_for_container_running(name, timeout=60):
     """Wait for container to reach Running state with retries.
 
@@ -237,7 +263,7 @@ class TestThreatDetection:
         for _ in range(15):
             time.sleep(1)
             state = get_container_state(container_name)
-            if state in ["Stopped", "Frozen", "Unknown"]:
+            if container_absent(container_name):
                 killed = True
                 break
 
@@ -794,11 +820,14 @@ class TestAutomatedResponse:
         killed = False
         for _ in range(15):
             time.sleep(1)
-            if get_container_state(container_name) in ["Stopped", "Frozen", "Unknown"]:
+            if container_absent(container_name):
                 killed = True
                 break
 
-        assert killed, "Container should be auto-killed on CRITICAL threat"
+        assert killed, (
+            "Container should be auto-killed (stopped AND deleted) on CRITICAL threat, "
+            f"but it still exists as {get_container_state(container_name)!r}"
+        )
 
         # The daemon writes the kill event and syncs to disk before killing the
         # container, but retry briefly in case of OS-level flush delay.
@@ -905,12 +934,14 @@ print("Task completed")
         for _ in range(15):
             time.sleep(1)
             state = get_container_state(container_name)
-            if state in ["Stopped", "Frozen", "Unknown"]:
+            if container_absent(container_name):
                 killed = True
                 break
 
         # Verify container was killed
-        assert killed, "Container should be auto-killed when inside process goes rogue"
+        assert killed, (
+            f"Container should be auto-killed (stopped AND deleted) when inside process goes rogue (final observed state: {state!r})"
+        )
 
         # Verify threat detected in audit log
         events = get_threat_events(container_name)
@@ -1737,11 +1768,13 @@ class TestReverseShellPatterns:
         for _ in range(15):
             time.sleep(1)
             state = get_container_state(container_name)
-            if state in ["Stopped", "Frozen", "Unknown"]:
+            if container_absent(container_name):
                 killed = True
                 break
 
-        assert killed, "Container should be killed on Python reverse shell detection"
+        assert killed, (
+            f"Container should be killed (stopped AND deleted) on Python reverse shell detection (final observed state: {state!r})"
+        )
 
         # Verify threat logged
         events = get_threat_events(container_name)
@@ -1806,7 +1839,7 @@ class TestReverseShellPatterns:
         for _ in range(15):
             time.sleep(1)
             state = get_container_state(container_name)
-            if state in ["Stopped", "Frozen", "Unknown"]:
+            if container_absent(container_name):
                 killed = True
                 break
 
@@ -1819,7 +1852,9 @@ class TestReverseShellPatterns:
             print(stderr_file.read_text())
         print("=== End Debug Log ===\n")
 
-        assert killed, "Container should be killed on Perl reverse shell detection"
+        assert killed, (
+            f"Container should be killed (stopped AND deleted) on Perl reverse shell detection (final observed state: {state!r})"
+        )
 
         # Verify threat logged
         events = get_threat_events(container_name)
@@ -1874,7 +1909,7 @@ class TestReverseShellPatterns:
         for _ in range(15):
             time.sleep(1)
             state = get_container_state(container_name)
-            if state in ["Stopped", "Frozen", "Unknown"]:
+            if container_absent(container_name):
                 killed = True
                 break
 
@@ -1891,7 +1926,9 @@ class TestReverseShellPatterns:
                 )
             print("=== END DEBUG ===\n")
 
-        assert killed, "Container should be killed on PHP reverse shell detection"
+        assert killed, (
+            f"Container should be killed (stopped AND deleted) on PHP reverse shell detection (final observed state: {state!r})"
+        )
 
         # Verify threat logged
         events = get_threat_events(container_name)
@@ -1953,7 +1990,7 @@ class TestReverseShellPatterns:
         for _ in range(15):
             time.sleep(1)
             state = get_container_state(container_name)
-            if state in ["Stopped", "Frozen", "Unknown"]:
+            if container_absent(container_name):
                 killed = True
                 break
 
@@ -1969,7 +2006,9 @@ class TestReverseShellPatterns:
                 )
             print("=== END DEBUG ===\n")
 
-        assert killed, "Container should be killed on Ruby reverse shell detection"
+        assert killed, (
+            f"Container should be killed (stopped AND deleted) on Ruby reverse shell detection (final observed state: {state!r})"
+        )
 
         events = get_threat_events(container_name)
         critical = [e for e in events if e.get("level") == "critical"]
@@ -2030,7 +2069,7 @@ class TestReverseShellPatterns:
         for _ in range(15):
             time.sleep(1)
             state = get_container_state(container_name)
-            if state in ["Stopped", "Frozen", "Unknown"]:
+            if container_absent(container_name):
                 killed = True
                 break
 
@@ -2046,7 +2085,9 @@ class TestReverseShellPatterns:
                 )
             print("=== END DEBUG ===\n")
 
-        assert killed, "Container should be killed on socat reverse shell detection"
+        assert killed, (
+            f"Container should be killed (stopped AND deleted) on socat reverse shell detection (final observed state: {state!r})"
+        )
 
         events = get_threat_events(container_name)
         critical = [e for e in events if e.get("level") == "critical"]
@@ -2204,7 +2245,7 @@ mode = "restricted"
             for _ in range(15):
                 time.sleep(1)
                 state = get_container_state(container_name)
-                if state in ["Stopped", "Frozen", "Unknown"]:
+                if container_absent(container_name):
                     killed = True
                     break
 
@@ -2222,7 +2263,9 @@ mode = "restricted"
                         )
                 print("=== END DEBUG ===")
 
-            assert killed, "Container should be killed when monitoring enabled via config"
+            assert killed, (
+                f"Container should be killed (stopped AND deleted) when monitoring enabled via config (final observed state: {state!r})"
+            )
 
             # Wait a moment for audit log to be flushed
             time.sleep(2)
@@ -2327,7 +2370,7 @@ file_read_rate_mb_per_sec = 1000
             for _ in range(15):
                 time.sleep(1)
                 state = get_container_state(container_name)
-                if state in ["Stopped", "Frozen", "Unknown"]:
+                if container_absent(container_name):
                     killed = True
                     final_state = state
                     break
@@ -2349,7 +2392,8 @@ file_read_rate_mb_per_sec = 1000
             # the startup check, so we proceed with verification.
 
             assert killed, (
-                "auto_kill_on_critical=true in config should kill container on critical threat"
+                "auto_kill_on_critical=true in config should kill (stop AND delete) the "
+                f"container on a critical threat; final observed state was {final_state!r}"
             )
 
             # The monitoring daemon writes to the audit log and kills the
@@ -2466,11 +2510,13 @@ class TestMultipleThreats:
         for _ in range(15):
             time.sleep(1)
             state = get_container_state(container_name)
-            if state in ["Stopped", "Frozen", "Unknown"]:
+            if container_absent(container_name):
                 killed = True
                 break
 
-        assert killed, "Container should be killed when CRITICAL threat present"
+        assert killed, (
+            f"Container should be killed (stopped AND deleted) when CRITICAL threat present (final observed state: {state!r})"
+        )
 
         # Verify all threats are logged
         events = get_threat_events(container_name)
@@ -3317,7 +3363,7 @@ class TestThresholdBoundaries:
         for _ in range(15):
             time.sleep(1)
             state = get_container_state(container_name)
-            if state in ["Stopped", "Frozen", "Unknown"]:
+            if container_absent(container_name):
                 killed = True
                 break
 
@@ -3333,7 +3379,9 @@ class TestThresholdBoundaries:
                 )
             print("=== END DEBUG ===\n")
 
-        assert killed, "Container should be killed on bash -i reverse shell detection"
+        assert killed, (
+            f"Container should be killed (stopped AND deleted) on bash -i reverse shell detection (final observed state: {state!r})"
+        )
 
         events = get_threat_events(container_name)
         critical = [e for e in events if e.get("level") == "critical"]
@@ -4439,11 +4487,14 @@ process_count_threshold = 15
             killed = False
             for _ in range(20):
                 time.sleep(1)
-                if get_container_state(container_name) in ["Stopped", "Frozen", "Unknown"]:
+                if container_absent(container_name):
                     killed = True
                     break
 
-            assert killed, "Container should be killed when process count exceeds threshold"
+            assert killed, (
+                "Container should be killed (stopped AND deleted) when process count "
+                f"exceeds threshold, but it still exists as {get_container_state(container_name)!r}"
+            )
 
             events = get_threat_events(container_name)
             critical = [
@@ -4616,11 +4667,14 @@ process_spawn_rate_threshold = 10
                 if i % 4 == 0:
                     spawn_burst()
                 time.sleep(1)
-                if get_container_state(container_name) in ["Stopped", "Frozen", "Unknown"]:
+                if container_absent(container_name):
                     killed = True
                     break
 
-            assert killed, "Container should be killed when spawn rate exceeds threshold"
+            assert killed, (
+                "Container should be killed (stopped AND deleted) when spawn rate "
+                f"exceeds threshold, but it still exists as {get_container_state(container_name)!r}"
+            )
 
             events = get_threat_events(container_name)
             rate_events = [
