@@ -1291,13 +1291,17 @@ def extract_container_name(result):
     return None
 
 
-def wait_for_container_started(coi_binary, container_name, timeout=60):
-    """Poll until the container is up AND its guest agent accepts an exec.
+def wait_for_container_started(coi_binary, container_name, timeout=90):
+    """Poll until the container is up AND systemd has finished booting.
 
     `coi container launch` returning does not mean the guest has finished
-    booting. Issuing a shutdown (`poweroff`/`close`) while systemd is still
-    coming up can race boot and leave the container running, so shutdown tests
-    must gate on real readiness rather than a fixed `time.sleep()`.
+    booting, and a bare `exec -- true` succeeding only proves the incus agent is
+    up — systemd's D-Bus can still be initializing. `poweroff`/`close` talk to
+    systemd over that bus, so issuing them in that window fails with
+    "Failed to connect to bus". Gate on `systemctl is-system-running` reporting a
+    *booted* state (`running` or `degraded` — both mean boot completed and the
+    bus is up; `is-system-running` exits non-zero for `degraded`, so match on the
+    reported state text, not the exit code) rather than a fixed `time.sleep()`.
     """
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -1309,12 +1313,20 @@ def wait_for_container_started(coi_binary, container_name, timeout=60):
         )
         if running.returncode == 0:
             probe = subprocess.run(
-                [coi_binary, "container", "exec", container_name, "--user", "1000", "--", "true"],
+                [
+                    coi_binary,
+                    "container",
+                    "exec",
+                    container_name,
+                    "--",
+                    "systemctl",
+                    "is-system-running",
+                ],
                 capture_output=True,
                 text=True,
                 timeout=15,
             )
-            if probe.returncode == 0:
+            if probe.stdout.strip() in ("running", "degraded"):
                 return True
         time.sleep(1)
     return False
