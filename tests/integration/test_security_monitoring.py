@@ -1217,13 +1217,16 @@ process_spawn_rate_threshold = 9999
 
             append_sudoers_line()
 
-            # Poll until the container is FROZEN (paused) or a paused event appears.
+            # Poll until the container is actually FROZEN. Do NOT break on the
+            # action="paused" audit event: responder.go writes that event
+            # (logThreat) BEFORE it runs `incus pause` (pauseContainer), so the
+            # event becomes visible a beat before the container freezes — breaking
+            # on it would let the assertion below observe a still-Running state and
+            # fail on a healthy auto-pause. The Frozen state is the definitive
+            # signal, and the event is guaranteed already written by then.
             for i in range(60):
                 state = get_container_state(container_name)
-                paused_events = [
-                    e for e in get_threat_events(container_name) if e.get("action") == "paused"
-                ]
-                if state == "Frozen" or paused_events:
+                if state == "Frozen":
                     break
                 if i and i % 8 == 0 and state == "Running":
                     append_sudoers_line()
