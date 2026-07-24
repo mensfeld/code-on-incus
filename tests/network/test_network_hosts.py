@@ -164,13 +164,17 @@ def test_network_hosts_allowlist_with_local_access_private_entry_applies(
         env=env,
     )
     combined = result.stdout + result.stderr
-    # Before the #605 fix, setup aborted with the RFC1918 rejection and the
-    # container never ran getent, so 192.168.1.50 would be absent. Resolution is
-    # the unambiguous proof that the private entry was accepted and written.
-    assert "192.168.1.50" in combined, (
-        "db.local should resolve to 192.168.1.50 in allowlist mode with "
-        "allow_local_network_access=true — setup must not reject the private "
-        f"[[network.hosts]] entry (regression mensfeld/code-on-incus#605). Got:\n{combined}"
+    # Assert on the HOSTNAME, not the IP. The pre-fix RFC1918 rejection error
+    # ("network.hosts: 192.168.1.50 is a private (RFC1918) address ...") contains
+    # the IP itself, so asserting the IP would false-pass while the bug is present.
+    # "db.local" appears only in successful `getent hosts` output (IP + name), never
+    # in the IP-only rejection error — so it is the unambiguous proof that setup
+    # accepted and wrote the private entry rather than aborting.
+    assert "db.local" in combined and "192.168.1.50" in combined, (
+        "getent must resolve db.local -> 192.168.1.50 in allowlist mode with "
+        "allow_local_network_access=true; before the fix, setup aborted and only the "
+        "IP (never the hostname) appeared in the RFC1918 rejection error "
+        f"(regression mensfeld/code-on-incus#605). Got:\n{combined}"
     )
 
 
