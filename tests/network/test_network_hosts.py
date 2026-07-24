@@ -134,6 +134,50 @@ def test_network_hosts_restricted_private_entry_applies(
     )
 
 
+def test_network_hosts_allowlist_with_local_access_private_entry_applies(
+    coi_binary, cleanup_containers, workspace_dir
+):
+    """In allowlist mode with allow_local_network_access=true, a private
+    [[network.hosts]] entry must be accepted and resolve.
+
+    Regression for mensfeld/code-on-incus#605 (reported by pbarnes-tibco): setup
+    aborted with "... is a private (RFC1918) address, which allowlist mode always
+    blocks" even though allow_local_network_access=true installs RFC1918 accept
+    rules, so the private target is in fact reachable (adding the /etc/hosts entry
+    by hand worked). checkHostReachable now honors allow_local_network_access.
+    """
+    env = write_trusted_coi_config(
+        "[network]\n"
+        'mode = "allowlist"\n'
+        "allow_local_network_access = true\n"
+        'allowed_domains = ["github.com"]\n\n'
+        "[[network.hosts]]\n"
+        'ip = "192.168.1.50"\n'
+        'hostnames = ["db.local"]\n'
+    )
+    result = subprocess.run(
+        [coi_binary, "run", "--workspace", workspace_dir, "--", "getent", "hosts", "db.local"],
+        capture_output=True,
+        text=True,
+        timeout=180,
+        cwd=workspace_dir,
+        env=env,
+    )
+    combined = result.stdout + result.stderr
+    # Assert on the HOSTNAME, not the IP. The pre-fix RFC1918 rejection error
+    # ("network.hosts: 192.168.1.50 is a private (RFC1918) address ...") contains
+    # the IP itself, so asserting the IP would false-pass while the bug is present.
+    # "db.local" appears only in successful `getent hosts` output (IP + name), never
+    # in the IP-only rejection error — so it is the unambiguous proof that setup
+    # accepted and wrote the private entry rather than aborting.
+    assert "db.local" in combined and "192.168.1.50" in combined, (
+        "getent must resolve db.local -> 192.168.1.50 in allowlist mode with "
+        "allow_local_network_access=true; before the fix, setup aborted and only the "
+        "IP (never the hostname) appeared in the RFC1918 rejection error "
+        f"(regression mensfeld/code-on-incus#605). Got:\n{combined}"
+    )
+
+
 def test_network_hosts_untrusted_project_config_ignored(
     coi_binary, cleanup_containers, workspace_dir
 ):

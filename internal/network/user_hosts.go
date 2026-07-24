@@ -37,24 +37,32 @@ func classifyHostIP(ipStr string) hostIPClass {
 // checkHostReachable reports whether a host entry's address CAN be made reachable
 // under the given mode. It refuses addresses the mode hard-blocks, so we never
 // write a /etc/hosts name that resolves to a permanently-unreachable address.
-func checkHostReachable(mode config.NetworkMode, ipStr string) error {
+// allowLocalNetworkAccess mirrors network.allow_local_network_access, which in
+// allowlist mode installs RFC1918 accept rules (nft_filter.go) — so a private
+// host entry IS reachable there and must not be refused.
+func checkHostReachable(mode config.NetworkMode, allowLocalNetworkAccess bool, ipStr string) error {
 	switch classifyHostIP(ipStr) {
 	case hostMetadata:
-		// Refused in every enforcing mode: pointing a name at 169.254.0.0/16
-		// (cloud metadata) is a credential-theft SSRF vector.
+		// Refused in every enforcing mode regardless of allow_local_network_access:
+		// pointing a name at 169.254.0.0/16 (cloud metadata) is a credential-theft
+		// SSRF vector. Even with local access on, allowlist mode installs an RFC1918
+		// accept but NOT a metadata one, so the address stays unreachable anyway.
 		if mode == config.NetworkModeRestricted || mode == config.NetworkModeAllowlist {
 			return fmt.Errorf(
 				"network.hosts: %s is in the link-local/metadata range (169.254.0.0/16), refused in %s mode "+
 					"(cloud-metadata SSRF)", ipStr, mode)
 		}
 	case hostPrivate:
-		// allowlist hard-blocks RFC1918 (the H1 rule) before any allow, so a host
-		// entry there is a dead name — refuse it. restricted CAN reach it via a
-		// targeted rule (applied below).
-		if mode == config.NetworkModeAllowlist {
+		// allowlist normally hard-blocks RFC1918, so a host entry there would be a
+		// dead name — refuse it. BUT network.allow_local_network_access=true installs
+		// RFC1918 accept rules in allowlist mode (nft_filter.go), making a private
+		// target reachable, so honor that and allow the entry. restricted CAN always
+		// reach a private target via a targeted rule (applied below).
+		if mode == config.NetworkModeAllowlist && !allowLocalNetworkAccess {
 			return fmt.Errorf(
-				"network.hosts: %s is a private (RFC1918) address, which allowlist mode always blocks — "+
-					"a host entry there can never be reached; use restricted or open mode for a private target", ipStr)
+				"network.hosts: %s is a private (RFC1918) address, which allowlist mode blocks unless "+
+					"network.allow_local_network_access=true — a host entry there can never be reached; "+
+					"enable allow_local_network_access, or use restricted or open mode for a private target", ipStr)
 		}
 	}
 	return nil
@@ -65,7 +73,7 @@ func checkHostReachable(mode config.NetworkMode, ipStr string) error {
 // active network mode. Reachability is validated for EVERY entry up front, so a
 // refused entry aborts before any /etc/hosts or firewall change. Works on a
 // running container. An empty slice clears the managed block.
-func ApplyUserHosts(containerName string, mode config.NetworkMode, entries []config.HostEntry) error {
+func ApplyUserHosts(containerName string, mode config.NetworkMode, allowLocalNetworkAccess bool, entries []config.HostEntry) error {
 	if len(entries) == 0 {
 		return WriteUserHosts(containerName, nil)
 	}
@@ -75,7 +83,7 @@ func ApplyUserHosts(containerName string, mode config.NetworkMode, entries []con
 
 	// 1. Fail before touching anything if any entry can't be made reachable.
 	for _, e := range entries {
-		if err := checkHostReachable(mode, e.IP); err != nil {
+		if err := checkHostReachable(mode, allowLocalNetworkAccess, e.IP); err != nil {
 			return err
 		}
 	}
@@ -133,7 +141,7 @@ func parseUserHostsBlock(hostsFile string) []config.HostEntry {
 // AddUserHost adds (or, for an existing IP, extends the hostnames of) one host
 // entry on a running container: it applies firewall reachability for the address
 // under the active mode, then merges the entry into the /etc/hosts user block.
-func AddUserHost(containerName string, mode config.NetworkMode, entry config.HostEntry) error {
+func AddUserHost(containerName string, mode config.NetworkMode, allowLocalNetworkAccess bool, entry config.HostEntry) error {
 	if err := config.ValidateNetworkHosts([]config.HostEntry{entry}); err != nil {
 		return err
 	}
@@ -150,7 +158,7 @@ func AddUserHost(containerName string, mode config.NetworkMode, entry config.Hos
 	// allowlist container's RFC1918 block. Detect the container's ACTUAL mode and
 	// honor that instead.
 	mode = effectiveContainerMode(containerIP, mode)
-	if err := checkHostReachable(mode, entry.IP); err != nil {
+	if err := checkHostReachable(mode, allowLocalNetworkAccess, entry.IP); err != nil {
 		return err
 	}
 	// Firewall reachability for just this address (open mode needs none).

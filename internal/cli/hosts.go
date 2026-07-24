@@ -85,7 +85,7 @@ func (a *App) hostsAddCommand(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	entry := config.HostEntry{IP: args[1], Hostnames: args[2:]}
-	if err := network.AddUserHost(name, a.cfg.Network.Mode, entry); err != nil {
+	if err := network.AddUserHost(name, a.cfg.Network.Mode, config.BoolVal(a.cfg.Network.AllowLocalNetworkAccess), entry); err != nil {
 		return err
 	}
 	fmt.Printf("Added %s -> %s to %s\n", strings.Join(entry.Hostnames, " "), entry.IP, name)
