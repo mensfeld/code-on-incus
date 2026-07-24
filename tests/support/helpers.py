@@ -1312,7 +1312,7 @@ def wait_for_container_started(coi_binary, container_name, timeout=90):
     """
     live_states = ("running", "degraded", "starting", "initializing", "maintenance")
     deadline = time.monotonic() + timeout
-    last_state = "<never probed>"
+    last_output = "<never probed>"
     while time.monotonic() < deadline:
         running = subprocess.run(
             [coi_binary, "container", "running", container_name],
@@ -1335,15 +1335,20 @@ def wait_for_container_started(coi_binary, container_name, timeout=90):
                 text=True,
                 timeout=15,
             )
-            last_state = (probe.stdout.strip() or probe.stderr.strip())[:80]
-            if probe.stdout.strip() in live_states:
+            # `coi container exec` surfaces the guest command's output on stderr,
+            # not stdout, so inspect BOTH streams. is-system-running prints just the
+            # state word (running/degraded/starting/...); "Failed to connect to bus"
+            # (bus not up yet) contains no live-state token and so keeps us waiting.
+            tokens = (probe.stdout + " " + probe.stderr).split()
+            last_output = " ".join(tokens)[:100] or "<empty>"
+            if any(state in tokens for state in live_states):
                 return True
         else:
-            last_state = f"not running ({(running.stderr or running.stdout).strip()[:60]})"
+            last_output = f"not running ({(running.stderr or running.stdout).strip()[:60]})"
         time.sleep(1)
-    # Surface the last observed state so a future timeout is diagnosable rather
+    # Surface the last observed output so a future timeout is diagnosable rather
     # than a bare "did not become ready" (pytest prints captured stdout on fail).
-    print(f"wait_for_container_started({container_name}) timed out; last state: {last_state}")
+    print(f"wait_for_container_started({container_name}) timed out; last output: {last_output}")
     return False
 
 
