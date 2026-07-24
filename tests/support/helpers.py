@@ -1289,3 +1289,55 @@ def extract_container_name(result):
             if "Container: " in line:
                 return line.split("Container: ")[-1].strip()
     return None
+
+
+def wait_for_container_started(coi_binary, container_name, timeout=60):
+    """Poll until the container is up AND its guest agent accepts an exec.
+
+    `coi container launch` returning does not mean the guest has finished
+    booting. Issuing a shutdown (`poweroff`/`close`) while systemd is still
+    coming up can race boot and leave the container running, so shutdown tests
+    must gate on real readiness rather than a fixed `time.sleep()`.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        running = subprocess.run(
+            [coi_binary, "container", "running", container_name],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if running.returncode == 0:
+            probe = subprocess.run(
+                [coi_binary, "container", "exec", container_name, "--user", "1000", "--", "true"],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            if probe.returncode == 0:
+                return True
+        time.sleep(1)
+    return False
+
+
+def wait_for_container_stopped(coi_binary, container_name, timeout=120):
+    """Poll until `coi container running` reports the container is no longer up.
+
+    Returns (stopped, last_result). A graceful systemd shutdown runs to stock
+    stop budgets (~90s) and can take longer on a loaded CI runner, so the default
+    budget is generous; the last `running` CompletedProcess is returned so the
+    caller can surface it in a failure message.
+    """
+    deadline = time.monotonic() + timeout
+    last = None
+    while time.monotonic() < deadline:
+        last = subprocess.run(
+            [coi_binary, "container", "running", container_name],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if last.returncode != 0:
+            return True, last
+        time.sleep(1)
+    return False, last
