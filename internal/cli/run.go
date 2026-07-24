@@ -679,7 +679,7 @@ func (a *App) applyNetworkIsolation(ctx context.Context, containerName string) (
 		// coi shell path calls SetupForContainer for every mode, so it already
 		// covers open; coi run short-circuits here, so apply them explicitly.)
 		if len(networkConfig.Hosts) > 0 {
-			if err := network.ApplyUserHosts(containerName, networkConfig.Mode, networkConfig.Hosts); err != nil {
+			if err := network.ApplyUserHosts(containerName, networkConfig.Mode, config.BoolVal(networkConfig.AllowLocalNetworkAccess), networkConfig.Hosts); err != nil {
 				return nil, fmt.Errorf("failed to apply [[network.hosts]]: %w", err)
 			}
 		}

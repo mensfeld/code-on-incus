@@ -24,26 +24,45 @@ func TestClassifyHostIP(t *testing.T) {
 }
 
 func TestCheckHostReachable(t *testing.T) {
-	// allowlist: only public reachable (RFC1918/metadata hard-blocked by H1).
-	if err := checkHostReachable(config.NetworkModeAllowlist, "1.2.3.4"); err != nil {
+	const noLocal, withLocal = false, true
+
+	// allowlist, allow_local_network_access=false: only public reachable
+	// (RFC1918/metadata hard-blocked).
+	if err := checkHostReachable(config.NetworkModeAllowlist, noLocal, "1.2.3.4"); err != nil {
 		t.Errorf("allowlist public should be reachable: %v", err)
 	}
-	if err := checkHostReachable(config.NetworkModeAllowlist, "10.0.0.5"); err == nil {
-		t.Error("allowlist private must be refused")
+	if err := checkHostReachable(config.NetworkModeAllowlist, noLocal, "10.0.0.5"); err == nil {
+		t.Error("allowlist private must be refused without allow_local_network_access")
 	}
-	if err := checkHostReachable(config.NetworkModeAllowlist, "169.254.169.254"); err == nil {
+	if err := checkHostReachable(config.NetworkModeAllowlist, noLocal, "169.254.169.254"); err == nil {
 		t.Error("allowlist metadata must be refused")
 	}
+
+	// allowlist, allow_local_network_access=true: RFC1918 becomes reachable
+	// (nft installs an RFC1918 accept), so a private host entry must be allowed —
+	// regression test for mensfeld/code-on-incus#605 (pbarnes-tibco).
+	if err := checkHostReachable(config.NetworkModeAllowlist, withLocal, "192.168.1.50"); err != nil {
+		t.Errorf("allowlist private WITH allow_local_network_access should be reachable: %v", err)
+	}
+	if err := checkHostReachable(config.NetworkModeAllowlist, withLocal, "10.0.0.5"); err != nil {
+		t.Errorf("allowlist private WITH allow_local_network_access should be reachable: %v", err)
+	}
+	// ...but metadata stays refused even with local access on (allowlist installs
+	// an RFC1918 accept, never a metadata one, so it is a genuine SSRF dead-name).
+	if err := checkHostReachable(config.NetworkModeAllowlist, withLocal, "169.254.169.254"); err == nil {
+		t.Error("allowlist metadata must be refused even with allow_local_network_access")
+	}
+
 	// restricted: public + private reachable (private via targeted allow), metadata refused.
-	if err := checkHostReachable(config.NetworkModeRestricted, "10.0.0.5"); err != nil {
+	if err := checkHostReachable(config.NetworkModeRestricted, noLocal, "10.0.0.5"); err != nil {
 		t.Errorf("restricted private should be reachable: %v", err)
 	}
-	if err := checkHostReachable(config.NetworkModeRestricted, "169.254.169.254"); err == nil {
+	if err := checkHostReachable(config.NetworkModeRestricted, noLocal, "169.254.169.254"); err == nil {
 		t.Error("restricted metadata must be refused")
 	}
 	// open: anything goes.
 	for _, ip := range []string{"10.0.0.5", "169.254.169.254", "1.2.3.4"} {
-		if err := checkHostReachable(config.NetworkModeOpen, ip); err != nil {
+		if err := checkHostReachable(config.NetworkModeOpen, noLocal, ip); err != nil {
 			t.Errorf("open should allow %s: %v", ip, err)
 		}
 	}
