@@ -63,35 +63,41 @@ def test_cpu_count_limit_is_enforced(coi_binary, workspace_dir, cleanup_containe
 
 
 def test_memory_limit_is_enforced(coi_binary, workspace_dir, cleanup_containers):
-    """With [limits.memory] max = "512MiB", the cgroup memory.max equals 512 MiB.
+    """With [limits.memory] max = "512MiB", the container's visible RAM is capped.
 
-    memory.max is the kernel's hard limit; reading it from inside proves the
-    container's cgroup is actually constrained. If the incus key were set but not
-    enforced, memory.max would read "max" (unlimited) — the exact regression this
-    guards. 512 MiB = 512*1024*1024 = 536870912 bytes.
+    incus applies limits.memory as the container cgroup's memory.max (on the host),
+    and LXCFS reflects that limit in the container's /proc/meminfo `MemTotal`. We
+    read MemTotal from inside: if the limit is enforced it is ~512 MiB (524288 kB),
+    far below the CI host's multi-GB RAM; if the incus key were set but not applied,
+    MemTotal would be the host's full memory — the regression this guards.
+
+    (Reading /sys/fs/cgroup/memory.max *inside* is NOT reliable: with a systemd +
+    cgroup-namespace container the enforced limit sits on a cgroup above the
+    namespace root, so the in-container cgroupfs shows "max". LXCFS's MemTotal
+    reflects the real, enforced limit. A real OOM-on-overcommit depends on the
+    swap controller, which is flaky on GitHub Actions runners, so we assert the
+    applied limit rather than trigger a kill.)
     """
     _write_limits_config(workspace_dir, '[limits.memory]\nmax = "512MiB"\n')
 
+    # 1 GiB = 1048576 kB. The 512 MiB limit is far below it and the CI host's RAM
+    # is far above it, so MemTotal < 1 GiB cleanly distinguishes enforced from not.
+    probe = (
+        r"""awk '/^MemTotal/ {print ($2 < 1048576) ? "MEM_LIMITED" : "MEM_UNLIMITED " $2}'"""
+        " /proc/meminfo"
+    )
     result = subprocess.run(
-        [
-            coi_binary,
-            "run",
-            "--workspace",
-            workspace_dir,
-            "--",
-            "bash",
-            "-c",
-            "echo MEMMAX=$(cat /sys/fs/cgroup/memory.max)",
-        ],
+        [coi_binary, "run", "--workspace", workspace_dir, "--", "bash", "-c", probe],
         capture_output=True,
         text=True,
         timeout=180,
         cwd=workspace_dir,
     )
     combined = result.stdout + result.stderr
-    assert "MEMMAX=536870912" in combined, (
-        "limits.memory max=512MiB must constrain the container cgroup "
-        f"(memory.max == 536870912 bytes), not read 'max'/unlimited. Got:\n{combined}"
+    assert "MEM_LIMITED" in combined, (
+        "limits.memory max=512MiB must cap the container's visible RAM (LXCFS MemTotal "
+        "~512 MiB, well below the host total), not leave it at the host memory. "
+        f"Got:\n{combined}"
     )
 
 
