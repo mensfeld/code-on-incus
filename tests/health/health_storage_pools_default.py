@@ -14,7 +14,12 @@ def test_health_storage_pools_default(coi_binary):
         text=True,
         timeout=60,
     )
-    assert result.returncode in (0, 1), f"health should return 0 or 1. stderr: {result.stderr}"
+    # Don't gate a specific-check test on the AGGREGATE exit code: exit 2 means
+    # some one of the ~34 checks failed, unrelated to the storage-pools check this
+    # test asserts below (and a source of CI flakes). Accept 0/1/2.
+    assert result.returncode in (0, 1, 2), (
+        f"health exited {result.returncode}. stderr: {result.stderr}"
+    )
 
     data = json.loads(result.stdout)
     checks = data.get("checks", {})
