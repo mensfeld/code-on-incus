@@ -5,10 +5,37 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 
 	"github.com/BurntSushi/toml"
 )
+
+// hostnameRe matches a single DNS name (RFC1123-ish): dot-separated labels of
+// letters/digits/hyphens, each 1–63 chars and not starting/ending with a hyphen.
+var hostnameRe = regexp.MustCompile(
+	`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$`)
+
+// ValidateNetworkHosts checks that [[network.hosts]] entries are structurally
+// sound: each has a valid IPv4 address and at least one syntactically valid
+// hostname. Mode-dependent reachability rules (e.g. refusing RFC1918/metadata
+// IPs in allowlist mode) are enforced later, when the entries are applied.
+func ValidateNetworkHosts(hosts []HostEntry) error {
+	for i, h := range hosts {
+		if ip := net.ParseIP(h.IP); ip == nil || ip.To4() == nil {
+			return fmt.Errorf("network.hosts[%d]: %q is not a valid IPv4 address", i, h.IP)
+		}
+		if len(h.Hostnames) == 0 {
+			return fmt.Errorf("network.hosts[%d] (%s): at least one hostname is required", i, h.IP)
+		}
+		for _, name := range h.Hostnames {
+			if !hostnameRe.MatchString(name) {
+				return fmt.Errorf("network.hosts[%d] (%s): %q is not a valid hostname", i, h.IP, name)
+			}
+		}
+	}
+	return nil
+}
 
 // ShellConfig contains shell session configuration
 type ShellConfig struct {
@@ -240,7 +267,15 @@ func (s *SecurityConfig) IsHostImmutableEnabled() bool {
 
 // DefaultsConfig contains default settings
 type DefaultsConfig struct {
-	Model       string            `toml:"model"`
+	Model string `toml:"model"`
+	// Profile names the profile to apply when `--profile` is not passed, so a
+	// user's opinionated setup applies without retyping it (#607). `coi` gives
+	// this profile; `coi --profile default` still gives the synthesized clone of
+	// global config. Honored ONLY from trusted-scope config (an untrusted
+	// project config redirecting the no-flag default could downgrade the user's
+	// chosen environment) — stripped from project config at load time. A name
+	// that does not resolve to a known profile is a hard error at startup.
+	Profile     string            `toml:"profile"`
 	ForwardEnv  []string          `toml:"forward_env"`
 	Environment map[string]string `toml:"environment"`
 	// EnvCommands maps env var names to host commands run at session start; the
@@ -298,6 +333,19 @@ type NetworkConfig struct {
 	// rules. For users who decline the installer's /etc/sudoers.d/coi-nft rule.
 	UseSudo *bool                `toml:"use_sudo"`
 	Logging NetworkLoggingConfig `toml:"logging"`
+	// Hosts are static name→address entries written into the container's
+	// /etc/hosts, with firewall reachability applied to match the active mode
+	// (#605). Honored ONLY from trusted-scope config — a name→IP mapping is a
+	// spoofing primitive and reachability punches a firewall hole, so an
+	// untrusted project config's entries are stripped at load time.
+	Hosts []HostEntry `toml:"hosts"`
+}
+
+// HostEntry maps one IPv4 address to one or more hostnames for the container's
+// /etc/hosts. It is the config form of `[[network.hosts]]`.
+type HostEntry struct {
+	IP        string   `toml:"ip"`
+	Hostnames []string `toml:"hostnames"`
 }
 
 // NetworkLoggingConfig contains network logging settings
@@ -808,6 +856,9 @@ func (c *Config) Merge(other *Config) {
 
 	if other.Defaults.Model != "" {
 		c.Defaults.Model = other.Defaults.Model
+	}
+	if other.Defaults.Profile != "" {
+		c.Defaults.Profile = other.Defaults.Profile
 	}
 	if len(other.Defaults.ForwardEnv) > 0 {
 		c.Defaults.ForwardEnv = MergeStringSliceUnique(c.Defaults.ForwardEnv, other.Defaults.ForwardEnv)
@@ -1358,6 +1409,9 @@ func mergeNetworkInto(dst *NetworkConfig, src *NetworkConfig) {
 	if src.RefreshIntervalMinutes != 0 {
 		dst.RefreshIntervalMinutes = src.RefreshIntervalMinutes
 	}
+	if src.Hosts != nil {
+		dst.Hosts = src.Hosts
+	}
 	if src.Logging.Path != "" {
 		dst.Logging.Path = src.Logging.Path
 	}
@@ -1638,6 +1692,13 @@ func (p *ProfileConfig) Validate(name string) error {
 			// valid
 		default:
 			return fmt.Errorf("profile '%s': invalid network mode %q (must be open, restricted, or allowlist)", name, p.Network.Mode)
+		}
+	}
+
+	// Validate [[network.hosts]] entries if set
+	if p.Network != nil && len(p.Network.Hosts) > 0 {
+		if err := ValidateNetworkHosts(p.Network.Hosts); err != nil {
+			return fmt.Errorf("profile '%s': %w", name, err)
 		}
 	}
 

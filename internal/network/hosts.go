@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
 )
 
@@ -36,6 +37,16 @@ import (
 const (
 	hostsBeginMarker = "# BEGIN coi allowlist (managed by coi — edits will be overwritten)"
 	hostsEndMarker   = "# END coi allowlist"
+
+	// Static user host entries ([[network.hosts]] and `coi hosts`, #605) live in
+	// their OWN managed block, independent of the allowlist block above, so the
+	// two never clobber each other. The two blocks are written independently; on
+	// the rare name that appears in both, glibc's first-match resolution picks
+	// whichever block is earlier in the file (the allowlist block, written at
+	// setup, precedes a user block appended later) — collisions are expected to
+	// be a non-case, since allowlisted domains and user host names don't overlap.
+	userHostsBeginMarker = "# BEGIN coi hosts (managed by coi — edits will be overwritten)"
+	userHostsEndMarker   = "# END coi hosts"
 )
 
 // renderHostsBlock builds the managed block for the container's /etc/hosts.
@@ -72,8 +83,46 @@ func renderHostsBlock(domainIPs map[string][]string) string {
 // swapping the inode under them is how you get a container that resolves nothing
 // until it is restarted.
 func WriteAllowlistHosts(containerName string, domainIPs map[string][]string) error {
-	block := renderHostsBlock(domainIPs)
+	return replaceManagedHostsBlock(containerName, hostsBeginMarker, hostsEndMarker, renderHostsBlock(domainIPs))
+}
 
+// renderUserHostsBlock builds the managed block for static user host entries
+// ([[network.hosts]] / `coi hosts`). One line per entry: `IP\tname1 name2 …`.
+// Pure and deterministic (sorted) so it can be tested and produces no spurious
+// rewrites.
+func renderUserHostsBlock(entries []config.HostEntry) string {
+	sorted := append([]config.HostEntry(nil), entries...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].IP < sorted[j].IP })
+
+	var b strings.Builder
+	b.WriteString(userHostsBeginMarker)
+	b.WriteString("\n")
+	for _, e := range sorted {
+		names := append([]string(nil), e.Hostnames...)
+		sort.Strings(names)
+		fmt.Fprintf(&b, "%s\t%s\n", e.IP, strings.Join(names, " "))
+	}
+	b.WriteString(userHostsEndMarker)
+	return b.String()
+}
+
+// WriteUserHosts replaces the COI user-hosts block in the container's /etc/hosts
+// with the given entries (an empty slice clears the block), leaving the allowlist
+// block and everything else untouched. Works on a running container.
+func WriteUserHosts(containerName string, entries []config.HostEntry) error {
+	return replaceManagedHostsBlock(containerName, userHostsBeginMarker, userHostsEndMarker, renderUserHostsBlock(entries))
+}
+
+// replaceManagedHostsBlock rewrites the container's /etc/hosts in place, replacing
+// the block delimited by beginMarker/endMarker with `block` and leaving everything
+// outside those markers (localhost, the container's own name, OTHER managed
+// blocks) untouched.
+//
+// The file is rewritten in place via `cat >` rather than `mv` so the inode,
+// ownership and permissions survive — some resolvers hold the file open, and
+// swapping the inode under them is how you get a container that resolves nothing
+// until it is restarted.
+func replaceManagedHostsBlock(containerName, beginMarker, endMarker, block string) error {
 	// Strip the previous COI-managed block, then append a fresh one. awk is used
 	// deliberately instead of a sed '/BEGIN/,/END/d' range: a sed range deletes
 	// through to end-of-file when the END marker is missing, so a truncated or
@@ -100,11 +149,11 @@ cat >> "$tmp" <<'COI_HOSTS_EOF'
 COI_HOSTS_EOF
 cat "$tmp" > /etc/hosts
 rm -f "$tmp"
-`, shellSingleQuote(hostsBeginMarker), shellSingleQuote(hostsEndMarker), block)
+`, shellSingleQuote(beginMarker), shellSingleQuote(endMarker), block)
 
 	mgr := container.NewManager(containerName)
 	if _, err := mgr.ExecCommand(script, container.ExecCommandOptions{Capture: true}); err != nil {
-		return fmt.Errorf("failed to write allowlist hosts entries: %w", err)
+		return fmt.Errorf("failed to write hosts entries: %w", err)
 	}
 	return nil
 }

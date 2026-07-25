@@ -240,6 +240,18 @@ func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.P
 				}
 			}
 
+			// No profile selected by --profile, an alias, or resume metadata:
+			// fall back to [defaults] profile (#607). Placed after alias
+			// (resolveWorkspacePhase) and resume resolution so those higher-
+			// precedence sources win. On resume, a.persistent was already
+			// reconciled with the session's saved mode above, so only recompute
+			// it for a fresh session (the profile may set [container] persistent).
+			if applied, err := a.applyDefaultProfileFallback(cmd); err != nil {
+				return nil, err
+			} else if applied && resumeID == "" {
+				a.persistent = config.BoolVal(a.cfg.Container.Persistent)
+			}
+
 			// Generate or reuse session ID.
 			if resumeID != "" {
 				s.sessionID = resumeID

@@ -23,7 +23,7 @@ def test_health_storage_pools_present_in_json(coi_binary):
         timeout=60,
     )
 
-    assert result.returncode in [0, 1], (
+    assert result.returncode in (0, 1, 2), (
         f"Health check exited {result.returncode}. stderr: {result.stderr}"
     )
 
@@ -80,7 +80,7 @@ def test_health_storage_pools_in_text_output(coi_binary):
         timeout=60,
     )
 
-    assert result.returncode in [0, 1], (
+    assert result.returncode in (0, 1, 2), (
         f"Health check exited {result.returncode}. stderr: {result.stderr}"
     )
 

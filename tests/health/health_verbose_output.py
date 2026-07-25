@@ -26,9 +26,12 @@ def test_health_verbose_output(coi_binary):
         timeout=120,
     )
 
-    # Should succeed (exit 0 for healthy, 1 for degraded)
-    assert result.returncode in [0, 1], (
-        f"Health check failed with exit {result.returncode}. stderr: {result.stderr}"
+    # Accept any valid classification (0 healthy, 1 degraded, 2 unhealthy): an
+    # unrelated check can push the aggregate to 2 under CI load, and this test is
+    # about the verbose output below, not the aggregate health.
+    assert result.returncode in (0, 1, 2), (
+        f"coi health did not run cleanly (exit {result.returncode}); an unrelated "
+        f"check failing is fine, the specific check is asserted below. stderr: {result.stderr}"
     )
 
     output = result.stdout

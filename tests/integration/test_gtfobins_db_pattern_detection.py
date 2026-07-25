@@ -130,24 +130,34 @@ process_spawn_rate_threshold = 9999
     # argv[0] = "frobnicator --frobsocket" satisfies:
     #   - Arg0 prefix check  : "frobnicator --frobsocket".split()[0] → "frobnicator"
     #   - keyword check      : "--frobsocket" appears in full cmdline
-    subprocess.Popen(
-        [
-            "incus",
-            "exec",
-            container_name,
-            "--",
-            "bash",
-            "-c",
-            "exec -a 'frobnicator --frobsocket' sleep 30",
-        ],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+    # sleep 5 (not 30) keeps the process alive long enough for the daemon to read
+    # /proc after the exec event, without piling up long-lived sleeps as we re-fire.
+    def fire():
+        subprocess.Popen(
+            [
+                "incus",
+                "exec",
+                container_name,
+                "--",
+                "bash",
+                "-c",
+                "exec -a 'frobnicator --frobsocket' sleep 5",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+    fire()
 
     log_path = coi_dir / "audit" / f"{container_name}.jsonl"
     detected = False
-    for _ in range(30):
+    for i in range(40):
         time.sleep(1)
+        # Re-fire periodically: the first exec can land before the proc-connector
+        # subscription is active (daemon still starting under CI load) and be missed.
+        # Each launch is a fresh execve, guaranteeing one fires after subscription.
+        if i % 3 == 2:
+            fire()
         if log_path.exists():
             for raw in log_path.read_text().splitlines():
                 if not raw.strip():

@@ -1289,3 +1289,87 @@ def extract_container_name(result):
             if "Container: " in line:
                 return line.split("Container: ")[-1].strip()
     return None
+
+
+def wait_for_container_started(coi_binary, container_name, timeout=90):
+    """Poll until the container is up AND systemd's bus is reachable.
+
+    `coi container launch` returning does not mean the guest has finished
+    booting, and a bare `exec -- true` succeeding only proves the incus agent is
+    up — systemd's D-Bus can still be initializing. `poweroff`/`close` talk to
+    systemd over that bus, so issuing them in that window fails with
+    "Failed to connect to bus".
+
+    Gate on `systemctl is-system-running` reporting any *live* state. We
+    deliberately do NOT require a fully-booted `running`/`degraded`: a COI
+    container can sit in `starting`/`initializing` for a long time under CI's
+    restricted network (waiting on network units), but the systemd bus is already
+    up in those states — which is all `poweroff`/`close` need. `offline` (no
+    systemd), an empty reply, or a "Failed to connect to bus" stderr (bus not up
+    yet) are treated as not-ready. `is-system-running` exits non-zero for several
+    of these states, so the reported state *text* is what matters, not the exit
+    code.
+    """
+    live_states = ("running", "degraded", "starting", "initializing", "maintenance")
+    deadline = time.monotonic() + timeout
+    last_output = "<never probed>"
+    while time.monotonic() < deadline:
+        running = subprocess.run(
+            [coi_binary, "container", "running", container_name],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if running.returncode == 0:
+            probe = subprocess.run(
+                [
+                    coi_binary,
+                    "container",
+                    "exec",
+                    container_name,
+                    "--",
+                    "systemctl",
+                    "is-system-running",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            # `coi container exec` surfaces the guest command's output on stderr,
+            # not stdout, so inspect BOTH streams. is-system-running prints just the
+            # state word (running/degraded/starting/...); "Failed to connect to bus"
+            # (bus not up yet) contains no live-state token and so keeps us waiting.
+            tokens = (probe.stdout + " " + probe.stderr).split()
+            last_output = " ".join(tokens)[:100] or "<empty>"
+            if any(state in tokens for state in live_states):
+                return True
+        else:
+            last_output = f"not running ({(running.stderr or running.stdout).strip()[:60]})"
+        time.sleep(1)
+    # Surface the last observed output so a future timeout is diagnosable rather
+    # than a bare "did not become ready" (pytest prints captured stdout on fail).
+    print(f"wait_for_container_started({container_name}) timed out; last output: {last_output}")
+    return False
+
+
+def wait_for_container_stopped(coi_binary, container_name, timeout=120):
+    """Poll until `coi container running` reports the container is no longer up.
+
+    Returns (stopped, last_result). A graceful systemd shutdown runs to stock
+    stop budgets (~90s) and can take longer on a loaded CI runner, so the default
+    budget is generous; the last `running` CompletedProcess is returned so the
+    caller can surface it in a failure message.
+    """
+    deadline = time.monotonic() + timeout
+    last = None
+    while time.monotonic() < deadline:
+        last = subprocess.run(
+            [coi_binary, "container", "running", container_name],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if last.returncode != 0:
+            return True, last
+        time.sleep(1)
+    return False, last
