@@ -33,6 +33,7 @@ XB-Bugs: https://github.com/mensfeld/code-on-incus/issues
 # or use_sudo = false), so a default-configured install needs it present.
 Depends: ${shlibs:Depends}, ${misc:Depends},
          libsystemd0,
+         libcap2-bin,
          incus,
          sudo
 # git is not required to start a session, but without it the host git-identity

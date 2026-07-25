@@ -249,6 +249,24 @@ dpkg-buildpackage -us -uc -b        # produces ../code-on-incus_*.deb
   [zabbly](https://github.com/zabbly/incus) repo (its package is also named
   `incus`), otherwise `apt install code-on-incus` reports `incus` as
   uninstallable — which correctly signals the missing prerequisite.
+- **`libcap2-bin` is `Depends`, and `debian/postinst` runs `setcap`.** `coi`
+  needs `CAP_LINUX_IMMUTABLE` to `chattr +i` host-side protected paths — the
+  layer that stops a container root from bypassing a read-only bind mount with
+  `unshare -m` + `umount` (`internal/session/immutable.go`). `install.sh` grants
+  it with `setcap` after installing, but a `.deb` cannot carry file
+  capabilities in the archive, so the package has to apply it from a maintainer
+  script. dpkg also drops the capability on every upgrade (the binary is a new
+  inode), which is why `postinst` re-applies on each `configure` rather than
+  only on first install — and why `setcap` must be present at configure time,
+  not merely at install time.
+
+  The `setcap` call is **non-fatal**, matching `install.sh`: `ApplyImmutable`
+  already degrades to read-only bind mounts with a warning when the capability
+  is absent, so a host that cannot hold it (`/usr` on a `nosuid` or no-xattr
+  mount, an unprivileged container without `CAP_SETFCAP`) gets a warning rather
+  than a half-configured package. Verify after a local install with
+  `getcap /usr/bin/coi` — expect `cap_linux_immutable=ep`. `coi doctor` reports
+  the same thing as a SECURITY warning if it is missing.
 - Other host tools are handled without extra hard dependencies:
   - `nftables`, `iproute2`, `iptables`, `uidmap`, `rsync`, and `systemd`
     (journalctl/systemctl) are pulled in transitively by `incus` (via
