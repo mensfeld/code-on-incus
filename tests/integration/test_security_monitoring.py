@@ -2847,6 +2847,139 @@ class TestAuditLogValidation:
         proc.terminate()
         cleanup_container(container_name, coi_binary)
 
+    def test_threat_deduplication(self, test_workspace, coi_binary):
+        """An identical threat repeated within the 30s window is deduplicated, and
+        re-alerts once the window passes.
+
+        Responder.Handle dedups by category:title:evidence within a 30s window
+        (internal/monitor/responder.go), emitting action="deduplicated" for the
+        repeat instead of re-running the response. AuthLog evidence is deterministic
+        (auth:<logfile>:<pattern>), so re-appending the same sudoers line yields the
+        same key — the property this exercises. (This is the test the audit-log
+        action allowlists elsewhere in this file reference by name.)
+        """
+        config_path = Path.home() / ".coi" / "config.toml"
+        backup = config_path.read_text() if config_path.exists() else None
+
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            """
+[network]
+mode = "open"
+
+[monitoring]
+enabled = true
+auto_pause_on_high = false
+auto_kill_on_critical = false
+poll_interval_sec = 1
+file_read_threshold_mb = 500
+file_read_rate_mb_per_sec = 1000
+process_count_threshold = 9999
+process_spawn_rate_threshold = 9999
+"""
+        )
+
+        container_name = (
+            get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-64"
+        )
+        proc = subprocess.Popen(
+            [coi_binary, "shell", "--workspace", str(test_workspace), "--slot", "64", "--debug"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        def append_sudoers_line():
+            subprocess.run(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "bash",
+                    "-c",
+                    "mkdir -p /var/log && "
+                    "echo 'Jun  5 12:00:01 coi sudo: hacker is not in the sudoers file. "
+                    "This incident will be reported.' >> /var/log/auth.log",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+
+        def high_auth(events):
+            return [e for e in events if e.get("category") == "auth" and e.get("level") == "high"]
+
+        def count_alerted(events):
+            return len([e for e in high_auth(events) if e.get("action") == "alerted"])
+
+        try:
+            assert wait_for_container_running(container_name), (
+                f"Container {container_name} did not start"
+            )
+            time.sleep(3)
+
+            # Phase 1 — within the window the repeat is deduplicated. Re-append on a
+            # cadence: the first detection is "alerted" (records the key), and every
+            # later append within 30s becomes "deduplicated". Re-appending also
+            # survives a monitoring-daemon startup race (the watch not yet active at
+            # the first write).
+            append_sudoers_line()
+            alerted = None
+            deduped = None
+            events = []
+            last_append = time.monotonic()
+            deadline = time.monotonic() + 45
+            while time.monotonic() < deadline:
+                events = get_threat_events(container_name)
+                auth = high_auth(events)
+                alerted = next((e for e in auth if e.get("action") == "alerted"), alerted)
+                deduped = next((e for e in auth if e.get("action") == "deduplicated"), deduped)
+                if alerted and deduped:
+                    break
+                if time.monotonic() - last_append >= 3:
+                    append_sudoers_line()
+                    last_append = time.monotonic()
+                time.sleep(1)
+
+            assert alerted is not None, f"expected an 'alerted' HIGH auth threat, got: {events}"
+            assert deduped is not None, (
+                "a repeat of the same threat within 30s must be recorded with "
+                f"action='deduplicated', not re-alerted. Got: {events}"
+            )
+            assert deduped.get("title") == alerted.get("title"), (
+                "the deduplicated event must be the SAME threat (same category+title) as "
+                f"the alert. alert={alerted}, dedup={deduped}"
+            )
+
+            # Phase 2 — past the 30s window the same threat re-alerts (a fresh
+            # "alerted"), proving the window expires rather than suppressing forever.
+            alerted_before = count_alerted(get_threat_events(container_name))
+            time.sleep(32)  # outlast the 30s dedup window (measured from the first alert)
+            append_sudoers_line()
+            realerted = False
+            last_append = time.monotonic()
+            deadline = time.monotonic() + 30
+            while time.monotonic() < deadline:
+                if count_alerted(get_threat_events(container_name)) > alerted_before:
+                    realerted = True
+                    break
+                if time.monotonic() - last_append >= 5:
+                    append_sudoers_line()
+                    last_append = time.monotonic()
+                time.sleep(1)
+
+            assert realerted, (
+                "past the 30s dedup window an identical threat must re-alert (a fresh "
+                "action='alerted'), not stay deduplicated forever"
+            )
+        finally:
+            proc.terminate()
+            if backup:
+                config_path.write_text(backup)
+            elif config_path.exists():
+                config_path.unlink()
+            cleanup_container(container_name, coi_binary)
+
 
 class TestFalsePositives:
     """Test that legitimate commands don't trigger false alerts."""
