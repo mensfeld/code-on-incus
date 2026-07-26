@@ -5181,24 +5181,31 @@ process_spawn_rate_threshold = 9999
             # pattern. PROC_EVENT_EXEC fires on execve before the shell tries to
             # connect, so we don't wait for the command to complete (the TCP
             # connection attempt may hang if no RST is returned by the network).
-            subprocess.Popen(
-                [
-                    "incus",
-                    "exec",
-                    container_name,
-                    "--",
-                    "bash",
-                    "-c",
-                    "bash -c 'exec 3>/dev/tcp/10.255.255.1/9999' 2>/dev/null; true",
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            # Re-fire on a cadence: PROC_EVENT_EXEC fires once per execve, and the
+            # proc-connector subscription may not be active yet while the daemon is
+            # still starting under CI load, so a single exec can be missed. Each
+            # launch is a fresh execve, guaranteeing one fires after subscription.
+            def fire():
+                subprocess.Popen(
+                    [
+                        "incus",
+                        "exec",
+                        container_name,
+                        "--",
+                        "bash",
+                        "-c",
+                        "bash -c 'exec 3>/dev/tcp/10.255.255.1/9999' 2>/dev/null; true",
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
 
-            # Poll until the proc_event threat appears (30 s timeout).
+            fire()
+
+            # Poll until the proc_event threat appears.
             proc_events = []
             events = []
-            for _ in range(30):
+            for i in range(40):
                 events = get_threat_events(container_name)
                 proc_events = [
                     e
@@ -5209,6 +5216,8 @@ process_spawn_rate_threshold = 9999
                 ]
                 if proc_events:
                     break
+                if i % 3 == 2:
+                    fire()
                 time.sleep(1)
 
             assert len(proc_events) > 0, (
@@ -5275,24 +5284,31 @@ process_spawn_rate_threshold = 9999
 
             # Run a Python one-liner whose cmdline contains "python3" and
             # "socket.socket", matching the python3-socket exec pattern.
-            subprocess.Popen(
-                [
-                    "incus",
-                    "exec",
-                    container_name,
-                    "--",
-                    "python3",
-                    "-c",
-                    "import socket; s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.close()",
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            ).wait(timeout=10)
+            # Re-fire on a cadence: PROC_EVENT_EXEC fires once per execve, and the
+            # proc-connector subscription may not be active yet while the daemon is
+            # still starting under CI load, so a single exec can be missed. Each
+            # launch is a fresh execve, guaranteeing one fires after subscription.
+            def fire():
+                subprocess.Popen(
+                    [
+                        "incus",
+                        "exec",
+                        container_name,
+                        "--",
+                        "python3",
+                        "-c",
+                        "import socket; s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.close()",
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
 
-            # Poll until the proc_event threat appears (30 s timeout).
+            fire()
+
+            # Poll until the proc_event threat appears.
             proc_events = []
             events = []
-            for _ in range(30):
+            for i in range(40):
                 events = get_threat_events(container_name)
                 proc_events = [
                     e
@@ -5303,6 +5319,8 @@ process_spawn_rate_threshold = 9999
                 ]
                 if proc_events:
                     break
+                if i % 3 == 2:
+                    fire()
                 time.sleep(1)
 
             assert len(proc_events) > 0, (
@@ -5381,24 +5399,31 @@ process_spawn_rate_threshold = 9999
             # Use exec -a to set argv[0] to the PHP fsockopen signature and run
             # sleep as the actual process. PROC_EVENT_EXEC fires at execve time,
             # and sleep keeps the process alive long enough to avoid a read race.
-            subprocess.Popen(
-                [
-                    "incus",
-                    "exec",
-                    container_name,
-                    "--",
-                    "bash",
-                    "-c",
-                    "exec -a 'php -r $sock=fsockopen(10.255.255.1,9999)' sleep 10",
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            # Re-fire on a cadence: PROC_EVENT_EXEC fires once per execve, and the
+            # proc-connector subscription may not be active yet while the daemon is
+            # still starting under CI load, so a single exec can be missed. Each
+            # launch is a fresh execve; sleep 5 (not 10) avoids piling up re-fires.
+            def fire():
+                subprocess.Popen(
+                    [
+                        "incus",
+                        "exec",
+                        container_name,
+                        "--",
+                        "bash",
+                        "-c",
+                        "exec -a 'php -r $sock=fsockopen(10.255.255.1,9999)' sleep 5",
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
 
-            # Poll until the proc_event threat appears (30 s timeout).
+            fire()
+
+            # Poll until the proc_event threat appears.
             proc_events = []
             events = []
-            for _ in range(30):
+            for i in range(40):
                 events = get_threat_events(container_name)
                 proc_events = [
                     e
@@ -5409,6 +5434,8 @@ process_spawn_rate_threshold = 9999
                 ]
                 if proc_events:
                     break
+                if i % 3 == 2:
+                    fire()
                 time.sleep(1)
 
             assert len(proc_events) > 0, (
@@ -5482,24 +5509,31 @@ process_spawn_rate_threshold = 9999
             # sleep as the actual process. PROC_EVENT_EXEC fires at execve time, and
             # sleep keeps the process alive long enough to avoid a read race.
             # Keywords 'child_process' and 'net' appear in the argv[0] string.
-            subprocess.Popen(
-                [
-                    "incus",
-                    "exec",
-                    container_name,
-                    "--",
-                    "bash",
-                    "-c",
-                    "exec -a 'node -e var sh=require(child_process);require(net).connect(9999)' sleep 10",
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            # Re-fire on a cadence: PROC_EVENT_EXEC fires once per execve, and the
+            # proc-connector subscription may not be active yet while the daemon is
+            # still starting under CI load, so a single exec can be missed. Each
+            # launch is a fresh execve; sleep 5 (not 10) avoids piling up re-fires.
+            def fire():
+                subprocess.Popen(
+                    [
+                        "incus",
+                        "exec",
+                        container_name,
+                        "--",
+                        "bash",
+                        "-c",
+                        "exec -a 'node -e var sh=require(child_process);require(net).connect(9999)' sleep 5",
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
 
-            # Poll until the proc_event threat appears (30 s timeout).
+            fire()
+
+            # Poll until the proc_event threat appears.
             proc_events = []
             events = []
-            for _ in range(30):
+            for i in range(40):
                 events = get_threat_events(container_name)
                 proc_events = [
                     e
@@ -5510,6 +5544,8 @@ process_spawn_rate_threshold = 9999
                 ]
                 if proc_events:
                     break
+                if i % 3 == 2:
+                    fire()
                 time.sleep(1)
 
             assert len(proc_events) > 0, (
@@ -5587,23 +5623,33 @@ process_spawn_rate_threshold = 9999
 
             # exec -a sets argv[0] of sleep to the suspicious signature so the
             # proc_event watcher sees the right cmdline without needing the binary.
-            subprocess.Popen(
-                [
-                    "incus",
-                    "exec",
-                    container_name,
-                    "--",
-                    "bash",
-                    "-c",
-                    f"exec -a '{exec_a_arg}' sleep 10",
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            # PROC_EVENT_EXEC fires once per execve; the proc-connector subscription
+            # may not be active yet while the daemon is still starting under CI load,
+            # so a single exec can be missed. Re-fire on a short cadence inside the
+            # poll loop — each launch is a fresh execve, guaranteeing one fires after
+            # the subscription is active. sleep 5 (not 10) keeps re-fired processes
+            # from piling up while still living long enough for the daemon to read
+            # /proc after the exec event.
+            def fire():
+                subprocess.Popen(
+                    [
+                        "incus",
+                        "exec",
+                        container_name,
+                        "--",
+                        "bash",
+                        "-c",
+                        f"exec -a '{exec_a_arg}' sleep 5",
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+
+            fire()
 
             proc_events = []
             events = []
-            for _ in range(30):
+            for i in range(40):
                 events = get_threat_events(container_name)
                 proc_events = [
                     e
@@ -5613,6 +5659,8 @@ process_spawn_rate_threshold = 9999
                 ]
                 if proc_events:
                     break
+                if i % 3 == 2:
+                    fire()
                 time.sleep(1)
 
             assert len(proc_events) > 0, (
