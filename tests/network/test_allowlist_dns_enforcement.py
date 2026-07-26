@@ -476,14 +476,20 @@ def test_allowlist_etc_hosts_overwrite_is_rejected_by_firewall(
     )
     assert rc == 0, f"the allowlisted host should be reachable before the hijack: {out}"
 
-    # Hijack: repoint the name at 1.1.1.1 (live, not in the set). glibc first-match
-    # resolution picks our prepended line.
+    # Hijack: OVERWRITE /etc/hosts so the name resolves ONLY to 1.1.1.1 (live, not in
+    # the set). Overwriting — not prepending — is essential: getaddrinfo (what curl
+    # uses) returns EVERY matching entry, so leaving COI's managed entry in place lets
+    # curl try 1.1.1.1, get rejected, and then FALL BACK to the still-listed real IP
+    # (which IS in the set) and succeed. getent ahostsv4 shows what curl will try.
     rc, out = container_exec(
         coi_binary,
         name,
-        "sudo sed -i '1i 1.1.1.1 registry.npmjs.org' /etc/hosts && getent hosts registry.npmjs.org",
+        "printf '127.0.0.1 localhost\\n1.1.1.1 registry.npmjs.org\\n' | sudo tee /etc/hosts "
+        ">/dev/null && getent ahostsv4 registry.npmjs.org",
     )
-    assert rc == 0 and "1.1.1.1" in out, f"the /etc/hosts hijack should take effect: {out}"
+    assert rc == 0 and "1.1.1.1" in out and "104.16" not in out, (
+        f"the hijack must leave ONLY 1.1.1.1 for the name (no fall-back IP): {out}"
+    )
 
     # The connection must now be REJECTED: 1.1.1.1 is live (a bypassable firewall
     # would connect), but it is not in the allowlist set.
