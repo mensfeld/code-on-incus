@@ -381,3 +381,124 @@ def test_teardown_removes_rules_and_sets(coi_binary, workspace_dir, cleanup_cont
     raise AssertionError(
         f"allowlist rules or sets for {ip} survived teardown\ncoi table:\n{nft_coi_table()}"
     )
+
+
+def test_allowlist_metadata_literal_stays_blocked_and_ordered_first(
+    coi_binary, workspace_dir, cleanup_containers
+):
+    """A cloud-metadata literal in allowed_domains does not become reachable.
+
+    policy.go puts ANY IPv4 literal — including 169.254.169.254 — into the static
+    accept set, so the 169.254.0.0/16 reject MUST be ordered BEFORE that set-accept
+    or the literal slips straight through (a real, previously-shipped SSRF ordering
+    bug — a name→metadata rebind would then reach the credential endpoint). A real
+    allowlisted host still works, proving the allowlist is functional, not just
+    blocking everything.
+    """
+    config = (
+        "[network]\n"
+        'mode = "allowlist"\n'
+        'allowed_domains = ["registry.npmjs.org", "169.254.169.254"]\n'
+        "allow_local_network_access = false\n"
+    )
+    name = start_ready_container(coi_binary, workspace_dir, config)
+
+    # The allowlist is FUNCTIONAL: a real allowlisted host is reachable.
+    rc, out = container_exec(
+        coi_binary,
+        name,
+        "curl -s --max-time 20 -o /dev/null -w '%{http_code}' https://registry.npmjs.org",
+        timeout=40,
+    )
+    assert rc == 0, f"an allowlisted host must be reachable: {out}"
+
+    # ...but the metadata literal is blocked despite being in allowed_domains.
+    rc, out = container_exec(
+        coi_binary,
+        name,
+        "curl -s --max-time 8 -o /dev/null -w '%{http_code}' http://169.254.169.254/",
+    )
+    assert rc != 0, f"the metadata endpoint must be blocked even when in allowed_domains: {out}"
+
+    # The load-bearing guard: in the container's forward chain the 169.254.0.0/16
+    # reject must PRECEDE the allowlist set-accept, so a set member in that range is
+    # rejected before the accept is reached. (nft evaluates rules top to bottom;
+    # `sudo -n nft` matches the pattern the other network tests use.)
+    cip = container_ip(name)
+    assert cip, "could not determine container IP"
+    chain = subprocess.run(
+        ["sudo", "-n", "nft", "-a", "list", "chain", "ip", "coi", "forward"],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    ).stdout
+    rules = [ln for ln in chain.splitlines() if cip in ln]
+    reject_idx = next(
+        (i for i, ln in enumerate(rules) if "169.254.0.0/16" in ln and "reject" in ln), None
+    )
+    accept_idx = next((i for i, ln in enumerate(rules) if "@" in ln and "accept" in ln), None)
+    assert reject_idx is not None, f"169.254.0.0/16 reject rule not found for {cip}:\n{chain}"
+    assert accept_idx is not None, f"allowlist set-accept rule not found for {cip}:\n{chain}"
+    assert reject_idx < accept_idx, (
+        "the 169.254.0.0/16 reject must precede the allowlist set-accept (SSRF ordering "
+        f"guard); got reject@{reject_idx}, set-accept@{accept_idx}:\n{chain}"
+    )
+
+
+def test_allowlist_etc_hosts_overwrite_is_rejected_by_firewall(
+    coi_binary, workspace_dir, cleanup_containers
+):
+    """Repointing an allowlisted name in /etc/hosts at a non-set address gains nothing.
+
+    An agent with root inside the container can overwrite /etc/hosts, but the nft set
+    is the boundary: "an address it invents is an address the firewall rejects; the
+    failure is closed and self-inflicted" (internal/network/hosts.go). We repoint an
+    allowlisted name at 1.1.1.1 — a LIVE public IP that is not in the set — so a
+    bypassable firewall WOULD connect; the firewall must reject it despite the name
+    resolving. (HTTP, not HTTPS: a TLS cert mismatch against 1.1.1.1 would make curl
+    fail regardless of the firewall and defeat the distinguisher.)
+    """
+    config = (
+        "[network]\n"
+        'mode = "allowlist"\n'
+        'allowed_domains = ["registry.npmjs.org"]\n'
+        "allow_local_network_access = false\n"
+    )
+    name = start_ready_container(coi_binary, workspace_dir, config)
+
+    # Baseline: the allowlisted name is reachable via COI's /etc/hosts -> set IP.
+    rc, out = container_exec(
+        coi_binary,
+        name,
+        "curl -s --max-time 20 -o /dev/null -w '%{http_code}' https://registry.npmjs.org",
+        timeout=40,
+    )
+    assert rc == 0, f"the allowlisted host should be reachable before the hijack: {out}"
+
+    # Hijack: OVERWRITE /etc/hosts so the name resolves ONLY to 1.1.1.1 (live, not in
+    # the set). Overwriting — not prepending — is essential: getaddrinfo (what curl
+    # uses) returns EVERY matching entry, so leaving COI's managed entry in place lets
+    # curl try 1.1.1.1, get rejected, and then FALL BACK to the still-listed real IP
+    # (which IS in the set) and succeed. getent ahostsv4 shows what curl will try.
+    rc, out = container_exec(
+        coi_binary,
+        name,
+        "printf '127.0.0.1 localhost\\n1.1.1.1 registry.npmjs.org\\n' | sudo tee /etc/hosts "
+        ">/dev/null && getent ahostsv4 registry.npmjs.org",
+    )
+    assert rc == 0 and "1.1.1.1" in out and "104.16" not in out, (
+        f"the hijack must leave ONLY 1.1.1.1 for the name (no fall-back IP): {out}"
+    )
+
+    # The connection must now be REJECTED: 1.1.1.1 is live (a bypassable firewall
+    # would connect), but it is not in the allowlist set.
+    rc, out = container_exec(
+        coi_binary,
+        name,
+        "curl -s --max-time 8 -o /dev/null -w '%{http_code}' http://registry.npmjs.org",
+    )
+    assert rc != 0, (
+        "repointing an allowlisted name at a non-set address must be rejected by the "
+        f"firewall — /etc/hosts is not the security boundary. Got rc={rc}, out={out}"
+    )
