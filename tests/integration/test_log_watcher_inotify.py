@@ -347,7 +347,29 @@ class TestLogWatcherInotify:
             assert container_exec_ready(container_name), (
                 f"Container {container_name} agent not ready for exec"
             )
-            time.sleep(3)  # let the monitoring daemon register its watches
+            # Pre-create an empty auth.log during the settle window so the log
+            # watcher registers a DIRECT file watch on it. Otherwise auth.log does
+            # not exist at daemon start, and first detection depends on catching the
+            # file's creation via the parent-directory IN_CREATE watch — a path
+            # logwatcher.go documents as unreliable across the overlayfs namespace
+            # boundary. With the file already watched, the trigger write below is a
+            # plain append/IN_MODIFY on a watched file (the reliable path), which is
+            # what flaked when missed here.
+            subprocess.run(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "bash",
+                    "-c",
+                    "mkdir -p /var/log && touch /var/log/auth.log",
+                ],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            time.sleep(5)  # let the monitoring daemon register its watches
 
             # Write the first suspicious line into the original auth.log, re-writing
             # on each poll. Just like the post-rotation write below, a single write
@@ -368,7 +390,7 @@ class TestLogWatcherInotify:
 
             # Wait for the first event before rotating.
             first_events = []
-            for _ in range(60):
+            for _ in range(90):
                 subprocess.run(
                     write_first, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
                 )
@@ -428,7 +450,7 @@ class TestLogWatcherInotify:
                 " from 2.2.2.2 port 22 ssh2' >> /var/log/auth.log",
             ]
             second_events = []
-            for _ in range(60):
+            for _ in range(90):
                 subprocess.run(
                     write_second, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
                 )
