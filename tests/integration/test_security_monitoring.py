@@ -5210,10 +5210,31 @@ process_spawn_rate_threshold = 9999
                 f"Container {container_name} did not start"
             )
 
-            time.sleep(3)
+            # Pre-create an empty auth.log during the settle window so the log
+            # watcher registers a DIRECT file watch on it. Otherwise auth.log does
+            # not exist at daemon start and first detection depends on catching the
+            # file's creation via the parent-directory IN_CREATE watch — a path
+            # logwatcher.go documents as unreliable across the overlayfs namespace
+            # boundary, which is how this flaked (line present in container, but
+            # events: []). With the file already watched, the trigger write below is
+            # a plain append/IN_MODIFY on a watched file (the reliable path).
+            subprocess.run(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "bash",
+                    "-c",
+                    "mkdir -p /var/log && touch /var/log/auth.log",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+            time.sleep(5)
 
-            # Write the suspicious line into the container's auth.log. The
-            # LogWatcher polls via `incus file pull` every ~5s.
+            # Write the suspicious line into the container's auth.log.
             def append_sudoers_line():
                 subprocess.run(
                     [
@@ -5240,14 +5261,14 @@ process_spawn_rate_threshold = 9999
             # a permanent miss — a fresh line is then picked up by the next poll.
             events = []
             auth_events = []
-            for i in range(60):
+            for i in range(90):
                 events = get_threat_events(container_name)
                 auth_events = [
                     e for e in events if e.get("category") == "auth" and e.get("level") == "high"
                 ]
                 if auth_events:
                     break
-                if i and i % 8 == 0:
+                if i and i % 5 == 0:
                     append_sudoers_line()
                 time.sleep(1)
 
