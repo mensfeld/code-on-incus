@@ -171,8 +171,13 @@ func TestClaudeGetSandboxSettings(t *testing.T) {
 		t.Errorf("Expected defaultMode 'bypassPermissions', got '%v'", permissions["defaultMode"])
 	}
 
-	if permissions["skipDangerousModePermissionPrompt"] != true {
-		t.Errorf("Expected skipDangerousModePermissionPrompt true, got '%v'", permissions["skipDangerousModePermissionPrompt"])
+	// skipDangerousModePermissionPrompt must be top-level: Claude Code only reads it
+	// there, not nested under "permissions" (mensfeld/code-on-incus#649).
+	if settings["skipDangerousModePermissionPrompt"] != true {
+		t.Errorf("Expected top-level skipDangerousModePermissionPrompt true, got '%v'", settings["skipDangerousModePermissionPrompt"])
+	}
+	if _, ok := permissions["skipDangerousModePermissionPrompt"]; ok {
+		t.Error("Expected skipDangerousModePermissionPrompt to not be nested under permissions")
 	}
 
 	// Prompt suppression flags must always be present
@@ -410,8 +415,11 @@ func TestClaudeGetSandboxSettings_BypassModeDefault(t *testing.T) {
 	if permissions["defaultMode"] != "bypassPermissions" {
 		t.Errorf("Expected defaultMode 'bypassPermissions', got '%v'", permissions["defaultMode"])
 	}
-	if permissions["skipDangerousModePermissionPrompt"] != true {
-		t.Errorf("Expected skipDangerousModePermissionPrompt true, got '%v'", permissions["skipDangerousModePermissionPrompt"])
+	if settings["skipDangerousModePermissionPrompt"] != true {
+		t.Errorf("Expected top-level skipDangerousModePermissionPrompt true, got '%v'", settings["skipDangerousModePermissionPrompt"])
+	}
+	if _, ok := permissions["skipDangerousModePermissionPrompt"]; ok {
+		t.Error("Expected skipDangerousModePermissionPrompt to not be nested under permissions")
 	}
 
 	// Effort level not configured — must not be locked
