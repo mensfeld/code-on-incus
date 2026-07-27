@@ -316,21 +316,33 @@ class TestNetworkConnectionDetection:
             if not container_ip:
                 pytest.skip(f"Could not get IP for {container_name}")
 
-            # Connect from inside the container to container_ip:4444, held open
-            # for 120s so it stays ESTABLISHED and visible across poll cycles.
+            # Connect from inside the container to container_ip:4444. The connect
+            # SELF-RETRIES in-container: a single fire-and-forget connect can fail
+            # transiently (a dropped SYN on the hairpin route to the container's own
+            # IP, an http.server still warming up, or slow python3 startup under CI
+            # load), and if that one connect() raises, the process dies with no
+            # ESTABLISHED socket — which is exactly what flaked here. Instead, retry
+            # create_connection() on a ~2s cadence (each attempt bounded by a 5s
+            # connect timeout) until it succeeds, then hold the socket open so it
+            # stays ESTABLISHED and visible across the monitor's poll cycles.
             tcp_cmd = (
-                'python3 -c "'
-                "import socket, time; "
-                f"s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); "
-                f"s.connect(('{container_ip}', 4444)); "
-                'time.sleep(120)"'
+                "import socket, time\n"
+                "sock = None\n"
+                "deadline = time.time() + 120\n"
+                "while sock is None and time.time() < deadline:\n"
+                "    try:\n"
+                f"        sock = socket.create_connection(({container_ip!r}, 4444), timeout=5)\n"
+                "    except OSError:\n"
+                "        time.sleep(2)\n"
+                "if sock is not None:\n"
+                "    time.sleep(300)\n"
             )
-            # Phase 1 — establish a real connection, retrying only the CONNECT: a
-            # fire-and-forget connect can transiently fail (server race / slow
-            # python3 startup under CI load). Each attempt (re)ensures the server
-            # listens, issues a connect, and confirms it reached ESTABLISHED before
-            # we rely on it. A server that won't come up is environmental → skip,
-            # matching how a missing server is handled.
+            # Phase 1 — establish a real connection. The in-container connect above
+            # retries for up to ~120s, so a single launch normally suffices; the
+            # outer loop is a backstop for the rare case where the `incus exec`
+            # session itself dies before the connect lands. Each pass (re)ensures the
+            # server is listening first. A server that won't come up is
+            # environmental → skip, matching how a missing server is handled.
             established = False
             for _ in range(3):
                 if not _port_listening(container_name, 4444):
@@ -339,19 +351,21 @@ class TestNetworkConnectionDetection:
                         pytest.skip("TCP server on port 4444 did not start within 15 s")
                 connect_procs.append(
                     subprocess.Popen(
-                        ["incus", "exec", container_name, "--", "bash", "-c", tcp_cmd],
+                        ["incus", "exec", container_name, "--", "python3", "-c", tcp_cmd],
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL,
                     )
                 )
-                if _wait_port_established(container_name, 4444):
+                # Poll generously (90s): the in-container connect keeps retrying, so
+                # give it room to win under load before falling back to a re-launch.
+                if _wait_port_established(container_name, 4444, attempts=45):
                     established = True
                     break
 
             assert established, (
-                "TCP connection to :4444 never reached ESTABLISHED after 3 attempts — "
-                "the in-container connect() failed every time (server or routing "
-                "problem), so detection could not be exercised.\n"
+                "TCP connection to :4444 never reached ESTABLISHED within the retry "
+                "budget — the in-container connect() could not reach the local server "
+                "(server or routing problem), so detection could not be exercised.\n"
                 f"Container IP: {container_ip}\n"
                 f"Port 4444 listening: {_port_listening(container_name, 4444)}"
             )
