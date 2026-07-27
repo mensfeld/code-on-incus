@@ -26,7 +26,6 @@
 #                                #   omit to install all supported agents (the default)
 
 [defaults]
-# model = "claude-sonnet-4-5"    # default model for the AI tool
 # Profile to apply when --profile is not passed, so your setup applies without
 # retyping it. Plain `coi` uses this; `coi --profile default` still gives the
 # clean clone of this config. Trusted (global/COI_CONFIG) scope only — a project
@@ -74,6 +73,10 @@
 [tool]
 # name = "claude"                # claude | opencode
 # auto_context = true            # inject SANDBOX_CONTEXT.md into the tool
+
+# [tool.claude]
+# model = "opus"                 # Claude model (ANTHROPIC_MODEL): alias like "opus" or a full ID
+# effort_level = "high"          # low | medium | high | xhigh | max | auto (unset = you control it)
 
 [git]
 # writable_hooks = false         # allow the container to write .git/hooks (security-sensitive)

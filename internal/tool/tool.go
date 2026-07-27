@@ -91,6 +91,7 @@ type ToolWithConfigDirFiles interface {
 // ClaudeTool implements Tool for Claude Code
 type ClaudeTool struct {
 	effortLevel    string // "low", "medium", "high", "xhigh", "max", "auto" — empty means unset (user controls interactively)
+	model          string // Claude model, delivered as ANTHROPIC_MODEL — empty means unset (Claude Code's own default)
 	permissionMode string // "bypass" (default) or "interactive"
 }
 
@@ -176,14 +177,25 @@ func (c *ClaudeTool) GetSandboxSettings() map[string]interface{} {
 	settings["hasSeenEffortPrompt"] = true
 	settings["effortCalloutDismissed"] = true
 
-	// Only inject the effort level when explicitly configured. Without this,
-	// Claude uses its own default and the user can change it interactively.
+	// Build the Claude Code env block from the explicitly-configured knobs. Each
+	// is injected only when set; unset means Claude uses its own default (and, for
+	// effort, the user can still change it interactively).
+	env := map[string]string{}
+
 	// Setting CLAUDE_CODE_EFFORT_LEVEL locks the level and prevents changes.
 	if c.effortLevel != "" {
 		settings["effortLevel"] = c.effortLevel
-		settings["env"] = map[string]string{
-			"CLAUDE_CODE_EFFORT_LEVEL": c.effortLevel,
-		}
+		env["CLAUDE_CODE_EFFORT_LEVEL"] = c.effortLevel
+	}
+
+	// ANTHROPIC_MODEL selects the model Claude Code runs (e.g. "opus",
+	// "claude-opus-4-8"). Configured via [tool.claude] model.
+	if c.model != "" {
+		env["ANTHROPIC_MODEL"] = c.model
+	}
+
+	if len(env) > 0 {
+		settings["env"] = env
 	}
 
 	return settings
@@ -226,6 +238,23 @@ type ToolWithEffortLevel interface {
 	// SetEffortLevel sets the effort level for the tool.
 	// Valid values depend on the tool (e.g., "low", "medium", "high" for Claude).
 	SetEffortLevel(level string)
+}
+
+// SetModel sets the model for Claude Code.
+// The value is passed through verbatim as ANTHROPIC_MODEL (e.g. "opus",
+// "claude-opus-4-8"). When empty (default), no model is injected and Claude
+// Code uses its own default.
+func (c *ClaudeTool) SetModel(model string) {
+	c.model = model
+}
+
+// ToolWithModel is an optional interface for tools that support selecting a
+// model (e.g., Claude via ANTHROPIC_MODEL).
+type ToolWithModel interface {
+	Tool
+	// SetModel sets the model for the tool. The accepted values depend on the
+	// tool (Claude accepts aliases like "opus" and full model IDs).
+	SetModel(model string)
 }
 
 // ToolWithContainerEnv is an optional interface for tools that need extra

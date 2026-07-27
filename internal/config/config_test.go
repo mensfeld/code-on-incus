@@ -18,8 +18,10 @@ func TestGetDefaultConfig(t *testing.T) {
 		t.Errorf("Expected default image 'coi-default', got '%s'", cfg.Container.Image)
 	}
 
-	if cfg.Defaults.Model != "claude-sonnet-4-5" {
-		t.Errorf("Expected default model 'claude-sonnet-4-5', got '%s'", cfg.Defaults.Model)
+	// The default profile no longer pins a model — it is unset so Claude Code
+	// uses its own default (model is now [tool.claude] model, opt-in).
+	if cfg.Tool.Claude.Model != "" {
+		t.Errorf("Expected default tool.claude.model to be unset, got '%s'", cfg.Tool.Claude.Model)
 	}
 
 	// Check Incus config
@@ -80,13 +82,13 @@ func TestExpandPath(t *testing.T) {
 func TestConfigMerge(t *testing.T) {
 	base := GetDefaultConfig()
 	base.Container.Image = "base-image"
-	base.Defaults.Model = "base-model"
+	base.Tool.Claude.Model = "base-model"
 
 	other := &Config{
 		Container: ContainerConfig{
 			Image: "other-image",
 		},
-		// Model not set - should not override
+		// tool.claude.model not set - should not override
 		Incus: IncusConfig{
 			CodeUID: 2000, // Override
 		},
@@ -99,9 +101,9 @@ func TestConfigMerge(t *testing.T) {
 		t.Errorf("Expected image 'other-image', got '%s'", base.Container.Image)
 	}
 
-	// Check that base.Model remained because other.Model was empty
-	if base.Defaults.Model != "base-model" {
-		t.Errorf("Expected model 'base-model', got '%s'", base.Defaults.Model)
+	// Check that base model remained because other's tool.claude.model was empty
+	if base.Tool.Claude.Model != "base-model" {
+		t.Errorf("Expected model 'base-model', got '%s'", base.Tool.Claude.Model)
 	}
 
 	// Check that CodeUID was overridden

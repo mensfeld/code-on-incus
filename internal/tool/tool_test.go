@@ -237,6 +237,56 @@ func TestClaudeEffortLevelDefault(t *testing.T) {
 	}
 }
 
+func TestClaudeSetModel(t *testing.T) {
+	twm, ok := NewClaude().(ToolWithModel)
+	if !ok {
+		t.Fatal("Claude tool should implement ToolWithModel")
+	}
+
+	for _, model := range []string{"opus", "sonnet", "claude-opus-4-8"} {
+		twm.SetModel(model)
+		settings := twm.(interface {
+			GetSandboxSettings() map[string]interface{}
+		}).GetSandboxSettings()
+
+		env, ok := settings["env"].(map[string]string)
+		if !ok {
+			t.Fatalf("model %q: expected env to be map[string]string", model)
+		}
+		if env["ANTHROPIC_MODEL"] != model {
+			t.Errorf("model %q: expected ANTHROPIC_MODEL %q, got %q", model, model, env["ANTHROPIC_MODEL"])
+		}
+	}
+}
+
+func TestClaudeModelDefault(t *testing.T) {
+	// When model is not set, ANTHROPIC_MODEL must be absent so Claude Code uses
+	// its own default. With no effort level either, the env block is absent.
+	settings := NewClaude().GetSandboxSettings()
+	if _, ok := settings["env"]; ok {
+		t.Error("Expected env to be absent when neither model nor effort level configured")
+	}
+}
+
+func TestClaudeModelAndEffortCoexist(t *testing.T) {
+	// Both knobs deliver via the same settings["env"] map; setting one must not
+	// clobber the other.
+	c := NewClaude()
+	c.(ToolWithEffortLevel).SetEffortLevel("high")
+	c.(ToolWithModel).SetModel("opus")
+
+	env, ok := c.GetSandboxSettings()["env"].(map[string]string)
+	if !ok {
+		t.Fatal("expected env to be map[string]string")
+	}
+	if env["CLAUDE_CODE_EFFORT_LEVEL"] != "high" {
+		t.Errorf("expected CLAUDE_CODE_EFFORT_LEVEL 'high', got %q", env["CLAUDE_CODE_EFFORT_LEVEL"])
+	}
+	if env["ANTHROPIC_MODEL"] != "opus" {
+		t.Errorf("expected ANTHROPIC_MODEL 'opus', got %q", env["ANTHROPIC_MODEL"])
+	}
+}
+
 func TestClaudeToolConfigDirFiles(t *testing.T) {
 	tool := NewClaude()
 	tcf, ok := tool.(ToolWithConfigDirFiles)
