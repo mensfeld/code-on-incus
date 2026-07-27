@@ -2953,17 +2953,27 @@ process_spawn_rate_threshold = 9999
 
             # Phase 2 — past the 30s window the same threat re-alerts (a fresh
             # "alerted"), proving the window expires rather than suppressing forever.
+            # The window is measured from the first alert and does NOT slide on
+            # deduplicated repeats (responder.go: the dedup branch returns without
+            # updating recentThreats), so a >30s quiet gap deterministically clears
+            # it and the re-alert WILL fire. The only variable is how long the daemon
+            # takes to read the appended line and write the alert — which can stretch
+            # to tens of seconds when the CI runner is CPU-starved (the log watcher's
+            # 3s backstop poll is a Go ticker and gets delayed under load). So poll
+            # generously and keep re-appending: a transient scheduling stall must not
+            # fail the run, while a genuinely broken window (re-alert never fires)
+            # still produces no fresh "alerted" and fails red.
             alerted_before = count_alerted(get_threat_events(container_name))
-            time.sleep(32)  # outlast the 30s dedup window (measured from the first alert)
+            time.sleep(33)  # outlast the 30s dedup window (measured from the first alert)
             append_sudoers_line()
             realerted = False
             last_append = time.monotonic()
-            deadline = time.monotonic() + 30
+            deadline = time.monotonic() + 90
             while time.monotonic() < deadline:
                 if count_alerted(get_threat_events(container_name)) > alerted_before:
                     realerted = True
                     break
-                if time.monotonic() - last_append >= 5:
+                if time.monotonic() - last_append >= 3:
                     append_sudoers_line()
                     last_append = time.monotonic()
                 time.sleep(1)
