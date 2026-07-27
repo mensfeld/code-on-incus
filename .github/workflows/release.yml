@@ -10,13 +10,17 @@ on:
         description: 'Release version (e.g., v0.1.0)'
         required: true
 
-permissions:
-  contents: write
+# Least privilege per job: only the release job publishes, so only it gets
+# write. A workflow-level `contents: write` would also hand write access to
+# the build job, which merely compiles.
+permissions: {}
 
 jobs:
   build:
     name: Build binaries
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     strategy:
       matrix:
         include:
@@ -27,20 +31,34 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # The build job never pushes; don't leave the token in .git/config
+          # where the uploaded artifact tooling could see it (zizmor: artipacked).
+          # The release job's checkout keeps credentials — it pushes the
+          # `latest` tag.
+          persist-credentials: false
 
       - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: '1.25'
+          # No cache in the workflow that builds RELEASE binaries: a poisoned
+          # Go module/build cache written by any other workflow would be baked
+          # into published artifacts (zizmor: cache-poisoning).
+          cache: false
 
       - name: Get version
         id: version
+        # Dispatch input reaches the shell via env, not template expansion, so
+        # its value can never be interpreted as code (zizmor: template-injection).
+        env:
+          VERSION_INPUT: ${{ github.event.inputs.version }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+            echo "version=$VERSION_INPUT" >> "$GITHUB_OUTPUT"
           else
-            echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+            echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Install build dependencies for CGo journal access
@@ -75,10 +93,11 @@ jobs:
       - name: Verify version
         # Only verify amd64 builds since ARM64 cannot run on amd64 runners
         if: matrix.arch == 'amd64'
+        env:
+          EXPECTED_VERSION: ${{ steps.version.outputs.version }}
         run: |
           chmod +x coi-${{ matrix.os }}-${{ matrix.arch }}
           BUILT_VERSION=$(./coi-${{ matrix.os }}-${{ matrix.arch }} version | grep -oP 'v\K[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
-          EXPECTED_VERSION=${{ steps.version.outputs.version }}
           # Strip leading 'v' from expected version if present
           EXPECTED_VERSION=${EXPECTED_VERSION#v}
           echo "Built version: $BUILT_VERSION"
@@ -99,10 +118,12 @@ jobs:
     name: Create release
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Download all artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
@@ -111,11 +132,14 @@ jobs:
 
       - name: Get version
         id: version
+        # Same env indirection as the build job (zizmor: template-injection).
+        env:
+          VERSION_INPUT: ${{ github.event.inputs.version }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+            echo "version=$VERSION_INPUT" >> "$GITHUB_OUTPUT"
           else
-            echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+            echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Prepare release files
@@ -132,6 +156,11 @@ jobs:
           cat checksums.txt
 
       - name: Create release notes
+        # The heredoc stays quoted ('EOF') so the markdown backticks are never
+        # shell-substituted; the version lands via a placeholder + sed from
+        # env instead of template expansion (zizmor: template-injection).
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           cat > release-notes.md << 'EOF'
           ## Installation
@@ -148,14 +177,14 @@ jobs:
 
           #### Linux AMD64 (x86_64)
           ```bash
-          wget https://github.com/mensfeld/code-on-incus/releases/download/${{ steps.version.outputs.version }}/coi-linux-amd64
+          wget https://github.com/mensfeld/code-on-incus/releases/download/__VERSION__/coi-linux-amd64
           chmod +x coi-linux-amd64
           sudo mv coi-linux-amd64 /usr/local/bin/coi
           ```
 
           #### Linux ARM64 (aarch64)
           ```bash
-          wget https://github.com/mensfeld/code-on-incus/releases/download/${{ steps.version.outputs.version }}/coi-linux-arm64
+          wget https://github.com/mensfeld/code-on-incus/releases/download/__VERSION__/coi-linux-arm64
           chmod +x coi-linux-arm64
           sudo mv coi-linux-arm64 /usr/local/bin/coi
           ```
@@ -183,9 +212,10 @@ jobs:
           - [Wiki](https://github.com/mensfeld/code-on-incus/wiki)
           - [CHANGELOG](https://github.com/mensfeld/code-on-incus/blob/master/CHANGELOG.md)
           EOF
+          sed -i "s|__VERSION__|$VERSION|g" release-notes.md
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
           tag_name: ${{ steps.version.outputs.version }}
           name: Release ${{ steps.version.outputs.version }}

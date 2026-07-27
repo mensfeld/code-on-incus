@@ -135,13 +135,21 @@ func runInlineBuild(cfg *config.Config, imageName string) error {
 			coiBaseImage = cfg.Container.Build.Base
 		}
 
+		// Validate the agent selection (#454) and warn if the image would be built
+		// without the tool the user runs — same as `coi build`. cfg is already
+		// resolved (profile applied), so there is no separate profile to consult.
+		if err := prepareBuildAgents(cfg.Container.Build.Agents, effectiveToolName(cfg, nil)); err != nil {
+			return err
+		}
+
 		opts := image.BuildOptions{
 			Force:       false,
 			ImageType:   "coi",
 			BaseImage:   coiBaseImage,
 			AliasName:   image.CoiAlias,
-			Description: "coi image (Docker + build tools + Claude CLI + GitHub CLI)",
+			Description: "coi image (Docker + build tools + AI agents + GitHub CLI)",
 			StoragePool: buildPool,
+			Agents:      cfg.Container.Build.Agents,
 			Logger:      func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) },
 		}
 		fmt.Fprintf(os.Stderr, "Building image '%s'...\n", imageName)

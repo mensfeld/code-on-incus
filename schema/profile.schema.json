@@ -46,6 +46,29 @@
       "items": { "$ref": "#/$defs/SocketEntry" },
       "description": "Host Unix sockets to forward into the container"
     },
+    "credentials": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/CredentialEntry" },
+      "description": "Host credential files to copy into the container: named catalog bundles or ad-hoc host/container pairs"
+    },
+    "ports": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Container TCP ports published on the host (localhost by default) via Incus proxy devices",
+      "properties": {
+        "pool": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10,
+          "description": "Number of identity-mapped ports to publish per session (host port == container port, allocated per workspace/slot)"
+        },
+        "map": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/PortEntry" },
+          "description": "Named fixed-container-port publications"
+        }
+      }
+    },
     "network":    { "$ref": "#/$defs/NetworkConfig" },
     "paths":      { "$ref": "#/$defs/PathsConfig" },
     "incus":      { "$ref": "#/$defs/IncusConfig" },

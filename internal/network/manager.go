@@ -48,6 +48,10 @@ type Manager struct {
 	// iptables fallback (when FORWARD DROP is set and bridge rules are missing)
 	iptablesBridgeName string
 
+	// Allowlist mode: the compiled policy. Its hostnames are resolved once and the
+	// answers written to both the firewall and the container's /etc/hosts.
+	policy *AllowPolicy
+
 	// Refresher lifecycle (for allowlist mode)
 	refreshCtx    context.Context
 	refreshCancel context.CancelFunc
@@ -118,6 +122,9 @@ func (m *Manager) SetupForContainer(ctx context.Context, containerName string) e
 		}
 		// Open mode always lifts the boot block — errors above are non-fatal
 		// and the user has explicitly opted into unrestricted network access.
+		if err := m.applyUserHosts(containerName); err != nil {
+			return err
+		}
 		m.removeBootBlock(containerName)
 		return nil
 
@@ -136,7 +143,25 @@ func (m *Manager) SetupForContainer(ctx context.Context, containerName string) e
 	}
 
 	// Restricted or allowlist rules are now in place — lift the boot block.
+	if err := m.applyUserHosts(containerName); err != nil {
+		return err
+	}
 	m.removeBootBlock(containerName)
+	return nil
+}
+
+// applyUserHosts writes the configured [[network.hosts]] entries into the
+// container's /etc/hosts and makes them reachable under the active mode. Fatal on
+// failure and run BEFORE the boot block is lifted, so a bad host entry fails the
+// session closed rather than leaving a dead name or half-applied firewall rule.
+func (m *Manager) applyUserHosts(containerName string) error {
+	if len(m.config.Hosts) == 0 {
+		return nil
+	}
+	if err := ApplyUserHosts(containerName, m.config.Mode, config.BoolVal(m.config.AllowLocalNetworkAccess), m.config.Hosts); err != nil {
+		return fmt.Errorf("failed to apply [[network.hosts]]: %w", err)
+	}
+	m.logger.Printf("Applied %d configured host entr(y/ies) to /etc/hosts", len(m.config.Hosts))
 	return nil
 }
 
@@ -228,9 +253,23 @@ func (m *Manager) setupRestricted(ctx context.Context, containerName string) err
 	return nil
 }
 
-// setupAllowlist configures allowlist mode with DNS resolution and refresh
+// setupAllowlist configures allowlist mode.
+//
+// Name resolution is made deterministic instead of live: COI resolves the
+// allowed hostnames on the host, installs those addresses in the container's nft
+// set, writes the SAME addresses into the container's /etc/hosts (see hosts.go),
+// and blocks all DNS egress (see dnsblock.go). With no route to a nameserver, the
+// hosts file COI wrote is the container's only way to turn a name into an address
+// — so it cannot learn about an address the firewall does not already trust, and
+// the host/container divergence this mode exists to prevent has nowhere to occur.
+//
+// Nothing has to stay running for that to hold, which is what makes it survive
+// coi exiting, a tmux detach, or a kill -9.
+//
+// Literal IP/CIDR entries in allowed_domains skip DNS entirely and go straight
+// into the static set.
 func (m *Manager) setupAllowlist(ctx context.Context, containerName string) error {
-	m.logger.Println("Network mode: allowlist (domain-based filtering)")
+	m.logger.Println("Network mode: allowlist (deterministic name resolution, DNS blocked)")
 
 	// Check if nft is available (and that sudo is permitted by config)
 	if !NftUsable(m.config) {
@@ -242,6 +281,12 @@ func (m *Manager) setupAllowlist(ctx context.Context, containerName string) erro
 		return fmt.Errorf("allowlist mode requires at least one allowed domain")
 	}
 
+	policy, err := NewAllowPolicy(m.config.AllowedDomains)
+	if err != nil {
+		return fmt.Errorf("invalid allowed_domains: %w", err)
+	}
+	m.policy = policy
+
 	// Get container IP
 	containerIP, err := GetContainerIP(containerName)
 	if err != nil {
@@ -250,13 +295,15 @@ func (m *Manager) setupAllowlist(ctx context.Context, containerName string) erro
 	m.containerIP = containerIP
 	m.logger.Printf("Container IP: %s", containerIP)
 
-	// Get gateway IP
+	// The gateway address keys the DHCP accept rule (the lease is what gives the
+	// container the IP every other rule is keyed on), so allowlist mode cannot
+	// proceed without it. Failing here is fail-closed: the boot block stays in
+	// place and the container has no egress at all.
 	gatewayIP, err := getContainerGatewayIP(containerName)
 	if err != nil {
-		m.logger.Errorf("Warning: Could not auto-detect gateway IP: %v", err)
-	} else {
-		m.logger.Printf("Gateway IP: %s", gatewayIP)
+		return fmt.Errorf("failed to determine gateway IP (required for allowlist mode): %w", err)
 	}
+	m.logger.Printf("Gateway IP: %s", gatewayIP)
 
 	// Disable IPv6 inside the container (defence-in-depth; reversible by
 	// in-container root, so the host-side drop below is the enforced boundary).
@@ -276,7 +323,49 @@ func (m *Manager) setupAllowlist(ctx context.Context, containerName string) erro
 	m.nft = NewNftManager(containerIP, gatewayIP)
 	m.purgeStaleRulesForIP(containerIP)
 
-	// Load IP cache
+	// Install the rules and the static (literal IP/CIDR) entries. The rules name
+	// the container's sets, not individual addresses, so they are stable for the
+	// life of the container. This also blocks all DNS egress — which is what makes
+	// the hosts file written below the container's only source of addresses.
+	staticCIDRs := policy.StaticCIDRs()
+	if err := m.nft.ApplyAllowlist(m.config, staticCIDRs); err != nil {
+		return fmt.Errorf("failed to apply nft rules: %w", err)
+	}
+	m.logger.Printf("nft rules applied for container %s (%d literal address entries, %d hostnames)",
+		containerName, len(staticCIDRs), len(policy.Names()))
+
+	// Resolve the configured hostnames and install the answers on BOTH sides: the
+	// firewall set and the container's /etc/hosts. Fatal on failure — a container
+	// that cannot resolve its allowlisted domains has no working network, and
+	// saying so now beats a session that mysteriously cannot reach anything.
+	if err := m.installNames(containerName); err != nil {
+		return err
+	}
+
+	m.logger.Println("  Allowing only allowlisted destinations")
+	m.logger.Println("  DNS blocked: /etc/hosts is the container's only name resolution")
+	m.logger.Println("  Blocking all RFC1918 private networks")
+	m.logger.Println("  Blocking cloud metadata endpoints")
+
+	// Re-resolve periodically so the addresses do not drift too far from DNS. The
+	// firewall and the hosts file are updated together, so they can never disagree
+	// — and if this refresher dies with the coi process, both simply stop moving in
+	// lockstep, which still leaves a container that works.
+	m.startRefresher(ctx, m.resolver.GetMinTTL())
+
+	return nil
+}
+
+// installNames resolves the policy's hostnames and writes the result to the two
+// places that must agree: the container's nft set and its /etc/hosts.
+//
+// Order matters. The firewall is updated FIRST, so there is never a moment where
+// the container can resolve a name to an address the firewall has not yet been
+// told about. The reverse order would open exactly the window this design exists
+// to close, just a much smaller one.
+func (m *Manager) installNames(containerName string) error {
+	names := m.policy.Names()
+
 	cache, err := m.cacheManager.Load(containerName)
 	if err != nil {
 		m.logger.Errorf("Warning: Failed to load cache: %v", err)
@@ -286,67 +375,103 @@ func (m *Manager) setupAllowlist(ctx context.Context, containerName string) erro
 			LastUpdate: time.Time{},
 		}
 	}
-
-	// Initialize resolver with cache
 	m.resolver = NewResolver(cache)
 
-	// Resolve domains
-	m.logger.Printf("Resolving %d allowed domains...", len(m.config.AllowedDomains))
-	domainIPs, err := m.resolver.ResolveAll(m.config.AllowedDomains)
+	if len(names) == 0 {
+		// An address-only allowlist is legitimate: the container reaches the
+		// configured IPs directly and needs no names at all.
+		return nil
+	}
+
+	m.logger.Printf("Resolving %d allowlisted hostnames...", len(names))
+	domainIPs, err := m.resolver.ResolveAll(names)
 	if err != nil && len(domainIPs) == 0 {
-		return fmt.Errorf("failed to resolve any allowed domains: %w", err)
+		return fmt.Errorf("failed to resolve any allowlisted hostname: %w", err)
 	}
 
-	// Log resolution results
-	totalIPs := countIPs(domainIPs)
-	m.logger.Printf("Resolved %d domains to %d IPs", len(domainIPs), totalIPs)
-	for domain, ips := range domainIPs {
-		m.logger.Printf("  %s -> %d IPs", domain, len(ips))
+	if err := m.syncResolved(domainIPs); err != nil {
+		return err
 	}
 
-	// Save resolved IPs to cache
 	m.resolver.UpdateCache(domainIPs)
 	if err := m.cacheManager.Save(containerName, m.resolver.GetCache()); err != nil {
 		m.logger.Errorf("Warning: Failed to save cache: %v", err)
 	}
-
-	// Collect all unique IPs from resolved domains
-	allowedIPs := collectUniqueIPs(domainIPs)
-
-	// Apply allowlist mode rules
-	if err := m.nft.ApplyAllowlist(m.config, allowedIPs); err != nil {
-		return fmt.Errorf("failed to apply nft rules: %w", err)
-	}
-
-	m.logger.Printf("nft rules applied for container %s", containerName)
-	m.logger.Println("  Allowing only specified domains")
-	m.logger.Println("  Blocking all RFC1918 private networks")
-	m.logger.Println("  Blocking cloud metadata endpoints")
-
-	// Compute initial refresh interval from DNS TTLs
-	minTTL := m.resolver.GetMinTTL()
-
-	// Start background refresher with TTL-aware interval
-	m.startRefresher(ctx, minTTL)
-
 	return nil
 }
 
-// collectUniqueIPs extracts all unique IPs from domain resolution map
-func collectUniqueIPs(domainIPs map[string][]string) []string {
-	uniqueIPs := make(map[string]bool)
-	for _, ips := range domainIPs {
-		for _, ip := range ips {
-			uniqueIPs[ip] = true
+// syncResolved installs resolved addresses into the firewall and then into the
+// container's /etc/hosts, keeping the two in lockstep. Firewall first — see
+// installNames.
+func (m *Manager) syncResolved(domainIPs map[string][]string) error {
+	allower := m.nftSetAllower()
+	refreshInterval := m.dynamicElementLifetimeInterval()
+	for domain, ips := range domainIPs {
+		if len(ips) == 0 {
+			continue
 		}
+		ttl := m.resolver.DomainTTLs[domain]
+		if err := allower.AllowDynamicIPs(ips, ttl, refreshInterval); err != nil {
+			return fmt.Errorf("failed to allow %d addresses for %s: %w", len(ips), domain, err)
+		}
+		m.logger.Printf("  %s -> %v", domain, ips)
 	}
 
-	result := make([]string, 0, len(uniqueIPs))
-	for ip := range uniqueIPs {
-		result = append(result, ip)
+	if m.containerName == "" {
+		return nil // no container to write to (unit tests)
 	}
-	return result
+	if err := WriteAllowlistHosts(m.containerName, domainIPs); err != nil {
+		return fmt.Errorf("failed to write the container's hosts entries: %w", err)
+	}
+	return nil
 }
+
+// nftSetAllower exposes the nft manager's set writer. Falls back to a no-op when
+// the nft layer is a test stub that cannot install elements.
+func (m *Manager) nftSetAllower() dynAllower {
+	if a, ok := m.nft.(dynAllower); ok {
+		return a
+	}
+	return noopAllower{}
+}
+
+// dynamicElementLifetimeInterval reports the kernel timeout to give DNS-learned
+// set elements. It is always 0 (permanent).
+//
+// A finite kernel timeout only stays safe if something re-adds the element before
+// it expires, and the only thing that would is the in-process refresher goroutine
+// — which cannot be relied on to outlive the container. `coi shell --background`
+// returns within seconds (and its deferred Teardown cancels the refresher);
+// detaching from tmux exits the process too. In both — the deployments the design
+// advertises as surviving a `coi` exit — the container keeps running with no
+// refresher, so a finite timeout would silently evict a still-valid address after
+// TTL+interval+grace (~20 min by default, 12 h cap) and the container would then
+// resolve an allowlisted name from /etc/hosts to an address the firewall no longer
+// holds, hit the default reject, and die mid-task with "Unable to connect" — the
+// exact failure this whole mode exists to prevent, now non-self-healing. This is
+// precisely the reasoning that removed the in-process DNS proxy (the container
+// outlives the coi process); it applies identically to the refresher.
+//
+// Permanent elements make the set survive a `coi` exit for the addresses the
+// container was actually handed (frozen /etc/hosts ⊆ permanent set — always
+// consistent, never a fresh-but-divergent state). The refresher, while it is
+// alive, still adds newly-rotated pool members and syncs /etc/hosts; it just no
+// longer bears the burden of keeping existing elements from expiring.
+//
+// Tradeoff: the set is no longer auto-pruned by kernel timeout, so it grows with
+// every rotated address over a very long session. Bounded in practice (an
+// ephemeral container's lifetime, a bounded frontend pool, and nft handles many
+// thousands of elements), but the proper way to bound it is refresher-driven
+// pruning of addresses that have dropped out of DNS — a follow-up, since eviction
+// must never race an in-flight connection and needs its own grace window.
+func (m *Manager) dynamicElementLifetimeInterval() time.Duration {
+	return 0 // permanent: the refresher cannot outlive the container, so nothing can renew a finite timeout
+}
+
+// noopAllower stands in when the nft layer cannot install set elements (tests).
+type noopAllower struct{}
+
+func (noopAllower) AllowDynamicIPs([]string, uint32, time.Duration) error { return nil }
 
 // computeRefreshInterval determines the refresh interval based on DNS TTL and config cap.
 // The configured refresh_interval_minutes acts as a maximum cap.
@@ -415,52 +540,40 @@ func (m *Manager) stopRefresher() {
 	}
 }
 
-// refreshAllowedIPs refreshes domain IPs and updates nft rules if changed.
-// Returns the minimum TTL from the new resolution for rescheduling.
+// refreshAllowedIPs re-resolves the policy's hostnames and re-installs the
+// answers into both the firewall and the container's /etc/hosts. Returns the
+// minimum TTL for rescheduling.
+//
+// This keeps the container's addresses from drifting too far from DNS over a long
+// session. It is not load-bearing: the firewall and the hosts file are written
+// together and therefore always agree, so if this refresher dies with the coi
+// process the container is left with addresses that are merely stale — and a
+// stale-but-consistent address still connects. It was fresh-but-divergent that
+// broke, which is the state this design can no longer reach.
 func (m *Manager) refreshAllowedIPs() (uint32, error) {
-	// Resolve all domains again
-	newIPs, err := m.resolver.ResolveAll(m.config.AllowedDomains)
+	if m.policy == nil || m.resolver == nil {
+		return 0, nil
+	}
+	names := m.policy.Names()
+	if len(names) == 0 {
+		return 0, nil
+	}
+
+	newIPs, err := m.resolver.ResolveAll(names)
 	if err != nil && len(newIPs) == 0 {
 		return 0, fmt.Errorf("failed to resolve any domains")
 	}
 
-	newMinTTL := m.resolver.GetMinTTL()
-
-	// Check if anything changed
-	if m.resolver.IPsUnchanged(newIPs) {
-		m.logger.Println("IP refresh: no changes detected")
-		return newMinTTL, nil
+	if err := m.syncResolved(newIPs); err != nil {
+		return 0, err
 	}
 
-	// Update nft rules with new IPs
-	totalIPs := countIPs(newIPs)
-	m.logger.Printf("IP refresh: updating nft rules with %d IPs", totalIPs)
-
-	// Replace rules atomically: snapshot old handles, append new rules, then
-	// delete only the old handles. This avoids any window where all rules are
-	// absent and the chain's default-accept policy would pass all traffic.
-	allowedIPs := collectUniqueIPs(newIPs)
-	if err := m.nft.ReplaceAllowlist(m.config, allowedIPs); err != nil {
-		return newMinTTL, fmt.Errorf("failed to update nft rules: %w", err)
-	}
-
-	// Update cache
 	m.resolver.UpdateCache(newIPs)
 	if err := m.cacheManager.Save(m.containerName, m.resolver.GetCache()); err != nil {
 		m.logger.Errorf("Warning: Failed to save cache: %v", err)
 	}
 
-	m.logger.Printf("IP refresh: successfully updated nft rules")
-	return newMinTTL, nil
-}
-
-// countIPs counts total IPs across all domains
-func countIPs(domainIPs map[string][]string) int {
-	count := 0
-	for _, ips := range domainIPs {
-		count += len(ips)
-	}
-	return count
+	return m.resolver.GetMinTTL(), nil
 }
 
 // Teardown removes network isolation for a container

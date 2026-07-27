@@ -279,3 +279,87 @@ func TestLoadConfigFileScoped_TrustedDoesNotMarkMounts(t *testing.T) {
 		t.Errorf("trusted mount SourcePath should be empty, got %q", m.SourcePath)
 	}
 }
+
+// TestLoad_CredentialsSurviveRealPath is an end-to-end test through the real
+// production entry point (Load()), not struct literals. It plants
+// [[credentials]] in both an untrusted top-level project config
+// (<workspace>/.coi/config.toml) and an untrusted project-scoped profile
+// (<workspace>/.coi/profiles/dev/config.toml), then verifies the entries
+// survive TOML decode, JSON-schema validation, Config.Merge /
+// synthesizeDefaultProfile, and untrusted trust-marking — closing the gap
+// where every prior credentials test built config.CredentialEntry structs
+// directly and so never exercised this path.
+func TestLoad_CredentialsSurviveRealPath(t *testing.T) {
+	tmpHome := t.TempDir()
+	workDir := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("COI_CONFIG", "")
+	t.Chdir(workDir)
+
+	// Untrusted top-level project config: exercises Config.Merge (previously
+	// dropped Credentials silently) and the loadConfigFileScoped
+	// markUntrustedCredentials call site.
+	topLevelDir := filepath.Join(workDir, ".coi")
+	if err := os.MkdirAll(topLevelDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(topLevelDir, "config.toml"),
+		[]byte("[[credentials]]\nbundle = \"ollama-toplevel\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Untrusted project-scoped profile: exercises real JSON-schema validation
+	// (profile.schema.json previously rejected [[credentials]] entirely) and
+	// the loadProfileDirectories markUntrustedCredentials call site.
+	profileDir := filepath.Join(topLevelDir, "profiles", "dev")
+	if err := os.MkdirAll(profileDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(profileDir, "config.toml"),
+		[]byte("[[credentials]]\nbundle = \"ollama-profile\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v (a profile with [[credentials]] must pass schema validation)", err)
+	}
+
+	// Config.Merge must have carried the top-level project credential in, and
+	// loadConfigFileScoped must have marked it untrusted.
+	if len(cfg.Credentials) != 1 || cfg.Credentials[0].Bundle != "ollama-toplevel" {
+		t.Fatalf("top-level cfg.Credentials not merged: %+v", cfg.Credentials)
+	}
+	if !cfg.Credentials[0].Untrusted {
+		t.Error("top-level project credential must be marked Untrusted")
+	}
+	if cfg.Credentials[0].SourcePath == "" {
+		t.Error("top-level project credential must have SourcePath set")
+	}
+
+	// synthesizeDefaultProfile must clone top-level Credentials into the
+	// built-in "default" profile rather than dropping them.
+	def, ok := cfg.Profiles["default"]
+	if !ok {
+		t.Fatal("default profile not synthesized")
+	}
+	if len(def.Credentials) != 1 || def.Credentials[0].Bundle != "ollama-toplevel" {
+		t.Fatalf("synthesized default profile did not clone Credentials: %+v", def.Credentials)
+	}
+
+	// The project-scoped "dev" profile must have loaded (schema validation
+	// passed) and been marked untrusted.
+	dev, ok := cfg.Profiles["dev"]
+	if !ok {
+		t.Fatal("dev profile not loaded")
+	}
+	if len(dev.Credentials) != 1 || dev.Credentials[0].Bundle != "ollama-profile" {
+		t.Fatalf("profile Credentials not loaded: %+v", dev.Credentials)
+	}
+	if !dev.Credentials[0].Untrusted {
+		t.Error("project-scoped profile credential must be marked Untrusted")
+	}
+	if dev.Credentials[0].SourcePath == "" {
+		t.Error("project-scoped profile credential must have SourcePath set")
+	}
+}

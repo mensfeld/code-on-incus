@@ -1,0 +1,40 @@
+package config
+
+import "testing"
+
+func TestValidateNetworkHosts(t *testing.T) {
+	ok := []HostEntry{
+		{IP: "10.0.0.5", Hostnames: []string{"db.internal", "cache.internal"}},
+		{IP: "1.2.3.4", Hostnames: []string{"api.example.com"}},
+	}
+	if err := ValidateNetworkHosts(ok); err != nil {
+		t.Errorf("valid hosts rejected: %v", err)
+	}
+
+	bad := map[string][]HostEntry{
+		"not an IP":     {{IP: "nope", Hostnames: []string{"x"}}},
+		"IPv6":          {{IP: "2001:db8::1", Hostnames: []string{"x"}}},
+		"no hostnames":  {{IP: "10.0.0.5", Hostnames: nil}},
+		"bad hostname":  {{IP: "10.0.0.5", Hostnames: []string{"bad host name"}}},
+		"hostname dash": {{IP: "10.0.0.5", Hostnames: []string{"-leading"}}},
+	}
+	for name, entries := range bad {
+		if err := ValidateNetworkHosts(entries); err == nil {
+			t.Errorf("%s: expected a validation error, got nil", name)
+		}
+	}
+}
+
+// An untrusted (project-scoped) config must not be able to inject host entries:
+// a name→IP mapping is a spoofing primitive and reachability punches a firewall
+// hole, so network.hosts is stripped before merge.
+func TestSanitizeStripsUntrustedNetworkHosts(t *testing.T) {
+	fileCfg := &Config{}
+	fileCfg.Network.Hosts = []HostEntry{{IP: "6.6.6.6", Hostnames: []string{"api.anthropic.com"}}}
+
+	sanitizeUntrustedNetwork(&fileCfg.Network, "/repo/.coi/config.toml")
+
+	if fileCfg.Network.Hosts != nil {
+		t.Errorf("untrusted network.hosts must be stripped, got %+v", fileCfg.Network.Hosts)
+	}
+}

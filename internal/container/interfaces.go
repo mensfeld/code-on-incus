@@ -24,7 +24,9 @@ type ContainerExecution interface {
 type ContainerDevices interface {
 	MountDisk(name, source, path string, shift, readonly bool) error
 	AddProxyDevice(name, connect, listen string, uid, gid int) error
+	AddHostPortDevice(name, listenAddr string, hostPort, containerPort int) error
 	RemoveDevice(name string) error
+	ListDevices() ([]string, error)
 	SetTmpfsSize(size string) error
 }
 
@@ -34,12 +36,14 @@ type ContainerDevices interface {
 type ContainerFiles interface {
 	GetWorkspacePath() string
 	PushFile(source, destination string) error
+	PullFile(containerPath, localPath string) error
 	PullDirectory(containerPath, localPath string) error
 	PushDirectory(localPath, containerPath string) error
 	Chown(path string, uid, gid int) error
 	DirExists(path string) (bool, error)
 	FileExists(path string) (bool, error)
 	CreateFile(containerPath, content string) error
+	CreateFileWithOwner(containerPath, content string, uid, gid int, mode string) error
 }
 
 // ContainerSnapshot covers snapshot lifecycle operations.

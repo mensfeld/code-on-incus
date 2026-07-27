@@ -240,6 +240,18 @@ func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.P
 				}
 			}
 
+			// No profile selected by --profile, an alias, or resume metadata:
+			// fall back to [defaults] profile (#607). Placed after alias
+			// (resolveWorkspacePhase) and resume resolution so those higher-
+			// precedence sources win. On resume, a.persistent was already
+			// reconciled with the session's saved mode above, so only recompute
+			// it for a fresh session (the profile may set [container] persistent).
+			if applied, err := a.applyDefaultProfileFallback(cmd); err != nil {
+				return nil, err
+			} else if applied && resumeID == "" {
+				a.persistent = config.BoolVal(a.cfg.Container.Persistent)
+			}
+
 			// Generate or reuse session ID.
 			if resumeID != "" {
 				s.sessionID = resumeID
@@ -312,6 +324,11 @@ func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.P
 			if err != nil {
 				return nil, fmt.Errorf("invalid socket configuration: %w", err)
 			}
+			credConfig, err := ParseCredentialConfig(a.cfg)
+			if err != nil {
+				return nil, fmt.Errorf("invalid credential configuration: %w", err)
+			}
+			portConfig := ParsePortConfig(a.cfg)
 			// Untrusted mounts/sockets are gated at the session.Setup chokepoint
 			// (combined trust fingerprint over both); pass them through unfiltered.
 			if err := session.ValidateMounts(mountConfig); err != nil {
@@ -332,6 +349,8 @@ func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.P
 				Slot:                  slotNum,
 				MountConfig:           mountConfig,
 				SocketConfig:          socketConfig,
+				CredentialConfig:      credConfig,
+				PortConfig:            portConfig,
 				SessionsDir:           sessionsDir,
 				CLIConfigPath:         cliConfigPath,
 				Tool:                  ti,
@@ -353,6 +372,7 @@ func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.P
 				ContainerName:         containerName,
 				Timezone:              resolvedTimezone,
 				Alias:                 a.cfg.Container.Alias,
+				ReadyTimeout:          a.cfg.Container.ReadyTimeoutSeconds(),
 			}
 			return nil, nil
 		},
@@ -405,6 +425,9 @@ func (a *App) setupContainerPhase(s *shellState) session.Phase {
 					Tool:           s.toolInstance,
 					NetworkManager: s.result.NetworkManager,
 					SessionLogger:  s.result.Logger,
+					// Bound the wait for an in-flight `close`/poweroff by the
+					// same budget graceful shutdowns get everywhere else.
+					ShutdownTimeout: a.cfg.Container.ShutdownTimeoutSeconds(),
 				}
 				if err := session.Cleanup(cleanupOpts); err != nil {
 					fmt.Fprintf(os.Stderr, "Cleanup error: %v\n", err)

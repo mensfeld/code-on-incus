@@ -107,7 +107,9 @@ See the [Supported Tools wiki page](https://github.com/mensfeld/code-on-incus/wi
 
 **Host Integration**
 - SSH agent forwarding - Use git-over-SSH inside containers without copying private keys (`[ssh] forward_agent = true`)
+- Host port publishing - Publish container TCP ports on the host (`[ports] pool` for identity-mapped agent-usable ports, `[[ports.map]]` for fixed services): agent-started dev servers become reachable at `localhost:<port>`, with per-slot deterministic allocation, a pre-launch conflict check, and `coi trust` gating for untrusted project configs
 - Host socket forwarding - Forward arbitrary host Unix sockets into the container (`[[sockets]]`) so the host endpoint never enters the container — the building block for credential brokers (mint short-lived tokens on the host, fetch them on demand inside). Untrusted project-config sockets are gated behind `coi trust`
+- Credential catalog - Copy third-party provider credentials into the container via `[[credentials]]` entries (config or profile): reference a named catalog bundle (`bundle = "ollama"`) or declare an ad-hoc host/container file pair for anything not yet cataloged. `claude`/`opencode`/`pi`'s own credential files come from the same built-in catalog. Ad-hoc entries from an untrusted project `.coi/config.toml` are gated behind `coi trust`; catalog references carry the same trust level the built-in tool credentials already have
 - Environment variable forwarding - Selectively forward host env vars by name (`forward_env` in config)
 - Command-sourced env vars - Mint a fresh secret per session by running a host command at start and injecting its output as an env var (`[defaults.env_commands]`) — for short-lived API keys/tokens. Trusted-scope config only
 - Host timezone inheritance - Containers automatically inherit the host's timezone (configurable via `[timezone]` config)
@@ -233,7 +235,7 @@ coi build --all --force
 ```
 
 **What's included in the `coi-default` image:**
-- Ubuntu 22.04 base with Docker (full Docker-in-container support)
+- Ubuntu 24.04 base with Docker (full Docker-in-container support)
 - **mise** (polyglot runtime manager) — Python 3, pnpm, TypeScript, tsx pre-installed; add more with `mise use go@latest`, `mise use ruby@3`, etc.
 - Node.js 22 LTS (system, for Claude CLI) + npm
 - Claude Code CLI (default AI tool) + GitHub CLI (`gh`)
@@ -290,6 +292,7 @@ coi trust                       # approve   (coi trust --list to view, coi untru
 
 # List active containers and saved sessions
 coi list --all
+coi list --running              # Only running containers (also: --stopped, --status frozen)
 
 # Gracefully shutdown / force kill containers
 coi shutdown coi-abc12345-1
@@ -303,7 +306,7 @@ coi clean --pools             # Detect containers in unused storage pools
 coi update
 ```
 
-> **Upgrading to 0.9?** 0.9 is a security-hardening release that tightens what an untrusted project `.coi/config.toml` can do (out-of-workspace mounts and forwarded sockets now require `coi trust`; project configs can no longer weaken network isolation). See the [Upgrading from 0.8 to 0.9 guide](https://github.com/mensfeld/code-on-incus/wiki/Migration-Guide#upgrading-from-08-to-09).
+> **Upgrading to 0.10?** 0.10 removes all config-shaped CLI flags (`--image`, `--persistent`, `--tmux`, `--tool`, `coi build --compression`, `coi shutdown --timeout`) and the legacy `CLAUDE_ON_INCUS_*` / `COI_LIMIT_*` env-var overrides — everything config-shaped now lives in config files and profiles, and a removed flag fails with a hint naming its replacement key. See the [Upgrading from 0.9 to 0.10 guide](https://github.com/mensfeld/code-on-incus/wiki/Migration-Guide#upgrading-from-09-to-010) (the [0.8→0.9 notes](https://github.com/mensfeld/code-on-incus/wiki/Migration-Guide#upgrading-from-08-to-09) are there too).
 
 ### Container Aliases
 
@@ -445,14 +448,16 @@ Place a `.coi/config.toml` in any repository root to auto-configure COI for that
 
 See the [Configuration wiki page](https://github.com/mensfeld/code-on-incus/wiki/Configuration) for the full config reference, per-repo setup, profiles, and environment variables.
 
-### Forwarding host sockets & minting secrets
+### Forwarding host sockets, minting secrets & copying credential files
 
-Two ways to give containerized tools credentials without the secret living in your host env or static config:
+Three ways to give containerized tools credentials:
 
 - **`[[sockets]]`** forwards any host Unix socket into the container via an Incus proxy device, so the host endpoint never crosses in — the building block for **credential brokers** (a host process mints short-lived tokens; an in-container `credential_process` fetches them on demand).
 - **`[defaults.env_commands]`** runs a host command at session start and injects its trimmed stdout as an env var — for plain env-var credentials (e.g. an AWS Bedrock bearer token). Trade-off: the value lives in the container env for the session, so prefer the broker for high-value/rotatable secrets.
+- **`[ports]`** publishes container TCP ports on the host, so services the agent starts are reachable at `localhost:<port>`: `pool = 3` gives every session identity-mapped ports (the agent binds a pool number, you open the SAME number — the sandbox context file tells the agent to use them), and `[[ports.map]]` publishes fixed container ports (`name = "web"`, `container = 3000`) auto-allocated or pinned on the host side. Deterministic per workspace/slot, preflight-checked before launch, isolation-neutral (userspace proxy, no NAT rules); `coi list` shows each container's published ports. See the [Port Publishing wiki page](https://github.com/mensfeld/code-on-incus/wiki/Port-Publishing).
+- **`[[credentials]]`** copies static credential files from host to container at session setup — for tools that read credentials from disk rather than an env var. Use `bundle = "ollama"` to reference a name from COI's built-in catalog (the same catalog `claude`/`opencode`/`pi` use for their own credentials), or set `host`/`container` (plus optional `mode`) for an ad-hoc file not yet in the catalog. Missing host files are skipped with a log line rather than failing the session.
 
-Both are honored only from trusted-scope config; sockets from an untrusted project `.coi/config.toml` are gated behind `coi trust`, and `env_commands` from one is ignored. See the [Configuration wiki page](https://github.com/mensfeld/code-on-incus/wiki/Configuration) for full examples and the trust model.
+Sockets, `[ports]`, and ad-hoc `[[credentials]]` entries are gated behind `coi trust` when they come from an untrusted project `.coi/config.toml`; `env_commands` from one is ignored outright; catalog-referenced credentials are never gated (the host path is fixed by COI's own catalog, not the referencing config). See the [Configuration wiki page](https://github.com/mensfeld/code-on-incus/wiki/Configuration) for full examples and the trust model.
 
 ## Profiles
 
@@ -510,19 +515,19 @@ See the [Container Lifecycle and Sessions guide](https://github.com/mensfeld/cod
 - **Workspace files**: Always saved (regardless of mode)
 - **Session data**: Always saved to `~/.coi/sessions-<tool>/`
 - **Ephemeral mode** (default): Container deleted after exit, session preserved
-- **Persistent mode** (`--persistent`): Container kept with all installed packages
+- **Persistent mode** (`[container] persistent = true` in config or a profile): Container kept with all installed packages
 - **Resume** (`--resume`): Restore AI conversation in fresh/existing container
 
 **Quick reference:**
 ```bash
-coi shell --persistent        # Keep container between sessions
 coi shell --resume            # Resume previous conversation
 coi attach                    # Reconnect to running container
-coi persist                   # Convert ephemeral session to persistent
+coi persist <container>       # Convert a running ephemeral session to persistent
 coi unfreeze <name>           # Unfreeze paused/frozen container
 coi unfreeze                  # Unfreeze all frozen COI containers
 close                         # Properly stop container (inside, safe alias for poweroff)
 coi shutdown <name>           # Graceful stop (outside)
+coi close <name>              # Alias for 'coi shutdown' (deletes it — even a persistent one)
 ```
 
 ## Network Isolation
@@ -541,6 +546,57 @@ mode = "restricted"   # Default — blocks private networks, allows internet
 # mode = "allowlist"  # Only specific domains/IPs allowed
 # mode = "open"       # No restrictions (trusted projects only)
 ```
+
+### Allowlist mode
+
+In allowlist mode the container does not resolve names itself. COI resolves the
+allowlisted hostnames on the host, installs those addresses in the firewall, and
+writes **the same addresses** into the container's `/etc/hosts`. DNS egress is
+then blocked, so that hosts file is the container's only way to turn a name into
+an address.
+
+That equality is the whole point: the container cannot reach an address the
+firewall has not already been given, because there is nowhere else for an address
+to come from. Nothing has to stay running for this to hold — it survives `coi`
+exiting, detaching from tmux, or the process being killed.
+
+```toml
+[network]
+mode = "allowlist"
+allowed_domains = [
+    "api.anthropic.com",       # exact hostname
+    "registry.npmjs.org",
+    "10.0.0.0/8",              # IPv4 CIDR — no name resolution involved
+    "8.8.8.8",                 # raw IPv4 address
+]
+```
+
+**Wildcards are not supported, and are rejected rather than quietly mishandled.**
+Because each name is resolved up front and written to `/etc/hosts`, there is no
+answer to write for `*.example.com` — you cannot know which subdomains will be
+asked for. List the exact hostnames, or allow the provider's published IP ranges
+as CIDRs.
+
+**Claude via GCP Vertex AI** — list the endpoints, which are enumerable:
+
+```toml
+allowed_domains = [
+    "us-central1-aiplatform.googleapis.com",   # your region
+    "oauth2.googleapis.com",
+    "sts.googleapis.com",
+]
+```
+
+Or, for blanket coverage without naming endpoints, use Google's published ranges
+(from `https://www.gstatic.com/ipranges/goog.json`) — these need no resolution at
+all:
+
+```toml
+allowed_domains = ["142.250.0.0/15", "172.217.0.0/16", "216.239.32.0/19"]
+```
+
+A host outside the allowlist has no address in `/etc/hosts` and no route through
+the firewall, so it fails to resolve and fails to connect.
 
 ## Security Monitoring
 

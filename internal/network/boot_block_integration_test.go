@@ -212,3 +212,76 @@ func TestBootBlockRemovedBySetupForContainer_Integration(t *testing.T) {
 		t.Logf("Teardown: %v", err)
 	}
 }
+
+// TestSetupForContainer_SetupError_KeepsBootBlock_Integration verifies the
+// fail-closed invariant: when network isolation setup ERRORS, SetupForContainer
+// must NOT lift the boot block, so a failed session stays at zero egress rather
+// than being silently opened. The happy-path tests above only prove the block is
+// removed on SUCCESS; a refactor that lifted the block before an early-return
+// error would open every failed session with those tests still green.
+//
+// The failure is induced with an allowlist config that declares no allowed
+// domains — setupAllowlist rejects it ("allowlist mode requires at least one
+// allowed domain") and returns through the exact `return err // boot block stays`
+// path that setupRestricted shares.
+func TestSetupForContainer_SetupError_KeepsBootBlock_Integration(t *testing.T) {
+	skipUnlessBootBlockReady(t)
+
+	containerName := "coi-boot-block-failclosed-test"
+	mgr := container.NewManager(containerName)
+
+	t.Cleanup(func() {
+		cleanupTestContainer(t, containerName)
+	})
+
+	if exists, _ := mgr.Exists(); exists {
+		_ = mgr.Stop(true)
+		_ = mgr.Delete(true)
+	}
+
+	if err := mgr.Launch("coi-default", false, ""); err != nil {
+		t.Fatalf("launch container: %v", err)
+	}
+
+	// Discover the gateway so we can confirm egress stays blocked after the failure.
+	var gatewayIP string
+	for i := 0; i < 30; i++ {
+		if ip, err := getContainerGatewayIP(containerName); err == nil && ip != "" {
+			gatewayIP = ip
+			break
+		}
+		time.Sleep(time.Second)
+	}
+
+	// Apply the boot block, exactly as session setup does right after container start.
+	if err := ApplyBootBlockRule(containerName); err != nil {
+		t.Fatalf("ApplyBootBlockRule: %v", err)
+	}
+
+	// Induce a setup failure: allowlist mode with no allowed domains. setupAllowlist
+	// rejects it, and SetupForContainer must return the error WITHOUT lifting the block.
+	netCfg := &config.NetworkConfig{
+		Mode:           config.NetworkModeAllowlist,
+		AllowedDomains: []string{},
+	}
+	networkMgr := NewManager(netCfg, logger.NewDiscard())
+	if err := networkMgr.SetupForContainer(t.Context(), containerName); err == nil {
+		t.Fatal("SetupForContainer should have errored on an allowlist config with no allowed domains")
+	}
+
+	// INVARIANT: the boot block must still be present after the failed setup.
+	output, _ := runNFTCommand("-a", "list", "chain", "ip", "coi", "forward")
+	if !strings.Contains(string(output), bootBlockComment(containerName)) {
+		t.Errorf("boot block was removed after a FAILED setup — the failed session was silently opened:\n%s", output)
+	}
+
+	// ...and it must still be effective: the container cannot reach the gateway.
+	if gatewayIP != "" {
+		if _, err := mgr.ExecCommand(
+			"ping -c1 -W1 "+gatewayIP,
+			container.ExecCommandOptions{Capture: true},
+		); err == nil {
+			t.Errorf("container reached gateway %s after a failed setup — network is not fail-closed", gatewayIP)
+		}
+	}
+}

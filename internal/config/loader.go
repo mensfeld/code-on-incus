@@ -139,6 +139,8 @@ func loadConfigFileScoped(cfg *Config, path string, trusted bool) error {
 		sanitizeUntrustedConfig(&fileCfg, path)
 		markUntrustedMounts(fileCfg.Mounts.Default, path)
 		markUntrustedSockets(fileCfg.Sockets, path)
+		markUntrustedPorts(&fileCfg.Ports, path)
+		markUntrustedCredentials(fileCfg.Credentials, path)
 	}
 
 	configDir := filepath.Dir(path)
@@ -161,6 +163,7 @@ func loadConfigFileScoped(cfg *Config, path string, trusted bool) error {
 func sanitizeUntrustedConfig(fileCfg *Config, path string) {
 	sanitizeUntrustedNetwork(&fileCfg.Network, path)
 	sanitizeUntrustedEnvCommands(&fileCfg.Defaults, path)
+	sanitizeUntrustedDefaultProfile(&fileCfg.Defaults, path)
 	sanitizeUntrustedSecurity(&fileCfg.Security, path)
 	sanitizeUntrustedGit(&fileCfg.Git, path)
 
@@ -277,6 +280,22 @@ func sanitizeUntrustedEnvCommands(d *DefaultsConfig, path string) {
 	d.EnvCommandTimeout = ""
 }
 
+// sanitizeUntrustedDefaultProfile strips `[defaults] profile` from an untrusted
+// (project-scoped) source. The default profile decides the whole environment a
+// no-flag `coi` launches into, so honoring it from a cloned/agent-planted repo
+// would let that repo redirect the user's default to a weaker profile of their
+// own — a silent downgrade. Move it to ~/.coi/config.toml (or COI_CONFIG) to apply.
+func sanitizeUntrustedDefaultProfile(d *DefaultsConfig, path string) {
+	if d == nil || d.Profile == "" {
+		return
+	}
+	fmt.Fprintf(os.Stderr,
+		"WARNING: ignoring '[defaults] profile' in project config %s; the default "+
+			"profile selects the whole session environment. Move it to "+
+			"~/.coi/config.toml or set COI_CONFIG to apply it.\n", path)
+	d.Profile = ""
+}
+
 // sanitizeUntrustedNetwork drops security-downgrading network settings from an
 // untrusted source (a project config or a project-scoped profile). nil is a
 // no-op so it can be called directly on a profile's optional *NetworkConfig.
@@ -304,6 +323,13 @@ func sanitizeUntrustedNetwork(n *NetworkConfig, path string) {
 	if n.Mode == NetworkModeOpen {
 		refuse("network.mode=open")
 		n.Mode = ""
+	}
+	if len(n.Hosts) > 0 {
+		// A name→IP mapping is a spoofing primitive (redirect api.anthropic.com to
+		// an attacker's box) and reachability punches a firewall hole. Honor it
+		// only from trusted scope.
+		refuse("network.hosts")
+		n.Hosts = nil
 	}
 }
 
@@ -335,6 +361,48 @@ func markUntrustedSockets(sockets []SocketEntry, path string) {
 	for i := range sockets {
 		sockets[i].Untrusted = true
 		sockets[i].SourcePath = src
+	}
+}
+
+// markUntrustedPorts tags a [ports] section from an untrusted source so it
+// is gated behind explicit trust (internal/session/trust.go): a repo
+// declaring host listeners can squat well-known localhost ports (e.g. a fake
+// postgres on 5432 capturing the host's own local connections). The flag is
+// section-level and covers the pool and every map entry.
+func markUntrustedPorts(ports *PortsConfig, path string) {
+	if ports == nil || !ports.HasPorts() {
+		return
+	}
+	src := path
+	if abs, err := filepath.Abs(path); err == nil {
+		src = abs
+	}
+	if ports.Pool > 0 {
+		ports.PoolUntrusted = true
+		ports.PoolSourcePath = src
+	}
+	for i := range ports.Map {
+		ports.Map[i].Untrusted = true
+		ports.Map[i].SourcePath = src
+	}
+}
+
+// markUntrustedCredentials tags credential entries from an untrusted source so
+// ad-hoc entries are gated behind explicit trust at apply time
+// (internal/session/trust.go). Like markUntrustedMounts, a path-resolution
+// error falls back to the raw path rather than failing open and copying an
+// ungated host credential file. Catalog-referenced entries (Bundle != "") are
+// also marked Untrusted here for consistency, but the trust-gating logic in
+// internal/session/trust.go never gates on Bundle-sourced entries regardless
+// of this flag — see CredentialEntry's own doc comment for why.
+func markUntrustedCredentials(creds []CredentialEntry, path string) {
+	src := path
+	if abs, err := filepath.Abs(path); err == nil {
+		src = abs
+	}
+	for i := range creds {
+		creds[i].Untrusted = true
+		creds[i].SourcePath = src
 	}
 }
 
@@ -389,7 +457,8 @@ func loadProfileDirectories(cfg *Config, configDir string, trusted bool) error {
 			return fmt.Errorf(
 				"profile %q defined in multiple locations:\n  %s\n  %s\n"+
 					"Rename one of them or delete the duplicate so it's clear which profile is being used",
-				profileName, existing.Source, profileConfigPath)
+				profileName, existing.Source, profileConfigPath,
+			)
 		}
 
 		var profileCfg ProfileConfig
@@ -437,6 +506,8 @@ func loadProfileDirectories(cfg *Config, configDir string, trusted bool) error {
 			sanitizeUntrustedGit(profileCfg.Git, profileConfigPath)
 			markUntrustedMounts(profileCfg.Mounts, profileConfigPath)
 			markUntrustedSockets(profileCfg.Sockets, profileConfigPath)
+			markUntrustedPorts(profileCfg.Ports, profileConfigPath)
+			markUntrustedCredentials(profileCfg.Credentials, profileConfigPath)
 			if len(profileCfg.EnvCommands) > 0 {
 				fmt.Fprintf(os.Stderr,
 					"WARNING: ignoring 'env_commands' in project profile %s; running a "+

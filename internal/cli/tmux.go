@@ -3,10 +3,23 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/mensfeld/code-on-incus/internal/container"
+	"github.com/mensfeld/code-on-incus/internal/session"
 	"github.com/spf13/cobra"
 )
+
+// tmuxExecUser resolves the UID whose per-user tmux socket
+// (/tmp/tmux-<uid>/default) the tmux commands must target (#588); see
+// session.ResolveCodeUID for why this is probed per container.
+func tmuxExecUser(mgr container.ContainerManager) (*int, error) {
+	uid, err := session.ResolveCodeUID(mgr, container.CodeUser)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve container code user: %w", err)
+	}
+	return &uid, nil
+}
 
 var tmuxFormat string
 
@@ -69,6 +82,11 @@ func tmuxSendCommand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("container %s is not running", containerName)
 	}
 
+	user, err := tmuxExecUser(mgr)
+	if err != nil {
+		return err
+	}
+
 	// Send command to tmux session
 	tmuxSession := fmt.Sprintf("coi-%s", containerName)
 	tmuxCmd := fmt.Sprintf("tmux send-keys -t %s %q Enter", tmuxSession, command)
@@ -76,6 +94,7 @@ func tmuxSendCommand(cmd *cobra.Command, args []string) error {
 	opts := container.ExecCommandOptions{
 		Interactive: false,
 		Capture:     true,
+		User:        user,
 	}
 
 	_, err = mgr.ExecCommand(tmuxCmd, opts)
@@ -101,6 +120,11 @@ func tmuxCaptureCommand(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("container %s is not running", containerName)
 	}
 
+	user, err := tmuxExecUser(mgr)
+	if err != nil {
+		return err
+	}
+
 	// Capture tmux pane output
 	tmuxSession := fmt.Sprintf("coi-%s", containerName)
 	tmuxCmd := fmt.Sprintf("tmux capture-pane -t %s -p", tmuxSession)
@@ -108,6 +132,7 @@ func tmuxCaptureCommand(cmd *cobra.Command, args []string) error {
 	opts := container.ExecCommandOptions{
 		Interactive: false,
 		Capture:     true,
+		User:        user,
 	}
 
 	output, err := mgr.ExecCommand(tmuxCmd, opts)
@@ -146,6 +171,16 @@ func tmuxListCommand(cmd *cobra.Command, args []string) error {
 			continue
 		}
 
+		// Resolve the per-container code UID. Unlike a failed Running()
+		// check (container is gone), a probe failure can hit a live
+		// container with a live session — warn instead of silently
+		// omitting it from the listing.
+		user, err := tmuxExecUser(mgr)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: skipping %s: %v\n", c, err)
+			continue
+		}
+
 		// Check if tmux session exists
 		tmuxSession := fmt.Sprintf("coi-%s", c)
 		checkCmd := fmt.Sprintf("tmux has-session -t %s 2>/dev/null", tmuxSession)
@@ -153,6 +188,7 @@ func tmuxListCommand(cmd *cobra.Command, args []string) error {
 		opts := container.ExecCommandOptions{
 			Interactive: false,
 			Capture:     false,
+			User:        user,
 		}
 
 		_, err = mgr.ExecCommand(checkCmd, opts)

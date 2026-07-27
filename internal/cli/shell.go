@@ -115,7 +115,8 @@ func (a *App) shellCommand(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	return pipeline.Run(ctx,
+	return pipeline.Run(
+		ctx,
 		a.resolveWorkspacePhase(cmd, s),
 		a.validateEnvPhase(cmd, s),
 		a.configureSessionPhase(cmd, s),
@@ -255,6 +256,12 @@ func (a *App) buildContainerEnv(result *session.SetupResult) (map[string]string,
 	// plus any configured [[sockets]] entries with an `env` name).
 	for env, path := range result.SocketEnv {
 		containerEnv[env] = path
+	}
+
+	// Published [[ports]]: tell the session which host port each service
+	// landed on (COI_PORT_<NAME> -> host port, #558).
+	for env, port := range result.PortsEnv {
+		containerEnv[env] = port
 	}
 
 	// Set TZ if timezone was configured
@@ -636,6 +643,26 @@ func startMonitoringDaemon(ctx context.Context, containerName, workspacePath str
 
 	auditLogPath := filepath.Join(homeDir, ".coi", "audit", containerName+".jsonl")
 
+	// In allowlist mode, keep the monitor in lockstep with the firewall: read the
+	// live nft allowlist set on every collection instead of trusting the static,
+	// independently-resolved snapshot. Without this the monitor and firewall
+	// resolve rotating frontends separately and drift, so a connection the firewall
+	// permits (and the container reached via /etc/hosts) looks unauthorized to the
+	// monitor and — under auto_pause_on_high — pauses the container mid-task. The
+	// static allowedCIDRs stay as the fallback (unresolvable IP / unreadable set).
+	var allowedCIDRsProvider func() []string
+	if cfg.Network.Mode == config.NetworkModeAllowlist {
+		if ip, ipErr := network.GetContainerIP(containerName); ipErr == nil && ip != "" {
+			allowedCIDRsProvider = func() []string {
+				cidrs, err := network.CurrentAllowlistCIDRs(ip)
+				if err != nil {
+					return nil // read failed — collector falls back to the static snapshot
+				}
+				return cidrs
+			}
+		}
+	}
+
 	// Create daemon config
 	daemonCfg := monitor.DaemonConfig{
 		ContainerName:             containerName,
@@ -643,6 +670,7 @@ func startMonitoringDaemon(ctx context.Context, containerName, workspacePath str
 		PollInterval:              time.Duration(cfg.Monitoring.PollIntervalSec) * time.Second,
 		AuditLogPath:              auditLogPath,
 		AllowedCIDRs:              allowedCIDRs,
+		AllowedCIDRsProvider:      allowedCIDRsProvider,
 		AllowedDomains:            cfg.Network.AllowedDomains,
 		GTFOBinsDir:               cfg.Detection.GTFOBinsDir,
 		SigmaDir:                  cfg.Detection.SigmaDir,
@@ -756,31 +784,53 @@ func startNFTMonitoringDaemon(ctx context.Context, containerName string, cfg *co
 	return nil
 }
 
+// resolveDomainsToHostCIDRs builds the CIDR list the monitor uses to decide
+// whether a connection is going somewhere the allowlist permits.
+//
+// It compiles allowed_domains through the same AllowPolicy the firewall uses, so
+// the monitor's idea of "allowed" and the firewall's cannot drift apart. That
+// drift was a real bug: entries were previously fed to the resolver raw, so a
+// wildcard was resolved as its BASE domain and the monitor ended up holding
+// addresses the container never dials. Every legitimate connection then looked
+// like an "Unauthorized connection attempt" at ThreatLevelHigh — which, with
+// auto_pause_on_high, pauses the container mid-task. Wildcards are now rejected
+// outright, and going through the policy is what keeps it that way.
 func resolveDomainsToHostCIDRs(domains []string) []string {
 	if len(domains) == 0 {
 		return nil
 	}
-	resolver := network.NewResolver(&network.IPCache{})
-	resolved, err := resolver.ResolveAll(domains)
+
+	policy, err := network.NewAllowPolicy(domains)
 	if err != nil {
-		// Route through the network session logger, not os.Stderr — in a coi
-		// shell os.Stderr is the user's tmux terminal (issue #372). The resolver
-		// already logs each failed domain to the session log; this records the
-		// monitoring-phase context alongside it.
-		network.Warnf("Warning: some allowed domains failed to resolve for monitoring: %v", err)
-	}
-	if len(resolved) == 0 {
+		// Setup would have failed on this already; the monitor must not silently
+		// carry on with a half-understood allowlist.
+		network.Warnf("Warning: allowed_domains could not be compiled for monitoring: %v", err)
 		return nil
 	}
-	var cidrs []string
-	for _, ips := range resolved {
-		for _, ip := range ips {
-			if strings.Contains(ip, "/") {
-				cidrs = append(cidrs, ip)
-			} else {
-				cidrs = append(cidrs, ip+"/32")
+
+	// Literal IP/CIDR entries need no resolution at all.
+	cidrs := append([]string(nil), policy.StaticCIDRs()...)
+
+	if names := policy.Names(); len(names) > 0 {
+		resolver := network.NewResolver(&network.IPCache{})
+		resolved, err := resolver.ResolveAll(names)
+		if err != nil {
+			// Route through the network session logger, not os.Stderr — in a coi
+			// shell os.Stderr is the user's tmux terminal (issue #372). The resolver
+			// already logs each failed domain to the session log; this records the
+			// monitoring-phase context alongside it.
+			network.Warnf("Warning: some allowed domains failed to resolve for monitoring: %v", err)
+		}
+		for _, ips := range resolved {
+			for _, ip := range ips {
+				if strings.Contains(ip, "/") {
+					cidrs = append(cidrs, ip)
+				} else {
+					cidrs = append(cidrs, ip+"/32")
+				}
 			}
 		}
 	}
+
 	return cidrs
 }

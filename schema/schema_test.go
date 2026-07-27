@@ -56,7 +56,7 @@ func TestGetProfileSchema_AllDefsPresent(t *testing.T) {
 		"BuildConfig", "ContainerConfig",
 		"CPULimits", "MemoryLimits", "DiskLimits", "RuntimeLimits", "LimitsConfig",
 		"ClaudeToolConfig", "ToolConfig",
-		"MountEntry", "SocketEntry",
+		"MountEntry", "SocketEntry", "CredentialEntry",
 		"NetworkLoggingConfig", "NetworkConfig",
 		"PathsConfig", "IncusConfig",
 		"GitConfig", "SSHConfig",
@@ -185,6 +185,43 @@ func TestGetProfileSchema_SocketsArrayWired(t *testing.T) {
 	}
 }
 
+// The profile schema must wire a top-level `ports` object whose `map` array
+// references PortEntry (drift guard, like the sockets sibling above).
+func TestGetProfileSchema_PortsWired(t *testing.T) {
+	b := mustGetSchema(t)
+	var doc struct {
+		Properties struct {
+			Ports struct {
+				Type       string `json:"type"`
+				Properties struct {
+					Pool struct {
+						Type    string `json:"type"`
+						Maximum int    `json:"maximum"`
+					} `json:"pool"`
+					Map struct {
+						Type  string `json:"type"`
+						Items struct {
+							Ref string `json:"$ref"`
+						} `json:"items"`
+					} `json:"map"`
+				} `json:"properties"`
+			} `json:"ports"`
+		} `json:"properties"`
+	}
+	if err := json.Unmarshal(b, &doc); err != nil {
+		t.Fatalf("failed to parse schema: %v", err)
+	}
+	if doc.Properties.Ports.Type != "object" {
+		t.Errorf("profile schema 'ports' should be an object, got %q", doc.Properties.Ports.Type)
+	}
+	if doc.Properties.Ports.Properties.Pool.Type != "integer" || doc.Properties.Ports.Properties.Pool.Maximum != 10 {
+		t.Errorf("profile schema 'ports.pool' should be an integer capped at 10, got %+v", doc.Properties.Ports.Properties.Pool)
+	}
+	if doc.Properties.Ports.Properties.Map.Items.Ref != "#/$defs/PortEntry" {
+		t.Errorf("profile schema 'ports.map' items should $ref PortEntry, got %q", doc.Properties.Ports.Properties.Map.Items.Ref)
+	}
+}
+
 // The profile schema must expose an `env_commands` object of string values.
 func TestGetProfileSchema_EnvCommandsWired(t *testing.T) {
 	b := mustGetSchema(t)
@@ -223,6 +260,18 @@ func TestValidateProfileMap_AcceptsStructSupportedKeys(t *testing.T) {
 	}
 	if err := schema.ValidateProfileMap(profile); err != nil {
 		t.Fatalf("profile with struct-supported keys should validate, got: %v", err)
+	}
+}
+
+// container.build.agents (#454) must validate as a string array.
+func TestValidateProfileMap_AcceptsBuildAgents(t *testing.T) {
+	profile := map[string]any{
+		"container": map[string]any{
+			"build": map[string]any{"agents": []any{"claude", "opencode"}},
+		},
+	}
+	if err := schema.ValidateProfileMap(profile); err != nil {
+		t.Fatalf("profile with [container.build] agents should validate, got: %v", err)
 	}
 }
 

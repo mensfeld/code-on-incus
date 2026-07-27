@@ -668,6 +668,23 @@ cleanup() {
 #######################################
 # Main
 #######################################
+# install_selected_agents installs the AI agents named in $COI_AGENTS (comma- or
+# space-separated). When COI_AGENTS is unset/empty it installs ALL supported agents,
+# preserving the historical behavior (issue #454). Unknown names are warned and skipped
+# (coi validates the list host-side before build, so this is defense-in-depth).
+install_selected_agents() {
+    local agents="${COI_AGENTS:-claude opencode pi}"
+    for agent in ${agents//,/ }; do
+        case "$agent" in
+            claude) install_claude_cli ;;
+            opencode) install_opencode ;;
+            pi) install_pi ;;
+            "") ;;
+            *) log "WARNING: unknown agent '$agent' in COI_AGENTS, skipping" ;;
+        esac
+    done
+}
+
 main() {
     log "Starting coi image build..."
 
@@ -680,9 +697,7 @@ main() {
     configure_power_wrappers
     configure_tmp_cleanup
     configure_tmux
-    install_claude_cli
-    install_opencode
-    install_pi
+    install_selected_agents
     install_dummy
     install_docker
     install_github_cli

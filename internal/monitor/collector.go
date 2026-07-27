@@ -13,7 +13,31 @@ type Collector struct {
 	containerIP       string
 	workspacePath     string
 	allowedCIDRs      []string
+	allowedCIDRsFn    func() []string
 	filesystemMonitor *FilesystemMonitor
+}
+
+// SetAllowedCIDRsProvider supplies a function that returns the CURRENT allowlist
+// CIDRs, consulted on every collection. In allowlist mode this reads the live nft
+// set (the firewall's source of truth), so the monitor decides "is this connection
+// allowed?" against exactly what the firewall enforces — even as a rotating
+// frontend's addresses change — instead of a frozen, independently-resolved
+// snapshot that drifts and flags legitimate traffic. The static allowedCIDRs
+// remain the fallback: if the provider returns nothing (read failed, sets absent),
+// the collector uses them, so it is never worse than before.
+func (c *Collector) SetAllowedCIDRsProvider(fn func() []string) {
+	c.allowedCIDRsFn = fn
+}
+
+// currentAllowedCIDRs returns the live allowlist when a provider is set and yields
+// entries, otherwise the static snapshot captured at daemon start.
+func (c *Collector) currentAllowedCIDRs() []string {
+	if c.allowedCIDRsFn != nil {
+		if live := c.allowedCIDRsFn(); len(live) > 0 {
+			return live
+		}
+	}
+	return c.allowedCIDRs
 }
 
 // NewCollector creates a new data collector
@@ -44,7 +68,7 @@ func (c *Collector) Collect(ctx context.Context) (MonitorSnapshot, error) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		networkStats, err := CollectNetworkStats(ctx, c.containerName, c.containerIP, c.allowedCIDRs)
+		networkStats, err := CollectNetworkStats(ctx, c.containerName, c.containerIP, c.currentAllowedCIDRs())
 		mu.Lock()
 		defer mu.Unlock()
 		if err != nil {

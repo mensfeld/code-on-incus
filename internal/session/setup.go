@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,11 +32,13 @@ type SetupOptions struct {
 	Persistent            bool // Keep container between sessions (don't delete on cleanup)
 	ResumeFromID          string
 	Slot                  int
-	MountConfig           *MountConfig  // Multi-mount support
-	SocketConfig          *SocketConfig // Forwarded host unix sockets
-	SessionsDir           string        // e.g., ~/.coi/sessions-claude
-	CLIConfigPath         string        // e.g., ~/.claude (host CLI config to copy credentials from)
-	Tool                  tool.Tool     // AI coding tool being used
+	MountConfig           *MountConfig      // Multi-mount support
+	SocketConfig          *SocketConfig     // Forwarded host unix sockets
+	CredentialConfig      *CredentialConfig // Configured [[credentials]] entries (catalog + ad-hoc)
+	PortConfig            *PortConfig       // Configured [[ports]] entries to publish on the host (#558)
+	SessionsDir           string            // e.g., ~/.coi/sessions-claude
+	CLIConfigPath         string            // e.g., ~/.claude (host CLI config to copy credentials from)
+	Tool                  tool.Tool         // AI coding tool being used
 	NetworkConfig         *config.NetworkConfig
 	DisableShift          bool                   // Disable UID shifting (for Colima/Lima environments)
 	LimitsConfig          *config.LimitsConfig   // Resource and time limits
@@ -53,6 +56,7 @@ type SetupOptions struct {
 	AutoContext           *bool                  // Auto-inject sandbox context into tool's native system (default: true)
 	HostImmutable         bool                   // Apply chattr +i on host-side protected paths (set by CLI from config)
 	Alias                 string                 // Human-friendly alias for this container (set user.coi.alias)
+	ReadyTimeout          int                    // Seconds to wait for the container to become ready (<=0 = default 30)
 	Logger                func(string)
 	ContainerName         string // Use existing container (for testing) - skips container creation
 }
@@ -70,6 +74,8 @@ type SetupResult struct {
 	ContainerWorkspacePath string            // Path where workspace is mounted inside container (default: /workspace)
 	SSHAgentSocketPath     string            // SSH agent socket path in container (empty if not forwarded)
 	SocketEnv              map[string]string // env var name -> in-container path for all forwarded sockets
+	PortsEnv               map[string]string // env var name -> host port for all published [[ports]]
+	PublishedPorts         []PublishedPort   // ports published on the host this session (for the context file)
 	Timezone               string            // Resolved timezone applied to the container (empty = UTC)
 	HasImmutableProtection bool              // True if host-side immutable attribute was applied to protected paths
 }
@@ -190,15 +196,22 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 	// 4. Check if container already exists
 	var skipLaunch bool
 
-	// If using existing container, skip launch
-	if opts.ContainerName != "" {
-		skipLaunch = true
-		opts.Logger("Using existing container, skipping creation...")
-	}
-
 	exists, err = result.Manager.Exists()
 	if err != nil {
 		return nil, fmt.Errorf("failed to check if container exists: %w", err)
+	}
+
+	// An explicitly named container (--container) is attached to, never
+	// created — so it must already exist. Without this guard a missing name
+	// silently skips both the reuse branch (exists is false) and the
+	// creation branch (skipLaunch is true), then fails with a misleading
+	// "container not ready" only after the full ready_timeout wait.
+	if opts.ContainerName != "" {
+		if !exists {
+			return nil, fmt.Errorf("container '%s' not found - omit --container to launch a new container for this workspace", opts.ContainerName)
+		}
+		skipLaunch = true
+		opts.Logger("Using existing container, skipping creation...")
 	}
 
 	if exists {
@@ -215,6 +228,20 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 				// The resume case covers post-reboot Incus stateful restore: a non-persistent
 				// container may be Running because Incus restored it; --resume should reuse it.
 				opts.Logger("Container already running, reusing...")
+				// Strip the previous session's port devices NOW, before the
+				// port preflight below bind-probes: their live forkproxy
+				// listeners would otherwise make the session collide with its
+				// own ports (pinned entries hard-fail, pool numbers drift).
+				RemoveStalePortDevices(result.Manager, opts.Logger)
+				// Deliberately do NOT reconcile protect-* devices here. This
+				// branch reuses an already-RUNNING container, so (a) there is no
+				// Start(), hence no "Missing source path" start-validation to
+				// prevent — the #610 wedge only bites the stopped branch below —
+				// and (b) hot-removing a protect-* device from a live container
+				// would DROP a read-only protection mid-session: a source that
+				// went missing while still mounted keeps writes blocked, but
+				// RemoveDevice would reopen it to a possibly-malicious agent.
+				// Reconciliation happens on the next stopped->start cycle.
 				skipLaunch = true
 			} else {
 				// A running container exists for this slot but we're not resuming or in
@@ -227,6 +254,33 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 				// Restart the stopped container
 				// This includes: persistent containers OR containers specified via --container flag
 				opts.Logger("Starting existing container...")
+				// Strip stale port devices while STOPPED: they would re-bind
+				// their old host ports at start (colliding with the preflight
+				// below, or failing the start outright if another process took
+				// a port meanwhile). The current plan is re-published later.
+				RemoveStalePortDevices(result.Manager, opts.Logger)
+				// Reconcile the workspace-sourced security devices against the
+				// CURRENT workspace BEFORE start (issue #610). A protect-*/mask-*/
+				// gitc-* device attached at first launch keeps its original host
+				// source; if that source was removed while the container was stopped,
+				// Incus rejects the container at start-validation with "Missing
+				// source path" and no fresh coi invocation self-heals it. Strip those
+				// devices and re-run the SAME security setup a fresh launch uses, so
+				// materialization / symlink-rejection / type handling all come from
+				// one place and protection matches the current workspace.
+				reuseCWP := result.Manager.GetWorkspacePath()
+				result.ContainerWorkspacePath = reuseCWP
+				reuseLayout, _ := ResolveGitWorktree(opts.WorkspacePath)
+				reuseWritableHooks := !containsGitHooksPath(opts.ProtectedPaths)
+				StripSecurityDevices(result.Manager, opts.Logger)
+				reusePaths, reuseImmutable, reuseErr := applySessionSecurity(result.Manager, opts, reuseCWP, !opts.DisableShift, reuseLayout, reuseWritableHooks, containerName)
+				opts.ProtectedPaths = reusePaths
+				if reuseImmutable {
+					result.HasImmutableProtection = true
+				}
+				if reuseErr != nil {
+					return nil, reuseErr
+				}
 				if err := result.Manager.Start(); err != nil {
 					return nil, fmt.Errorf("failed to start container: %w", err)
 				}
@@ -261,6 +315,63 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		}
 	}
 
+	// 4.6. Defense-in-depth: gate untrusted out-of-workspace mounts, untrusted
+	// forwarded sockets, untrusted ad-hoc credential entries, AND untrusted
+	// port publications at the single chokepoint every caller passes through.
+	// This deliberately runs on the REUSE paths too: sockets, credentials
+	// (resume), and ports are re-applied from the current config every
+	// session, so gating only at creation would let an untrusted repo config
+	// smuggle them onto a reused container. Mount devices are the exception —
+	// they persist from creation and can't be re-gated here, so on reuse we
+	// warn instead. Idempotent with the CLI-level gate: on the normal CLI
+	// flow these are already filtered, so this drops nothing.
+	gatedMC, droppedM, gatedSC, droppedS, gatedCC, droppedC, gatedPC, droppedP := FilterTrusted(opts.MountConfig, opts.SocketConfig, opts.CredentialConfig, opts.PortConfig, opts.WorkspacePath)
+	if skipLaunch && len(droppedM) > 0 {
+		opts.Logger(fmt.Sprintf(
+			"Warning: %d untrusted mount(s) remain attached from when this container was created; recreate it (coi kill + relaunch) to apply mount-trust changes",
+			len(droppedM),
+		))
+	} else {
+		for _, m := range droppedM {
+			opts.Logger(fmt.Sprintf(
+				"Warning: ignoring untrusted mount from %s: %s -> %s (resolves outside the workspace; run 'coi trust' or set %s=1)",
+				m.SourcePath, m.HostPath, m.ContainerPath, TrustEnvVar,
+			))
+		}
+	}
+	for _, s := range droppedS {
+		opts.Logger(fmt.Sprintf(
+			"Warning: ignoring untrusted socket from %s: %s -> %s (run 'coi trust' or set %s=1)",
+			s.SourcePath, s.HostPath, s.ContainerPath, TrustEnvVar,
+		))
+	}
+	for _, c := range droppedC {
+		opts.Logger(fmt.Sprintf(
+			"Warning: ignoring untrusted credential entry from %s: %s -> %s (run 'coi trust' or set %s=1)",
+			c.SourcePath, c.HostPath, c.ContainerPath, TrustEnvVar,
+		))
+	}
+	for _, p := range droppedP {
+		opts.Logger(fmt.Sprintf(
+			"Warning: ignoring untrusted %s from %s (a repo declaring host listeners can squat localhost ports; run 'coi trust' or set %s=1)",
+			DescribeDroppedPort(p), p.SourcePath, TrustEnvVar,
+		))
+	}
+	opts.MountConfig = gatedMC
+	opts.SocketConfig = gatedSC
+	opts.CredentialConfig = gatedCC
+	opts.PortConfig = gatedPC
+
+	// 4.7. Preflight the port plan BEFORE any container is created (fresh
+	// path) and AFTER stale port devices were stripped (reuse path, step 4):
+	// pinned host ports that are already taken abort here with a clear
+	// error, and auto/pool ports get their final numbers (busy ones skipped
+	// forward within the slot block). See ResolvePorts.
+	resolvedPorts, err := ResolvePorts(opts.PortConfig, opts.WorkspacePath, opts.Slot)
+	if err != nil {
+		return nil, fmt.Errorf("port preflight failed: %w", err)
+	}
+
 	// 5. Create and configure container (but don't start yet if we need to add devices)
 	// Always launch as non-ephemeral so we can save session data even if container is stopped
 	// (e.g., via 'sudo shutdown 0' from within). Cleanup will delete unless persistent mode is configured.
@@ -279,35 +390,50 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		// idmapApplied signal is not needed here.
 		useShift, _ := ConfigureUIDMapping(result.ContainerName, opts.DisableShift, opts.Logger)
 
-		// Add disk devices BEFORE starting container
+		// Add disk devices BEFORE starting container.
+		// Detect a git worktree checkout (.git is a file whose real git internals
+		// live outside the workspace). A valid layout forces preserve-path so git's
+		// pointers resolve identically host<->container, and its external git dirs
+		// are mounted + protected below (issue #533). A pointer that fails the safety
+		// guard is not mounted; git fails loudly rather than exposing a mis-pointed dir.
+		worktreeLayout, wtErr := ResolveGitWorktree(opts.WorkspacePath)
+		if wtErr != nil {
+			opts.Logger(fmt.Sprintf("Warning: git worktree not mounted (%v); git commands may fail in the container", wtErr))
+		}
+		worktreeWritableHooks := !containsGitHooksPath(opts.ProtectedPaths)
+
 		// Determine container mount path - either /workspace (default) or same as host path
+		preserveWorkspace := opts.PreserveWorkspacePath || worktreeLayout != nil
 		containerWorkspacePath := "/workspace"
-		if opts.PreserveWorkspacePath {
-			// Validate that the path doesn't conflict with critical system directories
-			cleanPath := filepath.Clean(opts.WorkspacePath)
-			disallowedPrefixes := []string{
-				"/etc", "/bin", "/sbin", "/usr", "/root", "/boot", "/sys", "/proc", "/dev", "/lib", "/lib64",
-			}
-			isDisallowed := false
-			for _, prefix := range disallowedPrefixes {
-				if cleanPath == prefix || strings.HasPrefix(cleanPath, prefix+"/") {
-					isDisallowed = true
-					break
+		if preserveWorkspace {
+			// Validate that the path doesn't conflict with critical system directories.
+			if WorkspaceUnderSystemDir(opts.WorkspacePath) {
+				if worktreeLayout != nil {
+					// Can't preserve the path, so the worktree's git pointers can't
+					// resolve and its internals can't be protected — fail closed.
+					return nil, fmt.Errorf("git worktree workspace %q is under a system directory; cannot preserve its host path to mount git internals safely", opts.WorkspacePath)
 				}
-			}
-			if isDisallowed {
 				opts.Logger(fmt.Sprintf("Warning: preserve_workspace_path requested for %q conflicts with system directories; using /workspace instead", opts.WorkspacePath))
 			} else {
-				containerWorkspacePath = cleanPath
+				containerWorkspacePath = filepath.Clean(opts.WorkspacePath)
 				opts.Logger(fmt.Sprintf("Adding workspace mount: %s -> %s (preserving host path)", opts.WorkspacePath, containerWorkspacePath))
 			}
 		}
-		if containerWorkspacePath == "/workspace" && !opts.PreserveWorkspacePath {
+		if containerWorkspacePath == "/workspace" && !preserveWorkspace {
 			opts.Logger(fmt.Sprintf("Adding workspace mount: %s -> %s", opts.WorkspacePath, containerWorkspacePath))
 		}
 		result.ContainerWorkspacePath = containerWorkspacePath
 		if err := result.Manager.MountDisk("workspace", opts.WorkspacePath, containerWorkspacePath, useShift, false); err != nil {
 			return nil, fmt.Errorf("failed to add workspace device: %w", err)
+		}
+		// Mount the worktree's external git common dir (read-write, at its host path)
+		// so git resolves; its RCE sinks are re-covered read-only after the security
+		// mounts below (issue #533).
+		if worktreeLayout != nil {
+			if err := MountGitWorktreeDirs(result.Manager, worktreeLayout, useShift); err != nil {
+				return nil, fmt.Errorf("failed to mount git worktree dirs: %w", err)
+			}
+			opts.Logger(fmt.Sprintf("Mounted git worktree common dir (read-write): %s", worktreeLayout.CommonDir))
 		}
 
 		// Configure /tmp tmpfs size (prevent space exhaustion during builds/operations)
@@ -319,80 +445,27 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 			}
 		}
 
-		// Defense-in-depth: gate untrusted out-of-workspace mounts AND untrusted
-		// forwarded sockets here, where a freshly-launched container is set up, so
-		// any caller of session.Setup that didn't pre-filter is still covered.
-		// (On container reuse this block is skipped along with the rest of setup —
-		// resources persist from creation; the run/shell reuse paths warn that
-		// trust changes need a recreate.) Idempotent with the CLI-level gate: on
-		// the normal CLI flow these are already filtered, so this drops nothing.
-		gatedMC, droppedM, gatedSC, droppedS := FilterTrusted(opts.MountConfig, opts.SocketConfig, opts.WorkspacePath)
-		for _, m := range droppedM {
-			opts.Logger(fmt.Sprintf(
-				"Warning: ignoring untrusted mount from %s: %s -> %s (resolves outside the workspace; run 'coi trust' or set %s=1)",
-				m.SourcePath, m.HostPath, m.ContainerPath, TrustEnvVar))
-		}
-		for _, s := range droppedS {
-			opts.Logger(fmt.Sprintf(
-				"Warning: ignoring untrusted socket from %s: %s -> %s (run 'coi trust' or set %s=1)",
-				s.SourcePath, s.HostPath, s.ContainerPath, TrustEnvVar))
-		}
-		opts.MountConfig = gatedMC
-		opts.SocketConfig = gatedSC
-
 		// Mount all configured directories
 		if err := setupMounts(result.Manager, opts.MountConfig, useShift, opts.Logger); err != nil {
 			return nil, err
 		}
 
-		// Protect security-sensitive paths by mounting read-only (security feature).
-		// This must be added after the workspace mount for the overlay to work.
-		// SetupSecurityMounts expands the dynamic per-worktree git configs internally
-		// (issue #545 — the single chokepoint both session paths share) and returns
-		// the effective list used for logging + the immutable pass over the same set.
-		effectivePaths, err := SetupSecurityMounts(result.Manager, opts.WorkspacePath, containerWorkspacePath, opts.ProtectedPaths, useShift, opts.Security)
+		// Protect security-sensitive paths (read-only mounts), extend protection to a
+		// worktree's external git common dir, apply the host-immutable belt, and mask
+		// secret paths — all via applySessionSecurity, the single implementation shared
+		// with the reuse/restart reconcile below (issue #610). Must be added after the
+		// workspace mount for the overlays to layer on top.
+		effectivePaths, hasImmutable, secErr := applySessionSecurity(result.Manager, opts, containerWorkspacePath, useShift, worktreeLayout, worktreeWritableHooks, containerName)
 		// Adopt the expanded list as the canonical protected set so downstream
 		// consumers (the SANDBOX_CONTEXT.md "Protected paths" listing built from
 		// opts.ProtectedPaths below) reflect what was actually mounted, including the
-		// per-worktree configs — matching pre-#545 behavior where the caller expanded
-		// in place. Returned even on partial error, so the record stays complete.
+		// per-worktree configs.
 		opts.ProtectedPaths = effectivePaths
-		if err != nil {
-			opts.Logger(fmt.Sprintf("Warning: Failed to setup security mounts: %v", err))
-			// Non-fatal: continue even if protection fails
-		} else if len(effectivePaths) > 0 {
-			// Log which paths were actually protected
-			protectedPaths := GetProtectedPathsForLogging(opts.WorkspacePath, effectivePaths)
-			if len(protectedPaths) > 0 {
-				opts.Logger(fmt.Sprintf("Protected paths (mounted read-only): %s", strings.Join(protectedPaths, ", ")))
-			}
+		if hasImmutable {
+			result.HasImmutableProtection = true
 		}
-
-		// Apply host-side immutable attribute for defense-in-depth. Runs even on a
-		// partial mount error, so it is gated on the effective list, not err.
-		if len(effectivePaths) > 0 && opts.HostImmutable {
-			immutablePaths := ApplyImmutable(opts.WorkspacePath, effectivePaths, containerName, opts.Logger)
-			if len(immutablePaths) > 0 {
-				result.HasImmutableProtection = true
-				opts.Logger(fmt.Sprintf("Host-side immutable protection applied: %s", strings.Join(immutablePaths, ", ")))
-			}
-		}
-
-		// Mask secret paths (issue #494): mount an empty read-only file/dir over
-		// each resolved match so the contained agent can neither read nor modify
-		// repo-local secrets. Independent of protected_paths. FAIL CLOSED — if a
-		// configured secret cannot be masked we must not launch with it exposed.
-		if len(opts.SecretPaths) > 0 {
-			masked, skipped, err := SetupSecretMasks(result.Manager, opts.WorkspacePath, containerWorkspacePath, opts.SecretPaths, useShift)
-			for _, s := range skipped {
-				opts.Logger(fmt.Sprintf("Warning: secret_paths entry %q is NOT masked (missing, or a symlink resolving outside the workspace) — it is not hidden from the agent", s))
-			}
-			if err != nil {
-				return nil, fmt.Errorf("failed to mask secret paths: %w", err)
-			}
-			if len(masked) > 0 {
-				opts.Logger(fmt.Sprintf("Masked secret paths (hidden read-only): %s", strings.Join(masked, ", ")))
-			}
+		if secErr != nil {
+			return nil, secErr
 		}
 
 		// Apply resource limits before starting (if configured)
@@ -513,9 +586,12 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 	}
 
 	// 6. Wait for ready
-	opts.Logger("Waiting for container to be ready...")
-	if err := waitForReady(result.Manager, 30, opts.Logger); err != nil {
-		return nil, err
+	readyTimeout := opts.ReadyTimeout
+	if readyTimeout <= 0 {
+		readyTimeout = 30
+	}
+	if err := WaitForReady(ctx, result.Manager, readyTimeout, opts.Logger); err != nil {
+		return nil, AnnotateReadyTimeout(err, opts.LimitsConfig)
 	}
 
 	// 6.1. Configure Docker bridge CIDR to prevent IP conflicts with the host
@@ -550,13 +626,37 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 	if !skipLaunch && hasCodeUser && container.CodeUID != 1000 {
 		opts.Logger(fmt.Sprintf("Remapping user %s from UID 1000 to %d...", container.CodeUser, container.CodeUID))
 		remapCmd := fmt.Sprintf(
-			"groupmod -g %d %s && usermod -u %d -g %d %s && chown -R %s:%s /home/%s",
+			"groupmod -g %d %s && usermod -u %d -g %d %s",
 			container.CodeUID, container.CodeUser,
 			container.CodeUID, container.CodeUID, container.CodeUser,
-			container.CodeUser, container.CodeUser, container.CodeUser,
 		)
 		if _, err := result.Manager.ExecCommand(remapCmd, container.ExecCommandOptions{Capture: true}); err != nil {
-			return nil, fmt.Errorf("failed to remap user %s to UID %d: %w", container.CodeUser, container.CodeUID, err)
+			// usermod -u, even without -m, walks the home directory chowning
+			// files it finds owned by the old UID — that walk hits any
+			// read-only mount already living under /home/<code> (protected
+			// paths, [[mounts]] entries; disk devices attach pre-start per
+			// #534) and usermod exits non-zero (E_HOMEDIR) despite the passwd
+			// update having already been committed. Don't trust the exit code
+			// alone: probe whether the account really did move to the target
+			// UID before treating this as fatal. groupmod ran first in the
+			// chain and usermod commits uid+gid in the same passwd write, so
+			// a confirmed UID implies the full remap landed.
+			actualUID, _, probeErr := probeCodeUser(result.Manager, container.CodeUser)
+			if probeErr != nil || actualUID != container.CodeUID {
+				return nil, fmt.Errorf("failed to remap user %s to UID %d: %w", container.CodeUser, container.CodeUID, err)
+			}
+			opts.Logger(fmt.Sprintf("Warning: UID/GID remap for %s succeeded but usermod's home-directory ownership walk hit an unwritable path: %v", container.CodeUser, err))
+		}
+		// The home-ownership sweep is best-effort, separately from the remap
+		// itself (mirrors the coi run path, #534): a read-only mount under
+		// /home/<code> makes chown -R exit non-zero after fixing everything it
+		// could, which must not abort setup. Keeping it OUT of the fatal &&
+		// chain also means it still runs when usermod exited non-zero above —
+		// fused, the chain would skip it and leave writable home files owned
+		// by the old UID (the code user unable to write its own dotfiles).
+		chownCmd := fmt.Sprintf("chown -R %s:%s /home/%s", container.CodeUser, container.CodeUser, container.CodeUser)
+		if _, err := result.Manager.ExecCommand(chownCmd, container.ExecCommandOptions{Capture: true}); err != nil {
+			opts.Logger(fmt.Sprintf("Warning: could not chown all of /home/%s after UID remap (a read-only mount under it is expected to fail): %v", container.CodeUser, err))
 		}
 	}
 
@@ -566,6 +666,14 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 	// trust-filtered above).
 	result.SocketEnv = ForwardConfiguredSockets(result.Manager, opts.SocketConfig, opts.ForwardSSHAgent, opts.Logger)
 	result.SSHAgentSocketPath = result.SocketEnv["SSH_AUTH_SOCK"]
+
+	// 6.6.05. Publish configured [ports] on the host (proxy devices, like
+	// sockets but pointing the other way): agent-started services become
+	// reachable as localhost:<port>, with the mapping exported to the
+	// session env (COI_PORTS / COI_PORT_<NAME>) and the sandbox context
+	// file (#558). The plan was trust-gated and resolved at step 4.6/4.7
+	// (after stale devices were stripped on reuse), so this is a plain add.
+	result.PublishedPorts, result.PortsEnv = PublishResolvedPorts(result.Manager, resolvedPorts, opts.Logger)
 
 	// 6.6.1. Prevent git from guessing commit identity from the container user.
 	// Setting user.useConfigOnly=true forces git to refuse commits until
@@ -651,6 +759,17 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		}
 	}
 
+	// 9.5 Refresh/copy configured [[credentials]] entries (catalog bundles and
+	// ad-hoc). Independent of which Tool is selected. Re-run on every resume
+	// (idempotent) so a rotated host credential stays in sync; on a fresh
+	// session it's applied once at step 11 alongside CLI tool config.
+	if opts.ResumeFromID != "" && opts.CredentialConfig != nil && len(opts.CredentialConfig.Entries) > 0 {
+		opts.Logger("Refreshing configured credentials...")
+		if err := setupCredentials(result.Manager, result.HomeDir, opts.CredentialConfig.Entries, opts.Logger); err != nil {
+			opts.Logger(fmt.Sprintf("Warning: Could not refresh credentials: %v", err))
+		}
+	}
+
 	// 10. Workspace and configured mounts are already mounted (added before container start in step 5)
 	if skipLaunch {
 		opts.Logger("Reusing existing workspace and mount configurations")
@@ -692,6 +811,16 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 			}
 		} else if opts.Tool.ConfigDirName() == "" {
 			opts.Logger(fmt.Sprintf("Tool %s uses ENV-based auth, skipping config setup", opts.Tool.Name()))
+		}
+	}
+
+	// 11.5 Setup configured [[credentials]] entries (skip if resuming - the
+	// refresh above already handled it; skip on container reuse - persists
+	// from creation, matching how step 11 handles the builtin tool config).
+	if !skipLaunch && opts.ResumeFromID == "" && opts.CredentialConfig != nil && len(opts.CredentialConfig.Entries) > 0 {
+		opts.Logger("Setting up configured credentials...")
+		if err := setupCredentials(result.Manager, result.HomeDir, opts.CredentialConfig.Entries, opts.Logger); err != nil {
+			opts.Logger(fmt.Sprintf("Warning: Failed to setup credentials: %v", err))
 		}
 	}
 
@@ -756,6 +885,7 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 			ForwardedEnvVars:   opts.ForwardedEnvVars,
 			Timezone:           result.Timezone,
 			ExtraMounts:        extraMounts,
+			PublishedPorts:     publishedPortInfos(result.PublishedPorts),
 			CPULimit:           cpuLimit,
 			MemoryLimit:        memoryLimit,
 			MaxDuration:        maxDuration,
@@ -822,8 +952,21 @@ func shellEscape(s string) string {
 	return "'" + escaped + "'"
 }
 
-// waitForReady waits for container to be ready
-func waitForReady(mgr container.ContainerManager, maxRetries int, logger func(string)) error {
+// ErrNotReady is the sentinel wrapped by WaitForReady's timeout error, so
+// callers can tell "the window expired" apart from cancellation or probe
+// errors (e.g. to attach cause hints — see AnnotateReadyTimeout).
+var ErrNotReady = errors.New("container failed to become ready")
+
+// WaitForReady waits for the container to be ready: running AND able to
+// execute a command. It probes once per second for up to maxRetries seconds
+// and honors ctx cancellation between probes (a SIGINT-cancelled context
+// stops the wait immediately instead of sleeping out the window against a
+// container the signal handler already tore down). This is the single
+// readiness chokepoint for every wait-for-container path (shell, run, health
+// probes) — private copies of this loop drift, as coi run's no-sleep variant
+// proved.
+func WaitForReady(ctx context.Context, mgr container.ContainerManager, maxRetries int, logger func(string)) error {
+	logger("Waiting for container to be ready...")
 	for i := 0; i < maxRetries; i++ {
 		running, err := mgr.Running()
 		if err != nil {
@@ -838,13 +981,50 @@ func waitForReady(mgr container.ContainerManager, maxRetries int, logger func(st
 			}
 		}
 
-		time.Sleep(1 * time.Second)
-		if i%5 == 0 && i > 0 {
-			logger(fmt.Sprintf("Still waiting... (%ds)", i))
+		// No sleep after the final probe — it would delay the error for
+		// nothing. The last iteration falls straight through to the timeout.
+		if i == maxRetries-1 {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(1 * time.Second):
+		}
+		if (i+1)%5 == 0 {
+			logger(fmt.Sprintf("Still waiting... (%ds)", i+1))
 		}
 	}
 
-	return fmt.Errorf("container failed to become ready after %d seconds", maxRetries)
+	return fmt.Errorf("%w after %d seconds", ErrNotReady, maxRetries)
+}
+
+// AnnotateReadyTimeout appends a cause hint to a WaitForReady timeout when
+// disk I/O limits were active during boot: a low configured rate (e.g.
+// read = "100kB") throttles the container's root disk while it is still
+// booting and can starve startup past the readiness window — a failure mode
+// that otherwise presents as a bare, misleading timeout. Errors other than
+// the ErrNotReady timeout (cancellation, probe failures) pass through
+// unchanged.
+func AnnotateReadyTimeout(err error, limitsCfg *config.LimitsConfig) error {
+	if err == nil || limitsCfg == nil || !errors.Is(err, ErrNotReady) {
+		return err
+	}
+	var active []string
+	if limitsCfg.Disk.Read != "" {
+		active = append(active, "read="+limitsCfg.Disk.Read)
+	}
+	if limitsCfg.Disk.Write != "" {
+		active = append(active, "write="+limitsCfg.Disk.Write)
+	}
+	if limitsCfg.Disk.Max != "" {
+		active = append(active, "max="+limitsCfg.Disk.Max)
+	}
+	if len(active) == 0 {
+		return err
+	}
+	return fmt.Errorf("%w (note: [limits.disk] %s was active while the container booted — a low disk I/O rate can starve startup past the readiness window)",
+		err, strings.Join(active, " "))
 }
 
 // DetectCodeUser returns true if the named user account exists inside
@@ -853,28 +1033,81 @@ func waitForReady(mgr container.ContainerManager, maxRetries int, logger func(st
 // that matched the image alias literally against "coi-default" and
 // misclassified every custom image built from it as a root image.
 //
-// The probe runs `id -u <user>` via ExecArgsCapture, which passes
-// codeUser as a raw argv entry to `id` rather than interpolating it
-// into a shell string. That is defence-in-depth against a maliciously
-// crafted [incus] code_user value in config.toml: even if a user set
-// `code_user = "code; rm -rf /"`, `id` would just receive that as a
-// single argv and report "no such user" — the shell never sees it.
-//
-// A *container.ExitError (non-zero exit of `id`) is treated as "user
-// not present" and returns (false, nil). Any other error (e.g. incus
-// connectivity failure) is surfaced to the caller so it can decide
-// whether to warn or fall back.
+// Implemented on probeCodeUser (shared with ResolveCodeUID): "user not
+// present" is recognized by `id`'s own stderr, while incus-level exec
+// failures return an error so the caller can decide whether to warn or
+// fall back. See probeCodeUser for the argv-injection defence notes.
 func DetectCodeUser(mgr container.ContainerExecution, codeUser string) (bool, error) {
-	_, err := mgr.ExecArgsCapture(
+	_, exists, err := probeCodeUser(mgr, codeUser)
+	return exists, err
+}
+
+// codeUserMissing reports whether a probe error means `id` itself ran and
+// said the account doesn't exist — as opposed to an incus-level failure
+// (daemon unreachable, container stopped mid-race, permission denied,
+// missing binary) that ALSO surfaces as *container.ExitError from the CLI
+// exec path, with the same non-zero exit code. The stderr text is the only
+// reliable discriminator: `id` (GNU coreutils and busybox alike) says
+// "no such user"/"unknown user", incus's own failures say "Error: ...".
+// Only a genuine no-such-user may fall back to root — misclassifying an
+// infra failure would silently misdirect callers to root's tmux socket,
+// the exact #588 failure mode.
+func codeUserMissing(err error) bool {
+	var exitErr *container.ExitError
+	if !errors.As(err, &exitErr) {
+		return false
+	}
+	stderr := strings.ToLower(exitErr.Stderr)
+	return strings.Contains(stderr, "no such user") || strings.Contains(stderr, "unknown user")
+}
+
+// probeCodeUser is the ONE code-user probe shared by DetectCodeUser and
+// ResolveCodeUID (so their error taxonomies cannot drift): it runs
+// `id -u <codeUser>` in the container and returns (uid, true, nil) when the
+// account exists, (0, false, nil) when `id` reports it missing, and an error
+// for anything else — including incus-level exec failures, which are
+// distinguished from "no such user" by stderr (see codeUserMissing).
+//
+// codeUser is passed as a raw argv entry to `id` rather than interpolated
+// into a shell string — defence-in-depth against a maliciously crafted
+// [incus] code_user config value: `id` receives it as a single argument and
+// reports "no such user"; the shell never sees it.
+func probeCodeUser(mgr container.ContainerExecution, codeUser string) (int, bool, error) {
+	out, err := mgr.ExecArgsCapture(
 		[]string{"id", "-u", codeUser},
 		container.ExecCommandOptions{Capture: true},
 	)
-	if err == nil {
-		return true, nil
+	if err != nil {
+		if codeUserMissing(err) {
+			return 0, false, nil
+		}
+		return 0, false, err
 	}
-	var exitErr *container.ExitError
-	if errors.As(err, &exitErr) {
-		return false, nil
+	uid, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil {
+		return 0, false, fmt.Errorf("unexpected `id -u %s` output %q: %w", codeUser, out, err)
 	}
-	return false, err
+	return uid, true, nil
+}
+
+// ResolveCodeUID returns the UID the container's code user ACTUALLY has,
+// probed from the container itself, or root (0) when the account doesn't
+// exist — images without a code user run their sessions, and therefore
+// their tmux server, as root. Callers that must talk to a session's
+// per-user resources (e.g. the tmux socket at /tmp/tmux-<uid>, #588) need
+// this rather than the config-derived container.CodeUID: after an
+// in-container remap (remapContainerUserIfNeeded / [incus] code_uid) the
+// two can differ. Note the probe uses the CURRENT config's code_user NAME,
+// so it resolves cross-config UID variance but not a container created
+// under a different [incus] code_user name (custom-image corner case —
+// such containers probe as "no user" and resolve to root).
+func ResolveCodeUID(mgr container.ContainerExecution, codeUser string) (int, error) {
+	uid, exists, err := probeCodeUser(mgr, codeUser)
+	if err != nil {
+		return 0, err
+	}
+	if !exists {
+		return 0, nil // no code user: sessions run as root
+	}
+	return uid, nil
 }

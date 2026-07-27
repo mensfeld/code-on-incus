@@ -2,11 +2,40 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 
 	"github.com/BurntSushi/toml"
 )
+
+// hostnameRe matches a single DNS name (RFC1123-ish): dot-separated labels of
+// letters/digits/hyphens, each 1–63 chars and not starting/ending with a hyphen.
+var hostnameRe = regexp.MustCompile(
+	`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$`)
+
+// ValidateNetworkHosts checks that [[network.hosts]] entries are structurally
+// sound: each has a valid IPv4 address and at least one syntactically valid
+// hostname. Mode-dependent reachability rules (e.g. refusing RFC1918/metadata
+// IPs in allowlist mode) are enforced later, when the entries are applied.
+func ValidateNetworkHosts(hosts []HostEntry) error {
+	for i, h := range hosts {
+		if ip := net.ParseIP(h.IP); ip == nil || ip.To4() == nil {
+			return fmt.Errorf("network.hosts[%d]: %q is not a valid IPv4 address", i, h.IP)
+		}
+		if len(h.Hostnames) == 0 {
+			return fmt.Errorf("network.hosts[%d] (%s): at least one hostname is required", i, h.IP)
+		}
+		for _, name := range h.Hostnames {
+			if !hostnameRe.MatchString(name) {
+				return fmt.Errorf("network.hosts[%d] (%s): %q is not a valid hostname", i, h.IP, name)
+			}
+		}
+	}
+	return nil
+}
 
 // ShellConfig contains shell session configuration
 type ShellConfig struct {
@@ -32,6 +61,8 @@ type Config struct {
 	Shell              ShellConfig              `toml:"shell"`
 	Mounts             MountsConfig             `toml:"mounts"`
 	Sockets            []SocketEntry            `toml:"sockets"`
+	Ports              PortsConfig              `toml:"ports"`
+	Credentials        []CredentialEntry        `toml:"credentials"`
 	Limits             LimitsConfig             `toml:"limits"`
 	Git                GitConfig                `toml:"git"`
 	SSH                SSHConfig                `toml:"ssh"`
@@ -49,6 +80,10 @@ type BuildConfig struct {
 	Script      string   `toml:"script"`      // Path to build script (relative to config file or absolute)
 	Commands    []string `toml:"commands"`    // Inline build commands (alternative to script)
 	Compression string   `toml:"compression"` // Image compression algorithm (e.g. "none", "gzip", "xz"; empty = Incus default)
+	// Agents selects which AI agents the base image installs (e.g. ["claude"]).
+	// Empty/unset installs all supported agents (the default). Names are validated
+	// against the tool registry at build time. Issue #454.
+	Agents []string `toml:"agents"`
 }
 
 // HasBuildConfig returns true if a build configuration is defined (script or commands)
@@ -65,6 +100,7 @@ type ContainerConfig struct {
 	Image           string      `toml:"image"`
 	Persistent      *bool       `toml:"persistent"`
 	ShutdownTimeout int         `toml:"shutdown_timeout"` // Seconds to wait for graceful shutdown before force-killing (default: 60)
+	ReadyTimeout    int         `toml:"ready_timeout"`    // Seconds to wait for a launched container to become ready (default: 30)
 	StoragePool     string      `toml:"storage_pool"`
 	Alias           string      `toml:"alias"`
 	Build           BuildConfig `toml:"build"`
@@ -76,19 +112,37 @@ func (c *ContainerConfig) HasContainerConfig() bool {
 	return c.Image != "" ||
 		c.Persistent != nil ||
 		c.ShutdownTimeout != 0 ||
+		c.ReadyTimeout != 0 ||
 		c.StoragePool != "" ||
 		c.Alias != "" ||
 		c.StaleBaseCheck != "" ||
 		c.Build.HasBuildConfig()
 }
 
+// DefaultShutdownTimeoutSeconds is the graceful-shutdown window applied when
+// [container] shutdown_timeout is unset — the single source for every
+// consumer (coi shutdown, session cleanup's wait for an in-flight poweroff).
+const DefaultShutdownTimeoutSeconds = 60
+
 // ShutdownTimeoutSeconds returns the graceful-shutdown window in seconds,
-// defaulting to 60 when unset.
+// defaulting to DefaultShutdownTimeoutSeconds when unset.
 func (c *ContainerConfig) ShutdownTimeoutSeconds() int {
 	if c.ShutdownTimeout <= 0 {
-		return 60
+		return DefaultShutdownTimeoutSeconds
 	}
 	return c.ShutdownTimeout
+}
+
+// ReadyTimeoutSeconds returns the container-readiness window in seconds,
+// defaulting to 30 when unset. Like the shutdown window, how long to wait
+// for a boot is policy, not a per-invocation whim — slow hosts (nested
+// virtualization, cold storage pools, loaded CI runners) occasionally need
+// more than the default.
+func (c *ContainerConfig) ReadyTimeoutSeconds() int {
+	if c.ReadyTimeout <= 0 {
+		return 30
+	}
+	return c.ReadyTimeout
 }
 
 // TimezoneConfig contains timezone settings for containers
@@ -213,7 +267,15 @@ func (s *SecurityConfig) IsHostImmutableEnabled() bool {
 
 // DefaultsConfig contains default settings
 type DefaultsConfig struct {
-	Model       string            `toml:"model"`
+	Model string `toml:"model"`
+	// Profile names the profile to apply when `--profile` is not passed, so a
+	// user's opinionated setup applies without retyping it (#607). `coi` gives
+	// this profile; `coi --profile default` still gives the synthesized clone of
+	// global config. Honored ONLY from trusted-scope config (an untrusted
+	// project config redirecting the no-flag default could downgrade the user's
+	// chosen environment) — stripped from project config at load time. A name
+	// that does not resolve to a known profile is a hard error at startup.
+	Profile     string            `toml:"profile"`
 	ForwardEnv  []string          `toml:"forward_env"`
 	Environment map[string]string `toml:"environment"`
 	// EnvCommands maps env var names to host commands run at session start; the
@@ -271,6 +333,19 @@ type NetworkConfig struct {
 	// rules. For users who decline the installer's /etc/sudoers.d/coi-nft rule.
 	UseSudo *bool                `toml:"use_sudo"`
 	Logging NetworkLoggingConfig `toml:"logging"`
+	// Hosts are static name→address entries written into the container's
+	// /etc/hosts, with firewall reachability applied to match the active mode
+	// (#605). Honored ONLY from trusted-scope config — a name→IP mapping is a
+	// spoofing primitive and reachability punches a firewall hole, so an
+	// untrusted project config's entries are stripped at load time.
+	Hosts []HostEntry `toml:"hosts"`
+}
+
+// HostEntry maps one IPv4 address to one or more hostnames for the container's
+// /etc/hosts. It is the config form of `[[network.hosts]]`.
+type HostEntry struct {
+	IP        string   `toml:"ip"`
+	Hostnames []string `toml:"hostnames"`
 }
 
 // NetworkLoggingConfig contains network logging settings
@@ -290,6 +365,8 @@ type ProfileConfig struct {
 	Tool        *ToolConfig       `toml:"tool"`
 	Mounts      []MountEntry      `toml:"mounts"`
 	Sockets     []SocketEntry     `toml:"sockets"`
+	Ports       *PortsConfig      `toml:"ports"`
+	Credentials []CredentialEntry `toml:"credentials"`
 	Network     *NetworkConfig    `toml:"network"`
 	ForwardEnv  []string          `toml:"forward_env"`
 	Source      string            `toml:"-"` // Where this profile was loaded from (not serialized)
@@ -355,6 +432,78 @@ type SocketEntry struct {
 	// entry came from an untrusted, project-scope config file. Forwarding a host
 	// socket exposes a host capability, so untrusted entries are gated behind
 	// explicit trust (`coi trust`), like escaping mounts.
+	Untrusted  bool   `toml:"-"`
+	SourcePath string `toml:"-"`
+}
+
+// CredentialEntry represents a single host credential source to copy into a
+// container: either a reference to a named catalog bundle (see
+// internal/tool/credentials), or an ad-hoc host/container file pair.
+// Exactly one of Bundle, or Host+Container, must be set.
+type CredentialEntry struct {
+	Bundle    string `toml:"bundle"`    // catalog bundle name, e.g. "ollama"
+	Host      string `toml:"host"`      // ad-hoc host path (supports ~ expansion)
+	Container string `toml:"container"` // ad-hoc container path (must be absolute)
+	Mode      string `toml:"mode"`      // optional chmod mode, e.g. "0600"
+
+	// Untrusted/SourcePath are set programmatically (never from TOML) when
+	// this entry came from an untrusted, project-scope config file. Only
+	// ad-hoc entries (Bundle == "") are ever marked Untrusted. A bundle
+	// reference can only select a name from coi's own vetted catalog, not an
+	// attacker-chosen host path, so it carries the same trust level the
+	// builtin tool credential seeding already has.
+	Untrusted  bool   `toml:"-"`
+	SourcePath string `toml:"-"`
+}
+
+// PortsConfig publishes container TCP ports on the host via Incus proxy
+// devices, so agent-started services inside a container are reachable as
+// localhost:<port> on the host (#558). Two complementary forms:
+//
+//   - Pool: N identity-mapped ports per session (host port == container
+//     port), allocated per (workspace, slot) — see internal/session
+//     AllocateHostPort — and announced to the agent via the sandbox context
+//     file and COI_PORTS. Zero per-service declarations: the agent binds
+//     any pool port and the user opens the SAME number on localhost.
+//   - Map: named entries for services with fixed container ports (e.g. a
+//     compose stack's postgres on 5432); host side auto-allocated or pinned.
+//
+// Allocation is deterministic with no coordination state, so the section is
+// safe to share via profiles: parallel slots and different workspaces get
+// distinct, stable ports by construction. Pinned host ports are bind-probed
+// before any container work and abort the session if taken.
+type PortsConfig struct {
+	Pool int         `toml:"pool"` // Number of identity-mapped ports to publish (0 = none)
+	Map  []PortEntry `toml:"map"`  // Named fixed-container-port publications
+
+	// PoolUntrusted/PoolSourcePath are set programmatically (never from
+	// TOML) when the pool value came from an untrusted, project-scope config
+	// file; map entries carry their own per-entry flags so mixed
+	// trusted+untrusted scopes gate independently. A repo declaring host
+	// listeners can squat well-known localhost ports, so untrusted
+	// pool/entries are gated behind explicit trust (`coi trust`).
+	// PoolTrustedFallback remembers a trusted pool value that an untrusted
+	// overlay overwrote, so the trust gate restores it instead of dropping
+	// the user's own pool to zero (see mergePortsInto).
+	PoolUntrusted       bool   `toml:"-"`
+	PoolSourcePath      string `toml:"-"`
+	PoolTrustedFallback int    `toml:"-"`
+}
+
+// HasPorts reports whether the section declares anything to publish.
+func (p *PortsConfig) HasPorts() bool {
+	return p != nil && (p.Pool > 0 || len(p.Map) > 0)
+}
+
+// PortEntry is one named [[ports.map]] publication.
+type PortEntry struct {
+	Name      string `toml:"name"`      // Identifier; exposed as COI_PORT_<NAME> (upper-cased)
+	Container int    `toml:"container"` // TCP port inside the container (1-65535)
+	Host      int    `toml:"host"`      // Optional exact host port (0 = auto per workspace/slot)
+	Listen    string `toml:"listen"`    // Host listen address (default "127.0.0.1")
+
+	// Untrusted/SourcePath: set programmatically for entries from an
+	// untrusted, project-scope config file (see PortsConfig).
 	Untrusted  bool   `toml:"-"`
 	SourcePath string `toml:"-"`
 }
@@ -505,6 +654,7 @@ func synthesizeDefaultProfile(cfg *Config) ProfileConfig {
 
 	container := cfg.Container
 	container.Build.Commands = cloneSlice(cfg.Container.Build.Commands)
+	container.Build.Agents = cloneSlice(cfg.Container.Build.Agents)
 
 	p := ProfileConfig{
 		Container:   container,
@@ -518,6 +668,8 @@ func synthesizeDefaultProfile(cfg *Config) ProfileConfig {
 		Network:     &network,
 		Mounts:      cloneSlice(cfg.Mounts.Default),
 		Sockets:     cloneSlice(cfg.Sockets),
+		Ports:       clonePortsConfig(&cfg.Ports),
+		Credentials: cloneSlice(cfg.Credentials),
 		Paths:       &paths,
 		Incus:       &incus,
 		Git:         &git,
@@ -705,6 +857,9 @@ func (c *Config) Merge(other *Config) {
 	if other.Defaults.Model != "" {
 		c.Defaults.Model = other.Defaults.Model
 	}
+	if other.Defaults.Profile != "" {
+		c.Defaults.Profile = other.Defaults.Profile
+	}
 	if len(other.Defaults.ForwardEnv) > 0 {
 		c.Defaults.ForwardEnv = MergeStringSliceUnique(c.Defaults.ForwardEnv, other.Defaults.ForwardEnv)
 	}
@@ -732,6 +887,10 @@ func (c *Config) Merge(other *Config) {
 	}
 	if len(other.Sockets) > 0 {
 		c.Sockets = append(c.Sockets, other.Sockets...)
+	}
+	mergePortsInto(&c.Ports, &other.Ports)
+	if len(other.Credentials) > 0 {
+		c.Credentials = append(c.Credentials, other.Credentials...)
 	}
 
 	mergePathsInto(&c.Paths, &other.Paths)
@@ -932,6 +1091,12 @@ func (c *Config) ApplyProfile(name string) error {
 	if len(profile.Sockets) > 0 {
 		c.Sockets = append(c.Sockets, profile.Sockets...)
 	}
+	if profile.Ports != nil {
+		mergePortsInto(&c.Ports, profile.Ports)
+	}
+	if len(profile.Credentials) > 0 {
+		c.Credentials = append(c.Credentials, profile.Credentials...)
+	}
 
 	// Apply struct sections
 	if profile.Limits != nil {
@@ -1009,6 +1174,9 @@ func mergeContainerInto(dst *ContainerConfig, src *ContainerConfig) {
 	if src.ShutdownTimeout != 0 {
 		dst.ShutdownTimeout = src.ShutdownTimeout
 	}
+	if src.ReadyTimeout != 0 {
+		dst.ReadyTimeout = src.ReadyTimeout
+	}
 	if src.StoragePool != "" {
 		dst.StoragePool = src.StoragePool
 	}
@@ -1019,6 +1187,54 @@ func mergeContainerInto(dst *ContainerConfig, src *ContainerConfig) {
 		dst.StaleBaseCheck = src.StaleBaseCheck
 	}
 	mergeBuildInto(&dst.Build, &src.Build)
+}
+
+// mergePortsInto overlays src's ports section onto dst: a non-zero pool wins
+// (pool provenance follows the winning source), and map entries with a name
+// dst already has REPLACE the earlier entry while new names append — so
+// re-applying a profile synthesized from the merged config (the "default"
+// profile) is a no-op instead of doubling every entry, and a later scope can
+// override an earlier entry's ports without duplicating its device name.
+// When an UNTRUSTED pool overwrites a trusted one, the trusted value is
+// remembered in PoolTrustedFallback so the trust gate can fall back to it
+// instead of silently disabling the user's own pool.
+func mergePortsInto(dst, src *PortsConfig) {
+	if src == nil || !src.HasPorts() {
+		return
+	}
+	if src.Pool > 0 {
+		switch {
+		case src.PoolUntrusted && dst.Pool > 0 && !dst.PoolUntrusted:
+			dst.PoolTrustedFallback = dst.Pool
+		case !src.PoolUntrusted:
+			dst.PoolTrustedFallback = 0 // a trusted winner needs no fallback
+		}
+		dst.Pool = src.Pool
+		dst.PoolUntrusted = src.PoolUntrusted
+		dst.PoolSourcePath = src.PoolSourcePath
+	}
+	for _, e := range src.Map {
+		replaced := false
+		for i := range dst.Map {
+			if dst.Map[i].Name == e.Name {
+				dst.Map[i] = e
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			dst.Map = append(dst.Map, e)
+		}
+	}
+}
+
+func clonePortsConfig(src *PortsConfig) *PortsConfig {
+	if src == nil {
+		return nil
+	}
+	out := *src
+	out.Map = cloneSlice(src.Map)
+	return &out
 }
 
 // maxInheritanceDepth is the maximum allowed inheritance chain depth
@@ -1082,6 +1298,12 @@ func mergeProfiles(parent, child ProfileConfig) ProfileConfig {
 	}
 	if result.Sockets == nil {
 		result.Sockets = parent.Sockets
+	}
+	if result.Ports == nil {
+		result.Ports = parent.Ports
+	}
+	if result.Credentials == nil {
+		result.Credentials = parent.Credentials
 	}
 	if result.ForwardEnv == nil {
 		result.ForwardEnv = parent.ForwardEnv
@@ -1160,6 +1382,9 @@ func mergeBuildInto(dst *BuildConfig, src *BuildConfig) {
 	if src.Compression != "" {
 		dst.Compression = src.Compression
 	}
+	if len(src.Agents) > 0 {
+		dst.Agents = src.Agents
+	}
 }
 
 func mergeNetworkInto(dst *NetworkConfig, src *NetworkConfig) {
@@ -1183,6 +1408,9 @@ func mergeNetworkInto(dst *NetworkConfig, src *NetworkConfig) {
 	}
 	if src.RefreshIntervalMinutes != 0 {
 		dst.RefreshIntervalMinutes = src.RefreshIntervalMinutes
+	}
+	if src.Hosts != nil {
+		dst.Hosts = src.Hosts
 	}
 	if src.Logging.Path != "" {
 		dst.Logging.Path = src.Logging.Path
@@ -1403,6 +1631,60 @@ func (p *ProfileConfig) Validate(name string) error {
 		}
 	}
 
+	// Validate credential entries: exactly one of bundle or host+container.
+	for i, cr := range p.Credentials {
+		hasBundle := cr.Bundle != ""
+		hasAdHoc := cr.Host != "" || cr.Container != ""
+		if hasBundle && hasAdHoc {
+			return fmt.Errorf("profile '%s': credentials[%d] must set either 'bundle' or 'host'+'container', not both", name, i)
+		}
+		if !hasBundle && !hasAdHoc {
+			return fmt.Errorf("profile '%s': credentials[%d] must set either 'bundle' or 'host'+'container'", name, i)
+		}
+		if hasAdHoc {
+			if cr.Host == "" {
+				return fmt.Errorf("profile '%s': credentials[%d] is missing 'host' path", name, i)
+			}
+			if cr.Container == "" {
+				return fmt.Errorf("profile '%s': credentials[%d] is missing 'container' path", name, i)
+			}
+		}
+		if cr.Mode != "" {
+			if _, err := strconv.ParseUint(cr.Mode, 8, 32); err != nil {
+				return fmt.Errorf("profile '%s': credentials[%d] has invalid 'mode' %q (must be an octal file mode, e.g. \"0600\"): %w", name, i, cr.Mode, err)
+			}
+		}
+	}
+
+	// Validate port entries: name required and unique, container port in
+	// range, optional host pin in range, listen a bare address if set.
+	seenPortNames := map[string]bool{}
+	var portEntries []PortEntry
+	if p.Ports != nil {
+		if p.Ports.Pool < 0 || p.Ports.Pool > 10 {
+			return fmt.Errorf("profile '%s': [ports] pool must be 0-10, got %d", name, p.Ports.Pool)
+		}
+		portEntries = p.Ports.Map
+	}
+	for i, pe := range portEntries {
+		if pe.Name == "" {
+			return fmt.Errorf("profile '%s': ports[%d] is missing 'name'", name, i)
+		}
+		if seenPortNames[pe.Name] {
+			return fmt.Errorf("profile '%s': ports[%d] duplicates name %q", name, i, pe.Name)
+		}
+		seenPortNames[pe.Name] = true
+		if pe.Container < 1 || pe.Container > 65535 {
+			return fmt.Errorf("profile '%s': ports[%d] (%s) 'container' must be a TCP port (1-65535), got %d", name, i, pe.Name, pe.Container)
+		}
+		if pe.Host != 0 && (pe.Host < 1 || pe.Host > 65535) {
+			return fmt.Errorf("profile '%s': ports[%d] (%s) 'host' must be a TCP port (1-65535) or omitted for auto-allocation, got %d", name, i, pe.Name, pe.Host)
+		}
+		if pe.Listen != "" && net.ParseIP(pe.Listen) == nil {
+			return fmt.Errorf("profile '%s': ports[%d] (%s) 'listen' must be an IP address (e.g. \"127.0.0.1\"), got %q", name, i, pe.Name, pe.Listen)
+		}
+	}
+
 	// Validate network mode if set
 	if p.Network != nil && p.Network.Mode != "" {
 		switch p.Network.Mode {
@@ -1410,6 +1692,13 @@ func (p *ProfileConfig) Validate(name string) error {
 			// valid
 		default:
 			return fmt.Errorf("profile '%s': invalid network mode %q (must be open, restricted, or allowlist)", name, p.Network.Mode)
+		}
+	}
+
+	// Validate [[network.hosts]] entries if set
+	if p.Network != nil && len(p.Network.Hosts) > 0 {
+		if err := ValidateNetworkHosts(p.Network.Hosts); err != nil {
+			return fmt.Errorf("profile '%s': %w", name, err)
 		}
 	}
 

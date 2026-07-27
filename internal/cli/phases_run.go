@@ -37,10 +37,14 @@ type runState struct {
 	// configure-container)
 	mgr                container.ContainerManager
 	wasRestarted       bool
-	useShift           bool                  // resolved by the launch phase's UID-mapping pre-start hook
-	containerWorkspace string                // in-container workspace path
-	mountConfig        *session.MountConfig  // trust-gated
-	socketConfig       *session.SocketConfig // trust-gated
+	useShift           bool                       // resolved by the launch phase's UID-mapping pre-start hook
+	containerWorkspace string                     // in-container workspace path
+	gitWorktree        *session.GitWorktreeLayout // external git dirs for a worktree checkout (#533), nil otherwise
+	mountConfig        *session.MountConfig       // trust-gated
+	socketConfig       *session.SocketConfig      // trust-gated
+	portConfig         *session.PortConfig        // trust-gated [[ports]] to publish (#558)
+	slot               int                        // resolved slot number (for port allocation)
+	resolvedPorts      []session.PublishedPort    // preflighted port plan (see session.ResolvePorts)
 
 	// After apply-network
 	socketEnv map[string]string
@@ -89,6 +93,7 @@ func (a *App) validateEnvRunPhase(s *runState) session.Phase {
 				}
 			}
 			s.containerName = session.ContainerName(s.absWorkspace, slotNum)
+			s.slot = slotNum
 
 			img := ResolveImageName(a.cfg)
 			if err := AutoBuildIfNeeded(a.cfg, img); err != nil {
@@ -141,7 +146,32 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 			}
 			// One combined trust gate over mounts + sockets, so the per-source
 			// fingerprint matches what `coi trust` recorded.
-			s.mountConfig, s.socketConfig = a.gateRunForwarding(mc, sc, s.absWorkspace, s.wasRestarted)
+			pc := ParsePortConfig(a.cfg)
+			s.mountConfig, s.socketConfig, s.portConfig = a.gateRunForwarding(mc, sc, pc, s.absWorkspace, s.wasRestarted)
+
+			// A reused persistent container still carries the previous
+			// session's port devices; strip them while it is STOPPED so they
+			// neither fail the start (a stale device whose old host port is
+			// now taken aborts the whole container start) nor linger for
+			// entries that were removed or untrusted since. The current plan
+			// is re-published after start.
+			// (Only when stopped: a RUNNING container belongs to a concurrent
+			// session — launchOrReuseContainer refuses it below — and its live
+			// port forwards must not be yanked here.)
+			if s.wasRestarted {
+				if running, _ := mgr.Running(); !running {
+					logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
+					session.RemoveStalePortDevices(mgr, logFn)
+				}
+			}
+
+			// Preflight the port plan BEFORE launching: pinned host ports
+			// already in use abort here; auto/pool ports get their final
+			// numbers (see session.ResolvePorts).
+			s.resolvedPorts, err = session.ResolvePorts(s.portConfig, s.absWorkspace, s.slot)
+			if err != nil {
+				return nil, fmt.Errorf("port preflight failed: %w", err)
+			}
 
 			// Pre-start hook: runs AFTER init but BEFORE first start (fresh
 			// launches only; reused persistent containers keep their creation-time
@@ -172,8 +202,34 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 						logFn(fmt.Sprintf("Warning: networkd IPv4-only config not applied: %v", err))
 					}
 				}
-				s.containerWorkspace = a.resolveContainerWorkspacePath(s.absWorkspace)
-				return a.applyWorkspaceMounts(mgr, s.containerName, s.absWorkspace, &s.containerWorkspace, s.mountConfig, s.useShift, false)
+				// Detect a git worktree checkout (.git is a file → external git dirs).
+				// A valid layout forces preserve-path so git's pointers resolve, and its
+				// internals are mounted + protected in applyWorkspaceMounts (#533).
+				layout, wtErr := session.ResolveGitWorktree(s.absWorkspace)
+				if wtErr != nil {
+					logFn(fmt.Sprintf("Warning: git worktree not mounted (%v); git commands may fail in the container", wtErr))
+				}
+				s.gitWorktree = layout
+				if layout != nil && session.WorkspaceUnderSystemDir(s.absWorkspace) {
+					return fmt.Errorf("git worktree workspace %q is under a system directory; cannot preserve its host path to mount git internals safely", s.absWorkspace)
+				}
+				s.containerWorkspace = a.resolveContainerWorkspacePath(s.absWorkspace, layout != nil)
+				return a.applyWorkspaceMounts(mgr, s.containerName, s.absWorkspace, &s.containerWorkspace, s.mountConfig, s.useShift, false, layout)
+			}
+
+			// preRestart reconciles a REUSED persistent container's security devices
+			// against the current workspace before it is restarted (issue #610). The
+			// creation-time protect-*/mask-*/gitc-* devices keep their original host
+			// sources; a source removed while the container was stopped would make
+			// Incus reject the container at start-validation. Read the existing
+			// workspace mount, re-resolve the worktree layout, strip those devices,
+			// and re-run the SAME security setup fresh launch uses (applySecurityMounts).
+			preRestart := func() error {
+				s.containerWorkspace = mgr.GetWorkspacePath()
+				layout, _ := session.ResolveGitWorktree(s.absWorkspace)
+				s.gitWorktree = layout
+				session.StripSecurityDevices(mgr, logFn)
+				return a.applySecurityMounts(mgr, s.absWorkspace, s.containerWorkspace, s.containerName, s.useShift, layout)
 			}
 
 			s.mgr = mgr
@@ -197,7 +253,7 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 				}
 			}
 
-			if err := launchOrReuseContainer(mgr, s.img, a.cfg.Container.StoragePool, s.containerName, containerExists, a.persistent, preStart); err != nil {
+			if err := launchOrReuseContainer(mgr, s.img, a.cfg.Container.StoragePool, s.containerName, containerExists, a.persistent, preStart, preRestart); err != nil {
 				// No teardown on a failed launch: launchOrReuseContainer already
 				// removed the half-created container when it was safe to (never a
 				// running one — a concurrent invocation may own it), and the
@@ -230,7 +286,7 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 func (a *App) configureContainerRunPhase(s *runState) session.Phase {
 	return session.PhaseFunc{
 		PhaseName: "configure-container",
-		RunFn: func(_ context.Context) (session.Teardown, error) {
+		RunFn: func(ctx context.Context) (session.Teardown, error) {
 			if !s.wasRestarted {
 				limitsConfig := &a.cfg.Limits
 				if hasAnyLimits(limitsConfig) {
@@ -264,13 +320,16 @@ func (a *App) configureContainerRunPhase(s *runState) session.Phase {
 				}
 			}
 
-			fmt.Fprintf(os.Stderr, "Waiting for container to be ready...\n")
-			if err := waitForContainer(s.mgr, 30); err != nil {
-				return nil, err
+			logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
+
+			// ctx is the pipeline's signal-cancelled context (run.go's
+			// NotifyContext), so Ctrl+C aborts the wait instead of polling
+			// out the window against a container teardown already deleted.
+			if err := session.WaitForReady(ctx, s.mgr, a.cfg.Container.ReadyTimeoutSeconds(), logFn); err != nil {
+				return nil, session.AnnotateReadyTimeout(err, &a.cfg.Limits)
 			}
 
 			if !s.wasRestarted {
-				logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
 				if err := session.ConfigureDockerDaemon(s.mgr, logFn); err != nil {
 					fmt.Fprintf(os.Stderr, "Warning: failed to configure Docker daemon: %v\n", err)
 				}
@@ -287,7 +346,9 @@ func (a *App) configureContainerRunPhase(s *runState) session.Phase {
 			// reused persistent container has work left here: resolve its existing
 			// workspace mount path from the container config.
 			if s.wasRestarted {
-				if err := a.applyWorkspaceMounts(s.mgr, s.containerName, s.absWorkspace, &s.containerWorkspace, s.mountConfig, !a.cfg.Incus.DisableShift, true); err != nil {
+				// Reuse: devices (incl. any worktree mounts) persist from creation, so
+				// applyWorkspaceMounts returns early without remounting; layout is nil.
+				if err := a.applyWorkspaceMounts(s.mgr, s.containerName, s.absWorkspace, &s.containerWorkspace, s.mountConfig, !a.cfg.Incus.DisableShift, true, nil); err != nil {
 					return nil, err
 				}
 			}
@@ -309,6 +370,18 @@ func (a *App) applyNetworkRunPhase(s *runState) session.Phase {
 		PhaseName: "apply-network",
 		RunFn: func(ctx context.Context) (session.Teardown, error) {
 			s.socketEnv = a.applyForwardSockets(s.mgr, s.socketConfig)
+
+			// Publish [ports] on the host (localhost:<port> -> container)
+			// and expose the mapping to the command env (COI_PORTS /
+			// COI_PORT_<NAME>).
+			logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
+			_, portsEnv := session.PublishResolvedPorts(s.mgr, s.resolvedPorts, logFn)
+			for k, v := range portsEnv {
+				if s.socketEnv == nil {
+					s.socketEnv = map[string]string{}
+				}
+				s.socketEnv[k] = v
+			}
 
 			nm, err := a.applyNetworkIsolation(ctx, s.containerName)
 			if err != nil {

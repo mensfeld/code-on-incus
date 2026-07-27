@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"os/user"
@@ -126,9 +127,43 @@ func (m *Manager) AddProxyDevice(name, connect, listen string, uid, gid int) err
 	return IncusExec(args...)
 }
 
+// AddHostPortDevice publishes a container TCP port on the host via a proxy
+// device: it listens on listenAddr:hostPort in the HOST namespace and
+// connects to 127.0.0.1:containerPort inside the container (bind=host), so
+// even dev servers bound to container-localhost are reachable. NAT mode is
+// deliberately not used — the userspace forkproxy keeps COI's nft isolation
+// rules untouched (#558).
+func (m *Manager) AddHostPortDevice(name, listenAddr string, hostPort, containerPort int) error {
+	// net.JoinHostPort brackets IPv6 addresses ([::1]:8080) — Incus's proxy
+	// address parser requires that form; a bare "tcp:::1:8080" is rejected.
+	args := []string{
+		"config", "device", "add", m.ContainerName, name, "proxy",
+		"listen=tcp:" + net.JoinHostPort(listenAddr, strconv.Itoa(hostPort)),
+		fmt.Sprintf("connect=tcp:127.0.0.1:%d", containerPort),
+		"bind=host",
+	}
+	return IncusExec(args...)
+}
+
 // RemoveDevice removes a device from the container (silently ignores if not found)
 func (m *Manager) RemoveDevice(name string) error {
 	return IncusExecQuiet("config", "device", "remove", m.ContainerName, name)
+}
+
+// ListDevices returns the names of the container's config devices
+// (`incus config device list`), one per line. Works on stopped containers.
+func (m *Manager) ListDevices() ([]string, error) {
+	out, err := IncusOutput("config", "device", "list", m.ContainerName)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, line := range strings.Split(out, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			names = append(names, line)
+		}
+	}
+	return names, nil
 }
 
 // SetTmpfsSize configures the tmpfs size for /tmp in the container
@@ -333,6 +368,18 @@ func (m *Manager) PushFile(source, destination string) error {
 
 // PullDirectory pulls a directory from the container recursively
 func (m *Manager) PullDirectory(containerPath, localPath string) error {
+	// Fail fast, before anything is transferred. This function used to clear
+	// the way for the final rename with os.RemoveAll(localPath),
+	// which recursively deleted whole host trees when a caller passed
+	// an existing directory such as "../" as the destination.
+	// Refusing an existing destination keeps every deletion
+	// explicit and owned by the caller.
+	if _, err := os.Lstat(localPath); err == nil {
+		return fmt.Errorf("destination %q already exists; remove it or choose another name", localPath)
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+
 	// Incus creates a subdirectory when pulling, so we pull to a temp location
 	// then move the contents to the desired location
 	tempDir, err := os.MkdirTemp("", "coi-pull-*")
@@ -386,9 +433,6 @@ func (m *Manager) PullDirectory(containerPath, localPath string) error {
 		return err
 	}
 
-	// Remove destination if it exists
-	os.RemoveAll(localPath)
-
 	// Rename (move) the pulled directory to the final location
 	// If rename fails with cross-device error, fall back to copy via a temp dir
 	if err := os.Rename(pulledDir, localPath); err != nil {
@@ -403,6 +447,102 @@ func (m *Manager) PullDirectory(containerPath, localPath string) error {
 			// Copy into a temp target, then atomically rename to the final location
 			tempTarget := filepath.Join(tempDestDir, filepath.Base(localPath))
 			if err := copyDirRecursive(pulledDir, tempTarget); err != nil {
+				return err
+			}
+			return os.Rename(tempTarget, localPath)
+		}
+		return err
+	}
+	return nil
+}
+
+// ErrRemoteIsDirectory is returned by PullFile when the remote source is a
+// directory, which requires a recursive pull. Callers can errors.Is against it
+// (rather than sniffing error text) to suggest the -r flag.
+var ErrRemoteIsDirectory = errors.New("remote path is a directory; use a recursive pull")
+
+// PullFile pulls a single file from the container to the host.
+// The destination's parent is created if missing.
+// If localPath is an existing file, it is replaced atomically.
+// If localPath is an existing directory, nothing happens and an error is returned.
+// Content is staged in a temp directory first, so a failed transfer cannot leave a truncated file behind.
+func (m *Manager) PullFile(containerPath, localPath string) error {
+	if !strings.HasPrefix(containerPath, "/") {
+		containerPath = "/" + containerPath
+	}
+
+	if fi, err := os.Lstat(localPath); err == nil && fi.IsDir() {
+		return fmt.Errorf("destination %q is an existing directory; remove it or choose another name", localPath)
+	} else if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+
+	// Create staging dir
+	tempDir, err := os.MkdirTemp("", "coi-pull-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Pull into the staging dir
+	source := m.ContainerName + containerPath
+	cmdArgs := buildIncusCommand("file", "pull", source, tempDir)
+	cmd := execIncusCommand(cmdArgs)
+	var stderr bytes.Buffer
+	cmd.Stdout = nil
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		stderrMsg := strings.TrimSpace(stderr.String())
+		// incus reports a non-recursive pull of a directory via stderr; surface it as
+		// a typed error so the CLI can suggest -r without sniffing text itself.
+		if strings.Contains(stderrMsg, "directory") || strings.Contains(stderrMsg, "recursive") {
+			return fmt.Errorf("%s: %w", stderrMsg, ErrRemoteIsDirectory)
+		}
+		if stderrMsg == "" {
+			return err
+		}
+		return fmt.Errorf("%s: %w", stderrMsg, err)
+	}
+
+	// Take whatever incus staged rather than assuming its basename: a single-file
+	// pull writes exactly one entry into the (empty) staging dir.
+	entries, err := os.ReadDir(tempDir)
+	if err != nil {
+		return err
+	}
+	if len(entries) != 1 {
+		return fmt.Errorf("expected exactly one entry in staging directory, got %d", len(entries))
+	}
+	staged := filepath.Join(tempDir, entries[0].Name())
+	fi, err := os.Lstat(staged)
+	if err != nil {
+		return fmt.Errorf("pulled file missing from staging directory: %w", err)
+	}
+	if fi.IsDir() {
+		return fmt.Errorf("refusing to pull %s: %w", containerPath, ErrRemoteIsDirectory)
+	}
+	// Container content is untrusted so only materialize regular files on the host
+	// (drop symlinks/special files, same policy as sanitizePulledTree for trees).
+	if !fi.Mode().IsRegular() {
+		return fmt.Errorf("refusing to pull %s: not a regular file", containerPath)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
+		return err
+	}
+
+	if err := os.Rename(staged, localPath); err != nil {
+		if isCrossDeviceError(err) {
+			// Copy to a temp file on the destination filesystem, then rename
+			// so the destination is still replaced atomically.
+			tempDestDir, err := os.MkdirTemp(filepath.Dir(localPath), "coi-pull-*")
+			if err != nil {
+				return err
+			}
+			defer os.RemoveAll(tempDestDir)
+
+			tempTarget := filepath.Join(tempDestDir, filepath.Base(localPath))
+			if err := copyFile(staged, tempTarget); err != nil {
 				return err
 			}
 			return os.Rename(tempTarget, localPath)
@@ -670,26 +810,63 @@ func UserInGroupFile(username, groupName string) bool {
 	return false
 }
 
-// Helper function to create a file with content
+// Helper function to create a file with content. The pushed file inherits the
+// host temp file's owner and mode (0600); use CreateFileWithOwner for files
+// that must land with explicit attributes.
 func (m *Manager) CreateFile(containerPath, content string) error {
-	// Create a unique temp file to avoid collisions with concurrent sessions
-	tmpFile, err := os.CreateTemp("", fmt.Sprintf("coi-%s-*", filepath.Base(containerPath)))
+	tmpPath, err := writeTempFile(containerPath, content)
 	if err != nil {
 		return err
 	}
-	tmpPath := tmpFile.Name()
 	defer os.Remove(tmpPath)
+
+	return m.PushFile(tmpPath, containerPath)
+}
+
+// CreateFileWithOwner creates a file in the container with explicit ownership
+// and mode, applied atomically by the push itself rather than by a follow-up
+// chown/chmod. Use for files that must not inherit the host temp file's owner
+// or 0600 mode, e.g. root-owned policy files the unprivileged code user only
+// reads.
+func (m *Manager) CreateFileWithOwner(containerPath, content string, uid, gid int, mode string) error {
+	tmpPath, err := writeTempFile(containerPath, content)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmpPath)
+
+	return m.PushFileWithOwner(tmpPath, containerPath, uid, gid, mode)
+}
+
+// PushFileWithOwner pushes a file into the container with explicit ownership
+// and mode (see IncusFilePushWithOwner).
+func (m *Manager) PushFileWithOwner(source, destination string, uid, gid int, mode string) error {
+	if destination[0] != '/' {
+		destination = "/" + destination
+	}
+	return IncusFilePushWithOwner(source, m.ContainerName+destination, uid, gid, mode)
+}
+
+// writeTempFile writes content to a unique host temp file (named after the
+// container path to avoid collisions with concurrent sessions) and returns
+// its path. The caller removes it.
+func writeTempFile(containerPath, content string) (string, error) {
+	tmpFile, err := os.CreateTemp("", fmt.Sprintf("coi-%s-*", filepath.Base(containerPath)))
+	if err != nil {
+		return "", err
+	}
+	tmpPath := tmpFile.Name()
 
 	if _, err := tmpFile.WriteString(content); err != nil {
 		tmpFile.Close()
-		return err
+		os.Remove(tmpPath)
+		return "", err
 	}
 	if err := tmpFile.Close(); err != nil {
-		return err
+		os.Remove(tmpPath)
+		return "", err
 	}
-
-	// Push to container
-	return m.PushFile(tmpPath, containerPath)
+	return tmpPath, nil
 }
 
 // ExecHostCommand executes a command on the host (not in container)

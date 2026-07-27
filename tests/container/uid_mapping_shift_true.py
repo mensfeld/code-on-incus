@@ -28,11 +28,10 @@ from support.helpers import (
 )
 
 
-@pytest.mark.xfail(
+@pytest.mark.skipif(
     os.getuid() != 1000,
     reason="shift=true fails when host UID != container code user UID (1000). "
     "This is a known Incus limitation — raw.idmap is the correct workaround.",
-    strict=True,
 )
 def test_workspace_write_access_shift_true(coi_binary, cleanup_containers, workspace_dir):
     """

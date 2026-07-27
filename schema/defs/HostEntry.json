@@ -1,0 +1,18 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "One IPv4 address mapped to one or more hostnames for the container's /etc/hosts",
+  "required": ["ip", "hostnames"],
+  "properties": {
+    "ip": {
+      "type": "string",
+      "description": "IPv4 address the hostnames resolve to (e.g. \"10.0.0.5\")"
+    },
+    "hostnames": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1,
+      "description": "One or more hostnames that resolve to this address inside the container"
+    }
+  }
+}

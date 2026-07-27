@@ -25,9 +25,10 @@ type BuildOptions struct {
 	Description string
 	BaseImage   string
 	Force       bool
-	BuildScript string // For custom images
-	Compression string // Compression algorithm (e.g., "none", "gzip", "xz")
-	StoragePool string // Storage pool for the build container ("" = Incus default)
+	BuildScript string   // For custom images
+	Compression string   // Compression algorithm (e.g., "none", "gzip", "xz")
+	StoragePool string   // Storage pool for the build container ("" = Incus default)
+	Agents      []string // AI agents to install (empty = all supported); passed as COI_AGENTS (#454)
 	Logger      func(string)
 }
 
@@ -513,7 +514,7 @@ func (b *Builder) runBuildScriptResolved(resolvedScript string) error {
 	}
 
 	b.opts.Logger("Executing build script...")
-	execOpts := container.ExecCommandOptions{Capture: false}
+	execOpts := b.buildScriptExecOpts()
 	if _, err := b.mgr.ExecCommand("/tmp/build.sh", execOpts); err != nil {
 		return fmt.Errorf("build script failed: %w", err)
 	}
@@ -672,4 +673,21 @@ func getImageFingerprint(alias string) (string, error) {
 	}
 
 	return "", fmt.Errorf("image not found: %s", alias)
+}
+
+// agentEnv returns the environment passed to build.sh to select which AI agents to
+// install (#454). An empty selection returns nil, so the script keeps its default of
+// installing every supported agent (COI_AGENTS unset).
+func agentEnv(agents []string) map[string]string {
+	if len(agents) == 0 {
+		return nil
+	}
+	return map[string]string{"COI_AGENTS": strings.Join(agents, ",")}
+}
+
+// buildScriptExecOpts builds the exec options used to run build.sh in the build
+// container. It threads the agent selection through COI_AGENTS (#454); kept as a
+// method so the wiring is unit-testable without launching a container.
+func (b *Builder) buildScriptExecOpts() container.ExecCommandOptions {
+	return container.ExecCommandOptions{Capture: false, Env: agentEnv(b.opts.Agents)}
 }

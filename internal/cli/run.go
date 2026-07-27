@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 
@@ -109,6 +110,13 @@ func (a *App) runCommand(cmd *cobra.Command, args []string) error {
 	if err := a.overlayWorkspaceConfig(absWorkspace); err != nil {
 		return err
 	}
+	// No --profile given: fall back to [defaults] profile (#607). coi run has no
+	// alias/resume profile source, so this is the only fallback site it needs.
+	if applied, err := a.applyDefaultProfileFallback(cmd); err != nil {
+		return err
+	} else if applied {
+		a.persistent = config.BoolVal(a.cfg.Container.Persistent)
+	}
 	if a.cfg.Limits.Runtime.MaxDuration != "" {
 		if _, err := limits.ParseDuration(a.cfg.Limits.Runtime.MaxDuration); err != nil {
 			return fmt.Errorf("invalid max_duration: %w", err)
@@ -153,7 +161,8 @@ func (a *App) runCommand(cmd *cobra.Command, args []string) error {
 		}
 	}()
 
-	return pipeline.Run(ctx,
+	return pipeline.Run(
+		ctx,
 		a.validateEnvRunPhase(s),
 		a.launchContainerRunPhase(s),
 		a.configureContainerRunPhase(s),
@@ -165,7 +174,7 @@ func (a *App) runCommand(cmd *cobra.Command, args []string) error {
 
 // launchOrReuseContainer restarts an existing persistent container, or
 // recreates / creates a fresh one on the given storage pool.
-func launchOrReuseContainer(mgr container.ContainerManager, img, pool, containerName string, containerExists, persistent bool, preStart func() error) error {
+func launchOrReuseContainer(mgr container.ContainerManager, img, pool, containerName string, containerExists, persistent bool, preStart, preRestart func() error) error {
 	if containerExists && persistent {
 		// Fail fast on an already-running container (another session may own
 		// it). Master's plain Start() errored here; StartWithIsolationFallback's
@@ -174,6 +183,16 @@ func launchOrReuseContainer(mgr container.ContainerManager, img, pool, container
 		// under the second.
 		if running, _ := mgr.Running(); running {
 			return fmt.Errorf("container %s is already running — another session may be using it; pick a different --slot or stop it first", containerName)
+		}
+		// Reconcile start-time-only state on the STOPPED container before starting:
+		// the workspace-sourced security devices are stripped and re-established
+		// against the current workspace, so a source removed while stopped can't
+		// wedge the start with "Missing source path" (issue #610). Mirrors preStart
+		// on the fresh path; must run before StartWithIsolationFallback.
+		if preRestart != nil {
+			if err := preRestart(); err != nil {
+				return fmt.Errorf("failed to reconcile container before restart: %w", err)
+			}
 		}
 		fmt.Fprintf(os.Stderr, "Restarting existing persistent container...\n")
 		// Start with the isolation fallback: the container's disk devices (set at
@@ -210,28 +229,6 @@ func launchOrReuseContainer(mgr container.ContainerManager, img, pool, container
 		return fmt.Errorf("failed to launch container: %w", err)
 	}
 	return nil
-}
-
-// waitForContainer waits for container to be ready
-func waitForContainer(mgr container.ContainerManager, maxRetries int) error {
-	for i := 0; i < maxRetries; i++ {
-		running, err := mgr.Running()
-		if err != nil {
-			return err
-		}
-		if running {
-			// Additional check: try to execute a simple command
-			_, err := mgr.ExecCommand("echo ready", container.ExecCommandOptions{Capture: true})
-			if err == nil {
-				return nil
-			}
-		}
-		// Wait before retry
-		if i < maxRetries-1 {
-			fmt.Fprintf(os.Stderr, ".")
-		}
-	}
-	return fmt.Errorf("container failed to become ready")
 }
 
 // ensureBridgeTrustedZone ensures the Incus bridge has iptables FORWARD ACCEPT
@@ -275,7 +272,21 @@ func remapContainerUserIfNeeded(mgr container.ContainerManager, wasRestarted boo
 		container.CodeUID, container.CodeUID, container.CodeUser,
 	)
 	if _, err := mgr.ExecCommand(remapCmd, container.ExecCommandOptions{Capture: true}); err != nil {
-		return fmt.Errorf("failed to remap user %s to UID %d: %w", container.CodeUser, container.CodeUID, err)
+		// usermod -u, even without -m, walks the home directory chowning
+		// files it finds owned by the old UID — that walk hits any
+		// read-only mount already living under /home/<code> (e.g. a
+		// protected-path or user [[mounts]] entry, disk devices attach
+		// pre-start per #534) and usermod exits non-zero despite the
+		// actual UID/GID change having applied. Don't trust the exit
+		// code alone: probe whether the account really did move to the
+		// target UID before treating this as fatal.
+		actualUID, probeErr := session.ResolveCodeUID(mgr, container.CodeUser)
+		if probeErr != nil || actualUID != container.CodeUID {
+			return fmt.Errorf("failed to remap user %s to UID %d: %w", container.CodeUser, container.CodeUID, err)
+		}
+		fmt.Fprintf(os.Stderr,
+			"Warning: UID/GID remap for %s succeeded but the home-directory ownership walk hit a read-only mount: %v\n",
+			container.CodeUser, err)
 	}
 	// The home-ownership sweep is best-effort, separately from the remap
 	// itself: disk devices attach pre-start now (#534), so a user-configured
@@ -298,25 +309,48 @@ func remapContainerUserIfNeeded(mgr container.ContainerManager, wasRestarted boo
 // socketEnv maps env var names to container-side socket paths for every
 // forwarded socket (SSH_AUTH_SOCK plus any configured [[sockets]] entries).
 func (a *App) appendEnvArgs(incusArgs []string, tz string, socketEnv map[string]string) ([]string, error) {
-	// Timezone (lowest priority — user can override with config env)
+	// Assemble the environment in a map so precedence is deterministic: each
+	// source in turn overwrites the previous one (last-wins), and every key is
+	// emitted as a single --env flag below. This mirrors how `coi shell` builds
+	// its env (buildContainerEnv) and, crucially, does NOT depend on how incus
+	// resolves repeated --env flags — no key is ever passed twice.
+	//
+	// Order = increasing priority:
+	//   1. baseline identity (HOME/USER/LOGNAME)
+	//   2. timezone
+	//   3. forwarded sockets
+	//   4. [defaults].environment (+ profile environment)
+	//   5. forward_env (host values)
+	//   6. env_commands (freshly minted per session)
+	env := map[string]string{}
+
+	// Baseline identity. incus exec does not set HOME/USER for a --user exec, so
+	// without this a `coi run` command runs with no HOME — anything resolving ~
+	// or reading a --global config breaks (`git config --global` ->
+	// "fatal: $HOME not set", #623). `coi run` execs as the code user, whose home
+	// is /home/<code_user>. A user can still override any of these via
+	// [defaults].environment (they are applied later, below).
+	env["HOME"] = "/home/" + container.CodeUser
+	env["USER"] = container.CodeUser
+	env["LOGNAME"] = container.CodeUser
+
 	if tz != "" {
-		incusArgs = append(incusArgs, "--env", fmt.Sprintf("TZ=%s", tz))
+		env["TZ"] = tz
 	}
 
-	// Forwarded socket env vars
-	for env, path := range socketEnv {
-		incusArgs = append(incusArgs, "--env", fmt.Sprintf("%s=%s", env, path))
+	for name, path := range socketEnv {
+		env[name] = path
 	}
 
 	// Static environment from config (defaults.environment + profile environment)
 	for k, v := range a.cfg.Defaults.Environment {
-		incusArgs = append(incusArgs, "--env", fmt.Sprintf("%s=%s", k, v))
+		env[k] = v
 	}
 
 	// Resolve forward_env from config, look up host values
 	for _, name := range a.cfg.Defaults.ForwardEnv {
 		if val, ok := os.LookupEnv(name); ok {
-			incusArgs = append(incusArgs, "--env", fmt.Sprintf("%s=%s", name, val))
+			env[name] = val
 		} else {
 			fmt.Fprintf(os.Stderr, "Warning: forward_env variable %q is not set on host, skipping\n", name)
 		}
@@ -329,7 +363,17 @@ func (a *App) appendEnvArgs(incusArgs []string, tz string, socketEnv map[string]
 		return nil, err
 	}
 	for k, v := range envCommandValues {
-		incusArgs = append(incusArgs, "--env", fmt.Sprintf("%s=%s", k, v))
+		env[k] = v
+	}
+
+	// Emit each var once, in a stable (sorted) order for deterministic args.
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		incusArgs = append(incusArgs, "--env", fmt.Sprintf("%s=%s", k, env[k]))
 	}
 
 	return incusArgs, nil
@@ -447,27 +491,23 @@ func (a *App) overlayWorkspaceConfig(absWorkspace string) error {
 // resolveContainerWorkspacePath returns the path inside the container where the
 // workspace should be mounted. When preserve_workspace_path is set it mirrors
 // the host path, falling back to /workspace if the path conflicts with system dirs.
-func (a *App) resolveContainerWorkspacePath(absWorkspace string) string {
-	if !a.cfg.Paths.PreserveWorkspacePath {
+func (a *App) resolveContainerWorkspacePath(absWorkspace string, forcePreserve bool) string {
+	if !a.cfg.Paths.PreserveWorkspacePath && !forcePreserve {
 		return "/workspace"
 	}
-	cleanPath := filepath.Clean(absWorkspace)
-	disallowedPrefixes := []string{
-		"/etc", "/bin", "/sbin", "/usr", "/root", "/boot", "/sys", "/proc", "/dev", "/lib", "/lib64",
+	if session.WorkspaceUnderSystemDir(absWorkspace) {
+		// A worktree caller pre-checks this and hard-errors (it can't work at
+		// /workspace); here it's the plain preserve_workspace_path fallback.
+		fmt.Fprintf(os.Stderr, "Warning: preserve_workspace_path requested for %q conflicts with system directories; using /workspace instead\n", absWorkspace)
+		return "/workspace"
 	}
-	for _, prefix := range disallowedPrefixes {
-		if cleanPath == prefix || strings.HasPrefix(cleanPath, prefix+"/") {
-			fmt.Fprintf(os.Stderr, "Warning: preserve_workspace_path requested for %q conflicts with system directories; using /workspace instead\n", absWorkspace)
-			return "/workspace"
-		}
-	}
-	return cleanPath
+	return filepath.Clean(absWorkspace)
 }
 
 // applyWorkspaceMounts mounts the workspace and all configured additional directories
 // into the container, then applies security (read-only) mounts. For restarted persistent
 // containers it retrieves the existing workspace path from the container config instead.
-func (a *App) applyWorkspaceMounts(mgr container.ContainerManager, containerName, absWorkspace string, containerWorkspacePath *string, mountConfig *session.MountConfig, useShift, wasRestarted bool) error {
+func (a *App) applyWorkspaceMounts(mgr container.ContainerManager, containerName, absWorkspace string, containerWorkspacePath *string, mountConfig *session.MountConfig, useShift, wasRestarted bool, worktree *session.GitWorktreeLayout) error {
 	if wasRestarted {
 		fmt.Fprintf(os.Stderr, "Reusing existing workspace mount...\n")
 		*containerWorkspacePath = mgr.GetWorkspacePath()
@@ -481,6 +521,16 @@ func (a *App) applyWorkspaceMounts(mgr container.ContainerManager, containerName
 	}
 	if err := mgr.MountDisk("workspace", absWorkspace, *containerWorkspacePath, useShift, false); err != nil {
 		return fmt.Errorf("failed to mount workspace: %w", err)
+	}
+
+	// Mount the worktree's external git common dir read-write at its host path so
+	// git resolves; its RCE sinks are re-covered read-only in applySecurityMounts
+	// (issue #533). Must precede the security mounts so the overlays layer on top.
+	if worktree != nil {
+		if err := session.MountGitWorktreeDirs(mgr, worktree, useShift); err != nil {
+			return fmt.Errorf("failed to mount git worktree dirs: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "Mounted git worktree common dir (read-write): %s\n", worktree.CommonDir)
 	}
 
 	if err := session.ValidateMounts(mountConfig); err != nil {
@@ -497,7 +547,7 @@ func (a *App) applyWorkspaceMounts(mgr container.ContainerManager, containerName
 	// Called unconditionally: applySecurityMounts internally skips the read-only
 	// protected_paths when disable_protection is set (GetEffectiveProtectedPaths
 	// returns nil), but secret-path masking is a separate opt-in that still runs.
-	if err := a.applySecurityMounts(mgr, absWorkspace, *containerWorkspacePath, containerName, useShift); err != nil {
+	if err := a.applySecurityMounts(mgr, absWorkspace, *containerWorkspacePath, containerName, useShift, worktree); err != nil {
 		return err
 	}
 	return nil
@@ -527,8 +577,14 @@ func addMount(mgr container.ContainerManager, mount session.MountEntry, useShift
 }
 
 // applySecurityMounts sets up read-only protection mounts and optional host immutable flags.
-func (a *App) applySecurityMounts(mgr container.ContainerManager, absWorkspace, containerWorkspacePath, containerName string, useShift bool) error {
+func (a *App) applySecurityMounts(mgr container.ContainerManager, absWorkspace, containerWorkspacePath, containerName string, useShift bool, worktree *session.GitWorktreeLayout) error {
 	protectedPaths := filterWritableGitHooks(a.cfg.Security.GetEffectiveProtectedPaths(), a.cfg)
+	if worktree != nil {
+		// The workspace .git is a file; its .git/* defaults can't be protected here
+		// (they'd each warn "gitdir indirection") — SetupCommonDirProtection covers
+		// the real internals below. Keep the non-.git protections (.vscode, ...).
+		protectedPaths = session.StripGitProtectedPaths(protectedPaths)
+	}
 	// SetupSecurityMounts expands the dynamic per-worktree git configs internally
 	// (issue #545 — the single chokepoint both `coi run` and `coi shell` share) and
 	// returns the effective list to drive logging + the immutable pass over the same
@@ -548,6 +604,21 @@ func (a *App) applySecurityMounts(mgr container.ContainerManager, absWorkspace, 
 		immutablePaths := session.ApplyImmutable(absWorkspace, effectivePaths, containerName, logFn)
 		if len(immutablePaths) > 0 {
 			fmt.Fprintf(os.Stderr, "Host-side immutable protection applied: %s\n", strings.Join(immutablePaths, ", "))
+		}
+	}
+
+	// Extend read-only protection to the external git common dir for a worktree
+	// checkout (#533): the same #474 hook/config lockdown applied to the real
+	// internals the workspace-relative pass above cannot reach. Mount-only (the
+	// host-immutable belt is deferred; the read-only mount is the primary control).
+	if worktree != nil {
+		writableHooks := config.BoolVal(a.cfg.Git.WritableHooks)
+		cProtected, cErr := session.SetupCommonDirProtection(mgr, worktree.CommonDir, useShift, writableHooks, &a.cfg.Security)
+		if cErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: some git common-dir protections not applied: %v\n", cErr)
+		}
+		if len(cProtected) > 0 {
+			fmt.Fprintf(os.Stderr, "Protected git common-dir paths (read-only): %s\n", strings.Join(cProtected, ", "))
 		}
 	}
 
@@ -572,8 +643,8 @@ func (a *App) applySecurityMounts(mgr container.ContainerManager, absWorkspace, 
 // every launch, so the gate always applies to them; a reused persistent
 // container keeps its creation-time mount devices, so for those we only warn
 // that trust changes won't take effect until the container is recreated.
-func (a *App) gateRunForwarding(mc *session.MountConfig, sc *session.SocketConfig, workspace string, wasRestarted bool) (*session.MountConfig, *session.SocketConfig) {
-	keptMC, droppedM, keptSC, droppedS := session.FilterTrusted(mc, sc, workspace)
+func (a *App) gateRunForwarding(mc *session.MountConfig, sc *session.SocketConfig, pc *session.PortConfig, workspace string, wasRestarted bool) (*session.MountConfig, *session.SocketConfig, *session.PortConfig) {
+	keptMC, droppedM, keptSC, droppedS, _, _, keptPC, droppedP := session.FilterTrusted(mc, sc, nil, pc, workspace)
 	if wasRestarted {
 		if len(droppedM) > 0 {
 			fmt.Fprintf(os.Stderr,
@@ -585,7 +656,8 @@ func (a *App) gateRunForwarding(mc *session.MountConfig, sc *session.SocketConfi
 		warnDroppedMounts(droppedM)
 	}
 	warnDroppedSockets(droppedS)
-	return keptMC, keptSC
+	warnDroppedPorts(droppedP)
+	return keptMC, keptSC, keptPC
 }
 
 // applyForwardSockets forwards the host SSH agent (when ssh.forward_agent is
@@ -602,6 +674,15 @@ func (a *App) applyForwardSockets(mgr container.ContainerManager, socketConfig *
 func (a *App) applyNetworkIsolation(ctx context.Context, containerName string) (*network.Manager, error) {
 	networkConfig := a.cfg.Network
 	if networkConfig.Mode == "" || networkConfig.Mode == config.NetworkModeOpen {
+		// Open mode installs no isolation rules, but static [[network.hosts]]
+		// entries still apply — resolution only, since nothing is blocked. (The
+		// coi shell path calls SetupForContainer for every mode, so it already
+		// covers open; coi run short-circuits here, so apply them explicitly.)
+		if len(networkConfig.Hosts) > 0 {
+			if err := network.ApplyUserHosts(containerName, networkConfig.Mode, config.BoolVal(networkConfig.AllowLocalNetworkAccess), networkConfig.Hosts); err != nil {
+				return nil, fmt.Errorf("failed to apply [[network.hosts]]: %w", err)
+			}
+		}
 		return nil, nil
 	}
 	if changed, bridgeName, err := network.EnsureBridgeInTrustedZone(); err != nil {

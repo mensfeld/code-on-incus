@@ -19,7 +19,7 @@ func (p *PiTool) Binary() string { return "pi" }
 
 // ConfigDirName returns the config directory for pi.
 // Pi stores config in ~/.pi/agent/ (controlled by PI_CODING_AGENT_DIR).
-func (p *PiTool) ConfigDirName() string { return ".pi/agent" }
+func (p *PiTool) ConfigDirName() string { return mustBundle("pi").ConfigDir }
 
 func (p *PiTool) SessionsDirName() string { return "sessions-pi" }
 
@@ -91,20 +91,20 @@ func (p *PiTool) SetAutoContextPath(path string) {
 
 // EssentialConfigFiles implements ToolWithConfigDirFiles.
 func (p *PiTool) EssentialConfigFiles() []string {
-	return []string{"settings.json", "models.json", "auth.json", "AGENTS.md"}
+	return mustBundle("pi").Files
 }
 
 // SandboxSettingsFileName implements ToolWithConfigDirFiles.
-func (p *PiTool) SandboxSettingsFileName() string { return "settings.json" }
+func (p *PiTool) SandboxSettingsFileName() string { return mustBundle("pi").SandboxSettingsFile }
 
 // StateConfigFileName implements ToolWithConfigDirFiles.
 // Pi has no sibling state file.
-func (p *PiTool) StateConfigFileName() string { return "" }
+func (p *PiTool) StateConfigFileName() string { return mustBundle("pi").StateFile }
 
 // AlwaysSetupConfig implements ToolWithConfigDirFiles.
 // Pi needs config dir setup even without host config dir so that
 // settings.json exists for sandbox context injection.
-func (p *PiTool) AlwaysSetupConfig() bool { return true }
+func (p *PiTool) AlwaysSetupConfig() bool { return mustBundle("pi").AlwaysSetup }
 
 // GetContainerEnv implements ToolWithContainerEnv.
 // Redirects pi's session storage directory to the workspace mount so

@@ -9,10 +9,11 @@ Tests that:
 """
 
 import subprocess
-import time
 
 from support.helpers import (
     calculate_container_name,
+    wait_for_container_started,
+    wait_for_container_stopped,
 )
 
 
@@ -43,7 +44,12 @@ def test_exec_close_alias_poweroff(coi_binary, cleanup_containers, workspace_dir
 
     assert result.returncode == 0, f"Container launch should succeed. stderr: {result.stderr}"
 
-    time.sleep(3)
+    # Wait for the guest to finish booting before issuing the shutdown. Issuing
+    # `close` while systemd is still coming up can race boot and leave the
+    # container running (a fixed `time.sleep(3)` flaked on loaded CI runners).
+    assert wait_for_container_started(coi_binary, container_name), (
+        f"Container {container_name} did not become ready to accept exec"
+    )
 
     # === Phase 2: Execute 'close' (poweroff alias, no password required) ===
 
@@ -70,21 +76,16 @@ def test_exec_close_alias_poweroff(coi_binary, cleanup_containers, workspace_dir
 
     # === Phase 3: Wait for container to stop ===
 
-    time.sleep(5)
+    # Poll (don't fixed-sleep): a graceful systemd shutdown can take far longer
+    # than a few seconds on a loaded CI runner. Budget 120s to cover the full
+    # stop window (stock systemd stop budgets run to ~90s).
+    stopped, last = wait_for_container_stopped(coi_binary, container_name, timeout=120)
 
     # === Phase 4: Verify container stopped ===
 
-    result = subprocess.run(
-        [coi_binary, "container", "running", container_name],
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-
-    # running command should return non-zero if container is not running
-    assert result.returncode != 0, (
-        "Container should be stopped after close. "
-        f"Exit code: {result.returncode}, Output: {result.stdout + result.stderr}"
+    assert stopped, (
+        "Container should be stopped after close within 120s. "
+        f"Last exit code: {last.returncode}, Output: {last.stdout + last.stderr}"
     )
 
     # === Phase 5: Cleanup ===

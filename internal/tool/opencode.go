@@ -16,7 +16,7 @@ func (c *OpencodeTool) Name() string { return "opencode" }
 func (c *OpencodeTool) Binary() string { return "opencode" }
 
 // ConfigDirName returns the XDG-standard config directory for opencode.
-func (c *OpencodeTool) ConfigDirName() string { return ".config/opencode" }
+func (c *OpencodeTool) ConfigDirName() string { return mustBundle("opencode").ConfigDir }
 
 func (c *OpencodeTool) SessionsDirName() string { return "sessions-opencode" }
 
@@ -82,19 +82,21 @@ func (c *OpencodeTool) SetAutoContextPath(path string) {
 
 // EssentialConfigFiles implements ToolWithConfigDirFiles.
 func (c *OpencodeTool) EssentialConfigFiles() []string {
-	return []string{"opencode.json", "tui.json"}
+	return mustBundle("opencode").Files
 }
 
 // SandboxSettingsFileName implements ToolWithConfigDirFiles.
-func (c *OpencodeTool) SandboxSettingsFileName() string { return "opencode.json" }
+func (c *OpencodeTool) SandboxSettingsFileName() string {
+	return mustBundle("opencode").SandboxSettingsFile
+}
 
 // StateConfigFileName implements ToolWithConfigDirFiles.
 // Opencode has no sibling state file.
-func (c *OpencodeTool) StateConfigFileName() string { return "" }
+func (c *OpencodeTool) StateConfigFileName() string { return mustBundle("opencode").StateFile }
 
 // AlwaysSetupConfig implements ToolWithConfigDirFiles.
 // Opencode needs sandbox permission bypass even without host config dir.
-func (c *OpencodeTool) AlwaysSetupConfig() bool { return true }
+func (c *OpencodeTool) AlwaysSetupConfig() bool { return mustBundle("opencode").AlwaysSetup }
 
 // GetContainerEnv implements ToolWithContainerEnv.
 // Redirects XDG data and state directories to the workspace mount so opencode's

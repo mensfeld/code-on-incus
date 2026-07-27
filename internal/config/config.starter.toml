@@ -19,8 +19,19 @@
 # storage_pool = ""              # Incus storage pool ("" = Incus default)
 # stale_base_check = "warn"      # warn | error | off — flag when the base image is outdated
 
+# [container.build]              # how `coi build` builds the base image
+# base = "ubuntu:24.04"          # base image to build from
+# compression = "none"          # image compression: none | gzip | xz ("" = Incus default)
+# agents = ["claude"]            # AI agents to install (subset of claude/opencode/pi);
+#                                #   omit to install all supported agents (the default)
+
 [defaults]
 # model = "claude-sonnet-4-5"    # default model for the AI tool
+# Profile to apply when --profile is not passed, so your setup applies without
+# retyping it. Plain `coi` uses this; `coi --profile default` still gives the
+# clean clone of this config. Trusted (global/COI_CONFIG) scope only — a project
+# config can't redirect your default. Must name an existing profile.
+# profile = "myprofile"
 # Forward host env vars into the container BY NAME (values read at session start, never stored):
 # forward_env = ["ANTHROPIC_API_KEY", "GITHUB_TOKEN"]
 # Inject fixed env vars into the container:
@@ -46,6 +57,15 @@
 # refresh_interval_minutes = 30  # re-resolve allowlist domains (allowlist mode)
 # allowlist mode only — domains/IPs the container may reach:
 # allowed_domains = ["registry.npmjs.org", "api.anthropic.com"]
+
+# Static name→address entries written into the container's /etc/hosts, made
+# reachable to match the mode (restricted punches a targeted allow for a private
+# IP; allowlist adds it to the firewall set and refuses private/metadata IPs).
+# Trusted-scope only — ignored from a project ./.coi/config.toml. Add on the fly
+# to a running container with `coi hosts add <container> <ip> <hostname...>`.
+# [[network.hosts]]
+# ip        = "10.0.0.5"
+# hostnames = ["db.internal", "cache.internal"]
 
 [network.logging]
 # enabled = true
