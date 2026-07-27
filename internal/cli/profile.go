@@ -148,9 +148,6 @@ func (a *App) profileInfoRunE(cmd *cobra.Command, args []string) error {
 	if p.Context != "" {
 		fmt.Printf("context = %q\n", p.Context)
 	}
-	if p.Model != "" {
-		fmt.Printf("model = %q\n", p.Model)
-	}
 	if len(p.ForwardEnv) > 0 {
 		fmt.Printf("forward_env = [%s]\n", formatStringSlice(p.ForwardEnv))
 	}
@@ -200,10 +197,15 @@ func (a *App) profileInfoRunE(cmd *cobra.Command, args []string) error {
 		if p.Tool.AutoContext != nil {
 			fmt.Printf("auto_context = %v\n", *p.Tool.AutoContext)
 		}
-		if p.Tool.Claude.EffortLevel != "" {
+		if p.Tool.Claude.EffortLevel != "" || p.Tool.Claude.Model != "" {
 			fmt.Println()
 			fmt.Println("[tool.claude]")
-			fmt.Printf("effort_level = %q\n", p.Tool.Claude.EffortLevel)
+			if p.Tool.Claude.EffortLevel != "" {
+				fmt.Printf("effort_level = %q\n", p.Tool.Claude.EffortLevel)
+			}
+			if p.Tool.Claude.Model != "" {
+				fmt.Printf("model = %q\n", p.Tool.Claude.Model)
+			}
 		}
 	}
 

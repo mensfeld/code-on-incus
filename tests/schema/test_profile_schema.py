@@ -71,7 +71,6 @@ def test_schema_top_level_properties(profile_schema):
     expected = {
         "inherits",
         "context",
-        "model",
         "forward_env",
         "environment",
         "container",
@@ -147,7 +146,6 @@ def test_full_profile_is_valid(validator):
     profile = {
         "inherits": "default",
         "context": "CONTEXT.md",
-        "model": "claude-opus-4-5",
         "forward_env": ["RUST_BACKTRACE", "CARGO_HOME"],
         "environment": {"RUST_BACKTRACE": "1", "EDITOR": "vim"},
         "container": {
@@ -184,7 +182,7 @@ def test_full_profile_is_valid(validator):
             "permission_mode": "bypass",
             "context_file": "~/.coi/context.md",
             "auto_context": True,
-            "claude": {"effort_level": "high"},
+            "claude": {"effort_level": "high", "model": "opus"},
         },
         "mounts": [
             {"host": "~/.cargo", "container": "/home/code/.cargo"},
@@ -257,6 +255,19 @@ def test_tool_permission_mode_interactive(validator):
 def test_claude_effort_level_variants(validator):
     for level in ["low", "medium", "high", "xhigh", "max", "auto", ""]:
         validator.validate({"tool": {"claude": {"effort_level": level}}})
+
+
+def test_claude_model_variants(validator):
+    # model is a free-form string (aliases and full IDs both allowed).
+    for model in ["opus", "sonnet", "claude-opus-4-8", ""]:
+        validator.validate({"tool": {"claude": {"model": model}}})
+
+
+def test_root_model_rejected(validator):
+    """The old root-level `model` was moved to [tool.claude]; it is no longer a
+    valid top-level key."""
+    errors = list(validator.iter_errors({"model": "opus"}))
+    assert errors, "Expected validation error for removed root-level 'model'"
 
 
 def test_timezone_utc_mode(validator):
@@ -396,7 +407,7 @@ def test_unknown_key_in_nested_section_rejected(validator, profile):
         # Strings expected — wrong types supplied
         {"inherits": 123},
         {"context": True},
-        {"model": ["gpt-4"]},
+        {"tool": {"claude": {"model": ["gpt-4"]}}},
         {"container": {"image": 42}},
         {"container": {"storage_pool": False}},
         {"container": {"alias": 0}},
@@ -681,7 +692,7 @@ def test_array_item_wrong_type_rejected(validator, field, bad_items):
     "profile",
     [
         {"inherits": None},
-        {"model": None},
+        {"tool": {"claude": {"model": None}}},
         {"context": None},
         {"container": None},
         {"limits": None},

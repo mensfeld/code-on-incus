@@ -267,7 +267,6 @@ func (s *SecurityConfig) IsHostImmutableEnabled() bool {
 
 // DefaultsConfig contains default settings
 type DefaultsConfig struct {
-	Model string `toml:"model"`
 	// Profile names the profile to apply when `--profile` is not passed, so a
 	// user's opinionated setup applies without retyping it (#607). `coi` gives
 	// this profile; `coi --profile default` still gives the synthesized clone of
@@ -372,7 +371,6 @@ type ProfileConfig struct {
 	Source      string            `toml:"-"` // Where this profile was loaded from (not serialized)
 
 	// Extended fields — previously Config-only, now available in profiles
-	Model      string            `toml:"model"`
 	Paths      *PathsConfig      `toml:"paths"`
 	Incus      *IncusConfig      `toml:"incus"`
 	Git        *GitConfig        `toml:"git"`
@@ -396,6 +394,7 @@ type ToolConfig struct {
 // ClaudeToolConfig contains Claude Code-specific settings
 type ClaudeToolConfig struct {
 	EffortLevel string `toml:"effort_level"` // Effort level: "low", "medium", "high", "xhigh", "max", "auto" (unset = user controls interactively)
+	Model       string `toml:"model"`        // Claude model, delivered as ANTHROPIC_MODEL (e.g. "opus", "claude-opus-4-8"); unset = Claude Code's own default
 }
 
 // MountEntry represents a single directory mount configuration
@@ -658,7 +657,6 @@ func synthesizeDefaultProfile(cfg *Config) ProfileConfig {
 
 	p := ProfileConfig{
 		Container:   container,
-		Model:       cfg.Defaults.Model,
 		Environment: cloneMap(cfg.Defaults.Environment),
 		EnvCommands: cloneMap(cfg.Defaults.EnvCommands),
 		ForwardEnv:  cloneSlice(cfg.Defaults.ForwardEnv),
@@ -854,9 +852,6 @@ func ExpandPath(path string) string {
 func (c *Config) Merge(other *Config) {
 	mergeContainerInto(&c.Container, &other.Container)
 
-	if other.Defaults.Model != "" {
-		c.Defaults.Model = other.Defaults.Model
-	}
 	if other.Defaults.Profile != "" {
 		c.Defaults.Profile = other.Defaults.Profile
 	}
@@ -1057,9 +1052,6 @@ func (c *Config) ApplyProfile(name string) error {
 	mergeContainerInto(&c.Container, &profile.Container)
 	if projectAlias != "" {
 		c.Container.Alias = projectAlias
-	}
-	if profile.Model != "" {
-		c.Defaults.Model = profile.Model
 	}
 	if profile.Context != "" {
 		c.ProfileContextFile = profile.Context
@@ -1316,9 +1308,6 @@ func mergeProfiles(parent, child ProfileConfig) ProfileConfig {
 	result.Monitoring = mergeStructPtr(parent.Monitoring, result.Monitoring, mergeMonitoringInto)
 
 	// New extended fields: scalar and struct pointer merges
-	if result.Model == "" {
-		result.Model = parent.Model
-	}
 	result.Paths = mergeStructPtr(parent.Paths, result.Paths, mergePathsInto)
 	result.Incus = mergeStructPtr(parent.Incus, result.Incus, mergeIncusInto)
 	result.Git = mergeStructPtr(parent.Git, result.Git, mergeGitInto)
@@ -1366,6 +1355,9 @@ func mergeToolInto(dst *ToolConfig, src *ToolConfig) {
 	}
 	if src.Claude.EffortLevel != "" {
 		dst.Claude.EffortLevel = src.Claude.EffortLevel
+	}
+	if src.Claude.Model != "" {
+		dst.Claude.Model = src.Claude.Model
 	}
 }
 

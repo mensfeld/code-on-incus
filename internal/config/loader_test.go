@@ -33,7 +33,7 @@ func TestLoadConfigFile(t *testing.T) {
 [container]
 image = "test-image"
 
-[defaults]
+[tool.claude]
 model = "test-model"
 
 [incus]
@@ -55,8 +55,8 @@ code_uid = 2000
 		t.Errorf("Expected image 'test-image', got '%s'", cfg.Container.Image)
 	}
 
-	if cfg.Defaults.Model != "test-model" {
-		t.Errorf("Expected model 'test-model', got '%s'", cfg.Defaults.Model)
+	if cfg.Tool.Claude.Model != "test-model" {
+		t.Errorf("Expected tool.claude.model 'test-model', got '%s'", cfg.Tool.Claude.Model)
 	}
 
 	if cfg.Incus.CodeUID != 2000 {

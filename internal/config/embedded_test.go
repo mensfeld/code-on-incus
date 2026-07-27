@@ -22,8 +22,10 @@ func TestEmbeddedDefaultConfigValues(t *testing.T) {
 	if cfg.Container.Image != "coi-default" {
 		t.Errorf("Expected image 'coi-default', got %q", cfg.Container.Image)
 	}
-	if cfg.Defaults.Model != "claude-sonnet-4-5" {
-		t.Errorf("Expected model 'claude-sonnet-4-5', got %q", cfg.Defaults.Model)
+	// The embedded default pins no model — it is unset so Claude Code uses its
+	// own default (model is now opt-in via [tool.claude] model).
+	if cfg.Tool.Claude.Model != "" {
+		t.Errorf("Expected tool.claude.model to be unset, got %q", cfg.Tool.Claude.Model)
 	}
 	// persistent must be UNSET (nil) in the embedded default: nil means "not
 	// configured", which lets resume distinguish an explicit user choice
@@ -147,8 +149,9 @@ func TestSynthesizeDefaultProfile(t *testing.T) {
 	if profile.Timezone == nil || profile.Timezone.Mode != "host" {
 		t.Error("Expected timezone mode 'host'")
 	}
-	if profile.Model != "claude-sonnet-4-5" {
-		t.Errorf("Expected model 'claude-sonnet-4-5', got %q", profile.Model)
+	// The synthesized default profile carries the (unset) tool.claude.model.
+	if profile.Tool == nil || profile.Tool.Claude.Model != "" {
+		t.Errorf("Expected synthesized tool.claude.model to be unset, got %+v", profile.Tool)
 	}
 }
 
@@ -240,9 +243,9 @@ func TestInheritFromDefault(t *testing.T) {
 func TestNewProfileFieldsMerge(t *testing.T) {
 	cfg := GetDefaultConfig()
 	cfg.Profiles["parent"] = ProfileConfig{
-		Model: "parent-model",
-		Git:   &GitConfig{WritableHooks: ptrBool(false)},
-		SSH:   &SSHConfig{ForwardAgent: ptrBool(false)},
+		Tool: &ToolConfig{Claude: ClaudeToolConfig{Model: "parent-model"}},
+		Git:  &GitConfig{WritableHooks: ptrBool(false)},
+		SSH:  &SSHConfig{ForwardAgent: ptrBool(false)},
 		Timezone: &TimezoneConfig{
 			Mode: "host",
 		},
@@ -253,7 +256,7 @@ func TestNewProfileFieldsMerge(t *testing.T) {
 	}
 	cfg.Profiles["child"] = ProfileConfig{
 		Inherits: "parent",
-		Model:    "child-model",
+		Tool:     &ToolConfig{Claude: ClaudeToolConfig{Model: "child-model"}},
 		SSH:      &SSHConfig{ForwardAgent: ptrBool(true)},
 		Paths: &PathsConfig{
 			SessionsDir: "/child/sessions",
@@ -266,9 +269,9 @@ func TestNewProfileFieldsMerge(t *testing.T) {
 
 	child := cfg.Profiles["child"]
 
-	// Model: child wins
-	if child.Model != "child-model" {
-		t.Errorf("Expected model 'child-model', got %q", child.Model)
+	// Model (tool.claude.model): child wins
+	if child.Tool == nil || child.Tool.Claude.Model != "child-model" {
+		t.Errorf("Expected tool.claude.model 'child-model', got %+v", child.Tool)
 	}
 
 	// Git: inherited from parent
@@ -301,9 +304,9 @@ func TestNewProfileFieldsMerge(t *testing.T) {
 func TestApplyProfileNewFields(t *testing.T) {
 	cfg := GetDefaultConfig()
 	cfg.Profiles["test"] = ProfileConfig{
-		Model: "custom-model",
-		Git:   &GitConfig{WritableHooks: ptrBool(true)},
-		SSH:   &SSHConfig{ForwardAgent: ptrBool(true)},
+		Tool: &ToolConfig{Claude: ClaudeToolConfig{Model: "custom-model"}},
+		Git:  &GitConfig{WritableHooks: ptrBool(true)},
+		SSH:  &SSHConfig{ForwardAgent: ptrBool(true)},
 		Timezone: &TimezoneConfig{
 			Mode: "utc",
 		},
@@ -316,8 +319,8 @@ func TestApplyProfileNewFields(t *testing.T) {
 		t.Fatalf("ApplyProfile failed: %v", err)
 	}
 
-	if cfg.Defaults.Model != "custom-model" {
-		t.Errorf("Expected model 'custom-model', got %q", cfg.Defaults.Model)
+	if cfg.Tool.Claude.Model != "custom-model" {
+		t.Errorf("Expected tool.claude.model 'custom-model', got %q", cfg.Tool.Claude.Model)
 	}
 	if cfg.Git.WritableHooks == nil || !*cfg.Git.WritableHooks {
 		t.Error("Expected writable_hooks=true after apply")
