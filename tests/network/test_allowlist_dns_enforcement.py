@@ -353,14 +353,20 @@ def test_teardown_removes_rules_and_sets(coi_binary, workspace_dir, cleanup_cont
     ident = ip.replace(".", "_")
     assert f"coi_d_{ident}" in nft_coi_table(), "the dynamic set should exist while running"
 
-    subprocess.run(
+    delete_result = subprocess.run(
         [coi_binary, "container", "delete", name, "--force"],
         capture_output=True,
+        text=True,
         timeout=60,
         check=False,
     )
 
-    deadline = time.time() + 30
+    # Teardown's nft cleanup runs inside `container delete`, but under heavy CI
+    # load the sudo-nft operations can lag behind the command returning, so a
+    # 30s window occasionally misread a slow-but-eventual cleanup as a leak. Poll
+    # generously; a genuine leak (rules never removed) still fails red after the
+    # budget, and the delete result is surfaced so a real failure is diagnosable.
+    deadline = time.time() + 75
     while time.time() < deadline:
         table = nft_coi_table()
         input_chain = subprocess.run(
@@ -379,7 +385,9 @@ def test_teardown_removes_rules_and_sets(coi_binary, workspace_dir, cleanup_cont
         time.sleep(1)
 
     raise AssertionError(
-        f"allowlist rules or sets for {ip} survived teardown\ncoi table:\n{nft_coi_table()}"
+        f"allowlist rules or sets for {ip} survived teardown after 75s "
+        f"(container delete rc={delete_result.returncode}, stderr={delete_result.stderr!r})\n"
+        f"coi table:\n{nft_coi_table()}"
     )
 
 
