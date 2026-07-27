@@ -2,11 +2,13 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"regexp"
 
 	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/network"
+	"github.com/mensfeld/code-on-incus/internal/timing"
 	"github.com/spf13/cobra"
 )
 
@@ -192,6 +194,11 @@ func Execute() error {
 	// Cobra re-parses flags on every Execute, so flag-bound fields are
 	// repopulated correctly from the fresh zero value.
 	*app = App{}
+
+	// Deferred here rather than inside a command so the report covers the whole
+	// invocation, teardowns included (a run pipeline tears down in its own
+	// defers, which fire before this one). No-op unless COI_TIMING is set.
+	defer timing.Report(os.Stderr)
 
 	return rootCmd.Execute()
 }

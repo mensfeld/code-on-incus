@@ -15,6 +15,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/mensfeld/code-on-incus/internal/timing"
 )
 
 // Manager provides a clean interface for Incus container operations
@@ -399,7 +401,7 @@ func (m *Manager) PullDirectory(containerPath, localPath string) error {
 	var stderr bytes.Buffer
 	cmd.Stdout = nil
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
+	if err := runIncus(cmd); err != nil {
 		stderrMsg := strings.TrimSpace(stderr.String())
 		if stderrMsg == "" {
 			return err
@@ -491,7 +493,7 @@ func (m *Manager) PullFile(containerPath, localPath string) error {
 	var stderr bytes.Buffer
 	cmd.Stdout = nil
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
+	if err := runIncus(cmd); err != nil {
 		stderrMsg := strings.TrimSpace(stderr.String())
 		// incus reports a non-recursive pull of a directory via stderr; surface it as
 		// a typed error so the CLI can suggest -r without sniffing text itself.
@@ -727,7 +729,7 @@ func Available() bool {
 	cmd := exec.Command("incus", "--project", IncusProject, "info")
 	cmd.Stdout = nil
 	cmd.Stderr = nil
-	return cmd.Run() == nil
+	return runIncus(cmd) == nil
 }
 
 // IncusNotAvailableError returns a descriptive error explaining why Incus is not
@@ -872,6 +874,7 @@ func writeTempFile(containerPath, content string) (string, error) {
 // ExecHostCommand executes a command on the host (not in container)
 func (m *Manager) ExecHostCommand(command string, capture bool) (string, error) {
 	cmd := exec.Command("sh", "-c", command)
+	defer timing.Start(timing.CatHost, command)()
 
 	if capture {
 		output, err := cmd.CombinedOutput()

@@ -16,6 +16,7 @@ import (
 	"github.com/mensfeld/code-on-incus/internal/limits"
 	"github.com/mensfeld/code-on-incus/internal/logger"
 	"github.com/mensfeld/code-on-incus/internal/network"
+	"github.com/mensfeld/code-on-incus/internal/timing"
 	"github.com/mensfeld/code-on-incus/internal/tool"
 	"github.com/mensfeld/code-on-incus/internal/vmhost"
 )
@@ -966,6 +967,7 @@ var ErrNotReady = errors.New("container failed to become ready")
 // probes) — private copies of this loop drift, as coi run's no-sleep variant
 // proved.
 func WaitForReady(ctx context.Context, mgr container.ContainerManager, maxRetries int, logger func(string)) error {
+	defer timing.Start(timing.CatStep, "wait-for-ready")()
 	logger("Waiting for container to be ready...")
 	for i := 0; i < maxRetries; i++ {
 		running, err := mgr.Running()

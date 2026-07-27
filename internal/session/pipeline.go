@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"sync"
+
+	"github.com/mensfeld/code-on-incus/internal/timing"
 )
 
 // Teardown is a cleanup function registered by a Phase. Teardowns run in LIFO
@@ -33,9 +35,22 @@ func (p PhaseFunc) Run(ctx context.Context) (Teardown, error) { return p.RunFn(c
 // no-ops. It is safe to call Teardown concurrently with Run.
 type Pipeline struct {
 	mu           sync.Mutex
-	teardowns    []Teardown
+	teardowns    []registeredTeardown
 	teardownOnce sync.Once
 	torn         bool // set to true once Teardown() has fired
+}
+
+// registeredTeardown pairs a teardown with the phase that returned it, so the
+// timing report can name it (teardowns are anonymous closures otherwise).
+type registeredTeardown struct {
+	phase string
+	fn    Teardown
+}
+
+// run invokes the teardown, timed under COI_TIMING.
+func (t registeredTeardown) run() {
+	defer timing.Start(timing.CatTeardown, t.phase)()
+	t.fn()
 }
 
 // Run executes each phase in order. If ctx is cancelled before a phase starts,
@@ -47,16 +62,19 @@ func (p *Pipeline) Run(ctx context.Context, phases ...Phase) error {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		stop := timing.Start(timing.CatPhase, phase.Name())
 		td, err := phase.Run(ctx)
+		stop()
 		if td != nil {
+			registered := registeredTeardown{phase: phase.Name(), fn: td}
 			p.mu.Lock()
 			if p.torn {
 				// Teardown() already fired and took its snapshot before this
 				// teardown was returned. Run it immediately so it is not lost.
 				p.mu.Unlock()
-				td()
+				registered.run()
 			} else {
-				p.teardowns = append(p.teardowns, td)
+				p.teardowns = append(p.teardowns, registered)
 				p.mu.Unlock()
 			}
 		}
@@ -76,11 +94,11 @@ func (p *Pipeline) Teardown() {
 	p.teardownOnce.Do(func() {
 		p.mu.Lock()
 		p.torn = true
-		tds := make([]Teardown, len(p.teardowns))
+		tds := make([]registeredTeardown, len(p.teardowns))
 		copy(tds, p.teardowns)
 		p.mu.Unlock()
 		for i := len(tds) - 1; i >= 0; i-- {
-			tds[i]()
+			tds[i].run()
 		}
 	})
 }
