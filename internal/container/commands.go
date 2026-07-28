@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mensfeld/code-on-incus/internal/timing"
 	"golang.org/x/sys/unix"
 )
 
@@ -47,13 +48,44 @@ func execIncusCommandContext(ctx context.Context, incusCmd string) *exec.Cmd {
 	return cmd
 }
 
+// runIncus runs an incus subprocess, recording its wall time when COI_TIMING_DEBUG is
+// set. Every incus invocation in this package goes through here (or
+// outputIncus) so the timing report accounts for all subprocess time without
+// each call site having to opt in.
+func runIncus(cmd *exec.Cmd) error {
+	defer timing.Start(timing.CatIncus, incusLabel(cmd))()
+	return cmd.Run()
+}
+
+// outputIncus is runIncus for the CombinedOutput form.
+func outputIncus(cmd *exec.Cmd) ([]byte, error) {
+	defer timing.Start(timing.CatIncus, incusLabel(cmd))()
+	return cmd.CombinedOutput()
+}
+
+// incusLabel is the timing label for a command built by buildIncusCommand: the
+// full command line with the constant "incus --project <project> " prefix
+// stripped, so the report shows "init <image> <name>" rather than the noise.
+func incusLabel(cmd *exec.Cmd) string {
+	if !timing.Enabled() || len(cmd.Args) == 0 {
+		return ""
+	}
+	// Commands are built as sh -c "<incus ...>"; anything else (a direct
+	// exec.Command) is labeled with its own argv.
+	line := strings.Join(cmd.Args, " ")
+	if cmd.Args[0] == "sh" && len(cmd.Args) == 3 {
+		line = cmd.Args[2]
+	}
+	return strings.TrimPrefix(line, "incus --project "+shellQuote(IncusProject)+" ")
+}
+
 // IncusExecContext executes an Incus command with context support
 func IncusExecContext(ctx context.Context, args ...string) error {
 	cmdArgs := buildIncusCommand(args...)
 	cmd := execIncusCommandContext(ctx, cmdArgs)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	return runIncus(cmd)
 }
 
 // IncusExec executes an Incus command
@@ -68,7 +100,7 @@ func IncusExecInteractive(args ...string) error {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	return runIncus(cmd)
 }
 
 // IncusExecQuietContext runs an Incus command without writing to the terminal,
@@ -88,7 +120,7 @@ func IncusExecQuietContext(ctx context.Context, args ...string) error {
 	cmd.Stdout = nil
 	cmd.Stderr = &stderr
 
-	if err := cmd.Run(); err != nil {
+	if err := runIncus(cmd); err != nil {
 		if msg := strings.TrimSpace(stderr.String()); msg != "" {
 			return fmt.Errorf("%w: %s", err, msg)
 		}
@@ -108,7 +140,7 @@ func IncusExecQuiet(args ...string) error {
 func ImportImage(lxdTar, squashfs, alias string) error {
 	cmdStr := buildIncusCommand("image", "import", lxdTar, squashfs, "--alias", alias)
 	cmd := execIncusCommand(cmdStr)
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := outputIncus(cmd); err != nil {
 		return fmt.Errorf("incus image import failed: %w (output: %s)", err, strings.TrimSpace(string(out)))
 	}
 	return nil
@@ -123,7 +155,7 @@ func IncusOutputContext(ctx context.Context, args ...string) (string, error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	err := cmd.Run()
+	err := runIncus(cmd)
 	output := strings.TrimSpace(stdout.String())
 
 	if err != nil {
@@ -154,7 +186,7 @@ func IncusOutputRawContext(ctx context.Context, args ...string) (string, error) 
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	err := cmd.Run()
+	err := runIncus(cmd)
 	output := stdout.String()
 
 	if err != nil {
@@ -185,7 +217,7 @@ func IncusOutputWithStderrContext(ctx context.Context, args ...string) (string, 
 	cmd.Stdout = &combined
 	cmd.Stderr = &combined
 
-	err := cmd.Run()
+	err := runIncus(cmd)
 	output := strings.TrimSpace(combined.String())
 
 	if err != nil {
@@ -216,7 +248,7 @@ func IncusOutputWithArgsContext(ctx context.Context, args ...string) (string, er
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	err := cmd.Run()
+	err := runIncus(cmd)
 	output := strings.TrimSpace(stdout.String())
 
 	if err != nil {
@@ -282,7 +314,7 @@ func IncusExecStreamedContext(ctx context.Context, args ...string) error {
 		return cmd.Process.Signal(os.Interrupt)
 	}
 
-	err := cmd.Run()
+	err := runIncus(cmd)
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			return &ExitError{ExitCode: exitErr.ExitCode(), Err: err}
@@ -296,7 +328,7 @@ func IncusExecStreamedContext(ctx context.Context, args ...string) error {
 func IncusFilePushContext(ctx context.Context, source, destination string) error {
 	cmdArgs := buildIncusCommand("file", "push", source, destination)
 	cmd := execIncusCommandContext(ctx, cmdArgs)
-	return cmd.Run()
+	return runIncus(cmd)
 }
 
 // IncusFilePush pushes a file into a container
@@ -315,7 +347,7 @@ func IncusFilePushWithOwnerContext(ctx context.Context, source, destination stri
 		"--uid", fmt.Sprintf("%d", uid), "--gid", fmt.Sprintf("%d", gid), "--mode", mode,
 		source, destination)
 	cmd := execIncusCommandContext(ctx, cmdArgs)
-	return cmd.Run()
+	return runIncus(cmd)
 }
 
 // IncusFilePushWithOwner pushes a file into a container with explicit
