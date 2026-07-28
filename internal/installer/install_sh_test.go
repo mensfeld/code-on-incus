@@ -797,7 +797,7 @@ STUB
 		t.Fatalf("expected restart, waitready and pool-create to all happen; "+
 			"got restart@%d waitready@%d create@%d\n%s", restart, waitready, create, stdout)
 	}
-	if !(restart < waitready && waitready < create) {
+	if restart >= waitready || waitready >= create {
 		t.Errorf("expected order restart < waitready < create; "+
 			"got restart@%d waitready@%d create@%d\n%s", restart, waitready, create, stdout)
 	}
