@@ -2916,7 +2916,29 @@ process_spawn_rate_threshold = 9999
             assert wait_for_container_running(container_name), (
                 f"Container {container_name} did not start"
             )
-            time.sleep(3)
+            # Pre-create auth.log during the settle window so the log watcher
+            # registers a DIRECT inotify file watch on it. Otherwise auth.log does
+            # not exist at daemon start and detection rides the 3s backstop poll (a
+            # Go ticker), which can be starved for the whole Phase 2 window on a
+            # heavily overloaded runner — the re-alert then never lands and the test
+            # fails. With a direct watch each append is a queued IN_MODIFY that
+            # survives starvation and is drained when the daemon next runs. Same fix
+            # that stabilized test_sudo_not_in_sudoers_triggers_high / _log_rotation.
+            subprocess.run(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "bash",
+                    "-c",
+                    "mkdir -p /var/log && touch /var/log/auth.log",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+            time.sleep(5)
 
             # Phase 1 — within the window the repeat is deduplicated. Re-append on a
             # cadence: the first detection is "alerted" (records the key), and every
@@ -2928,7 +2950,11 @@ process_spawn_rate_threshold = 9999
             deduped = None
             events = []
             last_append = time.monotonic()
-            deadline = time.monotonic() + 45
+            # Match the proven budget of the sibling test_sudo_not_in_sudoers_triggers_high
+            # (also this sudoers line): under starvation the daemon can drain the queued
+            # appends late, in one batch (first -> alerted, rest -> deduplicated), so
+            # give it room rather than the earlier 45s.
+            deadline = time.monotonic() + 90
             while time.monotonic() < deadline:
                 events = get_threat_events(container_name)
                 auth = high_auth(events)
@@ -2958,8 +2984,9 @@ process_spawn_rate_threshold = 9999
             # updating recentThreats), so a >30s quiet gap deterministically clears
             # it and the re-alert WILL fire. The only variable is how long the daemon
             # takes to read the appended line and write the alert — which can stretch
-            # to tens of seconds when the CI runner is CPU-starved (the log watcher's
-            # 3s backstop poll is a Go ticker and gets delayed under load). So poll
+            # to tens of seconds when the CI runner is CPU-starved (even with the
+            # direct inotify watch above, the append is a queued event that the daemon
+            # goroutine must still get CPU to process). So poll
             # generously and keep re-appending: a transient scheduling stall must not
             # fail the run, while a genuinely broken window (re-alert never fires)
             # still produces no fresh "alerted" and fails red.
@@ -2968,7 +2995,7 @@ process_spawn_rate_threshold = 9999
             append_sudoers_line()
             realerted = False
             last_append = time.monotonic()
-            deadline = time.monotonic() + 90
+            deadline = time.monotonic() + 120
             while time.monotonic() < deadline:
                 if count_alerted(get_threat_events(container_name)) > alerted_before:
                     realerted = True
