@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/mensfeld/code-on-incus/internal/timing"
 )
 
 // NFTCommandTimeout is the maximum time to wait for nft commands
@@ -66,7 +68,11 @@ func runNFTCommand(args ...string) ([]byte, error) {
 	cmdArgs := append([]string{"-n", "nft"}, args...)
 	cmd := exec.CommandContext(ctx, "sudo", cmdArgs...)
 
+	// Every nft rule change funnels through here, so timing it here accounts
+	// for all firewall time under COI_TIMING_DEBUG (no-op when unset).
+	stop := timing.Start(timing.CatHost, "nft "+strings.Join(args, " "))
 	output, err := cmd.CombinedOutput()
+	stop()
 	if ctx.Err() == context.DeadlineExceeded {
 		return output, fmt.Errorf("nft command timed out after %v", NFTCommandTimeout)
 	}

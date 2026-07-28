@@ -446,7 +446,7 @@ ensure_idmap() {
     # Restart Incus to pick up new mappings
     if systemctl is-active --quiet incus.service 2>/dev/null; then
         echo -e "${BLUE}→ Restarting Incus to apply idmap changes...${NC}"
-        sudo systemctl restart incus.service
+        restart_incus
         echo -e "${GREEN}✓ Incus restarted${NC}"
     fi
 }
@@ -483,6 +483,16 @@ ensure_incus_initialized() {
         fi
         return 1
     fi
+}
+
+# Restart Incus and wait for the daemon to accept connections again before
+# returning. Callers issue `incus` commands right after a restart (re-read idmaps,
+# probe a freshly installed storage driver), and `systemctl restart` returns as
+# soon as the unit is active, which can be a beat before the API socket is ready.
+# waitready is bounded and best-effort — it never aborts the installer.
+restart_incus() {
+    sudo systemctl restart incus.service
+    incus admin waitready --timeout=30 2>/dev/null || true
 }
 
 # Detect an OrbStack guest, where ZFS can never work.
@@ -592,7 +602,7 @@ setup_btrfs_storage() {
         # installed mkfs.btrfs is invisible until the daemon is restarted.
         if systemctl is-active --quiet incus.service 2>/dev/null; then
             echo -e "${BLUE}→ Restarting Incus to pick up the btrfs driver...${NC}"
-            sudo systemctl restart incus.service
+            restart_incus
         fi
     fi
 

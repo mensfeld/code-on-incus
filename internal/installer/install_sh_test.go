@@ -684,3 +684,124 @@ STUB
 		t.Errorf("expected already-configured message, got: %s", stdout)
 	}
 }
+
+// restart_incus must wait for the daemon to accept connections again (via
+// `incus admin waitready`) AFTER restarting the service, so callers that issue
+// `incus` commands right after don't race the API socket coming back up.
+func TestInstallSh_RestartIncus_WaitsReadyAfterRestart(t *testing.T) {
+	script := installShPath(t)
+
+	snippet := `
+		tmpdir=$(mktemp -d)
+		trap "rm -rf $tmpdir" EXIT
+
+		cat > "$tmpdir/sudo" <<'STUB'
+#!/bin/bash
+if [[ "$*" == *"systemctl restart incus"* ]]; then
+	echo "STEP:RESTART"
+	exit 0
+fi
+exec /usr/bin/sudo "$@"
+STUB
+		chmod +x "$tmpdir/sudo"
+
+		cat > "$tmpdir/incus" <<'STUB'
+#!/bin/bash
+if [[ "$*" == *"admin waitready"* ]]; then
+	echo "STEP:WAITREADY"
+	exit 0
+fi
+exit 0
+STUB
+		chmod +x "$tmpdir/incus"
+
+		export PATH="$tmpdir:$PATH"
+		export NONINTERACTIVE=1
+		source <(sed '/^main "\$@"/d; /^trap error_handler ERR/d' "` + script + `")
+		restart_incus
+		echo "COMPLETED"
+	`
+	stdout, _, exitCode := runBashSnippet(t, snippet, "NONINTERACTIVE=1")
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0, got %d; stdout: %s", exitCode, stdout)
+	}
+	restart := strings.Index(stdout, "STEP:RESTART")
+	waitready := strings.Index(stdout, "STEP:WAITREADY")
+	if restart < 0 {
+		t.Errorf("expected the service to be restarted, got: %s", stdout)
+	}
+	if waitready < 0 {
+		t.Errorf("expected `incus admin waitready` to run after restart, got: %s", stdout)
+	}
+	if restart >= 0 && waitready >= 0 && waitready < restart {
+		t.Errorf("waitready must run AFTER the restart; got restart@%d waitready@%d\n%s",
+			restart, waitready, stdout)
+	}
+}
+
+// On the btrfs fresh-install path, Incus is restarted to pick up the newly
+// installed driver; the daemon must be waited on before the pool is created, or
+// the create races the socket. Forces the install branch by excluding
+// /usr/sbin (where mkfs.btrfs lives) from PATH, then asserts the ordering
+// restart -> waitready -> create.
+func TestInstallSh_SetupBtrfsStorage_WaitsReadyBeforeCreatingPool(t *testing.T) {
+	script := installShPath(t)
+
+	snippet := `
+		tmpdir=$(mktemp -d)
+		trap "rm -rf $tmpdir" EXIT
+
+		# systemctl is-active --quiet incus.service -> active, so the restart runs.
+		printf '#!/bin/bash\nexit 0\n' > "$tmpdir/systemctl"
+		chmod +x "$tmpdir/systemctl"
+
+		cat > "$tmpdir/sudo" <<'STUB'
+#!/bin/bash
+if [[ "$*" == *"apt-get install"* ]]; then exit 0; fi
+if [[ "$*" == *"systemctl restart incus"* ]]; then echo "STEP:RESTART"; exit 0; fi
+if [[ "$*" == *"storage create"* ]]; then exit 0; fi
+exec /usr/bin/sudo "$@"
+STUB
+		chmod +x "$tmpdir/sudo"
+
+		cat > "$tmpdir/incus" <<'STUB'
+#!/bin/bash
+if [[ "$*" == *"admin waitready"* ]]; then echo "STEP:WAITREADY"; exit 0; fi
+if [[ "$*" == *"storage list"* ]]; then echo ""; exit 0; fi
+exit 0
+STUB
+		chmod +x "$tmpdir/incus"
+
+		# No mkfs.btrfs stub, and /usr/sbin dropped from PATH, so command -v fails
+		# and the install+restart branch runs. Keep coreutils (/usr/bin,/bin).
+		export PATH="$tmpdir:/usr/bin:/bin"
+		export PKG_MANAGER=apt
+		export NONINTERACTIVE=1
+		source <(sed '/^main "\$@"/d; /^trap error_handler ERR/d' "` + script + `")
+		setup_btrfs_storage
+		echo "COMPLETED"
+	`
+	stdout, _, exitCode := runBashSnippet(t, snippet, "NONINTERACTIVE=1")
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0, got %d; stdout: %s", exitCode, stdout)
+	}
+	if !strings.Contains(stdout, "COMPLETED") {
+		t.Errorf("function did not complete; stdout: %s", stdout)
+	}
+	// The pool-create command's output is captured into a variable, so use the
+	// message printed immediately before it as the "create attempted" marker.
+	restart := strings.Index(stdout, "STEP:RESTART")
+	waitready := strings.Index(stdout, "STEP:WAITREADY")
+	create := strings.Index(stdout, "Creating btrfs storage pool")
+	if restart < 0 || waitready < 0 || create < 0 {
+		t.Fatalf("expected restart, waitready and pool-create to all happen; "+
+			"got restart@%d waitready@%d create@%d\n%s", restart, waitready, create, stdout)
+	}
+	if !(restart < waitready && waitready < create) {
+		t.Errorf("expected order restart < waitready < create; "+
+			"got restart@%d waitready@%d create@%d\n%s", restart, waitready, create, stdout)
+	}
+	if !strings.Contains(stdout, "btrfs storage pool created") {
+		t.Errorf("expected the btrfs pool to be created; stdout: %s", stdout)
+	}
+}
