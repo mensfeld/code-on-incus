@@ -10,7 +10,6 @@ image = "coi-default"
 storage_pool = ""
 
 [defaults]
-model = "claude-sonnet-4-5"
 
 [paths]
 sessions_dir = "~/.coi/sessions"

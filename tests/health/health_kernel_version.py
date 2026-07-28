@@ -22,8 +22,9 @@ def test_health_kernel_version_text(coi_binary):
         timeout=120,
     )
 
-    assert result.returncode in [0, 1], (
-        f"Health check failed with exit {result.returncode}. stderr: {result.stderr}"
+    assert result.returncode in (0, 1, 2), (
+        f"coi health did not run cleanly (exit {result.returncode}); an unrelated "
+        f"check failing is fine, the specific check is asserted below. stderr: {result.stderr}"
     )
 
     output = result.stdout
@@ -44,8 +45,9 @@ def test_health_kernel_version_json(coi_binary):
         timeout=120,
     )
 
-    assert result.returncode in [0, 1], (
-        f"Health check failed with exit {result.returncode}. stderr: {result.stderr}"
+    assert result.returncode in (0, 1, 2), (
+        f"coi health did not run cleanly (exit {result.returncode}); an unrelated "
+        f"check failing is fine, the specific check is asserted below. stderr: {result.stderr}"
     )
 
     data = json.loads(result.stdout)

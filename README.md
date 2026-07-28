@@ -658,14 +658,14 @@ See the [Troubleshooting guide](https://github.com/mensfeld/code-on-incus/wiki/T
 
 ### Where did the time go?
 
-Set `COI_TIMING=1` on any command to get a wall-clock breakdown on stderr when it
+Set `COI_TIMING_DEBUG=1` on any command to get a wall-clock breakdown on stderr when it
 exits: every pipeline phase, every teardown, and every `incus` subprocess, nested
 by containment and followed by per-category totals. Almost all of a session's
 startup is one `incus` call after another, so this shows exactly which one.
 
 ```bash
-COI_TIMING=1 coi run -- true          # timeline + totals to stderr
-COI_TIMING_JSON=/tmp/run.json coi run -- true   # machine-readable, no stderr noise
+COI_TIMING_DEBUG=1 coi run -- true          # timeline + totals to stderr
+COI_TIMING_DEBUG_JSON=/tmp/run.json coi run -- true   # machine-readable, no stderr noise
 scripts/bench-run.py -n 5             # median over N runs, bucketed
 ```
 

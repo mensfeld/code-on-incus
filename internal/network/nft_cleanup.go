@@ -69,7 +69,7 @@ func runNFTCommand(args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, "sudo", cmdArgs...)
 
 	// Every nft rule change funnels through here, so timing it here accounts
-	// for all firewall time under COI_TIMING (no-op when unset).
+	// for all firewall time under COI_TIMING_DEBUG (no-op when unset).
 	stop := timing.Start(timing.CatHost, "nft "+strings.Join(args, " "))
 	output, err := cmd.CombinedOutput()
 	stop()

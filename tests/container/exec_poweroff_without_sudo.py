@@ -9,10 +9,11 @@ Tests that:
 """
 
 import subprocess
-import time
 
 from support.helpers import (
     calculate_container_name,
+    wait_for_container_started,
+    wait_for_container_stopped,
 )
 
 
@@ -40,7 +41,13 @@ def test_exec_poweroff_without_sudo(coi_binary, cleanup_containers, workspace_di
 
     assert result.returncode == 0, f"Container launch should succeed. stderr: {result.stderr}"
 
-    time.sleep(3)
+    # Wait for the guest to finish booting before issuing poweroff. A poweroff
+    # issued while systemd is still coming up can race boot and fail to halt the
+    # container (a fixed `time.sleep(3)` left the poweroff-stop poll exhausting
+    # its full 90s window on loaded CI runners).
+    assert wait_for_container_started(coi_binary, container_name), (
+        f"Container {container_name} did not become ready to accept exec"
+    )
 
     # === Phase 2: Execute sudo poweroff (no password required) ===
 
@@ -69,29 +76,18 @@ def test_exec_poweroff_without_sudo(coi_binary, cleanup_containers, workspace_di
 
     # === Phase 3: Wait for container to stop ===
 
-    # Poll until the container stops. Budget 90s: a fixed 30s window flaked on a
+    # Poll until the container stops. Budget 120s: a fixed 30s window flaked on a
     # loaded CI runner (poweroff exited 0 but systemd took >30s to halt) — stock
-    # systemd stop budgets run to 90s (see the #597 shutdown-detection notes),
-    # so the wait must cover the full graceful-shutdown window.
-    deadline = time.monotonic() + 90
-    stopped = False
-    while time.monotonic() < deadline:
-        result = subprocess.run(
-            [coi_binary, "container", "running", container_name],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        if result.returncode != 0:
-            stopped = True
-            break
-        time.sleep(1)
+    # systemd stop budgets run to ~90s (see the #597 shutdown-detection notes),
+    # and a heavily-parallel runner can exceed even that, so the wait covers the
+    # full graceful-shutdown window with headroom.
+    stopped, last = wait_for_container_stopped(coi_binary, container_name, timeout=120)
 
     # === Phase 4: Verify container stopped ===
 
     assert stopped, (
-        "Container should be stopped after poweroff within 90s. "
-        f"Last exit code: {result.returncode}, Output: {result.stdout + result.stderr}"
+        "Container should be stopped after poweroff within 120s. "
+        f"Last exit code: {last.returncode}, Output: {last.stdout + last.stderr}"
     )
 
     # === Phase 5: Cleanup ===

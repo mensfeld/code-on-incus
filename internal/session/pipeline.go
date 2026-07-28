@@ -47,7 +47,7 @@ type registeredTeardown struct {
 	fn    Teardown
 }
 
-// run invokes the teardown, timed under COI_TIMING.
+// run invokes the teardown, timed under COI_TIMING_DEBUG.
 func (t registeredTeardown) run() {
 	defer timing.Start(timing.CatTeardown, t.phase)()
 	t.fn()

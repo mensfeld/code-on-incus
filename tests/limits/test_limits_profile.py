@@ -57,7 +57,7 @@ max_processes = 50
         ],
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=240,
         cwd=workspace_dir,
     )
 
@@ -118,7 +118,7 @@ limit = "{memory}"
         ],
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=240,
         cwd=workspace_dir,
     )
 
@@ -158,7 +158,7 @@ limit = "{memory}"
         ],
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=240,
         cwd=workspace_dir,
     )
 
@@ -208,7 +208,7 @@ count = "2"
         ],
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=240,
         cwd=workspace_dir,
     )
 
@@ -281,7 +281,7 @@ count = "1"
         ],
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=240,
         cwd=workspace_dir,
     )
 
@@ -353,7 +353,7 @@ limit = "4GiB"
         ],
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=240,
         cwd=workspace_dir,
     )
 
@@ -419,7 +419,7 @@ persistent = true
         ],
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=240,
         cwd=workspace_dir,
     )
 

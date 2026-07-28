@@ -324,6 +324,13 @@ func sanitizeUntrustedNetwork(n *NetworkConfig, path string) {
 		refuse("network.mode=open")
 		n.Mode = ""
 	}
+	if len(n.Hosts) > 0 {
+		// A name→IP mapping is a spoofing primitive (redirect api.anthropic.com to
+		// an attacker's box) and reachability punches a firewall hole. Honor it
+		// only from trusted scope.
+		refuse("network.hosts")
+		n.Hosts = nil
+	}
 }
 
 // markUntrustedMounts tags mounts from an untrusted source so escaping host

@@ -14,10 +14,6 @@
       "type": "string",
       "description": "Path to context .md file (resolved relative to profile directory)"
     },
-    "model": {
-      "type": "string",
-      "description": "AI model name to use in this profile"
-    },
     "forward_env": {
       "type": "array",
       "items": { "type": "string" },

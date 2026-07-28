@@ -8,13 +8,25 @@ import (
 )
 
 // TestClaudeSandboxSettings_SkipPermissionPrompt verifies that ClaudeTool's
-// sandbox settings include skipDangerousModePermissionPrompt: true in the
-// permissions map, both in the raw settings and after mergeJSONSettings.
+// sandbox settings include a top-level skipDangerousModePermissionPrompt: true,
+// both in the raw settings and after mergeJSONSettings. Claude Code only reads
+// this key at the top level of settings.json, not nested under "permissions"
+// (mensfeld/code-on-incus#649).
 func TestClaudeSandboxSettings_SkipPermissionPrompt(t *testing.T) {
 	ct := tool.NewClaude()
 	settings := ct.GetSandboxSettings()
 
-	// Verify permissions map exists and has the right type
+	// Verify skipDangerousModePermissionPrompt is top-level
+	skip, ok := settings["skipDangerousModePermissionPrompt"]
+	if !ok {
+		t.Fatal("settings missing top-level 'skipDangerousModePermissionPrompt' key")
+	}
+	if skip != true {
+		t.Errorf("skipDangerousModePermissionPrompt = %v, want true", skip)
+	}
+
+	// Verify permissions map exists, still carries defaultMode, but no longer
+	// carries skipDangerousModePermissionPrompt
 	permsRaw, ok := settings["permissions"]
 	if !ok {
 		t.Fatal("settings missing 'permissions' key")
@@ -23,19 +35,11 @@ func TestClaudeSandboxSettings_SkipPermissionPrompt(t *testing.T) {
 	if !ok {
 		t.Fatalf("permissions is %T, want map[string]interface{}", permsRaw)
 	}
-
-	// Verify skipDangerousModePermissionPrompt is true
-	skip, ok := perms["skipDangerousModePermissionPrompt"]
-	if !ok {
-		t.Fatal("permissions missing 'skipDangerousModePermissionPrompt' key")
-	}
-	if skip != true {
-		t.Errorf("skipDangerousModePermissionPrompt = %v, want true", skip)
-	}
-
-	// Verify defaultMode is still present
 	if perms["defaultMode"] != "bypassPermissions" {
 		t.Errorf("defaultMode = %v, want 'bypassPermissions'", perms["defaultMode"])
+	}
+	if _, ok := perms["skipDangerousModePermissionPrompt"]; ok {
+		t.Error("permissions map should not contain 'skipDangerousModePermissionPrompt'")
 	}
 
 	// Verify mergeJSONSettings produces correct JSON with the boolean value
@@ -49,12 +53,13 @@ func TestClaudeSandboxSettings_SkipPermissionPrompt(t *testing.T) {
 		t.Fatalf("Failed to parse merged JSON: %v", err)
 	}
 
+	if parsed["skipDangerousModePermissionPrompt"] != true {
+		t.Errorf("merged JSON top-level skipDangerousModePermissionPrompt = %v, want true", parsed["skipDangerousModePermissionPrompt"])
+	}
+
 	permsParsed, ok := parsed["permissions"].(map[string]interface{})
 	if !ok {
 		t.Fatalf("merged JSON 'permissions' is %T, want map", parsed["permissions"])
-	}
-	if permsParsed["skipDangerousModePermissionPrompt"] != true {
-		t.Errorf("merged JSON skipDangerousModePermissionPrompt = %v, want true", permsParsed["skipDangerousModePermissionPrompt"])
 	}
 	if permsParsed["defaultMode"] != "bypassPermissions" {
 		t.Errorf("merged JSON defaultMode = %v, want 'bypassPermissions'", permsParsed["defaultMode"])

@@ -48,7 +48,7 @@ func execIncusCommandContext(ctx context.Context, incusCmd string) *exec.Cmd {
 	return cmd
 }
 
-// runIncus runs an incus subprocess, recording its wall time when COI_TIMING is
+// runIncus runs an incus subprocess, recording its wall time when COI_TIMING_DEBUG is
 // set. Every incus invocation in this package goes through here (or
 // outputIncus) so the timing report accounts for all subprocess time without
 // each call site having to opt in.

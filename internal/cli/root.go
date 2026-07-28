@@ -197,7 +197,7 @@ func Execute() error {
 
 	// Deferred here rather than inside a command so the report covers the whole
 	// invocation, teardowns included (a run pipeline tears down in its own
-	// defers, which fire before this one). No-op unless COI_TIMING is set.
+	// defers, which fire before this one). No-op unless COI_TIMING_DEBUG is set.
 	defer timing.Report(os.Stderr)
 
 	return rootCmd.Execute()
@@ -232,6 +232,7 @@ func init() {
 	rootCmd.AddCommand(fileCmd)      // New: coi file <subcommand>
 	rootCmd.AddCommand(cleanCmd)
 	rootCmd.AddCommand(killCmd)
+	rootCmd.AddCommand(hostsCmd) // coi hosts <add|list|remove> (#605)
 	rootCmd.AddCommand(persistCmd)
 	rootCmd.AddCommand(tmuxCmd)
 	rootCmd.AddCommand(versionCmd)

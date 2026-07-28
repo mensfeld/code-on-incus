@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Benchmark a cold `coi run` and report where the time goes.
 
-Runs `coi run -- true` N times with COI_TIMING_JSON set, then aggregates the
+Runs `coi run -- true` N times with COI_TIMING_DEBUG_JSON set, then aggregates the
 per-span timings across iterations. Everything coi does is an incus subprocess,
 so the interesting split is: which incus calls, and how much is coi's own code.
 
@@ -26,8 +26,8 @@ HEADLINE_VERBS = ("init", "start", "delete")
 
 
 def run_once(binary, extra_args, json_path):
-    env = dict(os.environ, COI_TIMING_JSON=json_path)
-    env.pop("COI_TIMING", None)  # JSON only; keep the terminal quiet
+    env = dict(os.environ, COI_TIMING_DEBUG_JSON=json_path)
+    env.pop("COI_TIMING_DEBUG", None)  # JSON only; keep the terminal quiet
     proc = subprocess.run(
         [binary, "run", *extra_args, "--", "true"],
         env=env,

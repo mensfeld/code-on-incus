@@ -9,11 +9,11 @@
 // intervals themselves rather than tracked with a counter, so spans recorded
 // from background goroutines can't corrupt the depth of the main pipeline.
 //
-// Nothing is recorded unless COI_TIMING is set, so instrumentation can live on
+// Nothing is recorded unless COI_TIMING_DEBUG is set, so instrumentation can live on
 // the hot paths permanently:
 //
-//	COI_TIMING=1                    # timeline + totals to stderr at exit
-//	COI_TIMING_JSON=/tmp/run.json   # machine-readable dump for benchmarking
+//	COI_TIMING_DEBUG=1                    # timeline + totals to stderr at exit
+//	COI_TIMING_DEBUG_JSON=/tmp/run.json   # machine-readable dump for benchmarking
 package timing
 
 import (
@@ -60,8 +60,8 @@ type Record struct {
 }
 
 func init() {
-	enabled = truthy(os.Getenv("COI_TIMING"))
-	jsonPath = os.Getenv("COI_TIMING_JSON")
+	enabled = truthy(os.Getenv("COI_TIMING_DEBUG"))
+	jsonPath = os.Getenv("COI_TIMING_DEBUG_JSON")
 	if jsonPath != "" {
 		enabled = true
 	}
@@ -128,7 +128,7 @@ func Reset() {
 }
 
 // Report writes the timeline and totals to w, and additionally dumps JSON to
-// COI_TIMING_JSON when that is set. No-op when timing is off or nothing was
+// COI_TIMING_DEBUG_JSON when that is set. No-op when timing is off or nothing was
 // recorded. Intended to be deferred once, as high in the call stack as
 // possible, so it sees the teardowns too.
 func Report(w io.Writer) {
@@ -145,7 +145,7 @@ func Report(w io.Writer) {
 	if len(recs) == 0 {
 		return
 	}
-	if truthy(os.Getenv("COI_TIMING")) {
+	if truthy(os.Getenv("COI_TIMING_DEBUG")) {
 		fmt.Fprint(w, Format(total, recs))
 	}
 }

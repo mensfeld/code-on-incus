@@ -129,6 +129,32 @@ def get_container_state(name):
     return containers[0].get("status", "Unknown") if containers else "Unknown"
 
 
+def container_absent(name):
+    """True when the container does not exist (was deleted), as opposed to a
+    stopped or frozen container that still exists.
+
+    A killed container is stopped AND deleted by the responder (killContainer:
+    StopContainerQuiet + `incus delete`), so its terminal state is *absent* from
+    `incus list`, not a non-Running status. Auto-kill tests poll on this rather
+    than accepting "Stopped"/"Frozen"/"Unknown": auto-PAUSE freezes a container
+    without deleting it, so a kill test that accepted "Frozen" would pass even if
+    auto-kill had silently degraded to auto-pause.
+    """
+    result = subprocess.run(
+        ["incus", "list", name, "--format=json"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    if result.returncode != 0:
+        return False
+    try:
+        containers = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return False
+    return len(containers) == 0
+
+
 def wait_for_container_running(name, timeout=60):
     """Wait for container to reach Running state with retries.
 
@@ -165,6 +191,22 @@ def get_threat_events(container_name):
                 except json.JSONDecodeError:
                     pass
     return events
+
+
+def poll_network_threats(container_name, max_wait=45):
+    """Poll the audit log for `network`-category threats, up to max_wait seconds.
+
+    Network detection reads /proc/<init-pid>/net/* on a poll cycle, so a threat
+    can take several cycles to appear — a single fixed sleep races it. Returns the
+    list of network threats (possibly empty if none appeared within the budget).
+    """
+    deadline = time.monotonic() + max_wait
+    while time.monotonic() < deadline:
+        net = [e for e in get_threat_events(container_name) if e.get("category") == "network"]
+        if net:
+            return net
+        time.sleep(2)
+    return [e for e in get_threat_events(container_name) if e.get("category") == "network"]
 
 
 def _find_container_cgroup_path(container_name: str) -> str | None:
@@ -237,7 +279,7 @@ class TestThreatDetection:
         for _ in range(15):
             time.sleep(1)
             state = get_container_state(container_name)
-            if state in ["Stopped", "Frozen", "Unknown"]:
+            if container_absent(container_name):
                 killed = True
                 break
 
@@ -794,11 +836,14 @@ class TestAutomatedResponse:
         killed = False
         for _ in range(15):
             time.sleep(1)
-            if get_container_state(container_name) in ["Stopped", "Frozen", "Unknown"]:
+            if container_absent(container_name):
                 killed = True
                 break
 
-        assert killed, "Container should be auto-killed on CRITICAL threat"
+        assert killed, (
+            "Container should be auto-killed (stopped AND deleted) on CRITICAL threat, "
+            f"but it still exists as {get_container_state(container_name)!r}"
+        )
 
         # The daemon writes the kill event and syncs to disk before killing the
         # container, but retry briefly in case of OS-level flush delay.
@@ -905,12 +950,14 @@ print("Task completed")
         for _ in range(15):
             time.sleep(1)
             state = get_container_state(container_name)
-            if state in ["Stopped", "Frozen", "Unknown"]:
+            if container_absent(container_name):
                 killed = True
                 break
 
         # Verify container was killed
-        assert killed, "Container should be auto-killed when inside process goes rogue"
+        assert killed, (
+            f"Container should be auto-killed (stopped AND deleted) when inside process goes rogue (final observed state: {state!r})"
+        )
 
         # Verify threat detected in audit log
         events = get_threat_events(container_name)
@@ -1001,10 +1048,11 @@ print("Task completed")
 class TestHighLevelThreats:
     """Test HIGH-level threats that trigger auto-pause."""
 
-    @pytest.mark.xfail(
+    @pytest.mark.skipif(
+        os.environ.get("GITHUB_ACTIONS") == "true",
         reason="cgroup io.stat does not track bind-mount I/O on GitHub Actions runners; "
         "reads from /workspace are served from the host page cache and not attributed "
-        "to the container's cgroup, so the monitoring daemon sees 0 bytes read."
+        "to the container's cgroup, so the monitoring daemon sees 0 bytes read.",
     )
     def test_large_file_read_triggers_auto_pause(
         self, test_workspace, enable_monitoring_low_thresholds, coi_binary
@@ -1095,6 +1143,120 @@ class TestHighLevelThreats:
         assert len(paused_events) > 0, "Expected action='paused' in audit log"
 
         cleanup_container(container_name, coi_binary)
+
+    def test_high_auth_threat_triggers_auto_pause(self, test_workspace, coi_binary):
+        """A HIGH auth-log threat with auto_pause_on_high=true FREEZES the container.
+
+        This is the CI-runnable coverage of the auto-PAUSE response.
+        test_large_file_read_triggers_auto_pause (above) is skipped on GitHub
+        Actions because cgroup io.stat does not track bind-mount reads there, and
+        every other HIGH test disables auto-pause — so pauseContainer otherwise
+        never runs in CI at all. A log-file HIGH threat (sudo "not in the sudoers
+        file") needs no cgroup accounting, so it drives the pause path end to end
+        on GHA: the container must reach the Frozen state AND record an
+        action="paused" audit event driven by a HIGH threat. This is an
+        unconditional assertion — a broken auto-pause fails the whole run red.
+        """
+        config_path = Path.home() / ".coi" / "config.toml"
+        backup = config_path.read_text() if config_path.exists() else None
+
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            """
+[network]
+mode = "open"
+
+[monitoring]
+enabled = true
+auto_pause_on_high = true
+auto_kill_on_critical = false
+poll_interval_sec = 1
+file_read_threshold_mb = 500
+file_read_rate_mb_per_sec = 1000
+process_count_threshold = 9999
+process_spawn_rate_threshold = 9999
+"""
+        )
+
+        container_name = (
+            get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-62"
+        )
+        proc = subprocess.Popen(
+            [coi_binary, "shell", "--workspace", str(test_workspace), "--slot", "62", "--debug"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        try:
+            assert wait_for_container_running(container_name), (
+                f"Container {container_name} did not start"
+            )
+            time.sleep(3)
+
+            # Reliable re-inject trigger (mirrors test_sudo_not_in_sudoers_triggers_high):
+            # the LogWatcher polls auth.log, so re-appending survives a monitoring
+            # daemon startup race. A frozen container can't exec, so re-append only
+            # while it is still Running.
+            def append_sudoers_line():
+                subprocess.run(
+                    [
+                        "incus",
+                        "exec",
+                        container_name,
+                        "--",
+                        "bash",
+                        "-c",
+                        "mkdir -p /var/log && "
+                        "echo 'Jun  5 12:00:01 coi sudo: hacker is not in the sudoers file. "
+                        "This incident will be reported.' >> /var/log/auth.log",
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                )
+
+            append_sudoers_line()
+
+            # Poll until the container is actually FROZEN. Do NOT break on the
+            # action="paused" audit event: responder.go writes that event
+            # (logThreat) BEFORE it runs `incus pause` (pauseContainer), so the
+            # event becomes visible a beat before the container freezes — breaking
+            # on it would let the assertion below observe a still-Running state and
+            # fail on a healthy auto-pause. The Frozen state is the definitive
+            # signal, and the event is guaranteed already written by then.
+            for i in range(60):
+                state = get_container_state(container_name)
+                if state == "Frozen":
+                    break
+                if i and i % 8 == 0 and state == "Running":
+                    append_sudoers_line()
+                time.sleep(1)
+
+            final_state = get_container_state(container_name)
+            events = get_threat_events(container_name)
+            paused_events = [e for e in events if e.get("action") == "paused"]
+            high_threats = [e for e in events if e.get("level") == "high"]
+
+            assert final_state == "Frozen", (
+                "auto_pause_on_high=true: a HIGH auth threat should FREEZE (pause) the "
+                f"container, but its state is {final_state!r}. Events: {events}"
+            )
+            assert paused_events, f"Expected an action='paused' audit event. Events: {events}"
+            assert high_threats, f"Expected a HIGH threat to drive the pause. Events: {events}"
+        finally:
+            # A frozen container must be unfrozen before it can be torn down cleanly.
+            subprocess.run(
+                [coi_binary, "unfreeze", container_name],
+                capture_output=True,
+                timeout=30,
+                check=False,
+            )
+            proc.terminate()
+            if backup:
+                config_path.write_text(backup)
+            elif config_path.exists():
+                config_path.unlink()
+            cleanup_container(container_name, coi_binary)
 
     def test_high_threat_without_auto_pause(self, test_workspace, enable_monitoring, coi_binary):
         """Test HIGH threat only alerts when auto_pause_on_high=false."""
@@ -1269,31 +1431,28 @@ time.sleep(60)
             stderr=subprocess.DEVNULL,
         )
 
-        # Wait for detection
-        time.sleep(10)
-
-        # Container may be killed if network threat detected as CRITICAL
-        # Wait for potential detection and response
-        for _ in range(10):
-            time.sleep(1)
-            state = get_container_state(container_name)
-            if state in ["Stopped", "Frozen", "Unknown"]:
-                break
-
-        # Check audit log for network threats
-        events = get_threat_events(container_name)
-        network_threats = [e for e in events if e.get("category") == "network"]
-
-        # Network monitoring might not catch this immediately, so we make this lenient
-        if len(network_threats) > 0:
-            # If network threat was detected, verify it's CRITICAL or HIGH
+        try:
+            # Poll for a network-category threat instead of a single fixed sleep.
+            # This is a best-effort connection (fire-and-forget to an external host
+            # that need not accept it), so if nothing is detected we skip honestly
+            # rather than pass vacuously. Reliable *unconditional* detection coverage
+            # lives in test_network_connection_detection.py (which establishes a
+            # stable ESTABLISHED connection); here we only validate the level when a
+            # threat does surface.
+            network_threats = poll_network_threats(container_name)
+            if not network_threats:
+                pytest.skip(
+                    "no network threat detected within the poll window (best-effort "
+                    "connection); see test_network_connection_detection.py for the "
+                    "reliable unconditional coverage"
+                )
             for threat in network_threats:
                 assert threat.get("level") in ["critical", "high"], (
                     f"Expected CRITICAL/HIGH network threat, got {threat.get('level')}"
                 )
-
-        proc.terminate()
-        cleanup_container(container_name, coi_binary)
+        finally:
+            proc.terminate()
+            cleanup_container(container_name, coi_binary)
 
     def test_metadata_endpoint_access_critical(self, test_workspace, enable_monitoring, coi_binary):
         """Test connection to cloud metadata endpoint triggers CRITICAL threat."""
@@ -1340,21 +1499,22 @@ time.sleep(60)
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(10)
-
-        # Check for threats (may or may not kill depending on timing)
-        events = get_threat_events(container_name)
-
-        # Metadata access detection depends on network monitoring being active
-        # This is a best-effort check
-        network_threats = [e for e in events if e.get("category") == "network"]
-        if len(network_threats) > 0:
-            # Should be CRITICAL for metadata endpoint
+        try:
+            # Best-effort connection (the metadata endpoint is blocked, so the SYN
+            # may never establish): poll, and skip honestly if nothing is detected
+            # rather than pass vacuously. test_network_connection_detection.py has
+            # the reliable unconditional metadata-endpoint coverage.
+            network_threats = poll_network_threats(container_name)
+            if not network_threats:
+                pytest.skip(
+                    "no network threat detected within the poll window (best-effort "
+                    "metadata connection); see test_network_connection_detection.py"
+                )
             critical = [e for e in network_threats if e.get("level") == "critical"]
             assert len(critical) > 0, "Metadata endpoint access should be CRITICAL"
-
-        proc.terminate()
-        cleanup_container(container_name, coi_binary)
+        finally:
+            proc.terminate()
+            cleanup_container(container_name, coi_binary)
 
     def test_suspicious_port_high_threat(self, test_workspace, enable_monitoring, coi_binary):
         """Test connection to suspicious ports (1234, 31337) triggers HIGH/CRITICAL threat."""
@@ -1415,19 +1575,22 @@ time.sleep(60)
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(10)
-
-        # Check for network threats - lenient check (network monitoring is best-effort)
-        events = get_threat_events(container_name)
-        network_threats = [e for e in events if e.get("category") == "network"]
-        if len(network_threats) > 0:
+        try:
+            # Best-effort connection (fire-and-forget to an external host): poll,
+            # then skip honestly if nothing surfaced rather than pass vacuously.
+            network_threats = poll_network_threats(container_name)
+            if not network_threats:
+                pytest.skip(
+                    "no network threat detected within the poll window (best-effort "
+                    "suspicious-port connection); see test_network_connection_detection.py"
+                )
             for threat in network_threats:
                 assert threat.get("level") in ["high", "critical"], (
                     f"Expected HIGH/CRITICAL for suspicious port, got {threat.get('level')}"
                 )
-
-        proc.terminate()
-        cleanup_container(container_name, coi_binary)
+        finally:
+            proc.terminate()
+            cleanup_container(container_name, coi_binary)
 
     def test_rfc1918_private_address_detection(self, test_workspace, enable_monitoring, coi_binary):
         """Test that connections to RFC1918 private addresses trigger a network threat."""
@@ -1494,19 +1657,22 @@ time.sleep(60)
             stderr=subprocess.DEVNULL,
         )
 
-        time.sleep(10)
-
-        # Lenient check: if network threats are detected they must be HIGH or CRITICAL
-        events = get_threat_events(container_name)
-        network_threats = [e for e in events if e.get("category") == "network"]
-        if len(network_threats) > 0:
+        try:
+            # Best-effort connections (fire-and-forget to unrouted RFC1918 hosts):
+            # poll, then skip honestly if nothing surfaced rather than pass vacuously.
+            network_threats = poll_network_threats(container_name)
+            if not network_threats:
+                pytest.skip(
+                    "no network threat detected within the poll window (best-effort "
+                    "RFC1918 connections); see test_network_connection_detection.py"
+                )
             for threat in network_threats:
                 assert threat.get("level") in ["high", "critical"], (
                     f"Expected HIGH/CRITICAL for RFC1918 address, got {threat.get('level')}"
                 )
-
-        proc.terminate()
-        cleanup_container(container_name, coi_binary)
+        finally:
+            proc.terminate()
+            cleanup_container(container_name, coi_binary)
 
     def test_allowlist_mode_rfc1918_flagged(self, test_workspace, coi_binary):
         """Allowed-domain CIDRs must be passed to the monitoring daemon.
@@ -1585,15 +1751,19 @@ time.sleep(60)
                 stderr=subprocess.DEVNULL,
             )
 
-            time.sleep(10)
-
-            events = get_threat_events(container_name)
-            network_threats = [e for e in events if e.get("category") == "network"]
-            if len(network_threats) > 0:
-                for threat in network_threats:
-                    assert threat.get("level") in ["high", "critical"], (
-                        f"Expected HIGH/CRITICAL for RFC1918 in allowlist mode, got {threat.get('level')}"
-                    )
+            # Best-effort connection: poll, then skip honestly if nothing surfaced
+            # rather than pass vacuously.
+            network_threats = poll_network_threats(container_name)
+            if not network_threats:
+                pytest.skip(
+                    "no network threat detected within the poll window (best-effort "
+                    "RFC1918 connection in allowlist mode); see "
+                    "test_network_connection_detection.py"
+                )
+            for threat in network_threats:
+                assert threat.get("level") in ["high", "critical"], (
+                    f"Expected HIGH/CRITICAL for RFC1918 in allowlist mode, got {threat.get('level')}"
+                )
         finally:
             proc.terminate()
             cleanup_container(container_name, coi_binary)
@@ -1672,15 +1842,20 @@ time.sleep(120)
                 stderr=subprocess.DEVNULL,
             )
 
-            time.sleep(10)
-
-            events = get_threat_events(container_name)
-            network_threats = [e for e in events if e.get("category") == "network"]
-            if len(network_threats) > 0:
-                for threat in network_threats:
-                    assert threat.get("level") in ["high", "critical"], (
-                        f"Expected HIGH/CRITICAL for C2 port on loopback, got {threat.get('level')}"
-                    )
+            # Unlike the fire-and-forget tests above, this establishes a real,
+            # stable ESTABLISHED loopback connection (held 120s) on the suspicious
+            # port 1234, so detection is reliable — poll, then skip only if it truly
+            # never surfaced (environmental), otherwise assert the level.
+            network_threats = poll_network_threats(container_name)
+            if not network_threats:
+                pytest.skip(
+                    "no network threat detected for the loopback C2-port connection "
+                    "within the poll window; see test_network_connection_detection.py"
+                )
+            for threat in network_threats:
+                assert threat.get("level") in ["high", "critical"], (
+                    f"Expected HIGH/CRITICAL for C2 port on loopback, got {threat.get('level')}"
+                )
         finally:
             proc.terminate()
             cleanup_container(container_name, coi_binary)
@@ -1736,11 +1911,13 @@ class TestReverseShellPatterns:
         for _ in range(15):
             time.sleep(1)
             state = get_container_state(container_name)
-            if state in ["Stopped", "Frozen", "Unknown"]:
+            if container_absent(container_name):
                 killed = True
                 break
 
-        assert killed, "Container should be killed on Python reverse shell detection"
+        assert killed, (
+            f"Container should be killed (stopped AND deleted) on Python reverse shell detection (final observed state: {state!r})"
+        )
 
         # Verify threat logged
         events = get_threat_events(container_name)
@@ -1805,7 +1982,7 @@ class TestReverseShellPatterns:
         for _ in range(15):
             time.sleep(1)
             state = get_container_state(container_name)
-            if state in ["Stopped", "Frozen", "Unknown"]:
+            if container_absent(container_name):
                 killed = True
                 break
 
@@ -1818,7 +1995,9 @@ class TestReverseShellPatterns:
             print(stderr_file.read_text())
         print("=== End Debug Log ===\n")
 
-        assert killed, "Container should be killed on Perl reverse shell detection"
+        assert killed, (
+            f"Container should be killed (stopped AND deleted) on Perl reverse shell detection (final observed state: {state!r})"
+        )
 
         # Verify threat logged
         events = get_threat_events(container_name)
@@ -1873,7 +2052,7 @@ class TestReverseShellPatterns:
         for _ in range(15):
             time.sleep(1)
             state = get_container_state(container_name)
-            if state in ["Stopped", "Frozen", "Unknown"]:
+            if container_absent(container_name):
                 killed = True
                 break
 
@@ -1890,7 +2069,9 @@ class TestReverseShellPatterns:
                 )
             print("=== END DEBUG ===\n")
 
-        assert killed, "Container should be killed on PHP reverse shell detection"
+        assert killed, (
+            f"Container should be killed (stopped AND deleted) on PHP reverse shell detection (final observed state: {state!r})"
+        )
 
         # Verify threat logged
         events = get_threat_events(container_name)
@@ -1952,7 +2133,7 @@ class TestReverseShellPatterns:
         for _ in range(15):
             time.sleep(1)
             state = get_container_state(container_name)
-            if state in ["Stopped", "Frozen", "Unknown"]:
+            if container_absent(container_name):
                 killed = True
                 break
 
@@ -1968,7 +2149,9 @@ class TestReverseShellPatterns:
                 )
             print("=== END DEBUG ===\n")
 
-        assert killed, "Container should be killed on Ruby reverse shell detection"
+        assert killed, (
+            f"Container should be killed (stopped AND deleted) on Ruby reverse shell detection (final observed state: {state!r})"
+        )
 
         events = get_threat_events(container_name)
         critical = [e for e in events if e.get("level") == "critical"]
@@ -2029,7 +2212,7 @@ class TestReverseShellPatterns:
         for _ in range(15):
             time.sleep(1)
             state = get_container_state(container_name)
-            if state in ["Stopped", "Frozen", "Unknown"]:
+            if container_absent(container_name):
                 killed = True
                 break
 
@@ -2045,7 +2228,9 @@ class TestReverseShellPatterns:
                 )
             print("=== END DEBUG ===\n")
 
-        assert killed, "Container should be killed on socat reverse shell detection"
+        assert killed, (
+            f"Container should be killed (stopped AND deleted) on socat reverse shell detection (final observed state: {state!r})"
+        )
 
         events = get_threat_events(container_name)
         critical = [e for e in events if e.get("level") == "critical"]
@@ -2203,7 +2388,7 @@ mode = "restricted"
             for _ in range(15):
                 time.sleep(1)
                 state = get_container_state(container_name)
-                if state in ["Stopped", "Frozen", "Unknown"]:
+                if container_absent(container_name):
                     killed = True
                     break
 
@@ -2221,7 +2406,9 @@ mode = "restricted"
                         )
                 print("=== END DEBUG ===")
 
-            assert killed, "Container should be killed when monitoring enabled via config"
+            assert killed, (
+                f"Container should be killed (stopped AND deleted) when monitoring enabled via config (final observed state: {state!r})"
+            )
 
             # Wait a moment for audit log to be flushed
             time.sleep(2)
@@ -2326,7 +2513,7 @@ file_read_rate_mb_per_sec = 1000
             for _ in range(15):
                 time.sleep(1)
                 state = get_container_state(container_name)
-                if state in ["Stopped", "Frozen", "Unknown"]:
+                if container_absent(container_name):
                     killed = True
                     final_state = state
                     break
@@ -2348,7 +2535,8 @@ file_read_rate_mb_per_sec = 1000
             # the startup check, so we proceed with verification.
 
             assert killed, (
-                "auto_kill_on_critical=true in config should kill container on critical threat"
+                "auto_kill_on_critical=true in config should kill (stop AND delete) the "
+                f"container on a critical threat; final observed state was {final_state!r}"
             )
 
             # The monitoring daemon writes to the audit log and kills the
@@ -2465,11 +2653,13 @@ class TestMultipleThreats:
         for _ in range(15):
             time.sleep(1)
             state = get_container_state(container_name)
-            if state in ["Stopped", "Frozen", "Unknown"]:
+            if container_absent(container_name):
                 killed = True
                 break
 
-        assert killed, "Container should be killed when CRITICAL threat present"
+        assert killed, (
+            f"Container should be killed (stopped AND deleted) when CRITICAL threat present (final observed state: {state!r})"
+        )
 
         # Verify all threats are logged
         events = get_threat_events(container_name)
@@ -2656,6 +2846,149 @@ class TestAuditLogValidation:
 
         proc.terminate()
         cleanup_container(container_name, coi_binary)
+
+    def test_threat_deduplication(self, test_workspace, coi_binary):
+        """An identical threat repeated within the 30s window is deduplicated, and
+        re-alerts once the window passes.
+
+        Responder.Handle dedups by category:title:evidence within a 30s window
+        (internal/monitor/responder.go), emitting action="deduplicated" for the
+        repeat instead of re-running the response. AuthLog evidence is deterministic
+        (auth:<logfile>:<pattern>), so re-appending the same sudoers line yields the
+        same key — the property this exercises. (This is the test the audit-log
+        action allowlists elsewhere in this file reference by name.)
+        """
+        config_path = Path.home() / ".coi" / "config.toml"
+        backup = config_path.read_text() if config_path.exists() else None
+
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            """
+[network]
+mode = "open"
+
+[monitoring]
+enabled = true
+auto_pause_on_high = false
+auto_kill_on_critical = false
+poll_interval_sec = 1
+file_read_threshold_mb = 500
+file_read_rate_mb_per_sec = 1000
+process_count_threshold = 9999
+process_spawn_rate_threshold = 9999
+"""
+        )
+
+        container_name = (
+            get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-64"
+        )
+        proc = subprocess.Popen(
+            [coi_binary, "shell", "--workspace", str(test_workspace), "--slot", "64", "--debug"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        def append_sudoers_line():
+            subprocess.run(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "bash",
+                    "-c",
+                    "mkdir -p /var/log && "
+                    "echo 'Jun  5 12:00:01 coi sudo: hacker is not in the sudoers file. "
+                    "This incident will be reported.' >> /var/log/auth.log",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+
+        def high_auth(events):
+            return [e for e in events if e.get("category") == "auth" and e.get("level") == "high"]
+
+        def count_alerted(events):
+            return len([e for e in high_auth(events) if e.get("action") == "alerted"])
+
+        try:
+            assert wait_for_container_running(container_name), (
+                f"Container {container_name} did not start"
+            )
+            time.sleep(3)
+
+            # Phase 1 — within the window the repeat is deduplicated. Re-append on a
+            # cadence: the first detection is "alerted" (records the key), and every
+            # later append within 30s becomes "deduplicated". Re-appending also
+            # survives a monitoring-daemon startup race (the watch not yet active at
+            # the first write).
+            append_sudoers_line()
+            alerted = None
+            deduped = None
+            events = []
+            last_append = time.monotonic()
+            deadline = time.monotonic() + 45
+            while time.monotonic() < deadline:
+                events = get_threat_events(container_name)
+                auth = high_auth(events)
+                alerted = next((e for e in auth if e.get("action") == "alerted"), alerted)
+                deduped = next((e for e in auth if e.get("action") == "deduplicated"), deduped)
+                if alerted and deduped:
+                    break
+                if time.monotonic() - last_append >= 3:
+                    append_sudoers_line()
+                    last_append = time.monotonic()
+                time.sleep(1)
+
+            assert alerted is not None, f"expected an 'alerted' HIGH auth threat, got: {events}"
+            assert deduped is not None, (
+                "a repeat of the same threat within 30s must be recorded with "
+                f"action='deduplicated', not re-alerted. Got: {events}"
+            )
+            assert deduped.get("title") == alerted.get("title"), (
+                "the deduplicated event must be the SAME threat (same category+title) as "
+                f"the alert. alert={alerted}, dedup={deduped}"
+            )
+
+            # Phase 2 — past the 30s window the same threat re-alerts (a fresh
+            # "alerted"), proving the window expires rather than suppressing forever.
+            # The window is measured from the first alert and does NOT slide on
+            # deduplicated repeats (responder.go: the dedup branch returns without
+            # updating recentThreats), so a >30s quiet gap deterministically clears
+            # it and the re-alert WILL fire. The only variable is how long the daemon
+            # takes to read the appended line and write the alert — which can stretch
+            # to tens of seconds when the CI runner is CPU-starved (the log watcher's
+            # 3s backstop poll is a Go ticker and gets delayed under load). So poll
+            # generously and keep re-appending: a transient scheduling stall must not
+            # fail the run, while a genuinely broken window (re-alert never fires)
+            # still produces no fresh "alerted" and fails red.
+            alerted_before = count_alerted(get_threat_events(container_name))
+            time.sleep(33)  # outlast the 30s dedup window (measured from the first alert)
+            append_sudoers_line()
+            realerted = False
+            last_append = time.monotonic()
+            deadline = time.monotonic() + 90
+            while time.monotonic() < deadline:
+                if count_alerted(get_threat_events(container_name)) > alerted_before:
+                    realerted = True
+                    break
+                if time.monotonic() - last_append >= 3:
+                    append_sudoers_line()
+                    last_append = time.monotonic()
+                time.sleep(1)
+
+            assert realerted, (
+                "past the 30s dedup window an identical threat must re-alert (a fresh "
+                "action='alerted'), not stay deduplicated forever"
+            )
+        finally:
+            proc.terminate()
+            if backup:
+                config_path.write_text(backup)
+            elif config_path.exists():
+                config_path.unlink()
+            cleanup_container(container_name, coi_binary)
 
 
 class TestFalsePositives:
@@ -3063,10 +3396,11 @@ class TestThresholdBoundaries:
         proc.terminate()
         cleanup_container(container_name, coi_binary)
 
-    @pytest.mark.xfail(
+    @pytest.mark.skipif(
+        os.environ.get("GITHUB_ACTIONS") == "true",
         reason="cgroup io.stat does not track bind-mount I/O on GitHub Actions runners; "
         "reads from /workspace are served from the host page cache and not attributed "
-        "to the container's cgroup, so the monitoring daemon sees 0 bytes read."
+        "to the container's cgroup, so the monitoring daemon sees 0 bytes read.",
     )
     def test_file_read_at_threshold_triggers(
         self, test_workspace, enable_monitoring_low_thresholds, coi_binary
@@ -3164,10 +3498,11 @@ class TestThresholdBoundaries:
 
         cleanup_container(container_name, coi_binary)
 
-    @pytest.mark.xfail(
+    @pytest.mark.skipif(
+        os.environ.get("GITHUB_ACTIONS") == "true",
         reason="cgroup io.stat does not track bind-mount I/O on GitHub Actions runners; "
         "reads from /workspace are served from the host page cache and not attributed "
-        "to the container's cgroup, so the monitoring daemon sees 0 bytes read."
+        "to the container's cgroup, so the monitoring daemon sees 0 bytes read.",
     )
     def test_file_read_above_threshold_triggers(
         self, test_workspace, enable_monitoring_low_thresholds, coi_binary
@@ -3314,7 +3649,7 @@ class TestThresholdBoundaries:
         for _ in range(15):
             time.sleep(1)
             state = get_container_state(container_name)
-            if state in ["Stopped", "Frozen", "Unknown"]:
+            if container_absent(container_name):
                 killed = True
                 break
 
@@ -3330,7 +3665,9 @@ class TestThresholdBoundaries:
                 )
             print("=== END DEBUG ===\n")
 
-        assert killed, "Container should be killed on bash -i reverse shell detection"
+        assert killed, (
+            f"Container should be killed (stopped AND deleted) on bash -i reverse shell detection (final observed state: {state!r})"
+        )
 
         events = get_threat_events(container_name)
         critical = [e for e in events if e.get("level") == "critical"]
@@ -3564,10 +3901,11 @@ class DisabledTestDiskSpaceMonitoring:
 class TestLargeWriteDetection:
     """Test large write detection for data exfiltration prevention."""
 
-    @pytest.mark.xfail(
+    @pytest.mark.skipif(
+        os.environ.get("GITHUB_ACTIONS") == "true",
         reason="cgroup io.stat does not track bind-mount I/O on GitHub Actions runners; "
         "writes to /workspace go through the host page cache and are not attributed "
-        "to the container's cgroup, so the monitoring daemon sees 0 bytes written."
+        "to the container's cgroup, so the monitoring daemon sees 0 bytes written.",
     )
     def test_large_write_triggers_high_threat(
         self, test_workspace, enable_monitoring_low_thresholds, coi_binary
@@ -4435,11 +4773,14 @@ process_count_threshold = 15
             killed = False
             for _ in range(20):
                 time.sleep(1)
-                if get_container_state(container_name) in ["Stopped", "Frozen", "Unknown"]:
+                if container_absent(container_name):
                     killed = True
                     break
 
-            assert killed, "Container should be killed when process count exceeds threshold"
+            assert killed, (
+                "Container should be killed (stopped AND deleted) when process count "
+                f"exceeds threshold, but it still exists as {get_container_state(container_name)!r}"
+            )
 
             events = get_threat_events(container_name)
             critical = [
@@ -4612,11 +4953,14 @@ process_spawn_rate_threshold = 10
                 if i % 4 == 0:
                     spawn_burst()
                 time.sleep(1)
-                if get_container_state(container_name) in ["Stopped", "Frozen", "Unknown"]:
+                if container_absent(container_name):
                     killed = True
                     break
 
-            assert killed, "Container should be killed when spawn rate exceeds threshold"
+            assert killed, (
+                "Container should be killed (stopped AND deleted) when spawn rate "
+                f"exceeds threshold, but it still exists as {get_container_state(container_name)!r}"
+            )
 
             events = get_threat_events(container_name)
             rate_events = [
@@ -4866,10 +5210,14 @@ process_spawn_rate_threshold = 9999
                 f"Container {container_name} did not start"
             )
 
-            time.sleep(3)
-
-            # Write the suspicious line into the container's auth.log.
-            # The LogWatcher polls via incus file pull every 5 seconds.
+            # Pre-create an empty auth.log during the settle window so the log
+            # watcher registers a DIRECT file watch on it. Otherwise auth.log does
+            # not exist at daemon start and first detection depends on catching the
+            # file's creation via the parent-directory IN_CREATE watch — a path
+            # logwatcher.go documents as unreliable across the overlayfs namespace
+            # boundary, which is how this flaked (line present in container, but
+            # events: []). With the file already watched, the trigger write below is
+            # a plain append/IN_MODIFY on a watched file (the reliable path).
             subprocess.run(
                 [
                     "incus",
@@ -4878,24 +5226,50 @@ process_spawn_rate_threshold = 9999
                     "--",
                     "bash",
                     "-c",
-                    "mkdir -p /var/log && "
-                    "echo 'Jun  5 12:00:01 coi sudo: hacker is not in the sudoers file. This incident will be reported.'"
-                    " >> /var/log/auth.log",
+                    "mkdir -p /var/log && touch /var/log/auth.log",
                 ],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 check=False,
             )
+            time.sleep(5)
 
-            # Poll until the HIGH auth threat appears (30 s timeout).
+            # Write the suspicious line into the container's auth.log.
+            def append_sudoers_line():
+                subprocess.run(
+                    [
+                        "incus",
+                        "exec",
+                        container_name,
+                        "--",
+                        "bash",
+                        "-c",
+                        "mkdir -p /var/log && "
+                        "echo 'Jun  5 12:00:01 coi sudo: hacker is not in the sudoers file. This incident will be reported.'"
+                        " >> /var/log/auth.log",
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                )
+
+            append_sudoers_line()
+
+            # Poll until the HIGH auth threat appears. The window is generous for CI
+            # load, and the line is re-appended periodically so a monitoring-daemon
+            # startup race (the watch not yet active at the first write) can't cause
+            # a permanent miss — a fresh line is then picked up by the next poll.
+            events = []
             auth_events = []
-            for _ in range(30):
+            for i in range(90):
                 events = get_threat_events(container_name)
                 auth_events = [
                     e for e in events if e.get("category") == "auth" and e.get("level") == "high"
                 ]
                 if auth_events:
                     break
+                if i and i % 5 == 0:
+                    append_sudoers_line()
                 time.sleep(1)
 
             assert len(auth_events) > 0, (
@@ -4971,24 +5345,31 @@ process_spawn_rate_threshold = 9999
             # pattern. PROC_EVENT_EXEC fires on execve before the shell tries to
             # connect, so we don't wait for the command to complete (the TCP
             # connection attempt may hang if no RST is returned by the network).
-            subprocess.Popen(
-                [
-                    "incus",
-                    "exec",
-                    container_name,
-                    "--",
-                    "bash",
-                    "-c",
-                    "bash -c 'exec 3>/dev/tcp/10.255.255.1/9999' 2>/dev/null; true",
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            # Re-fire on a cadence: PROC_EVENT_EXEC fires once per execve, and the
+            # proc-connector subscription may not be active yet while the daemon is
+            # still starting under CI load, so a single exec can be missed. Each
+            # launch is a fresh execve, guaranteeing one fires after subscription.
+            def fire():
+                subprocess.Popen(
+                    [
+                        "incus",
+                        "exec",
+                        container_name,
+                        "--",
+                        "bash",
+                        "-c",
+                        "bash -c 'exec 3>/dev/tcp/10.255.255.1/9999' 2>/dev/null; true",
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
 
-            # Poll until the proc_event threat appears (30 s timeout).
+            fire()
+
+            # Poll until the proc_event threat appears.
             proc_events = []
             events = []
-            for _ in range(30):
+            for i in range(40):
                 events = get_threat_events(container_name)
                 proc_events = [
                     e
@@ -4999,6 +5380,8 @@ process_spawn_rate_threshold = 9999
                 ]
                 if proc_events:
                     break
+                if i % 3 == 2:
+                    fire()
                 time.sleep(1)
 
             assert len(proc_events) > 0, (
@@ -5065,24 +5448,31 @@ process_spawn_rate_threshold = 9999
 
             # Run a Python one-liner whose cmdline contains "python3" and
             # "socket.socket", matching the python3-socket exec pattern.
-            subprocess.Popen(
-                [
-                    "incus",
-                    "exec",
-                    container_name,
-                    "--",
-                    "python3",
-                    "-c",
-                    "import socket; s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.close()",
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            ).wait(timeout=10)
+            # Re-fire on a cadence: PROC_EVENT_EXEC fires once per execve, and the
+            # proc-connector subscription may not be active yet while the daemon is
+            # still starting under CI load, so a single exec can be missed. Each
+            # launch is a fresh execve, guaranteeing one fires after subscription.
+            def fire():
+                subprocess.Popen(
+                    [
+                        "incus",
+                        "exec",
+                        container_name,
+                        "--",
+                        "python3",
+                        "-c",
+                        "import socket; s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.close()",
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
 
-            # Poll until the proc_event threat appears (30 s timeout).
+            fire()
+
+            # Poll until the proc_event threat appears.
             proc_events = []
             events = []
-            for _ in range(30):
+            for i in range(40):
                 events = get_threat_events(container_name)
                 proc_events = [
                     e
@@ -5093,6 +5483,8 @@ process_spawn_rate_threshold = 9999
                 ]
                 if proc_events:
                     break
+                if i % 3 == 2:
+                    fire()
                 time.sleep(1)
 
             assert len(proc_events) > 0, (
@@ -5171,24 +5563,31 @@ process_spawn_rate_threshold = 9999
             # Use exec -a to set argv[0] to the PHP fsockopen signature and run
             # sleep as the actual process. PROC_EVENT_EXEC fires at execve time,
             # and sleep keeps the process alive long enough to avoid a read race.
-            subprocess.Popen(
-                [
-                    "incus",
-                    "exec",
-                    container_name,
-                    "--",
-                    "bash",
-                    "-c",
-                    "exec -a 'php -r $sock=fsockopen(10.255.255.1,9999)' sleep 10",
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            # Re-fire on a cadence: PROC_EVENT_EXEC fires once per execve, and the
+            # proc-connector subscription may not be active yet while the daemon is
+            # still starting under CI load, so a single exec can be missed. Each
+            # launch is a fresh execve; sleep 5 (not 10) avoids piling up re-fires.
+            def fire():
+                subprocess.Popen(
+                    [
+                        "incus",
+                        "exec",
+                        container_name,
+                        "--",
+                        "bash",
+                        "-c",
+                        "exec -a 'php -r $sock=fsockopen(10.255.255.1,9999)' sleep 5",
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
 
-            # Poll until the proc_event threat appears (30 s timeout).
+            fire()
+
+            # Poll until the proc_event threat appears.
             proc_events = []
             events = []
-            for _ in range(30):
+            for i in range(40):
                 events = get_threat_events(container_name)
                 proc_events = [
                     e
@@ -5199,6 +5598,8 @@ process_spawn_rate_threshold = 9999
                 ]
                 if proc_events:
                     break
+                if i % 3 == 2:
+                    fire()
                 time.sleep(1)
 
             assert len(proc_events) > 0, (
@@ -5272,24 +5673,31 @@ process_spawn_rate_threshold = 9999
             # sleep as the actual process. PROC_EVENT_EXEC fires at execve time, and
             # sleep keeps the process alive long enough to avoid a read race.
             # Keywords 'child_process' and 'net' appear in the argv[0] string.
-            subprocess.Popen(
-                [
-                    "incus",
-                    "exec",
-                    container_name,
-                    "--",
-                    "bash",
-                    "-c",
-                    "exec -a 'node -e var sh=require(child_process);require(net).connect(9999)' sleep 10",
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            # Re-fire on a cadence: PROC_EVENT_EXEC fires once per execve, and the
+            # proc-connector subscription may not be active yet while the daemon is
+            # still starting under CI load, so a single exec can be missed. Each
+            # launch is a fresh execve; sleep 5 (not 10) avoids piling up re-fires.
+            def fire():
+                subprocess.Popen(
+                    [
+                        "incus",
+                        "exec",
+                        container_name,
+                        "--",
+                        "bash",
+                        "-c",
+                        "exec -a 'node -e var sh=require(child_process);require(net).connect(9999)' sleep 5",
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
 
-            # Poll until the proc_event threat appears (30 s timeout).
+            fire()
+
+            # Poll until the proc_event threat appears.
             proc_events = []
             events = []
-            for _ in range(30):
+            for i in range(40):
                 events = get_threat_events(container_name)
                 proc_events = [
                     e
@@ -5300,6 +5708,8 @@ process_spawn_rate_threshold = 9999
                 ]
                 if proc_events:
                     break
+                if i % 3 == 2:
+                    fire()
                 time.sleep(1)
 
             assert len(proc_events) > 0, (
@@ -5377,23 +5787,33 @@ process_spawn_rate_threshold = 9999
 
             # exec -a sets argv[0] of sleep to the suspicious signature so the
             # proc_event watcher sees the right cmdline without needing the binary.
-            subprocess.Popen(
-                [
-                    "incus",
-                    "exec",
-                    container_name,
-                    "--",
-                    "bash",
-                    "-c",
-                    f"exec -a '{exec_a_arg}' sleep 10",
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            # PROC_EVENT_EXEC fires once per execve; the proc-connector subscription
+            # may not be active yet while the daemon is still starting under CI load,
+            # so a single exec can be missed. Re-fire on a short cadence inside the
+            # poll loop — each launch is a fresh execve, guaranteeing one fires after
+            # the subscription is active. sleep 5 (not 10) keeps re-fired processes
+            # from piling up while still living long enough for the daemon to read
+            # /proc after the exec event.
+            def fire():
+                subprocess.Popen(
+                    [
+                        "incus",
+                        "exec",
+                        container_name,
+                        "--",
+                        "bash",
+                        "-c",
+                        f"exec -a '{exec_a_arg}' sleep 5",
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+
+            fire()
 
             proc_events = []
             events = []
-            for _ in range(30):
+            for i in range(40):
                 events = get_threat_events(container_name)
                 proc_events = [
                     e
@@ -5403,6 +5823,8 @@ process_spawn_rate_threshold = 9999
                 ]
                 if proc_events:
                     break
+                if i % 3 == 2:
+                    fire()
                 time.sleep(1)
 
             assert len(proc_events) > 0, (
