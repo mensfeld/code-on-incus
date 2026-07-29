@@ -40,8 +40,13 @@ func ConfigureUIDMapping(containerName string, disableShift bool, logger func(st
 	useShift, idmap = decideUIDMapping(os.Getuid(), container.CodeUID, disableShift, hostHandlesUIDMapping)
 
 	if idmap != "" {
-		logger(fmt.Sprintf("Host UID %d differs from container code UID %d, using raw.idmap: %s",
-			os.Getuid(), container.CodeUID, idmap))
+		if os.Getuid() != container.CodeUID {
+			logger(fmt.Sprintf("Host UID %d differs from container code UID %d, using raw.idmap: %s",
+				os.Getuid(), container.CodeUID, idmap))
+		} else {
+			logger(fmt.Sprintf("Host UID %d matches container code UID but shift is off and the guest doesn't map it, using raw.idmap: %s",
+				os.Getuid(), idmap))
+		}
 		if err := container.IncusExec("config", "set", containerName, "raw.idmap", idmap); err != nil {
 			logger(fmt.Sprintf("Warning: Failed to set raw.idmap: %v", err))
 			return useShift, false
@@ -71,6 +76,14 @@ func decideUIDMapping(hostUID, codeUID int, disableShift, hostHandlesUIDMapping 
 		disableShift = true
 	}
 	if hostUID != codeUID {
+		return false, fmt.Sprintf("both %d %d", hostUID, codeUID)
+	}
+	if disableShift && !hostHandlesUIDMapping {
+		// Shift is off but the guest doesn't already handle UID mapping itself
+		// (manual disable_shift, e.g. #553's OrbStack case) — the container's
+		// default unprivileged subuid range won't cover hostUID just because
+		// the nominal code UID matches it, so raw.idmap is still required
+		// (issue #667, a gap in #530's fix).
 		return false, fmt.Sprintf("both %d %d", hostUID, codeUID)
 	}
 	return !disableShift, ""
