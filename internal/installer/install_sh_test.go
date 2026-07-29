@@ -805,3 +805,115 @@ STUB
 		t.Errorf("expected the btrfs pool to be created; stdout: %s", stdout)
 	}
 }
+
+// zfsAbsentStubs installs the binary stubs shared by the setup_fast_storage
+// tests where ZFS must appear ABSENT: an `incus` stub (no pools exist yet), a
+// `sudo` stub that flags any ZFS package install (so a test can assert it never
+// happens) while letting `storage create` and the apt-get install succeed, and a
+// present `mkfs.btrfs` so the btrfs path can complete. There is deliberately no
+// `zfs` stub — callers must also restrict PATH to `"$tmpdir:/usr/bin:/bin"` so a
+// real /usr/sbin/zfs on the runner is not picked up.
+func zfsAbsentStubs() string {
+	return `
+		cat > "$tmpdir/incus" <<'STUB'
+#!/bin/bash
+if [[ "$*" == *"storage list"* ]]; then echo ""; exit 0; fi
+exit 0
+STUB
+		chmod +x "$tmpdir/incus"
+
+		cat > "$tmpdir/sudo" <<'STUB'
+#!/bin/bash
+# Flag any package install that mentions zfs so a test can assert it never runs
+# (and stand in for a successful apt-get install of zfsutils-linux on apt).
+if [[ "$*" == *"install"* && "$*" == *"zfs"* ]] || [[ "$*" == *"pacman"* && "$*" == *"zfs"* ]]; then
+	echo "ZFS_INSTALL_ATTEMPTED"
+	exit 0
+fi
+if [[ "$*" == *"storage create"* ]]; then exit 0; fi
+exec /usr/bin/sudo "$@"
+STUB
+		chmod +x "$tmpdir/sudo"
+
+		printf '#!/bin/bash\nexit 0\n' > "$tmpdir/mkfs.btrfs"
+		chmod +x "$tmpdir/mkfs.btrfs"
+	`
+}
+
+// #666: on a non-apt distro (e.g. Arch/EndeavourOS) where ZFS is not installed,
+// the installer must NOT auto-install it — pulling in the ZFS packages there can
+// trigger a dracut/initramfs rebuild that breaks the system. It must use btrfs
+// (in-kernel, safe) instead. Reproduces the reporter's case (btrfs available).
+func TestInstallSh_SetupFastStorage_SkipsZfsInstallOnNonApt(t *testing.T) {
+	script := installShPath(t)
+
+	snippet := `
+		tmpdir=$(mktemp -d)
+		trap "rm -rf $tmpdir" EXIT
+	` + unameStub("6.12.4-arch1-1") + zfsAbsentStubs() + `
+		# ZFS absent: no zfs stub, and /usr/sbin (where a real zfs would live) is
+		# dropped from PATH. btrfs tools present (mkfs.btrfs stub).
+		export PATH="$tmpdir:/usr/bin:/bin"
+		export PKG_MANAGER=pacman
+		export NONINTERACTIVE=1
+		source <(sed '/^main "\$@"/d; /^trap error_handler ERR/d' "` + script + `")
+		setup_fast_storage
+		echo "COMPLETED"
+	`
+	stdout, _, exitCode := runBashSnippet(t, snippet, "NONINTERACTIVE=1")
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0, got %d; stdout: %s", exitCode, stdout)
+	}
+	if !strings.Contains(stdout, "COMPLETED") {
+		t.Errorf("function did not complete; stdout: %s", stdout)
+	}
+	// The regression guard: ZFS must never be installed on a non-apt distro.
+	if strings.Contains(stdout, "ZFS_INSTALL_ATTEMPTED") {
+		t.Errorf("ZFS must not be auto-installed on a non-apt distro (#666), got: %s", stdout)
+	}
+	if strings.Contains(stdout, "Installing ZFS") {
+		t.Errorf("ZFS should not be installed, got: %s", stdout)
+	}
+	if strings.Contains(stdout, "Setting up fast storage (ZFS)") {
+		t.Errorf("ZFS setup should be skipped when absent on a non-apt distro, got: %s", stdout)
+	}
+	// btrfs is used instead.
+	if !strings.Contains(stdout, "using btrfs") {
+		t.Errorf("expected the 'using btrfs' message, got: %s", stdout)
+	}
+	if !strings.Contains(stdout, "btrfs storage pool created") {
+		t.Errorf("expected the btrfs pool to be created, got: %s", stdout)
+	}
+}
+
+// On apt (Debian/Ubuntu) the ZFS install is a clean userspace op, so it is still
+// auto-installed and used — the fast path is preserved where it's safe.
+func TestInstallSh_SetupFastStorage_InstallsZfsOnApt(t *testing.T) {
+	script := installShPath(t)
+
+	snippet := `
+		tmpdir=$(mktemp -d)
+		trap "rm -rf $tmpdir" EXIT
+	` + unameStub("6.8.0-51-generic") + zfsAbsentStubs() + `
+		# ZFS absent so the (apt-only) install path runs; /usr/sbin dropped.
+		export PATH="$tmpdir:/usr/bin:/bin"
+		export PKG_MANAGER=apt
+		export NONINTERACTIVE=1
+		source <(sed '/^main "\$@"/d; /^trap error_handler ERR/d' "` + script + `")
+		setup_fast_storage
+		echo "COMPLETED"
+	`
+	stdout, _, exitCode := runBashSnippet(t, snippet, "NONINTERACTIVE=1")
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0, got %d; stdout: %s", exitCode, stdout)
+	}
+	if !strings.Contains(stdout, "COMPLETED") {
+		t.Errorf("function did not complete; stdout: %s", stdout)
+	}
+	if !strings.Contains(stdout, "Setting up fast storage (ZFS)") {
+		t.Errorf("ZFS should be attempted on apt, got: %s", stdout)
+	}
+	if !strings.Contains(stdout, "ZFS storage pool created") {
+		t.Errorf("ZFS pool should be created on apt, got: %s", stdout)
+	}
+}
