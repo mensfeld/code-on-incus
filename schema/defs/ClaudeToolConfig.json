@@ -7,6 +7,10 @@
       "type": "string",
       "enum": ["low", "medium", "high", "xhigh", "max", "auto", ""],
       "description": "Thinking effort level passed to Claude. Empty means the user controls it interactively."
+    },
+    "model": {
+      "type": "string",
+      "description": "Claude model to run, delivered as ANTHROPIC_MODEL (e.g. \"opus\" or a full ID like \"claude-opus-4-8\"). Empty means Claude Code's own default."
     }
   }
 }

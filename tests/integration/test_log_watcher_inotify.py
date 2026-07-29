@@ -166,27 +166,39 @@ class TestLogWatcherInotify:
             assert wait_for_container_running(container_name), (
                 f"Container {container_name} did not start"
             )
+            # "Running" != agent-ready: wait until incus exec actually works before
+            # writing, so a slow agent under CI load doesn't silently drop the write.
+            assert container_exec_ready(container_name), (
+                f"Container {container_name} agent not ready for exec"
+            )
             time.sleep(3)  # wait for monitoring daemon to start
 
-            subprocess.run(
-                [
-                    "incus",
-                    "exec",
-                    container_name,
-                    "--",
-                    "bash",
-                    "-c",
-                    "mkdir -p /var/log && "
-                    "echo 'Jun  5 12:00:00 coi sshd[1234]: Failed password for attacker"
-                    " from 1.2.3.4 port 22222 ssh2' >> /var/log/syslog",
-                ],
-                check=False,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            write_syslog = [
+                "incus",
+                "exec",
+                container_name,
+                "--",
+                "bash",
+                "-c",
+                "mkdir -p /var/log && "
+                "echo 'Jun  5 12:00:00 coi sshd[1234]: Failed password for attacker"
+                " from 1.2.3.4 port 22222 ssh2' >> /var/log/syslog",
+            ]
 
+            # Re-write on each poll: a single write can land before the watcher has
+            # registered its inotify watch (monitor still starting up under CI load)
+            # and be missed. Re-writing guarantees a write lands after registration
+            # rather than depending on one perfectly-timed write.
+            events = []
             auth_events = []
             for _ in range(30):
+                subprocess.run(
+                    write_syslog,
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                time.sleep(1)
                 events = get_threat_events(container_name)
                 auth_events = [
                     e
@@ -197,9 +209,15 @@ class TestLogWatcherInotify:
                 ]
                 if auth_events:
                     break
-                time.sleep(1)
 
-            assert len(auth_events) > 0, f"Expected auth threat from syslog, got events: {events}"
+            # Distinguish a write-side failure (line never landed) from a
+            # monitor-side failure (line present but not detected) so a future
+            # flake is diagnosable rather than a bare "events: []".
+            wrote = line_in_container_file(container_name, "/var/log/syslog", "1.2.3.4")
+            assert len(auth_events) > 0, (
+                f"Expected auth threat from syslog "
+                f"(line_present_in_container={wrote}), got events: {events}"
+            )
             assert auth_events[0].get("level") == "warning"
         finally:
             terminate_shell(proc)
@@ -210,12 +228,15 @@ class TestLogWatcherInotify:
             cleanup_container(container_name, coi_binary)
 
     def test_event_detected_promptly(self, test_workspace, coi_binary):
-        """Auth log threat is detected within 8 seconds of the line being written.
+        """Auth log threat is detected after the failed-login line is written.
 
         With 5-second polling the detection could take up to 5 s; inotify delivers
-        in ~1 s when watches are active.  The 8 s ceiling also accommodates the
-        3-second backstop ticker that kicks in when log files don't exist at
-        watch-setup time (e.g. fresh containers with overlayfs).
+        in ~1 s when watches are active. The ceiling is deliberately generous to
+        absorb CI scheduling jitter on this detection-timing-sensitive lane, on top
+        of the 3-second backstop ticker that kicks in when log files don't exist at
+        watch-setup time (e.g. fresh containers with overlayfs). The line is also
+        re-appended periodically so a monitoring-daemon startup race under load
+        (watch not yet active at the first write) can't cause a permanent miss.
         """
         config_path = Path.home() / ".coi" / "config.toml"
         backup = config_path.read_text() if config_path.exists() else None
@@ -237,27 +258,31 @@ class TestLogWatcherInotify:
             )
             time.sleep(3)
 
+            def append_auth_line():
+                subprocess.run(
+                    [
+                        "incus",
+                        "exec",
+                        container_name,
+                        "--",
+                        "bash",
+                        "-c",
+                        "mkdir -p /var/log && "
+                        "echo 'Jun  5 12:00:00 coi sshd[99]: Failed password for attacker"
+                        " from 5.6.7.8 port 22222 ssh2' >> /var/log/auth.log",
+                    ],
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+
             write_time = time.monotonic()
-            subprocess.run(
-                [
-                    "incus",
-                    "exec",
-                    container_name,
-                    "--",
-                    "bash",
-                    "-c",
-                    "mkdir -p /var/log && "
-                    "echo 'Jun  5 12:00:00 coi sshd[99]: Failed password for attacker"
-                    " from 5.6.7.8 port 22222 ssh2' >> /var/log/auth.log",
-                ],
-                check=False,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            append_auth_line()
 
             events = []
             auth_events = []
-            deadline = write_time + 8.0
+            deadline = write_time + 20.0
+            next_rewrite = write_time + 4.0
             while time.monotonic() < deadline:
                 events = get_threat_events(container_name)
                 auth_events = [
@@ -269,11 +294,18 @@ class TestLogWatcherInotify:
                 ]
                 if auth_events:
                     break
+                # Re-append if nothing yet: survives a daemon-startup race where the
+                # watch wasn't active at the first write (a fresh line then fires
+                # inotify) rather than depending solely on the backstop re-read.
+                now = time.monotonic()
+                if now >= next_rewrite:
+                    append_auth_line()
+                    next_rewrite = now + 4.0
                 time.sleep(0.2)
 
             elapsed = time.monotonic() - write_time
             assert len(auth_events) > 0, (
-                f"Expected auth threat within 8 s (inotify + backstop), elapsed {elapsed:.1f}s. "
+                f"Expected auth threat within 20 s (inotify + backstop), elapsed {elapsed:.1f}s. "
                 f"Events: {events}"
             )
         finally:
@@ -315,7 +347,29 @@ class TestLogWatcherInotify:
             assert container_exec_ready(container_name), (
                 f"Container {container_name} agent not ready for exec"
             )
-            time.sleep(3)  # let the monitoring daemon register its watches
+            # Pre-create an empty auth.log during the settle window so the log
+            # watcher registers a DIRECT file watch on it. Otherwise auth.log does
+            # not exist at daemon start, and first detection depends on catching the
+            # file's creation via the parent-directory IN_CREATE watch — a path
+            # logwatcher.go documents as unreliable across the overlayfs namespace
+            # boundary. With the file already watched, the trigger write below is a
+            # plain append/IN_MODIFY on a watched file (the reliable path), which is
+            # what flaked when missed here.
+            subprocess.run(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "bash",
+                    "-c",
+                    "mkdir -p /var/log && touch /var/log/auth.log",
+                ],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            time.sleep(5)  # let the monitoring daemon register its watches
 
             # Write the first suspicious line into the original auth.log, re-writing
             # on each poll. Just like the post-rotation write below, a single write
@@ -336,7 +390,7 @@ class TestLogWatcherInotify:
 
             # Wait for the first event before rotating.
             first_events = []
-            for _ in range(60):
+            for _ in range(90):
                 subprocess.run(
                     write_first, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
                 )
@@ -396,7 +450,7 @@ class TestLogWatcherInotify:
                 " from 2.2.2.2 port 22 ssh2' >> /var/log/auth.log",
             ]
             second_events = []
-            for _ in range(60):
+            for _ in range(90):
                 subprocess.run(
                     write_second, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
                 )

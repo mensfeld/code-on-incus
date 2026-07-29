@@ -745,10 +745,12 @@ class TestDaemonLifecycle:
             )
 
             try:
-                # Poll stderr for startup message instead of fixed sleep
+                # Poll stderr for startup message instead of fixed sleep. The
+                # window is generous (CI runners are frequently overloaded and the
+                # daemon starts after full session setup).
                 stderr_content = ""
                 started = False
-                for _ in range(30):
+                for _ in range(90):
                     time.sleep(1)
                     stderr_content = stderr_file.read_text()
                     if "[security] NFT network monitoring started" in stderr_content:

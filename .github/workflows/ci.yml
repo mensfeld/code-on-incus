@@ -19,10 +19,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.25'
           cache: true
@@ -61,10 +61,10 @@ jobs:
     needs: build
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.25'
           cache: true
@@ -183,10 +183,10 @@ jobs:
             path: tests/integration/test_session_diagnostics_no_terminal_pollution.py
             description: "Session-runtime diagnostics must not leak onto the attached terminal (#372): nft debug + runtime-limit auto-stop"
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.25'
           cache: true
@@ -220,7 +220,7 @@ jobs:
           fi
 
       - name: Set up Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
 
@@ -595,10 +595,10 @@ jobs:
     timeout-minutes: 60
     needs: build
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up Go
-        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: '1.25'
           cache: true
@@ -775,6 +775,39 @@ jobs:
         if: always()
         run: timeout 60 limactl stop -f coi 2>/dev/null || true
 
+  # End-to-end regression guard for #666 on a REAL non-apt distro. The stubbed Go
+  # tests (Unit lane) source install.sh with a hand-set PKG_MANAGER and mocked
+  # binaries; this runs the actual storage-selection logic inside a genuine Arch
+  # container where `pacman` and `command -v zfs` resolve for real, proving the
+  # installer never auto-installs ZFS on Arch (which breaks the initramfs) and
+  # selects btrfs instead. incus/sudo are intercepted by a recording shim — we
+  # must never actually run `pacman -S zfs*`, and there is no incus daemon here.
+  installer-storage-arch:
+    # Quoted because the unquoted ' #666)' would be parsed as a YAML comment,
+    # truncating the job name to 'Installer Storage E2E (Arch,'.
+    name: "Installer Storage E2E (Arch, #666)"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    needs: build
+    container:
+      # Pinned by digest (like every action in this file) so the test's
+      # environmental assumptions — real pacman, zfs absent, btrfs absent by
+      # default — can't drift out from under it on an upstream image rebuild.
+      image: archlinux:latest@sha256:3406a568f45d68f0bef35dc80b3eacec8bda59b0292b2e50d5932ba1667f20cf
+    steps:
+      - name: Install git (needed by actions/checkout)
+        run: pacman -Sy --noconfirm --needed git
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: ZFS gate — btrfs absent (installer must reach for btrfs-progs, never zfs)
+        run: bash tests/installer/zfs_gate_arch_e2e.sh
+
+      - name: ZFS gate — btrfs already present (reporter's case, no install at all)
+        env:
+          COI_E2E_BTRFS_PRESENT: "1"
+        run: bash tests/installer/zfs_gate_arch_e2e.sh
+
   ci-success:
     name: CI Success
     runs-on: ubuntu-24.04
@@ -785,6 +818,7 @@ jobs:
       - unit-tests
       - integration
       - lima-smoke
+      - installer-storage-arch
     steps:
       - name: Check all jobs passed
         if: |

@@ -403,11 +403,19 @@ refresh_interval_minutes = 30
             timeout=15,
         )
 
-        assert result.returncode == 0, f"DNS query to allowed server failed: {result.stderr}"
-        # Should return an IP address in the output
-        output_text = result.stderr
-        assert "Address" in output_text or "address" in output_text.lower(), (
-            f"No DNS response received: {result.stderr}"
+        # Allowlist mode blocks DNS outright. COI resolves the allowlisted hostnames
+        # on the host, writes the addresses into the container's /etc/hosts, and
+        # denies every route to a nameserver — so the hosts file is the container's
+        # only way to turn a name into an address, and it holds exactly what the
+        # firewall holds. Leave the container a resolver and it can learn an address
+        # the firewall has never seen, which is the divergence that made allowlist
+        # mode flap against rotating cloud frontends in the first place.
+        #
+        # So a query to 8.8.8.8 must FAIL, even though 8.8.8.8 is in allowed_domains:
+        # the address is reachable, port 53 is not.
+        assert result.returncode != 0, (
+            "DNS to a public resolver must be blocked in allowlist mode — otherwise the container "
+            f"can resolve names COI never saw: {result.stdout}{result.stderr}"
         )
 
     finally:

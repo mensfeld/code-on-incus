@@ -155,12 +155,35 @@ func killCommand(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		// Delete container
-		if err := mgr.Delete(true); err != nil {
-			fmt.Fprintf(os.Stderr, "  Warning: Failed to delete %s: %v\n", name, err)
-		} else {
+		// Delete container.
+		//
+		// An instance that is already gone counts as killed. Stopping a container
+		// ends the coi session that owns it, and that session deletes its own
+		// ephemeral container — so the delete below routinely races that cleanup and
+		// finds the instance already removed. Reporting that as a failure meant
+		// `coi kill` printed "No containers were killed" and exited non-zero about a
+		// container it had, in fact, just killed.
+		err = mgr.Delete(true)
+		switch {
+		case err == nil, container.IsNotFoundErr(err):
 			killed++
 			fmt.Printf("  ✓ Killed %s\n", name)
+		default:
+			// A delete can also lose a race to a concurrent delete of the SAME
+			// instance (the session's own ephemeral cleanup, or another `coi kill`).
+			// Incus reports the loser with messages like "A matching non-reusable
+			// operation has now succeeded" — the instance is gone, but the error
+			// text varies by race window and incus version. Rather than pattern-
+			// match every phrasing, re-check the actual end state: if the instance
+			// is no longer there, the delete effectively succeeded and it counts as
+			// killed. Only a delete error that leaves the instance PRESENT is a real
+			// failure.
+			if exists, chkErr := mgr.Exists(); chkErr == nil && !exists {
+				killed++
+				fmt.Printf("  ✓ Killed %s\n", name)
+			} else {
+				fmt.Fprintf(os.Stderr, "  Warning: Failed to delete %s: %v\n", name, err)
+			}
 		}
 	}
 

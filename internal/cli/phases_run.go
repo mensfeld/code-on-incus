@@ -13,6 +13,7 @@ import (
 	"github.com/mensfeld/code-on-incus/internal/monitor"
 	"github.com/mensfeld/code-on-incus/internal/nftmonitor"
 	"github.com/mensfeld/code-on-incus/internal/session"
+	"github.com/mensfeld/code-on-incus/internal/timing"
 )
 
 // runState is the mutable state accumulated across run pipeline phases.
@@ -192,6 +193,7 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 			s.useShift = !a.cfg.Incus.DisableShift
 			logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
 			preStart := func() error {
+				defer timing.Start(timing.CatStep, "pre-start-hook")()
 				s.useShift, _ = session.ConfigureUIDMapping(s.containerName, a.cfg.Incus.DisableShift, logFn)
 				// Restricted/allowlist disable IPv6 in the container (post-start,
 				// via the network manager). Pre-seed an IPv4-only networkd config
@@ -214,6 +216,7 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 					return fmt.Errorf("git worktree workspace %q is under a system directory; cannot preserve its host path to mount git internals safely", s.absWorkspace)
 				}
 				s.containerWorkspace = a.resolveContainerWorkspacePath(s.absWorkspace, layout != nil)
+				defer timing.Start(timing.CatStep, "apply-workspace-mounts")()
 				return a.applyWorkspaceMounts(mgr, s.containerName, s.absWorkspace, &s.containerWorkspace, s.mountConfig, s.useShift, false, layout)
 			}
 
@@ -253,7 +256,10 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 				}
 			}
 
-			if err := launchOrReuseContainer(mgr, s.img, a.cfg.Container.StoragePool, s.containerName, containerExists, a.persistent, preStart, preRestart); err != nil {
+			stopLaunch := timing.Start(timing.CatStep, "launch-or-reuse")
+			launchErr := launchOrReuseContainer(mgr, s.img, a.cfg.Container.StoragePool, s.containerName, containerExists, a.persistent, preStart, preRestart)
+			stopLaunch()
+			if launchErr != nil {
 				// No teardown on a failed launch: launchOrReuseContainer already
 				// removed the half-created container when it was safe to (never a
 				// running one — a concurrent invocation may own it), and the
@@ -262,7 +268,7 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 				// hook may have applied need releasing here.
 				logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
 				session.RemoveImmutable(s.containerName, logFn)
-				return nil, err
+				return nil, launchErr
 			}
 
 			// From here the container is definitively ours (we created or

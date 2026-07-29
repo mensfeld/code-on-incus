@@ -10,7 +10,6 @@ image = "coi-default"
 storage_pool = ""
 
 [defaults]
-model = "claude-sonnet-4-5"
 
 [paths]
 sessions_dir = "~/.coi/sessions"
@@ -27,13 +26,27 @@ code_user = "code"
 mode = "restricted"
 block_private_networks = true
 block_metadata_endpoint = true
+# In allowlist mode COI resolves each hostname on the host, installs the addresses
+# in the firewall, and writes the SAME addresses into the container's /etc/hosts.
+# DNS egress is then blocked, so that file is the container's only way to turn a
+# name into an address -- it cannot reach an address the firewall was not given.
+#
+# Wildcards are NOT supported: there is no answer to write for a subdomain nobody
+# has asked for yet, so "*.example.com" is rejected rather than quietly
+# mishandled. List exact hostnames, or the provider's published IP ranges as CIDRs
+# ("142.250.0.0/15"), which need no resolution at all.
+#
+# There are deliberately no public resolvers here: DNS is blocked, so allowlisting
+# 8.8.8.8 would buy nothing.
 allowed_domains = [
-    "8.8.8.8",
-    "1.1.1.1",
     "registry.npmjs.org",
     "npm.pkg.github.com",
     "api.anthropic.com",
     "platform.claude.com",
+    # Claude via GCP Vertex AI -- add your region's endpoint:
+    # "us-central1-aiplatform.googleapis.com",
+    # "oauth2.googleapis.com",
+    # "sts.googleapis.com",
 ]
 allow_local_network_access = false
 refresh_interval_minutes = 30

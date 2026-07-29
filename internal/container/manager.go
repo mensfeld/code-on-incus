@@ -15,6 +15,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/mensfeld/code-on-incus/internal/timing"
 )
 
 // Manager provides a clean interface for Incus container operations
@@ -399,7 +401,7 @@ func (m *Manager) PullDirectory(containerPath, localPath string) error {
 	var stderr bytes.Buffer
 	cmd.Stdout = nil
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
+	if err := runIncus(cmd); err != nil {
 		stderrMsg := strings.TrimSpace(stderr.String())
 		if stderrMsg == "" {
 			return err
@@ -491,7 +493,7 @@ func (m *Manager) PullFile(containerPath, localPath string) error {
 	var stderr bytes.Buffer
 	cmd.Stdout = nil
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
+	if err := runIncus(cmd); err != nil {
 		stderrMsg := strings.TrimSpace(stderr.String())
 		// incus reports a non-recursive pull of a directory via stderr; surface it as
 		// a typed error so the CLI can suggest -r without sniffing text itself.
@@ -727,7 +729,7 @@ func Available() bool {
 	cmd := exec.Command("incus", "--project", IncusProject, "info")
 	cmd.Stdout = nil
 	cmd.Stderr = nil
-	return cmd.Run() == nil
+	return runIncus(cmd) == nil
 }
 
 // IncusNotAvailableError returns a descriptive error explaining why Incus is not
@@ -810,31 +812,69 @@ func UserInGroupFile(username, groupName string) bool {
 	return false
 }
 
-// Helper function to create a file with content
+// Helper function to create a file with content. The pushed file inherits the
+// host temp file's owner and mode (0600); use CreateFileWithOwner for files
+// that must land with explicit attributes.
 func (m *Manager) CreateFile(containerPath, content string) error {
-	// Create a unique temp file to avoid collisions with concurrent sessions
-	tmpFile, err := os.CreateTemp("", fmt.Sprintf("coi-%s-*", filepath.Base(containerPath)))
+	tmpPath, err := writeTempFile(containerPath, content)
 	if err != nil {
 		return err
 	}
-	tmpPath := tmpFile.Name()
 	defer os.Remove(tmpPath)
+
+	return m.PushFile(tmpPath, containerPath)
+}
+
+// CreateFileWithOwner creates a file in the container with explicit ownership
+// and mode, applied atomically by the push itself rather than by a follow-up
+// chown/chmod. Use for files that must not inherit the host temp file's owner
+// or 0600 mode, e.g. root-owned policy files the unprivileged code user only
+// reads.
+func (m *Manager) CreateFileWithOwner(containerPath, content string, uid, gid int, mode string) error {
+	tmpPath, err := writeTempFile(containerPath, content)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmpPath)
+
+	return m.PushFileWithOwner(tmpPath, containerPath, uid, gid, mode)
+}
+
+// PushFileWithOwner pushes a file into the container with explicit ownership
+// and mode (see IncusFilePushWithOwner).
+func (m *Manager) PushFileWithOwner(source, destination string, uid, gid int, mode string) error {
+	if destination[0] != '/' {
+		destination = "/" + destination
+	}
+	return IncusFilePushWithOwner(source, m.ContainerName+destination, uid, gid, mode)
+}
+
+// writeTempFile writes content to a unique host temp file (named after the
+// container path to avoid collisions with concurrent sessions) and returns
+// its path. The caller removes it.
+func writeTempFile(containerPath, content string) (string, error) {
+	tmpFile, err := os.CreateTemp("", fmt.Sprintf("coi-%s-*", filepath.Base(containerPath)))
+	if err != nil {
+		return "", err
+	}
+	tmpPath := tmpFile.Name()
 
 	if _, err := tmpFile.WriteString(content); err != nil {
 		tmpFile.Close()
-		return err
+		os.Remove(tmpPath)
+		return "", err
 	}
 	if err := tmpFile.Close(); err != nil {
-		return err
+		os.Remove(tmpPath)
+		return "", err
 	}
-
-	// Push to container
-	return m.PushFile(tmpPath, containerPath)
+	return tmpPath, nil
 }
 
 // ExecHostCommand executes a command on the host (not in container)
 func (m *Manager) ExecHostCommand(command string, capture bool) (string, error) {
 	cmd := exec.Command("sh", "-c", command)
+	defer timing.Start(timing.CatHost, command)()
 
 	if capture {
 		output, err := cmd.CombinedOutput()

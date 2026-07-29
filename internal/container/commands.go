@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mensfeld/code-on-incus/internal/timing"
 	"golang.org/x/sys/unix"
 )
 
@@ -47,13 +48,44 @@ func execIncusCommandContext(ctx context.Context, incusCmd string) *exec.Cmd {
 	return cmd
 }
 
+// runIncus runs an incus subprocess, recording its wall time when COI_TIMING_DEBUG is
+// set. Every incus invocation in this package goes through here (or
+// outputIncus) so the timing report accounts for all subprocess time without
+// each call site having to opt in.
+func runIncus(cmd *exec.Cmd) error {
+	defer timing.Start(timing.CatIncus, incusLabel(cmd))()
+	return cmd.Run()
+}
+
+// outputIncus is runIncus for the CombinedOutput form.
+func outputIncus(cmd *exec.Cmd) ([]byte, error) {
+	defer timing.Start(timing.CatIncus, incusLabel(cmd))()
+	return cmd.CombinedOutput()
+}
+
+// incusLabel is the timing label for a command built by buildIncusCommand: the
+// full command line with the constant "incus --project <project> " prefix
+// stripped, so the report shows "init <image> <name>" rather than the noise.
+func incusLabel(cmd *exec.Cmd) string {
+	if !timing.Enabled() || len(cmd.Args) == 0 {
+		return ""
+	}
+	// Commands are built as sh -c "<incus ...>"; anything else (a direct
+	// exec.Command) is labeled with its own argv.
+	line := strings.Join(cmd.Args, " ")
+	if cmd.Args[0] == "sh" && len(cmd.Args) == 3 {
+		line = cmd.Args[2]
+	}
+	return strings.TrimPrefix(line, "incus --project "+shellQuote(IncusProject)+" ")
+}
+
 // IncusExecContext executes an Incus command with context support
 func IncusExecContext(ctx context.Context, args ...string) error {
 	cmdArgs := buildIncusCommand(args...)
 	cmd := execIncusCommandContext(ctx, cmdArgs)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	return runIncus(cmd)
 }
 
 // IncusExec executes an Incus command
@@ -68,16 +100,33 @@ func IncusExecInteractive(args ...string) error {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	return runIncus(cmd)
 }
 
-// IncusExecQuietContext executes an Incus command silently with context support
+// IncusExecQuietContext runs an Incus command without writing to the terminal,
+// but still reports WHY it failed.
+//
+// "Quiet" previously meant discarding stderr outright, so a failure surfaced as
+// a bare "exit status 1" with the cause thrown away — `coi kill` could only tell
+// you "Failed to delete <container>: exit status 1", which is not something
+// anyone can act on. Incus's message is captured and attached to the error
+// instead; callers that want silence get silence, callers that hit an error get
+// the reason.
 func IncusExecQuietContext(ctx context.Context, args ...string) error {
 	cmdArgs := buildIncusCommand(args...)
 	cmd := execIncusCommandContext(ctx, cmdArgs)
+
+	var stderr bytes.Buffer
 	cmd.Stdout = nil
-	cmd.Stderr = nil
-	return cmd.Run()
+	cmd.Stderr = &stderr
+
+	if err := runIncus(cmd); err != nil {
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return fmt.Errorf("%w: %s", err, msg)
+		}
+		return err
+	}
+	return nil
 }
 
 // IncusExecQuiet executes an Incus command silently (suppress stdout/stderr)
@@ -91,7 +140,7 @@ func IncusExecQuiet(args ...string) error {
 func ImportImage(lxdTar, squashfs, alias string) error {
 	cmdStr := buildIncusCommand("image", "import", lxdTar, squashfs, "--alias", alias)
 	cmd := execIncusCommand(cmdStr)
-	if out, err := cmd.CombinedOutput(); err != nil {
+	if out, err := outputIncus(cmd); err != nil {
 		return fmt.Errorf("incus image import failed: %w (output: %s)", err, strings.TrimSpace(string(out)))
 	}
 	return nil
@@ -106,7 +155,7 @@ func IncusOutputContext(ctx context.Context, args ...string) (string, error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	err := cmd.Run()
+	err := runIncus(cmd)
 	output := strings.TrimSpace(stdout.String())
 
 	if err != nil {
@@ -137,7 +186,7 @@ func IncusOutputRawContext(ctx context.Context, args ...string) (string, error) 
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	err := cmd.Run()
+	err := runIncus(cmd)
 	output := stdout.String()
 
 	if err != nil {
@@ -168,7 +217,7 @@ func IncusOutputWithStderrContext(ctx context.Context, args ...string) (string, 
 	cmd.Stdout = &combined
 	cmd.Stderr = &combined
 
-	err := cmd.Run()
+	err := runIncus(cmd)
 	output := strings.TrimSpace(combined.String())
 
 	if err != nil {
@@ -199,7 +248,7 @@ func IncusOutputWithArgsContext(ctx context.Context, args ...string) (string, er
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	err := cmd.Run()
+	err := runIncus(cmd)
 	output := strings.TrimSpace(stdout.String())
 
 	if err != nil {
@@ -265,7 +314,7 @@ func IncusExecStreamedContext(ctx context.Context, args ...string) error {
 		return cmd.Process.Signal(os.Interrupt)
 	}
 
-	err := cmd.Run()
+	err := runIncus(cmd)
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
 			return &ExitError{ExitCode: exitErr.ExitCode(), Err: err}
@@ -279,12 +328,32 @@ func IncusExecStreamedContext(ctx context.Context, args ...string) error {
 func IncusFilePushContext(ctx context.Context, source, destination string) error {
 	cmdArgs := buildIncusCommand("file", "push", source, destination)
 	cmd := execIncusCommandContext(ctx, cmdArgs)
-	return cmd.Run()
+	return runIncus(cmd)
 }
 
 // IncusFilePush pushes a file into a container
 func IncusFilePush(source, destination string) error {
 	return IncusFilePushContext(context.Background(), source, destination)
+}
+
+// IncusFilePushWithOwnerContext pushes a file into a container with explicit
+// ownership and mode applied by the push itself. Without these flags incus
+// preserves the SOURCE file's owner and mode (--uid/--gid default to -1), so
+// a pushed host temp file lands owned by the host UID with its restrictive
+// mode — unreadable by other container users. Pushing with the flags leaves
+// no window or failure path where the file exists with the wrong attributes.
+func IncusFilePushWithOwnerContext(ctx context.Context, source, destination string, uid, gid int, mode string) error {
+	cmdArgs := buildIncusCommand("file", "push",
+		"--uid", fmt.Sprintf("%d", uid), "--gid", fmt.Sprintf("%d", gid), "--mode", mode,
+		source, destination)
+	cmd := execIncusCommandContext(ctx, cmdArgs)
+	return runIncus(cmd)
+}
+
+// IncusFilePushWithOwner pushes a file into a container with explicit
+// ownership and mode.
+func IncusFilePushWithOwner(source, destination string, uid, gid int, mode string) error {
+	return IncusFilePushWithOwnerContext(context.Background(), source, destination, uid, gid, mode)
 }
 
 // StartWithIsolationFallback starts a non-ephemeral container that may have
@@ -651,6 +720,29 @@ func StopContainerQuiet(ctx context.Context, containerName string, force bool) (
 		args = append(args, "--force")
 	}
 	return IncusOutputContext(ctx, args...)
+}
+
+// IsNotFoundErr reports whether an Incus error means the instance is not there.
+//
+// For anything whose goal is "this container should be gone", that is success,
+// not failure. Deletion races are routine: stopping a container ends the session
+// that owns it, and that session then deletes its own ephemeral container — so a
+// concurrent `coi kill` can find the instance already removed between checking
+// that it exists and deleting it. Treating that as an error made `coi kill`
+// report "No containers were killed" and exit non-zero about a container that
+// had, in fact, been killed.
+//
+// Matching on the message is unpleasant but is what the Incus CLI gives us; it
+// exits 1 for every failure and distinguishes them only in stderr. We match the
+// exact phrase Incus emits ("Instance not found") rather than a loose "not found"
+// AND "instance", so an unrelated failure that merely mentions an instance — a
+// busy storage volume, a missing network "for instance X" — is still reported
+// instead of being silently counted as a successful kill.
+func IsNotFoundErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "instance not found")
 }
 
 // DeleteContainer deletes a container forcefully

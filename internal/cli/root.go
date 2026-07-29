@@ -2,11 +2,13 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"regexp"
 
 	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/network"
+	"github.com/mensfeld/code-on-incus/internal/timing"
 	"github.com/spf13/cobra"
 )
 
@@ -77,6 +79,13 @@ Examples:
 			}
 		}
 
+		// A misconfigured [defaults] profile is caught at the point it is
+		// applied (applyDefaultProfileFallback, only for coi shell/run), not
+		// here: this hook runs for EVERY command, so validating here would break
+		// unrelated operational commands (coi list/kill/clean/attach/…) on a
+		// typo — including the very commands used to recover — even though they
+		// never apply a profile (#607 follow-up).
+
 		// Apply Incus configuration from config file
 		container.Configure(app.cfg.Incus.Project, app.cfg.Incus.CodeUser, app.cfg.Incus.CodeUID)
 
@@ -97,6 +106,47 @@ Examples:
 
 		return nil
 	},
+}
+
+// applyDefaultProfileFallback applies [defaults] profile as the lowest-priority
+// source of a profile (#607): it takes effect only when the user selected no
+// profile by any other means — no --profile flag, no alias-saved profile, and
+// no resume-remembered profile. a.profile being empty is the signal that
+// nothing else claimed it (the explicit/alias/resume paths all set it when they
+// apply), so this applies at most once and can never stack on top of another
+// profile.
+//
+// This is the single guard for a misconfigured [defaults] profile: it runs only
+// for the commands that consume the default profile (coi shell/run), before any
+// container work, so a typo fails those sessions fast without breaking unrelated
+// commands. A name that resolves to no known profile is reported with an
+// actionable message rather than ApplyProfile's terser wording.
+//
+// It returns whether it applied a profile so the caller can recompute
+// a.persistent for its own context — the profile may set [container] persistent,
+// but the caller decides how that reconciles with session-resume metadata, which
+// this helper cannot see.
+func (a *App) applyDefaultProfileFallback(cmd *cobra.Command) (bool, error) {
+	if a.profile != "" || cmd.Flags().Changed("profile") {
+		return false, nil
+	}
+	name := a.cfg.Defaults.Profile
+	if name == "" {
+		return false, nil
+	}
+	if a.cfg.GetProfile(name) == nil {
+		return false, fmt.Errorf(
+			"[defaults] profile = %q does not name a known profile; "+
+				"run 'coi profile list' to see available profiles", name)
+	}
+	if err := a.cfg.ApplyProfile(name); err != nil {
+		return false, err
+	}
+	a.profile = name
+	// The profile may change [incus] identity; mirror the reconfigure the
+	// explicit --profile and alias/resume paths do.
+	container.Configure(a.cfg.Incus.Project, a.cfg.Incus.CodeUser, a.cfg.Incus.CodeUID)
+	return true, nil
 }
 
 // removedFlagConfig maps each removed, config-shaped CLI flag to the config
@@ -145,6 +195,11 @@ func Execute() error {
 	// repopulated correctly from the fresh zero value.
 	*app = App{}
 
+	// Deferred here rather than inside a command so the report covers the whole
+	// invocation, teardowns included (a run pipeline tears down in its own
+	// defers, which fire before this one). No-op unless COI_TIMING_DEBUG is set.
+	defer timing.Report(os.Stderr)
+
 	return rootCmd.Execute()
 }
 
@@ -177,6 +232,7 @@ func init() {
 	rootCmd.AddCommand(fileCmd)      // New: coi file <subcommand>
 	rootCmd.AddCommand(cleanCmd)
 	rootCmd.AddCommand(killCmd)
+	rootCmd.AddCommand(hostsCmd) // coi hosts <add|list|remove> (#605)
 	rootCmd.AddCommand(persistCmd)
 	rootCmd.AddCommand(tmuxCmd)
 	rootCmd.AddCommand(versionCmd)

@@ -163,6 +163,7 @@ func loadConfigFileScoped(cfg *Config, path string, trusted bool) error {
 func sanitizeUntrustedConfig(fileCfg *Config, path string) {
 	sanitizeUntrustedNetwork(&fileCfg.Network, path)
 	sanitizeUntrustedEnvCommands(&fileCfg.Defaults, path)
+	sanitizeUntrustedDefaultProfile(&fileCfg.Defaults, path)
 	sanitizeUntrustedSecurity(&fileCfg.Security, path)
 	sanitizeUntrustedGit(&fileCfg.Git, path)
 
@@ -279,6 +280,22 @@ func sanitizeUntrustedEnvCommands(d *DefaultsConfig, path string) {
 	d.EnvCommandTimeout = ""
 }
 
+// sanitizeUntrustedDefaultProfile strips `[defaults] profile` from an untrusted
+// (project-scoped) source. The default profile decides the whole environment a
+// no-flag `coi` launches into, so honoring it from a cloned/agent-planted repo
+// would let that repo redirect the user's default to a weaker profile of their
+// own — a silent downgrade. Move it to ~/.coi/config.toml (or COI_CONFIG) to apply.
+func sanitizeUntrustedDefaultProfile(d *DefaultsConfig, path string) {
+	if d == nil || d.Profile == "" {
+		return
+	}
+	fmt.Fprintf(os.Stderr,
+		"WARNING: ignoring '[defaults] profile' in project config %s; the default "+
+			"profile selects the whole session environment. Move it to "+
+			"~/.coi/config.toml or set COI_CONFIG to apply it.\n", path)
+	d.Profile = ""
+}
+
 // sanitizeUntrustedNetwork drops security-downgrading network settings from an
 // untrusted source (a project config or a project-scoped profile). nil is a
 // no-op so it can be called directly on a profile's optional *NetworkConfig.
@@ -306,6 +323,13 @@ func sanitizeUntrustedNetwork(n *NetworkConfig, path string) {
 	if n.Mode == NetworkModeOpen {
 		refuse("network.mode=open")
 		n.Mode = ""
+	}
+	if len(n.Hosts) > 0 {
+		// A name→IP mapping is a spoofing primitive (redirect api.anthropic.com to
+		// an attacker's box) and reachability punches a firewall hole. Honor it
+		// only from trusted scope.
+		refuse("network.hosts")
+		n.Hosts = nil
 	}
 }
 

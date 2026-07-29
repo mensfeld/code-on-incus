@@ -40,8 +40,13 @@ func ConfigureUIDMapping(containerName string, disableShift bool, logger func(st
 	useShift, idmap = decideUIDMapping(os.Getuid(), container.CodeUID, disableShift, hostHandlesUIDMapping)
 
 	if idmap != "" {
-		logger(fmt.Sprintf("Host UID %d differs from container code UID %d, using raw.idmap: %s",
-			os.Getuid(), container.CodeUID, idmap))
+		if os.Getuid() != container.CodeUID {
+			logger(fmt.Sprintf("Host UID %d differs from container code UID %d, using raw.idmap: %s",
+				os.Getuid(), container.CodeUID, idmap))
+		} else {
+			logger(fmt.Sprintf("Host UID %d matches container code UID but shift is off and the guest doesn't map it, using raw.idmap: %s",
+				os.Getuid(), idmap))
+		}
 		if err := container.IncusExec("config", "set", containerName, "raw.idmap", idmap); err != nil {
 			logger(fmt.Sprintf("Warning: Failed to set raw.idmap: %v", err))
 			return useShift, false
@@ -71,6 +76,14 @@ func decideUIDMapping(hostUID, codeUID int, disableShift, hostHandlesUIDMapping 
 		disableShift = true
 	}
 	if hostUID != codeUID {
+		return false, fmt.Sprintf("both %d %d", hostUID, codeUID)
+	}
+	if disableShift && !hostHandlesUIDMapping {
+		// Shift is off but the guest doesn't already handle UID mapping itself
+		// (manual disable_shift, e.g. #553's OrbStack case) — the container's
+		// default unprivileged subuid range won't cover hostUID just because
+		// the nominal code UID matches it, so raw.idmap is still required
+		// (issue #667, a gap in #530's fix).
 		return false, fmt.Sprintf("both %d %d", hostUID, codeUID)
 	}
 	return !disableShift, ""
@@ -200,7 +213,7 @@ func SetupGitIdentity(mgr container.ContainerExecution, homeDir string, identity
 // way to set disableAutoMode — it cannot be set via user settings.
 // Non-fatal: logs a warning on failure.
 // Accepts ContainerManager (not a sub-interface) because it uses both
-// ExecCommand (ContainerExecution) and CreateFile (ContainerFiles).
+// ExecCommand (ContainerExecution) and CreateFileWithOwner (ContainerFiles).
 func SetupClaudeManagedSettings(mgr container.ContainerManager, logger func(string)) {
 	mkdirCmd := "mkdir -p /etc/claude-code"
 	if _, err := mgr.ExecCommand(mkdirCmd, container.ExecCommandOptions{Capture: true}); err != nil {
@@ -208,7 +221,13 @@ func SetupClaudeManagedSettings(mgr container.ContainerManager, logger func(stri
 		return
 	}
 	content := `{"disableAutoMode": "disable"}` + "\n"
-	if err := mgr.CreateFile("/etc/claude-code/managed-settings.json", content); err != nil {
+	// Root-owned and world-readable, applied atomically by the push: a plain
+	// CreateFile inherits the host temp file's 0600 mode and UID, which the
+	// container code user cannot read when the host UID differs (macOS 501,
+	// CI 1001) — Claude Code then refuses OAuth on the unreadable policy file.
+	// Root ownership also keeps the sandboxed agent from rewriting its own
+	// managed policy.
+	if err := mgr.CreateFileWithOwner("/etc/claude-code/managed-settings.json", content, 0, 0, "0644"); err != nil {
 		logger(fmt.Sprintf("Warning: Failed to write Claude managed settings: %v", err))
 	}
 }

@@ -54,10 +54,24 @@ def test_health_storage_pools_multi(coi_binary, workspace_dir):
             timeout=60,
             cwd=workspace_dir,
         )
-        assert result.returncode in (0, 1), f"health should exit 0 or 1. stderr: {result.stderr}"
+        # Don't gate on the AGGREGATE health exit code. Exit 2 means some check
+        # failed — and here it is routinely the incus_storage_pools check itself:
+        # a pool that can't be fully evaluated on a CI runner reports a per-pool
+        # status of "failed" (the sibling health_storage_pool.py tolerates exactly
+        # this). That does not stop the pool from being ENUMERATED, which is all
+        # this test verifies. Accept 0/1/2 and assert enumeration, not health.
+        assert result.returncode in (0, 1, 2), (
+            f"health exited {result.returncode}.\n"
+            f"--- report ---\n{result.stdout}\n--- stderr ---\n{result.stderr}"
+        )
 
         data = json.loads(result.stdout)
-        details = data["checks"]["incus_storage_pools"]["details"]
+        assert "incus_storage_pools" in data["checks"], (
+            "incus_storage_pools check should be present in health output"
+        )
+        details = data["checks"]["incus_storage_pools"].get("details", {})
+        # The temp pool must be ENUMERATED in the per-pool details map, regardless
+        # of whether its (or another pool's) per-pool status is "failed" in CI.
         assert pool_name in details, (
             f"Temp pool {pool_name} should appear in pool details. Got: {list(details.keys())}"
         )

@@ -107,7 +107,6 @@ func TestStarterConfigInlineDefaultsAreCurrent(t *testing.T) {
 	text := string(EmbeddedStarterConfig)
 	checks := []string{
 		fmt.Sprintf("image = %q", def.Container.Image),
-		fmt.Sprintf("model = %q", def.Defaults.Model),
 		fmt.Sprintf("mode = %q", string(def.Network.Mode)),
 		fmt.Sprintf("enforce = %q", def.Limits.Memory.Enforce),
 		fmt.Sprintf("mode = %q", def.Timezone.Mode),

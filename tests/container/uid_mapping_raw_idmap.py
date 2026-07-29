@@ -29,6 +29,7 @@ import time
 
 from support.helpers import (
     calculate_container_name,
+    extract_container_name,
 )
 
 
@@ -229,3 +230,103 @@ def test_workspace_write_access_raw_idmap(coi_binary, cleanup_containers, worksp
             capture_output=True,
             timeout=30,
         )
+
+
+def test_matching_uid_disable_shift_auto_sets_raw_idmap(
+    coi_binary, cleanup_containers, workspace_dir
+):
+    """End-to-end lock-down for #667/#668: when code_uid is manually set to match
+    the host UID AND disable_shift is on, on a host that does NOT handle UID
+    mapping itself (bare Linux / OrbStack), `coi` must set raw.idmap on its own —
+    otherwise the workspace mount lands on the container's default subuid range
+    and /workspace is owned by nobody:nogroup / unwritable.
+
+    Unlike test_workspace_write_access_raw_idmap (which sets raw.idmap by hand),
+    this drives the real decision path (session.decideUIDMapping via `coi shell`)
+    and asserts both the mechanism (raw.idmap auto-set to `both <host> <host>`)
+    and the user-facing outcome (workspace writable, host round-trips ownership).
+    """
+    host_uid = os.getuid()
+
+    # A host-owned file to prove read access flows through the mapping.
+    hostfile = os.path.join(workspace_dir, "coi-idmap-hostfile.txt")
+    with open(hostfile, "w") as f:
+        f.write("written-by-host")
+
+    # Trusted (COI_CONFIG) config: code_uid matched to the host UID + manual
+    # disable_shift. This is exactly the documented #530 workaround that #667
+    # showed was broken without an auto raw.idmap.
+    with tempfile.NamedTemporaryFile("w", suffix=".toml", delete=False) as f:
+        f.write(f"[incus]\ncode_uid = {host_uid}\ndisable_shift = true\n")
+        config_file = f.name
+    env = dict(os.environ, COI_CONFIG=config_file)
+
+    result = subprocess.run(
+        [coi_binary, "shell", "--workspace", workspace_dir, "--background"],
+        capture_output=True,
+        text=True,
+        timeout=180,
+        env=env,
+    )
+    assert result.returncode == 0, (
+        f"coi shell --background should succeed. stderr: {result.stderr}\nstdout: {result.stdout}"
+    )
+    # Read the actual launched name; fall back to the derived slot-1 name.
+    container_name = extract_container_name(result) or calculate_container_name(workspace_dir, 1)
+
+    try:
+        time.sleep(3)
+
+        # 1. Mechanism: coi decided to set raw.idmap itself (the #667/#668 fix).
+        #    An empty value means the regression is back.
+        got = _incus_run("config", "get", container_name, "raw.idmap")
+        assert got.returncode == 0, f"incus config get raw.idmap failed: {got.stderr}"
+        idmap = got.stdout.strip()
+        assert idmap == f"both {host_uid} {host_uid}", (
+            f"coi must auto-set raw.idmap='both {host_uid} {host_uid}' when code_uid == host UID "
+            f"and disable_shift is on (#667); got {idmap!r}. Empty means /workspace would be "
+            f"nobody:nogroup and unwritable."
+        )
+
+        # 2. Outcome: the code user (running as the host UID) can read the host
+        #    file and write into /workspace. `coi container exec` routes the
+        #    command's stdout to ITS stderr, so read the merged streams.
+        exec_res = subprocess.run(
+            [
+                coi_binary,
+                "container",
+                "exec",
+                container_name,
+                "--user",
+                str(host_uid),
+                "--group",
+                str(host_uid),
+                "--",
+                "sh",
+                "-c",
+                "cat /workspace/coi-idmap-hostfile.txt && "
+                "echo created-by-code > /workspace/coi-idmap-codefile.txt && echo WRITE_OK",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        merged = exec_res.stdout + exec_res.stderr
+        assert exec_res.returncode == 0 and "WRITE_OK" in merged, (
+            f"/workspace must be writable by the code user with the auto raw.idmap; "
+            f"rc={exec_res.returncode}, output={merged!r}"
+        )
+        assert "written-by-host" in merged, (
+            f"host file should be readable in-container; output={merged!r}"
+        )
+
+        # 3. Round-trip: the code-created file appears on the host owned by the host UID.
+        codefile = os.path.join(workspace_dir, "coi-idmap-codefile.txt")
+        assert os.path.exists(codefile), "code-created file should appear on the host workspace"
+        assert os.stat(codefile).st_uid == host_uid, (
+            f"host should see the code-created file owned by host UID {host_uid}, "
+            f"got {os.stat(codefile).st_uid}"
+        )
+    finally:
+        _incus_run("delete", container_name, "--force")
+        os.unlink(config_file)
