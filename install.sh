@@ -547,10 +547,16 @@ setup_zfs_storage() {
     if command -v zfs &> /dev/null; then
         echo -e "${GREEN}✓ ZFS already installed${NC}"
     else
-        # Only reached on apt (setup_fast_storage gates the install): apt's
-        # zfsutils-linux is a clean userspace install. Non-apt distros never get
-        # here — their ZFS packages can break the initramfs (#666), so they use
-        # btrfs instead.
+        # Installing ZFS is only safe on apt (zfsutils-linux is a plain userspace
+        # package); on pacman/dnf/zypper the ZFS packages can rebuild and break the
+        # initramfs (#666). setup_fast_storage already gates on this, but guard
+        # here too so a future caller can't reach a wrong-distro install: the
+        # pkg_install below hard-codes the apt package name, so a non-apt distro
+        # would otherwise silently install the wrong (or a destructive) package.
+        if [ "$PKG_MANAGER" != "apt" ]; then
+            echo -e "${YELLOW}⚠ ZFS not installed and auto-install is only supported on apt${NC}"
+            return 1
+        fi
         echo -e "${BLUE}→ Installing ZFS...${NC}"
         if ! pkg_install zfsutils-linux 2>/dev/null; then
             echo -e "${YELLOW}⚠ ZFS installation failed (may not be available for your kernel)${NC}"
