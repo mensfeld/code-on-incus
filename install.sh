@@ -518,10 +518,19 @@ setup_fast_storage() {
         echo "  OrbStack guests get their kernel from the host, with no headers or module"
         echo "  tree, so the out-of-tree ZFS module can never be built or loaded."
         echo "  Using btrfs instead, which is built into the OrbStack kernel."
-    elif setup_zfs_storage; then
-        return 0
-    else
+    elif command -v zfs &> /dev/null || [ "$PKG_MANAGER" = "apt" ]; then
+        # ZFS is already present, or we can install it cleanly (apt is a plain
+        # userspace install). Try it; fall back to btrfs if the pool can't be made.
+        if setup_zfs_storage; then
+            return 0
+        fi
         echo -e "${BLUE}→ Falling back to btrfs...${NC}"
+    else
+        # ZFS is not installed and this distro's ZFS packages can break the
+        # initramfs on install (#666 — e.g. Arch/EndeavourOS, where installing
+        # zfs-utils triggers a dracut/mkinitcpio rebuild that fails on the missing
+        # zfs module). Use btrfs, which is in-kernel and safe to install.
+        echo -e "${BLUE}→ ZFS not installed; using btrfs (in-kernel, safe to install)...${NC}"
     fi
 
     if ! setup_btrfs_storage; then
@@ -538,8 +547,12 @@ setup_zfs_storage() {
     if command -v zfs &> /dev/null; then
         echo -e "${GREEN}✓ ZFS already installed${NC}"
     else
+        # Only reached on apt (setup_fast_storage gates the install): apt's
+        # zfsutils-linux is a clean userspace install. Non-apt distros never get
+        # here — their ZFS packages can break the initramfs (#666), so they use
+        # btrfs instead.
         echo -e "${BLUE}→ Installing ZFS...${NC}"
-        if ! pkg_install zfsutils-linux zfs-utils zfs zfs 2>/dev/null; then
+        if ! pkg_install zfsutils-linux 2>/dev/null; then
             echo -e "${YELLOW}⚠ ZFS installation failed (may not be available for your kernel)${NC}"
             return 1
         fi
