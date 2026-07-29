@@ -783,15 +783,20 @@ jobs:
   # selects btrfs instead. incus/sudo are intercepted by a recording shim — we
   # must never actually run `pacman -S zfs*`, and there is no incus daemon here.
   installer-storage-arch:
-    name: Installer Storage E2E (Arch, #666)
+    # Quoted because the unquoted ' #666)' would be parsed as a YAML comment,
+    # truncating the job name to 'Installer Storage E2E (Arch,'.
+    name: "Installer Storage E2E (Arch, #666)"
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     needs: build
     container:
-      image: archlinux:latest
+      # Pinned by digest (like every action in this file) so the test's
+      # environmental assumptions — real pacman, zfs absent, btrfs absent by
+      # default — can't drift out from under it on an upstream image rebuild.
+      image: archlinux:latest@sha256:3406a568f45d68f0bef35dc80b3eacec8bda59b0292b2e50d5932ba1667f20cf
     steps:
-      - name: Install git (for checkout) and coreutils
-        run: pacman -Sy --noconfirm --needed git grep sed coreutils
+      - name: Install git (needed by actions/checkout)
+        run: pacman -Sy --noconfirm --needed git
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 

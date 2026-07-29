@@ -70,13 +70,23 @@ export NONINTERACTIVE=1
 
 # Premise checks: this must be a real non-apt (pacman) box with ZFS genuinely
 # absent, otherwise the test proves nothing and must fail loudly rather than
-# silently pass.
+# silently pass. Every environmental assumption the assertions rely on is
+# asserted here so a drifting base image fails clearly, not misleadingly.
 command -v pacman >/dev/null 2>&1 || { echo "FAIL: pacman not found; not an Arch host"; exit 1; }
 if command -v apt-get >/dev/null 2>&1; then
     echo "FAIL: apt-get present; not a pure non-apt host"; exit 1
 fi
-if [ "$BTRFS_PRESENT" != "1" ] && command -v zfs >/dev/null 2>&1; then
+# ZFS must be absent in BOTH modes — the whole point is that setup_fast_storage
+# takes its non-ZFS branch; if zfs were present it would run ZFS setup and the
+# assertions below would fail with a confusing message instead of this clear one.
+if command -v zfs >/dev/null 2>&1; then
     echo "FAIL: zfs is installed on the runner; test premise broken"; exit 1
+fi
+# Default mode asserts the installer *reaches for* btrfs-progs, which only happens
+# when btrfs tooling is absent. If a future base image ships it, say so plainly
+# rather than failing later with 'did not reach for btrfs-progs'.
+if [ "$BTRFS_PRESENT" != "1" ] && command -v mkfs.btrfs >/dev/null 2>&1; then
+    echo "FAIL: btrfs tools already present; default mode needs them absent (use COI_E2E_BTRFS_PRESENT=1)"; exit 1
 fi
 
 # Source the REAL installer (minus its entrypoint and ERR trap) and drive the
