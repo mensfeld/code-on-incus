@@ -775,6 +775,34 @@ jobs:
         if: always()
         run: timeout 60 limactl stop -f coi 2>/dev/null || true
 
+  # End-to-end regression guard for #666 on a REAL non-apt distro. The stubbed Go
+  # tests (Unit lane) source install.sh with a hand-set PKG_MANAGER and mocked
+  # binaries; this runs the actual storage-selection logic inside a genuine Arch
+  # container where `pacman` and `command -v zfs` resolve for real, proving the
+  # installer never auto-installs ZFS on Arch (which breaks the initramfs) and
+  # selects btrfs instead. incus/sudo are intercepted by a recording shim — we
+  # must never actually run `pacman -S zfs*`, and there is no incus daemon here.
+  installer-storage-arch:
+    name: Installer Storage E2E (Arch, #666)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    needs: build
+    container:
+      image: archlinux:latest
+    steps:
+      - name: Install git (for checkout) and coreutils
+        run: pacman -Sy --noconfirm --needed git grep sed coreutils
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: ZFS gate — btrfs absent (installer must reach for btrfs-progs, never zfs)
+        run: bash tests/installer/zfs_gate_arch_e2e.sh
+
+      - name: ZFS gate — btrfs already present (reporter's case, no install at all)
+        env:
+          COI_E2E_BTRFS_PRESENT: "1"
+        run: bash tests/installer/zfs_gate_arch_e2e.sh
+
   ci-success:
     name: CI Success
     runs-on: ubuntu-24.04
@@ -785,6 +813,7 @@ jobs:
       - unit-tests
       - integration
       - lima-smoke
+      - installer-storage-arch
     steps:
       - name: Check all jobs passed
         if: |
