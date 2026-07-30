@@ -44,6 +44,39 @@ func TestCompareVersions(t *testing.T) {
 	}
 }
 
+// TestNormalizeVersion locks down that a version string is reduced to a bare
+// number regardless of how many leading 'v' characters a build injected.
+// Regression guard for the release-build bug where the Makefile's `?=` skipped
+// its `sed 's/^v//'`, leaving Version="v0.10.1" and rendering as "vv0.10.1".
+func TestNormalizeVersion(t *testing.T) {
+	tests := []struct {
+		in, want string
+	}{
+		{"0.10.1", "0.10.1"},
+		{"v0.10.1", "0.10.1"},
+		{"vv0.10.1", "0.10.1"}, // the doubled-prefix release artifact
+		{"dev", "dev"},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			if got := normalizeVersion(tt.in); got != tt.want {
+				t.Errorf("normalizeVersion(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestCompareVersionsToleratesVPrefix reproduces the user-visible failure: a
+// v-prefixed current version made compareVersions fall into string comparison
+// ("v0" > "0"), so `coi update` wrongly reported "already on the latest version"
+// for 0.10.1 when 0.11.0 was out. Normalized inputs must compare numerically.
+func TestCompareVersionsToleratesVPrefix(t *testing.T) {
+	if got := compareVersions(normalizeVersion("vv0.10.1"), normalizeVersion("v0.11.0")); got != -1 {
+		t.Errorf("compareVersions(vv0.10.1, v0.11.0) after normalize = %d, want -1 (update available)", got)
+	}
+}
+
 func TestVerifyChecksum(t *testing.T) {
 	data := []byte("hello world\n")
 	// SHA256 of "hello world\n"
