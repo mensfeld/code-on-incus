@@ -153,3 +153,94 @@ func TestInjectAutoContextFile_PreservesHostContent(t *testing.T) {
 		t.Errorf("expected exactly one COI sandbox block alongside preserved content, found %d", n)
 	}
 }
+
+// TestInjectAutoContextFile_HealsLegacyDuplicates covers the migration path for
+// #674: a file already bloated by the pre-fix code (many unmarked copies joined
+// by the old "# COI Sandbox Context" separator) must collapse to a single copy
+// once the fixed injection runs, and stay there.
+func TestInjectAutoContextFile_HealsLegacyDuplicates(t *testing.T) {
+	mgr := newFakeAutoCtxManager()
+	acf := fakeAutoCtxTool{}
+	homeDir := "/home/code"
+	destPath := "/home/code/.claude/CLAUDE.md"
+	logger := func(string) {}
+
+	content := tool.RenderContextFileContent(tool.ContextInfo{
+		WorkspacePath: "/workspace",
+		HomeDir:       homeDir,
+		NetworkMode:   "restricted",
+	})
+	// Simulate the old (pre-#674) accumulation: three unmarked copies joined by
+	// the legacy separator line.
+	oldSep := "\n\n# COI Sandbox Context\n\n"
+	mgr.files[destPath] = content + oldSep + content + oldSep + content
+
+	for i := 0; i < 3; i++ {
+		if err := injectAutoContextFile(mgr, acf, content, homeDir, logger); err != nil {
+			t.Fatalf("session %d: injectAutoContextFile failed: %v", i+1, err)
+		}
+	}
+
+	got := mgr.files[destPath]
+	if n := strings.Count(got, "# COI Sandbox Environment"); n != 1 {
+		t.Errorf("legacy duplicates must be healed to exactly one copy, found %d (%d chars)", n, len(got))
+	}
+}
+
+// TestInjectAutoContextFile_HealsLegacyPreservingHostContent verifies the legacy
+// cleanup keeps genuine user/host content that preceded the old coi copies.
+func TestInjectAutoContextFile_HealsLegacyPreservingHostContent(t *testing.T) {
+	mgr := newFakeAutoCtxManager()
+	acf := fakeAutoCtxTool{}
+	homeDir := "/home/code"
+	destPath := "/home/code/.claude/CLAUDE.md"
+	logger := func(string) {}
+
+	content := tool.RenderContextFileContent(tool.ContextInfo{
+		WorkspacePath: "/workspace",
+		HomeDir:       homeDir,
+	})
+	const userMarker = "MY-PROJECT-RULES-KEEP-ME"
+	host := "# My project rules\n\n" + userMarker + "\n"
+	mgr.files[destPath] = host + "\n\n# COI Sandbox Context\n\n" + content + "\n\n# COI Sandbox Context\n\n" + content
+
+	if err := injectAutoContextFile(mgr, acf, content, homeDir, logger); err != nil {
+		t.Fatalf("injectAutoContextFile failed: %v", err)
+	}
+
+	got := mgr.files[destPath]
+	if n := strings.Count(got, userMarker); n != 1 {
+		t.Errorf("host content must be preserved exactly once, found %d occurrences of %q", n, userMarker)
+	}
+	if n := strings.Count(got, "# COI Sandbox Environment"); n != 1 {
+		t.Errorf("legacy coi copies must be healed to one block, found %d", n)
+	}
+}
+
+// TestInjectAutoContextFile_ContentContainingMarkerStaysIdempotent covers finding
+// #1: when the injected content (e.g. a user-provided context_file) merely
+// mentions the end-marker text inline — as a substring, not a standalone line —
+// line-anchored matching must not treat it as a delimiter, so the block stays a
+// single copy across sessions rather than being mis-parsed and duplicated.
+func TestInjectAutoContextFile_ContentContainingMarkerStaysIdempotent(t *testing.T) {
+	mgr := newFakeAutoCtxManager()
+	acf := fakeAutoCtxTool{}
+	homeDir := "/home/code"
+	destPath := "/home/code/.claude/CLAUDE.md"
+	logger := func(string) {}
+
+	const sentinel = "CUSTOM-CONTEXT-SENTINEL"
+	content := "# COI Sandbox Environment\n" + sentinel +
+		"\nsee the " + autoCtxEndMarker + " marker inline\n"
+
+	for i := 0; i < 3; i++ {
+		if err := injectAutoContextFile(mgr, acf, content, homeDir, logger); err != nil {
+			t.Fatalf("session %d: injectAutoContextFile failed: %v", i+1, err)
+		}
+	}
+
+	got := mgr.files[destPath]
+	if n := strings.Count(got, sentinel); n != 1 {
+		t.Errorf("content mentioning the end marker inline must remain a single block, found %d copies (%d chars)", n, len(got))
+	}
+}
