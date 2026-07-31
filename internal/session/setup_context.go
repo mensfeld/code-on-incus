@@ -61,10 +61,42 @@ func resolveContextContent(info tool.ContextInfo, customPath string, logger func
 	return tool.RenderContextFileContent(info)
 }
 
+// Markers delimiting the coi-managed sandbox context block inside the tool's
+// auto-load file. The block is rewritten (not appended) every session, so the
+// file never accumulates duplicate copies (#674). Anything outside the markers
+// (e.g. a CLAUDE.md copied from the host) is preserved.
+const (
+	autoCtxBeginMarker = "# BEGIN COI Sandbox Context (managed by coi — do not edit this block)"
+	autoCtxEndMarker   = "# END COI Sandbox Context"
+)
+
+// stripManagedAutoContext removes a previously coi-written managed block (from
+// autoCtxBeginMarker through autoCtxEndMarker, inclusive) from s, so a fresh
+// block can replace it instead of stacking on top of it. Content outside the
+// block is returned untouched. If the begin marker is present but the end marker
+// is missing (a truncated/hand-mangled block), everything from the begin marker
+// on is dropped rather than left half-parsed.
+func stripManagedAutoContext(s string) string {
+	begin := strings.Index(s, autoCtxBeginMarker)
+	if begin == -1 {
+		return s
+	}
+	rest := s[begin+len(autoCtxBeginMarker):]
+	endRel := strings.Index(rest, autoCtxEndMarker)
+	if endRel == -1 {
+		return s[:begin]
+	}
+	end := begin + len(autoCtxBeginMarker) + endRel + len(autoCtxEndMarker)
+	return s[:begin] + s[end:]
+}
+
 // injectAutoContextFile writes sandbox context into the tool's native auto-load
-// file (e.g., ~/.claude/CLAUDE.md). If the file already exists (e.g., copied from
-// host), the sandbox context is appended with a separator. Otherwise, the file is
-// created with just the sandbox context.
+// file (e.g., ~/.claude/CLAUDE.md) as a single coi-managed block delimited by
+// autoCtxBeginMarker/autoCtxEndMarker. If the file already exists (e.g. copied
+// from host, or left over from a previous session on a persistent container), any
+// prior managed block is stripped and a fresh one is written in its place, so the
+// file does not grow a new copy every session (#674). Non-managed content in the
+// file is preserved.
 func injectAutoContextFile(mgr container.ContainerManager, acf tool.ToolWithAutoContextFile, contextContent, homeDir string, logger func(string)) error {
 	relPath := acf.AutoContextFile()
 	destPath := filepath.Join(homeDir, relPath)
@@ -76,43 +108,38 @@ func injectAutoContextFile(mgr container.ContainerManager, acf tool.ToolWithAuto
 		return fmt.Errorf("failed to create directory for %s: %w", relPath, err)
 	}
 
-	separator := "\n\n# COI Sandbox Context\n\n"
+	managedBlock := autoCtxBeginMarker + "\n" + contextContent + "\n" + autoCtxEndMarker + "\n"
 
-	// Check if the file already exists in the container (e.g., host's CLAUDE.md was copied)
+	// Check if the file already exists in the container (e.g., host's CLAUDE.md was
+	// copied, or the container is persistent and a prior session already wrote one).
 	checkCmd := fmt.Sprintf("test -f %s && echo exists || echo missing", destPath)
 	checkResult, err := mgr.ExecCommand(checkCmd, container.ExecCommandOptions{Capture: true})
 
+	var newContent string
 	if err == nil && strings.TrimSpace(checkResult) == "exists" {
-		// File exists — append sandbox context with separator by writing to a temp
-		// file and using cat >> inside the container
-		logger(fmt.Sprintf("Appending sandbox context to existing %s", relPath))
-		appendContent := separator + contextContent
-		tmpFile, tmpErr := os.CreateTemp("", "coi-autocontext-*")
-		if tmpErr != nil {
-			return fmt.Errorf("failed to create temp file for append: %w", tmpErr)
+		// Read the current file, drop any prior managed block, and re-attach a fresh
+		// one. This keeps exactly one always-current copy while preserving any
+		// user/host content, instead of appending a new copy every session (#674).
+		existing, readErr := mgr.ExecCommand(fmt.Sprintf("cat %s", destPath), container.ExecCommandOptions{Capture: true})
+		if readErr != nil {
+			return fmt.Errorf("failed to read %s: %w", relPath, readErr)
 		}
-		tmpPath := tmpFile.Name()
-		defer os.Remove(tmpPath)
-		if _, tmpErr = tmpFile.WriteString(appendContent); tmpErr != nil {
-			tmpFile.Close()
-			return fmt.Errorf("failed to write temp file for append: %w", tmpErr)
-		}
-		tmpFile.Close()
-		// Push temp file to a staging path in the container, then cat >> to target
-		stagingPath := destPath + ".coi-append"
-		if pushErr := mgr.PushFile(tmpPath, stagingPath); pushErr != nil {
-			return fmt.Errorf("failed to push append content to %s: %w", relPath, pushErr)
-		}
-		catCmd := fmt.Sprintf("cat %s >> %s && rm -f %s", stagingPath, destPath, stagingPath)
-		if _, catErr := mgr.ExecCommand(catCmd, container.ExecCommandOptions{Capture: true}); catErr != nil {
-			return fmt.Errorf("failed to append to %s: %w", relPath, catErr)
+		preserved := strings.TrimRight(stripManagedAutoContext(existing), "\n")
+		if preserved == "" {
+			logger(fmt.Sprintf("Refreshing sandbox context in %s", relPath))
+			newContent = managedBlock
+		} else {
+			logger(fmt.Sprintf("Refreshing sandbox context in %s (preserving existing content)", relPath))
+			newContent = preserved + "\n\n" + managedBlock
 		}
 	} else {
-		// File doesn't exist — create it with sandbox context
 		logger(fmt.Sprintf("Creating %s with sandbox context", relPath))
-		if err := mgr.CreateFile(destPath, contextContent); err != nil {
-			return fmt.Errorf("failed to create %s: %w", relPath, err)
-		}
+		newContent = managedBlock
+	}
+
+	// Overwrite the file with the reconciled content (single managed block).
+	if err := mgr.CreateFile(destPath, newContent); err != nil {
+		return fmt.Errorf("failed to write %s: %w", relPath, err)
 	}
 
 	// Fix ownership if running as non-root user

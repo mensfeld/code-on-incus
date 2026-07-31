@@ -119,3 +119,37 @@ func TestInjectAutoContextFile_DoesNotAccumulateAcrossSessions(t *testing.T) {
 			sessions, copies, len(claudeMD))
 	}
 }
+
+// TestInjectAutoContextFile_PreservesHostContent verifies that when the tool's
+// auto-context file already contains user/host content (e.g. a CLAUDE.md copied
+// from the host), injecting the sandbox context preserves that content and still
+// keeps exactly one managed COI block across repeated sessions.
+func TestInjectAutoContextFile_PreservesHostContent(t *testing.T) {
+	mgr := newFakeAutoCtxManager()
+	acf := fakeAutoCtxTool{}
+	homeDir := "/home/code"
+	destPath := "/home/code/.claude/CLAUDE.md"
+	logger := func(string) {}
+
+	const userMarker = "MY-PROJECT-INSTRUCTIONS-DO-NOT-DROP"
+	mgr.files[destPath] = "# My project rules\n\n" + userMarker + "\n"
+
+	content := tool.RenderContextFileContent(tool.ContextInfo{
+		WorkspacePath: "/workspace",
+		HomeDir:       homeDir,
+	})
+
+	for i := 0; i < 3; i++ {
+		if err := injectAutoContextFile(mgr, acf, content, homeDir, logger); err != nil {
+			t.Fatalf("session %d: injectAutoContextFile failed: %v", i+1, err)
+		}
+	}
+
+	got := mgr.files[destPath]
+	if n := strings.Count(got, userMarker); n != 1 {
+		t.Errorf("host/user content must be preserved exactly once, found %d occurrences of %q", n, userMarker)
+	}
+	if n := strings.Count(got, "# COI Sandbox Environment"); n != 1 {
+		t.Errorf("expected exactly one COI sandbox block alongside preserved content, found %d", n)
+	}
+}
