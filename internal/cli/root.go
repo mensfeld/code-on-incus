@@ -15,6 +15,11 @@ import (
 // Version is the current version of coi (injected via ldflags at build time)
 var Version = "dev"
 
+// rootVersionTemplate is the text/template cobra renders for `coi --version`.
+// It mirrors the first line the `coi version` subcommand prints so both surfaces
+// agree; {{.Version}} is rootCmd.Version, which is normalizeVersion(Version).
+const rootVersionTemplate = "code-on-incus (coi) v{{.Version}}\n"
+
 // App holds the shared CLI state that is populated from persistent flags and
 // config loading in PersistentPreRunE. Grouping this in a struct rather than
 // package-level vars makes it easier to construct an isolated instance in
@@ -53,7 +58,7 @@ Examples:
   coi image list               # List available images
   coi list                     # List active sessions
 `,
-	Version: Version,
+	Version: normalizeVersion(Version),
 	// When called without subcommand, run shell command
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Execute shell command with the same args
@@ -204,6 +209,12 @@ func Execute() error {
 }
 
 func init() {
+	// Keep `coi --version` (cobra's version flag) consistent with the `coi
+	// version` subcommand: same "code-on-incus (coi) v<semver>" line, and the
+	// version already normalized (rootCmd.Version above) so a stray/doubled 'v'
+	// from a mis-tagged build can't leak here either.
+	rootCmd.SetVersionTemplate(rootVersionTemplate)
+
 	// Global flags available to all commands.
 	// NOTE: --image and --persistent were removed on purpose — anything
 	// config-shaped goes via config/profiles ([container] image / persistent).
