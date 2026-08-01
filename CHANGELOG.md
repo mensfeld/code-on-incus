@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 0.11.1 (Unreleased)
+
+### Fixed
+
+- **The sandbox context block no longer grows `~/.claude/CLAUDE.md` on every session (#674)** — coi injects its sandbox context into the tool's native auto-context file (Claude's `~/.claude/CLAUDE.md`) at session setup. When the file already existed it **appended** the block without checking for its own prior copy, so on a persistent container reused across sessions the block accumulated one copy per session — a reporter hit 16 identical copies (108k chars), past Claude Code's 40k-char limit. The block is now delimited by `# BEGIN COI Sandbox Context …` / `# END COI Sandbox Context` markers and the injection is **idempotent**: each session strips any prior managed block and writes a single fresh one, overwriting (regenerating) the dynamic block while preserving non-managed user/host content. Marker matching is line-anchored so the delimiters can't be spoofed by content that merely mentions them (e.g. a custom `context_file`). The same pass also **heals files already bloated** by the old code — old unmarked copies (identified by the coi-exclusive `# COI Sandbox Context` separator) are removed on the next session, collapsing an accumulated file back to a single block while keeping any real user content. Covered by a deterministic Go test and an end-to-end `shell-persistent` integration test that reproduces the growth across real sessions.
+
 ## 0.11.0 (2026-07-29)
 
 ### Breaking Changes
