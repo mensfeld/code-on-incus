@@ -1,6 +1,8 @@
 package container
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -64,5 +66,43 @@ func TestNetworkdConfigFilename_SortsBeforeNetplan(t *testing.T) {
 	// generates 10-netplan-*.network, so ours must sort strictly before "10".
 	if networkdConfigFilename >= "10" {
 		t.Errorf("networkd config filename %q must sort before netplan's 10-netplan-eth0.network", networkdConfigFilename)
+	}
+}
+
+// TestIsIdmapMountUnsupported guards detection of the guest-kernel idmapped-mount
+// failure that triggers the #678 shift→raw.idmap fallback. It must match the
+// Incus message (case-insensitively) and nothing unrelated.
+func TestIsIdmapMountUnsupported(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"exact incus message", errors.New(`Failed to setup device mount "workspace": idmapping abilities are required but aren't supported on system`), true},
+		{"wrapped", fmt.Errorf("failed to launch container: %w", errors.New("idmapping abilities are required but aren't supported on system")), true},
+		{"uppercase", errors.New("IDMAPPING ABILITIES ARE REQUIRED"), true},
+		{"unrelated start failure", errors.New("exit status 1: some other error"), false},
+		{"isolation failure", errors.New("security.idmap.isolated: not enough uid/gid available"), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isIdmapMountUnsupported(tc.err); got != tc.want {
+				t.Errorf("isIdmapMountUnsupported(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestWithDisableShiftHint verifies the #678 hint preserves the underlying error
+// (errors.Is via %w) and points the user at the disable_shift escape hatch.
+func TestWithDisableShiftHint(t *testing.T) {
+	base := errors.New("idmapping abilities are required but aren't supported on system")
+	wrapped := withDisableShiftHint(base)
+	if !errors.Is(wrapped, base) {
+		t.Error("withDisableShiftHint must wrap the original error (errors.Is)")
+	}
+	if !strings.Contains(wrapped.Error(), "disable_shift = true") {
+		t.Errorf("hint must mention the disable_shift workaround, got: %s", wrapped.Error())
 	}
 }
