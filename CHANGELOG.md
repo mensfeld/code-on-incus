@@ -1,6 +1,14 @@
 # CHANGELOG
 
-## 0.10.2 (Unreleased)
+## 0.11.1 (Unreleased)
+
+### Fixed
+
+- **Release binaries no longer show a doubled `v` and `coi update` no longer wrongly reports "already on the latest version" (#673, thanks @sklarsa)** — every downloaded release binary printed `code-on-incus (coi) vv0.11.0` and, worse, `coi update` claimed you were up to date even when a newer release existed. The release workflow feeds the raw git tag (`v0.11.0`) to `make build` via the environment, and the Makefile's `VERSION ?=` lets that env value win — so its own `sed 's/^v//'` never runs and the binary is built with a `v`-prefixed version. The display paths then prepend another `v` (→ `vv…`), and `compareVersions` splits on `.` so `"v0"` fails `strconv.Atoi` and falls back to string comparison where `"v0" > "0"`, making the current version look newer than the latest and suppressing the update. Fixed defensively: the release workflow strips the leading `v` before `make build`; a `normalizeVersion()` helper is applied wherever the version is read for display or comparison (`coi version` text + JSON, `coi update`'s current/latest, and cobra's `coi --version` flag, which now renders the same line as `coi version`); and the release "verify version" guard now compares the full version line exactly instead of a substring, so a stray or doubled `v` fails the build. (This is a recurrence, via the release-env path, of the older `git describe`-side double-`v` fixed in 0.8.x.)
+
+- **The sandbox context block no longer grows `~/.claude/CLAUDE.md` on every session (#674)** — coi injects its sandbox context into the tool's native auto-context file (Claude's `~/.claude/CLAUDE.md`) at session setup. When the file already existed it **appended** the block without checking for its own prior copy, so on a persistent container reused across sessions the block accumulated one copy per session — a reporter hit 16 identical copies (108k chars), past Claude Code's 40k-char limit. The block is now delimited by `# BEGIN COI Sandbox Context …` / `# END COI Sandbox Context` markers and the injection is **idempotent**: each session strips any prior managed block and writes a single fresh one, overwriting (regenerating) the dynamic block while preserving non-managed user/host content. Marker matching is line-anchored so the delimiters can't be spoofed by content that merely mentions them (e.g. a custom `context_file`). The same pass also **heals files already bloated** by the old code — old unmarked copies (identified by the coi-exclusive `# COI Sandbox Context` separator) are removed on the next session, collapsing an accumulated file back to a single block while keeping any real user content. Covered by a deterministic Go test and an end-to-end `shell-persistent` integration test that reproduces the growth across real sessions.
+
+## 0.11.0 (2026-07-29)
 
 ### Breaking Changes
 
