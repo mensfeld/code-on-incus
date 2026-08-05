@@ -148,7 +148,7 @@ func updateCoreCommand(cmd *cobra.Command, args []string) error {
 		return errors.New(packagedUpdateHint())
 	}
 
-	currentVersion := Version
+	currentVersion := normalizeVersion(Version)
 	isDev := currentVersion == "dev"
 
 	// A dev build cannot be version-compared. Unless the user is forcing the
@@ -180,7 +180,7 @@ func updateCoreCommand(cmd *cobra.Command, args []string) error {
 		latestTag = release.TagName
 	}
 
-	latestVersion := strings.TrimPrefix(latestTag, "v")
+	latestVersion := normalizeVersion(latestTag)
 
 	// Show version comparison
 	if isDev {
@@ -433,6 +433,15 @@ func verifyChecksum(data []byte, checksumFile []byte, binaryName string) error {
 	}
 
 	return fmt.Errorf("no checksum found for %s in checksums.txt", binaryName)
+}
+
+// normalizeVersion strips any leading "v" characters from a version string so
+// callers always work with a bare semver (e.g. "0.10.1"). It tolerates a
+// doubled prefix ("vv0.10.1") defensively: a release build once injected a
+// v-prefixed Version because the Makefile's `?=` skipped its `sed 's/^v//'`,
+// producing "vv…" in display and breaking compareVersions' numeric split.
+func normalizeVersion(v string) string {
+	return strings.TrimLeft(v, "v")
 }
 
 // compareVersions compares two semver strings (without "v" prefix)

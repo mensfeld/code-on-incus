@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -457,5 +458,462 @@ STUB
 	// Success messages should appear
 	if !strings.Contains(stdout, "ZFS storage pool created") {
 		t.Errorf("expected success message, got: %s", stdout)
+	}
+}
+
+// unameStub returns a bash snippet fragment that puts a `uname` stub on PATH
+// reporting the given kernel release for `uname -r` and delegating everything
+// else to the real binary. `tmpdir` must already be set and on PATH.
+func unameStub(release string) string {
+	return `
+		cat > "$tmpdir/uname" <<STUB
+#!/bin/bash
+if [[ "\$*" == *"-r"* ]]; then
+	echo "` + release + `"
+	exit 0
+fi
+exec /usr/bin/uname "\$@"
+STUB
+		chmod +x "$tmpdir/uname"
+	`
+}
+
+// is_orbstack keys off the kernel release, the same signal
+// internal/vmhost/vmhost.go uses. OrbStack's release string contains "orbstack".
+func TestInstallSh_IsOrbstack_DetectsKernelRelease(t *testing.T) {
+	script := installShPath(t)
+
+	cases := []struct {
+		name    string
+		release string
+		want    string
+	}{
+		{"orbstack kernel", "7.0.11-orbstack-00360-gc9bc4d96ac70", "ORBSTACK=yes"},
+		{"orbstack uppercase", "7.0.11-OrbStack-00360", "ORBSTACK=yes"},
+		{"stock ubuntu kernel", "6.8.0-51-generic", "ORBSTACK=no"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			snippet := `
+				tmpdir=$(mktemp -d)
+				trap "rm -rf $tmpdir" EXIT
+			` + unameStub(tc.release) + `
+				export PATH="$tmpdir:$PATH"
+				export NONINTERACTIVE=1
+				source <(sed '/^main "\$@"/d; /^trap error_handler ERR/d' "` + script + `")
+				if is_orbstack; then echo "ORBSTACK=yes"; else echo "ORBSTACK=no"; fi
+			`
+			stdout, _, exitCode := runBashSnippet(t, snippet, "NONINTERACTIVE=1")
+			if exitCode != 0 {
+				t.Fatalf("expected exit 0, got %d; stdout: %s", exitCode, stdout)
+			}
+			if !strings.Contains(stdout, tc.want) {
+				t.Errorf("expected %s for release %q, got: %s", tc.want, tc.release, strings.TrimSpace(stdout))
+			}
+		})
+	}
+}
+
+// storageStubs returns a bash snippet fragment stubbing incus/sudo/zfs/mkfs.btrfs
+// for storage setup tests. zfsCreateExit controls whether the ZFS pool creation
+// succeeds; btrfs pool creation always succeeds. `tmpdir` must already be set.
+func storageStubs(zfsCreateExit int) string {
+	return `
+		cat > "$tmpdir/incus" <<'STUB'
+#!/bin/bash
+if [[ "$*" == *"storage list"* ]]; then
+	# No pools exist yet
+	echo ""
+	exit 0
+fi
+exit 0
+STUB
+		chmod +x "$tmpdir/incus"
+
+		cat > "$tmpdir/sudo" <<STUB
+#!/bin/bash
+if [[ "\$*" == *"storage create"* && "\$*" == *" zfs "* ]]; then
+	echo "Error: Failed to create storage pool: modprobe: FATAL: Module zfs not found"
+	exit ` + strconv.Itoa(zfsCreateExit) + `
+fi
+if [[ "\$*" == *"storage create"* ]]; then
+	exit 0
+fi
+exec /usr/bin/sudo "\$@"
+STUB
+		chmod +x "$tmpdir/sudo"
+
+		# Userspace tools present — mirrors the OrbStack case, where zfsutils-linux
+		# installs fine but the kernel module does not exist.
+		printf '#!/bin/bash\nexit 0\n' > "$tmpdir/zfs"
+		printf '#!/bin/bash\nexit 0\n' > "$tmpdir/mkfs.btrfs"
+		chmod +x "$tmpdir/zfs" "$tmpdir/mkfs.btrfs"
+	`
+}
+
+// On OrbStack, ZFS can never work (no kernel headers or module tree), so
+// setup_fast_storage should skip it entirely with an explanatory message and set
+// up btrfs instead.
+func TestInstallSh_SetupFastStorage_SkipsZfsOnOrbStack(t *testing.T) {
+	script := installShPath(t)
+
+	snippet := `
+		tmpdir=$(mktemp -d)
+		trap "rm -rf $tmpdir" EXIT
+	` + unameStub("7.0.11-orbstack-00360-gc9bc4d96ac70") + storageStubs(0) + `
+		export PATH="$tmpdir:$PATH"
+		export NONINTERACTIVE=1
+		source <(sed '/^main "\$@"/d; /^trap error_handler ERR/d' "` + script + `")
+		setup_fast_storage
+		echo "COMPLETED"
+	`
+	stdout, _, exitCode := runBashSnippet(t, snippet, "NONINTERACTIVE=1")
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0, got %d; stdout: %s", exitCode, stdout)
+	}
+	if !strings.Contains(stdout, "COMPLETED") {
+		t.Errorf("function did not complete; stdout: %s", stdout)
+	}
+	// ZFS should not even be attempted
+	if strings.Contains(stdout, "Setting up fast storage (ZFS)") {
+		t.Errorf("ZFS setup should be skipped on OrbStack, got: %s", stdout)
+	}
+	if !strings.Contains(stdout, "not supported on OrbStack") {
+		t.Errorf("expected an explanation of why ZFS was skipped, got: %s", stdout)
+	}
+	if !strings.Contains(stdout, "btrfs storage pool created") {
+		t.Errorf("expected btrfs pool to be created, got: %s", stdout)
+	}
+	if !strings.Contains(stdout, "Default profile configured for btrfs") {
+		t.Errorf("expected default profile to point at the btrfs pool, got: %s", stdout)
+	}
+}
+
+// On a non-OrbStack host where ZFS is tried but the pool cannot be created
+// (module missing, unsupported kernel), setup_fast_storage should fall back to
+// btrfs rather than leaving containers on `dir`.
+func TestInstallSh_SetupFastStorage_FallsBackToBtrfsWhenZfsFails(t *testing.T) {
+	script := installShPath(t)
+
+	snippet := `
+		tmpdir=$(mktemp -d)
+		trap "rm -rf $tmpdir" EXIT
+	` + unameStub("6.8.0-51-generic") + storageStubs(1) + `
+		export PATH="$tmpdir:$PATH"
+		export NONINTERACTIVE=1
+		source <(sed '/^main "\$@"/d; /^trap error_handler ERR/d' "` + script + `")
+		setup_fast_storage
+		echo "COMPLETED"
+	`
+	stdout, _, exitCode := runBashSnippet(t, snippet, "NONINTERACTIVE=1")
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0, got %d; stdout: %s", exitCode, stdout)
+	}
+	if !strings.Contains(stdout, "COMPLETED") {
+		t.Errorf("function did not complete; stdout: %s", stdout)
+	}
+	// ZFS is attempted first on a non-OrbStack host
+	if !strings.Contains(stdout, "Setting up fast storage (ZFS)") {
+		t.Errorf("expected ZFS to be attempted first, got: %s", stdout)
+	}
+	// The underlying reason should be surfaced, not swallowed
+	if !strings.Contains(stdout, "Module zfs not found") {
+		t.Errorf("expected the ZFS failure reason to be shown, got: %s", stdout)
+	}
+	if !strings.Contains(stdout, "Falling back to btrfs") {
+		t.Errorf("expected a btrfs fallback message, got: %s", stdout)
+	}
+	if !strings.Contains(stdout, "btrfs storage pool created") {
+		t.Errorf("expected btrfs pool to be created, got: %s", stdout)
+	}
+	// Containers should not be left on the slow default pool
+	if strings.Contains(stdout, "Containers will use default storage") {
+		t.Errorf("btrfs succeeded, so the default-storage warning should not appear: %s", stdout)
+	}
+}
+
+// An existing btrfs-pool should be left alone rather than re-created.
+func TestInstallSh_SetupBtrfsStorage_SkipsWhenPoolExists(t *testing.T) {
+	script := installShPath(t)
+
+	snippet := `
+		tmpdir=$(mktemp -d)
+		trap "rm -rf $tmpdir" EXIT
+
+		cat > "$tmpdir/incus" <<'STUB'
+#!/bin/bash
+if [[ "$*" == *"storage list"* ]]; then
+	echo "btrfs-pool,btrfs,,,1,CREATED"
+	exit 0
+fi
+exit 0
+STUB
+		chmod +x "$tmpdir/incus"
+
+		cat > "$tmpdir/sudo" <<'STUB'
+#!/bin/bash
+if [[ "$*" == *"storage create"* ]]; then
+	echo "SHOULD_NOT_CREATE"
+	exit 0
+fi
+exec /usr/bin/sudo "$@"
+STUB
+		chmod +x "$tmpdir/sudo"
+
+		printf '#!/bin/bash\nexit 0\n' > "$tmpdir/mkfs.btrfs"
+		chmod +x "$tmpdir/mkfs.btrfs"
+
+		export PATH="$tmpdir:$PATH"
+		export NONINTERACTIVE=1
+		source <(sed '/^main "\$@"/d; /^trap error_handler ERR/d' "` + script + `")
+		setup_btrfs_storage
+		echo "COMPLETED"
+	`
+	stdout, _, exitCode := runBashSnippet(t, snippet, "NONINTERACTIVE=1")
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0, got %d; stdout: %s", exitCode, stdout)
+	}
+	if !strings.Contains(stdout, "COMPLETED") {
+		t.Errorf("function did not complete; stdout: %s", stdout)
+	}
+	if strings.Contains(stdout, "SHOULD_NOT_CREATE") {
+		t.Errorf("existing btrfs-pool should not be re-created, got: %s", stdout)
+	}
+	if !strings.Contains(stdout, "btrfs storage pool already configured") {
+		t.Errorf("expected already-configured message, got: %s", stdout)
+	}
+}
+
+// restart_incus must wait for the daemon to accept connections again (via
+// `incus admin waitready`) AFTER restarting the service, so callers that issue
+// `incus` commands right after don't race the API socket coming back up.
+func TestInstallSh_RestartIncus_WaitsReadyAfterRestart(t *testing.T) {
+	script := installShPath(t)
+
+	snippet := `
+		tmpdir=$(mktemp -d)
+		trap "rm -rf $tmpdir" EXIT
+
+		cat > "$tmpdir/sudo" <<'STUB'
+#!/bin/bash
+if [[ "$*" == *"systemctl restart incus"* ]]; then
+	echo "STEP:RESTART"
+	exit 0
+fi
+exec /usr/bin/sudo "$@"
+STUB
+		chmod +x "$tmpdir/sudo"
+
+		cat > "$tmpdir/incus" <<'STUB'
+#!/bin/bash
+if [[ "$*" == *"admin waitready"* ]]; then
+	echo "STEP:WAITREADY"
+	exit 0
+fi
+exit 0
+STUB
+		chmod +x "$tmpdir/incus"
+
+		export PATH="$tmpdir:$PATH"
+		export NONINTERACTIVE=1
+		source <(sed '/^main "\$@"/d; /^trap error_handler ERR/d' "` + script + `")
+		restart_incus
+		echo "COMPLETED"
+	`
+	stdout, _, exitCode := runBashSnippet(t, snippet, "NONINTERACTIVE=1")
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0, got %d; stdout: %s", exitCode, stdout)
+	}
+	restart := strings.Index(stdout, "STEP:RESTART")
+	waitready := strings.Index(stdout, "STEP:WAITREADY")
+	if restart < 0 {
+		t.Errorf("expected the service to be restarted, got: %s", stdout)
+	}
+	if waitready < 0 {
+		t.Errorf("expected `incus admin waitready` to run after restart, got: %s", stdout)
+	}
+	if restart >= 0 && waitready >= 0 && waitready < restart {
+		t.Errorf("waitready must run AFTER the restart; got restart@%d waitready@%d\n%s",
+			restart, waitready, stdout)
+	}
+}
+
+// On the btrfs fresh-install path, Incus is restarted to pick up the newly
+// installed driver; the daemon must be waited on before the pool is created, or
+// the create races the socket. Forces the install branch by excluding
+// /usr/sbin (where mkfs.btrfs lives) from PATH, then asserts the ordering
+// restart -> waitready -> create.
+func TestInstallSh_SetupBtrfsStorage_WaitsReadyBeforeCreatingPool(t *testing.T) {
+	script := installShPath(t)
+
+	snippet := `
+		tmpdir=$(mktemp -d)
+		trap "rm -rf $tmpdir" EXIT
+
+		# systemctl is-active --quiet incus.service -> active, so the restart runs.
+		printf '#!/bin/bash\nexit 0\n' > "$tmpdir/systemctl"
+		chmod +x "$tmpdir/systemctl"
+
+		cat > "$tmpdir/sudo" <<'STUB'
+#!/bin/bash
+if [[ "$*" == *"apt-get install"* ]]; then exit 0; fi
+if [[ "$*" == *"systemctl restart incus"* ]]; then echo "STEP:RESTART"; exit 0; fi
+if [[ "$*" == *"storage create"* ]]; then exit 0; fi
+exec /usr/bin/sudo "$@"
+STUB
+		chmod +x "$tmpdir/sudo"
+
+		cat > "$tmpdir/incus" <<'STUB'
+#!/bin/bash
+if [[ "$*" == *"admin waitready"* ]]; then echo "STEP:WAITREADY"; exit 0; fi
+if [[ "$*" == *"storage list"* ]]; then echo ""; exit 0; fi
+exit 0
+STUB
+		chmod +x "$tmpdir/incus"
+
+		# No mkfs.btrfs stub, and /usr/sbin dropped from PATH, so command -v fails
+		# and the install+restart branch runs. Keep coreutils (/usr/bin,/bin).
+		export PATH="$tmpdir:/usr/bin:/bin"
+		export PKG_MANAGER=apt
+		export NONINTERACTIVE=1
+		source <(sed '/^main "\$@"/d; /^trap error_handler ERR/d' "` + script + `")
+		setup_btrfs_storage
+		echo "COMPLETED"
+	`
+	stdout, _, exitCode := runBashSnippet(t, snippet, "NONINTERACTIVE=1")
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0, got %d; stdout: %s", exitCode, stdout)
+	}
+	if !strings.Contains(stdout, "COMPLETED") {
+		t.Errorf("function did not complete; stdout: %s", stdout)
+	}
+	// The pool-create command's output is captured into a variable, so use the
+	// message printed immediately before it as the "create attempted" marker.
+	restart := strings.Index(stdout, "STEP:RESTART")
+	waitready := strings.Index(stdout, "STEP:WAITREADY")
+	create := strings.Index(stdout, "Creating btrfs storage pool")
+	if restart < 0 || waitready < 0 || create < 0 {
+		t.Fatalf("expected restart, waitready and pool-create to all happen; "+
+			"got restart@%d waitready@%d create@%d\n%s", restart, waitready, create, stdout)
+	}
+	if restart >= waitready || waitready >= create {
+		t.Errorf("expected order restart < waitready < create; "+
+			"got restart@%d waitready@%d create@%d\n%s", restart, waitready, create, stdout)
+	}
+	if !strings.Contains(stdout, "btrfs storage pool created") {
+		t.Errorf("expected the btrfs pool to be created; stdout: %s", stdout)
+	}
+}
+
+// zfsAbsentStubs installs the binary stubs shared by the setup_fast_storage
+// tests where ZFS must appear ABSENT: an `incus` stub (no pools exist yet), a
+// `sudo` stub that flags any ZFS package install (so a test can assert it never
+// happens) while letting `storage create` and the apt-get install succeed, and a
+// present `mkfs.btrfs` so the btrfs path can complete. There is deliberately no
+// `zfs` stub — callers must also restrict PATH to `"$tmpdir:/usr/bin:/bin"` so a
+// real /usr/sbin/zfs on the runner is not picked up.
+func zfsAbsentStubs() string {
+	return `
+		cat > "$tmpdir/incus" <<'STUB'
+#!/bin/bash
+if [[ "$*" == *"storage list"* ]]; then echo ""; exit 0; fi
+exit 0
+STUB
+		chmod +x "$tmpdir/incus"
+
+		cat > "$tmpdir/sudo" <<'STUB'
+#!/bin/bash
+# Flag any package install that mentions zfs so a test can assert it never runs
+# (and stand in for a successful apt-get install of zfsutils-linux on apt).
+if [[ "$*" == *"install"* && "$*" == *"zfs"* ]] || [[ "$*" == *"pacman"* && "$*" == *"zfs"* ]]; then
+	echo "ZFS_INSTALL_ATTEMPTED"
+	exit 0
+fi
+if [[ "$*" == *"storage create"* ]]; then exit 0; fi
+exec /usr/bin/sudo "$@"
+STUB
+		chmod +x "$tmpdir/sudo"
+
+		printf '#!/bin/bash\nexit 0\n' > "$tmpdir/mkfs.btrfs"
+		chmod +x "$tmpdir/mkfs.btrfs"
+	`
+}
+
+// #666: on a non-apt distro (e.g. Arch/EndeavourOS) where ZFS is not installed,
+// the installer must NOT auto-install it — pulling in the ZFS packages there can
+// trigger a dracut/initramfs rebuild that breaks the system. It must use btrfs
+// (in-kernel, safe) instead. Reproduces the reporter's case (btrfs available).
+func TestInstallSh_SetupFastStorage_SkipsZfsInstallOnNonApt(t *testing.T) {
+	script := installShPath(t)
+
+	snippet := `
+		tmpdir=$(mktemp -d)
+		trap "rm -rf $tmpdir" EXIT
+	` + unameStub("6.12.4-arch1-1") + zfsAbsentStubs() + `
+		# ZFS absent: no zfs stub, and /usr/sbin (where a real zfs would live) is
+		# dropped from PATH. btrfs tools present (mkfs.btrfs stub).
+		export PATH="$tmpdir:/usr/bin:/bin"
+		export PKG_MANAGER=pacman
+		export NONINTERACTIVE=1
+		source <(sed '/^main "\$@"/d; /^trap error_handler ERR/d' "` + script + `")
+		setup_fast_storage
+		echo "COMPLETED"
+	`
+	stdout, _, exitCode := runBashSnippet(t, snippet, "NONINTERACTIVE=1")
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0, got %d; stdout: %s", exitCode, stdout)
+	}
+	if !strings.Contains(stdout, "COMPLETED") {
+		t.Errorf("function did not complete; stdout: %s", stdout)
+	}
+	// The regression guard: ZFS must never be installed on a non-apt distro.
+	if strings.Contains(stdout, "ZFS_INSTALL_ATTEMPTED") {
+		t.Errorf("ZFS must not be auto-installed on a non-apt distro (#666), got: %s", stdout)
+	}
+	if strings.Contains(stdout, "Installing ZFS") {
+		t.Errorf("ZFS should not be installed, got: %s", stdout)
+	}
+	if strings.Contains(stdout, "Setting up fast storage (ZFS)") {
+		t.Errorf("ZFS setup should be skipped when absent on a non-apt distro, got: %s", stdout)
+	}
+	// btrfs is used instead.
+	if !strings.Contains(stdout, "using btrfs") {
+		t.Errorf("expected the 'using btrfs' message, got: %s", stdout)
+	}
+	if !strings.Contains(stdout, "btrfs storage pool created") {
+		t.Errorf("expected the btrfs pool to be created, got: %s", stdout)
+	}
+}
+
+// On apt (Debian/Ubuntu) the ZFS install is a clean userspace op, so it is still
+// auto-installed and used — the fast path is preserved where it's safe.
+func TestInstallSh_SetupFastStorage_InstallsZfsOnApt(t *testing.T) {
+	script := installShPath(t)
+
+	snippet := `
+		tmpdir=$(mktemp -d)
+		trap "rm -rf $tmpdir" EXIT
+	` + unameStub("6.8.0-51-generic") + zfsAbsentStubs() + `
+		# ZFS absent so the (apt-only) install path runs; /usr/sbin dropped.
+		export PATH="$tmpdir:/usr/bin:/bin"
+		export PKG_MANAGER=apt
+		export NONINTERACTIVE=1
+		source <(sed '/^main "\$@"/d; /^trap error_handler ERR/d' "` + script + `")
+		setup_fast_storage
+		echo "COMPLETED"
+	`
+	stdout, _, exitCode := runBashSnippet(t, snippet, "NONINTERACTIVE=1")
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0, got %d; stdout: %s", exitCode, stdout)
+	}
+	if !strings.Contains(stdout, "COMPLETED") {
+		t.Errorf("function did not complete; stdout: %s", stdout)
+	}
+	if !strings.Contains(stdout, "Setting up fast storage (ZFS)") {
+		t.Errorf("ZFS should be attempted on apt, got: %s", stdout)
+	}
+	if !strings.Contains(stdout, "ZFS storage pool created") {
+		t.Errorf("ZFS pool should be created on apt, got: %s", stdout)
 	}
 }

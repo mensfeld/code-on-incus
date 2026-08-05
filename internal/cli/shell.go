@@ -147,6 +147,14 @@ func getConfiguredTool(cfg *config.Config) (tool.Tool, error) {
 		}
 	}
 
+	// Set model if the tool supports it (Claude-specific). Delivered as
+	// ANTHROPIC_MODEL; when unset the tool uses its own default.
+	if twm, ok := t.(tool.ToolWithModel); ok {
+		if model := cfg.Tool.Claude.Model; model != "" {
+			twm.SetModel(model)
+		}
+	}
+
 	// Set permission mode if the tool supports it
 	if twpm, ok := t.(tool.ToolWithPermissionMode); ok {
 		if cfg.Tool.PermissionMode != "" {

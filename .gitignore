@@ -63,3 +63,12 @@ test-config.toml
 
 # Go build cache/GOPATH used by debian/rules
 /_build/
+
+# Documentation lives in the GitHub wiki, not in-repo. This guards against
+# accidentally committing local docs or process artifacts (e.g. plan/spec
+# scratch from tooling) under docs/.
+/docs/
+
+# Analysis / planning scratch generated at repo root by tooling (kept local,
+# never committed) — e.g. *_IMPROVEMENTS.md coverage write-ups.
+/*_IMPROVEMENTS.md

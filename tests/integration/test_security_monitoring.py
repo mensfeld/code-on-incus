@@ -2847,6 +2847,176 @@ class TestAuditLogValidation:
         proc.terminate()
         cleanup_container(container_name, coi_binary)
 
+    def test_threat_deduplication(self, test_workspace, coi_binary):
+        """An identical threat repeated within the 30s window is deduplicated, and
+        re-alerts once the window passes.
+
+        Responder.Handle dedups by category:title:evidence within a 30s window
+        (internal/monitor/responder.go), emitting action="deduplicated" for the
+        repeat instead of re-running the response. AuthLog evidence is deterministic
+        (auth:<logfile>:<pattern>), so re-appending the same sudoers line yields the
+        same key — the property this exercises. (This is the test the audit-log
+        action allowlists elsewhere in this file reference by name.)
+        """
+        config_path = Path.home() / ".coi" / "config.toml"
+        backup = config_path.read_text() if config_path.exists() else None
+
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(
+            """
+[network]
+mode = "open"
+
+[monitoring]
+enabled = true
+auto_pause_on_high = false
+auto_kill_on_critical = false
+poll_interval_sec = 1
+file_read_threshold_mb = 500
+file_read_rate_mb_per_sec = 1000
+process_count_threshold = 9999
+process_spawn_rate_threshold = 9999
+"""
+        )
+
+        container_name = (
+            get_container_name_from_workspace(str(test_workspace)).rsplit("-", 1)[0] + "-64"
+        )
+        proc = subprocess.Popen(
+            [coi_binary, "shell", "--workspace", str(test_workspace), "--slot", "64", "--debug"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        def append_sudoers_line():
+            subprocess.run(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "bash",
+                    "-c",
+                    "mkdir -p /var/log && "
+                    "echo 'Jun  5 12:00:01 coi sudo: hacker is not in the sudoers file. "
+                    "This incident will be reported.' >> /var/log/auth.log",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+
+        def high_auth(events):
+            return [e for e in events if e.get("category") == "auth" and e.get("level") == "high"]
+
+        def count_alerted(events):
+            return len([e for e in high_auth(events) if e.get("action") == "alerted"])
+
+        try:
+            assert wait_for_container_running(container_name), (
+                f"Container {container_name} did not start"
+            )
+            # Pre-create auth.log during the settle window so the log watcher
+            # registers a DIRECT inotify file watch on it. Otherwise auth.log does
+            # not exist at daemon start and detection rides the 3s backstop poll (a
+            # Go ticker), which can be starved for the whole Phase 2 window on a
+            # heavily overloaded runner — the re-alert then never lands and the test
+            # fails. With a direct watch each append is a queued IN_MODIFY that
+            # survives starvation and is drained when the daemon next runs. Same fix
+            # that stabilized test_sudo_not_in_sudoers_triggers_high / _log_rotation.
+            subprocess.run(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "bash",
+                    "-c",
+                    "mkdir -p /var/log && touch /var/log/auth.log",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+            time.sleep(5)
+
+            # Phase 1 — within the window the repeat is deduplicated. Re-append on a
+            # cadence: the first detection is "alerted" (records the key), and every
+            # later append within 30s becomes "deduplicated". Re-appending also
+            # survives a monitoring-daemon startup race (the watch not yet active at
+            # the first write).
+            append_sudoers_line()
+            alerted = None
+            deduped = None
+            events = []
+            last_append = time.monotonic()
+            # Match the proven budget of the sibling test_sudo_not_in_sudoers_triggers_high
+            # (also this sudoers line): under starvation the daemon can drain the queued
+            # appends late, in one batch (first -> alerted, rest -> deduplicated), so
+            # give it room rather than the earlier 45s.
+            deadline = time.monotonic() + 90
+            while time.monotonic() < deadline:
+                events = get_threat_events(container_name)
+                auth = high_auth(events)
+                alerted = next((e for e in auth if e.get("action") == "alerted"), alerted)
+                deduped = next((e for e in auth if e.get("action") == "deduplicated"), deduped)
+                if alerted and deduped:
+                    break
+                if time.monotonic() - last_append >= 3:
+                    append_sudoers_line()
+                    last_append = time.monotonic()
+                time.sleep(1)
+
+            assert alerted is not None, f"expected an 'alerted' HIGH auth threat, got: {events}"
+            assert deduped is not None, (
+                "a repeat of the same threat within 30s must be recorded with "
+                f"action='deduplicated', not re-alerted. Got: {events}"
+            )
+            assert deduped.get("title") == alerted.get("title"), (
+                "the deduplicated event must be the SAME threat (same category+title) as "
+                f"the alert. alert={alerted}, dedup={deduped}"
+            )
+
+            # Phase 2 — past the 30s window the same threat re-alerts (a fresh
+            # "alerted"), proving the window expires rather than suppressing forever.
+            # The window is measured from the first alert and does NOT slide on
+            # deduplicated repeats (responder.go: the dedup branch returns without
+            # updating recentThreats), so a >30s quiet gap deterministically clears
+            # it and the re-alert WILL fire. The only variable is how long the daemon
+            # takes to read the appended line and write the alert — which can stretch
+            # to tens of seconds when the CI runner is CPU-starved (even with the
+            # direct inotify watch above, the append is a queued event that the daemon
+            # goroutine must still get CPU to process). So poll
+            # generously and keep re-appending: a transient scheduling stall must not
+            # fail the run, while a genuinely broken window (re-alert never fires)
+            # still produces no fresh "alerted" and fails red.
+            alerted_before = count_alerted(get_threat_events(container_name))
+            time.sleep(33)  # outlast the 30s dedup window (measured from the first alert)
+            append_sudoers_line()
+            realerted = False
+            last_append = time.monotonic()
+            deadline = time.monotonic() + 120
+            while time.monotonic() < deadline:
+                if count_alerted(get_threat_events(container_name)) > alerted_before:
+                    realerted = True
+                    break
+                if time.monotonic() - last_append >= 3:
+                    append_sudoers_line()
+                    last_append = time.monotonic()
+                time.sleep(1)
+
+            assert realerted, (
+                "past the 30s dedup window an identical threat must re-alert (a fresh "
+                "action='alerted'), not stay deduplicated forever"
+            )
+        finally:
+            proc.terminate()
+            if backup:
+                config_path.write_text(backup)
+            elif config_path.exists():
+                config_path.unlink()
+            cleanup_container(container_name, coi_binary)
+
 
 class TestFalsePositives:
     """Test that legitimate commands don't trigger false alerts."""
@@ -5067,10 +5237,31 @@ process_spawn_rate_threshold = 9999
                 f"Container {container_name} did not start"
             )
 
-            time.sleep(3)
+            # Pre-create an empty auth.log during the settle window so the log
+            # watcher registers a DIRECT file watch on it. Otherwise auth.log does
+            # not exist at daemon start and first detection depends on catching the
+            # file's creation via the parent-directory IN_CREATE watch — a path
+            # logwatcher.go documents as unreliable across the overlayfs namespace
+            # boundary, which is how this flaked (line present in container, but
+            # events: []). With the file already watched, the trigger write below is
+            # a plain append/IN_MODIFY on a watched file (the reliable path).
+            subprocess.run(
+                [
+                    "incus",
+                    "exec",
+                    container_name,
+                    "--",
+                    "bash",
+                    "-c",
+                    "mkdir -p /var/log && touch /var/log/auth.log",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+            time.sleep(5)
 
-            # Write the suspicious line into the container's auth.log. The
-            # LogWatcher polls via `incus file pull` every ~5s.
+            # Write the suspicious line into the container's auth.log.
             def append_sudoers_line():
                 subprocess.run(
                     [
@@ -5097,14 +5288,14 @@ process_spawn_rate_threshold = 9999
             # a permanent miss — a fresh line is then picked up by the next poll.
             events = []
             auth_events = []
-            for i in range(60):
+            for i in range(90):
                 events = get_threat_events(container_name)
                 auth_events = [
                     e for e in events if e.get("category") == "auth" and e.get("level") == "high"
                 ]
                 if auth_events:
                     break
-                if i and i % 8 == 0:
+                if i and i % 5 == 0:
                     append_sudoers_line()
                 time.sleep(1)
 
@@ -5181,24 +5372,31 @@ process_spawn_rate_threshold = 9999
             # pattern. PROC_EVENT_EXEC fires on execve before the shell tries to
             # connect, so we don't wait for the command to complete (the TCP
             # connection attempt may hang if no RST is returned by the network).
-            subprocess.Popen(
-                [
-                    "incus",
-                    "exec",
-                    container_name,
-                    "--",
-                    "bash",
-                    "-c",
-                    "bash -c 'exec 3>/dev/tcp/10.255.255.1/9999' 2>/dev/null; true",
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            # Re-fire on a cadence: PROC_EVENT_EXEC fires once per execve, and the
+            # proc-connector subscription may not be active yet while the daemon is
+            # still starting under CI load, so a single exec can be missed. Each
+            # launch is a fresh execve, guaranteeing one fires after subscription.
+            def fire():
+                subprocess.Popen(
+                    [
+                        "incus",
+                        "exec",
+                        container_name,
+                        "--",
+                        "bash",
+                        "-c",
+                        "bash -c 'exec 3>/dev/tcp/10.255.255.1/9999' 2>/dev/null; true",
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
 
-            # Poll until the proc_event threat appears (30 s timeout).
+            fire()
+
+            # Poll until the proc_event threat appears.
             proc_events = []
             events = []
-            for _ in range(30):
+            for i in range(40):
                 events = get_threat_events(container_name)
                 proc_events = [
                     e
@@ -5209,6 +5407,8 @@ process_spawn_rate_threshold = 9999
                 ]
                 if proc_events:
                     break
+                if i % 3 == 2:
+                    fire()
                 time.sleep(1)
 
             assert len(proc_events) > 0, (
@@ -5275,24 +5475,31 @@ process_spawn_rate_threshold = 9999
 
             # Run a Python one-liner whose cmdline contains "python3" and
             # "socket.socket", matching the python3-socket exec pattern.
-            subprocess.Popen(
-                [
-                    "incus",
-                    "exec",
-                    container_name,
-                    "--",
-                    "python3",
-                    "-c",
-                    "import socket; s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.close()",
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            ).wait(timeout=10)
+            # Re-fire on a cadence: PROC_EVENT_EXEC fires once per execve, and the
+            # proc-connector subscription may not be active yet while the daemon is
+            # still starting under CI load, so a single exec can be missed. Each
+            # launch is a fresh execve, guaranteeing one fires after subscription.
+            def fire():
+                subprocess.Popen(
+                    [
+                        "incus",
+                        "exec",
+                        container_name,
+                        "--",
+                        "python3",
+                        "-c",
+                        "import socket; s = socket.socket(socket.AF_INET, socket.SOCK_STREAM); s.close()",
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
 
-            # Poll until the proc_event threat appears (30 s timeout).
+            fire()
+
+            # Poll until the proc_event threat appears.
             proc_events = []
             events = []
-            for _ in range(30):
+            for i in range(40):
                 events = get_threat_events(container_name)
                 proc_events = [
                     e
@@ -5303,6 +5510,8 @@ process_spawn_rate_threshold = 9999
                 ]
                 if proc_events:
                     break
+                if i % 3 == 2:
+                    fire()
                 time.sleep(1)
 
             assert len(proc_events) > 0, (
@@ -5381,24 +5590,31 @@ process_spawn_rate_threshold = 9999
             # Use exec -a to set argv[0] to the PHP fsockopen signature and run
             # sleep as the actual process. PROC_EVENT_EXEC fires at execve time,
             # and sleep keeps the process alive long enough to avoid a read race.
-            subprocess.Popen(
-                [
-                    "incus",
-                    "exec",
-                    container_name,
-                    "--",
-                    "bash",
-                    "-c",
-                    "exec -a 'php -r $sock=fsockopen(10.255.255.1,9999)' sleep 10",
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            # Re-fire on a cadence: PROC_EVENT_EXEC fires once per execve, and the
+            # proc-connector subscription may not be active yet while the daemon is
+            # still starting under CI load, so a single exec can be missed. Each
+            # launch is a fresh execve; sleep 5 (not 10) avoids piling up re-fires.
+            def fire():
+                subprocess.Popen(
+                    [
+                        "incus",
+                        "exec",
+                        container_name,
+                        "--",
+                        "bash",
+                        "-c",
+                        "exec -a 'php -r $sock=fsockopen(10.255.255.1,9999)' sleep 5",
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
 
-            # Poll until the proc_event threat appears (30 s timeout).
+            fire()
+
+            # Poll until the proc_event threat appears.
             proc_events = []
             events = []
-            for _ in range(30):
+            for i in range(40):
                 events = get_threat_events(container_name)
                 proc_events = [
                     e
@@ -5409,6 +5625,8 @@ process_spawn_rate_threshold = 9999
                 ]
                 if proc_events:
                     break
+                if i % 3 == 2:
+                    fire()
                 time.sleep(1)
 
             assert len(proc_events) > 0, (
@@ -5482,24 +5700,31 @@ process_spawn_rate_threshold = 9999
             # sleep as the actual process. PROC_EVENT_EXEC fires at execve time, and
             # sleep keeps the process alive long enough to avoid a read race.
             # Keywords 'child_process' and 'net' appear in the argv[0] string.
-            subprocess.Popen(
-                [
-                    "incus",
-                    "exec",
-                    container_name,
-                    "--",
-                    "bash",
-                    "-c",
-                    "exec -a 'node -e var sh=require(child_process);require(net).connect(9999)' sleep 10",
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            # Re-fire on a cadence: PROC_EVENT_EXEC fires once per execve, and the
+            # proc-connector subscription may not be active yet while the daemon is
+            # still starting under CI load, so a single exec can be missed. Each
+            # launch is a fresh execve; sleep 5 (not 10) avoids piling up re-fires.
+            def fire():
+                subprocess.Popen(
+                    [
+                        "incus",
+                        "exec",
+                        container_name,
+                        "--",
+                        "bash",
+                        "-c",
+                        "exec -a 'node -e var sh=require(child_process);require(net).connect(9999)' sleep 5",
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
 
-            # Poll until the proc_event threat appears (30 s timeout).
+            fire()
+
+            # Poll until the proc_event threat appears.
             proc_events = []
             events = []
-            for _ in range(30):
+            for i in range(40):
                 events = get_threat_events(container_name)
                 proc_events = [
                     e
@@ -5510,6 +5735,8 @@ process_spawn_rate_threshold = 9999
                 ]
                 if proc_events:
                     break
+                if i % 3 == 2:
+                    fire()
                 time.sleep(1)
 
             assert len(proc_events) > 0, (
@@ -5587,23 +5814,33 @@ process_spawn_rate_threshold = 9999
 
             # exec -a sets argv[0] of sleep to the suspicious signature so the
             # proc_event watcher sees the right cmdline without needing the binary.
-            subprocess.Popen(
-                [
-                    "incus",
-                    "exec",
-                    container_name,
-                    "--",
-                    "bash",
-                    "-c",
-                    f"exec -a '{exec_a_arg}' sleep 10",
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            # PROC_EVENT_EXEC fires once per execve; the proc-connector subscription
+            # may not be active yet while the daemon is still starting under CI load,
+            # so a single exec can be missed. Re-fire on a short cadence inside the
+            # poll loop — each launch is a fresh execve, guaranteeing one fires after
+            # the subscription is active. sleep 5 (not 10) keeps re-fired processes
+            # from piling up while still living long enough for the daemon to read
+            # /proc after the exec event.
+            def fire():
+                subprocess.Popen(
+                    [
+                        "incus",
+                        "exec",
+                        container_name,
+                        "--",
+                        "bash",
+                        "-c",
+                        f"exec -a '{exec_a_arg}' sleep 5",
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+
+            fire()
 
             proc_events = []
             events = []
-            for _ in range(30):
+            for i in range(40):
                 events = get_threat_events(container_name)
                 proc_events = [
                     e
@@ -5613,6 +5850,8 @@ process_spawn_rate_threshold = 9999
                 ]
                 if proc_events:
                     break
+                if i % 3 == 2:
+                    fire()
                 time.sleep(1)
 
             assert len(proc_events) > 0, (

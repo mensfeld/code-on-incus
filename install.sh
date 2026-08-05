@@ -446,7 +446,7 @@ ensure_idmap() {
     # Restart Incus to pick up new mappings
     if systemctl is-active --quiet incus.service 2>/dev/null; then
         echo -e "${BLUE}→ Restarting Incus to apply idmap changes...${NC}"
-        sudo systemctl restart incus.service
+        restart_incus
         echo -e "${GREEN}✓ Incus restarted${NC}"
     fi
 }
@@ -485,19 +485,81 @@ ensure_incus_initialized() {
     fi
 }
 
+# Restart Incus and wait for the daemon to accept connections again before
+# returning. Callers issue `incus` commands right after a restart (re-read idmaps,
+# probe a freshly installed storage driver), and `systemctl restart` returns as
+# soon as the unit is active, which can be a beat before the API socket is ready.
+# waitready is bounded and best-effort — it never aborts the installer.
+restart_incus() {
+    sudo systemctl restart incus.service
+    incus admin waitready --timeout=30 2>/dev/null || true
+}
+
+# Detect an OrbStack guest, where ZFS can never work.
+# OrbStack injects the kernel from the host: the guest has no kernel packages,
+# no headers and no module tree, so the out-of-tree ZFS module can neither be
+# shipped precompiled nor built with DKMS. btrfs is compiled into that kernel,
+# so it works. Mirrors the osrelease check in internal/vmhost/vmhost.go.
+is_orbstack() {
+    case "$(uname -r 2>/dev/null | tr '[:upper:]' '[:lower:]')" in
+        *orbstack*) return 0 ;;
+        *)          return 1 ;;
+    esac
+}
+
+# Set up fast copy-on-write storage for containers.
+# ZFS is the first choice (fastest), btrfs the fallback when ZFS is unavailable.
+# btrfs is still copy-on-write, so still far faster than the default `dir` pool.
+setup_fast_storage() {
+    echo ""
+
+    if is_orbstack; then
+        echo -e "${YELLOW}⚠ Skipping ZFS: not supported on OrbStack${NC}"
+        echo "  OrbStack guests get their kernel from the host, with no headers or module"
+        echo "  tree, so the out-of-tree ZFS module can never be built or loaded."
+        echo "  Using btrfs instead, which is built into the OrbStack kernel."
+    elif command -v zfs &> /dev/null || [ "$PKG_MANAGER" = "apt" ]; then
+        # ZFS is already present, or we can install it cleanly (apt is a plain
+        # userspace install). Try it; fall back to btrfs if the pool can't be made.
+        if setup_zfs_storage; then
+            return 0
+        fi
+        echo -e "${BLUE}→ Falling back to btrfs...${NC}"
+    else
+        # ZFS is not installed and this distro's ZFS packages can break the
+        # initramfs on install (#666 — e.g. Arch/EndeavourOS, where installing
+        # zfs-utils triggers a dracut/mkinitcpio rebuild that fails on the missing
+        # zfs module). Use btrfs, which is in-kernel and safe to install.
+        echo -e "${BLUE}→ ZFS not installed; using btrfs (in-kernel, safe to install)...${NC}"
+    fi
+
+    if ! setup_btrfs_storage; then
+        echo -e "${YELLOW}  Containers will use default storage (slower but functional)${NC}"
+        return 1
+    fi
+}
+
 # Set up ZFS storage (for instant container creation)
 setup_zfs_storage() {
-    echo ""
     echo -e "${BLUE}→ Setting up fast storage (ZFS)...${NC}"
 
     # Check if ZFS is already installed
     if command -v zfs &> /dev/null; then
         echo -e "${GREEN}✓ ZFS already installed${NC}"
     else
+        # Installing ZFS is only safe on apt (zfsutils-linux is a plain userspace
+        # package); on pacman/dnf/zypper the ZFS packages can rebuild and break the
+        # initramfs (#666). setup_fast_storage already gates on this, but guard
+        # here too so a future caller can't reach a wrong-distro install: the
+        # pkg_install below hard-codes the apt package name, so a non-apt distro
+        # would otherwise silently install the wrong (or a destructive) package.
+        if [ "$PKG_MANAGER" != "apt" ]; then
+            echo -e "${YELLOW}⚠ ZFS not installed and auto-install is only supported on apt${NC}"
+            return 1
+        fi
         echo -e "${BLUE}→ Installing ZFS...${NC}"
-        if ! pkg_install zfsutils-linux zfs-utils zfs zfs 2>/dev/null; then
+        if ! pkg_install zfsutils-linux 2>/dev/null; then
             echo -e "${YELLOW}⚠ ZFS installation failed (may not be available for your kernel)${NC}"
-            echo -e "${YELLOW}  Containers will use default storage (slower but functional)${NC}"
             return 1
         fi
         echo -e "${GREEN}✓ ZFS installed${NC}"
@@ -534,7 +596,66 @@ setup_zfs_storage() {
         if [ -n "$storage_output" ]; then
             printf "${YELLOW}  %s${NC}\n" "$storage_output"
         fi
-        echo -e "${YELLOW}  Containers will use default storage (slower but functional)${NC}"
+        return 1
+    fi
+}
+
+# Set up btrfs storage, the fallback when ZFS is unavailable.
+# Still copy-on-write, so container launches from a cached image are roughly 7x
+# faster than the default `dir` pool (~0.2s vs ~1.1s measured on OrbStack).
+setup_btrfs_storage() {
+    echo -e "${BLUE}→ Setting up fast storage (btrfs)...${NC}"
+
+    # Check if btrfs tools are already installed
+    if command -v mkfs.btrfs &> /dev/null; then
+        echo -e "${GREEN}✓ btrfs tools already installed${NC}"
+    else
+        echo -e "${BLUE}→ Installing btrfs tools...${NC}"
+        if ! pkg_install btrfs-progs btrfs-progs btrfs-progs btrfsprogs 2>/dev/null; then
+            echo -e "${YELLOW}⚠ btrfs installation failed${NC}"
+            return 1
+        fi
+        echo -e "${GREEN}✓ btrfs tools installed${NC}"
+
+        # Incus probes for available storage drivers when it starts, so a freshly
+        # installed mkfs.btrfs is invisible until the daemon is restarted.
+        if systemctl is-active --quiet incus.service 2>/dev/null; then
+            echo -e "${BLUE}→ Restarting Incus to pick up the btrfs driver...${NC}"
+            restart_incus
+        fi
+    fi
+
+    # Check if btrfs pool already exists
+    if incus storage list --format=csv 2>/dev/null | grep -q "^btrfs-pool,"; then
+        echo -e "${GREEN}✓ btrfs storage pool already configured${NC}"
+        return 0
+    fi
+
+    # Create btrfs storage pool
+    echo -e "${BLUE}→ Creating btrfs storage pool (50GiB)...${NC}"
+    local storage_output
+    if storage_output="$(sudo incus storage create btrfs-pool btrfs size=50GiB 2>&1)"; then
+        echo -e "${GREEN}✓ btrfs storage pool created${NC}"
+
+        # Configure default profile to use btrfs
+        echo -e "${BLUE}→ Configuring default profile to use btrfs...${NC}"
+        local profile_output
+        if profile_output="$(incus profile device set default root pool=btrfs-pool 2>&1)"; then
+            echo -e "${GREEN}✓ Default profile configured for btrfs${NC}"
+            echo -e "${GREEN}✓ Containers will now start much faster (~0.2s vs 1-5s)${NC}"
+        else
+            echo -e "${YELLOW}⚠ Failed to configure default profile${NC}"
+            if [ -n "$profile_output" ]; then
+                printf "${YELLOW}  %s${NC}\n" "$profile_output"
+            fi
+            echo -e "${YELLOW}  You can manually configure it later with:${NC}"
+            echo -e "  ${BLUE}incus profile device set default root pool=btrfs-pool${NC}"
+        fi
+    else
+        echo -e "${YELLOW}⚠ btrfs storage pool creation failed${NC}"
+        if [ -n "$storage_output" ]; then
+            printf "${YELLOW}  %s${NC}\n" "$storage_output"
+        fi
         return 1
     fi
 }
@@ -564,8 +685,8 @@ post_install() {
     ensure_idmap || true
     ensure_incus_initialized || true
 
-    # Try to set up ZFS storage (best-effort, don't abort installer on failure)
-    setup_zfs_storage || true
+    # Try to set up fast storage (best-effort, don't abort installer on failure)
+    setup_fast_storage || true
 
     # Fetch GTFOBins and Sigma detection databases
     fetch_detection_databases || true

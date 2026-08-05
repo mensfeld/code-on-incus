@@ -21,14 +21,14 @@ import "testing"
 // Pinned consequences, so any future change to the merge order is a deliberate
 // decision rather than a silent behavior shift:
 //   - [container] fields: the profile wins in BOTH paths.
-//   - other sections (here: model): the workspace overlay wins for an explicit
-//     --profile, but the profile wins for [defaults] profile.
+//   - other sections (here: tool.claude.model): the workspace overlay wins for
+//     an explicit --profile, but the profile wins for [defaults] profile.
 //
 // Security-relevant downgrades never reach this divergence: an untrusted
 // workspace config is sanitized (network/security/git stripped) before the
-// overlay, so only benign scalars like `model`/`timezone` can differ.
+// overlay, so only benign fields like `tool.claude.model`/`timezone` can differ.
 func TestProfilePrecedence_ExplicitVsDefault_Pinned(t *testing.T) {
-	profileWork := ProfileConfig{Model: "profile-model"}
+	profileWork := ProfileConfig{Tool: &ToolConfig{Claude: ClaudeToolConfig{Model: "profile-model"}}}
 	profileWork.Container.Image = "coi-work"
 
 	newBase := func() *Config {
@@ -40,7 +40,7 @@ func TestProfilePrecedence_ExplicitVsDefault_Pinned(t *testing.T) {
 	// non-[container] field and a [container] field that the profile also sets.
 	newOverlay := func() *Config {
 		o := &Config{}
-		o.Defaults.Model = "project-model"
+		o.Tool.Claude.Model = "project-model"
 		o.Container.Image = "coi-project"
 		return o
 	}
@@ -72,20 +72,20 @@ func TestProfilePrecedence_ExplicitVsDefault_Pinned(t *testing.T) {
 	}
 
 	// Divergent part (finding 4): a non-[container] field the overlay also sets.
-	if explicit.Defaults.Model != "project-model" {
-		t.Errorf("explicit --profile: the workspace overlay should win model (applied after the profile), got %q", explicit.Defaults.Model)
+	if explicit.Tool.Claude.Model != "project-model" {
+		t.Errorf("explicit --profile: the workspace overlay should win model (applied after the profile), got %q", explicit.Tool.Claude.Model)
 	}
-	if def.Defaults.Model != "profile-model" {
-		t.Errorf("[defaults] profile: the profile should win model (applied after the overlay), got %q", def.Defaults.Model)
+	if def.Tool.Claude.Model != "profile-model" {
+		t.Errorf("[defaults] profile: the profile should win model (applied after the overlay), got %q", def.Tool.Claude.Model)
 	}
 
 	// The whole point of this test: the two selection paths intentionally diverge
 	// on non-[container] fields today. If they ever agree, that is a behavior
 	// change to reconcile deliberately (update the docs/decision) — not an
 	// assertion to quietly delete.
-	if explicit.Defaults.Model == def.Defaults.Model {
+	if explicit.Tool.Claude.Model == def.Tool.Claude.Model {
 		t.Fatalf("explicit and [defaults] profile now agree on model (%q); "+
 			"the known precedence divergence changed — reconcile the decision, don't just drop this test",
-			def.Defaults.Model)
+			def.Tool.Claude.Model)
 	}
 }

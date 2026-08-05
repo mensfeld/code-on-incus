@@ -87,6 +87,11 @@ jobs:
           CC: ${{ matrix.arch == 'arm64' && 'aarch64-linux-gnu-gcc' || 'gcc' }}
           PKG_CONFIG_PATH: ${{ matrix.arch == 'arm64' && '/usr/lib/aarch64-linux-gnu/pkgconfig' || '' }}
         run: |
+          # The Makefile's VERSION uses `?=`, so an env value wins and its own
+          # `sed 's/^v//'` never runs. Strip the leading 'v' here to honor the
+          # Makefile's bare-version contract; otherwise the binary reports
+          # "vv0.10.1" and version comparison breaks (#672 follow-up).
+          export VERSION="${VERSION#v}"
           make build
           mv coi coi-${{ matrix.os }}-${{ matrix.arch }}
 
@@ -97,13 +102,17 @@ jobs:
           EXPECTED_VERSION: ${{ steps.version.outputs.version }}
         run: |
           chmod +x coi-${{ matrix.os }}-${{ matrix.arch }}
-          BUILT_VERSION=$(./coi-${{ matrix.os }}-${{ matrix.arch }} version | grep -oP 'v\K[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
-          # Strip leading 'v' from expected version if present
+          # Compare the FULL first line against the exact expected string. The
+          # old `grep -oP 'v\K…'` matched the digits even inside "vv0.10.1",
+          # so a doubled-prefix build slipped through. Anchoring the whole line
+          # makes any stray 'v' (or missing one) fail the release.
           EXPECTED_VERSION=${EXPECTED_VERSION#v}
-          echo "Built version: $BUILT_VERSION"
-          echo "Expected version: $EXPECTED_VERSION"
-          if [ "$BUILT_VERSION" != "$EXPECTED_VERSION" ]; then
-            echo "ERROR: Version mismatch! Built: $BUILT_VERSION, Expected: $EXPECTED_VERSION"
+          BUILT_LINE=$(./coi-${{ matrix.os }}-${{ matrix.arch }} version | head -n1)
+          EXPECTED_LINE="code-on-incus (coi) v${EXPECTED_VERSION}"
+          echo "Built version line:    $BUILT_LINE"
+          echo "Expected version line: $EXPECTED_LINE"
+          if [ "$BUILT_LINE" != "$EXPECTED_LINE" ]; then
+            echo "ERROR: Version mismatch! Built: '$BUILT_LINE', Expected: '$EXPECTED_LINE'"
             exit 1
           fi
           echo "Version verification passed!"

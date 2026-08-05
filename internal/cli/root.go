@@ -2,11 +2,13 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"regexp"
 
 	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/network"
+	"github.com/mensfeld/code-on-incus/internal/timing"
 	"github.com/spf13/cobra"
 )
 
@@ -19,6 +21,11 @@ var Version = "dev"
 // non-"source" value disables the self-updater; see installedFromPackage and
 // packageUpdateCommands in update.go.
 var InstallSource = "source"
+
+// rootVersionTemplate is the text/template cobra renders for `coi --version`.
+// It mirrors the first line the `coi version` subcommand prints so both surfaces
+// agree; {{.Version}} is rootCmd.Version, which is normalizeVersion(Version).
+const rootVersionTemplate = "code-on-incus (coi) v{{.Version}}\n"
 
 // App holds the shared CLI state that is populated from persistent flags and
 // config loading in PersistentPreRunE. Grouping this in a struct rather than
@@ -58,7 +65,7 @@ Examples:
   coi image list               # List available images
   coi list                     # List active sessions
 `,
-	Version: Version,
+	Version: normalizeVersion(Version),
 	// When called without subcommand, run shell command
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Execute shell command with the same args
@@ -200,10 +207,21 @@ func Execute() error {
 	// repopulated correctly from the fresh zero value.
 	*app = App{}
 
+	// Deferred here rather than inside a command so the report covers the whole
+	// invocation, teardowns included (a run pipeline tears down in its own
+	// defers, which fire before this one). No-op unless COI_TIMING_DEBUG is set.
+	defer timing.Report(os.Stderr)
+
 	return rootCmd.Execute()
 }
 
 func init() {
+	// Keep `coi --version` (cobra's version flag) consistent with the `coi
+	// version` subcommand: same "code-on-incus (coi) v<semver>" line, and the
+	// version already normalized (rootCmd.Version above) so a stray/doubled 'v'
+	// from a mis-tagged build can't leak here either.
+	rootCmd.SetVersionTemplate(rootVersionTemplate)
+
 	// Global flags available to all commands.
 	// NOTE: --image and --persistent were removed on purpose — anything
 	// config-shaped goes via config/profiles ([container] image / persistent).
@@ -259,10 +277,10 @@ var versionCmd = &cobra.Command{
 			return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid format %q: must be 'text' or 'json'", format)}
 		}
 		if format == "json" {
-			fmt.Printf(`{"version":%q,"url":"https://github.com/mensfeld/code-on-incus"}`+"\n", "v"+Version)
+			fmt.Printf(`{"version":%q,"url":"https://github.com/mensfeld/code-on-incus"}`+"\n", "v"+normalizeVersion(Version))
 			return nil
 		}
-		fmt.Printf("code-on-incus (coi) v%s\n", Version)
+		fmt.Printf("code-on-incus (coi) v%s\n", normalizeVersion(Version))
 		fmt.Println("https://github.com/mensfeld/code-on-incus")
 		return nil
 	},
