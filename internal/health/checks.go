@@ -1457,25 +1457,34 @@ func defaultIncusPool() string {
 // poolUsage holds parsed `incus storage info` numbers for a single pool plus
 // any error encountered while gathering them.
 type poolUsage struct {
+	driver   string
 	usedGiB  float64
 	totalGiB float64
 	err      error
 }
 
 // gatherPoolUsage queries `incus storage info <pool>` and parses out the
-// space-used / total-space lines. Returns an error if the pool is missing or
-// the output cannot be parsed. Goes through container.IncusOutput so the
-// configured Incus project is respected.
-func gatherPoolUsage(pool string) poolUsage {
+// driver and space-used / total-space lines. Returns an error if the pool is
+// missing or the output cannot be parsed. Goes through container.IncusOutput
+// so the configured Incus project is respected. Swappable so unit tests can
+// exercise CheckIncusStoragePools without an Incus daemon.
+var gatherPoolUsage = func(pool string) poolUsage {
 	out, err := container.IncusOutput("storage", "info", pool)
 	if err != nil {
 		return poolUsage{err: err}
 	}
+	return parsePoolInfo(out)
+}
 
+// parsePoolInfo extracts the driver and usage numbers from `incus storage
+// info` output.
+func parsePoolInfo(out string) poolUsage {
 	var u poolUsage
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
 		switch {
+		case strings.HasPrefix(line, "driver:"):
+			u.driver = strings.TrimSpace(strings.TrimPrefix(line, "driver:"))
 		case strings.HasPrefix(line, "space used:"):
 			u.usedGiB = parseStorageValueGiB(strings.TrimPrefix(line, "space used:"))
 		case strings.HasPrefix(line, "total space:"):
@@ -1496,6 +1505,9 @@ func gatherPoolUsage(pool string) poolUsage {
 //
 // One HealthCheck is returned with per-pool entries in Details. The overall
 // status is the worst status across the inspected pools (failed > warning > ok).
+// Besides usage thresholds, a pool on the `dir` driver is flagged as a warning:
+// it forces `incus init` to re-unpack the whole image on every launch, which
+// dominates session startup time (#659).
 func CheckIncusStoragePools(pools []string) HealthCheck {
 	// De-dupe + replace empty entries with the actual default pool name.
 	seen := map[string]bool{}
@@ -1549,16 +1561,30 @@ func CheckIncusStoragePools(pools []string) HealthCheck {
 		default:
 			poolStatus = StatusOK
 		}
+		// A `dir` pool has no unpacked image volume to clone from, so every
+		// launch re-unpacks the full image tarball (~5-6s per unpacked GB,
+		// #659). Copy-on-write drivers make instance creation near-free.
+		if u.driver == "dir" {
+			if poolStatus == StatusOK {
+				poolStatus = StatusWarning
+			}
+			messages = append(messages, fmt.Sprintf("%s: 'dir' storage driver re-unpacks the image on every launch — recreate the pool with a copy-on-write driver (zfs/btrfs), e.g. by re-running install.sh", pool))
+		}
 		worsen(poolStatus)
 
 		details[pool] = map[string]interface{}{
+			"driver":    u.driver,
 			"used_gib":  u.usedGiB,
 			"total_gib": u.totalGiB,
 			"free_gib":  freeGiB,
 			"used_pct":  usedPct,
 			"status":    string(poolStatus),
 		}
-		messages = append(messages, fmt.Sprintf("%s: %.1f GiB free of %.1f GiB (%.0f%% used)", pool, freeGiB, u.totalGiB, usedPct))
+		label := pool
+		if u.driver != "" {
+			label = fmt.Sprintf("%s (%s)", pool, u.driver)
+		}
+		messages = append(messages, fmt.Sprintf("%s: %.1f GiB free of %.1f GiB (%.0f%% used)", label, freeGiB, u.totalGiB, usedPct))
 	}
 
 	return HealthCheck{

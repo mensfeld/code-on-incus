@@ -669,6 +669,12 @@ COI_TIMING_DEBUG_JSON=/tmp/run.json coi run -- true   # machine-readable, no std
 scripts/bench-run.py -n 5             # median over N runs, bucketed
 ```
 
+The most common culprit is an Incus storage pool on the `dir` driver: with no
+copy-on-write, every launch re-unpacks the full image (~5-6s per unpacked GB,
+so ~18s for a 3 GB image). `coi health` flags this; fix it by recreating the
+pool with a CoW driver (zfs/btrfs) — re-running `install.sh` sets one up.
+Image size is a per-session cost on such pools, so lean images pay off twice.
+
 Nothing is recorded unless one of those variables is set.
 
 ## Frequently Asked Questions
