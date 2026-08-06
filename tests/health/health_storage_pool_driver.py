@@ -18,6 +18,7 @@ driver and warning assertions hold in all of those states; only the exact
 
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -72,33 +73,31 @@ def test_health_reports_dir_pool_driver(coi_binary, workspace_dir):
 
         # The dir warning rides the check message in every state, and the
         # text renderer prints the message verbatim — so asserting on the
-        # message covers the human-readable output too.
-        assert "'dir' storage driver" in check["message"], (
-            f"Check message should carry the dir-driver warning. Message: {check['message']}"
-        )
-        assert f"{pool} (dir):" in check["message"], (
-            f"Check message should name the pool's driver as '{pool} (dir): ...'. "
+        # message covers the human-readable output too. The warning is bound
+        # to THIS pool's label: the host's own default pool may also be dir,
+        # and an unbound substring would match its warning instead.
+        assert f"{pool} (dir): 'dir' storage driver" in check["message"], (
+            f"Check message should carry this pool's dir-driver warning. "
             f"Message: {check['message']}"
         )
 
+        if "error" not in entry:
+            # The usage line must also be present and labeled — the warning
+            # shares the label, so match the usage line's own shape.
+            assert re.search(rf"{re.escape(pool)} \(dir\): [\d.]+ GiB free", check["message"]), (
+                f"Check message should carry this pool's labeled usage line. "
+                f"Message: {check['message']}"
+            )
+
+        # A dir pool must never report ok — warning from the driver alone,
+        # or warning/failed when this runner's usage or a failed usage query
+        # already degrades it. The exact warning-vs-failed split is pinned by
+        # the Go unit tests; duplicating the thresholds here would just drift.
+        assert entry["status"] in ("warning", "failed"), (
+            f"A dir pool must never be ok, got: {entry['status']}"
+        )
         assert check["status"] in ("warning", "failed"), (
             f"Overall check must be at least a warning with a dir pool, got: {check['status']}"
         )
-
-        if "error" in entry:
-            # Usage query failed on this runner — driver/warning assertions
-            # above already covered the feature; the status is "failed" for
-            # an environmental reason, not a product bug.
-            assert entry["status"] == "failed"
-        elif entry["free_gib"] < 5 or entry["used_pct"] > 80:
-            # Usage alone already puts the pool at warning/failed on this
-            # runner (a dir pool mirrors the root filesystem), so the exact
-            # status is environment-dependent.
-            assert entry["status"] in ("warning", "failed")
-        else:
-            # Healthy usage: the warning can only come from the dir driver.
-            assert entry["status"] == "warning", (
-                f"A dir pool with healthy usage must be a warning, got: {entry['status']}"
-            )
     finally:
         delete_storage_pool(pool)

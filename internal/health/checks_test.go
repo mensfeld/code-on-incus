@@ -287,12 +287,17 @@ func TestCheckIncusStoragePools_DirDriverWarns(t *testing.T) {
 				t.Errorf("message %q should contain %q", result.Message, want)
 			}
 
-			// The dir warning must follow the usage line and share its label.
-			if tt.wantDriver == "dir" && tt.wantStatus != StatusFailed {
-				usageIdx := strings.Index(result.Message, "GiB free")
+			// The usage line must be present (the shared label means the
+			// warning alone could otherwise satisfy the Contains above),
+			// and the dir warning must follow it.
+			usageIdx := strings.Index(result.Message, "GiB free")
+			if usageIdx == -1 {
+				t.Errorf("usage line missing from message: %q", result.Message)
+			}
+			if tt.wantDriver == "dir" {
 				warnIdx := strings.Index(result.Message, "'dir' storage driver")
-				if warnIdx < usageIdx {
-					t.Errorf("dir warning should follow the usage line, message: %q", result.Message)
+				if warnIdx == -1 || warnIdx < usageIdx {
+					t.Errorf("dir warning should be present and follow the usage line, message: %q", result.Message)
 				}
 			}
 		})
@@ -301,7 +306,9 @@ func TestCheckIncusStoragePools_DirDriverWarns(t *testing.T) {
 
 // When the usage query fails, the details entry must still carry the driver
 // (known independently via `storage list`) and a dir pool must still surface
-// its warning — the schema stays consistent across the error and success paths.
+// its warning — the schema stays consistent across the error and success
+// paths. And since a known driver proves the pool exists, the message must
+// say the usage is unavailable rather than contradict itself with "missing".
 func TestCheckIncusStoragePools_ErrPathKeepsDriver(t *testing.T) {
 	origGather := gatherPoolUsage
 	origList := listPoolDrivers
@@ -331,5 +338,35 @@ func TestCheckIncusStoragePools_ErrPathKeepsDriver(t *testing.T) {
 	}
 	if !strings.Contains(result.Message, "'dir' storage driver") {
 		t.Errorf("dir warning should still fire when usage is unavailable, message: %q", result.Message)
+	}
+	if !strings.Contains(result.Message, "testpool (dir): usage unavailable") {
+		t.Errorf("an enumerated pool must report usage unavailable, not missing, message: %q", result.Message)
+	}
+	if strings.Contains(result.Message, "missing") {
+		t.Errorf("a pool with a known driver must not be called missing, message: %q", result.Message)
+	}
+}
+
+// A pool with no driver from either source (not enumerated, info failed) is
+// genuinely unresolvable — that one is reported as missing.
+func TestCheckIncusStoragePools_UnknownPoolIsMissing(t *testing.T) {
+	origGather := gatherPoolUsage
+	origList := listPoolDrivers
+	defer func() {
+		gatherPoolUsage = origGather
+		listPoolDrivers = origList
+	}()
+
+	gatherPoolUsage = func(pool string) poolUsage {
+		return poolUsage{err: errors.New("storage pool not found")}
+	}
+	listPoolDrivers = func() map[string]string { return nil }
+
+	result := CheckIncusStoragePools([]string{"ghostpool"})
+	if result.Status != StatusFailed {
+		t.Errorf("status = %s, want %s", result.Status, StatusFailed)
+	}
+	if !strings.Contains(result.Message, "ghostpool: missing") {
+		t.Errorf("an unresolvable pool should be reported missing, message: %q", result.Message)
 	}
 }

@@ -1559,62 +1559,18 @@ func CheckIncusStoragePools(pools []string) HealthCheck {
 	for _, pool := range unique {
 		u := gatherPoolUsage(pool)
 
+		// Driver primarily from the structured list; the text scrape is a
+		// fallback. An empty driver after both means "unknown" — it is kept
+		// as "" in the details so consumers can see driver detection failed.
 		driver := drivers[pool]
 		if driver == "" {
 			driver = u.driver
 		}
-		label := pool
-		if driver != "" {
-			label = fmt.Sprintf("%s (%s)", pool, driver)
-		}
-		// A `dir` pool has no unpacked image volume to clone from, so every
-		// launch re-unpacks the full image tarball (~5-6s per unpacked GB,
-		// #659). Copy-on-write drivers make instance creation near-free.
-		dirWarning := fmt.Sprintf("%s: 'dir' storage driver re-unpacks the image on every launch — recreate the pool with a copy-on-write driver (zfs/btrfs), e.g. by re-running install.sh", label)
 
-		if u.err != nil {
-			details[pool] = map[string]interface{}{
-				"driver": driver,
-				"status": string(StatusFailed),
-				"error":  u.err.Error(),
-			}
-			messages = append(messages, fmt.Sprintf("%s: missing", pool))
-			if driver == "dir" {
-				messages = append(messages, dirWarning)
-			}
-			worsen(StatusFailed)
-			continue
-		}
-
-		freeGiB := u.totalGiB - u.usedGiB
-		usedPct := (u.usedGiB / u.totalGiB) * 100
-
-		var poolStatus CheckStatus
-		switch {
-		case freeGiB < 2 || usedPct > 90:
-			poolStatus = StatusFailed
-		case freeGiB < 5 || usedPct > 80:
-			poolStatus = StatusWarning
-		default:
-			poolStatus = StatusOK
-		}
-		if driver == "dir" && poolStatus == StatusOK {
-			poolStatus = StatusWarning
-		}
-		worsen(poolStatus)
-
-		details[pool] = map[string]interface{}{
-			"driver":    driver,
-			"used_gib":  u.usedGiB,
-			"total_gib": u.totalGiB,
-			"free_gib":  freeGiB,
-			"used_pct":  usedPct,
-			"status":    string(poolStatus),
-		}
-		messages = append(messages, fmt.Sprintf("%s: %.1f GiB free of %.1f GiB (%.0f%% used)", label, freeGiB, u.totalGiB, usedPct))
-		if driver == "dir" {
-			messages = append(messages, dirWarning)
-		}
+		status, msgs, entry := evaluatePool(pool, driver, u)
+		worsen(status)
+		details[pool] = entry
+		messages = append(messages, msgs...)
 	}
 
 	return HealthCheck{
@@ -1623,6 +1579,73 @@ func CheckIncusStoragePools(pools []string) HealthCheck {
 		Message: strings.Join(messages, "; "),
 		Details: details,
 	}
+}
+
+// evaluatePool turns one pool's driver + gathered usage into its status,
+// message lines, and details entry. Both the usage-error and success paths
+// flow through here, so driver-based diagnoses (the dir warning today,
+// non-thin LVM per #686 tomorrow) cannot drift between the two paths.
+func evaluatePool(pool, driver string, u poolUsage) (CheckStatus, []string, map[string]interface{}) {
+	label := pool
+	if driver != "" {
+		label = fmt.Sprintf("%s (%s)", pool, driver)
+	}
+
+	var status CheckStatus
+	var msgs []string
+	var entry map[string]interface{}
+
+	if u.err != nil {
+		status = StatusFailed
+		entry = map[string]interface{}{
+			"driver": driver,
+			"status": string(StatusFailed),
+			"error":  u.err.Error(),
+		}
+		if driver != "" {
+			// A known driver means the pool was enumerated (or its info
+			// output partially parsed) — it exists, only the usage query
+			// failed. Calling it "missing" would contradict the driver we
+			// are about to print.
+			msgs = append(msgs, fmt.Sprintf("%s: usage unavailable: %v", label, u.err))
+		} else {
+			msgs = append(msgs, fmt.Sprintf("%s: missing", pool))
+		}
+	} else {
+		freeGiB := u.totalGiB - u.usedGiB
+		usedPct := (u.usedGiB / u.totalGiB) * 100
+
+		switch {
+		case freeGiB < 2 || usedPct > 90:
+			status = StatusFailed
+		case freeGiB < 5 || usedPct > 80:
+			status = StatusWarning
+		default:
+			status = StatusOK
+		}
+		if driver == "dir" && status == StatusOK {
+			status = StatusWarning
+		}
+
+		entry = map[string]interface{}{
+			"driver":    driver,
+			"used_gib":  u.usedGiB,
+			"total_gib": u.totalGiB,
+			"free_gib":  freeGiB,
+			"used_pct":  usedPct,
+			"status":    string(status),
+		}
+		msgs = append(msgs, fmt.Sprintf("%s: %.1f GiB free of %.1f GiB (%.0f%% used)", label, freeGiB, u.totalGiB, usedPct))
+	}
+
+	if driver == "dir" {
+		// A `dir` pool has no unpacked image volume to clone from, so every
+		// launch re-unpacks the full image tarball (~5-6s per unpacked GB,
+		// #659). Copy-on-write drivers make instance creation near-free.
+		msgs = append(msgs, fmt.Sprintf("%s: 'dir' storage driver re-unpacks the image on every launch — recreate the pool with a copy-on-write driver (zfs/btrfs), e.g. by re-running install.sh", label))
+	}
+
+	return status, msgs, entry
 }
 
 // parseStorageValueGiB parses a value like "277.69MiB" or "28.57GiB" and
