@@ -800,10 +800,14 @@ func TestCheckIncusStoragePools_SaneValues(t *testing.T) {
 			continue
 		}
 
-		for _, key := range []string{"used_gib", "total_gib", "free_gib", "used_pct"} {
+		for _, key := range []string{"driver", "used_gib", "total_gib", "free_gib", "used_pct"} {
 			if _, ok := entry[key]; !ok {
 				t.Errorf("Expected %q key in details[%q]", key, poolName)
 			}
+		}
+
+		if driver, _ := entry["driver"].(string); driver == "" {
+			t.Errorf("Expected non-empty driver in details[%q]", poolName)
 		}
 
 		totalGiB, ok := entry["total_gib"].(float64)
@@ -830,8 +834,8 @@ func TestCheckIncusStoragePools_SaneValues(t *testing.T) {
 			t.Errorf("pool %q used_pct should be 0-100, got %f (was >100%% before the MiB/GiB fix)", poolName, usedPct)
 		}
 
-		t.Logf("CheckIncusStoragePools[%s]: total=%.2f GiB free=%.2f GiB used=%.0f%%",
-			poolName, totalGiB, freeGiB, usedPct)
+		t.Logf("CheckIncusStoragePools[%s]: driver=%v total=%.2f GiB free=%.2f GiB used=%.0f%%",
+			poolName, entry["driver"], totalGiB, freeGiB, usedPct)
 	}
 }
 
