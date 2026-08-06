@@ -302,7 +302,7 @@ type IncusConfig struct {
 	Group        string `toml:"group"`
 	CodeUID      int    `toml:"code_uid"`
 	CodeUser     string `toml:"code_user"`
-	DisableShift bool   `toml:"disable_shift"` // Disable UID shifting (for Colima/Lima environments)
+	DisableShift bool   `toml:"disable_shift"` // Disable UID shifting; use raw.idmap instead. For hosts whose kernel can't do idmapped ("shift") mounts — Colima/Lima, and some OrbStack kernels where the workspace mount fails with "idmapping abilities are required but aren't supported on system" (#678).
 }
 
 // NetworkMode represents the network isolation mode

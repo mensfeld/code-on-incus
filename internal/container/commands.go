@@ -356,6 +356,71 @@ func IncusFilePushWithOwner(source, destination string, uid, gid int, mode strin
 	return IncusFilePushWithOwnerContext(context.Background(), source, destination, uid, gid, mode)
 }
 
+// startCapture runs `incus start`, capturing stderr into the returned error so
+// the start fallbacks can inspect WHY start failed — in particular the idmapped
+// ("shift") mount failure some guest kernels raise (#678). Plain IncusExec sends
+// stderr straight to the terminal and returns a bare exit error, which can't be
+// matched on. `incus start` prints nothing useful on success, so nothing is lost.
+func startCapture(containerName string) error {
+	return IncusExecQuietContext(context.Background(), "start", containerName)
+}
+
+// isIdmapMountUnsupported reports whether err is the failure Incus raises when a
+// shift=true (idmapped) disk device can't be materialized because the guest
+// kernel lacks idmapped-mount support. Observed on some OrbStack kernels (#678):
+// "Failed to setup device mount \"workspace\": idmapping abilities are required
+// but aren't supported on system".
+func isIdmapMountUnsupported(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "idmapping abilities are required")
+}
+
+// shiftEnabledDiskDevices returns the names of the container's disk devices that
+// have shift=true set — the ones that would fail on a host without idmapped-mount
+// support and need converting to a raw.idmap workspace mapping instead.
+func shiftEnabledDiskDevices(containerName string) []string {
+	out, err := IncusOutput("config", "device", "list", containerName)
+	if err != nil {
+		return nil
+	}
+	var shifted []string
+	for _, name := range strings.Fields(out) {
+		if typ, _ := IncusOutput("config", "device", "get", containerName, name, "type"); strings.TrimSpace(typ) != "disk" {
+			continue
+		}
+		if sh, _ := IncusOutput("config", "device", "get", containerName, name, "shift"); strings.TrimSpace(sh) == "true" {
+			shifted = append(shifted, name)
+		}
+	}
+	return shifted
+}
+
+// fallbackShiftToRawIdmap converts every shift=true disk device on the (stopped)
+// container to shift=false and sets raw.idmap="both <hostUID> <codeUID>" — the
+// exact mapping decideUIDMapping applies for a manual `disable_shift`. This is
+// the reactive recovery for a host whose kernel can't do idmapped mounts (#678):
+// try shift, and only if start fails on it, drop to raw.idmap. Returns true if it
+// changed anything, so the caller knows a retry is worthwhile.
+func fallbackShiftToRawIdmap(containerName string) bool {
+	devices := shiftEnabledDiskDevices(containerName)
+	if len(devices) == 0 {
+		return false
+	}
+	for _, d := range devices {
+		_ = IncusExecQuiet("config", "device", "set", containerName, d, "shift=false")
+	}
+	_ = IncusExecQuiet("config", "set", containerName, "raw.idmap", fmt.Sprintf("both %d %d", os.Getuid(), CodeUID))
+	return true
+}
+
+// withDisableShiftHint wraps err with actionable guidance for the case where a
+// host can't do idmapped mounts and coi's automatic raw.idmap fallback did not
+// recover (#678). Callers apply it only when the failure is the idmapping error.
+func withDisableShiftHint(err error) error {
+	return fmt.Errorf("%w -- this host's kernel can't set up idmapped (\"shift\") mounts and coi's "+
+		"automatic raw.idmap fallback did not recover; set `[incus] disable_shift = true` in "+
+		"~/.coi/config.toml (or your active profile) to use raw.idmap for the workspace mount instead", err)
+}
+
 // StartWithIsolationFallback starts a non-ephemeral container that may have
 // security.idmap.isolated set, with automatic fallback if the host doesn't
 // support it. Intended for non-ephemeral containers (setup.go path, run's
@@ -373,7 +438,7 @@ func IncusFilePushWithOwner(source, destination string, uid, gid int, mode strin
 //     mount source) must not leave a persistent container silently un-isolated
 //     for every future session.
 func StartWithIsolationFallback(containerName string) error {
-	firstErr := IncusExec("start", containerName)
+	firstErr := startCapture(containerName)
 	if firstErr == nil {
 		return nil
 	}
@@ -386,12 +451,28 @@ func StartWithIsolationFallback(containerName string) error {
 		}
 	}
 	// Retry once with isolation intact: transient failures recover here.
-	if retryErr := IncusExec("start", containerName); retryErr == nil {
+	if retryErr := startCapture(containerName); retryErr == nil {
 		return nil
 	}
 	if running, _ := ContainerRunning(containerName); running {
 		return nil
 	}
+
+	// #678: a shift=true (idmapped) workspace mount the guest kernel can't do —
+	// observed on some OrbStack kernels — fails the START, and the isolation
+	// fallback below won't fix it (a different code path). Convert the shift
+	// mounts to raw.idmap (the same mapping a manual disable_shift produces) on
+	// the stopped container and retry before touching isolation.
+	if isIdmapMountUnsupported(firstErr) && fallbackShiftToRawIdmap(containerName) {
+		fmt.Fprintf(os.Stderr, "Warning: this host can't do idmapped (shift) mounts; using raw.idmap for the workspace and retrying\n")
+		if retryErr := startCapture(containerName); retryErr == nil {
+			return nil
+		}
+		if running, _ := ContainerRunning(containerName); running {
+			return nil
+		}
+	}
+
 	// Persistent failure — isolation may genuinely be unsupported. Surface the
 	// original error so a non-isolation root cause isn't misattributed, capture
 	// the prior flag state, then unset and retry.
@@ -402,7 +483,7 @@ func StartWithIsolationFallback(containerName string) error {
 	}
 	fmt.Fprintf(os.Stderr, "Warning: UID namespace isolation not available in this environment, disabling and retrying\n")
 	_ = IncusExecQuiet("config", "unset", containerName, "security.idmap.isolated")
-	if retryErr := IncusExec("start", containerName); retryErr != nil {
+	if retryErr := startCapture(containerName); retryErr != nil {
 		if running, _ := ContainerRunning(containerName); running {
 			return nil
 		}
@@ -410,6 +491,12 @@ func StartWithIsolationFallback(containerName string) error {
 		// Restore the container's isolation so the failed run leaves no trace.
 		if wasIsolated {
 			_ = IncusExecQuiet("config", "set", containerName, "security.idmap.isolated=true")
+		}
+		// If the root cause was an unsupported idmapped mount that the raw.idmap
+		// fallback couldn't recover, point the user at the disable_shift escape
+		// hatch instead of the raw Incus error (#678).
+		if isIdmapMountUnsupported(firstErr) {
+			return withDisableShiftHint(retryErr)
 		}
 		return retryErr
 	}
@@ -449,7 +536,8 @@ func LaunchContainerWithPreStart(imageAlias, containerName, pool string, ephemer
 	if !ephemeral {
 		return startWithIsolationFallback(containerName)
 	}
-	if err := IncusExec("start", containerName); err == nil {
+	firstErr := startCapture(containerName)
+	if firstErr == nil {
 		return nil
 	}
 	// Start failed. Poll briefly to distinguish a soft forkstart error (container
@@ -469,12 +557,30 @@ func LaunchContainerWithPreStart(imageAlias, containerName, pool string, ephemer
 			return initConfigureAndStart(imageAlias, containerName, pool, true, preStart)
 		}
 	}
+
+	// #678: an idmapped ("shift") workspace mount the guest kernel can't do fails
+	// the start and leaves the ephemeral container stopped (not deleted). Convert
+	// its shift mounts to raw.idmap and retry — the isolation unset below can't fix
+	// this, it's a different code path.
+	if isIdmapMountUnsupported(firstErr) && fallbackShiftToRawIdmap(containerName) {
+		fmt.Fprintf(os.Stderr, "Warning: this host can't do idmapped (shift) mounts; using raw.idmap for the workspace and retrying\n")
+		if retryErr := startCapture(containerName); retryErr == nil {
+			return nil
+		}
+		if running, _ := ContainerRunning(containerName); running {
+			return nil
+		}
+	}
+
 	// Container exists but didn't start; unset isolation and retry.
 	fmt.Fprintf(os.Stderr, "Warning: UID namespace isolation not supported in this environment, retrying\n")
 	_ = IncusExecQuiet("config", "unset", containerName, "security.idmap.isolated")
-	if retryErr := IncusExec("start", containerName); retryErr != nil {
+	if retryErr := startCapture(containerName); retryErr != nil {
 		if running, _ := ContainerRunning(containerName); running {
 			return nil
+		}
+		if isIdmapMountUnsupported(firstErr) {
+			return withDisableShiftHint(retryErr)
 		}
 		return retryErr
 	}
