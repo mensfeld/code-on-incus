@@ -274,7 +274,17 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 				reuseLayout, _ := ResolveGitWorktree(opts.WorkspacePath)
 				reuseWritableHooks := !containsGitHooksPath(opts.ProtectedPaths)
 				StripSecurityDevices(result.Manager, opts.Logger)
-				reusePaths, reuseImmutable, reuseErr := applySessionSecurity(result.Manager, opts, reuseCWP, !opts.DisableShift, reuseLayout, reuseWritableHooks, containerName)
+				// Decide the shift flag the same way a fresh launch does (issue
+				// #685). The old `!opts.DisableShift` ignored both cases that turn
+				// shift off at first launch — a host/code UID mismatch and a
+				// Colima/Lima guest that maps UIDs itself — so every reuse re-added
+				// the protect-* devices with shift=true. On a container the #678
+				// fallback had already converted to raw.idmap that re-armed the
+				// exact configuration whose start failure caused the conversion,
+				// once per session.
+				reuseConfiguredShift, _ := ConfigureUIDMapping(containerName, opts.DisableShift, opts.Logger)
+				reuseUseShift := reuseShiftDecision(reuseConfiguredShift, container.ContainerUsesRawIdmap(containerName))
+				reusePaths, reuseImmutable, reuseErr := applySessionSecurity(result.Manager, opts, reuseCWP, reuseUseShift, reuseLayout, reuseWritableHooks, containerName)
 				opts.ProtectedPaths = reusePaths
 				if reuseImmutable {
 					result.HasImmutableProtection = true
@@ -282,7 +292,12 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 				if reuseErr != nil {
 					return nil, reuseErr
 				}
-				if err := result.Manager.Start(); err != nil {
+				// Reuse gets the same start fallbacks as a fresh launch and as
+				// run's persistent reuse (internal/cli/run.go): a persistent
+				// container may carry security.idmap.isolated, and its disk devices
+				// only materialize at start, so an idmap-incompatible mount fails
+				// right here with nothing to catch it (#685).
+				if err := container.StartWithIsolationFallback(result.ContainerName); err != nil {
 					return nil, fmt.Errorf("failed to start container: %w", err)
 				}
 				// Block network immediately: a previous session's AI agent may have
@@ -555,7 +570,10 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 				return nil, fmt.Errorf("failed to start container: %w", err)
 			}
 		} else {
-			if err := result.Manager.Start(); err != nil {
+			// Isolation was never set, so the isolation fallback has nothing to
+			// unset — but the #678 idmapped-mount failure is orthogonal to it and
+			// hits this branch just the same (#685).
+			if err := container.StartWithIdmapFallback(result.ContainerName); err != nil {
 				return nil, fmt.Errorf("failed to start container: %w", err)
 			}
 		}

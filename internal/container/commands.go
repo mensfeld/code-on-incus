@@ -421,23 +421,30 @@ func withDisableShiftHint(err error) error {
 		"~/.coi/config.toml (or your active profile) to use raw.idmap for the workspace mount instead", err)
 }
 
-// StartWithIsolationFallback starts a non-ephemeral container that may have
-// security.idmap.isolated set, with automatic fallback if the host doesn't
-// support it. Intended for non-ephemeral containers (setup.go path, run's
-// persistent reuse) — stopped containers are not deleted, so unset+retry works.
+// ContainerUsesRawIdmap reports whether the container already has raw.idmap set,
+// i.e. its workspace UID mapping is on the non-shift path — either because the
+// config asked for it (disable_shift, a host/code UID mismatch) or because
+// fallbackShiftToRawIdmap healed it after a #678 start failure. The reuse path
+// checks this so a session doesn't re-arm shift=true on a container that has
+// already been established as unable to use it (#685).
+func ContainerUsesRawIdmap(containerName string) bool {
+	out, err := IncusOutput("config", "get", containerName, "raw.idmap")
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(out) != ""
+}
+
+// startWithIdmapRecovery is the start sequence shared by every non-ephemeral
+// start path: start, poll, retry, and on a #678 idmapped-mount failure convert
+// the shift mounts to raw.idmap and retry again. Returns nil once the container
+// is running; otherwise the ORIGINAL start error, which is the useful diagnostic
+// and what callers match on to decide whether a further fallback applies.
 //
 // On some hosts (nested containers, CI runners), forkstart exits non-zero even
-// though the LXC process started successfully. We poll ContainerRunning for up
-// to 5 s before deciding the container failed to start.
-//
-// The fallback is careful not to downgrade a container it didn't help:
-//   - a second attempt runs with isolation INTACT first, so transient failures
-//     (incusd blip, slow storage) recover without touching the security posture;
-//   - the prior isolated state is captured, and restored if the post-unset
-//     retry fails too — an unrelated permanent failure (corrupt rootfs, missing
-//     mount source) must not leave a persistent container silently un-isolated
-//     for every future session.
-func StartWithIsolationFallback(containerName string) error {
+// though the LXC process started successfully, so ContainerRunning is polled for
+// up to 5 s before deciding the container failed to start.
+func startWithIdmapRecovery(containerName string) error {
 	firstErr := startCapture(containerName)
 	if firstErr == nil {
 		return nil
@@ -450,7 +457,8 @@ func StartWithIsolationFallback(containerName string) error {
 			return nil
 		}
 	}
-	// Retry once with isolation intact: transient failures recover here.
+	// Retry once unchanged: transient failures (incusd blip, slow storage)
+	// recover here, before anything touches the container's configuration.
 	if retryErr := startCapture(containerName); retryErr == nil {
 		return nil
 	}
@@ -459,10 +467,9 @@ func StartWithIsolationFallback(containerName string) error {
 	}
 
 	// #678: a shift=true (idmapped) workspace mount the guest kernel can't do —
-	// observed on some OrbStack kernels — fails the START, and the isolation
-	// fallback below won't fix it (a different code path). Convert the shift
+	// observed on some OrbStack kernels — fails the START. Convert the shift
 	// mounts to raw.idmap (the same mapping a manual disable_shift produces) on
-	// the stopped container and retry before touching isolation.
+	// the stopped container and retry.
 	if isIdmapMountUnsupported(firstErr) && fallbackShiftToRawIdmap(containerName) {
 		fmt.Fprintf(os.Stderr, "Warning: this host can't do idmapped (shift) mounts; using raw.idmap for the workspace and retrying\n")
 		if retryErr := startCapture(containerName); retryErr == nil {
@@ -471,6 +478,48 @@ func StartWithIsolationFallback(containerName string) error {
 		if running, _ := ContainerRunning(containerName); running {
 			return nil
 		}
+	}
+	return firstErr
+}
+
+// StartWithIdmapFallback starts a container with only the #678 shift→raw.idmap
+// recovery, for callers whose container never had security.idmap.isolated set:
+// the non-isolated fresh-launch branch and `coi container start`. Those callers
+// must not go through StartWithIsolationFallback, which would print a misleading
+// "UID namespace isolation not available" warning — and unset a key that was
+// never set — for any unrelated permanent failure.
+func StartWithIdmapFallback(containerName string) error {
+	firstErr := startWithIdmapRecovery(containerName)
+	if firstErr == nil {
+		return nil
+	}
+	// The raw.idmap conversion didn't recover: point at the escape hatch rather
+	// than leave the user with the raw Incus error (#678).
+	if isIdmapMountUnsupported(firstErr) {
+		return withDisableShiftHint(firstErr)
+	}
+	return firstErr
+}
+
+// StartWithIsolationFallback starts a non-ephemeral container that may have
+// security.idmap.isolated set, with automatic fallback if the host doesn't
+// support it. Intended for non-ephemeral containers (setup.go path, run's
+// persistent reuse) — stopped containers are not deleted, so unset+retry works.
+//
+// The idmapped-mount recovery in startWithIdmapRecovery runs first: that failure
+// is a different code path, and unsetting isolation would not fix it.
+//
+// The isolation fallback is careful not to downgrade a container it didn't help:
+//   - startWithIdmapRecovery's second attempt runs with isolation INTACT, so
+//     transient failures recover without touching the security posture;
+//   - the prior isolated state is captured, and restored if the post-unset
+//     retry fails too — an unrelated permanent failure (corrupt rootfs, missing
+//     mount source) must not leave a persistent container silently un-isolated
+//     for every future session.
+func StartWithIsolationFallback(containerName string) error {
+	firstErr := startWithIdmapRecovery(containerName)
+	if firstErr == nil {
+		return nil
 	}
 
 	// Persistent failure — isolation may genuinely be unsupported. Surface the
