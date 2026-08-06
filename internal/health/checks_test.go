@@ -1,6 +1,7 @@
 package health
 
 import (
+	"errors"
 	"math"
 	"strings"
 	"testing"
@@ -201,41 +202,71 @@ used by: {}`,
 
 // A pool on the `dir` driver must be flagged as a warning even when its usage
 // is fine: with no unpacked image volume to clone from, every launch re-unpacks
-// the full image, dominating session startup (#659). CoW drivers stay OK.
+// the full image, dominating session startup (#659). CoW drivers stay OK. The
+// driver comes primarily from the structured `storage list` JSON; the text
+// scrape of `storage info` is only a fallback.
 func TestCheckIncusStoragePools_DirDriverWarns(t *testing.T) {
-	orig := gatherPoolUsage
-	defer func() { gatherPoolUsage = orig }()
+	origGather := gatherPoolUsage
+	origList := listPoolDrivers
+	defer func() {
+		gatherPoolUsage = origGather
+		listPoolDrivers = origList
+	}()
 
 	tests := []struct {
-		name       string
-		usage      poolUsage
-		wantStatus CheckStatus
+		name        string
+		usage       poolUsage
+		listDrivers map[string]string
+		wantStatus  CheckStatus
+		wantDriver  string
 	}{
 		{
-			name:       "dir driver with healthy usage warns",
+			name:        "dir driver from structured list warns",
+			usage:       poolUsage{usedGiB: 5, totalGiB: 100},
+			listDrivers: map[string]string{"testpool": "dir"},
+			wantStatus:  StatusWarning,
+			wantDriver:  "dir",
+		},
+		{
+			name:       "dir driver via text fallback warns when list unavailable",
 			usage:      poolUsage{driver: "dir", usedGiB: 5, totalGiB: 100},
 			wantStatus: StatusWarning,
+			wantDriver: "dir",
 		},
 		{
-			name:       "dir driver with critical usage stays failed",
-			usage:      poolUsage{driver: "dir", usedGiB: 99, totalGiB: 100},
-			wantStatus: StatusFailed,
+			name:        "dir driver with critical usage stays failed",
+			usage:       poolUsage{usedGiB: 99, totalGiB: 100},
+			listDrivers: map[string]string{"testpool": "dir"},
+			wantStatus:  StatusFailed,
+			wantDriver:  "dir",
 		},
 		{
-			name:       "zfs driver with healthy usage is ok",
-			usage:      poolUsage{driver: "zfs", usedGiB: 5, totalGiB: 100},
-			wantStatus: StatusOK,
+			name:        "zfs driver with healthy usage is ok",
+			usage:       poolUsage{usedGiB: 5, totalGiB: 100},
+			listDrivers: map[string]string{"testpool": "zfs"},
+			wantStatus:  StatusOK,
+			wantDriver:  "zfs",
 		},
 		{
-			name:       "btrfs driver with healthy usage is ok",
-			usage:      poolUsage{driver: "btrfs", usedGiB: 5, totalGiB: 100},
-			wantStatus: StatusOK,
+			name:        "btrfs driver with healthy usage is ok",
+			usage:       poolUsage{usedGiB: 5, totalGiB: 100},
+			listDrivers: map[string]string{"testpool": "btrfs"},
+			wantStatus:  StatusOK,
+			wantDriver:  "btrfs",
+		},
+		{
+			name:        "structured list wins over text fallback",
+			usage:       poolUsage{driver: "dir", usedGiB: 5, totalGiB: 100},
+			listDrivers: map[string]string{"testpool": "zfs"},
+			wantStatus:  StatusOK,
+			wantDriver:  "zfs",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			gatherPoolUsage = func(pool string) poolUsage { return tt.usage }
+			listPoolDrivers = func() map[string]string { return tt.listDrivers }
 
 			result := CheckIncusStoragePools([]string{"testpool"})
 			if result.Status != tt.wantStatus {
@@ -246,15 +277,96 @@ func TestCheckIncusStoragePools_DirDriverWarns(t *testing.T) {
 			if !ok {
 				t.Fatalf("expected details[testpool] map, got %T", result.Details["testpool"])
 			}
-			if entry["driver"] != tt.usage.driver {
-				t.Errorf("details driver = %v, want %q", entry["driver"], tt.usage.driver)
+			if entry["driver"] != tt.wantDriver {
+				t.Errorf("details driver = %v, want %q", entry["driver"], tt.wantDriver)
 			}
 
 			// The usage line names the driver so `coi health` text output
 			// answers "which driver is this pool on?" at a glance.
-			if want := "testpool (" + tt.usage.driver + "):"; !strings.Contains(result.Message, want) {
+			if want := "testpool (" + tt.wantDriver + "):"; !strings.Contains(result.Message, want) {
 				t.Errorf("message %q should contain %q", result.Message, want)
 			}
+
+			// The usage line must be present (the shared label means the
+			// warning alone could otherwise satisfy the Contains above),
+			// and the dir warning must follow it.
+			usageIdx := strings.Index(result.Message, "GiB free")
+			if usageIdx == -1 {
+				t.Errorf("usage line missing from message: %q", result.Message)
+			}
+			if tt.wantDriver == "dir" {
+				warnIdx := strings.Index(result.Message, "'dir' storage driver")
+				if warnIdx == -1 || warnIdx < usageIdx {
+					t.Errorf("dir warning should be present and follow the usage line, message: %q", result.Message)
+				}
+			}
 		})
+	}
+}
+
+// When the usage query fails, the details entry must still carry the driver
+// (known independently via `storage list`) and a dir pool must still surface
+// its warning — the schema stays consistent across the error and success
+// paths. And since a known driver proves the pool exists, the message must
+// say the usage is unavailable rather than contradict itself with "missing".
+func TestCheckIncusStoragePools_ErrPathKeepsDriver(t *testing.T) {
+	origGather := gatherPoolUsage
+	origList := listPoolDrivers
+	defer func() {
+		gatherPoolUsage = origGather
+		listPoolDrivers = origList
+	}()
+
+	gatherPoolUsage = func(pool string) poolUsage {
+		return poolUsage{err: errors.New("could not parse usage")}
+	}
+	listPoolDrivers = func() map[string]string {
+		return map[string]string{"testpool": "dir"}
+	}
+
+	result := CheckIncusStoragePools([]string{"testpool"})
+	if result.Status != StatusFailed {
+		t.Errorf("status = %s, want %s", result.Status, StatusFailed)
+	}
+
+	entry, ok := result.Details["testpool"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected details[testpool] map, got %T", result.Details["testpool"])
+	}
+	if entry["driver"] != "dir" {
+		t.Errorf("details driver = %v, want %q on the error path", entry["driver"], "dir")
+	}
+	if !strings.Contains(result.Message, "'dir' storage driver") {
+		t.Errorf("dir warning should still fire when usage is unavailable, message: %q", result.Message)
+	}
+	if !strings.Contains(result.Message, "testpool (dir): usage unavailable") {
+		t.Errorf("an enumerated pool must report usage unavailable, not missing, message: %q", result.Message)
+	}
+	if strings.Contains(result.Message, "missing") {
+		t.Errorf("a pool with a known driver must not be called missing, message: %q", result.Message)
+	}
+}
+
+// A pool with no driver from either source (not enumerated, info failed) is
+// genuinely unresolvable — that one is reported as missing.
+func TestCheckIncusStoragePools_UnknownPoolIsMissing(t *testing.T) {
+	origGather := gatherPoolUsage
+	origList := listPoolDrivers
+	defer func() {
+		gatherPoolUsage = origGather
+		listPoolDrivers = origList
+	}()
+
+	gatherPoolUsage = func(pool string) poolUsage {
+		return poolUsage{err: errors.New("storage pool not found")}
+	}
+	listPoolDrivers = func() map[string]string { return nil }
+
+	result := CheckIncusStoragePools([]string{"ghostpool"})
+	if result.Status != StatusFailed {
+		t.Errorf("status = %s, want %s", result.Status, StatusFailed)
+	}
+	if !strings.Contains(result.Message, "ghostpool: missing") {
+		t.Errorf("an unresolvable pool should be reported missing, message: %q", result.Message)
 	}
 }
