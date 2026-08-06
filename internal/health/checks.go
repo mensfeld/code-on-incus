@@ -1580,7 +1580,11 @@ func CheckIncusStoragePools(pools []string) HealthCheck {
 			"used_pct":  usedPct,
 			"status":    string(poolStatus),
 		}
-		messages = append(messages, fmt.Sprintf("%s: %.1f GiB free of %.1f GiB (%.0f%% used)", pool, freeGiB, u.totalGiB, usedPct))
+		label := pool
+		if u.driver != "" {
+			label = fmt.Sprintf("%s (%s)", pool, u.driver)
+		}
+		messages = append(messages, fmt.Sprintf("%s: %.1f GiB free of %.1f GiB (%.0f%% used)", label, freeGiB, u.totalGiB, usedPct))
 	}
 
 	return HealthCheck{

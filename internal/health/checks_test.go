@@ -2,6 +2,7 @@ package health
 
 import (
 	"math"
+	"strings"
 	"testing"
 )
 
@@ -247,6 +248,12 @@ func TestCheckIncusStoragePools_DirDriverWarns(t *testing.T) {
 			}
 			if entry["driver"] != tt.usage.driver {
 				t.Errorf("details driver = %v, want %q", entry["driver"], tt.usage.driver)
+			}
+
+			// The usage line names the driver so `coi health` text output
+			// answers "which driver is this pool on?" at a glance.
+			if want := "testpool (" + tt.usage.driver + "):"; !strings.Contains(result.Message, want) {
+				t.Errorf("message %q should contain %q", result.Message, want)
 			}
 		})
 	}
