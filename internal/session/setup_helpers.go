@@ -30,14 +30,25 @@ import (
 // started the container (the run pipeline uses `incus launch` = create+start)
 // must restart it when idmapApplied is true; the shell pipeline sets it before
 // its own start, so it ignores idmapApplied.
-func ConfigureUIDMapping(containerName string, disableShift bool, logger func(string)) (useShift, idmapApplied bool) {
+//
+// sources are the HOST paths this container's disk devices are sourced from
+// (workspace first, then any configured mounts). Their filesystems decide
+// whether an idmapped (shift=true) mount is possible at all, which is a
+// property of the paths rather than of the VM around them (#683).
+func ConfigureUIDMapping(containerName string, sources []string, disableShift bool, logger func(string)) (useShift, idmapApplied bool) {
 	if logger == nil {
 		logger = func(string) {}
 	}
 	// Detect() reads /proc/mounts etc.; call it once and reuse.
 	hostHandlesUIDMapping := vmhost.Detect().HandlesUIDMapping()
+	blocking := vmhost.FirstBlockingSource(sources...)
+	// Only worth saying when it changes the outcome: if shift was already off
+	// for another reason, the filesystem never got a vote.
+	if blocking != "" && !disableShift && !hostHandlesUIDMapping {
+		logger(fmt.Sprintf("Mount source %s is on a FUSE-family filesystem, which can't be relied on for idmapped (shift) mounts; using raw.idmap for this container instead", blocking))
+	}
 	var idmap string
-	useShift, idmap = decideUIDMapping(os.Getuid(), container.CodeUID, disableShift, hostHandlesUIDMapping)
+	useShift, idmap = decideUIDMapping(os.Getuid(), container.CodeUID, disableShift, hostHandlesUIDMapping, blocking != "")
 
 	if idmap != "" {
 		if os.Getuid() != container.CodeUID {
@@ -63,6 +74,31 @@ func ConfigureUIDMapping(containerName string, disableShift bool, logger func(st
 	return useShift, false
 }
 
+// ResolveUseShift returns just the shift flag from the same decision
+// ConfigureUIDMapping makes, without applying anything to a container. It is
+// for callers that need the flag before the container exists (the run
+// pipeline's pre-start default) or on a reused container whose raw.idmap was
+// applied at creation.
+func ResolveUseShift(sources []string, disableShift bool) bool {
+	useShift, _ := decideUIDMapping(os.Getuid(), container.CodeUID, disableShift,
+		vmhost.Detect().HandlesUIDMapping(), vmhost.FirstBlockingSource(sources...) != "")
+	return useShift
+}
+
+// MountSources lists the HOST paths a session's disk devices are sourced from:
+// the workspace, plus any configured extra mounts. Protected paths and secret
+// masks are not included — they live inside the workspace, so its filesystem
+// already speaks for them.
+func MountSources(workspacePath string, mountConfig *MountConfig) []string {
+	sources := []string{workspacePath}
+	if mountConfig != nil {
+		for _, m := range mountConfig.Mounts {
+			sources = append(sources, m.HostPath)
+		}
+	}
+	return sources
+}
+
 // decideUIDMapping is the pure decision behind ConfigureUIDMapping (no I/O), so
 // the case matrix — especially the issue #530 regression where a UID mismatch
 // was skipped under Colima/Lima — is unit-testable. Returns the effective shift
@@ -71,7 +107,16 @@ func ConfigureUIDMapping(containerName string, disableShift bool, logger func(st
 // A host-UID/code-UID mismatch ALWAYS wins: raw.idmap is set and shift is off,
 // regardless of disableShift or Colima/Lima. shift=true only translates root,
 // not arbitrary UIDs, and cannot be combined with raw.idmap.
-func decideUIDMapping(hostUID, codeUID int, disableShift, hostHandlesUIDMapping bool) (useShift bool, idmap string) {
+func decideUIDMapping(hostUID, codeUID int, disableShift, hostHandlesUIDMapping, sourceBlocksShift bool) (useShift bool, idmap string) {
+	// A source filesystem that can't be relied on for idmapped mounts is the
+	// exact situation disable_shift exists for (#683), so fold it in first and
+	// let the rest of the matrix apply unchanged. In particular this reaches the
+	// #667 branch below, so a host/code UID match still gets raw.idmap rather
+	// than nothing — the container's default subuid range doesn't cover hostUID
+	// just because the nominal code UID matches it.
+	if sourceBlocksShift {
+		disableShift = true
+	}
 	if !disableShift && hostHandlesUIDMapping {
 		disableShift = true
 	}

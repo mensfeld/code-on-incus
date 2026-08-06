@@ -190,11 +190,11 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 			//     all (issue #534).
 			// If the ephemeral isolation fallback recreates the container, this
 			// hook re-runs on the fresh container, re-applying mapping and devices.
-			s.useShift = !a.cfg.Incus.DisableShift
+			s.useShift = session.ResolveUseShift(session.MountSources(s.absWorkspace, s.mountConfig), a.cfg.Incus.DisableShift)
 			logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
 			preStart := func() error {
 				defer timing.Start(timing.CatStep, "pre-start-hook")()
-				s.useShift, _ = session.ConfigureUIDMapping(s.containerName, a.cfg.Incus.DisableShift, logFn)
+				s.useShift, _ = session.ConfigureUIDMapping(s.containerName, session.MountSources(s.absWorkspace, s.mountConfig), a.cfg.Incus.DisableShift, logFn)
 				// Restricted/allowlist disable IPv6 in the container (post-start,
 				// via the network manager). Pre-seed an IPv4-only networkd config
 				// so the link reaches "configured" and systemd-networkd-wait-online
@@ -354,7 +354,7 @@ func (a *App) configureContainerRunPhase(s *runState) session.Phase {
 			if s.wasRestarted {
 				// Reuse: devices (incl. any worktree mounts) persist from creation, so
 				// applyWorkspaceMounts returns early without remounting; layout is nil.
-				if err := a.applyWorkspaceMounts(s.mgr, s.containerName, s.absWorkspace, &s.containerWorkspace, s.mountConfig, !a.cfg.Incus.DisableShift, true, nil); err != nil {
+				if err := a.applyWorkspaceMounts(s.mgr, s.containerName, s.absWorkspace, &s.containerWorkspace, s.mountConfig, session.ResolveUseShift(session.MountSources(s.absWorkspace, s.mountConfig), a.cfg.Incus.DisableShift), true, nil); err != nil {
 					return nil, err
 				}
 			}

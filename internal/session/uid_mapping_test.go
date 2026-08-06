@@ -9,19 +9,29 @@ func TestDecideUIDMapping(t *testing.T) {
 		hostUID      int
 		disableShift bool
 		colima       bool
+		fuseSource   bool
 		wantShift    bool
 		wantIdmap    string
 	}{
-		{"match, shift allowed → shift", 1000, false, false, true, ""},
-		{"match, colima (host handles mapping) → no shift, no idmap", 1000, false, true, false, ""},
+		{"match, shift allowed → shift", 1000, false, false, false, true, ""},
+		{"match, colima (host handles mapping) → no shift, no idmap", 1000, false, true, false, false, ""},
+
+		// Issue #683: a workspace on a FUSE-family source can't be relied on for
+		// idmapped mounts, so it turns shift off exactly like a manual
+		// disable_shift would — including reaching the #667 branch, so a UID
+		// match still gets raw.idmap rather than nothing.
+		{"match, FUSE source → no shift, idmap (#683)", 1000, false, false, true, false, "both 1000 1000"},
+		{"mismatch 501, FUSE source → idmap (#683)", 501, false, false, true, false, "both 501 1000"},
+		{"match, FUSE source under colima → no shift, no idmap (guest maps it)", 1000, false, true, true, false, ""},
+		{"match, FUSE source + disable_shift → same as either alone", 1000, true, false, true, false, "both 1000 1000"},
 
 		// The issue #530 regression: a UID mismatch must set raw.idmap and turn
 		// shift off — INCLUDING under Colima/Lima and explicit disable_shift,
 		// which the old code gated out.
-		{"mismatch 501 (macOS), plain → idmap", 501, false, false, false, "both 501 1000"},
-		{"mismatch 1001 (CI runner), plain → idmap", 1001, false, false, false, "both 1001 1000"},
-		{"mismatch 501, colima → idmap (#530)", 501, false, true, false, "both 501 1000"},
-		{"mismatch 501, disable_shift → idmap (#530)", 501, true, false, false, "both 501 1000"},
+		{"mismatch 501 (macOS), plain → idmap", 501, false, false, false, false, "both 501 1000"},
+		{"mismatch 1001 (CI runner), plain → idmap", 1001, false, false, false, false, "both 1001 1000"},
+		{"mismatch 501, colima → idmap (#530)", 501, false, true, false, false, "both 501 1000"},
+		{"mismatch 501, disable_shift → idmap (#530)", 501, true, false, false, false, "both 501 1000"},
 
 		// The issue #667 gap: hostUID == codeUID with a manually configured
 		// disable_shift (e.g. OrbStack, where shift is unsupported per #553)
@@ -30,11 +40,11 @@ func TestDecideUIDMapping(t *testing.T) {
 		// This must NOT apply when hostHandlesUIDMapping is true (real
 		// Colima/Lima, covered by the case above) — that guest already maps
 		// the UID itself.
-		{"match, manual disable_shift (no host mapping) → idmap (#667)", 1000, true, false, false, "both 1000 1000"},
+		{"match, manual disable_shift (no host mapping) → idmap (#667)", 1000, true, false, false, false, "both 1000 1000"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			shift, idmap := decideUIDMapping(c.hostUID, code, c.disableShift, c.colima)
+			shift, idmap := decideUIDMapping(c.hostUID, code, c.disableShift, c.colima, c.fuseSource)
 			if shift != c.wantShift {
 				t.Errorf("shift: got %v want %v", shift, c.wantShift)
 			}
@@ -46,5 +56,29 @@ func TestDecideUIDMapping(t *testing.T) {
 				t.Error("raw.idmap must never be combined with shift=true")
 			}
 		})
+	}
+}
+
+// TestMountSources checks the disk-device source list handed to the #683
+// filesystem check: the workspace always leads, configured mounts follow, and a
+// nil mount config is just the workspace.
+func TestMountSources(t *testing.T) {
+	if got := MountSources("/ws", nil); len(got) != 1 || got[0] != "/ws" {
+		t.Errorf("nil mount config should yield just the workspace, got %v", got)
+	}
+
+	mc := &MountConfig{Mounts: []MountEntry{
+		{HostPath: "/Users/me/data"},
+		{HostPath: "/opt/cache"},
+	}}
+	got := MountSources("/ws", mc)
+	want := []string{"/ws", "/Users/me/data", "/opt/cache"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("source %d: got %q want %q", i, got[i], want[i])
+		}
 	}
 }

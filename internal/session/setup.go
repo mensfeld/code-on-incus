@@ -389,7 +389,7 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		// (issue #530).
 		// Shell path sets raw.idmap before its own start (below), so the
 		// idmapApplied signal is not needed here.
-		useShift, _ := ConfigureUIDMapping(result.ContainerName, opts.DisableShift, opts.Logger)
+		useShift, _ := ConfigureUIDMapping(result.ContainerName, MountSources(opts.WorkspacePath, opts.MountConfig), opts.DisableShift, opts.Logger)
 
 		// Add disk devices BEFORE starting container.
 		// Detect a git worktree checkout (.git is a file whose real git internals

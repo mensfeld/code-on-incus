@@ -60,9 +60,11 @@ func detect(mounts, user, osRelease string) Kind {
 	// is false and coi maps UIDs itself. Whether OrbStack's virtiofs mounts
 	// support Incus's idmapped ("shift") mounts is kernel-dependent and NOT
 	// assumed here: some OrbStack kernels can't, so a shift=true workspace mount
-	// fails at container start. That is handled reactively at start time by
-	// falling back to raw.idmap (see StartWithIsolationFallback / #678), not by a
-	// capability guess in this string match.
+	// fails at container start, and on 2.2.2 and later it attaches but produces
+	// junk ownership instead. Neither is decided by this string match. The
+	// question is answered from the source path's filesystem instead, in
+	// SourceBlocksIdmappedMounts (#683), with the reactive raw.idmap fallback at
+	// start (StartWithIsolationFallback / #678) left underneath as the backstop.
 	if strings.Contains(strings.ToLower(osRelease), "orbstack") {
 		return KindOrbStack
 	}
