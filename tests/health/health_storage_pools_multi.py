@@ -11,23 +11,7 @@ from pathlib import Path
 
 import pytest
 
-
-def _create_temp_pool(name):
-    result = subprocess.run(
-        ["incus", "storage", "create", name, "dir"],
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    return result.returncode == 0, result.stderr
-
-
-def _delete_temp_pool(name):
-    subprocess.run(
-        ["incus", "storage", "delete", name],
-        capture_output=True,
-        timeout=30,
-    )
+from support.helpers import create_storage_pool, delete_storage_pool
 
 
 def test_health_storage_pools_multi(coi_binary, workspace_dir):
@@ -35,7 +19,7 @@ def test_health_storage_pools_multi(coi_binary, workspace_dir):
     pool_name = "coi-test-multipool"
 
     # Skip if we cannot create a temp pool (e.g. no admin permission).
-    ok, err = _create_temp_pool(pool_name)
+    ok, err = create_storage_pool(pool_name)
     if not ok:
         pytest.skip(f"Cannot create temp storage pool: {err}")
 
@@ -76,4 +60,4 @@ def test_health_storage_pools_multi(coi_binary, workspace_dir):
             f"Temp pool {pool_name} should appear in pool details. Got: {list(details.keys())}"
         )
     finally:
-        _delete_temp_pool(pool_name)
+        delete_storage_pool(pool_name)

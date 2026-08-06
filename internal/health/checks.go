@@ -1498,6 +1498,23 @@ func parsePoolInfo(out string) poolUsage {
 	return u
 }
 
+// listPoolDrivers returns a pool-name → driver map from `incus storage list
+// --format=json` — the structured source of truth for the driver. The text
+// scrape in parsePoolInfo stays only as a fallback, so a future Incus
+// reshaping either output cannot silently blank the driver. Returns nil when
+// the list call fails; swappable so unit tests can run without a daemon.
+var listPoolDrivers = func() map[string]string {
+	pools, err := container.ListStoragePools()
+	if err != nil {
+		return nil
+	}
+	drivers := make(map[string]string, len(pools))
+	for _, p := range pools {
+		drivers[p.Name] = p.Driver
+	}
+	return drivers
+}
+
 // CheckIncusStoragePools checks Incus storage pool usage for all pools the
 // loaded config references (global + every profile), de-duplicated. An empty
 // pool name in config falls back to the Incus default profile's pool so we
@@ -1537,14 +1554,34 @@ func CheckIncusStoragePools(pools []string) HealthCheck {
 		}
 	}
 
+	drivers := listPoolDrivers()
+
 	for _, pool := range unique {
 		u := gatherPoolUsage(pool)
+
+		driver := drivers[pool]
+		if driver == "" {
+			driver = u.driver
+		}
+		label := pool
+		if driver != "" {
+			label = fmt.Sprintf("%s (%s)", pool, driver)
+		}
+		// A `dir` pool has no unpacked image volume to clone from, so every
+		// launch re-unpacks the full image tarball (~5-6s per unpacked GB,
+		// #659). Copy-on-write drivers make instance creation near-free.
+		dirWarning := fmt.Sprintf("%s: 'dir' storage driver re-unpacks the image on every launch — recreate the pool with a copy-on-write driver (zfs/btrfs), e.g. by re-running install.sh", label)
+
 		if u.err != nil {
 			details[pool] = map[string]interface{}{
+				"driver": driver,
 				"status": string(StatusFailed),
 				"error":  u.err.Error(),
 			}
 			messages = append(messages, fmt.Sprintf("%s: missing", pool))
+			if driver == "dir" {
+				messages = append(messages, dirWarning)
+			}
 			worsen(StatusFailed)
 			continue
 		}
@@ -1561,30 +1598,23 @@ func CheckIncusStoragePools(pools []string) HealthCheck {
 		default:
 			poolStatus = StatusOK
 		}
-		// A `dir` pool has no unpacked image volume to clone from, so every
-		// launch re-unpacks the full image tarball (~5-6s per unpacked GB,
-		// #659). Copy-on-write drivers make instance creation near-free.
-		if u.driver == "dir" {
-			if poolStatus == StatusOK {
-				poolStatus = StatusWarning
-			}
-			messages = append(messages, fmt.Sprintf("%s: 'dir' storage driver re-unpacks the image on every launch — recreate the pool with a copy-on-write driver (zfs/btrfs), e.g. by re-running install.sh", pool))
+		if driver == "dir" && poolStatus == StatusOK {
+			poolStatus = StatusWarning
 		}
 		worsen(poolStatus)
 
 		details[pool] = map[string]interface{}{
-			"driver":    u.driver,
+			"driver":    driver,
 			"used_gib":  u.usedGiB,
 			"total_gib": u.totalGiB,
 			"free_gib":  freeGiB,
 			"used_pct":  usedPct,
 			"status":    string(poolStatus),
 		}
-		label := pool
-		if u.driver != "" {
-			label = fmt.Sprintf("%s (%s)", pool, u.driver)
-		}
 		messages = append(messages, fmt.Sprintf("%s: %.1f GiB free of %.1f GiB (%.0f%% used)", label, freeGiB, u.totalGiB, usedPct))
+		if driver == "dir" {
+			messages = append(messages, dirWarning)
+		}
 	}
 
 	return HealthCheck{
