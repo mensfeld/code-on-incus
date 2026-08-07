@@ -1373,3 +1373,39 @@ def wait_for_container_stopped(coi_binary, container_name, timeout=120):
             return True, last
         time.sleep(1)
     return False, last
+
+
+def is_incus_permission_error(stderr):
+    """Heuristic: was an incus admin operation (e.g. `incus storage create`)
+    rejected because the caller does not have Incus admin access? Anything
+    else (name collision, backend error, transient failure) should fail the
+    test loud, not skip."""
+    lowered = stderr.lower()
+    return (
+        "permission denied" in lowered
+        or "not authorized" in lowered
+        or "forbidden" in lowered
+        or "access denied" in lowered
+    )
+
+
+def create_storage_pool(name, driver="dir"):
+    """Create a storage pool for a test. Returns (ok, stderr). Callers should
+    treat ok=False as a hard failure unless is_incus_permission_error(stderr),
+    in which case the test should pytest.skip."""
+    result = subprocess.run(
+        ["incus", "storage", "create", name, driver],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    return result.returncode == 0, result.stderr
+
+
+def delete_storage_pool(name):
+    """Best-effort deletion of a test storage pool."""
+    subprocess.run(
+        ["incus", "storage", "delete", name],
+        capture_output=True,
+        timeout=30,
+    )

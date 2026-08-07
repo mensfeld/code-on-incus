@@ -3,27 +3,16 @@ Test that `coi clean --pools` never deletes the storage pool itself,
 only the COI containers within it.
 """
 
+import os
 import subprocess
 
 import pytest
 
-
-def _create_temp_pool(name):
-    result = subprocess.run(
-        ["incus", "storage", "create", name, "dir"],
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    return result.returncode == 0
-
-
-def _delete_temp_pool(name):
-    subprocess.run(
-        ["incus", "storage", "delete", name],
-        capture_output=True,
-        timeout=30,
-    )
+from support.helpers import (
+    create_storage_pool,
+    delete_storage_pool,
+    is_incus_permission_error,
+)
 
 
 def _pool_exists(name):
@@ -40,10 +29,13 @@ def _pool_exists(name):
 
 def test_clean_pools_never_deletes_pool(coi_binary, workspace_dir):
     """After `coi clean --pools --force`, the pool itself remains."""
-    pool_name = "coi-test-keeppool"
+    pool_name = f"coi-test-keeppool-{os.urandom(4).hex()}"
 
-    if not _create_temp_pool(pool_name):
-        pytest.skip("Cannot create temp storage pool")
+    ok, err = create_storage_pool(pool_name)
+    if not ok:
+        if is_incus_permission_error(err):
+            pytest.skip(f"No permission to create storage pool {pool_name}: {err}")
+        pytest.fail(f"Failed to create temp pool {pool_name}: {err}")
 
     try:
         # Run clean --pools --force on an empty unreferenced pool.
@@ -66,4 +58,4 @@ def test_clean_pools_never_deletes_pool(coi_binary, workspace_dir):
         # Pool itself must still exist
         assert _pool_exists(pool_name), f"Pool {pool_name} should still exist after clean --pools."
     finally:
-        _delete_temp_pool(pool_name)
+        delete_storage_pool(pool_name)

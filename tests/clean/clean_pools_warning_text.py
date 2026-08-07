@@ -3,27 +3,16 @@ Test that `coi clean --pools` prints the cross-project warning before
 listing pools to delete.
 """
 
+import os
 import subprocess
 
 import pytest
 
-
-def _create_temp_pool(name):
-    result = subprocess.run(
-        ["incus", "storage", "create", name, "dir"],
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    return result.returncode == 0
-
-
-def _delete_temp_pool(name):
-    subprocess.run(
-        ["incus", "storage", "delete", name],
-        capture_output=True,
-        timeout=30,
-    )
+from support.helpers import (
+    create_storage_pool,
+    delete_storage_pool,
+    is_incus_permission_error,
+)
 
 
 def _delete_container(name):
@@ -36,11 +25,14 @@ def _delete_container(name):
 
 def test_clean_pools_warning_text(coi_binary, workspace_dir):
     """The cross-project visibility warning text appears in clean output."""
-    pool_name = "coi-test-warnpool"
+    pool_name = f"coi-test-warnpool-{os.urandom(4).hex()}"
     container_name = "coi-test-warn-container"
 
-    if not _create_temp_pool(pool_name):
-        pytest.skip("Cannot create temp storage pool")
+    ok, err = create_storage_pool(pool_name)
+    if not ok:
+        if is_incus_permission_error(err):
+            pytest.skip(f"No permission to create storage pool {pool_name}: {err}")
+        pytest.fail(f"Failed to create temp pool {pool_name}: {err}")
 
     try:
         result = subprocess.run(
@@ -84,4 +76,4 @@ def test_clean_pools_warning_text(coi_binary, workspace_dir):
         finally:
             _delete_container(container_name)
     finally:
-        _delete_temp_pool(pool_name)
+        delete_storage_pool(pool_name)
