@@ -5,32 +5,21 @@ A profile with [container.build] and [container] storage_pool should
 build the image into the requested pool.
 """
 
+import os
 import subprocess
 
 import pytest
 
-
-def _create_temp_pool(name):
-    result = subprocess.run(
-        ["incus", "storage", "create", name, "dir"],
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    return result.returncode == 0
-
-
-def _delete_temp_pool(name):
-    subprocess.run(
-        ["incus", "storage", "delete", name],
-        capture_output=True,
-        timeout=30,
-    )
+from support.helpers import (
+    create_storage_pool,
+    delete_storage_pool,
+    is_incus_permission_error,
+)
 
 
 def test_build_with_storage_pool(coi_binary, tmp_path):
     """coi build should succeed against a profile that selects a custom pool."""
-    pool_name = "coi-test-buildpool"
+    pool_name = f"coi-test-buildpool-{os.urandom(4).hex()}"
 
     # Skip if base image isn't available
     result = subprocess.run(
@@ -40,8 +29,11 @@ def test_build_with_storage_pool(coi_binary, tmp_path):
     if result.returncode != 0:
         pytest.skip("coi-sandbox base image not present")
 
-    if not _create_temp_pool(pool_name):
-        pytest.skip("Cannot create temp storage pool")
+    ok, err = create_storage_pool(pool_name)
+    if not ok:
+        if is_incus_permission_error(err):
+            pytest.skip(f"No permission to create storage pool {pool_name}: {err}")
+        pytest.fail(f"Failed to create temp pool {pool_name}: {err}")
 
     image_name = "coi-test-pool-build"
 
@@ -90,4 +82,4 @@ def test_build_with_storage_pool(coi_binary, tmp_path):
             check=False,
             capture_output=True,
         )
-        _delete_temp_pool(pool_name)
+        delete_storage_pool(pool_name)
