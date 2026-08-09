@@ -89,6 +89,19 @@ func decideUIDMapping(hostUID, codeUID int, disableShift, hostHandlesUIDMapping 
 	return !disableShift, ""
 }
 
+// reuseShiftDecision folds a container's existing state into the fresh-launch
+// shift decision when a persistent container is reused (issue #685).
+//
+// configuredShift is what ConfigureUIDMapping says the current config wants.
+// hasRawIdmap is whether the container already carries raw.idmap. The two are
+// mutually exclusive — shift=true only translates root, and Incus rejects the
+// combination — so an existing raw.idmap always wins. That covers the container
+// healed by the #678 fallback: its config still asks for shift, but the start
+// failure that forced the conversion would repeat on every single session.
+func reuseShiftDecision(configuredShift, hasRawIdmap bool) bool {
+	return configuredShift && !hasRawIdmap
+}
+
 // mergeJSONSettings merges settings into existing JSON content with one-level deep merge.
 // If both existing and new values for a key are maps, their entries are merged;
 // otherwise the new value overwrites. Returns indented JSON with trailing newline.

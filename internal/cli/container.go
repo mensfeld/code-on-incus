@@ -52,8 +52,12 @@ var containerStartCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 
-		mgr := container.NewManager(name)
-		if err := mgr.Start(); err != nil {
+		// Recover from the #678 idmapped-mount start failure here too, rather
+		// than handing back a raw Incus error the user can't act on (#685). The
+		// isolation fallback is deliberately not used: this command runs against
+		// an arbitrary container, and it must not unset security.idmap.isolated
+		// on someone's container as a side effect of a failed start.
+		if err := container.StartWithIdmapFallback(name); err != nil {
 			return fmt.Errorf("failed to start container: %v", err)
 		}
 
