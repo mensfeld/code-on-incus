@@ -8,6 +8,10 @@ image = "coi-default"
 # BoolVal): "not configured" is distinguishable from an explicit choice, so
 # resume can let session metadata win unless the user explicitly set it.
 storage_pool = ""
+# session_name is deliberately UNSET: when set (typically in a profile), it
+# keys the session identity — container, slots, ports, saved sessions —
+# instead of the workspace path, so the same persistent session continues
+# from any workspace location. Trusted scope only.
 
 [defaults]
 

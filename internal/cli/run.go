@@ -206,6 +206,14 @@ func launchOrReuseContainer(mgr container.ContainerManager, img, pool, container
 		return nil
 	}
 	if containerExists {
+		// Never force-delete a RUNNING container: for a path-keyed workspace a
+		// leftover here is this workspace's own ephemeral corpse, but with a
+		// session_name the identical name resolves from EVERY checkout — an
+		// ephemeral `coi run --slot N` must not be able to kill another
+		// checkout's live named session mid-flight.
+		if running, _ := mgr.Running(); running {
+			return fmt.Errorf("container %s is already running — another session may be using it; pick a different --slot or stop it first", containerName)
+		}
 		fmt.Fprintf(os.Stderr, "Removing existing container...\n")
 		if err := mgr.Delete(true); err != nil {
 			return fmt.Errorf("failed to delete existing container: %w", err)

@@ -34,6 +34,32 @@ type App struct {
 	cfg             *config.Config
 }
 
+// sessionName returns the resolved [container] session_name — the identity-key
+// override for every workspace→container derivation (empty = key by path).
+func (a *App) sessionName() string {
+	if a.cfg == nil {
+		return ""
+	}
+	return a.cfg.Container.SessionName
+}
+
+// applyDefaultProfileForOps applies the [defaults] profile fallback for
+// OPERATIONAL commands (attach, monitor, snapshot) so a profile-carried
+// session_name — the documented placement — resolves the same container
+// identity the launch used. Unlike the session commands' fallback this is
+// error-TOLERANT: per #607, operational commands must keep working on a
+// misconfigured default profile (they are the recovery tools), so an unknown
+// profile is ignored rather than fatal. The same suppression rules apply: an
+// explicit --profile (or alias/resume-applied profile) means the fallback
+// never applies, exactly as at launch. A session launched with a
+// session_name-carrying profile selected by --profile or an alias needs the
+// same flag repeated on the operational command.
+func (a *App) applyDefaultProfileForOps(cmd *cobra.Command) {
+	if _, err := a.applyDefaultProfileFallback(cmd); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: %v (continuing without the default profile)\n", err)
+	}
+}
+
 // app is the singleton used by the cobra command tree. Execute() resets it to
 // a zero value on each call so tests that invoke Execute() multiple times
 // start with clean state (cobra re-parses flags, PersistentPreRunE reloads

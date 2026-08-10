@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/mensfeld/code-on-incus/internal/config"
@@ -191,6 +192,93 @@ func decideUIDMapping(hostUID, codeUID int, disableShift, hostHandlesUIDMapping,
 // failure that forced the conversion would repeat on every single session.
 func reuseShiftDecision(configuredShift, hasRawIdmap bool) bool {
 	return configuredShift && !hasRawIdmap
+}
+
+// SameWorkspaceSource reports whether two host paths refer to the same
+// workspace directory. Symlinks are resolved when possible so a workspace
+// reached via an aliased path (~/proj -> /data/proj) does not count as moved —
+// a spurious remount would churn devices on every launch and, under
+// preserve-path, flip the container-side path between spellings.
+func SameWorkspaceSource(a, b string) bool {
+	na, errA := filepath.EvalSymlinks(a)
+	nb, errB := filepath.EvalSymlinks(b)
+	if errA != nil || errB != nil {
+		return filepath.Clean(a) == filepath.Clean(b)
+	}
+	return na == nb
+}
+
+// WorkspaceRemounter is the slice of ContainerManager that
+// RemountMovedWorkspace needs — narrowed so tests can fake it without
+// implementing the whole manager surface.
+type WorkspaceRemounter interface {
+	container.ContainerDevices
+	GetWorkspaceSource() string
+}
+
+// RemountMovedWorkspace reconciles a reused container whose persisted
+// workspace device points at a different host source than the current
+// workspace — the normal situation for a NAMED session ([container]
+// session_name) launched from a new location, and for a workspace directory
+// that moved on disk. The workspace and git-worktree-common devices are
+// replaced, with the container-side path re-derived from the current
+// workspace under the same preserve-path/worktree rules a fresh launch uses.
+// Configured [[mount]] devices are location-independent and keep their
+// persisted sources. Returns the container-side workspace path and whether a
+// remount happened (cwp is "" when it didn't).
+//
+// Must run BEFORE the security mounts are re-applied (they derive protect
+// overlays from the container-side workspace path) and AFTER the reuse shift
+// decision (the new devices carry the current shift flag).
+func RemountMovedWorkspace(mgr WorkspaceRemounter, workspacePath string, preservePath bool, layout *GitWorktreeLayout, useShift bool, logger func(string)) (string, bool, error) {
+	if logger == nil {
+		logger = func(string) {}
+	}
+	src := mgr.GetWorkspaceSource()
+	if src == "" {
+		// Can't tell (device missing or incus error) — fail open, but say so:
+		// a silently skipped remount is indistinguishable from the same-source
+		// no-op, and for a named session that means running against the wrong
+		// checkout with no trace.
+		logger("Warning: could not determine the reused container's workspace source; skipping the moved-workspace check")
+		return "", false, nil
+	}
+	if SameWorkspaceSource(src, workspacePath) {
+		return "", false, nil
+	}
+	logger(fmt.Sprintf("Workspace location changed since this session's container was created (%s -> %s); remounting", src, workspacePath))
+
+	cwp := "/workspace"
+	if preservePath || layout != nil {
+		if WorkspaceUnderSystemDir(workspacePath) {
+			if layout != nil {
+				// Can't preserve the path, so the worktree's git pointers can't
+				// resolve — fail closed, matching the fresh-launch rule.
+				return "", false, fmt.Errorf("git worktree workspace %q is under a system directory; cannot preserve its host path to mount git internals safely", workspacePath)
+			}
+			logger(fmt.Sprintf("Warning: preserve_workspace_path requested for %q conflicts with system directories; using /workspace instead", workspacePath))
+		} else {
+			cwp = filepath.Clean(workspacePath)
+		}
+	}
+
+	if err := mgr.RemoveDevice("workspace"); err != nil {
+		return "", false, fmt.Errorf("failed to remove stale workspace device: %w", err)
+	}
+	// May not exist (non-worktree creation); a leftover from the old location
+	// must not survive pointing at the old repo.
+	_ = mgr.RemoveDevice("git-worktree-common")
+
+	if err := mgr.MountDisk("workspace", workspacePath, cwp, useShift, false); err != nil {
+		return "", false, fmt.Errorf("failed to remount workspace from %s: %w", workspacePath, err)
+	}
+	if layout != nil {
+		if err := MountGitWorktreeDirs(mgr, layout, useShift); err != nil {
+			return "", false, fmt.Errorf("failed to mount git worktree dirs: %w", err)
+		}
+		logger(fmt.Sprintf("Mounted git worktree common dir (read-write): %s", layout.CommonDir))
+	}
+	return cwp, true, nil
 }
 
 // mergeJSONSettings merges settings into existing JSON content with one-level deep merge.

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -71,6 +72,22 @@ func Load() (*Config, error) {
 	// Resolve profile inheritance after all profiles are loaded from all levels
 	if err := cfg.ResolveProfileInheritance(); err != nil {
 		return nil, fmt.Errorf("profile inheritance error: %w", err)
+	}
+
+	stripUntrustedInheritedSessionNames(cfg)
+
+	// Profiles are schema-validated, but the top-level config is not — and a
+	// malformed session_name (trailing space, path separators, invisible
+	// characters) would silently hash to a different identity than its
+	// lookalike, recreating the fresh-container failure the feature exists to
+	// prevent. Validate every name that survived trust gating.
+	if err := validateSessionName(cfg.Container.SessionName); err != nil {
+		return nil, err
+	}
+	for name, p := range cfg.Profiles {
+		if err := validateSessionName(p.Container.SessionName); err != nil {
+			return nil, fmt.Errorf("profile %q: %w", name, err)
+		}
 	}
 
 	// Ensure directories exist
@@ -164,6 +181,7 @@ func sanitizeUntrustedConfig(fileCfg *Config, path string) {
 	sanitizeUntrustedNetwork(&fileCfg.Network, path)
 	sanitizeUntrustedEnvCommands(&fileCfg.Defaults, path)
 	sanitizeUntrustedDefaultProfile(&fileCfg.Defaults, path)
+	sanitizeUntrustedSessionName(&fileCfg.Container, path)
 	sanitizeUntrustedSecurity(&fileCfg.Security, path)
 	sanitizeUntrustedGit(&fileCfg.Git, path)
 
@@ -294,6 +312,54 @@ func sanitizeUntrustedDefaultProfile(d *DefaultsConfig, path string) {
 			"profile selects the whole session environment. Move it to "+
 			"~/.coi/config.toml or set COI_CONFIG to apply it.\n", path)
 	d.Profile = ""
+}
+
+// stripUntrustedInheritedSessionNames re-strips session_name from untrusted
+// (project-scoped) profiles AFTER inheritance resolution: inheritance can copy
+// a TRUSTED parent's session_name into a project-scoped child, so
+// `inherits = "<trusted profile>"` would smuggle what direct declaration
+// cannot (the per-profile strip runs before inheritance is resolved).
+func stripUntrustedInheritedSessionNames(cfg *Config) {
+	for name, p := range cfg.Profiles {
+		// Synthesized profiles (default/hardened) have no Source and carry
+		// only already-validated trusted config; disk profiles carry the
+		// Trusted stamp from their scan root.
+		if p.Container.SessionName == "" || p.Source == "" || p.Trusted {
+			continue
+		}
+		sanitizeUntrustedSessionName(&p.Container, p.Source)
+		cfg.Profiles[name] = p
+	}
+}
+
+// sessionNameRe mirrors the profile schema's session_name pattern.
+var sessionNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$`)
+
+// validateSessionName rejects [container] session_name values that would
+// silently hash to a different identity than their lookalike (whitespace,
+// path separators, invisible characters). Empty = unset = valid.
+func validateSessionName(name string) error {
+	if name == "" || sessionNameRe.MatchString(name) {
+		return nil
+	}
+	return fmt.Errorf("invalid [container] session_name %q: must match %s (letters, digits, '.', '_', '-'; start alphanumeric; max 64 chars)", name, sessionNameRe.String())
+}
+
+// sanitizeUntrustedSessionName strips [container] session_name from an
+// untrusted (project-scoped) source. The session name selects which persistent
+// container and saved session state (conversation history, restored
+// credentials) a launch attaches to — a cloned/agent-planted repo must not be
+// able to attach its own workspace to another project's session, or plant a
+// name that a later trusted launch would unknowingly share state with.
+func sanitizeUntrustedSessionName(c *ContainerConfig, path string) {
+	if c == nil || c.SessionName == "" {
+		return
+	}
+	fmt.Fprintf(os.Stderr,
+		"WARNING: ignoring '[container] session_name' in project config %s; the "+
+			"session name selects which persistent session a launch attaches to. "+
+			"Move it to ~/.coi/config.toml or a profile under ~/.coi/profiles to apply it.\n", path)
+	c.SessionName = ""
 }
 
 // sanitizeUntrustedNetwork drops security-downgrading network settings from an
@@ -493,8 +559,9 @@ func loadProfileDirectories(cfg *Config, configDir string, trusted bool) error {
 			profileCfg.Context = resolveRelativePath(profileDir, profileCfg.Context)
 		}
 
-		// Tag with source location
+		// Tag with source location and the scan root's trust
 		profileCfg.Source = profileConfigPath
+		profileCfg.Trusted = trusted
 
 		// A project-scoped profile (under the workspace ./.coi) is untrusted — a
 		// cloned repo can ship it. Apply the same hardening as an untrusted
@@ -502,6 +569,7 @@ func loadProfileDirectories(cfg *Config, configDir string, trusted bool) error {
 		// escaping host mounts are gated behind `coi trust`.
 		if !trusted {
 			sanitizeUntrustedNetwork(profileCfg.Network, profileConfigPath)
+			sanitizeUntrustedSessionName(&profileCfg.Container, profileConfigPath)
 			sanitizeUntrustedSecurity(profileCfg.Security, profileConfigPath)
 			sanitizeUntrustedGit(profileCfg.Git, profileConfigPath)
 			markUntrustedMounts(profileCfg.Mounts, profileConfigPath)

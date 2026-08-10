@@ -35,6 +35,7 @@ type ContainerDevices interface {
 // changes, existence checks, and workspace path resolution.
 type ContainerFiles interface {
 	GetWorkspacePath() string
+	GetWorkspaceSource() string
 	PushFile(source, destination string) error
 	PullFile(containerPath, localPath string) error
 	PullDirectory(containerPath, localPath string) error

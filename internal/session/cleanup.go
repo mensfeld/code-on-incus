@@ -577,7 +577,7 @@ func GetLatestSession(sessionsDir string) (string, error) {
 }
 
 // GetLatestSessionForWorkspace returns the most recent session ID for a specific workspace
-func GetLatestSessionForWorkspace(sessionsDir, workspacePath string) (string, error) {
+func GetLatestSessionForWorkspace(sessionsDir, workspacePath, sessionName string) (string, error) {
 	sessions, err := ListSavedSessions(sessionsDir)
 	if err != nil {
 		return "", err
@@ -587,12 +587,25 @@ func GetLatestSessionForWorkspace(sessionsDir, workspacePath string) (string, er
 		return "", fmt.Errorf("no saved sessions found")
 	}
 
-	// Get the workspace hash to match against
-	workspaceHash := WorkspaceHash(workspacePath)
+	// Get the identity hash to match against. Saved sessions embed it in
+	// their container name, so sessions saved under one session_name match
+	// from ANY workspace — that is what lets --resume continue a named
+	// session after the workspace moved. Sessions saved BEFORE a name was
+	// adopted are path-keyed, so this workspace's path hash is a FALLBACK,
+	// consulted only when NO session matches the named identity: adding
+	// session_name must not orphan history, but a newer path-keyed session
+	// (this path's pre-adoption life, or an unrelated project that once used
+	// the path) must never shadow the named session's own history.
+	identityHash := IdentityHash(workspacePath, sessionName)
+	legacyHash := ""
+	if sessionName != "" {
+		legacyHash = WorkspaceHash(workspacePath)
+	}
 
-	// Find the most recent session for this workspace
-	var latestSession string
-	var latestTime time.Time
+	// Find the most recent session for this identity, tracking the legacy
+	// path-keyed candidate separately so it can never outrank a named match.
+	var latestSession, latestLegacy string
+	var latestTime, latestLegacyTime time.Time
 
 	for _, sessionID := range sessions {
 		metadataPath := filepath.Join(sessionsDir, sessionID, "metadata.json")
@@ -607,20 +620,27 @@ func GetLatestSessionForWorkspace(sessionsDir, workspacePath string) (string, er
 			continue
 		}
 
-		// Only consider sessions from the same workspace
-		if sessionHash != workspaceHash {
-			continue
-		}
-
 		savedTime, err := time.Parse(time.RFC3339, metadata.SavedAt)
 		if err != nil {
 			continue
 		}
 
-		if latestSession == "" || savedTime.After(latestTime) {
-			latestSession = sessionID
-			latestTime = savedTime
+		switch sessionHash {
+		case identityHash:
+			if latestSession == "" || savedTime.After(latestTime) {
+				latestSession = sessionID
+				latestTime = savedTime
+			}
+		case legacyHash:
+			if legacyHash != "" && (latestLegacy == "" || savedTime.After(latestLegacyTime)) {
+				latestLegacy = sessionID
+				latestLegacyTime = savedTime
+			}
 		}
+	}
+
+	if latestSession == "" {
+		latestSession = latestLegacy
 	}
 
 	if latestSession == "" {

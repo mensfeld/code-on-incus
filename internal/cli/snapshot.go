@@ -205,7 +205,7 @@ func resolveContainer() (string, error) {
 		return "", fmt.Errorf("failed to resolve workspace path: %w", err)
 	}
 
-	sessions, err := session.ListWorkspaceSessions(absWorkspace)
+	sessions, err := session.ListWorkspaceSessions(absWorkspace, app.sessionName())
 	if err != nil {
 		return "", fmt.Errorf("failed to list workspace sessions: %w", err)
 	}
@@ -249,6 +249,7 @@ func confirmAction(prompt string) bool {
 }
 
 func snapshotCreateCommand(cmd *cobra.Command, args []string) error {
+	app.applyDefaultProfileForOps(cmd) // profile-carried session_name (#607-tolerant)
 	containerName, err := resolveContainer()
 	if err != nil {
 		return fmt.Errorf("%w", err)
@@ -288,6 +289,7 @@ func snapshotCreateCommand(cmd *cobra.Command, args []string) error {
 }
 
 func snapshotListCommand(cmd *cobra.Command, args []string) error {
+	app.applyDefaultProfileForOps(cmd) // profile-carried session_name (#607-tolerant)
 	// Validate format
 	if snapshotFormat != "text" && snapshotFormat != "json" {
 		return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid format '%s': must be 'text' or 'json'", snapshotFormat)}
@@ -422,6 +424,7 @@ func outputSnapshotText(containerName string, snapshots []container.SnapshotInfo
 }
 
 func snapshotRestoreCommand(cmd *cobra.Command, args []string) error {
+	app.applyDefaultProfileForOps(cmd) // profile-carried session_name (#607-tolerant)
 	containerName, err := resolveContainer()
 	if err != nil {
 		return fmt.Errorf("%w", err)
@@ -468,6 +471,7 @@ func snapshotRestoreCommand(cmd *cobra.Command, args []string) error {
 }
 
 func snapshotDeleteCommand(cmd *cobra.Command, args []string) error {
+	app.applyDefaultProfileForOps(cmd) // profile-carried session_name (#607-tolerant)
 	containerName, err := resolveContainer()
 	if err != nil {
 		return fmt.Errorf("%w", err)
@@ -538,6 +542,7 @@ func snapshotDeleteCommand(cmd *cobra.Command, args []string) error {
 }
 
 func snapshotInfoCommand(cmd *cobra.Command, args []string) error {
+	app.applyDefaultProfileForOps(cmd) // profile-carried session_name (#607-tolerant)
 	// Validate format
 	if snapshotFormat != "text" && snapshotFormat != "json" {
 		return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid format '%s': must be 'text' or 'json'", snapshotFormat)}

@@ -105,6 +105,19 @@ type ContainerConfig struct {
 	Alias           string      `toml:"alias"`
 	Build           BuildConfig `toml:"build"`
 	StaleBaseCheck  string      `toml:"stale_base_check"` // "error", "warn", "off"
+
+	// SessionName decouples the session identity from the workspace path.
+	// When set, container names, slot allocation, port allocation, and the
+	// saved-session store are all keyed on this name instead of a hash of the
+	// workspace's absolute path — so the same persistent session continues
+	// (--resume/--continue) even when the workspace is mounted at a different
+	// location. Intended for profiles: point different checkouts of a project
+	// at one named session. Honored from TRUSTED scope only (~/.coi or
+	// COI_CONFIG, and profiles under them): session identity selects which
+	// persistent container and saved session state (conversation history,
+	// restored credentials) a launch attaches to, so a cloned repo must not
+	// be able to attach itself to another project's session.
+	SessionName string `toml:"session_name"`
 }
 
 // HasContainerConfig reports whether any field is set.
@@ -116,6 +129,7 @@ func (c *ContainerConfig) HasContainerConfig() bool {
 		c.StoragePool != "" ||
 		c.Alias != "" ||
 		c.StaleBaseCheck != "" ||
+		c.SessionName != "" ||
 		c.Build.HasBuildConfig()
 }
 
@@ -369,6 +383,11 @@ type ProfileConfig struct {
 	Network     *NetworkConfig    `toml:"network"`
 	ForwardEnv  []string          `toml:"forward_env"`
 	Source      string            `toml:"-"` // Where this profile was loaded from (not serialized)
+	// Trusted records whether the profile was loaded from a trusted scan root
+	// (~/.coi or the COI_CONFIG dir), stamped by loadProfileDirectories at
+	// load time — the authoritative signal for post-inheritance trust checks,
+	// instead of lexically reconstructing the root from Source.
+	Trusted bool `toml:"-"`
 
 	// Extended fields — previously Config-only, now available in profiles
 	Paths      *PathsConfig      `toml:"paths"`
@@ -1177,6 +1196,9 @@ func mergeContainerInto(dst *ContainerConfig, src *ContainerConfig) {
 	}
 	if src.StaleBaseCheck != "" {
 		dst.StaleBaseCheck = src.StaleBaseCheck
+	}
+	if src.SessionName != "" {
+		dst.SessionName = src.SessionName
 	}
 	mergeBuildInto(&dst.Build, &src.Build)
 }
