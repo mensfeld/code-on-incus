@@ -577,7 +577,7 @@ func GetLatestSession(sessionsDir string) (string, error) {
 }
 
 // GetLatestSessionForWorkspace returns the most recent session ID for a specific workspace
-func GetLatestSessionForWorkspace(sessionsDir, workspacePath string) (string, error) {
+func GetLatestSessionForWorkspace(sessionsDir, workspacePath, sessionName string) (string, error) {
 	sessions, err := ListSavedSessions(sessionsDir)
 	if err != nil {
 		return "", err
@@ -587,8 +587,11 @@ func GetLatestSessionForWorkspace(sessionsDir, workspacePath string) (string, er
 		return "", fmt.Errorf("no saved sessions found")
 	}
 
-	// Get the workspace hash to match against
-	workspaceHash := WorkspaceHash(workspacePath)
+	// Get the identity hash to match against. Saved sessions embed it in
+	// their container name, so sessions saved under one session_name match
+	// from ANY workspace — that is what lets --resume continue a named
+	// session after the workspace moved.
+	workspaceHash := IdentityHash(workspacePath, sessionName)
 
 	// Find the most recent session for this workspace
 	var latestSession string

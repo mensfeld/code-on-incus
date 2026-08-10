@@ -44,8 +44,8 @@ type PublishedPort struct {
 
 // AllocateHostPort computes the deterministic host port for the index-th
 // entry of the given workspace and slot.
-func AllocateHostPort(workspacePath string, slot, index int) int {
-	h := WorkspaceHash(workspacePath)
+func AllocateHostPort(workspacePath, sessionName string, slot, index int) int {
+	h := IdentityHash(workspacePath, sessionName)
 	n, err := strconv.ParseUint(h[:4], 16, 32)
 	if err != nil {
 		n = 0 // cannot happen for a hex hash; keep allocation total anyway
@@ -111,7 +111,7 @@ var hostPortFree = func(listen string, port int) bool {
 // The probe is a UX layer, not a guarantee: another process can grab a port
 // between this check and the proxy device binding, in which case the publish
 // step still fails loudly for that entry.
-func ResolvePorts(pc *PortConfig, workspacePath string, slot int) ([]PublishedPort, error) {
+func ResolvePorts(pc *PortConfig, workspacePath, sessionName string, slot int) ([]PublishedPort, error) {
 	if !pc.HasPorts() {
 		return nil, nil
 	}
@@ -139,14 +139,14 @@ func ResolvePorts(pc *PortConfig, workspacePath string, slot int) ([]PublishedPo
 	nextIdx := 0
 	takeAuto := func(listen string) (int, error) {
 		for ; nextIdx < slotStride; nextIdx++ {
-			candidate := AllocateHostPort(workspacePath, slot, nextIdx)
+			candidate := AllocateHostPort(workspacePath, sessionName, slot, nextIdx)
 			if hostPortFree(listen, candidate) {
 				nextIdx++
 				return candidate, nil
 			}
 		}
 		return 0, fmt.Errorf("no free port left in this slot's block (%d-%d) — other processes are using them",
-			AllocateHostPort(workspacePath, slot, 0), AllocateHostPort(workspacePath, slot, slotStride-1))
+			AllocateHostPort(workspacePath, sessionName, slot, 0), AllocateHostPort(workspacePath, sessionName, slot, slotStride-1))
 	}
 
 	// Pool first: identity-mapped, so the agent binds the very number the

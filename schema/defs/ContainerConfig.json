@@ -32,8 +32,17 @@
     },
     "stale_base_check": {
       "type": "string",
-      "enum": ["error", "warn", "off"],
+      "enum": [
+        "error",
+        "warn",
+        "off"
+      ],
       "description": "How to react when the project image's base is older than the current coi base: 'error' aborts, 'warn' prints a warning (default), 'off' is silent"
+    },
+    "session_name": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$",
+      "description": "Name that keys the session identity (container, slots, ports, saved sessions) instead of the workspace path, so the same persistent session continues from any workspace location. Honored from trusted scope only."
     }
   }
 }

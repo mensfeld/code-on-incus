@@ -24,36 +24,55 @@ func GetContainerPrefix() string {
 	return "coi-"
 }
 
-// WorkspaceHash generates a short hash from workspace path
-// Returns first 8 characters of SHA256 hash
-func WorkspaceHash(workspacePath string) string {
-	// Normalize path (resolve symlinks, make absolute)
+// Identity returns the string every session-scoped resource is keyed on: the
+// configured `[container] session_name` (namespaced so a name can never
+// collide with a real path) when set, else the workspace's absolute path.
+// A session name decouples the session from where its workspace lives — the
+// same name resolves to the same container, slots, ports, and saved-session
+// store from any workspace location.
+func Identity(workspacePath, sessionName string) string {
+	if sessionName != "" {
+		return "session-name:" + sessionName
+	}
 	absPath, err := filepath.Abs(workspacePath)
 	if err != nil {
 		absPath = workspacePath
 	}
+	return absPath
+}
 
-	hash := sha256.Sum256([]byte(absPath))
+// IdentityHash returns the first 8 hex characters of the SHA256 of the
+// session identity — the key embedded in container names and used to scope
+// slots, ports, and saved sessions.
+func IdentityHash(workspacePath, sessionName string) string {
+	hash := sha256.Sum256([]byte(Identity(workspacePath, sessionName)))
 	return fmt.Sprintf("%x", hash)[:8]
 }
 
-// ContainerName generates a container name from workspace and slot
-// Format: <prefix><workspace-hash>-<slot> where prefix defaults to "coi-"
+// WorkspaceHash generates a short hash from the workspace path alone —
+// IdentityHash without a session name. Kept for callers that key strictly by
+// location (and for pre-session_name call sites).
+func WorkspaceHash(workspacePath string) string {
+	return IdentityHash(workspacePath, "")
+}
+
+// ContainerName generates a container name from the session identity and slot
+// Format: <prefix><identity-hash>-<slot> where prefix defaults to "coi-"
 // Can be customized via COI_CONTAINER_PREFIX environment variable
-func ContainerName(workspacePath string, slot int) string {
-	hash := WorkspaceHash(workspacePath)
+func ContainerName(workspacePath, sessionName string, slot int) string {
+	hash := IdentityHash(workspacePath, sessionName)
 	prefix := GetContainerPrefix()
 	return fmt.Sprintf("%s%s-%d", prefix, hash, slot)
 }
 
 // AllocateSlot finds the next available slot for a workspace
 // Returns the slot number (1, 2, 3, ...) or 0 if no slots available
-func AllocateSlot(workspacePath string, maxSlots int) (int, error) {
+func AllocateSlot(workspacePath, sessionName string, maxSlots int) (int, error) {
 	if maxSlots == 0 {
 		maxSlots = 10 // Default max 10 parallel sessions
 	}
 
-	hash := WorkspaceHash(workspacePath)
+	hash := IdentityHash(workspacePath, sessionName)
 	prefix := fmt.Sprintf("%s%s-", GetContainerPrefix(), hash)
 
 	// Get all containers matching our workspace
@@ -111,11 +130,11 @@ func AllocateSlot(workspacePath string, maxSlots int) (int, error) {
 // Running containers are never returned: they may belong to an active
 // session, and parallel invocations should keep taking fresh slots.
 // Returns (0, false) when no stopped container exists or listing fails.
-func FindReusablePersistentSlot(workspacePath string, maxSlots int) (int, bool) {
+func FindReusablePersistentSlot(workspacePath, sessionName string, maxSlots int) (int, bool) {
 	if maxSlots == 0 {
 		maxSlots = 10
 	}
-	hash := WorkspaceHash(workspacePath)
+	hash := IdentityHash(workspacePath, sessionName)
 	prefix := fmt.Sprintf("%s%s-", GetContainerPrefix(), hash)
 
 	output, err := container.IncusOutput("list", "--format=json")
@@ -149,12 +168,12 @@ func FindReusablePersistentSlot(workspacePath string, maxSlots int) (int, bool) 
 
 // AllocateSlotFrom finds the next available slot starting from a specific slot number
 // Returns the slot number or error if no slots available
-func AllocateSlotFrom(workspacePath string, startSlot, maxSlots int) (int, error) {
+func AllocateSlotFrom(workspacePath, sessionName string, startSlot, maxSlots int) (int, error) {
 	if maxSlots == 0 {
 		maxSlots = 10 // Default max 10 parallel sessions
 	}
 
-	hash := WorkspaceHash(workspacePath)
+	hash := IdentityHash(workspacePath, sessionName)
 	prefix := fmt.Sprintf("%s%s-", GetContainerPrefix(), hash)
 
 	// Get all containers matching our workspace
@@ -205,8 +224,8 @@ func AllocateSlotFrom(workspacePath string, startSlot, maxSlots int) (int, error
 }
 
 // IsSlotAvailable checks if a specific slot is available
-func IsSlotAvailable(workspacePath string, slot int) (bool, error) {
-	containerName := ContainerName(workspacePath, slot)
+func IsSlotAvailable(workspacePath, sessionName string, slot int) (bool, error) {
+	containerName := ContainerName(workspacePath, sessionName, slot)
 	running, err := container.ContainerRunning(containerName)
 	if err != nil {
 		return false, err
@@ -235,8 +254,8 @@ func ParseContainerName(containerName string) (string, int, error) {
 
 // ListWorkspaceSessions lists all sessions for a workspace
 // Returns map of slot -> container name
-func ListWorkspaceSessions(workspacePath string) (map[int]string, error) {
-	hash := WorkspaceHash(workspacePath)
+func ListWorkspaceSessions(workspacePath, sessionName string) (map[int]string, error) {
+	hash := IdentityHash(workspacePath, sessionName)
 	prefix := fmt.Sprintf("%s%s-", GetContainerPrefix(), hash)
 
 	output, err := container.IncusOutput("list", "--format=json")

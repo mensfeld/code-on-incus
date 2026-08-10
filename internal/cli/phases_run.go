@@ -80,20 +80,20 @@ func (a *App) validateEnvRunPhase(s *runState) session.Phase {
 				// its slot and would silently launch a FRESH container on
 				// the next slot (state never persists, slots exhaust).
 				if a.persistent {
-					if reuse, ok := session.FindReusablePersistentSlot(s.absWorkspace, 10); ok {
+					if reuse, ok := session.FindReusablePersistentSlot(s.absWorkspace, a.sessionName(), 10); ok {
 						slotNum = reuse
 						fmt.Fprintf(os.Stderr, "Reusing persistent container on slot %d\n", slotNum)
 					}
 				}
 				if slotNum == 0 {
-					slotNum, err = session.AllocateSlot(s.absWorkspace, 10)
+					slotNum, err = session.AllocateSlot(s.absWorkspace, a.sessionName(), 10)
 					if err != nil {
 						return nil, fmt.Errorf("failed to allocate slot: %w", err)
 					}
 					fmt.Fprintf(os.Stderr, "Auto-allocated slot %d\n", slotNum)
 				}
 			}
-			s.containerName = session.ContainerName(s.absWorkspace, slotNum)
+			s.containerName = session.ContainerName(s.absWorkspace, a.sessionName(), slotNum)
 			s.slot = slotNum
 
 			img := ResolveImageName(a.cfg)
@@ -169,7 +169,7 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 			// Preflight the port plan BEFORE launching: pinned host ports
 			// already in use abort here; auto/pool ports get their final
 			// numbers (see session.ResolvePorts).
-			s.resolvedPorts, err = session.ResolvePorts(s.portConfig, s.absWorkspace, s.slot)
+			s.resolvedPorts, err = session.ResolvePorts(s.portConfig, s.absWorkspace, a.sessionName(), s.slot)
 			if err != nil {
 				return nil, fmt.Errorf("port preflight failed: %w", err)
 			}
@@ -252,6 +252,16 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 				// converted when the decision is raw.idmap (#683 — the reactive
 				// #678 fallback never fires on OrbStack ≥2.2.2's silent breakage).
 				s.useShift = session.ResolveReuseUIDMapping(s.containerName, session.MountSources(s.absWorkspace, s.mountConfig, session.WorktreeSources(layout)...), a.cfg.Incus.DisableShift, logFn)
+				// A named session (session_name) can be reused from a different
+				// workspace location than the container was created with — the
+				// persisted workspace device then points at the old source and
+				// must be replaced before applySecurityMounts derives overlays
+				// from the container-side workspace path.
+				if cwp, moved, err := session.RemountMovedWorkspace(mgr, s.absWorkspace, a.cfg.Paths.PreserveWorkspacePath, layout, s.useShift, logFn); err != nil {
+					return err
+				} else if moved {
+					s.containerWorkspace = cwp
+				}
 				return a.applySecurityMounts(mgr, s.absWorkspace, s.containerWorkspace, s.containerName, s.useShift, layout)
 			}
 

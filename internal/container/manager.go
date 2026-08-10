@@ -190,17 +190,35 @@ func (m *Manager) SetTmpfsSize(size string) error {
 // GetWorkspacePath returns the container path where the "workspace" device is mounted.
 // Returns "/workspace" as fallback if the workspace device is not found or cannot be read.
 func (m *Manager) GetWorkspacePath() string {
+	if p := m.workspaceDeviceField("path"); p != "" {
+		return p
+	}
+	return "/workspace" // fallback
+}
+
+// GetWorkspaceSource returns the HOST source path of the persisted workspace
+// disk device, or "" when it cannot be determined. A reused container's
+// devices persist from creation, so this is how the reuse path detects that
+// the current workspace lives somewhere else — the normal situation for a
+// named session ([container] session_name) launched from a new location.
+func (m *Manager) GetWorkspaceSource() string {
+	return m.workspaceDeviceField("source")
+}
+
+// workspaceDeviceField parses `incus config device show` output for one field
+// of the workspace device. Returns "" when the device or field is absent.
+func (m *Manager) workspaceDeviceField(field string) string {
 	output, err := IncusOutput("config", "device", "show", m.ContainerName)
 	if err != nil {
-		return "/workspace" // fallback
+		return ""
 	}
 
-	// Parse YAML output to find workspace device path
-	// Format is:
+	// Parse YAML output to find the workspace device's field. Format is:
 	// workspace:
 	//   path: /some/path
 	//   source: /host/path
 	//   type: disk
+	prefix := field + ":"
 	lines := strings.Split(output, "\n")
 	inWorkspace := false
 	for _, line := range lines {
@@ -214,16 +232,14 @@ func (m *Manager) GetWorkspacePath() string {
 			if len(line) > 0 && line[0] != ' ' && line[0] != '\t' {
 				break // moved to a different device
 			}
-			if strings.HasPrefix(trimmed, "path:") {
-				path := strings.TrimSpace(strings.TrimPrefix(trimmed, "path:"))
-				if path != "" {
-					return path
+			if strings.HasPrefix(trimmed, prefix) {
+				if v := strings.TrimSpace(strings.TrimPrefix(trimmed, prefix)); v != "" {
+					return v
 				}
 			}
 		}
 	}
-
-	return "/workspace" // fallback
+	return ""
 }
 
 // Exec executes a command in the container (no output capture)

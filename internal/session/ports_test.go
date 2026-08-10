@@ -19,27 +19,27 @@ func allFree(string, int) bool { return true }
 func TestAllocateHostPort(t *testing.T) {
 	ws := "/some/workspace"
 	// Deterministic across calls
-	first := AllocateHostPort(ws, 1, 0)
-	if again := AllocateHostPort(ws, 1, 0); again != first {
+	first := AllocateHostPort(ws, "", 1, 0)
+	if again := AllocateHostPort(ws, "", 1, 0); again != first {
 		t.Errorf("allocation must be deterministic: %d then %d", first, again)
 	}
 	// Slot stride: slot 2 is exactly one block above slot 1
-	if AllocateHostPort(ws, 2, 0)-AllocateHostPort(ws, 1, 0) != slotStride {
+	if AllocateHostPort(ws, "", 2, 0)-AllocateHostPort(ws, "", 1, 0) != slotStride {
 		t.Error("slots must occupy adjacent blocks")
 	}
 	// Index within block
-	if AllocateHostPort(ws, 1, 3)-AllocateHostPort(ws, 1, 0) != 3 {
+	if AllocateHostPort(ws, "", 1, 3)-AllocateHostPort(ws, "", 1, 0) != 3 {
 		t.Error("indices must be consecutive within a block")
 	}
 	// Range bounds
 	for slot := 1; slot <= 10; slot++ {
-		p := AllocateHostPort(ws, slot, slotStride-1)
+		p := AllocateHostPort(ws, "", slot, slotStride-1)
 		if p < autoPortBase || p >= autoPortBase+neighborhoods*neighborhoodSize {
 			t.Errorf("port %d out of range for slot %d", p, slot)
 		}
 	}
 	// Different workspaces land in different neighborhoods (for these two)
-	if AllocateHostPort("/ws/a", 1, 0) == AllocateHostPort("/ws/b", 1, 0) {
+	if AllocateHostPort("/ws/a", "", 1, 0) == AllocateHostPort("/ws/b", "", 1, 0) {
 		t.Log("hash collision between test workspaces — permissible but unexpected")
 	}
 }
@@ -55,7 +55,7 @@ func TestPortEnvVar(t *testing.T) {
 
 func TestResolvePortsPoolIsIdentityMapped(t *testing.T) {
 	withPortProbe(t, allFree)
-	resolved, err := ResolvePorts(&PortConfig{Pool: 3}, "/ws", 1)
+	resolved, err := ResolvePorts(&PortConfig{Pool: 3}, "/ws", "", 1)
 	if err != nil {
 		t.Fatalf("ResolvePorts: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestResolvePortsPoolIsIdentityMapped(t *testing.T) {
 		if p.HostPort != p.ContainerPort {
 			t.Errorf("pool port %d not identity-mapped: host %d container %d", i, p.HostPort, p.ContainerPort)
 		}
-		if want := AllocateHostPort("/ws", 1, i); p.HostPort != want {
+		if want := AllocateHostPort("/ws", "", 1, i); p.HostPort != want {
 			t.Errorf("pool port %d = %d, want deterministic %d", i, p.HostPort, want)
 		}
 	}
@@ -79,16 +79,16 @@ func TestResolvePortsPinnedTakenIsHardError(t *testing.T) {
 	withPortProbe(t, func(_ string, port int) bool { return port != 5432 })
 	_, err := ResolvePorts(&PortConfig{Ports: []PortEntry{
 		{Name: "postgres", ContainerPort: 5432, HostPort: 5432},
-	}}, "/ws", 1)
+	}}, "/ws", "", 1)
 	if err == nil || !strings.Contains(err.Error(), "already in use") {
 		t.Fatalf("pinned taken port must abort, got: %v", err)
 	}
 }
 
 func TestResolvePortsAutoSkipsBusyForward(t *testing.T) {
-	first := AllocateHostPort("/ws", 1, 0)
+	first := AllocateHostPort("/ws", "", 1, 0)
 	withPortProbe(t, func(_ string, port int) bool { return port != first })
-	resolved, err := ResolvePorts(&PortConfig{Pool: 1}, "/ws", 1)
+	resolved, err := ResolvePorts(&PortConfig{Pool: 1}, "/ws", "", 1)
 	if err != nil {
 		t.Fatalf("ResolvePorts: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestResolvePortsAutoSkipsBusyForward(t *testing.T) {
 
 func TestResolvePortsBlockExhaustion(t *testing.T) {
 	withPortProbe(t, func(string, int) bool { return false })
-	_, err := ResolvePorts(&PortConfig{Pool: 1}, "/ws", 1)
+	_, err := ResolvePorts(&PortConfig{Pool: 1}, "/ws", "", 1)
 	if err == nil || !strings.Contains(err.Error(), "no free port left") {
 		t.Fatalf("exhausted block must error, got: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestResolvePortsCapacity(t *testing.T) {
 	_, err := ResolvePorts(&PortConfig{Pool: 9, Ports: []PortEntry{
 		{Name: "a", ContainerPort: 3000},
 		{Name: "b", ContainerPort: 4000},
-	}}, "/ws", 1)
+	}}, "/ws", "", 1)
 	if err == nil || !strings.Contains(err.Error(), "at most") {
 		t.Fatalf("over-capacity must error, got: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestResolvePortsCapacity(t *testing.T) {
 	_, err = ResolvePorts(&PortConfig{Pool: 9, Ports: []PortEntry{
 		{Name: "a", ContainerPort: 3000},
 		{Name: "b", ContainerPort: 4000, HostPort: 24000},
-	}}, "/ws", 1)
+	}}, "/ws", "", 1)
 	if err != nil {
 		t.Fatalf("pinned entry must not consume auto budget: %v", err)
 	}
@@ -127,13 +127,13 @@ func TestResolvePortsCapacity(t *testing.T) {
 func TestResolvePortsSlotBounds(t *testing.T) {
 	withPortProbe(t, allFree)
 	for _, slot := range []int{0, -1, 11} {
-		if _, err := ResolvePorts(&PortConfig{Pool: 1}, "/ws", slot); err == nil {
+		if _, err := ResolvePorts(&PortConfig{Pool: 1}, "/ws", "", slot); err == nil {
 			t.Errorf("slot %d must be rejected: it would allocate inside another workspace's block", slot)
 		}
 	}
 	// Boundary slots are fine
 	for _, slot := range []int{1, 10} {
-		if _, err := ResolvePorts(&PortConfig{Pool: 1}, "/ws", slot); err != nil {
+		if _, err := ResolvePorts(&PortConfig{Pool: 1}, "/ws", "", slot); err != nil {
 			t.Errorf("slot %d must be accepted: %v", slot, err)
 		}
 	}
@@ -146,7 +146,7 @@ func TestResolvePortsNameCollisionsAreHardErrors(t *testing.T) {
 	_, err := ResolvePorts(&PortConfig{Ports: []PortEntry{
 		{Name: "web_1", ContainerPort: 3000},
 		{Name: "web-1", ContainerPort: 4000},
-	}}, "/ws", 1)
+	}}, "/ws", "", 1)
 	if err == nil || !strings.Contains(err.Error(), "collides") {
 		t.Errorf("device-name collision must be a hard error, got: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestResolvePortsNameCollisionsAreHardErrors(t *testing.T) {
 	// A map entry squatting the pool's synthetic device name
 	_, err = ResolvePorts(&PortConfig{Pool: 1, Ports: []PortEntry{
 		{Name: "pool-1", ContainerPort: 3000},
-	}}, "/ws", 1)
+	}}, "/ws", "", 1)
 	if err == nil || !strings.Contains(err.Error(), "collides") {
 		t.Errorf("collision with a pool device must be a hard error, got: %v", err)
 	}
@@ -200,7 +200,7 @@ func TestPublishResolvedPorts(t *testing.T) {
 	resolved, err := ResolvePorts(&PortConfig{
 		Pool:  2,
 		Ports: []PortEntry{{Name: "web", ContainerPort: 3000}},
-	}, "/ws", 1)
+	}, "/ws", "", 1)
 	if err != nil {
 		t.Fatalf("ResolvePorts: %v", err)
 	}
@@ -211,7 +211,7 @@ func TestPublishResolvedPorts(t *testing.T) {
 	if len(published) != 3 {
 		t.Fatalf("want 3 published, got %d", len(published))
 	}
-	p0, p1 := AllocateHostPort("/ws", 1, 0), AllocateHostPort("/ws", 1, 1)
+	p0, p1 := AllocateHostPort("/ws", "", 1, 0), AllocateHostPort("/ws", "", 1, 1)
 	if want := fmt.Sprintf("%d %d", p0, p1); env["COI_PORTS"] != want {
 		t.Errorf("COI_PORTS = %q, want %q", env["COI_PORTS"], want)
 	}

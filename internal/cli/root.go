@@ -34,6 +34,15 @@ type App struct {
 	cfg             *config.Config
 }
 
+// sessionName returns the resolved [container] session_name — the identity-key
+// override for every workspace→container derivation (empty = key by path).
+func (a *App) sessionName() string {
+	if a.cfg == nil {
+		return ""
+	}
+	return a.cfg.Container.SessionName
+}
+
 // app is the singleton used by the cobra command tree. Execute() resets it to
 // a zero value on each call so tests that invoke Execute() multiple times
 // start with clean state (cobra re-parses flags, PersistentPreRunE reloads

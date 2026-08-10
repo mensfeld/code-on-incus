@@ -205,7 +205,7 @@ func resolveContainer() (string, error) {
 		return "", fmt.Errorf("failed to resolve workspace path: %w", err)
 	}
 
-	sessions, err := session.ListWorkspaceSessions(absWorkspace)
+	sessions, err := session.ListWorkspaceSessions(absWorkspace, app.sessionName())
 	if err != nil {
 		return "", fmt.Errorf("failed to list workspace sessions: %w", err)
 	}

@@ -190,7 +190,7 @@ func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.P
 					resumeID = "workspace-session"
 					fmt.Fprintf(os.Stderr, "Resuming %s session from workspace\n", ti.Name())
 				} else {
-					resumeID, err = session.GetLatestSessionForWorkspace(sessionsDir, s.absWorkspace)
+					resumeID, err = session.GetLatestSessionForWorkspace(sessionsDir, s.absWorkspace, a.sessionName())
 					if err != nil {
 						return nil, fmt.Errorf("no previous session to resume for this workspace: %w", err)
 					}
@@ -269,19 +269,19 @@ func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.P
 				slotNum = resumeSlot
 				fmt.Fprintf(os.Stderr, "Reusing original slot %d from session\n", slotNum)
 			} else if slotNum == 0 {
-				slotNum, err = session.AllocateSlot(s.absWorkspace, 10)
+				slotNum, err = session.AllocateSlot(s.absWorkspace, a.sessionName(), 10)
 				if err != nil {
 					return nil, fmt.Errorf("failed to allocate slot: %w", err)
 				}
 				fmt.Fprintf(os.Stderr, "Auto-allocated slot %d\n", slotNum)
 			} else {
-				available, err := session.IsSlotAvailable(s.absWorkspace, slotNum)
+				available, err := session.IsSlotAvailable(s.absWorkspace, a.sessionName(), slotNum)
 				if err != nil {
 					return nil, fmt.Errorf("failed to check slot availability: %w", err)
 				}
 				if !available {
 					orig := slotNum
-					slotNum, err = session.AllocateSlotFrom(s.absWorkspace, slotNum+1, 10)
+					slotNum, err = session.AllocateSlotFrom(s.absWorkspace, a.sessionName(), slotNum+1, 10)
 					if err != nil {
 						return nil, fmt.Errorf("slot %d is occupied and failed to find next available slot: %w", orig, err)
 					}
@@ -343,6 +343,7 @@ func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.P
 
 			s.setupOpts = session.SetupOptions{
 				WorkspacePath:         s.absWorkspace,
+				SessionName:           a.sessionName(),
 				Image:                 img,
 				Persistent:            a.persistent,
 				ResumeFromID:          resumeID,

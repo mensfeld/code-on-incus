@@ -164,6 +164,7 @@ func sanitizeUntrustedConfig(fileCfg *Config, path string) {
 	sanitizeUntrustedNetwork(&fileCfg.Network, path)
 	sanitizeUntrustedEnvCommands(&fileCfg.Defaults, path)
 	sanitizeUntrustedDefaultProfile(&fileCfg.Defaults, path)
+	sanitizeUntrustedSessionName(&fileCfg.Container, path)
 	sanitizeUntrustedSecurity(&fileCfg.Security, path)
 	sanitizeUntrustedGit(&fileCfg.Git, path)
 
@@ -294,6 +295,23 @@ func sanitizeUntrustedDefaultProfile(d *DefaultsConfig, path string) {
 			"profile selects the whole session environment. Move it to "+
 			"~/.coi/config.toml or set COI_CONFIG to apply it.\n", path)
 	d.Profile = ""
+}
+
+// sanitizeUntrustedSessionName strips [container] session_name from an
+// untrusted (project-scoped) source. The session name selects which persistent
+// container and saved session state (conversation history, restored
+// credentials) a launch attaches to — a cloned/agent-planted repo must not be
+// able to attach its own workspace to another project's session, or plant a
+// name that a later trusted launch would unknowingly share state with.
+func sanitizeUntrustedSessionName(c *ContainerConfig, path string) {
+	if c == nil || c.SessionName == "" {
+		return
+	}
+	fmt.Fprintf(os.Stderr,
+		"WARNING: ignoring '[container] session_name' in project config %s; the "+
+			"session name selects which persistent session a launch attaches to. "+
+			"Move it to ~/.coi/config.toml or a profile under ~/.coi/profiles to apply it.\n", path)
+	c.SessionName = ""
 }
 
 // sanitizeUntrustedNetwork drops security-downgrading network settings from an
@@ -502,6 +520,7 @@ func loadProfileDirectories(cfg *Config, configDir string, trusted bool) error {
 		// escaping host mounts are gated behind `coi trust`.
 		if !trusted {
 			sanitizeUntrustedNetwork(profileCfg.Network, profileConfigPath)
+			sanitizeUntrustedSessionName(&profileCfg.Container, profileConfigPath)
 			sanitizeUntrustedSecurity(profileCfg.Security, profileConfigPath)
 			sanitizeUntrustedGit(profileCfg.Git, profileConfigPath)
 			markUntrustedMounts(profileCfg.Mounts, profileConfigPath)
