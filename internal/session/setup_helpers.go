@@ -194,6 +194,20 @@ func reuseShiftDecision(configuredShift, hasRawIdmap bool) bool {
 	return configuredShift && !hasRawIdmap
 }
 
+// SameWorkspaceSource reports whether two host paths refer to the same
+// workspace directory. Symlinks are resolved when possible so a workspace
+// reached via an aliased path (~/proj -> /data/proj) does not count as moved —
+// a spurious remount would churn devices on every launch and, under
+// preserve-path, flip the container-side path between spellings.
+func SameWorkspaceSource(a, b string) bool {
+	na, errA := filepath.EvalSymlinks(a)
+	nb, errB := filepath.EvalSymlinks(b)
+	if errA != nil || errB != nil {
+		return filepath.Clean(a) == filepath.Clean(b)
+	}
+	return na == nb
+}
+
 // WorkspaceRemounter is the slice of ContainerManager that
 // RemountMovedWorkspace needs — narrowed so tests can fake it without
 // implementing the whole manager surface.
@@ -221,7 +235,15 @@ func RemountMovedWorkspace(mgr WorkspaceRemounter, workspacePath string, preserv
 		logger = func(string) {}
 	}
 	src := mgr.GetWorkspaceSource()
-	if src == "" || filepath.Clean(src) == filepath.Clean(workspacePath) {
+	if src == "" {
+		// Can't tell (device missing or incus error) — fail open, but say so:
+		// a silently skipped remount is indistinguishable from the same-source
+		// no-op, and for a named session that means running against the wrong
+		// checkout with no trace.
+		logger("Warning: could not determine the reused container's workspace source; skipping the moved-workspace check")
+		return "", false, nil
+	}
+	if SameWorkspaceSource(src, workspacePath) {
 		return "", false, nil
 	}
 	logger(fmt.Sprintf("Workspace location changed since this session's container was created (%s -> %s); remounting", src, workspacePath))

@@ -229,6 +229,17 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 				// Reuse running container if: persistent mode, --container flag, or explicit resume.
 				// The resume case covers post-reboot Incus stateful restore: a non-persistent
 				// container may be Running because Incus restored it; --resume should reuse it.
+				// A RUNNING container cannot be remounted safely, so refuse
+				// to attach when it still has a DIFFERENT workspace mounted —
+				// the normal hazard for a named session (session_name) whose
+				// previous checkout's session is still live. Attaching would
+				// silently hand this launch the other checkout's files.
+				if src := result.Manager.GetWorkspaceSource(); src != "" && !SameWorkspaceSource(src, opts.WorkspacePath) {
+					return nil, fmt.Errorf(
+						"container %s is running with a different workspace mounted (%s); "+
+							"stop that session first (coi shutdown %s) or launch from that workspace",
+						containerName, src, containerName)
+				}
 				opts.Logger("Container already running, reusing...")
 				// Strip the previous session's port devices NOW, before the
 				// port preflight below bind-probes: their live forkproxy

@@ -69,3 +69,42 @@ func TestSessionName_AppliedFromProfile(t *testing.T) {
 		t.Errorf("profile session_name not applied: got %q", cfg.Container.SessionName)
 	}
 }
+
+// Inheritance must not smuggle a trusted parent's session_name into an
+// untrusted project profile: `inherits = "<trusted profile>"` would otherwise
+// attach a hostile workspace to the user's named session.
+func TestSessionName_InheritanceReStripped(t *testing.T) {
+	cfg := GetDefaultConfig()
+	cfg.Profiles = map[string]ProfileConfig{
+		// Trusted profile (source under ~/.coi would be trusted; Source left
+		// empty is skipped, so give it no name to strip anyway).
+		"work": {Container: ContainerConfig{SessionName: "work-session"}},
+		// Untrusted project-scoped child that inherited the parent's name.
+		"dev": {
+			Source:    "/repo/.coi/profiles/dev/config.toml",
+			Container: ContainerConfig{SessionName: "work-session"},
+		},
+	}
+	stripUntrustedInheritedSessionNames(cfg)
+	if got := cfg.Profiles["dev"].Container.SessionName; got != "" {
+		t.Errorf("inherited session_name in untrusted profile must be stripped, got %q", got)
+	}
+	if got := cfg.Profiles["work"].Container.SessionName; got != "work-session" {
+		t.Errorf("trusted/sourceless profile must keep its name, got %q", got)
+	}
+}
+
+// validateSessionName rejects names that would silently hash to a different
+// identity than their lookalike.
+func TestSessionName_Validation(t *testing.T) {
+	for _, ok := range []string{"", "proj", "my-proj.2", "A_b-c.d"} {
+		if err := validateSessionName(ok); err != nil {
+			t.Errorf("%q should be valid: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"proj ", " proj", "pro j", "a/b", "-lead", ".lead", "x\u200by"} {
+		if err := validateSessionName(bad); err == nil {
+			t.Errorf("%q should be rejected", bad)
+		}
+	}
+}

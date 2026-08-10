@@ -12,24 +12,16 @@ Flow:
    the persisted workspace device was remounted from the new location.
 """
 
-import hashlib
-import os
 import subprocess
 import uuid
 
-from support.helpers import write_trusted_coi_config
-
-
-def named_container_name(session_name, slot):
-    """Replicates internal/session/naming.go Identity/IdentityHash for a name."""
-    prefix = os.environ.get("COI_CONTAINER_PREFIX", "coi-")
-    h = hashlib.sha256(f"session-name:{session_name}".encode()).hexdigest()[:8]
-    return f"{prefix}{h}-{slot}"
+from support.helpers import calculate_container_name, write_trusted_coi_config
 
 
 def test_named_session_continues_across_workspaces(coi_binary, tmp_path):
     session_name = f"namedsess-{uuid.uuid4().hex[:8]}"
-    container = named_container_name(session_name, 1)
+    # workspace_dir is unused when session_name keys the identity
+    container = calculate_container_name("", 1, session_name=session_name)
 
     ws_a = tmp_path / "checkout-a"
     ws_a.mkdir()

@@ -2,6 +2,7 @@ package session
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -148,5 +149,29 @@ func TestIdentity(t *testing.T) {
 	}
 	if ContainerName("/a", "proj", 1) != ContainerName("/b", "proj", 1) {
 		t.Error("container names for a named session must match across workspaces")
+	}
+}
+
+// TestSameWorkspaceSource pins the symlink-aware comparison: an aliased path
+// to the same directory is NOT a move (a spurious remount would churn devices
+// on every launch), while genuinely different directories are.
+func TestSameWorkspaceSource(t *testing.T) {
+	realDir := t.TempDir()
+	link := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(realDir, link); err != nil {
+		t.Fatal(err)
+	}
+	if !SameWorkspaceSource(realDir, link) {
+		t.Error("a symlink alias of the same directory must not count as moved")
+	}
+	if !SameWorkspaceSource(realDir, realDir+string(filepath.Separator)) {
+		t.Error("trailing separator must not count as moved")
+	}
+	if SameWorkspaceSource(realDir, t.TempDir()) {
+		t.Error("different directories must count as moved")
+	}
+	// Nonexistent paths fall back to a lexical comparison rather than erroring.
+	if !SameWorkspaceSource("/no/such/a", "/no/such/a") {
+		t.Error("identical nonexistent paths should compare equal lexically")
 	}
 }

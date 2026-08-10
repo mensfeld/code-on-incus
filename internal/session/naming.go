@@ -65,7 +65,8 @@ func ContainerName(workspacePath, sessionName string, slot int) string {
 	return fmt.Sprintf("%s%s-%d", prefix, hash, slot)
 }
 
-// AllocateSlot finds the next available slot for a workspace
+// AllocateSlot finds the next available slot for a session identity
+// (workspace path, or session_name when set)
 // Returns the slot number (1, 2, 3, ...) or 0 if no slots available
 func AllocateSlot(workspacePath, sessionName string, maxSlots int) (int, error) {
 	if maxSlots == 0 {
@@ -252,7 +253,9 @@ func ParseContainerName(containerName string) (string, int, error) {
 	return hash, slot, nil
 }
 
-// ListWorkspaceSessions lists all sessions for a workspace
+// ListWorkspaceSessions lists all sessions for a session identity — the
+// workspace path, or session_name when set (a named session's containers are
+// found from ANY workspace location)
 // Returns map of slot -> container name
 func ListWorkspaceSessions(workspacePath, sessionName string) (map[int]string, error) {
 	hash := IdentityHash(workspacePath, sessionName)

@@ -205,41 +205,16 @@ func (m *Manager) GetWorkspaceSource() string {
 	return m.workspaceDeviceField("source")
 }
 
-// workspaceDeviceField parses `incus config device show` output for one field
-// of the workspace device. Returns "" when the device or field is absent.
+// workspaceDeviceField reads one field of the workspace device via
+// `incus config device get` — the value comes back raw (no YAML rendering to
+// mis-parse when a path would need quoting). Returns "" when the device or
+// field is absent.
 func (m *Manager) workspaceDeviceField(field string) string {
-	output, err := IncusOutput("config", "device", "show", m.ContainerName)
+	v, err := IncusOutput("config", "device", "get", m.ContainerName, "workspace", field)
 	if err != nil {
 		return ""
 	}
-
-	// Parse YAML output to find the workspace device's field. Format is:
-	// workspace:
-	//   path: /some/path
-	//   source: /host/path
-	//   type: disk
-	prefix := field + ":"
-	lines := strings.Split(output, "\n")
-	inWorkspace := false
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "workspace:" {
-			inWorkspace = true
-			continue
-		}
-		if inWorkspace {
-			// Check for a new device (line starts without indent)
-			if len(line) > 0 && line[0] != ' ' && line[0] != '\t' {
-				break // moved to a different device
-			}
-			if strings.HasPrefix(trimmed, prefix) {
-				if v := strings.TrimSpace(strings.TrimPrefix(trimmed, prefix)); v != "" {
-					return v
-				}
-			}
-		}
-	}
-	return ""
+	return strings.TrimSpace(v)
 }
 
 // Exec executes a command in the container (no output capture)

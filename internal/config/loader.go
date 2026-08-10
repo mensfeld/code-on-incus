@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -71,6 +72,22 @@ func Load() (*Config, error) {
 	// Resolve profile inheritance after all profiles are loaded from all levels
 	if err := cfg.ResolveProfileInheritance(); err != nil {
 		return nil, fmt.Errorf("profile inheritance error: %w", err)
+	}
+
+	stripUntrustedInheritedSessionNames(cfg)
+
+	// Profiles are schema-validated, but the top-level config is not — and a
+	// malformed session_name (trailing space, path separators, invisible
+	// characters) would silently hash to a different identity than its
+	// lookalike, recreating the fresh-container failure the feature exists to
+	// prevent. Validate every name that survived trust gating.
+	if err := validateSessionName(cfg.Container.SessionName); err != nil {
+		return nil, err
+	}
+	for name, p := range cfg.Profiles {
+		if err := validateSessionName(p.Container.SessionName); err != nil {
+			return nil, fmt.Errorf("profile %q: %w", name, err)
+		}
 	}
 
 	// Ensure directories exist
@@ -295,6 +312,38 @@ func sanitizeUntrustedDefaultProfile(d *DefaultsConfig, path string) {
 			"profile selects the whole session environment. Move it to "+
 			"~/.coi/config.toml or set COI_CONFIG to apply it.\n", path)
 	d.Profile = ""
+}
+
+// stripUntrustedInheritedSessionNames re-strips session_name from untrusted
+// (project-scoped) profiles AFTER inheritance resolution: inheritance can copy
+// a TRUSTED parent's session_name into a project-scoped child, so
+// `inherits = "<trusted profile>"` would smuggle what direct declaration
+// cannot (the per-profile strip runs before inheritance is resolved).
+func stripUntrustedInheritedSessionNames(cfg *Config) {
+	for name, p := range cfg.Profiles {
+		if p.Container.SessionName == "" || p.Source == "" {
+			continue
+		}
+		// p.Source is <root>/profiles/<name>/config.toml; trust is a property
+		// of the scan root the profile came from.
+		if !isTrustedProfileDir(filepath.Dir(filepath.Dir(filepath.Dir(p.Source)))) {
+			sanitizeUntrustedSessionName(&p.Container, p.Source)
+			cfg.Profiles[name] = p
+		}
+	}
+}
+
+// sessionNameRe mirrors the profile schema's session_name pattern.
+var sessionNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$`)
+
+// validateSessionName rejects [container] session_name values that would
+// silently hash to a different identity than their lookalike (whitespace,
+// path separators, invisible characters). Empty = unset = valid.
+func validateSessionName(name string) error {
+	if name == "" || sessionNameRe.MatchString(name) {
+		return nil
+	}
+	return fmt.Errorf("invalid [container] session_name %q: must match %s (letters, digits, '.', '_', '-'; start alphanumeric; max 64 chars)", name, sessionNameRe.String())
 }
 
 // sanitizeUntrustedSessionName strips [container] session_name from an

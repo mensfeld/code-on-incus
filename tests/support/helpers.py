@@ -1241,15 +1241,19 @@ def get_screen_display(child, refresh=False, clear_buffer=False):
         return ""
 
 
-def calculate_container_name(workspace_dir, slot):
+def calculate_container_name(workspace_dir, slot, session_name=None):
     """
-    Calculate the expected container name for a given workspace and slot.
+    Calculate the expected container name for a given session identity and slot.
 
-    This replicates the container naming logic from internal/session/naming.go.
+    This replicates the identity-keyed naming logic from
+    internal/session/naming.go (Identity/IdentityHash/ContainerName): the hash
+    input is the workspace's absolute path, or "session-name:<name>" when a
+    [container] session_name is configured.
 
     Args:
         workspace_dir: Path to workspace directory
         slot: Slot number
+        session_name: Optional [container] session_name keying the identity
 
     Returns:
         Expected container name (e.g., "coi-test-85918044-1")
@@ -1259,17 +1263,19 @@ def calculate_container_name(workspace_dir, slot):
     # Get container prefix from environment (defaults to "coi-" but tests use "coi-test-")
     prefix = os.environ.get("COI_CONTAINER_PREFIX", "coi-")
 
-    # Hash the workspace path (SHA256)
-    # Use os.path.abspath (not Path.resolve) to match Go's filepath.Abs behavior
-    # (abspath doesn't follow symlinks, resolve does)
-    workspace_path = os.path.abspath(workspace_dir)
-    hash_bytes = hashlib.sha256(workspace_path.encode()).digest()
+    if session_name:
+        identity = f"session-name:{session_name}"
+    else:
+        # Use os.path.abspath (not Path.resolve) to match Go's filepath.Abs
+        # behavior (abspath doesn't follow symlinks, resolve does)
+        identity = os.path.abspath(workspace_dir)
+    hash_bytes = hashlib.sha256(identity.encode()).digest()
 
     # Take first 8 hex characters
-    workspace_id = hash_bytes.hex()[:8]
+    identity_id = hash_bytes.hex()[:8]
 
     # Format: {prefix}{hash}-{slot}
-    return f"{prefix}{workspace_id}-{slot}"
+    return f"{prefix}{identity_id}-{slot}"
 
 
 def extract_container_name(result):

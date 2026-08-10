@@ -43,6 +43,27 @@ func (a *App) sessionName() string {
 	return a.cfg.Container.SessionName
 }
 
+// effectiveSessionName returns the session name the EFFECTIVE configuration
+// would use: the already-applied config's name when set (explicit --profile or
+// alias), else the one carried by the trusted [defaults] profile that a
+// shell/run launch would fall back to (#607). Operational commands (attach,
+// monitor, snapshot) and the shell resume lookup run BEFORE any profile
+// fallback is applied, so without this peek a profile-carried session_name —
+// the documented placement — would make them resolve path-keyed container
+// names that don't exist.
+func (a *App) effectiveSessionName() string {
+	if n := a.sessionName(); n != "" {
+		return n
+	}
+	if a.cfg == nil || a.cfg.Defaults.Profile == "" {
+		return ""
+	}
+	if p := a.cfg.GetProfile(a.cfg.Defaults.Profile); p != nil {
+		return p.Container.SessionName
+	}
+	return ""
+}
+
 // app is the singleton used by the cobra command tree. Execute() resets it to
 // a zero value on each call so tests that invoke Execute() multiple times
 // start with clean state (cobra re-parses flags, PersistentPreRunE reloads

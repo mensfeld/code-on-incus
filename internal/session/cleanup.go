@@ -590,8 +590,14 @@ func GetLatestSessionForWorkspace(sessionsDir, workspacePath, sessionName string
 	// Get the identity hash to match against. Saved sessions embed it in
 	// their container name, so sessions saved under one session_name match
 	// from ANY workspace — that is what lets --resume continue a named
-	// session after the workspace moved.
-	workspaceHash := IdentityHash(workspacePath, sessionName)
+	// session after the workspace moved. Sessions saved BEFORE a name was
+	// adopted are path-keyed, so this workspace's path hash stays an accepted
+	// fallback: adding session_name to a profile must not orphan history.
+	identityHash := IdentityHash(workspacePath, sessionName)
+	legacyHash := ""
+	if sessionName != "" {
+		legacyHash = WorkspaceHash(workspacePath)
+	}
 
 	// Find the most recent session for this workspace
 	var latestSession string
@@ -610,8 +616,9 @@ func GetLatestSessionForWorkspace(sessionsDir, workspacePath, sessionName string
 			continue
 		}
 
-		// Only consider sessions from the same workspace
-		if sessionHash != workspaceHash {
+		// Only consider sessions from the same identity (or, for a named
+		// session, this workspace's pre-adoption path identity).
+		if sessionHash != identityHash && (legacyHash == "" || sessionHash != legacyHash) {
 			continue
 		}
 

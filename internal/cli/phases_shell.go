@@ -190,7 +190,7 @@ func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.P
 					resumeID = "workspace-session"
 					fmt.Fprintf(os.Stderr, "Resuming %s session from workspace\n", ti.Name())
 				} else {
-					resumeID, err = session.GetLatestSessionForWorkspace(sessionsDir, s.absWorkspace, a.sessionName())
+					resumeID, err = session.GetLatestSessionForWorkspace(sessionsDir, s.absWorkspace, a.effectiveSessionName())
 					if err != nil {
 						return nil, fmt.Errorf("no previous session to resume for this workspace: %w", err)
 					}
@@ -274,6 +274,11 @@ func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.P
 					return nil, fmt.Errorf("failed to allocate slot: %w", err)
 				}
 				fmt.Fprintf(os.Stderr, "Auto-allocated slot %d\n", slotNum)
+				if n := a.sessionName(); n != "" && slotNum > 1 {
+					fmt.Fprintf(os.Stderr,
+						"Warning: named session %q is already active on another slot; this launch FORKS it into a NEW container (slot %d) with none of the session's state. Stop the running session or pass --slot to target it.\n",
+						n, slotNum)
+				}
 			} else {
 				available, err := session.IsSlotAvailable(s.absWorkspace, a.sessionName(), slotNum)
 				if err != nil {

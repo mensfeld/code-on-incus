@@ -52,7 +52,7 @@ func (a *App) attachCommand(cmd *cobra.Command, args []string) error {
 		}
 
 		// Calculate container name for this workspace+slot
-		targetContainer = session.ContainerName(workspacePath, a.sessionName(), attachSlot)
+		targetContainer = session.ContainerName(workspacePath, a.effectiveSessionName(), attachSlot)
 
 		// Verify it exists and is running
 		mgr := container.NewManager(targetContainer)
