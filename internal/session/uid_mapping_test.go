@@ -82,3 +82,28 @@ func TestMountSources(t *testing.T) {
 		}
 	}
 }
+
+// TestReuseShiftDecision covers the issue #685 rule for reusing a persistent
+// container: an existing raw.idmap always wins over what the config asks for,
+// so a container the #678 fallback already converted doesn't get shift=true
+// re-armed on it once per session.
+func TestReuseShiftDecision(t *testing.T) {
+	cases := []struct {
+		name            string
+		configuredShift bool
+		hasRawIdmap     bool
+		want            bool
+	}{
+		{"config wants shift, container clean → shift", true, false, true},
+		{"config wants shift, container already on raw.idmap (#678 healed) → no shift", true, true, false},
+		{"config disabled shift, container on raw.idmap → no shift", false, true, false},
+		{"config disabled shift, container clean → no shift", false, false, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := reuseShiftDecision(c.configuredShift, c.hasRawIdmap); got != c.want {
+				t.Errorf("reuseShiftDecision(%v, %v) = %v, want %v", c.configuredShift, c.hasRawIdmap, got, c.want)
+			}
+		})
+	}
+}

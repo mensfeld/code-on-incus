@@ -46,7 +46,9 @@ func SourceBlocksIdmappedMounts(path string) bool {
 	if err := unix.Statfs(path, &st); err != nil {
 		return false
 	}
-	return magicBlocksIdmappedMounts(int64(st.Type))
+	// The conversion is load-bearing cross-platform: Statfs_t.Type is int64 on
+	// linux but uint32 on darwin, which this repo also builds for.
+	return magicBlocksIdmappedMounts(int64(st.Type)) //nolint:unconvert
 }
 
 // FirstBlockingSource returns the first of paths that SourceBlocksIdmappedMounts
