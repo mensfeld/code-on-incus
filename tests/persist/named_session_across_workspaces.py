@@ -41,6 +41,9 @@ session_name = "{session_name}"
 
     def run_session(workspace, command):
         return subprocess.run(
+            # "--" ends coi's flag parsing so bash's -c isn't eaten by cobra;
+            # coi run execs the argv directly (no implicit shell), so the
+            # shell must be explicit for the && chains below.
             [
                 coi_binary,
                 "run",
@@ -48,6 +51,7 @@ session_name = "{session_name}"
                 str(workspace),
                 "--slot",
                 "1",
+                "--",
                 "bash",
                 "-c",
                 command,
