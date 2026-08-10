@@ -1263,12 +1263,9 @@ def calculate_container_name(workspace_dir, slot, session_name=None):
     # Get container prefix from environment (defaults to "coi-" but tests use "coi-test-")
     prefix = os.environ.get("COI_CONTAINER_PREFIX", "coi-")
 
-    if session_name:
-        identity = f"session-name:{session_name}"
-    else:
-        # Use os.path.abspath (not Path.resolve) to match Go's filepath.Abs
-        # behavior (abspath doesn't follow symlinks, resolve does)
-        identity = os.path.abspath(workspace_dir)
+    # For the path case, use os.path.abspath (not Path.resolve) to match Go's
+    # filepath.Abs behavior (abspath doesn't follow symlinks, resolve does).
+    identity = f"session-name:{session_name}" if session_name else os.path.abspath(workspace_dir)
     hash_bytes = hashlib.sha256(identity.encode()).digest()
 
     # Take first 8 hex characters
