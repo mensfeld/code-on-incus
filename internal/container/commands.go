@@ -395,21 +395,24 @@ func shiftEnabledDiskDevices(containerName string) []string {
 }
 
 // ConvertShiftedDiskDevices sets shift=false on every shift=true disk device
-// of the (stopped) container, returning whether any were converted. Callers
-// pair it with raw.idmap: reactively via fallbackShiftToRawIdmap after a #678
-// start failure, or proactively on reuse when the mapping decision has changed
-// to raw.idmap since the container was created (#683 — OrbStack ≥2.2.2 never
-// produces the start failure the reactive path keys on, so creation-time
-// shift=true devices must be converted before start).
-func ConvertShiftedDiskDevices(containerName string) bool {
-	devices := shiftEnabledDiskDevices(containerName)
-	if len(devices) == 0 {
-		return false
+// of the (stopped) container, reporting how many conversions succeeded and how
+// many failed — a failed one leaves raw.idmap combined with a shift=true
+// device, which fails the start with an error none of the fallbacks match, so
+// callers must not report failure as success. Callers pair it with raw.idmap:
+// reactively via fallbackShiftToRawIdmap after a #678 start failure, or
+// proactively on reuse when the mapping decision has changed to raw.idmap
+// since the container was created (#683 — OrbStack ≥2.2.2 never produces the
+// start failure the reactive path keys on, so creation-time shift=true devices
+// must be converted before start).
+func ConvertShiftedDiskDevices(containerName string) (converted, failed int) {
+	for _, d := range shiftEnabledDiskDevices(containerName) {
+		if err := IncusExecQuiet("config", "device", "set", containerName, d, "shift=false"); err != nil {
+			failed++
+			continue
+		}
+		converted++
 	}
-	for _, d := range devices {
-		_ = IncusExecQuiet("config", "device", "set", containerName, d, "shift=false")
-	}
-	return true
+	return converted, failed
 }
 
 // fallbackShiftToRawIdmap converts every shift=true disk device on the (stopped)
@@ -419,7 +422,8 @@ func ConvertShiftedDiskDevices(containerName string) bool {
 // try shift, and only if start fails on it, drop to raw.idmap. Returns true if it
 // changed anything, so the caller knows a retry is worthwhile.
 func fallbackShiftToRawIdmap(containerName string) bool {
-	if !ConvertShiftedDiskDevices(containerName) {
+	converted, failed := ConvertShiftedDiskDevices(containerName)
+	if converted+failed == 0 {
 		return false
 	}
 	_ = IncusExecQuiet("config", "set", containerName, "raw.idmap", fmt.Sprintf("both %d %d", os.Getuid(), CodeUID))

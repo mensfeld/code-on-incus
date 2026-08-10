@@ -61,14 +61,24 @@ func TestSourceBlocksIdmappedMountsMissingPathUsesAncestor(t *testing.T) {
 }
 
 // TestSourceBlocksIdmappedMountsUnreadablePath pins the fail-open behaviour for
-// errors other than a missing path: a path that can't be stat'd for permission
-// reasons must not silently turn shift off for everyone, it must leave the
-// caller on its existing behaviour with the reactive fallback underneath.
+// terminal statfs errors other than a missing path: they must not silently turn
+// shift off for everyone, they must leave the caller on its existing behaviour
+// with the reactive fallback underneath. The symlink loop (ELOOP) case runs in
+// every environment, including as root where EACCES is not constructible.
 func TestSourceBlocksIdmappedMountsUnreadablePath(t *testing.T) {
-	if os.Getuid() == 0 {
-		t.Skip("running as root; permission-based statfs failure not constructible")
-	}
 	dir := t.TempDir()
+
+	loop := filepath.Join(dir, "loop")
+	if err := os.Symlink(loop, loop); err != nil {
+		t.Fatal(err)
+	}
+	if SourceBlocksIdmappedMounts(loop) {
+		t.Errorf("an ELOOP path must fail open (return false), got true for %s", loop)
+	}
+
+	if os.Getuid() == 0 {
+		return // EACCES not constructible as root; ELOOP above covered fail-open.
+	}
 	locked := filepath.Join(dir, "locked")
 	if err := os.Mkdir(locked, 0o000); err != nil {
 		t.Fatal(err)

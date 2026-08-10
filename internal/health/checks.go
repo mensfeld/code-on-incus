@@ -1250,9 +1250,9 @@ func CheckSecretMasking(imageName string) HealthCheck {
 
 	mgr := container.NewManager(containerName)
 	const containerWorkspace = "/workspace"
-	// Deliberately NOT session.ResolveUseShift: shift=false is only half of the
-	// non-shift path, the other half being raw.idmap, which takes effect at
-	// container START and this probe has already started. Handing the real
+	// Deliberately NOT session.ConfigureUIDMapping's decision: shift=false is
+	// only half of the non-shift path, the other half being raw.idmap, which
+	// takes effect at container START and this probe has already started. Handing the real
 	// decision here without the mapping breaks the mask device outright
 	// ("Failed to add mount for device inside container"). The workspace is a
 	// throwaway MkdirTemp on local storage rather than the user's real one, so
@@ -1358,6 +1358,9 @@ func CheckHostCredentialIsolation(imageName string) HealthCheck {
 	}
 
 	mgr := container.NewManager(containerName)
+	// shift=true deliberately hardcoded for the same reason as the secret-mask
+	// probe above: raw.idmap can't take effect on an already-started container,
+	// and the workspace is a throwaway temp dir on local storage (#683).
 	if err := mgr.MountDisk("workspace", workspace, "/workspace", true, false); err != nil {
 		return HealthCheck{Name: name, Status: StatusWarning, Message: fmt.Sprintf("Skipped (mount workspace: %v)", err)}
 	}

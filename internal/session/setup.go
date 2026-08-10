@@ -271,7 +271,12 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 				// one place and protection matches the current workspace.
 				reuseCWP := result.Manager.GetWorkspacePath()
 				result.ContainerWorkspacePath = reuseCWP
-				reuseLayout, _ := ResolveGitWorktree(opts.WorkspacePath)
+				reuseLayout, reuseWtErr := ResolveGitWorktree(opts.WorkspacePath)
+				if reuseWtErr != nil {
+					// The layout also feeds the shift decision below; losing it
+					// silently would drop the common dir's vote (#683).
+					opts.Logger(fmt.Sprintf("Warning: git worktree not resolved (%v); its git dirs are skipped by the UID-mapping check and git commands may fail in the container", reuseWtErr))
+				}
 				reuseWritableHooks := !containsGitHooksPath(opts.ProtectedPaths)
 				StripSecurityDevices(result.Manager, opts.Logger)
 				// Decide the shift flag the same way a fresh launch does (issue
@@ -286,13 +291,18 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 				// (#683 — a pre-upgrade container on OrbStack ≥2.2.2 never hits
 				// the start failure the reactive fallback keys on).
 				//
-				// The decision must see only TRUSTED mounts — the same set the
-				// fresh path sees after the 4.6 gate below. An untrusted [[mount]]
-				// is never attached, so it must not vote on the container's
-				// raw.idmap either. (The full gate with its warnings still runs
-				// below; this pre-gate is silent and drops nothing extra.)
-				trustedMC, _, _, _, _, _, _, _ := FilterTrusted(opts.MountConfig, nil, nil, nil, opts.WorkspacePath)
-				reuseSources := MountSources(opts.WorkspacePath, trustedMC, WorktreeSources(reuseLayout)...)
+				// The decision deliberately sees the UNGATED mount config: on
+				// reuse, mount devices persist from creation regardless of
+				// current trust (the 4.6 gate below only warns), so the
+				// currently-declared mounts are the closest available stand-in
+				// for the devices actually attached. Trust-gating the vote
+				// would be both unsafe and pointless here: a mount whose trust
+				// was revoked after creation is still attached and its
+				// filesystem still matters, while the only influence any path
+				// has on the vote is flipping toward raw.idmap — whose value
+				// derives from host/code UIDs, never from the path — so an
+				// untrusted entry cannot inject anything.
+				reuseSources := MountSources(opts.WorkspacePath, opts.MountConfig, WorktreeSources(reuseLayout)...)
 				reuseUseShift := ResolveReuseUIDMapping(containerName, reuseSources, opts.DisableShift, opts.Logger)
 				reusePaths, reuseImmutable, reuseErr := applySessionSecurity(result.Manager, opts, reuseCWP, reuseUseShift, reuseLayout, reuseWritableHooks, containerName)
 				opts.ProtectedPaths = reusePaths

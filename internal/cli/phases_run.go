@@ -174,9 +174,10 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 				return nil, fmt.Errorf("port preflight failed: %w", err)
 			}
 
-			// Pre-start hook: runs AFTER init but BEFORE first start (fresh
-			// launches only; reused persistent containers keep their creation-time
-			// devices and mapping). Two jobs:
+			// Pre-start hook: runs AFTER init but BEFORE first start, on fresh
+			// launches only (reused persistent containers go through preRestart
+			// below, which re-decides the mapping and reconciles the security
+			// devices). Two jobs:
 			//  1. Apply the workspace UID mapping (raw.idmap on a host/code UID
 			//     mismatch; Colima/Lima auto-detect) so it takes effect at first
 			//     boot (#530).
@@ -190,7 +191,8 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 			//     all (issue #534).
 			// If the ephemeral isolation fallback recreates the container, this
 			// hook re-runs on the fresh container, re-applying mapping and devices.
-			s.useShift = session.ResolveUseShift(session.MountSources(s.absWorkspace, s.mountConfig), a.cfg.Incus.DisableShift)
+			// s.useShift is set by whichever hook runs (preStart or preRestart)
+			// before anything reads it.
 			logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
 			preStart := func() error {
 				defer timing.Start(timing.CatStep, "pre-start-hook")()
@@ -232,15 +234,24 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 			// and re-run the SAME security setup fresh launch uses (applySecurityMounts).
 			preRestart := func() error {
 				s.containerWorkspace = mgr.GetWorkspacePath()
-				layout, _ := session.ResolveGitWorktree(s.absWorkspace)
+				layout, wtErr := session.ResolveGitWorktree(s.absWorkspace)
+				if wtErr != nil {
+					// The layout also feeds the shift decision below; losing it
+					// silently would drop the common dir's vote (#683).
+					logFn(fmt.Sprintf("Warning: git worktree not resolved (%v); its git dirs are skipped by the UID-mapping check and git commands may fail in the container", wtErr))
+				}
 				s.gitWorktree = layout
+				// Strip BEFORE deciding the mapping (matching the shell reuse
+				// path in session.Setup): the conversion scan inside
+				// ResolveReuseUIDMapping then never enumerates security devices
+				// that are about to be re-created with the new flag anyway.
+				session.StripSecurityDevices(mgr, logFn)
 				// Apply the fresh-launch mapping decision to the reused container,
 				// mirroring the shell reuse path: an existing raw.idmap wins over
 				// the config (#685), and creation-time shift=true devices are
 				// converted when the decision is raw.idmap (#683 — the reactive
 				// #678 fallback never fires on OrbStack ≥2.2.2's silent breakage).
 				s.useShift = session.ResolveReuseUIDMapping(s.containerName, session.MountSources(s.absWorkspace, s.mountConfig, session.WorktreeSources(layout)...), a.cfg.Incus.DisableShift, logFn)
-				session.StripSecurityDevices(mgr, logFn)
 				return a.applySecurityMounts(mgr, s.absWorkspace, s.containerWorkspace, s.containerName, s.useShift, layout)
 			}
 

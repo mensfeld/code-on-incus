@@ -42,15 +42,17 @@ func ConfigureUIDMapping(containerName string, sources []string, disableShift bo
 	// Detect() reads /proc/mounts etc.; call it once and reuse.
 	hostHandlesUIDMapping := vmhost.Detect().HandlesUIDMapping()
 	blocking := vmhost.FirstBlockingSource(sources...)
-	// Only worth saying when it changes the outcome: if shift was already off
-	// for another reason (disable_shift, a Colima/Lima guest, or a host/code
-	// UID mismatch that forces raw.idmap first), the filesystem never got a
-	// vote.
-	if blocking != "" && !disableShift && !hostHandlesUIDMapping && os.Getuid() == container.CodeUID {
-		logger(fmt.Sprintf("Mount source %s is on a FUSE-family filesystem, which can't be relied on for idmapped (shift) mounts; using raw.idmap for this container instead", blocking))
-	}
 	var idmap string
 	useShift, idmap = decideUIDMapping(os.Getuid(), container.CodeUID, disableShift, hostHandlesUIDMapping, blocking != "")
+	// Only worth saying when the filesystem actually decided the outcome —
+	// asked of the decision matrix itself (by re-deciding without the blocking
+	// source), so this can't drift from decideUIDMapping's precedence the way
+	// a hand-copied condition would.
+	if blocking != "" {
+		if s, i := decideUIDMapping(os.Getuid(), container.CodeUID, disableShift, hostHandlesUIDMapping, false); s != useShift || i != idmap {
+			logger(fmt.Sprintf("Mount source %s is on a filesystem that can't be relied on for idmapped (shift) mounts; using raw.idmap for this container instead", blocking))
+		}
+	}
 
 	if idmap != "" {
 		if os.Getuid() != container.CodeUID {
@@ -61,7 +63,7 @@ func ConfigureUIDMapping(containerName string, sources []string, disableShift bo
 				os.Getuid(), idmap))
 		}
 		if err := container.IncusExec("config", "set", containerName, "raw.idmap", idmap); err != nil {
-			logger(fmt.Sprintf("Warning: Failed to set raw.idmap: %v", err))
+			logger(fmt.Sprintf("Warning: Failed to set raw.idmap (%v) — the workspace will be mounted with NO UID mapping and may be unwritable in the container; retry, or set `[incus] disable_shift = true` and relaunch", err))
 			return useShift, false
 		}
 		return useShift, true
@@ -74,17 +76,6 @@ func ConfigureUIDMapping(containerName string, sources []string, disableShift bo
 		logger("Auto-detected Colima/Lima environment - disabling UID shifting")
 	}
 	return useShift, false
-}
-
-// ResolveUseShift returns just the shift flag from the same decision
-// ConfigureUIDMapping makes, without applying anything to a container. It is
-// for callers that need the flag before the container exists (the run
-// pipeline's pre-start default) or on a reused container whose raw.idmap was
-// applied at creation.
-func ResolveUseShift(sources []string, disableShift bool) bool {
-	useShift, _ := decideUIDMapping(os.Getuid(), container.CodeUID, disableShift,
-		vmhost.Detect().HandlesUIDMapping(), vmhost.FirstBlockingSource(sources...) != "")
-	return useShift
 }
 
 // MountSources lists the HOST paths a session's disk devices are sourced from:
@@ -134,10 +125,22 @@ func ResolveReuseUIDMapping(containerName string, sources []string, disableShift
 	if logger == nil {
 		logger = func(string) {}
 	}
+	hadRawIdmap := container.ContainerUsesRawIdmap(containerName)
 	configuredShift, idmapApplied := ConfigureUIDMapping(containerName, sources, disableShift, logger)
-	useShift := reuseShiftDecision(configuredShift, container.ContainerUsesRawIdmap(containerName))
-	if idmapApplied && container.ConvertShiftedDiskDevices(containerName) {
-		logger("Converted creation-time shift=true disk devices to shift=false to match raw.idmap (#683)")
+	useShift := reuseShiftDecision(configuredShift, hadRawIdmap || idmapApplied)
+	// Convert creation-time devices only on the TRANSITION to raw.idmap: a
+	// container that already carried it had its devices converted when that
+	// happened (creation, the #678 fallback, or an earlier reuse), so the
+	// per-device incus scan is skipped on the steady state every later
+	// session hits.
+	if idmapApplied && !hadRawIdmap {
+		converted, failed := container.ConvertShiftedDiskDevices(containerName)
+		if converted > 0 {
+			logger(fmt.Sprintf("Converted %d creation-time shift=true disk device(s) to shift=false to match raw.idmap (#683)", converted))
+		}
+		if failed > 0 {
+			logger(fmt.Sprintf("Warning: %d shift=true disk device(s) could not be converted to shift=false; the container may fail to start with raw.idmap set — retry, or recreate the container", failed))
+		}
 	}
 	return useShift
 }
