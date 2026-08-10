@@ -194,7 +194,18 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 			logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
 			preStart := func() error {
 				defer timing.Start(timing.CatStep, "pre-start-hook")()
-				s.useShift, _ = session.ConfigureUIDMapping(s.containerName, session.MountSources(s.absWorkspace, s.mountConfig), a.cfg.Incus.DisableShift, logFn)
+				// Detect a git worktree checkout (.git is a file → external git dirs)
+				// BEFORE the UID-mapping decision: the common dir is mounted as its
+				// own shift-carrying disk device, so its filesystem votes on that
+				// decision too (#683). A valid layout forces preserve-path so git's
+				// pointers resolve, and its internals are mounted + protected in
+				// applyWorkspaceMounts (#533).
+				layout, wtErr := session.ResolveGitWorktree(s.absWorkspace)
+				if wtErr != nil {
+					logFn(fmt.Sprintf("Warning: git worktree not mounted (%v); git commands may fail in the container", wtErr))
+				}
+				s.gitWorktree = layout
+				s.useShift, _ = session.ConfigureUIDMapping(s.containerName, session.MountSources(s.absWorkspace, s.mountConfig, session.WorktreeSources(layout)...), a.cfg.Incus.DisableShift, logFn)
 				// Restricted/allowlist disable IPv6 in the container (post-start,
 				// via the network manager). Pre-seed an IPv4-only networkd config
 				// so the link reaches "configured" and systemd-networkd-wait-online
@@ -204,14 +215,6 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 						logFn(fmt.Sprintf("Warning: networkd IPv4-only config not applied: %v", err))
 					}
 				}
-				// Detect a git worktree checkout (.git is a file → external git dirs).
-				// A valid layout forces preserve-path so git's pointers resolve, and its
-				// internals are mounted + protected in applyWorkspaceMounts (#533).
-				layout, wtErr := session.ResolveGitWorktree(s.absWorkspace)
-				if wtErr != nil {
-					logFn(fmt.Sprintf("Warning: git worktree not mounted (%v); git commands may fail in the container", wtErr))
-				}
-				s.gitWorktree = layout
 				if layout != nil && session.WorkspaceUnderSystemDir(s.absWorkspace) {
 					return fmt.Errorf("git worktree workspace %q is under a system directory; cannot preserve its host path to mount git internals safely", s.absWorkspace)
 				}
@@ -231,6 +234,12 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 				s.containerWorkspace = mgr.GetWorkspacePath()
 				layout, _ := session.ResolveGitWorktree(s.absWorkspace)
 				s.gitWorktree = layout
+				// Apply the fresh-launch mapping decision to the reused container,
+				// mirroring the shell reuse path: an existing raw.idmap wins over
+				// the config (#685), and creation-time shift=true devices are
+				// converted when the decision is raw.idmap (#683 — the reactive
+				// #678 fallback never fires on OrbStack ≥2.2.2's silent breakage).
+				s.useShift = session.ResolveReuseUIDMapping(s.containerName, session.MountSources(s.absWorkspace, s.mountConfig, session.WorktreeSources(layout)...), a.cfg.Incus.DisableShift, logFn)
 				session.StripSecurityDevices(mgr, logFn)
 				return a.applySecurityMounts(mgr, s.absWorkspace, s.containerWorkspace, s.containerName, s.useShift, layout)
 			}
@@ -353,8 +362,12 @@ func (a *App) configureContainerRunPhase(s *runState) session.Phase {
 			// workspace mount path from the container config.
 			if s.wasRestarted {
 				// Reuse: devices (incl. any worktree mounts) persist from creation, so
-				// applyWorkspaceMounts returns early without remounting; layout is nil.
-				if err := a.applyWorkspaceMounts(s.mgr, s.containerName, s.absWorkspace, &s.containerWorkspace, s.mountConfig, session.ResolveUseShift(session.MountSources(s.absWorkspace, s.mountConfig), a.cfg.Incus.DisableShift), true, nil); err != nil {
+				// applyWorkspaceMounts returns early without remounting and never reads
+				// the shift flag; s.useShift (resolved by preRestart through
+				// ResolveReuseUIDMapping) is passed so any future use of the flag on
+				// this path inherits the raw.idmap-aware reuse decision, not a
+				// config-only recompute.
+				if err := a.applyWorkspaceMounts(s.mgr, s.containerName, s.absWorkspace, &s.containerWorkspace, s.mountConfig, s.useShift, true, nil); err != nil {
 					return nil, err
 				}
 			}

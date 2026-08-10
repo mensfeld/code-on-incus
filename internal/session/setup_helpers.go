@@ -43,8 +43,10 @@ func ConfigureUIDMapping(containerName string, sources []string, disableShift bo
 	hostHandlesUIDMapping := vmhost.Detect().HandlesUIDMapping()
 	blocking := vmhost.FirstBlockingSource(sources...)
 	// Only worth saying when it changes the outcome: if shift was already off
-	// for another reason, the filesystem never got a vote.
-	if blocking != "" && !disableShift && !hostHandlesUIDMapping {
+	// for another reason (disable_shift, a Colima/Lima guest, or a host/code
+	// UID mismatch that forces raw.idmap first), the filesystem never got a
+	// vote.
+	if blocking != "" && !disableShift && !hostHandlesUIDMapping && os.Getuid() == container.CodeUID {
 		logger(fmt.Sprintf("Mount source %s is on a FUSE-family filesystem, which can't be relied on for idmapped (shift) mounts; using raw.idmap for this container instead", blocking))
 	}
 	var idmap string
@@ -86,17 +88,58 @@ func ResolveUseShift(sources []string, disableShift bool) bool {
 }
 
 // MountSources lists the HOST paths a session's disk devices are sourced from:
-// the workspace, plus any configured extra mounts. Protected paths and secret
-// masks are not included — they live inside the workspace, so its filesystem
-// already speaks for them.
-func MountSources(workspacePath string, mountConfig *MountConfig) []string {
+// the workspace, any configured extra mounts, and any extra device sources the
+// caller knows about (the git-worktree common dir, whose device carries the
+// same shift flag — see WorktreeSources). Protected paths and secret masks are
+// not included — they live inside the workspace, so its filesystem already
+// speaks for them. Empty extras are skipped.
+func MountSources(workspacePath string, mountConfig *MountConfig, extra ...string) []string {
 	sources := []string{workspacePath}
 	if mountConfig != nil {
 		for _, m := range mountConfig.Mounts {
 			sources = append(sources, m.HostPath)
 		}
 	}
+	for _, e := range extra {
+		if e != "" {
+			sources = append(sources, e)
+		}
+	}
 	return sources
+}
+
+// WorktreeSources returns the host paths of a worktree layout's external git
+// dirs for inclusion in MountSources (nil-safe). MountGitWorktreeDirs attaches
+// the common dir as a shift-carrying disk device sourced OUTSIDE the
+// workspace, so its filesystem must vote on the shift decision too (#683): a
+// worktree on local disk whose main repo lives on a FUSE share would otherwise
+// mount its entire git internals with junk ownership.
+func WorktreeSources(layout *GitWorktreeLayout) []string {
+	if layout == nil {
+		return nil
+	}
+	return []string{layout.CommonDir}
+}
+
+// ResolveReuseUIDMapping is the reuse-path counterpart of ConfigureUIDMapping:
+// it applies the fresh-launch mapping decision to a REUSED container, folds in
+// the container's existing raw.idmap (which always wins — shift and raw.idmap
+// are mutually exclusive, #685), and, when the decision is raw.idmap while the
+// container still carries creation-time shift=true disk devices (created
+// before the decision changed — e.g. by a pre-#683 coi on OrbStack ≥2.2.2,
+// where the start failure the #678 reactive fallback keys on never happens),
+// proactively converts those devices to shift=false so the raw.idmap actually
+// takes effect. Returns the shift flag for devices re-added this session.
+func ResolveReuseUIDMapping(containerName string, sources []string, disableShift bool, logger func(string)) bool {
+	if logger == nil {
+		logger = func(string) {}
+	}
+	configuredShift, idmapApplied := ConfigureUIDMapping(containerName, sources, disableShift, logger)
+	useShift := reuseShiftDecision(configuredShift, container.ContainerUsesRawIdmap(containerName))
+	if idmapApplied && container.ConvertShiftedDiskDevices(containerName) {
+		logger("Converted creation-time shift=true disk devices to shift=false to match raw.idmap (#683)")
+	}
+	return useShift
 }
 
 // decideUIDMapping is the pure decision behind ConfigureUIDMapping (no I/O), so

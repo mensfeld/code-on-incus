@@ -1,14 +1,16 @@
 package vmhost
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
 
 // TestMagicBlocksIdmappedMounts guards the filesystem table behind the #683
 // proactive shift skip. The FUSE magic is the one that matters (OrbStack's Mac
-// share reports fuseblk); everything else must fall through so a normal
-// workspace keeps using shift.
+// share reports fuseblk); 9p is listed because it has no idmapped-mount support
+// and its Lima mountType: 9p users carry none of detect()'s markers; everything
+// else must fall through so a normal workspace keeps using shift.
 func TestMagicBlocksIdmappedMounts(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -16,13 +18,13 @@ func TestMagicBlocksIdmappedMounts(t *testing.T) {
 		want  bool
 	}{
 		{"fuse / fuseblk", 0x65735546, true},
+		{"9p", 0x01021997, true},
 		{"btrfs", 0x9123683e, false},
 		{"tmpfs", 0x01021994, false},
 		{"ext4", 0xef53, false},
 		{"xfs", 0x58465342, false},
 		{"overlayfs", 0x794c7630, false},
 		{"zfs", 0x2fc12fc1, false},
-		{"9p", 0x01021997, false}, // deliberately not listed; see SourceBlocksIdmappedMounts
 		{"zero", 0, false},
 	}
 	for _, c := range cases {
@@ -34,14 +36,47 @@ func TestMagicBlocksIdmappedMounts(t *testing.T) {
 	}
 }
 
-// TestSourceBlocksIdmappedMountsUnreadablePath pins the fail-open behaviour: a
-// path that can't be stat'd must not silently turn shift off for everyone, it
-// must leave the caller on its existing behaviour with the reactive fallback
-// underneath.
+// TestSourceBlocksIdmappedMountsMissingPathUsesAncestor pins the ENOENT
+// behaviour: a path that does not exist yet is judged by its nearest existing
+// ancestor, because the callers decide shift before the code that MkdirAll's
+// missing writable mount sources — the ancestor's filesystem is where that
+// MkdirAll will land. On a non-FUSE temp dir the answer is false either way;
+// the point is that the walk terminates and agrees with the ancestor.
+func TestSourceBlocksIdmappedMountsMissingPathUsesAncestor(t *testing.T) {
+	dir := t.TempDir()
+	missing := filepath.Join(dir, "not", "created", "yet")
+	if got, want := SourceBlocksIdmappedMounts(missing), SourceBlocksIdmappedMounts(dir); got != want {
+		t.Errorf("missing path should be judged by its existing ancestor: got %v, ancestor %v", got, want)
+	}
+
+	// A file in the middle of the path (ENOTDIR) walks up the same way.
+	file := filepath.Join(dir, "plainfile")
+	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	under := filepath.Join(file, "child")
+	if got, want := SourceBlocksIdmappedMounts(under), SourceBlocksIdmappedMounts(dir); got != want {
+		t.Errorf("path under a plain file should be judged by its ancestor: got %v, ancestor %v", got, want)
+	}
+}
+
+// TestSourceBlocksIdmappedMountsUnreadablePath pins the fail-open behaviour for
+// errors other than a missing path: a path that can't be stat'd for permission
+// reasons must not silently turn shift off for everyone, it must leave the
+// caller on its existing behaviour with the reactive fallback underneath.
 func TestSourceBlocksIdmappedMountsUnreadablePath(t *testing.T) {
-	missing := filepath.Join(t.TempDir(), "no-such-dir", "workspace")
-	if SourceBlocksIdmappedMounts(missing) {
-		t.Errorf("a path that cannot be stat'd must return false, got true for %s", missing)
+	if os.Getuid() == 0 {
+		t.Skip("running as root; permission-based statfs failure not constructible")
+	}
+	dir := t.TempDir()
+	locked := filepath.Join(dir, "locked")
+	if err := os.Mkdir(locked, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+	inside := filepath.Join(locked, "workspace")
+	if SourceBlocksIdmappedMounts(inside) {
+		t.Errorf("an EACCES path must fail open (return false), got true for %s", inside)
 	}
 }
 

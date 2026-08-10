@@ -1,13 +1,22 @@
 package vmhost
 
 import (
+	"errors"
+	"path/filepath"
+
 	"golang.org/x/sys/unix"
 )
 
 // fuseSuperMagic is the statfs f_type shared by the whole FUSE family. Both
 // `fuse` and `fuseblk` report it, and `fuseblk` is what OrbStack's macOS share
-// reports — the mount at the centre of #678 and #683.
+// reports — the mount at the centre of #678 and #683. virtiofs also reports it
+// (the kernel's virtio_fs is FUSE-based and sets no magic of its own).
 const fuseSuperMagic = 0x65735546
+
+// v9fsSuperMagic is the statfs f_type of 9p mounts (V9FS_MAGIC). 9p has no
+// idmapped-mount support in the kernel at all, and unlike FUSE there is no
+// per-mount negotiation that could make it work.
+const v9fsSuperMagic = 0x01021997
 
 // SourceBlocksIdmappedMounts reports whether a disk device sourced at path
 // should skip Incus's shift=true (idmapped) mount and use raw.idmap instead.
@@ -35,15 +44,29 @@ const fuseSuperMagic = 0x65735546
 // This also generalizes past OrbStack. Lima and Colima share the host
 // filesystem the same way, which is what the hardcoded VM-host list in this
 // package has been approximating: a property of the actual source path beats a
-// guess about the VM around it. (9p, the other host-passthrough filesystem
-// that can't do idmapped mounts, is deliberately not listed — the Lima/Colima
-// setups that use it already route around shift via HandlesUIDMapping.)
+// guess about the VM around it. 9p is in the table for the same reason: a Lima
+// instance with mountType: 9p carries none of detect()'s markers (no virtiofs
+// mount, no "lima" user), so HandlesUIDMapping does not route around shift for
+// it — and where a real Colima/Lima IS detected, that veto still wins inside
+// decideUIDMapping, so listing 9p costs those setups nothing.
 //
-// A path that cannot be stat'd returns false, leaving the caller on its
+// A path that does not exist yet is judged by its nearest existing ancestor:
+// the callers decide shift BEFORE the code that MkdirAll's missing writable
+// mount sources, and the ancestor's filesystem is exactly where that MkdirAll
+// will land. Any other statfs failure returns false, leaving the caller on its
 // existing behaviour and the reactive fallback (#679) as the backstop.
 func SourceBlocksIdmappedMounts(path string) bool {
 	var st unix.Statfs_t
-	if err := unix.Statfs(path, &st); err != nil {
+	err := unix.Statfs(path, &st)
+	for errors.Is(err, unix.ENOENT) || errors.Is(err, unix.ENOTDIR) {
+		parent := filepath.Dir(path)
+		if parent == path {
+			break
+		}
+		path = parent
+		err = unix.Statfs(path, &st)
+	}
+	if err != nil {
 		return false
 	}
 	// The conversion is load-bearing cross-platform: Statfs_t.Type is int64 on
@@ -75,5 +98,5 @@ func FirstBlockingSource(paths ...string) string {
 // SourceBlocksIdmappedMounts, split out so the filesystem table is testable
 // without needing a host that has one of these mounted.
 func magicBlocksIdmappedMounts(magic int64) bool {
-	return magic == fuseSuperMagic
+	return magic == fuseSuperMagic || magic == v9fsSuperMagic
 }

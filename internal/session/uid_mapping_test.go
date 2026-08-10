@@ -81,6 +81,31 @@ func TestMountSources(t *testing.T) {
 			t.Errorf("source %d: got %q want %q", i, got[i], want[i])
 		}
 	}
+
+	// Extra device sources (the worktree common dir) append after the mounts;
+	// empty extras are skipped so a nil layout costs nothing.
+	got = MountSources("/ws", mc, "", "/repos/main/.git")
+	want = []string{"/ws", "/Users/me/data", "/opt/cache", "/repos/main/.git"}
+	if len(got) != len(want) {
+		t.Fatalf("with extras: got %v, want %v", got, want)
+	}
+	if got[len(got)-1] != "/repos/main/.git" {
+		t.Errorf("extra source should be last, got %v", got)
+	}
+}
+
+// TestWorktreeSources pins the nil-safety and the common-dir-only shape: the
+// worktree's own gitdir is a subdirectory of the common dir, so one entry
+// speaks for the whole layout (mirroring MountGitWorktreeDirs).
+func TestWorktreeSources(t *testing.T) {
+	if got := WorktreeSources(nil); got != nil {
+		t.Errorf("nil layout should yield nil, got %v", got)
+	}
+	layout := &GitWorktreeLayout{GitDir: "/repos/main/.git/worktrees/wt", CommonDir: "/repos/main/.git"}
+	got := WorktreeSources(layout)
+	if len(got) != 1 || got[0] != "/repos/main/.git" {
+		t.Errorf("expected just the common dir, got %v", got)
+	}
 }
 
 // TestReuseShiftDecision covers the issue #685 rule for reusing a persistent

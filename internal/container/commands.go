@@ -394,6 +394,24 @@ func shiftEnabledDiskDevices(containerName string) []string {
 	return shifted
 }
 
+// ConvertShiftedDiskDevices sets shift=false on every shift=true disk device
+// of the (stopped) container, returning whether any were converted. Callers
+// pair it with raw.idmap: reactively via fallbackShiftToRawIdmap after a #678
+// start failure, or proactively on reuse when the mapping decision has changed
+// to raw.idmap since the container was created (#683 — OrbStack ≥2.2.2 never
+// produces the start failure the reactive path keys on, so creation-time
+// shift=true devices must be converted before start).
+func ConvertShiftedDiskDevices(containerName string) bool {
+	devices := shiftEnabledDiskDevices(containerName)
+	if len(devices) == 0 {
+		return false
+	}
+	for _, d := range devices {
+		_ = IncusExecQuiet("config", "device", "set", containerName, d, "shift=false")
+	}
+	return true
+}
+
 // fallbackShiftToRawIdmap converts every shift=true disk device on the (stopped)
 // container to shift=false and sets raw.idmap="both <hostUID> <codeUID>" — the
 // exact mapping decideUIDMapping applies for a manual `disable_shift`. This is
@@ -401,12 +419,8 @@ func shiftEnabledDiskDevices(containerName string) []string {
 // try shift, and only if start fails on it, drop to raw.idmap. Returns true if it
 // changed anything, so the caller knows a retry is worthwhile.
 func fallbackShiftToRawIdmap(containerName string) bool {
-	devices := shiftEnabledDiskDevices(containerName)
-	if len(devices) == 0 {
+	if !ConvertShiftedDiskDevices(containerName) {
 		return false
-	}
-	for _, d := range devices {
-		_ = IncusExecQuiet("config", "device", "set", containerName, d, "shift=false")
 	}
 	_ = IncusExecQuiet("config", "set", containerName, "raw.idmap", fmt.Sprintf("both %d %d", os.Getuid(), CodeUID))
 	return true
