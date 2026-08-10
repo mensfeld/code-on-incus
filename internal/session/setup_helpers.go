@@ -30,14 +30,29 @@ import (
 // started the container (the run pipeline uses `incus launch` = create+start)
 // must restart it when idmapApplied is true; the shell pipeline sets it before
 // its own start, so it ignores idmapApplied.
-func ConfigureUIDMapping(containerName string, disableShift bool, logger func(string)) (useShift, idmapApplied bool) {
+//
+// sources are the HOST paths this container's disk devices are sourced from
+// (workspace first, then any configured mounts). Their filesystems decide
+// whether an idmapped (shift=true) mount is possible at all, which is a
+// property of the paths rather than of the VM around them (#683).
+func ConfigureUIDMapping(containerName string, sources []string, disableShift bool, logger func(string)) (useShift, idmapApplied bool) {
 	if logger == nil {
 		logger = func(string) {}
 	}
 	// Detect() reads /proc/mounts etc.; call it once and reuse.
 	hostHandlesUIDMapping := vmhost.Detect().HandlesUIDMapping()
+	blocking := vmhost.FirstBlockingSource(sources...)
 	var idmap string
-	useShift, idmap = decideUIDMapping(os.Getuid(), container.CodeUID, disableShift, hostHandlesUIDMapping)
+	useShift, idmap = decideUIDMapping(os.Getuid(), container.CodeUID, disableShift, hostHandlesUIDMapping, blocking != "")
+	// Only worth saying when the filesystem actually decided the outcome —
+	// asked of the decision matrix itself (by re-deciding without the blocking
+	// source), so this can't drift from decideUIDMapping's precedence the way
+	// a hand-copied condition would.
+	if blocking != "" {
+		if s, i := decideUIDMapping(os.Getuid(), container.CodeUID, disableShift, hostHandlesUIDMapping, false); s != useShift || i != idmap {
+			logger(fmt.Sprintf("Mount source %s is on a filesystem that can't be relied on for idmapped (shift) mounts; using raw.idmap for this container instead", blocking))
+		}
+	}
 
 	if idmap != "" {
 		if os.Getuid() != container.CodeUID {
@@ -48,7 +63,7 @@ func ConfigureUIDMapping(containerName string, disableShift bool, logger func(st
 				os.Getuid(), idmap))
 		}
 		if err := container.IncusExec("config", "set", containerName, "raw.idmap", idmap); err != nil {
-			logger(fmt.Sprintf("Warning: Failed to set raw.idmap: %v", err))
+			logger(fmt.Sprintf("Warning: Failed to set raw.idmap (%v) — the workspace will be mounted with NO UID mapping and may be unwritable in the container; retry, or set `[incus] disable_shift = true` and relaunch", err))
 			return useShift, false
 		}
 		return useShift, true
@@ -63,6 +78,73 @@ func ConfigureUIDMapping(containerName string, disableShift bool, logger func(st
 	return useShift, false
 }
 
+// MountSources lists the HOST paths a session's disk devices are sourced from:
+// the workspace, any configured extra mounts, and any extra device sources the
+// caller knows about (the git-worktree common dir, whose device carries the
+// same shift flag — see WorktreeSources). Protected paths and secret masks are
+// not included — they live inside the workspace, so its filesystem already
+// speaks for them. Empty extras are skipped.
+func MountSources(workspacePath string, mountConfig *MountConfig, extra ...string) []string {
+	sources := []string{workspacePath}
+	if mountConfig != nil {
+		for _, m := range mountConfig.Mounts {
+			sources = append(sources, m.HostPath)
+		}
+	}
+	for _, e := range extra {
+		if e != "" {
+			sources = append(sources, e)
+		}
+	}
+	return sources
+}
+
+// WorktreeSources returns the host paths of a worktree layout's external git
+// dirs for inclusion in MountSources (nil-safe). MountGitWorktreeDirs attaches
+// the common dir as a shift-carrying disk device sourced OUTSIDE the
+// workspace, so its filesystem must vote on the shift decision too (#683): a
+// worktree on local disk whose main repo lives on a FUSE share would otherwise
+// mount its entire git internals with junk ownership.
+func WorktreeSources(layout *GitWorktreeLayout) []string {
+	if layout == nil {
+		return nil
+	}
+	return []string{layout.CommonDir}
+}
+
+// ResolveReuseUIDMapping is the reuse-path counterpart of ConfigureUIDMapping:
+// it applies the fresh-launch mapping decision to a REUSED container, folds in
+// the container's existing raw.idmap (which always wins — shift and raw.idmap
+// are mutually exclusive, #685), and, when the decision is raw.idmap while the
+// container still carries creation-time shift=true disk devices (created
+// before the decision changed — e.g. by a pre-#683 coi on OrbStack ≥2.2.2,
+// where the start failure the #678 reactive fallback keys on never happens),
+// proactively converts those devices to shift=false so the raw.idmap actually
+// takes effect. Returns the shift flag for devices re-added this session.
+func ResolveReuseUIDMapping(containerName string, sources []string, disableShift bool, logger func(string)) bool {
+	if logger == nil {
+		logger = func(string) {}
+	}
+	hadRawIdmap := container.ContainerUsesRawIdmap(containerName)
+	configuredShift, idmapApplied := ConfigureUIDMapping(containerName, sources, disableShift, logger)
+	useShift := reuseShiftDecision(configuredShift, hadRawIdmap || idmapApplied)
+	// Convert creation-time devices only on the TRANSITION to raw.idmap: a
+	// container that already carried it had its devices converted when that
+	// happened (creation, the #678 fallback, or an earlier reuse), so the
+	// per-device incus scan is skipped on the steady state every later
+	// session hits.
+	if idmapApplied && !hadRawIdmap {
+		converted, failed := container.ConvertShiftedDiskDevices(containerName)
+		if converted > 0 {
+			logger(fmt.Sprintf("Converted %d creation-time shift=true disk device(s) to shift=false to match raw.idmap (#683)", converted))
+		}
+		if failed > 0 {
+			logger(fmt.Sprintf("Warning: %d shift=true disk device(s) could not be converted to shift=false; the container may fail to start with raw.idmap set — retry, or recreate the container", failed))
+		}
+	}
+	return useShift
+}
+
 // decideUIDMapping is the pure decision behind ConfigureUIDMapping (no I/O), so
 // the case matrix — especially the issue #530 regression where a UID mismatch
 // was skipped under Colima/Lima — is unit-testable. Returns the effective shift
@@ -71,7 +153,16 @@ func ConfigureUIDMapping(containerName string, disableShift bool, logger func(st
 // A host-UID/code-UID mismatch ALWAYS wins: raw.idmap is set and shift is off,
 // regardless of disableShift or Colima/Lima. shift=true only translates root,
 // not arbitrary UIDs, and cannot be combined with raw.idmap.
-func decideUIDMapping(hostUID, codeUID int, disableShift, hostHandlesUIDMapping bool) (useShift bool, idmap string) {
+func decideUIDMapping(hostUID, codeUID int, disableShift, hostHandlesUIDMapping, sourceBlocksShift bool) (useShift bool, idmap string) {
+	// A source filesystem that can't be relied on for idmapped mounts is the
+	// exact situation disable_shift exists for (#683), so fold it in first and
+	// let the rest of the matrix apply unchanged. In particular this reaches the
+	// #667 branch below, so a host/code UID match still gets raw.idmap rather
+	// than nothing — the container's default subuid range doesn't cover hostUID
+	// just because the nominal code UID matches it.
+	if sourceBlocksShift {
+		disableShift = true
+	}
 	if !disableShift && hostHandlesUIDMapping {
 		disableShift = true
 	}

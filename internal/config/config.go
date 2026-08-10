@@ -302,7 +302,7 @@ type IncusConfig struct {
 	Group        string `toml:"group"`
 	CodeUID      int    `toml:"code_uid"`
 	CodeUser     string `toml:"code_user"`
-	DisableShift bool   `toml:"disable_shift"` // Disable UID shifting; use raw.idmap instead. For hosts whose kernel can't do idmapped ("shift") mounts — Colima/Lima, and some OrbStack kernels where the workspace mount fails with "idmapping abilities are required but aren't supported on system" (#678).
+	DisableShift bool   `toml:"disable_shift"` // Force UID shifting off; use raw.idmap instead. Rarely needed now: coi statfs's the workspace source and skips shift on its own for FUSE-family filesystems, which covers the OrbStack/Colima/Lima host shares this used to be set by hand for (#683). Keep it for a source coi's check clears but that still can't do idmapped mounts — the symptom is a start failure with "idmapping abilities are required but aren't supported on system" (#678), or a workspace that mounts but is unwritable.
 }
 
 // NetworkMode represents the network isolation mode

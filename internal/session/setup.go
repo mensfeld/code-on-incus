@@ -271,7 +271,12 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 				// one place and protection matches the current workspace.
 				reuseCWP := result.Manager.GetWorkspacePath()
 				result.ContainerWorkspacePath = reuseCWP
-				reuseLayout, _ := ResolveGitWorktree(opts.WorkspacePath)
+				reuseLayout, reuseWtErr := ResolveGitWorktree(opts.WorkspacePath)
+				if reuseWtErr != nil {
+					// The layout also feeds the shift decision below; losing it
+					// silently would drop the common dir's vote (#683).
+					opts.Logger(fmt.Sprintf("Warning: git worktree not resolved (%v); its git dirs are skipped by the UID-mapping check and git commands may fail in the container", reuseWtErr))
+				}
 				reuseWritableHooks := !containsGitHooksPath(opts.ProtectedPaths)
 				StripSecurityDevices(result.Manager, opts.Logger)
 				// Decide the shift flag the same way a fresh launch does (issue
@@ -281,9 +286,24 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 				// the protect-* devices with shift=true. On a container the #678
 				// fallback had already converted to raw.idmap that re-armed the
 				// exact configuration whose start failure caused the conversion,
-				// once per session.
-				reuseConfiguredShift, _ := ConfigureUIDMapping(containerName, opts.DisableShift, opts.Logger)
-				reuseUseShift := reuseShiftDecision(reuseConfiguredShift, container.ContainerUsesRawIdmap(containerName))
+				// once per session. ResolveReuseUIDMapping additionally converts
+				// creation-time shift=true devices when the decision is raw.idmap
+				// (#683 — a pre-upgrade container on OrbStack ≥2.2.2 never hits
+				// the start failure the reactive fallback keys on).
+				//
+				// The decision deliberately sees the UNGATED mount config: on
+				// reuse, mount devices persist from creation regardless of
+				// current trust (the 4.6 gate below only warns), so the
+				// currently-declared mounts are the closest available stand-in
+				// for the devices actually attached. Trust-gating the vote
+				// would be both unsafe and pointless here: a mount whose trust
+				// was revoked after creation is still attached and its
+				// filesystem still matters, while the only influence any path
+				// has on the vote is flipping toward raw.idmap — whose value
+				// derives from host/code UIDs, never from the path — so an
+				// untrusted entry cannot inject anything.
+				reuseSources := MountSources(opts.WorkspacePath, opts.MountConfig, WorktreeSources(reuseLayout)...)
+				reuseUseShift := ResolveReuseUIDMapping(containerName, reuseSources, opts.DisableShift, opts.Logger)
 				reusePaths, reuseImmutable, reuseErr := applySessionSecurity(result.Manager, opts, reuseCWP, reuseUseShift, reuseLayout, reuseWritableHooks, containerName)
 				opts.ProtectedPaths = reusePaths
 				if reuseImmutable {
@@ -398,25 +418,27 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 			return nil, fmt.Errorf("failed to create container: %w", err)
 		}
 
+		// Detect a git worktree checkout (.git is a file whose real git internals
+		// live outside the workspace) BEFORE the UID-mapping decision: the common
+		// dir is mounted as its own shift-carrying disk device, so its filesystem
+		// must vote on that decision too (#683). A valid layout forces
+		// preserve-path so git's pointers resolve identically host<->container,
+		// and its external git dirs are mounted + protected below (issue #533). A
+		// pointer that fails the safety guard is not mounted; git fails loudly
+		// rather than exposing a mis-pointed dir.
+		worktreeLayout, wtErr := ResolveGitWorktree(opts.WorkspacePath)
+		if wtErr != nil {
+			opts.Logger(fmt.Sprintf("Warning: git worktree not mounted (%v); git commands may fail in the container", wtErr))
+		}
+		worktreeWritableHooks := !containsGitHooksPath(opts.ProtectedPaths)
+
 		// Configure UID/GID mapping for the workspace bind mount. Shared with
 		// the run pipeline via ConfigureUIDMapping so both honor Colima/Lima
 		// auto-detection AND set raw.idmap on any host-UID/code-UID mismatch
 		// (issue #530).
 		// Shell path sets raw.idmap before its own start (below), so the
 		// idmapApplied signal is not needed here.
-		useShift, _ := ConfigureUIDMapping(result.ContainerName, opts.DisableShift, opts.Logger)
-
-		// Add disk devices BEFORE starting container.
-		// Detect a git worktree checkout (.git is a file whose real git internals
-		// live outside the workspace). A valid layout forces preserve-path so git's
-		// pointers resolve identically host<->container, and its external git dirs
-		// are mounted + protected below (issue #533). A pointer that fails the safety
-		// guard is not mounted; git fails loudly rather than exposing a mis-pointed dir.
-		worktreeLayout, wtErr := ResolveGitWorktree(opts.WorkspacePath)
-		if wtErr != nil {
-			opts.Logger(fmt.Sprintf("Warning: git worktree not mounted (%v); git commands may fail in the container", wtErr))
-		}
-		worktreeWritableHooks := !containsGitHooksPath(opts.ProtectedPaths)
+		useShift, _ := ConfigureUIDMapping(result.ContainerName, MountSources(opts.WorkspacePath, opts.MountConfig, WorktreeSources(worktreeLayout)...), opts.DisableShift, opts.Logger)
 
 		// Determine container mount path - either /workspace (default) or same as host path
 		preserveWorkspace := opts.PreserveWorkspacePath || worktreeLayout != nil
