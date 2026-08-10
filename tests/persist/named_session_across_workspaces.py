@@ -87,7 +87,7 @@ session_name = "{session_name}"
         )
     finally:
         subprocess.run(
-            ["incus", "delete", container, "--force"],
+            ["incus", "--project", "default", "delete", container, "--force"],
             capture_output=True,
             timeout=60,
         )

@@ -321,15 +321,14 @@ func sanitizeUntrustedDefaultProfile(d *DefaultsConfig, path string) {
 // cannot (the per-profile strip runs before inheritance is resolved).
 func stripUntrustedInheritedSessionNames(cfg *Config) {
 	for name, p := range cfg.Profiles {
-		if p.Container.SessionName == "" || p.Source == "" {
+		// Synthesized profiles (default/hardened) have no Source and carry
+		// only already-validated trusted config; disk profiles carry the
+		// Trusted stamp from their scan root.
+		if p.Container.SessionName == "" || p.Source == "" || p.Trusted {
 			continue
 		}
-		// p.Source is <root>/profiles/<name>/config.toml; trust is a property
-		// of the scan root the profile came from.
-		if !isTrustedProfileDir(filepath.Dir(filepath.Dir(filepath.Dir(p.Source)))) {
-			sanitizeUntrustedSessionName(&p.Container, p.Source)
-			cfg.Profiles[name] = p
-		}
+		sanitizeUntrustedSessionName(&p.Container, p.Source)
+		cfg.Profiles[name] = p
 	}
 }
 
@@ -560,8 +559,9 @@ func loadProfileDirectories(cfg *Config, configDir string, trusted bool) error {
 			profileCfg.Context = resolveRelativePath(profileDir, profileCfg.Context)
 		}
 
-		// Tag with source location
+		// Tag with source location and the scan root's trust
 		profileCfg.Source = profileConfigPath
+		profileCfg.Trusted = trusted
 
 		// A project-scoped profile (under the workspace ./.coi) is untrusted — a
 		// cloned repo can ship it. Apply the same hardening as an untrusted

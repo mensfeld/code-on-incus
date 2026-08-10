@@ -383,6 +383,11 @@ type ProfileConfig struct {
 	Network     *NetworkConfig    `toml:"network"`
 	ForwardEnv  []string          `toml:"forward_env"`
 	Source      string            `toml:"-"` // Where this profile was loaded from (not serialized)
+	// Trusted records whether the profile was loaded from a trusted scan root
+	// (~/.coi or the COI_CONFIG dir), stamped by loadProfileDirectories at
+	// load time — the authoritative signal for post-inheritance trust checks,
+	// instead of lexically reconstructing the root from Source.
+	Trusted bool `toml:"-"`
 
 	// Extended fields — previously Config-only, now available in profiles
 	Paths      *PathsConfig      `toml:"paths"`

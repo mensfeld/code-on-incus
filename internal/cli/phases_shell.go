@@ -175,6 +175,22 @@ func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.P
 			if a.continueSession != "" {
 				resumeID = a.continueSession
 			}
+			// No profile selected by --profile or an alias: fall back to
+			// [defaults] profile (#607) BEFORE the resume lookup — the profile
+			// may carry [container] session_name, which keys which saved
+			// sessions the auto-resume below can even see. A resume-remembered
+			// profile still wins: the metadata block below applies it ON TOP
+			// (ApplyProfile merges over), preserving the
+			// explicit > alias > resume > default precedence.
+			if applied, err := a.applyDefaultProfileFallback(cmd); err != nil {
+				return nil, err
+			} else if applied {
+				// The profile may set [container] persistent; on resume the
+				// metadata reconciliation below still overrides via
+				// resumePersistence.
+				a.persistent = config.BoolVal(a.cfg.Container.Persistent)
+			}
+
 			resumeFlagSet := cmd.Flags().Changed("resume") || cmd.Flags().Changed("continue")
 
 			isWorkspaceSessionTool := false
@@ -190,7 +206,7 @@ func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.P
 					resumeID = "workspace-session"
 					fmt.Fprintf(os.Stderr, "Resuming %s session from workspace\n", ti.Name())
 				} else {
-					resumeID, err = session.GetLatestSessionForWorkspace(sessionsDir, s.absWorkspace, a.effectiveSessionName())
+					resumeID, err = session.GetLatestSessionForWorkspace(sessionsDir, s.absWorkspace, a.sessionName())
 					if err != nil {
 						return nil, fmt.Errorf("no previous session to resume for this workspace: %w", err)
 					}
@@ -240,18 +256,6 @@ func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.P
 				}
 			}
 
-			// No profile selected by --profile, an alias, or resume metadata:
-			// fall back to [defaults] profile (#607). Placed after alias
-			// (resolveWorkspacePhase) and resume resolution so those higher-
-			// precedence sources win. On resume, a.persistent was already
-			// reconciled with the session's saved mode above, so only recompute
-			// it for a fresh session (the profile may set [container] persistent).
-			if applied, err := a.applyDefaultProfileFallback(cmd); err != nil {
-				return nil, err
-			} else if applied && resumeID == "" {
-				a.persistent = config.BoolVal(a.cfg.Container.Persistent)
-			}
-
 			// Generate or reuse session ID.
 			if resumeID != "" {
 				s.sessionID = resumeID
@@ -269,15 +273,24 @@ func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.P
 				slotNum = resumeSlot
 				fmt.Fprintf(os.Stderr, "Reusing original slot %d from session\n", slotNum)
 			} else if slotNum == 0 {
-				slotNum, err = session.AllocateSlot(s.absWorkspace, a.sessionName(), 10)
-				if err != nil {
-					return nil, fmt.Errorf("failed to allocate slot: %w", err)
+				// Persistent mode: prefer restarting the identity's stopped
+				// container over allocating a fresh slot — for a NAMED
+				// persistent session this is the core promise (auto-allocation
+				// would otherwise fork it on every plain `coi shell`), and it
+				// mirrors what the run pipeline has done since #610.
+				if a.persistent {
+					if reuse, ok := session.FindReusablePersistentSlot(s.absWorkspace, a.sessionName(), 10); ok {
+						slotNum = reuse
+						fmt.Fprintf(os.Stderr, "Reusing stopped persistent container on slot %d\n", slotNum)
+					}
 				}
-				fmt.Fprintf(os.Stderr, "Auto-allocated slot %d\n", slotNum)
-				if n := a.sessionName(); n != "" && slotNum > 1 {
-					fmt.Fprintf(os.Stderr,
-						"Warning: named session %q is already active on another slot; this launch FORKS it into a NEW container (slot %d) with none of the session's state. Stop the running session or pass --slot to target it.\n",
-						n, slotNum)
+				if slotNum == 0 {
+					slotNum, err = session.AllocateSlot(s.absWorkspace, a.sessionName(), 10)
+					if err != nil {
+						return nil, fmt.Errorf("failed to allocate slot: %w", err)
+					}
+					fmt.Fprintf(os.Stderr, "Auto-allocated slot %d\n", slotNum)
+					warnNamedSessionFork(s.absWorkspace, a.sessionName(), slotNum)
 				}
 			} else {
 				available, err := session.IsSlotAvailable(s.absWorkspace, a.sessionName(), slotNum)
@@ -291,6 +304,7 @@ func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.P
 						return nil, fmt.Errorf("slot %d is occupied and failed to find next available slot: %w", orig, err)
 					}
 					fmt.Fprintf(os.Stderr, "Slot %d is occupied, using slot %d instead\n", orig, slotNum)
+					warnNamedSessionFork(s.absWorkspace, a.sessionName(), slotNum)
 				}
 			}
 			s.slotNum = slotNum

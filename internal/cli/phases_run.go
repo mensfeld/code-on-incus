@@ -91,11 +91,7 @@ func (a *App) validateEnvRunPhase(s *runState) session.Phase {
 						return nil, fmt.Errorf("failed to allocate slot: %w", err)
 					}
 					fmt.Fprintf(os.Stderr, "Auto-allocated slot %d\n", slotNum)
-					if n := a.sessionName(); n != "" && slotNum > 1 {
-						fmt.Fprintf(os.Stderr,
-							"Warning: named session %q is already active on another slot; this launch FORKS it into a NEW container (slot %d) with none of the session's state. Stop the running session or pass --slot to target it.\n",
-							n, slotNum)
-					}
+					warnNamedSessionFork(s.absWorkspace, a.sessionName(), slotNum)
 				}
 			}
 			s.containerName = session.ContainerName(s.absWorkspace, a.sessionName(), slotNum)
@@ -386,17 +382,10 @@ func (a *App) configureContainerRunPhase(s *runState) session.Phase {
 			// the start where the isolation fallback covers it (#534). Only a
 			// reused persistent container has work left here: resolve its existing
 			// workspace mount path from the container config.
-			if s.wasRestarted {
-				// Reuse: devices (incl. any worktree mounts) persist from creation, so
-				// applyWorkspaceMounts returns early without remounting and never reads
-				// the shift flag; s.useShift (resolved by preRestart through
-				// ResolveReuseUIDMapping) is passed so any future use of the flag on
-				// this path inherits the raw.idmap-aware reuse decision, not a
-				// config-only recompute.
-				if err := a.applyWorkspaceMounts(s.mgr, s.containerName, s.absWorkspace, &s.containerWorkspace, s.mountConfig, s.useShift, true, nil); err != nil {
-					return nil, err
-				}
-			}
+			// Reuse needs no work here: preRestart already resolved
+			// s.containerWorkspace (including the moved-workspace remount) and
+			// re-applied the security devices; re-reading the device here would
+			// only mask a half-failed remount behind the "/workspace" fallback.
 
 			// No teardown: the immutable-flag removal moved to the launch phase's
 			// teardown, alongside the pre-start hook that now applies them —

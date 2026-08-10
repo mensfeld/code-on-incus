@@ -234,11 +234,18 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 				// the normal hazard for a named session (session_name) whose
 				// previous checkout's session is still live. Attaching would
 				// silently hand this launch the other checkout's files.
-				if src := result.Manager.GetWorkspaceSource(); src != "" && !SameWorkspaceSource(src, opts.WorkspacePath) {
-					return nil, fmt.Errorf(
-						"container %s is running with a different workspace mounted (%s); "+
-							"stop that session first (coi shutdown %s) or launch from that workspace",
-						containerName, src, containerName)
+				// An EXPLICIT --container is exempt: naming the container is
+				// the user saying "attach to that container as it is",
+				// wherever it was created from (the documented testing flow).
+				if opts.ContainerName == "" {
+					if src := result.Manager.GetWorkspaceSource(); src == "" {
+						opts.Logger("Warning: could not determine the running container's workspace source; skipping the workspace-match check")
+					} else if !SameWorkspaceSource(src, opts.WorkspacePath) {
+						return nil, fmt.Errorf(
+							"container %s is running with a different workspace mounted (%s); "+
+								"stop that session first (coi shutdown %s) or launch from that workspace",
+							containerName, src, containerName)
+					}
 				}
 				opts.Logger("Container already running, reusing...")
 				// Strip the previous session's port devices NOW, before the
@@ -321,11 +328,18 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 				// persisted workspace device then points at the old source and
 				// must be replaced before the security mounts derive their
 				// overlays from the container-side workspace path.
-				if cwp, moved, remountErr := RemountMovedWorkspace(result.Manager, opts.WorkspacePath, opts.PreserveWorkspacePath, reuseLayout, reuseUseShift, opts.Logger); remountErr != nil {
-					return nil, remountErr
-				} else if moved {
-					reuseCWP = cwp
-					result.ContainerWorkspacePath = cwp
+				// An EXPLICIT --container is exempt: it means "enter that
+				// container as it is" — rebinding its workspace to whatever
+				// directory the caller happens to be in would both break the
+				// testing flow and silently mount an unintended directory
+				// (e.g. $HOME) read-write into the container.
+				if opts.ContainerName == "" {
+					if cwp, moved, remountErr := RemountMovedWorkspace(result.Manager, opts.WorkspacePath, opts.PreserveWorkspacePath, reuseLayout, reuseUseShift, opts.Logger); remountErr != nil {
+						return nil, remountErr
+					} else if moved {
+						reuseCWP = cwp
+						result.ContainerWorkspacePath = cwp
+					}
 				}
 				reusePaths, reuseImmutable, reuseErr := applySessionSecurity(result.Manager, opts, reuseCWP, reuseUseShift, reuseLayout, reuseWritableHooks, containerName)
 				opts.ProtectedPaths = reusePaths

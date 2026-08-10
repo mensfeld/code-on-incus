@@ -175,3 +175,17 @@ func TestSameWorkspaceSource(t *testing.T) {
 		t.Error("identical nonexistent paths should compare equal lexically")
 	}
 }
+
+// TestNamedIdentityKeysPorts pins that port allocation follows the SAME
+// identity as container naming: a refactor that ignored sessionName in
+// AllocateHostPort while honoring it in ContainerName would give a moved
+// named session colliding host ports with the path-keyed session at its old
+// location.
+func TestNamedIdentityKeysPorts(t *testing.T) {
+	if AllocateHostPort("/a", "proj", 1, 0) != AllocateHostPort("/b", "proj", 1, 0) {
+		t.Error("named identity's ports must be location-independent")
+	}
+	if AllocateHostPort("/a", "proj", 1, 0) == AllocateHostPort("/a", "", 1, 0) {
+		t.Error("named identity must allocate a different port neighborhood than the path identity (hash inputs differ)")
+	}
+}

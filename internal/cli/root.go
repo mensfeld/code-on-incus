@@ -43,25 +43,21 @@ func (a *App) sessionName() string {
 	return a.cfg.Container.SessionName
 }
 
-// effectiveSessionName returns the session name the EFFECTIVE configuration
-// would use: the already-applied config's name when set (explicit --profile or
-// alias), else the one carried by the trusted [defaults] profile that a
-// shell/run launch would fall back to (#607). Operational commands (attach,
-// monitor, snapshot) and the shell resume lookup run BEFORE any profile
-// fallback is applied, so without this peek a profile-carried session_name —
-// the documented placement — would make them resolve path-keyed container
-// names that don't exist.
-func (a *App) effectiveSessionName() string {
-	if n := a.sessionName(); n != "" {
-		return n
+// applyDefaultProfileForOps applies the [defaults] profile fallback for
+// OPERATIONAL commands (attach, monitor, snapshot) so a profile-carried
+// session_name — the documented placement — resolves the same container
+// identity the launch used. Unlike the session commands' fallback this is
+// error-TOLERANT: per #607, operational commands must keep working on a
+// misconfigured default profile (they are the recovery tools), so an unknown
+// profile is ignored rather than fatal. The same suppression rules apply: an
+// explicit --profile (or alias/resume-applied profile) means the fallback
+// never applies, exactly as at launch. A session launched with a
+// session_name-carrying profile selected by --profile or an alias needs the
+// same flag repeated on the operational command.
+func (a *App) applyDefaultProfileForOps(cmd *cobra.Command) {
+	if _, err := a.applyDefaultProfileFallback(cmd); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: %v (continuing without the default profile)\n", err)
 	}
-	if a.cfg == nil || a.cfg.Defaults.Profile == "" {
-		return ""
-	}
-	if p := a.cfg.GetProfile(a.cfg.Defaults.Profile); p != nil {
-		return p.Container.SessionName
-	}
-	return ""
 }
 
 // app is the singleton used by the cobra command tree. Execute() resets it to

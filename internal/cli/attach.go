@@ -41,6 +41,10 @@ func init() {
 }
 
 func (a *App) attachCommand(cmd *cobra.Command, args []string) error {
+	// A profile-carried session_name changes which container this workspace
+	// resolves to, so the operational commands apply the same [defaults]
+	// profile fallback the launch used (error-tolerantly, per #607).
+	a.applyDefaultProfileForOps(cmd)
 	var targetContainer string
 
 	// If --slot is provided, calculate container name from workspace and slot
@@ -52,7 +56,7 @@ func (a *App) attachCommand(cmd *cobra.Command, args []string) error {
 		}
 
 		// Calculate container name for this workspace+slot
-		targetContainer = session.ContainerName(workspacePath, a.effectiveSessionName(), attachSlot)
+		targetContainer = session.ContainerName(workspacePath, a.sessionName(), attachSlot)
 
 		// Verify it exists and is running
 		mgr := container.NewManager(targetContainer)
