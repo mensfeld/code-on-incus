@@ -529,6 +529,16 @@ func nftRuleExistsWithCommentFamily(family, comment string) (bool, error) {
 func nftGetHandlesByCommentFamily(family, comment string) ([]string, error) {
 	output, err := runNFTCommand("-a", "list", "chain", family, "coi", "forward")
 	if err != nil {
+		// A chain that was never created holds no rules — treating it as an
+		// error made deleteNFTRulesByCommentFamily spin all 8 retry rounds
+		// (~2s + 8 warnings) on hosts that never ran the family in question
+		// (e.g. the ip6 chain in open network mode). Same for disabled sudo:
+		// without it nothing can be listed OR deleted, so retrying is pure
+		// stall. Both mean "nothing to delete here".
+		msg := err.Error()
+		if strings.Contains(msg, "No such file or directory") || strings.Contains(msg, "sudo disabled") {
+			return nil, nil
+		}
 		return nil, err
 	}
 	var handles []string

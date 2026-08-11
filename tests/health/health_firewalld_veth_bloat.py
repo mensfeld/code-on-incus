@@ -15,6 +15,8 @@ touch a live firewall) or when nft/sudo aren't usable.
 import json
 import subprocess
 
+import pytest
+
 
 def nft(*args):
     return subprocess.run(
@@ -38,8 +40,6 @@ def run_health(coi_binary, workspace_dir):
 
 
 def test_health_firewalld_veth_bloat(coi_binary, workspace_dir):
-    import pytest
-
     probe = nft("list", "tables")
     if probe.returncode != 0:
         pytest.skip(f"nft not usable via sudo: {probe.stderr}")
@@ -72,7 +72,11 @@ def test_health_firewalld_veth_bloat(coi_binary, workspace_dir):
         assert "firewall-cmd --reload" in check["message"], check["message"]
         assert "unmanaged-devices" in check["message"], check["message"]
     finally:
-        nft("delete", "table", "inet", "firewalld")
+        # The synthetic table is GLOBAL state: a silently failed delete would
+        # leak it into every later test on this runner (and skip this test
+        # forever), so the cleanup itself is asserted.
+        deleted = nft("delete", "table", "inet", "firewalld")
+        assert deleted.returncode == 0, f"failed to remove synthetic table: {deleted.stderr}"
 
     # Healthy path: table gone -> OK, no scary message.
     check = run_health(coi_binary, workspace_dir)

@@ -1898,21 +1898,29 @@ func CheckImageAge(imageName string) HealthCheck {
 // health is the right place to name it.
 func CheckFirewalldVethBloat() HealthCheck {
 	const name = "firewalld_veth_bloat"
+	// The nft listing and the interface stats are not atomic: a container
+	// being torn down concurrently shows its veth as transiently dead. The
+	// threshold absorbs that churn so normal session turnover can't flap the
+	// warning; genuine leaks accumulate well past it.
+	const deadVethWarnThreshold = 3
 	audit := network.AuditFirewalldVeths()
+	if audit.Unreadable {
+		return HealthCheck{Name: name, Status: StatusOK, Message: "firewalld nft table not readable (sudo/nft unavailable or listing timed out) — veth bloat check skipped"}
+	}
 	if !audit.Present {
-		return HealthCheck{Name: name, Status: StatusOK, Message: "firewalld not managing nft rules on this host"}
+		return HealthCheck{Name: name, Status: StatusOK, Message: "no firewalld nft table on this host"}
 	}
 	dead := len(audit.DeadVeths)
 	details := map[string]interface{}{
-		"rule_count": audit.RuleCount,
-		"dead_veths": dead,
-		"live_veths": audit.LiveVeths,
+		"entry_count": audit.RuleCount,
+		"dead_veths":  dead,
+		"live_veths":  audit.LiveVeths,
 	}
-	if dead < 3 {
+	if dead < deadVethWarnThreshold {
 		return HealthCheck{
 			Name:    name,
 			Status:  StatusOK,
-			Message: fmt.Sprintf("firewalld table healthy (%d rules, %d dead veth registrations)", audit.RuleCount, dead),
+			Message: fmt.Sprintf("firewalld table healthy (~%d entries, %d dead veth registrations)", audit.RuleCount, dead),
 			Details: details,
 		}
 	}
@@ -1920,9 +1928,9 @@ func CheckFirewalldVethBloat() HealthCheck {
 		Name:   name,
 		Status: StatusWarning,
 		Message: fmt.Sprintf(
-			"%d dead veth interfaces registered in firewalld zones (%d rules in table inet firewalld — grows quadratically per leaked veth). "+
+			"%d dead veth interfaces registered in firewalld zones (~%d entries in table inet firewalld — grows quadratically per leaked veth). "+
 				"Fix now: sudo firewall-cmd --reload. Prevent: mark veths unmanaged in NetworkManager "+
-				"(/etc/NetworkManager/conf.d/99-coi-unmanaged.conf: [keyfile] unmanaged-devices=interface-name:veth*)",
+				"(/etc/NetworkManager/conf.d/99-coi-unmanaged.conf: [keyfile] unmanaged-devices+=interface-name:veth*)",
 			dead, audit.RuleCount),
 		Details: details,
 	}

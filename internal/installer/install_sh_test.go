@@ -944,7 +944,9 @@ func TestInstallSh_NMUnmanagedVeths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("conf file not written: %v", err)
 	}
-	if !strings.Contains(string(data), "unmanaged-devices=interface-name:veth*") {
+	// += appends to any user-set list (plain = would replace it under
+	// NM's last-file-wins conf.d semantics).
+	if !strings.Contains(string(data), "unmanaged-devices+=interface-name:veth*") {
 		t.Errorf("conf missing the veth exclusion: %s", data)
 	}
 
@@ -969,5 +971,27 @@ func TestInstallSh_NMUnmanagedVeths(t *testing.T) {
 	// 4. NM absent (dir missing): silent no-op.
 	if _, stderr, code = runBashSnippet(t, snippet(filepath.Join(confDir, "nope"))); code != 0 {
 		t.Fatalf("absent-dir run should no-op, got: %s", stderr)
+	}
+
+	// 5. A COMMENTED-OUT veth rule must not suppress the real one.
+	commentedDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(commentedDir, "50-user.conf"),
+		[]byte("[keyfile]\n#unmanaged-devices=interface-name:veth*\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, stderr, code = runBashSnippet(t, snippet(commentedDir)); code != 0 {
+		t.Fatalf("commented-rule run failed: %s", stderr)
+	}
+	if _, err := os.Stat(filepath.Join(commentedDir, "99-coi-unmanaged.conf")); err != nil {
+		t.Error("a commented-out user rule must not suppress installing the active exclusion")
+	}
+
+	// 6. COI_SKIP_NM_UNMANAGED=1 opts out entirely.
+	skipDir := t.TempDir()
+	if _, stderr, code = runBashSnippet(t, "COI_SKIP_NM_UNMANAGED=1\n"+snippet(skipDir)); code != 0 {
+		t.Fatalf("skip-env run failed: %s", stderr)
+	}
+	if _, err := os.Stat(filepath.Join(skipDir, "99-coi-unmanaged.conf")); err == nil {
+		t.Error("COI_SKIP_NM_UNMANAGED=1 must prevent the drop-in")
 	}
 }
