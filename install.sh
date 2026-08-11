@@ -735,7 +735,8 @@ post_install() {
 # (145 leaked veths ~= 101k rules, issue #695). Marking veth* unmanaged stops
 # the enrollment at the source; container traffic policy lives on the bridge.
 setup_nm_unmanaged_veths() {
-    local conf_dir="/etc/NetworkManager/conf.d"
+    # COI_NM_CONF_DIR is a test seam; production always uses the real path.
+    local conf_dir="${COI_NM_CONF_DIR:-/etc/NetworkManager/conf.d}"
     local conf_file="$conf_dir/99-coi-unmanaged.conf"
     [ -d "$conf_dir" ] || return 0
     if [ -f "$conf_file" ]; then

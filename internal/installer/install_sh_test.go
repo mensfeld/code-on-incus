@@ -917,3 +917,57 @@ func TestInstallSh_SetupFastStorage_InstallsZfsOnApt(t *testing.T) {
 		t.Errorf("ZFS pool should be created on apt, got: %s", stdout)
 	}
 }
+
+// setup_nm_unmanaged_veths (#695) must install the veth exclusion when the NM
+// conf dir exists, be idempotent, respect a pre-existing user rule covering
+// veths, and no-op entirely when NetworkManager is absent. sudo/systemctl are
+// stubbed to plain execution/no-ops so the real system is never touched.
+func TestInstallSh_NMUnmanagedVeths(t *testing.T) {
+	script := installShPath(t)
+	confDir := t.TempDir()
+	snippet := func(dir string) string {
+		return `
+			sudo() { "$@"; }        # run without privileges
+			systemctl() { :; }      # never reload anything real
+			source <(sed '/^main "\$@"/d; /^trap error_handler ERR/d' "` + script + `")
+			COI_NM_CONF_DIR="` + dir + `" setup_nm_unmanaged_veths
+		`
+	}
+
+	// 1. Fresh dir: file gets written.
+	_, stderr, code := runBashSnippet(t, snippet(confDir))
+	if code != 0 {
+		t.Fatalf("setup failed: %s", stderr)
+	}
+	conf := filepath.Join(confDir, "99-coi-unmanaged.conf")
+	data, err := os.ReadFile(conf)
+	if err != nil {
+		t.Fatalf("conf file not written: %v", err)
+	}
+	if !strings.Contains(string(data), "unmanaged-devices=interface-name:veth*") {
+		t.Errorf("conf missing the veth exclusion: %s", data)
+	}
+
+	// 2. Idempotent: second run leaves the file alone and succeeds.
+	if _, stderr, code = runBashSnippet(t, snippet(confDir)); code != 0 {
+		t.Fatalf("second run failed: %s", stderr)
+	}
+
+	// 3. Pre-existing user rule covering veths: no coi file is added.
+	userDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(userDir, "50-user.conf"),
+		[]byte("[keyfile]\nunmanaged-devices=interface-name:veth*\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, stderr, code = runBashSnippet(t, snippet(userDir)); code != 0 {
+		t.Fatalf("user-rule run failed: %s", stderr)
+	}
+	if _, err := os.Stat(filepath.Join(userDir, "99-coi-unmanaged.conf")); err == nil {
+		t.Error("coi conf must not be written when a user rule already covers veths")
+	}
+
+	// 4. NM absent (dir missing): silent no-op.
+	if _, stderr, code = runBashSnippet(t, snippet(filepath.Join(confDir, "nope"))); code != 0 {
+		t.Fatalf("absent-dir run should no-op, got: %s", stderr)
+	}
+}
