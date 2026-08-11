@@ -681,6 +681,7 @@ fetch_detection_databases() {
 
 # Post-install setup
 post_install() {
+    setup_nm_unmanaged_veths
     ensure_incus_service || true
     ensure_idmap || true
     ensure_incus_initialized || true
@@ -728,6 +729,51 @@ post_install() {
 }
 
 # Main installation
+# Prevent NetworkManager from enrolling container veths into firewalld zones.
+# NM assigns each new veth to firewalld's default zone; leaked registrations
+# survive container deletion, and firewalld generates FORWARD rules as the
+# CROSS PRODUCT of zone interfaces — dead veths grow the ruleset quadratically
+# (145 leaked veths ~= 101k rules, issue #695). Marking veth* unmanaged stops
+# the enrollment at the source; container traffic policy lives on the bridge.
+#
+# Entirely best-effort: every step tolerates failure (a firewall nicety must
+# never abort the install under set -e / the ERR trap), and it is skippable
+# with COI_SKIP_NM_UNMANAGED=1 for hosts that intentionally manage veths
+# through NetworkManager (e.g. nmcli-configured veth pairs).
+setup_nm_unmanaged_veths() {
+    [ "${COI_SKIP_NM_UNMANAGED:-0}" = "1" ] && return 0
+    # COI_NM_CONF_DIR is a test seam; production always uses the real path.
+    local conf_dir="${COI_NM_CONF_DIR:-/etc/NetworkManager/conf.d}"
+    local conf_file="$conf_dir/99-coi-unmanaged.conf"
+    [ -d "$conf_dir" ] || return 0
+    if [ -f "$conf_file" ]; then
+        return 0
+    fi
+    # Only an ACTIVE (uncommented) rule that mentions veths counts as existing
+    # coverage — a commented-out example must not suppress the real one.
+    if grep -rhs '^[[:space:]]*unmanaged-devices' "$conf_dir"/*.conf 2>/dev/null | grep -q 'veth'; then
+        echo -e "${GREEN}✓ NetworkManager already has an unmanaged-devices rule mentioning veths — leaving it alone${NC}"
+        return 0
+    fi
+    echo -e "${BLUE}→ Marking veth* unmanaged in NetworkManager (prevents firewalld zone bloat, #695; skip with COI_SKIP_NM_UNMANAGED=1)...${NC}"
+    # unmanaged-devices+= APPENDS to any list set elsewhere; plain '=' would
+    # REPLACE a user's own exclusions under NM's last-file-wins semantics.
+    if ! sudo tee "$conf_file" > /dev/null 2>&1 <<'NMEOF'
+# Installed by code-on-incus (coi): container veths must not be enrolled in
+# firewalld zones — leaked registrations grow the firewall ruleset
+# quadratically. See https://github.com/mensfeld/code-on-incus/issues/695
+# Remove this file (and reload NetworkManager) to undo.
+[keyfile]
+unmanaged-devices+=interface-name:veth*
+NMEOF
+    then
+        echo -e "${YELLOW}⚠ Could not write $conf_file; skipping (see issue #695 for the manual step)${NC}"
+        return 0
+    fi
+    sudo systemctl reload NetworkManager 2>/dev/null || true
+    echo -e "${GREEN}✓ NetworkManager veth exclusion installed${NC}"
+}
+
 main() {
     echo ""
     echo -e "${BLUE}════════════════════════════════════════${NC}"

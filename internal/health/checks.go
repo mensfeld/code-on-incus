@@ -1888,6 +1888,54 @@ func CheckImageAge(imageName string) HealthCheck {
 	}
 }
 
+// CheckFirewalldVethBloat detects dead veth interfaces still registered in
+// firewalld's zones (#695). NetworkManager enrolls each container's host-side
+// veth into the default zone; leaked registrations survive container deletion,
+// and firewalld's FORWARD policy rules are generated as the cross product of
+// zone interfaces — so the ruleset grows QUADRATICALLY with leaked veths
+// (145 dead veths ≈ 101k rules on the reporting host) while coi's own tables
+// stay tiny. Not a coi leak, but coi's container churn is what feeds it, so
+// health is the right place to name it.
+func CheckFirewalldVethBloat() HealthCheck {
+	const name = "firewalld_veth_bloat"
+	// The nft listing and the interface stats are not atomic: a container
+	// being torn down concurrently shows its veth as transiently dead. The
+	// threshold absorbs that churn so normal session turnover can't flap the
+	// warning; genuine leaks accumulate well past it.
+	const deadVethWarnThreshold = 3
+	audit := network.AuditFirewalldVeths()
+	if audit.Unreadable {
+		return HealthCheck{Name: name, Status: StatusOK, Message: "firewalld nft table not readable (sudo/nft unavailable or listing timed out) — veth bloat check skipped"}
+	}
+	if !audit.Present {
+		return HealthCheck{Name: name, Status: StatusOK, Message: "no firewalld nft table on this host"}
+	}
+	dead := len(audit.DeadVeths)
+	details := map[string]interface{}{
+		"entry_count": audit.RuleCount,
+		"dead_veths":  dead,
+		"live_veths":  audit.LiveVeths,
+	}
+	if dead < deadVethWarnThreshold {
+		return HealthCheck{
+			Name:    name,
+			Status:  StatusOK,
+			Message: fmt.Sprintf("firewalld table healthy (~%d entries, %d dead veth registrations)", audit.RuleCount, dead),
+			Details: details,
+		}
+	}
+	return HealthCheck{
+		Name:   name,
+		Status: StatusWarning,
+		Message: fmt.Sprintf(
+			"%d dead veth interfaces registered in firewalld zones (~%d entries in table inet firewalld — grows quadratically per leaked veth). "+
+				"Fix now: sudo firewall-cmd --reload. Prevent: mark veths unmanaged in NetworkManager "+
+				"(/etc/NetworkManager/conf.d/99-coi-unmanaged.conf: [keyfile] unmanaged-devices+=interface-name:veth*)",
+			dead, audit.RuleCount),
+		Details: details,
+	}
+}
+
 // CheckOrphanedResources checks for orphaned system resources
 func CheckOrphanedResources() HealthCheck {
 	// Check for orphaned veths
@@ -1982,7 +2030,7 @@ func CheckOrphanedResources() HealthCheck {
 	} else if orphanedRules > 0 {
 		message += fmt.Sprintf(" (%d firewall rules)", orphanedRules)
 	}
-	message += " - run 'coi clean' to remove"
+	message += " - run 'coi clean --orphans' to remove"
 
 	return HealthCheck{
 		Name:    "orphaned_resources",

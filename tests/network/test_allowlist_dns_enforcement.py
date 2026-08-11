@@ -24,6 +24,7 @@ returns immediately and the container outlives it.
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -376,10 +377,14 @@ def test_teardown_removes_rules_and_sets(coi_binary, workspace_dir, cleanup_cont
             timeout=15,
             check=False,
         ).stdout
+        # Boundary-anchored matching: a plain substring check made this test
+        # the victim of ANY same-prefix leak — "coi_s_10_47_62_2" is a prefix
+        # of "coi_s_10_47_62_232", so another container's leaked sets failed
+        # THIS container's (successful) teardown assertion.
         if (
-            f"coi_s_{ident}" not in table
-            and f"coi_d_{ident}" not in table
-            and ip not in input_chain
+            not re.search(rf"coi_s_{ident}\b", table)
+            and not re.search(rf"coi_d_{ident}\b", table)
+            and not re.search(rf"{re.escape(ip)}\b", input_chain)
         ):
             return
         time.sleep(1)

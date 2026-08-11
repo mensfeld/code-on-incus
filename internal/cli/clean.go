@@ -268,7 +268,9 @@ func cleanOrphanedResources() (int, bool) {
 		return 0, false
 	}
 
-	totalOrphans := len(orphans.Veths) + len(orphans.NftRules) + len(orphans.NFTMonitorRules) + len(orphans.IptablesBridgeRules)
+	// IPv6Rules included (#696): omitting them made coi clean --orphans report
+	// "no orphaned resources found" when IPv6 blocks were the only leak class.
+	totalOrphans := len(orphans.Veths) + len(orphans.NftRules) + len(orphans.NFTMonitorRules) + len(orphans.IptablesBridgeRules) + len(orphans.IPv6Rules)
 
 	if totalOrphans == 0 {
 		fmt.Println("  (no orphaned resources found)")
