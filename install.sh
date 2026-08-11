@@ -728,6 +728,35 @@ post_install() {
 }
 
 # Main installation
+# Prevent NetworkManager from enrolling container veths into firewalld zones.
+# NM assigns each new veth to firewalld's default zone; leaked registrations
+# survive container deletion, and firewalld generates FORWARD rules as the
+# CROSS PRODUCT of zone interfaces — dead veths grow the ruleset quadratically
+# (145 leaked veths ~= 101k rules, issue #695). Marking veth* unmanaged stops
+# the enrollment at the source; container traffic policy lives on the bridge.
+setup_nm_unmanaged_veths() {
+    local conf_dir="/etc/NetworkManager/conf.d"
+    local conf_file="$conf_dir/99-coi-unmanaged.conf"
+    [ -d "$conf_dir" ] || return 0
+    if [ -f "$conf_file" ]; then
+        return 0
+    fi
+    if grep -rqs "unmanaged-devices.*veth" "$conf_dir" 2>/dev/null; then
+        echo -e "${GREEN}✓ NetworkManager already leaves veths unmanaged${NC}"
+        return 0
+    fi
+    echo -e "${BLUE}→ Marking veth* unmanaged in NetworkManager (prevents firewalld zone bloat, #695)...${NC}"
+    sudo tee "$conf_file" > /dev/null <<'NMEOF'
+# Installed by code-on-incus (coi): container veths must not be enrolled in
+# firewalld zones — leaked registrations grow the firewall ruleset
+# quadratically. See https://github.com/mensfeld/code-on-incus/issues/695
+[keyfile]
+unmanaged-devices=interface-name:veth*
+NMEOF
+    sudo systemctl reload NetworkManager 2>/dev/null || true
+    echo -e "${GREEN}✓ NetworkManager veth exclusion installed${NC}"
+}
+
 main() {
     echo ""
     echo -e "${BLUE}════════════════════════════════════════${NC}"
@@ -740,6 +769,7 @@ main() {
     check_incus
     check_group
     check_nft
+    setup_nm_unmanaged_veths
 
     echo ""
     echo "Installation method:"

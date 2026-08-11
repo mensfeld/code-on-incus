@@ -1888,6 +1888,46 @@ func CheckImageAge(imageName string) HealthCheck {
 	}
 }
 
+// CheckFirewalldVethBloat detects dead veth interfaces still registered in
+// firewalld's zones (#695). NetworkManager enrolls each container's host-side
+// veth into the default zone; leaked registrations survive container deletion,
+// and firewalld's FORWARD policy rules are generated as the cross product of
+// zone interfaces — so the ruleset grows QUADRATICALLY with leaked veths
+// (145 dead veths ≈ 101k rules on the reporting host) while coi's own tables
+// stay tiny. Not a coi leak, but coi's container churn is what feeds it, so
+// health is the right place to name it.
+func CheckFirewalldVethBloat() HealthCheck {
+	const name = "firewalld_veth_bloat"
+	audit := network.AuditFirewalldVeths()
+	if !audit.Present {
+		return HealthCheck{Name: name, Status: StatusOK, Message: "firewalld not managing nft rules on this host"}
+	}
+	dead := len(audit.DeadVeths)
+	details := map[string]interface{}{
+		"rule_count": audit.RuleCount,
+		"dead_veths": dead,
+		"live_veths": audit.LiveVeths,
+	}
+	if dead < 3 {
+		return HealthCheck{
+			Name:    name,
+			Status:  StatusOK,
+			Message: fmt.Sprintf("firewalld table healthy (%d rules, %d dead veth registrations)", audit.RuleCount, dead),
+			Details: details,
+		}
+	}
+	return HealthCheck{
+		Name:   name,
+		Status: StatusWarning,
+		Message: fmt.Sprintf(
+			"%d dead veth interfaces registered in firewalld zones (%d rules in table inet firewalld — grows quadratically per leaked veth). "+
+				"Fix now: sudo firewall-cmd --reload. Prevent: mark veths unmanaged in NetworkManager "+
+				"(/etc/NetworkManager/conf.d/99-coi-unmanaged.conf: [keyfile] unmanaged-devices=interface-name:veth*)",
+			dead, audit.RuleCount),
+		Details: details,
+	}
+}
+
 // CheckOrphanedResources checks for orphaned system resources
 func CheckOrphanedResources() HealthCheck {
 	// Check for orphaned veths
@@ -1982,7 +2022,7 @@ func CheckOrphanedResources() HealthCheck {
 	} else if orphanedRules > 0 {
 		message += fmt.Sprintf(" (%d firewall rules)", orphanedRules)
 	}
-	message += " - run 'coi clean' to remove"
+	message += " - run 'coi clean --orphans' to remove"
 
 	return HealthCheck{
 		Name:    "orphaned_resources",

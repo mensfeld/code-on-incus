@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## 0.11.2 (Unreleased)
+
+### Fixed
+
+- **`coi health` now detects firewalld zone bloat from leaked container veths, and the installer prevents it (#695)** — on hosts running NetworkManager + firewalld, NM enrolls each container's host-side veth into firewalld's default zone; the registration leaks when the container is deleted, and because firewalld generates its FORWARD policy rules as the **cross product** of zone interfaces, the ruleset grows quadratically with leaked veths — the reporting host had 145 dead veths ≈ 101,888 rules in `table inet firewalld` while coi's own tables held ~50. This is a firewalld/NM interaction, not a coi rule leak, but coi's container churn feeds it and nothing named it: the new `firewalld_veth_bloat` health check counts dead veth registrations (via the same sudo-nft path other checks use) and warns with both remedies (`firewall-cmd --reload` to collapse it now; an NM `unmanaged-devices=interface-name:veth*` drop-in to stop the enrollment), and `install.sh` now installs that drop-in automatically where NetworkManager is present (skipped when an existing rule already covers veths).
+
+- **Three teardown leaks from the #696 nft-lifecycle audit** — `coi kill` and `coi shutdown` never removed the container's `coi6-<name>` IPv6 egress block (it is keyed by name, not IP, so it is now removed even when the container's IP was unresolvable); `coi clean --orphans` omitted IPv6 blocks from its orphan COUNT, so when they were the only leaked class it printed "no orphaned resources found" and cleaned nothing despite its cleanup code handling them; and the orphaned-resources health warning pointed at plain `coi clean`, which performs no nft cleanup — it now says `coi clean --orphans`. The remaining audit findings (monitoring-rule idempotency, default-clean nft cleanup, permanent allowlist set elements) stay tracked in #696.
+
 ## 0.11.1 (2026-08-11)
 
 ### Fixed

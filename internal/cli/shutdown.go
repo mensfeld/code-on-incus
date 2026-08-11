@@ -136,6 +136,12 @@ func shutdownCommand(cmd *cobra.Command, args []string) error {
 				fmt.Fprintf(os.Stderr, "  Warning: Failed to cleanup NFT monitoring rules: %v\n", err)
 			}
 		}
+		// The IPv6 egress block is keyed by container NAME, not IP, so it is
+		// removable even when the IP was unresolvable — and was previously
+		// leaked by this path entirely (#696).
+		if err := network.RemoveIPv6BlockForContainer(name); err != nil {
+			fmt.Fprintf(os.Stderr, "  Warning: Failed to cleanup IPv6 block rule: %v\n", err)
+		}
 
 		// Delete container (may already be gone if ephemeral or cleaned by shell process)
 		if err := mgr.Delete(true); err != nil {

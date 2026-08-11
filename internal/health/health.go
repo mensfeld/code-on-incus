@@ -90,6 +90,7 @@ func RunAllChecks(cfg *config.Config, verbose bool) *HealthResult {
 	checks["active_containers"] = CheckActiveContainers()
 	checks["saved_sessions"] = CheckSavedSessions(cfg)
 	checks["orphaned_resources"] = CheckOrphanedResources()
+	checks["firewalld_veth_bloat"] = CheckFirewalldVethBloat()
 
 	// Container networking checks (critical for detecting real networking issues)
 	checks["container_connectivity"] = CheckContainerConnectivity(cfg.Container.Image)
