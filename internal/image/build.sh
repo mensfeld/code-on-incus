@@ -360,10 +360,15 @@ prefer_ipv4() {
 install_claude_cli() {
     log "Installing Claude CLI (native)..."
 
-    # Run the native installer as the code user (with retries for transient network failures)
+    # Run the native installer as the code user (with retries for transient
+    # network failures). `set -o pipefail` inside the su login shell is what
+    # makes the retry work: without it the pipeline's status is bash's, which
+    # exits 0 on the empty stdin a failed curl leaves behind — so a transient
+    # network failure would "succeed", skip the retries, and hard-fail the
+    # build at the binary check below.
     local attempt
     for attempt in 1 2 3; do
-        if su - "$CODE_USER" -c 'curl -4 -fsSL https://claude.ai/install.sh | bash'; then
+        if su - "$CODE_USER" -c 'set -o pipefail; curl -4 -fsSL https://claude.ai/install.sh | bash'; then
             break
         fi
         if [ "$attempt" -eq 3 ]; then
@@ -461,10 +466,11 @@ install_opencode() {
 install_pi() {
     log "Installing pi..."
 
-    # Install as the code user via the official installer
+    # Install as the code user via the official installer. `set -o pipefail`
+    # makes a failed curl actually trigger the retries — see install_claude_cli.
     local attempt
     for attempt in 1 2 3; do
-        if su - "$CODE_USER" -c 'curl -fsSL https://pi.dev/install.sh | sh'; then
+        if su - "$CODE_USER" -c 'set -o pipefail; curl -fsSL https://pi.dev/install.sh | sh'; then
             break
         fi
         if [ "$attempt" -eq 3 ]; then
