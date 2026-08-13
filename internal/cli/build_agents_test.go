@@ -54,7 +54,8 @@ func TestEffectiveToolName(t *testing.T) {
 }
 
 func TestPrepareBuildAgents(t *testing.T) {
-	// Empty selection installs all agents — always valid, never warns.
+	// Empty selection installs the default agent set — always valid, and never
+	// warns when the configured tool is in that set (claude is).
 	if err := prepareBuildAgents(nil, "claude"); err != nil {
 		t.Errorf("empty agents must be valid, got %v", err)
 	}

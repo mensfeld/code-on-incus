@@ -11,25 +11,14 @@ read-only (protected_paths) and materializes an empty placeholder when absent
 so it cannot be planted either.
 """
 
-import subprocess
 from pathlib import Path
 
-
-def _run(coi_binary, workspace_dir, argv, env=None, timeout=120):
-    return subprocess.run(
-        [coi_binary, "run", "--", *argv],
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        cwd=workspace_dir,
-        env=env,
-    )
-
-
-def _make_workspace_writable(workspace_dir):
-    # In CI the runner UID differs from the container user UID; with shift=true
-    # the container user can only write files with 'other' write permission.
-    subprocess.run(["chmod", "-R", "a+rwX", workspace_dir], check=True, capture_output=True)
+from support.helpers import (
+    make_workspace_writable as _make_workspace_writable,
+)
+from support.helpers import (
+    run_coi_in_workspace as _run,
+)
 
 
 def test_codex_config_readonly_by_default(coi_binary, cleanup_containers, workspace_dir):

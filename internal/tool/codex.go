@@ -1,11 +1,10 @@
 package tool
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
-	"strings"
-	"time"
 )
 
 // CodexTool implements Tool for OpenAI Codex CLI (https://developers.openai.com/codex/cli)
@@ -30,6 +29,27 @@ func (c *CodexTool) SessionsDirName() string { return "sessions-codex" }
 // rolloutSessionFile matches codex session files
 // (sessions/YYYY/MM/DD/rollout-<timestamp>-<uuid>.jsonl) and captures the UUID.
 var rolloutSessionFile = regexp.MustCompile(`^rollout-.*-([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.jsonl$`)
+
+// codexSafeFlagValue is the set of values accepted for codex launch knobs.
+// BuildCommand's argv is joined into a shell command string by the CLI layer
+// (and nested inside tmux quoting), and the [tool] config section is mergeable
+// from an untrusted project .coi/config.toml — so flag values MUST be single
+// shell-safe tokens. Anything else is rejected at the setter (and loudly, with
+// an error, by ValidateCodexFlagValue at the CLI wiring layer) rather than
+// quoted, because no legitimate codex model or reasoning-effort value contains
+// shell metacharacters or whitespace.
+var codexSafeFlagValue = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/@-]*$`)
+
+// ValidateCodexFlagValue returns an error when a [tool.codex] launch value
+// (model, reasoning_effort) is not a single shell-safe token. Empty is valid
+// (knob unset). Shared by the CLI wiring (loud failure at launch) and the
+// setters below (fail-closed even if a future caller skips validation).
+func ValidateCodexFlagValue(key, value string) error {
+	if value == "" || codexSafeFlagValue.MatchString(value) {
+		return nil
+	}
+	return fmt.Errorf("[tool.codex] %s %q must be a single token of letters, digits, or ._:/@- (shell metacharacters and whitespace are not allowed in launch flags)", key, value)
+}
 
 // BuildCommand builds the codex launch command. Every codex flag coi relies on
 // lives in this one function so upstream flag drift has a single fix site.
@@ -64,8 +84,10 @@ func (c *CodexTool) BuildCommand(sessionID string, resume bool, resumeSessionID 
 		cmd = append(cmd, "--dangerously-bypass-approvals-and-sandbox")
 	}
 
-	// Flag values must stay single shell-safe tokens: buildCLICommand joins
-	// argv with spaces into a shell command string.
+	// Flag values are guaranteed single shell-safe tokens: the setters drop
+	// anything that fails ValidateCodexFlagValue (and the CLI wiring rejects
+	// such values with an error first). buildCLICommand joins argv with
+	// spaces into a shell command string, so this invariant is load-bearing.
 	if c.model != "" {
 		cmd = append(cmd, "-m", c.model)
 	}
@@ -77,35 +99,25 @@ func (c *CodexTool) BuildCommand(sessionID string, resume bool, resumeSessionID 
 }
 
 // DiscoverSessionID finds the newest codex session UUID in the saved state dir.
-// Codex stores sessions as sessions/YYYY/MM/DD/rollout-<timestamp>-<uuid>.jsonl.
+// Codex stores sessions as sessions/YYYY/MM/DD/rollout-<timestamp>-<uuid>.jsonl,
+// so the lexicographically greatest matching path is the newest session
+// (zero-padded date dirs + ISO timestamps sort chronologically). Deliberately
+// NOT mtime-based: the saved state is round-tripped through `incus file pull`,
+// which does not preserve mtimes — after a save every file carries its
+// pull-time mtime in transfer order, so mtimes carry no session-recency signal.
 // Returns "" when nothing is found — BuildCommand then falls back to
 // `codex resume --last`, which is independent of the sessions layout.
 func (c *CodexTool) DiscoverSessionID(stateDir string) string {
 	sessionsDir := filepath.Join(stateDir, "sessions")
 
-	var newestID string
-	var newestTime time.Time
-	var newestPath string
-
+	var newestPath, newestID string
 	_ = filepath.WalkDir(sessionsDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
-			return nil //nolint:nilerr // skip unreadable entries; discovery is best-effort
+			return nil // skip unreadable entries; discovery is best-effort
 		}
 		m := rolloutSessionFile.FindStringSubmatch(d.Name())
-		if m == nil {
-			return nil
-		}
-		info, err := d.Info()
-		if err != nil {
-			return nil //nolint:nilerr // skip unreadable entries; discovery is best-effort
-		}
-		// Newest by mtime; tie-break on the lexicographically greatest path
-		// (the layout is date-encoded, so greater path = later session).
-		if info.ModTime().After(newestTime) ||
-			(info.ModTime().Equal(newestTime) && strings.Compare(path, newestPath) > 0) {
-			newestTime = info.ModTime()
-			newestPath = path
-			newestID = m[1]
+		if m != nil && path > newestPath {
+			newestPath, newestID = path, m[1]
 		}
 		return nil
 	})
@@ -131,14 +143,24 @@ func (c *CodexTool) SetPermissionMode(mode string) {
 
 // SetModel implements ToolWithModel. Delivered as `-m <model>`;
 // when unset codex uses its own default. Configured via [tool.codex] model.
+// A value that is not a shell-safe token is dropped (fail-closed): the CLI
+// wiring rejects such values with an error before this setter runs, so the
+// drop only matters if a future caller skips ValidateCodexFlagValue.
 func (c *CodexTool) SetModel(model string) {
+	if ValidateCodexFlagValue("model", model) != nil {
+		return
+	}
 	c.model = model
 }
 
 // SetEffortLevel implements ToolWithEffortLevel. For codex this maps to
 // `model_reasoning_effort` ("minimal", "low", "medium", "high") — codex's
 // scale, not Claude's effort levels. Configured via [tool.codex] reasoning_effort.
+// Non-shell-safe values are dropped, as in SetModel.
 func (c *CodexTool) SetEffortLevel(level string) {
+	if ValidateCodexFlagValue("reasoning_effort", level) != nil {
+		return
+	}
 	c.reasoningEffort = level
 }
 

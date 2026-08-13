@@ -28,7 +28,7 @@ type BuildOptions struct {
 	BuildScript string   // For custom images
 	Compression string   // Compression algorithm (e.g., "none", "gzip", "xz")
 	StoragePool string   // Storage pool for the build container ("" = Incus default)
-	Agents      []string // AI agents to install (empty = all supported); passed as COI_AGENTS (#454)
+	Agents      []string // AI agents to install (empty = default set; opt-in agents like codex excluded, #698); passed as COI_AGENTS (#454)
 	Logger      func(string)
 }
 

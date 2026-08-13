@@ -4,8 +4,8 @@ Tests for selectable agents in the base image build (issue #454).
 profiles/default/build.sh used to call install_claude_cli / install_opencode /
 install_pi unconditionally. It now dispatches through install_selected_agents,
 which installs the agents named in $COI_AGENTS (comma/space separated) and falls
-back to ALL supported agents when COI_AGENTS is unset — preserving the historical
-default.
+back to the DEFAULT agent set when COI_AGENTS is unset (claude/opencode/pi —
+opt-in agents like codex are excluded per #698 and must be requested explicitly).
 
 These tests source the REAL install_selected_agents from build.sh (like
 test_opencode_arch_selection.py sources opencode_asset_arch), stub the per-agent

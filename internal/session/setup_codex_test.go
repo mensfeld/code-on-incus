@@ -10,31 +10,22 @@ import (
 	"github.com/mensfeld/code-on-incus/internal/tool"
 )
 
-// fakeCodexSetupManager is an in-memory ContainerManager covering exactly what
-// setupCLIConfig/injectCredentials touch for a tool WITHOUT a sandbox settings
-// file or sibling state file: mkdir (ExecCommand and ExecArgs forms), PushFile,
-// CreateFile, Chown, chown -R, and the `cat` read used on resume. Every other
-// method is inherited from the embedded (nil) interface, so an unexpected call
-// panics loudly instead of passing silently.
+// fakeCodexSetupManager extends the package's shared in-memory fake
+// (fakeAutoCtxManager, see setup_context_autoctx_test.go) with the two things
+// the codex setup path additionally needs: ExecArgs (mkdir/chmod from
+// seedHostFile) and CreateFile call tracking, so tests can assert that NO
+// synthesized settings writes happen for codex. The files map, PushFile,
+// Chown, and ExecCommand handling (mkdir -p, cat, and a permissive default
+// for chown -R) are inherited. Note the inherited ExecCommand returns ("",
+// nil) for unrecognized command strings — un-overridden interface METHODS
+// panic via the embedded nil interface, but unknown command strings do not.
 type fakeCodexSetupManager struct {
-	container.ContainerManager
-	files        map[string]string
+	*fakeAutoCtxManager
 	createdFiles []string // paths written via CreateFile (settings injection writes)
 }
 
 func newFakeCodexSetupManager() *fakeCodexSetupManager {
-	return &fakeCodexSetupManager{files: map[string]string{}}
-}
-
-func (f *fakeCodexSetupManager) ExecCommand(cmd string, _ container.ExecCommandOptions) (string, error) {
-	switch {
-	case strings.HasPrefix(cmd, "mkdir -p"), strings.HasPrefix(cmd, "chown -R"):
-		return "", nil
-	case strings.HasPrefix(cmd, "cat "):
-		return f.files[strings.Fields(cmd)[1]], nil
-	default:
-		return "", nil
-	}
+	return &fakeCodexSetupManager{fakeAutoCtxManager: newFakeAutoCtxManager()}
 }
 
 func (f *fakeCodexSetupManager) ExecArgs(args []string, _ container.ExecCommandOptions) error {
@@ -42,22 +33,10 @@ func (f *fakeCodexSetupManager) ExecArgs(args []string, _ container.ExecCommandO
 	return nil
 }
 
-func (f *fakeCodexSetupManager) PushFile(src, dest string) error {
-	data, err := os.ReadFile(src)
-	if err != nil {
-		return err
-	}
-	f.files[dest] = string(data)
-	return nil
-}
-
 func (f *fakeCodexSetupManager) CreateFile(path, content string) error {
-	f.files[path] = content
 	f.createdFiles = append(f.createdFiles, path)
-	return nil
+	return f.fakeAutoCtxManager.CreateFile(path, content)
 }
-
-func (f *fakeCodexSetupManager) Chown(_ string, _, _ int) error { return nil }
 
 func codexToolWithConfigDirFiles(t *testing.T) tool.ToolWithConfigDirFiles {
 	t.Helper()

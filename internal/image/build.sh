@@ -338,21 +338,27 @@ WRAPPER_EOF
 }
 
 #######################################
+# Prefer IPv4 for outbound connections.
+# Works around broken IPv6 in containers and some networks: agent installers
+# (Bun/Node-based) resolve AAAA records first; when the IPv6 path is
+# non-functional the download either times out or returns 403.
+# See: https://github.com/anthropics/claude-code/issues/13498
+# Idempotent; called once from main() so EVERY agent installer benefits.
+#######################################
+prefer_ipv4() {
+    if ! grep -q '::ffff:0:0/96' /etc/gai.conf 2>/dev/null; then
+        echo 'precedence ::ffff:0:0/96 100' >> /etc/gai.conf
+        log "IPv4 preference set in /etc/gai.conf"
+    fi
+}
+
+#######################################
 # Install Claude CLI using native installer
 # Note: npm installation is deprecated as of 2025
 # See: https://code.claude.com/docs/en/setup
 #######################################
 install_claude_cli() {
     log "Installing Claude CLI (native)..."
-
-    # Prefer IPv4 to work around broken IPv6 in containers and some networks.
-    # The native installer (Bun/Node) resolves AAAA records first; when the
-    # IPv6 path is non-functional the download either times out or returns 403.
-    # See: https://github.com/anthropics/claude-code/issues/13498
-    if ! grep -q '::ffff:0:0/96' /etc/gai.conf 2>/dev/null; then
-        echo 'precedence ::ffff:0:0/96 100' >> /etc/gai.conf
-        log "IPv4 preference set in /etc/gai.conf"
-    fi
 
     # Run the native installer as the code user (with retries for transient network failures)
     local attempt
@@ -491,17 +497,15 @@ install_pi() {
 install_codex() {
     log "Installing Codex CLI (native)..."
 
-    # Prefer IPv4 — same rationale as install_claude_cli (broken IPv6 paths in
-    # containers make installer downloads time out). The guard is idempotent.
-    if ! grep -q '::ffff:0:0/96' /etc/gai.conf 2>/dev/null; then
-        echo 'precedence ::ffff:0:0/96 100' >> /etc/gai.conf
-        log "IPv4 preference set in /etc/gai.conf"
-    fi
-
-    # Run the native installer as the code user (with retries for transient network failures)
+    # Run the native installer as the code user (with retries for transient
+    # network failures). `set -o pipefail` inside the su login shell is
+    # required for the retry to work at all: without it the pipeline's status
+    # is sh's, and sh exits 0 on the empty stdin a failed curl leaves behind —
+    # so a transient network failure would "succeed", skip the retries, and
+    # hard-fail the build at the binary check below.
     local attempt
     for attempt in 1 2 3; do
-        if su - "$CODE_USER" -c 'CODEX_NON_INTERACTIVE=1 curl -4 -fsSL https://chatgpt.com/codex/install.sh | sh'; then
+        if su - "$CODE_USER" -c 'set -o pipefail; CODEX_NON_INTERACTIVE=1 curl -4 -fsSL https://chatgpt.com/codex/install.sh | sh'; then
             break
         fi
         if [ "$attempt" -eq 3 ]; then
@@ -746,6 +750,7 @@ main() {
     configure_power_wrappers
     configure_tmp_cleanup
     configure_tmux
+    prefer_ipv4
     install_selected_agents
     install_dummy
     install_docker
