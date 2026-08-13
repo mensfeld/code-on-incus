@@ -198,6 +198,7 @@ create_code_user() {
         useradd -m -u "$CODE_UID" -g "$CODE_USER" -s /bin/bash "$CODE_USER"
     fi
     mkdir -p "/home/$CODE_USER/.claude"
+    mkdir -p "/home/$CODE_USER/.codex"
     mkdir -p "/home/$CODE_USER/.ssh"
     chmod 700 "/home/$CODE_USER/.ssh"
     # Pre-populate known_hosts. Try ssh-keyscan first (fresh keys); fall back to
@@ -481,6 +482,51 @@ install_pi() {
 }
 
 #######################################
+# Install OpenAI Codex CLI using native installer
+# See: https://developers.openai.com/codex/cli
+#
+# Not in the default agent set — opt in via [container.build]
+# agents = ["claude", "codex"] before building (issue #698).
+#######################################
+install_codex() {
+    log "Installing Codex CLI (native)..."
+
+    # Prefer IPv4 — same rationale as install_claude_cli (broken IPv6 paths in
+    # containers make installer downloads time out). The guard is idempotent.
+    if ! grep -q '::ffff:0:0/96' /etc/gai.conf 2>/dev/null; then
+        echo 'precedence ::ffff:0:0/96 100' >> /etc/gai.conf
+        log "IPv4 preference set in /etc/gai.conf"
+    fi
+
+    # Run the native installer as the code user (with retries for transient network failures)
+    local attempt
+    for attempt in 1 2 3; do
+        if su - "$CODE_USER" -c 'CODEX_NON_INTERACTIVE=1 curl -4 -fsSL https://chatgpt.com/codex/install.sh | sh'; then
+            break
+        fi
+        if [ "$attempt" -eq 3 ]; then
+            log "ERROR: Codex CLI installation failed after 3 attempts."
+            exit 1
+        fi
+        log "Codex CLI install failed (attempt $attempt/3), retrying in 10s..."
+        sleep 10
+    done
+
+    # Verify that the installer actually created the Codex CLI binary
+    local CODEX_PATH="/home/$CODE_USER/.local/bin/codex"
+    if [[ ! -x "$CODEX_PATH" ]]; then
+        log "ERROR: Codex CLI binary not found at $CODEX_PATH after installation."
+        log "Installation may have failed or installed to an unexpected location."
+        exit 1
+    fi
+
+    # Create a global symlink so it's accessible system-wide
+    ln -sf "$CODEX_PATH" /usr/local/bin/codex
+
+    log "Codex CLI $(codex --version 2>/dev/null || echo 'installed')"
+}
+
+#######################################
 # Install dummy (test stub for testing)
 #######################################
 install_dummy() {
@@ -669,9 +715,11 @@ cleanup() {
 # Main
 #######################################
 # install_selected_agents installs the AI agents named in $COI_AGENTS (comma- or
-# space-separated). When COI_AGENTS is unset/empty it installs ALL supported agents,
-# preserving the historical behavior (issue #454). Unknown names are warned and skipped
-# (coi validates the list host-side before build, so this is defense-in-depth).
+# space-separated). When COI_AGENTS is unset/empty it installs the default agents,
+# preserving the historical behavior (issue #454). codex is supported but opt-in
+# only (issue #698) — request it explicitly to include it. Unknown names are
+# warned and skipped (coi validates the list host-side before build, so this is
+# defense-in-depth).
 install_selected_agents() {
     local agents="${COI_AGENTS:-claude opencode pi}"
     for agent in ${agents//,/ }; do
@@ -679,6 +727,7 @@ install_selected_agents() {
             claude) install_claude_cli ;;
             opencode) install_opencode ;;
             pi) install_pi ;;
+            codex) install_codex ;;
             "") ;;
             *) log "WARNING: unknown agent '$agent' in COI_AGENTS, skipping" ;;
         esac

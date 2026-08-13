@@ -676,8 +676,8 @@ func getImageFingerprint(alias string) (string, error) {
 }
 
 // agentEnv returns the environment passed to build.sh to select which AI agents to
-// install (#454). An empty selection returns nil, so the script keeps its default of
-// installing every supported agent (COI_AGENTS unset).
+// install (#454). An empty selection returns nil, so the script keeps its default
+// agent set (COI_AGENTS unset; opt-in agents like codex are excluded, #698).
 func agentEnv(agents []string) map[string]string {
 	if len(agents) == 0 {
 		return nil

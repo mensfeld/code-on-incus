@@ -217,6 +217,53 @@ func TestInjectAutoContextFile_HealsLegacyPreservingHostContent(t *testing.T) {
 	}
 }
 
+// TestInjectAutoContextFile_CodexAgentsMD verifies the codex wiring end-to-end
+// with the REAL CodexTool: the managed block lands in ~/.codex/AGENTS.md
+// (container-global — never the workspace AGENTS.md, which is on the host
+// bind-mount), host-seeded AGENTS.md content is preserved, and repeated
+// sessions keep exactly one copy of the block.
+func TestInjectAutoContextFile_CodexAgentsMD(t *testing.T) {
+	mgr := newFakeAutoCtxManager()
+	codex, err := tool.Get("codex")
+	if err != nil {
+		t.Fatalf("Get(codex): %v", err)
+	}
+	acf, ok := codex.(tool.ToolWithAutoContextFile)
+	if !ok {
+		t.Fatal("CodexTool must implement ToolWithAutoContextFile")
+	}
+	homeDir := "/home/code"
+	destPath := "/home/code/.codex/AGENTS.md"
+	logger := func(string) {}
+
+	const userMarker = "MY-GLOBAL-CODEX-RULES-KEEP-ME"
+	mgr.files[destPath] = "# My codex instructions\n\n" + userMarker + "\n"
+
+	content := tool.RenderContextFileContent(tool.ContextInfo{
+		WorkspacePath: "/workspace",
+		HomeDir:       homeDir,
+		NetworkMode:   "restricted",
+	})
+
+	for i := 0; i < 3; i++ {
+		if err := injectAutoContextFile(mgr, acf, content, homeDir, logger); err != nil {
+			t.Fatalf("session %d: injectAutoContextFile failed: %v", i+1, err)
+		}
+	}
+
+	got := mgr.files[destPath]
+	if n := strings.Count(got, userMarker); n != 1 {
+		t.Errorf("host AGENTS.md content must be preserved exactly once, found %d occurrences", n)
+	}
+	if n := strings.Count(got, "# COI Sandbox Environment"); n != 1 {
+		t.Errorf("expected exactly one COI sandbox block in ~/.codex/AGENTS.md, found %d", n)
+	}
+	// The workspace AGENTS.md must not be touched.
+	if _, ok := mgr.files["/workspace/AGENTS.md"]; ok {
+		t.Error("workspace AGENTS.md was written — the managed block must only go to ~/.codex/AGENTS.md")
+	}
+}
+
 // TestInjectAutoContextFile_ContentContainingMarkerStaysIdempotent covers finding
 // #1: when the injected content (e.g. a user-provided context_file) merely
 // mentions the end-marker text inline — as a substring, not a standalone line —

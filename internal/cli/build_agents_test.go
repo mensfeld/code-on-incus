@@ -74,4 +74,16 @@ func TestPrepareBuildAgents(t *testing.T) {
 	if err := prepareBuildAgents([]string{"opencode"}, "claude"); err != nil {
 		t.Errorf("omitting the tool must warn, not error, got %v", err)
 	}
+
+	// An EMPTY selection installs the default agent set, which excludes opt-in
+	// agents (#698): a codex user with no explicit agents list still gets an
+	// image without their tool, so the footgun warning must fire (non-fatal).
+	if err := prepareBuildAgents(nil, "codex"); err != nil {
+		t.Errorf("empty agents with an opt-in tool must warn, not error, got %v", err)
+	}
+
+	// Explicitly selecting the opt-in agent alongside its tool is clean.
+	if err := prepareBuildAgents([]string{"claude", "codex"}, "codex"); err != nil {
+		t.Errorf("explicit codex selection must not error, got %v", err)
+	}
 }

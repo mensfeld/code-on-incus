@@ -78,13 +78,17 @@ func TestBuildScriptDispatchMatchesRegistry(t *testing.T) {
 		t.Fatal("tool.ListSupported() is empty")
 	}
 
-	// Unset COI_AGENTS must install exactly one installer per supported agent — i.e.
-	// the ${COI_AGENTS:-...} default lists every supported agent (preserves all-agents).
+	// Unset COI_AGENTS must install exactly one installer per DEFAULT agent — i.e.
+	// the ${COI_AGENTS:-...} default lists exactly tool.DefaultBuildAgents() (a
+	// subset of the registry: opt-in agents like codex are excluded, #698). This
+	// keeps the Go-side default (used by prepareBuildAgents' footgun warning) and
+	// the script default from drifting.
+	defaults := tool.DefaultBuildAgents()
 	installers, _ := dispatchAgents(t, path, nil)
-	if len(installers) != len(supported) {
-		t.Errorf("unset COI_AGENTS invoked %d installers %v, want one per supported agent %v; "+
-			"the ${COI_AGENTS:-...} default must list exactly the supported agents",
-			len(installers), installers, supported)
+	if len(installers) != len(defaults) {
+		t.Errorf("unset COI_AGENTS invoked %d installers %v, want one per default agent %v; "+
+			"the ${COI_AGENTS:-...} default must list exactly tool.DefaultBuildAgents()",
+			len(installers), installers, defaults)
 	}
 
 	// Every supported agent must dispatch to exactly one installer (a case arm exists).

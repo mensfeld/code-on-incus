@@ -207,6 +207,16 @@ func (a *App) profileInfoRunE(cmd *cobra.Command, args []string) error {
 				fmt.Printf("model = %q\n", p.Tool.Claude.Model)
 			}
 		}
+		if p.Tool.Codex.Model != "" || p.Tool.Codex.ReasoningEffort != "" {
+			fmt.Println()
+			fmt.Println("[tool.codex]")
+			if p.Tool.Codex.Model != "" {
+				fmt.Printf("model = %q\n", p.Tool.Codex.Model)
+			}
+			if p.Tool.Codex.ReasoningEffort != "" {
+				fmt.Printf("reasoning_effort = %q\n", p.Tool.Codex.ReasoningEffort)
+			}
+		}
 	}
 
 	if p.Container.Build.HasBuildConfig() {

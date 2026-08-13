@@ -138,19 +138,29 @@ func getConfiguredTool(cfg *config.Config) (tool.Tool, error) {
 		return nil, fmt.Errorf("failed to get tool '%s': %w", toolName, err)
 	}
 
-	// Set effort level if the tool supports it (Claude-specific)
+	// Model/effort knobs live in per-tool config sections ([tool.claude],
+	// [tool.codex]) so one tool's settings never leak into another. Tools
+	// without a section here simply get no model/effort applied.
+	var model, effortLevel string
+	switch t.Name() {
+	case "claude":
+		model, effortLevel = cfg.Tool.Claude.Model, cfg.Tool.Claude.EffortLevel
+	case "codex":
+		model, effortLevel = cfg.Tool.Codex.Model, cfg.Tool.Codex.ReasoningEffort
+	}
+
+	// Set effort level if the tool supports it. If not configured, the tool
+	// uses its own default (Claude: user controls interactively).
 	if twel, ok := t.(tool.ToolWithEffortLevel); ok {
-		effortLevel := cfg.Tool.Claude.EffortLevel
-		// If not configured, the tool's GetSandboxSettings will use its default
 		if effortLevel != "" {
 			twel.SetEffortLevel(effortLevel)
 		}
 	}
 
-	// Set model if the tool supports it (Claude-specific). Delivered as
-	// ANTHROPIC_MODEL; when unset the tool uses its own default.
+	// Set model if the tool supports it. Delivery is tool-specific (Claude:
+	// ANTHROPIC_MODEL env; codex: -m flag); when unset the tool uses its own default.
 	if twm, ok := t.(tool.ToolWithModel); ok {
-		if model := cfg.Tool.Claude.Model; model != "" {
+		if model != "" {
 			twm.SetModel(model)
 		}
 	}
