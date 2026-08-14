@@ -465,7 +465,7 @@ func TestRestrictedDNSPinFiltersLocalOn53_Integration(t *testing.T) {
 	// Order: pinned :53 accept  <  :53 reject  <  LAN allow. So a pinned LAN resolver
 	// works on :53, every other :53 (including LAN) is rejected, and the LAN allow
 	// only governs non-53 traffic.
-	if !(pinAcceptIdx < pinRejectIdx && pinRejectIdx < localAcceptIdx) {
+	if pinAcceptIdx >= pinRejectIdx || pinRejectIdx >= localAcceptIdx {
 		t.Errorf("expected order pinAccept(%d) < pinReject(%d) < localAccept(%d) so the DNS pin "+
 			"filters LAN :53 while the pinned resolver stays reachable:\n%s",
 			pinAcceptIdx, pinRejectIdx, localAcceptIdx, rules)
