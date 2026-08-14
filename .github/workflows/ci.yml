@@ -516,18 +516,25 @@ jobs:
         if: steps.cache-coi-image.outputs.cache-hit != 'true'
         run: |
           echo "Building COI image (not cached)..."
-          for attempt in 1 2 3; do
-            echo "Attempt $attempt of 3..."
+          # The build script apt/curls external mirrors; those occasionally reset
+          # ("curl: (35) Recv failure: Connection reset by peer"). The old 3x/10s
+          # loop (~20s total) was too tight to ride out a blip. Widen to 5 attempts
+          # with progressive backoff (15/30/45/60s, ~150s total) so a transient
+          # network error self-heals instead of redding the lane.
+          max_attempts=5
+          for attempt in $(seq 1 "$max_attempts"); do
+            echo "Attempt $attempt of $max_attempts..."
             if ./coi build; then
               echo "Image built successfully on attempt $attempt"
               break
             fi
-            if [ "$attempt" -eq 3 ]; then
-              echo "Failed to build COI image after 3 attempts"
+            if [ "$attempt" -eq "$max_attempts" ]; then
+              echo "Failed to build COI image after $max_attempts attempts"
               exit 1
             fi
-            echo "Build failed, retrying in 10s..."
-            sleep 10
+            backoff=$((attempt * 15))
+            echo "Build failed (often a transient curl/network error in the build script), retrying in ${backoff}s..."
+            sleep "$backoff"
           done
           ./coi image list
           # Export image for caching
