@@ -646,6 +646,11 @@ device admin daemons is cut off.
 - Bridge-provided DNS is unaffected; add `53` to `allowed_ports` if the container
   resolves via an **off-box** resolver.
 - **Trusted-scope only** (ignored from a project `./.coi/config.toml`).
+- **Applies to the LAN too.** Even with `allow_local_network_access = true`, the
+  local network is reachable only on these ports — so enabling local access does
+  not silently reopen SSH/DB ports on your LAN. Likewise `dns_servers` filters
+  `:53` everywhere, so a LAN resolver (Pi-hole) must be listed by its exact IP to
+  stay reachable.
 - Combine with `dns_servers` for the full "use my Pi-hole, on these ports only"
   posture — the two compose: a pinned resolver is reachable on `:53` regardless of
   `allowed_ports`.

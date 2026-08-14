@@ -74,10 +74,10 @@ func (f *NftManager) ApplyRestricted(cfg *config.NetworkConfig) error {
 	}
 
 	if config.BoolVal(cfg.AllowLocalNetworkAccess) {
-		for _, cidr := range []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"} {
-			if err := f.addRule(f.containerIP, cidr, "accept"); err != nil {
-				return fmt.Errorf("failed to add RFC1918 allow rule: %w", err)
-			}
+		// allowed_ports still applies to the LAN (see addLocalNetworkAllows): local
+		// access opens the LAN, but only on the permitted ports when a cap is set.
+		if err := f.addLocalNetworkAllows(allowedPorts); err != nil {
+			return err
 		}
 	} else if config.BoolVal(cfg.BlockPrivateNetworks) {
 		for _, cidr := range []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"} {
@@ -196,10 +196,10 @@ func (f *NftManager) ApplyAllowlist(cfg *config.NetworkConfig, staticCIDRs []str
 	// block_metadata_endpoint independently (as restricted mode does) — and thus
 	// blocking metadata even when local access is on — is a separate follow-up.
 	if config.BoolVal(cfg.AllowLocalNetworkAccess) {
-		for _, cidr := range []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"} {
-			if err := f.addRule(f.containerIP, cidr, "accept"); err != nil {
-				return fmt.Errorf("failed to add RFC1918 allow rule: %w", err)
-			}
+		// allowed_ports still applies to the LAN (see addLocalNetworkAllows): local
+		// access opens the LAN, but only on the permitted ports when a cap is set.
+		if err := f.addLocalNetworkAllows(allowedPorts); err != nil {
+			return err
 		}
 	} else {
 		for _, cidr := range []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16"} {

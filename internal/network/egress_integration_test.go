@@ -351,6 +351,127 @@ func TestAllowlistPortCapCoversBothSets_Integration(t *testing.T) {
 	}
 }
 
+// TestRestrictedAllowLocalRespectsPortCap_Integration verifies the fix for the
+// review finding that allowed_ports did not constrain LAN traffic when
+// allow_local_network_access was set. With both enabled, the RFC1918 allow rules
+// must be port-scoped (carry a dport match), so the LAN is reachable only on the
+// permitted ports — not all ports.
+func TestRestrictedAllowLocalRespectsPortCap_Integration(t *testing.T) {
+	skipUnlessAllowlistReady(t)
+
+	yes := true
+	containerIP, rules := setupNetForContainer(t, "coi-restricted-local-portcap", &config.NetworkConfig{
+		Mode:                    config.NetworkModeRestricted,
+		AllowLocalNetworkAccess: &yes,
+		AllowedPorts:            []int{443},
+	})
+	lines := linesWithComment(rules, containerIP)
+
+	var localAccepts, localAcceptsWithPort int
+	for _, line := range lines {
+		// The RFC1918 allow rules for local access (daddr is a private CIDR, accept).
+		if !strings.Contains(line, "accept") {
+			continue
+		}
+		if strings.Contains(line, "10.0.0.0/8") || strings.Contains(line, "172.16.0.0/12") ||
+			strings.Contains(line, "192.168.0.0/16") {
+			localAccepts++
+			if strings.Contains(line, "dport") && strings.Contains(line, "443") {
+				localAcceptsWithPort++
+			}
+		}
+	}
+	if localAccepts == 0 {
+		t.Fatalf("expected RFC1918 local-access allow rules, found none:\n%s", rules)
+	}
+	if localAcceptsWithPort != localAccepts {
+		t.Errorf("expected every LAN allow rule to be port-scoped to 443, but %d/%d were blanket "+
+			"(all-ports) — allowed_ports must apply to the LAN:\n%s", localAccepts-localAcceptsWithPort, localAccepts, rules)
+	}
+}
+
+// TestRestrictedAllowLocalNoPortCapIsBlanket_Integration is the parity guard for
+// the fix: with allow_local_network_access but NO allowed_ports, the LAN allow
+// rules stay the historic all-ports blanket accept (no dport match).
+func TestRestrictedAllowLocalNoPortCapIsBlanket_Integration(t *testing.T) {
+	skipUnlessAllowlistReady(t)
+
+	yes := true
+	containerIP, rules := setupNetForContainer(t, "coi-restricted-local-blanket", &config.NetworkConfig{
+		Mode:                    config.NetworkModeRestricted,
+		AllowLocalNetworkAccess: &yes,
+	})
+	lines := linesWithComment(rules, containerIP)
+
+	var found bool
+	for _, line := range lines {
+		if !strings.Contains(line, "accept") {
+			continue
+		}
+		if strings.Contains(line, "10.0.0.0/8") || strings.Contains(line, "172.16.0.0/12") ||
+			strings.Contains(line, "192.168.0.0/16") {
+			found = true
+			if strings.Contains(line, "dport") {
+				t.Errorf("LAN allow rule should be a blanket accept with no allowed_ports set, "+
+					"but it carries a dport match:\n%s", line)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected blanket RFC1918 local-access allow rules, found none:\n%s", rules)
+	}
+}
+
+// TestRestrictedDNSPinFiltersLocalOn53_Integration verifies that dns_servers
+// filters LAN :53 too (finding 2): even with allow_local_network_access, the DNS
+// pin reject precedes the RFC1918 allow, so an unpinned LAN resolver is blocked on
+// :53 while the pinned LAN resolver (listed by exact IP) stays reachable. This is
+// the consistent counterpart to the port cap applying to the LAN.
+func TestRestrictedDNSPinFiltersLocalOn53_Integration(t *testing.T) {
+	skipUnlessAllowlistReady(t)
+
+	const lanResolver = "192.168.222.53" // a pinned LAN resolver (RFC1918)
+	yes := true
+	containerIP, rules := setupNetForContainer(t, "coi-restricted-local-dnspin", &config.NetworkConfig{
+		Mode:                    config.NetworkModeRestricted,
+		AllowLocalNetworkAccess: &yes,
+		DNSServers:              []string{lanResolver},
+	})
+	lines := linesWithComment(rules, containerIP)
+
+	pinAcceptIdx, pinRejectIdx, localAcceptIdx := -1, -1, -1
+	for i, line := range lines {
+		if pinAcceptIdx == -1 && strings.Contains(line, lanResolver) &&
+			strings.Contains(line, "dport 53") && strings.Contains(line, "accept") {
+			pinAcceptIdx = i
+		}
+		if pinRejectIdx == -1 && strings.Contains(line, "dport 53") && strings.Contains(line, "reject") {
+			pinRejectIdx = i
+		}
+		if localAcceptIdx == -1 && strings.Contains(line, "accept") &&
+			(strings.Contains(line, "10.0.0.0/8") || strings.Contains(line, "192.168.0.0/16")) {
+			localAcceptIdx = i
+		}
+	}
+	if pinAcceptIdx == -1 {
+		t.Fatalf("pinned LAN resolver %s must be accepted on :53:\n%s", lanResolver, rules)
+	}
+	if pinRejectIdx == -1 {
+		t.Fatalf("expected a :53 reject rule for unpinned resolvers:\n%s", rules)
+	}
+	if localAcceptIdx == -1 {
+		t.Fatalf("expected RFC1918 local-access allow rules:\n%s", rules)
+	}
+	// Order: pinned :53 accept  <  :53 reject  <  LAN allow. So a pinned LAN resolver
+	// works on :53, every other :53 (including LAN) is rejected, and the LAN allow
+	// only governs non-53 traffic.
+	if !(pinAcceptIdx < pinRejectIdx && pinRejectIdx < localAcceptIdx) {
+		t.Errorf("expected order pinAccept(%d) < pinReject(%d) < localAccept(%d) so the DNS pin "+
+			"filters LAN :53 while the pinned resolver stays reachable:\n%s",
+			pinAcceptIdx, pinRejectIdx, localAcceptIdx, rules)
+	}
+}
+
 // TestRestrictedModeDNSPinOrderedBeforeRFC1918_Integration guards the
 // security-critical ordering: a pinned resolver on the LAN must have its :53
 // accept installed BEFORE the RFC1918 block, or the block would shadow it and the

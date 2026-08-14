@@ -50,7 +50,7 @@
     "allowed_ports": {
       "type": "array",
       "items": { "type": "integer", "minimum": 1, "maximum": 65535 },
-      "description": "Restrict outbound destination ports. In restricted mode this caps the otherwise-open internet egress to just these TCP/UDP ports (ICMP echo still works); in allowlist mode it further constrains the allowlisted hosts. Everything else is rejected. Bridge-provided DNS is unaffected, so include 53 if the container resolves via an off-box resolver. Honored only from trusted-scope config. Empty/unset keeps the default (all ports)."
+      "description": "Restrict outbound destination ports. In restricted mode this caps the otherwise-open internet egress to just these TCP/UDP ports (ICMP echo still works); in allowlist mode it further constrains the allowlisted hosts. Everything else is rejected. Applies to LAN traffic too: even with allow_local_network_access set, the local network is reachable only on these ports. Bridge-provided DNS is unaffected, so include 53 if the container resolves via an off-box resolver. Honored only from trusted-scope config. Empty/unset keeps the default (all ports)."
     }
   }
 }

@@ -355,20 +355,26 @@ type NetworkConfig struct {
 	// DNSServers pins the resolvers the container may reach on port 53. In
 	// restricted mode COI accepts :53 only to these addresses and rejects every
 	// other off-box DNS query, so a compromised container cannot bypass your
-	// resolver by talking straight to a public one (e.g. 8.8.8.8). The bridge's
-	// own resolver (input path) is left untouched, so normal resolution keeps
-	// working. IPv4 addresses only. Incompatible with allowlist mode, which
-	// blocks all DNS and uses /etc/hosts. Honored ONLY from trusted-scope config:
-	// a resolver pin from an untrusted project config is a DNS-redirect primitive,
-	// so untrusted entries are stripped at load time (see sanitizeUntrustedNetwork).
+	// resolver by talking straight to a public one (e.g. 8.8.8.8). The pin applies
+	// to ALL destinations, including the LAN and even when allow_local_network_access
+	// is set — so a LAN resolver (a Pi-hole) must be listed here by its exact IP to
+	// stay reachable on :53. The bridge's own resolver (input path) is left
+	// untouched, so normal resolution keeps working. IPv4 addresses only.
+	// Incompatible with allowlist mode, which blocks all DNS and uses /etc/hosts.
+	// Honored ONLY from trusted-scope config: a resolver pin from an untrusted
+	// project config is a DNS-redirect primitive, so untrusted entries are stripped
+	// at load time (see sanitizeUntrustedNetwork).
 	DNSServers []string `toml:"dns_servers"`
 	// AllowedPorts restricts outbound destination ports. When set, only these
 	// TCP/UDP dports are allowed to permitted destinations (ICMP echo still
 	// works); everything else is rejected. In restricted mode it caps the
 	// otherwise-open internet egress; in allowlist mode it further constrains the
-	// allowlisted hosts. nil/empty keeps the default (all ports). Bridge-provided
-	// DNS is unaffected, so include 53 here if the container resolves via an
-	// off-box resolver. Honored ONLY from trusted-scope config.
+	// allowlisted hosts. The cap applies to LAN traffic too — even when
+	// allow_local_network_access is set, the local network is reachable only on
+	// these ports (so a compromised container cannot pivot to SSH/DBs on the LAN).
+	// nil/empty keeps the default (all ports). Bridge-provided DNS is unaffected,
+	// so include 53 here if the container resolves via an off-box resolver. Honored
+	// ONLY from trusted-scope config.
 	AllowedPorts []int `toml:"allowed_ports"`
 }
 

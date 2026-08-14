@@ -69,8 +69,10 @@
 # Restrict outbound destination ports. In restricted mode this caps the open
 # internet egress to just these dports (ICMP echo still works); in allowlist mode
 # it further constrains the allowlisted hosts. Everything else is rejected.
-# Bridge-provided DNS is unaffected — add 53 here if the container resolves via an
-# off-box resolver. Trusted-scope only.
+# Applies to the LAN too: even with allow_local_network_access, the local network
+# is reachable only on these ports (so local access can't silently reopen SSH/DB
+# ports). Bridge-provided DNS is unaffected — add 53 here if the container resolves
+# via an off-box resolver. Trusted-scope only.
 # allowed_ports = [80, 443]
 
 # Static name→address entries written into the container's /etc/hosts, made

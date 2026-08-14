@@ -82,6 +82,31 @@ func l4PortMatch(ports []int) []string {
 	return match
 }
 
+// addLocalNetworkAllows opens the RFC1918 ranges for allow_local_network_access.
+//
+// When allowed_ports is set the accept is scoped to those destination ports, so
+// the egress port cap applies to LAN traffic too: a compromised container must
+// not gain all-ports reach to the local network — the prime lateral-movement
+// target (SSH, databases, device admin panels) — merely because local access is
+// enabled. This keeps allowed_ports and dns_servers consistent: both filter LAN
+// traffic just as they filter internet traffic (dns_servers already restricts
+// :53 everywhere via pinDNSForward, which runs before this).
+//
+// With no port cap it is the historic all-protocol blanket accept, so configs
+// that do not set allowed_ports emit byte-identical rules.
+func (f *NftManager) addLocalNetworkAllows(allowedPorts []int) error {
+	for _, cidr := range []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"} {
+		if len(allowedPorts) > 0 {
+			if err := f.addRuleWithMatch(f.containerIP, cidr, l4PortMatch(allowedPorts), "accept"); err != nil {
+				return fmt.Errorf("failed to add port-scoped RFC1918 allow rule: %w", err)
+			}
+		} else if err := f.addRule(f.containerIP, cidr, "accept"); err != nil {
+			return fmt.Errorf("failed to add RFC1918 allow rule: %w", err)
+		}
+	}
+	return nil
+}
+
 // pinDNSForward restricts the container's off-box DNS to a fixed set of resolvers.
 // It accepts port 53 to each pinned server, then rejects port 53 to everything
 // else — all in the forward chain, so a compromised container cannot reach an
