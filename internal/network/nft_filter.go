@@ -36,8 +36,26 @@ func NewNftManager(containerIP, gatewayIP string) *NftManager {
 	}
 }
 
-// ApplyRestricted applies restricted mode rules (block RFC1918, allow internet)
+// ApplyRestricted applies restricted mode rules (block RFC1918, allow internet).
+//
+// Two optional egress controls layer on top of the classic behaviour, each a
+// no-op when unset so existing configs emit byte-identical rules:
+//
+//   - dns_servers: pin the resolvers reachable on port 53 (see pinDNSForward).
+//   - allowed_ports: cap the otherwise-open internet egress to specific dports.
 func (f *NftManager) ApplyRestricted(cfg *config.NetworkConfig) error {
+	// Validate the optional egress controls up front. Setup is fail-closed, so a
+	// bad dns_servers/allowed_ports value aborts here with the boot block still in
+	// place rather than installing a half-applied policy.
+	dnsServers, err := validateDNSServers(cfg.DNSServers)
+	if err != nil {
+		return err
+	}
+	allowedPorts, err := validateAllowedPorts(cfg.AllowedPorts)
+	if err != nil {
+		return err
+	}
+
 	if err := EnsureBaseRules(); err != nil {
 		logWarnf("Warning: failed to ensure base rules: %v", err)
 	}
@@ -46,6 +64,13 @@ func (f *NftManager) ApplyRestricted(cfg *config.NetworkConfig) error {
 		if err := f.addRule(f.containerIP, f.gatewayIP+"/32", "accept"); err != nil {
 			return fmt.Errorf("failed to add gateway allow rule: %w", err)
 		}
+	}
+
+	// DNS pinning must precede the RFC1918 block so a pinned LAN resolver stays
+	// reachable on 53, and must precede the permissive default so a pinned public
+	// resolver is accepted before the port cap / catch-all could touch it.
+	if err := f.pinDNSForward(dnsServers); err != nil {
+		return err
 	}
 
 	if config.BoolVal(cfg.AllowLocalNetworkAccess) {
@@ -68,8 +93,23 @@ func (f *NftManager) ApplyRestricted(cfg *config.NetworkConfig) error {
 		}
 	}
 
-	// Allow all remaining internet traffic (needed when FORWARD policy is DROP)
-	if err := f.addRule(f.containerIP, "0.0.0.0/0", "accept"); err != nil {
+	// Allow remaining internet traffic (needed when FORWARD policy is DROP). With
+	// allowed_ports set this becomes a port-capped accept plus a default reject,
+	// turning restricted mode from allow-by-default into "internet, but only on
+	// these ports"; ICMP echo stays permitted so ping/health checks still work.
+	// Without allowed_ports it is the historic blanket accept.
+	if len(allowedPorts) > 0 {
+		if err := f.addRuleWithMatch(f.containerIP, "0.0.0.0/0", l4PortMatch(allowedPorts), "accept"); err != nil {
+			return fmt.Errorf("failed to add port-capped allow rule: %w", err)
+		}
+		if err := f.addRuleWithMatch(f.containerIP, "0.0.0.0/0",
+			[]string{"icmp", "type", "echo-request", "limit", "rate", "10/second"}, "accept"); err != nil {
+			return fmt.Errorf("failed to add ICMP allow rule: %w", err)
+		}
+		if err := f.addRule(f.containerIP, "0.0.0.0/0", "reject"); err != nil {
+			return fmt.Errorf("failed to add port-cap default deny rule: %w", err)
+		}
+	} else if err := f.addRule(f.containerIP, "0.0.0.0/0", "accept"); err != nil {
 		return fmt.Errorf("failed to add default allow rule: %w", err)
 	}
 
@@ -97,6 +137,14 @@ func (f *NftManager) ApplyRestricted(cfg *config.NetworkConfig) error {
 func (f *NftManager) ApplyAllowlist(cfg *config.NetworkConfig, staticCIDRs []string) error {
 	if f.gatewayIP == "" {
 		return fmt.Errorf("allowlist mode requires a gateway IP (for the DHCP renewal accept rule)")
+	}
+
+	// allowed_ports optionally caps which dports the allowlisted hosts are reachable
+	// on. Validated up front so setup fails closed on a bad value. (dns_servers is
+	// rejected earlier, in setupAllowlist: allowlist mode blocks all DNS by design.)
+	allowedPorts, err := validateAllowedPorts(cfg.AllowedPorts)
+	if err != nil {
+		return err
 	}
 
 	if err := EnsureBaseRules(); err != nil {
@@ -170,9 +218,9 @@ func (f *NftManager) ApplyAllowlist(cfg *config.NetworkConfig, staticCIDRs []str
 	// burst) so ordinary ping and health checks work while ICMP cannot become a
 	// high-bandwidth covert channel. Excess echo and all other ICMP types fall
 	// through to the default deny.
+	l4match := l4PortMatch(allowedPorts) // meta l4proto {tcp,udp} [th dport { ... }]
 	for _, set := range []string{staticSetName(f.containerIP), dynamicSetName(f.containerIP)} {
-		if err := f.addRuleWithMatch(f.containerIP, "@"+set,
-			[]string{"meta", "l4proto", "{", "tcp,", "udp", "}"}, "accept"); err != nil {
+		if err := f.addRuleWithMatch(f.containerIP, "@"+set, l4match, "accept"); err != nil {
 			return fmt.Errorf("failed to add allowlist L4 rule for set %s: %w", set, err)
 		}
 		if err := f.addRuleWithMatch(f.containerIP, "@"+set,

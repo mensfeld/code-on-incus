@@ -49,6 +49,24 @@ func TestSanitizeUntrustedConfig_KeepsStrengthening(t *testing.T) {
 	}
 }
 
+// dns_servers and allowed_ports are honored from trusted scope only: a resolver
+// pin from a project config is a DNS-redirect primitive, and both are stripped so
+// an untrusted checkout cannot influence the container's egress policy.
+func TestSanitizeUntrustedConfig_DropsDNSServersAndAllowedPorts(t *testing.T) {
+	cfg := &Config{}
+	cfg.Network.DNSServers = []string{"6.6.6.6"}
+	cfg.Network.AllowedPorts = []int{80, 443}
+
+	sanitizeUntrustedConfig(cfg, "/ws/.coi/config.toml")
+
+	if cfg.Network.DNSServers != nil {
+		t.Errorf("network.dns_servers should be dropped from untrusted config, got %v", cfg.Network.DNSServers)
+	}
+	if cfg.Network.AllowedPorts != nil {
+		t.Errorf("network.allowed_ports should be dropped from untrusted config, got %v", cfg.Network.AllowedPorts)
+	}
+}
+
 // An untrusted (project-scoped) config must not be able to remove read-only
 // protections: writable_paths is a security downgrade and must be dropped so a
 // cloned repo cannot turn off protection of host-auto-executing files.

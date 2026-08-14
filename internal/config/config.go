@@ -352,6 +352,24 @@ type NetworkConfig struct {
 	// spoofing primitive and reachability punches a firewall hole, so an
 	// untrusted project config's entries are stripped at load time.
 	Hosts []HostEntry `toml:"hosts"`
+	// DNSServers pins the resolvers the container may reach on port 53. In
+	// restricted mode COI accepts :53 only to these addresses and rejects every
+	// other off-box DNS query, so a compromised container cannot bypass your
+	// resolver by talking straight to a public one (e.g. 8.8.8.8). The bridge's
+	// own resolver (input path) is left untouched, so normal resolution keeps
+	// working. IPv4 addresses only. Incompatible with allowlist mode, which
+	// blocks all DNS and uses /etc/hosts. Honored ONLY from trusted-scope config:
+	// a resolver pin from an untrusted project config is a DNS-redirect primitive,
+	// so untrusted entries are stripped at load time (see sanitizeUntrustedNetwork).
+	DNSServers []string `toml:"dns_servers"`
+	// AllowedPorts restricts outbound destination ports. When set, only these
+	// TCP/UDP dports are allowed to permitted destinations (ICMP echo still
+	// works); everything else is rejected. In restricted mode it caps the
+	// otherwise-open internet egress; in allowlist mode it further constrains the
+	// allowlisted hosts. nil/empty keeps the default (all ports). Bridge-provided
+	// DNS is unaffected, so include 53 here if the container resolves via an
+	// off-box resolver. Honored ONLY from trusted-scope config.
+	AllowedPorts []int `toml:"allowed_ports"`
 }
 
 // HostEntry maps one IPv4 address to one or more hostnames for the container's
@@ -658,6 +676,8 @@ func synthesizeDefaultProfile(cfg *Config) ProfileConfig {
 	shell := cfg.Shell
 	network := cfg.Network
 	network.AllowedDomains = cloneSlice(cfg.Network.AllowedDomains)
+	network.DNSServers = cloneSlice(cfg.Network.DNSServers)
+	network.AllowedPorts = cloneSlice(cfg.Network.AllowedPorts)
 	paths := cfg.Paths
 	incus := cfg.Incus
 	git := cfg.Git
@@ -1425,6 +1445,12 @@ func mergeNetworkInto(dst *NetworkConfig, src *NetworkConfig) {
 	}
 	if src.Hosts != nil {
 		dst.Hosts = src.Hosts
+	}
+	if src.DNSServers != nil {
+		dst.DNSServers = src.DNSServers
+	}
+	if src.AllowedPorts != nil {
+		dst.AllowedPorts = src.AllowedPorts
 	}
 	if src.Logging.Path != "" {
 		dst.Logging.Path = src.Logging.Path

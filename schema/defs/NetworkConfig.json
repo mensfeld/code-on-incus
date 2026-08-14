@@ -41,6 +41,16 @@
       "type": "array",
       "items": { "$ref": "#/$defs/HostEntry" },
       "description": "Static name→address entries written into the container's /etc/hosts, with firewall reachability applied to match the active mode. Honored only from trusted-scope config (~/.coi/config.toml or COI_CONFIG); a project ./.coi/config.toml's entries are ignored, since a name→IP mapping is a spoofing primitive and reachability punches a firewall hole. In allowlist mode a private/metadata IP is refused; in restricted mode a private IP gets a targeted allow rule."
+    },
+    "dns_servers": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Pin the DNS resolvers the container may reach on port 53 (restricted mode). COI accepts :53 only to these IPv4 addresses and rejects every other off-box DNS query, so a compromised container cannot bypass your resolver (e.g. hit 8.8.8.8 directly). The bridge's own resolver is left untouched, so normal resolution keeps working. Honored only from trusted-scope config; not valid in allowlist mode (which blocks all DNS). Only effective alongside a port/allowlist cap, since DNS-over-HTTPS on 443 is otherwise still possible."
+    },
+    "allowed_ports": {
+      "type": "array",
+      "items": { "type": "integer", "minimum": 1, "maximum": 65535 },
+      "description": "Restrict outbound destination ports. In restricted mode this caps the otherwise-open internet egress to just these TCP/UDP ports (ICMP echo still works); in allowlist mode it further constrains the allowlisted hosts. Everything else is rejected. Bridge-provided DNS is unaffected, so include 53 if the container resolves via an off-box resolver. Honored only from trusted-scope config. Empty/unset keeps the default (all ports)."
     }
   }
 }
