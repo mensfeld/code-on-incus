@@ -908,8 +908,13 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 	var contextContent string
 	{
 		networkMode := ""
+		var allowedPorts []int
+		var dnsServers, allowedDomains []string
 		if opts.NetworkConfig != nil {
 			networkMode = string(opts.NetworkConfig.Mode)
+			allowedPorts = opts.NetworkConfig.AllowedPorts
+			dnsServers = opts.NetworkConfig.DNSServers
+			allowedDomains = opts.NetworkConfig.AllowedDomains
 		}
 		// Check if GH_TOKEN or GITHUB_TOKEN is among forwarded env vars
 		ghAuthenticated := false
@@ -956,6 +961,9 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 			HomeDir:            result.HomeDir,
 			Persistent:         opts.Persistent,
 			NetworkMode:        networkMode,
+			AllowedPorts:       allowedPorts,
+			DNSServers:         dnsServers,
+			AllowedDomains:     allowedDomains,
 			SSHAgentForwarded:  result.SSHAgentSocketPath != "",
 			RunAsRoot:          result.RunAsRoot,
 			ProtectedPaths:     opts.ProtectedPaths,

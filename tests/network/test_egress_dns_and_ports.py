@@ -242,6 +242,33 @@ def test_restricted_allow_local_without_cap_is_blanket(
         )
 
 
+def test_context_file_surfaces_network_limitations(coi_binary, workspace_dir, cleanup_containers):
+    """The generated SANDBOX_CONTEXT.md (injected into the agent's context/system
+    prompt) must state the active egress limits — the port cap and the pinned
+    resolver — so the agent knows what it can and cannot reach instead of blindly
+    dialing blocked ports/resolvers."""
+    env = write_trusted_coi_config(
+        '[network]\nmode = "restricted"\nallowed_ports = [443]\ndns_servers = ["1.1.1.1"]\n'
+    )
+    name = _start_background_shell(coi_binary, workspace_dir, env)
+
+    result = subprocess.run(
+        [coi_binary, "container", "exec", name, "--", "cat", "/home/code/SANDBOX_CONTEXT.md"],
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    # coi container exec writes command output to stderr.
+    content = result.stdout + result.stderr
+    assert result.returncode == 0, f"should read SANDBOX_CONTEXT.md. stderr: {result.stderr}"
+    assert "destination port(s) 443" in content, (
+        f"context file must state the egress port cap.\n{content}"
+    )
+    assert "DNS is pinned to 1.1.1.1" in content, (
+        f"context file must state the pinned resolver.\n{content}"
+    )
+
+
 def test_dns_servers_rejected_in_allowlist_mode(coi_binary, workspace_dir, cleanup_containers):
     """dns_servers + allowlist mode is refused (fail closed): allowlist mode blocks
     all DNS by design, so re-opening :53 would defeat it. coi run must abort and
