@@ -567,9 +567,15 @@ jobs:
           echo "Args: ${{ matrix.test_group.pytest_args }}"
           echo "============================================"
 
-          # Run test group with coverage reporting
-          # pytest_args allows filtering specific test classes within a file
-          python -m pytest ${{ matrix.test_group.path }} ${{ matrix.test_group.pytest_args }} -v --tb=short --durations=0 --cov=tests --cov-report=term-missing
+          # Run test group with coverage reporting.
+          # pytest_args allows filtering specific test classes within a file.
+          # --reruns retries a failed test a couple of times before giving up:
+          # these lanes drive real containers/incus/nft and have a documented tail
+          # of timing flakes (monitoring dedup, auth-log/inotify watchers,
+          # shell poweroff detection — see #653/#658/#665) where a single transient
+          # miss reds the whole run. A genuine bug still fails after every attempt;
+          # only integration lanes get this, never the strict Go unit lane.
+          python -m pytest ${{ matrix.test_group.path }} ${{ matrix.test_group.pytest_args }} -v --tb=short --durations=0 --reruns 2 --reruns-delay 3 --cov=tests --cov-report=term-missing
         env:
           COI_BINARY: ./coi
           GITHUB_REPOSITORY_URL: ${{ github.event.pull_request.head.repo.clone_url || format('https://github.com/{0}.git', github.repository) }}
