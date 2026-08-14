@@ -1,6 +1,41 @@
 package config
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/BurntSushi/toml"
+)
+
+// End-to-end at the file level: an untrusted project config.toml that sets
+// dns_servers/allowed_ports (a DNS-redirect primitive and an egress control) must
+// have them stripped after decode+sanitize, while a strengthening key it also
+// sets (block_private_networks=true) survives. Mirrors the real Load() path where
+// a decoded project config is sanitized before merge.
+func TestSanitizeUntrustedConfig_DecodedProjectTOML(t *testing.T) {
+	const projectTOML = `
+[network]
+mode = "restricted"
+block_private_networks = true
+dns_servers = ["6.6.6.6"]
+allowed_ports = [80, 443]
+`
+	var cfg Config
+	if _, err := toml.Decode(projectTOML, &cfg); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	sanitizeUntrustedConfig(&cfg, "/ws/.coi/config.toml")
+
+	if cfg.Network.DNSServers != nil {
+		t.Errorf("dns_servers should be stripped from untrusted TOML, got %v", cfg.Network.DNSServers)
+	}
+	if cfg.Network.AllowedPorts != nil {
+		t.Errorf("allowed_ports should be stripped from untrusted TOML, got %v", cfg.Network.AllowedPorts)
+	}
+	if cfg.Network.BlockPrivateNetworks == nil || !*cfg.Network.BlockPrivateNetworks {
+		t.Error("block_private_networks=true (strengthening) must survive sanitize")
+	}
+}
 
 // Untrusted (project-scoped) config must have any security-WEAKENING network
 // setting dropped.

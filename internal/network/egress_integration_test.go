@@ -185,6 +185,212 @@ func TestRestrictedModeDNSPinAndPortCap_Integration(t *testing.T) {
 	verifyTeardownRemovesRules(t, containerIP)
 }
 
+// setupNetForContainer is the shared launch+setup boilerplate for the
+// rule-assertion integration tests below. It launches a fresh container, runs
+// SetupForContainer with cfg, returns the container IP and the resulting forward
+// chain text, and registers teardown+cleanup.
+func setupNetForContainer(t *testing.T, containerName string, cfg *config.NetworkConfig) (string, string) {
+	t.Helper()
+	mgr := container.NewManager(containerName)
+	t.Cleanup(func() { cleanupTestContainer(t, containerName) })
+
+	if exists, _ := mgr.Exists(); exists {
+		_ = mgr.Stop(true)
+		_ = mgr.Delete(true)
+	}
+	if err := mgr.Launch("coi-default", false, ""); err != nil {
+		t.Fatalf("launch container: %v", err)
+	}
+	time.Sleep(3 * time.Second)
+
+	containerIP, err := GetContainerIP(containerName)
+	if err != nil {
+		t.Fatalf("get container IP: %v", err)
+	}
+
+	netMgr := NewManager(cfg, logger.NewDiscard())
+	if err := netMgr.SetupForContainer(context.Background(), containerName); err != nil {
+		t.Fatalf("SetupForContainer: %v", err)
+	}
+	t.Cleanup(func() { _ = netMgr.Teardown(context.Background(), containerName) })
+
+	output, err := runNFTCommand("-a", "list", "chain", "ip", "coi", "forward")
+	if err != nil {
+		t.Fatalf("list nft chain: %v", err)
+	}
+	return containerIP, string(output)
+}
+
+// TestRestrictedModeMultipleDNSPins_Integration verifies each pinned resolver
+// gets its own :53 accept and a single :53 reject closes the rest.
+func TestRestrictedModeMultipleDNSPins_Integration(t *testing.T) {
+	skipUnlessAllowlistReady(t)
+
+	servers := []string{"203.0.113.10", "203.0.113.11"}
+	containerIP, rules := setupNetForContainer(t, "coi-restricted-multi-dns", &config.NetworkConfig{
+		Mode:       config.NetworkModeRestricted,
+		DNSServers: servers,
+	})
+	lines := linesWithComment(rules, containerIP)
+
+	var accepts, rejects int
+	for _, line := range lines {
+		if !strings.Contains(line, "dport 53") {
+			continue
+		}
+		if strings.Contains(line, "accept") {
+			accepts++
+		}
+		if strings.Contains(line, "reject") {
+			rejects++
+		}
+	}
+	if accepts != len(servers) {
+		t.Errorf("expected %d :53 accept rules (one per pinned resolver), got %d:\n%s", len(servers), accepts, rules)
+	}
+	if rejects != 1 {
+		t.Errorf("expected exactly 1 :53 reject rule, got %d:\n%s", rejects, rules)
+	}
+	for _, s := range servers {
+		if !strings.Contains(rules, s) {
+			t.Errorf("expected an accept rule for pinned resolver %s:\n%s", s, rules)
+		}
+	}
+}
+
+// TestRestrictedModeSinglePortCap_Integration verifies a single allowed port is
+// emitted correctly (nft normalises `{ 8080 }` to `dport 8080`) and that a
+// default-deny closes the chain.
+func TestRestrictedModeSinglePortCap_Integration(t *testing.T) {
+	skipUnlessAllowlistReady(t)
+
+	containerIP, rules := setupNetForContainer(t, "coi-restricted-single-port", &config.NetworkConfig{
+		Mode:         config.NetworkModeRestricted,
+		AllowedPorts: []int{8080},
+	})
+	lines := linesWithComment(rules, containerIP)
+
+	var portAccept, defaultDeny bool
+	for _, line := range lines {
+		if strings.Contains(line, "dport 8080") && strings.Contains(line, "accept") {
+			portAccept = true
+		}
+		if strings.Contains(line, "reject") && !strings.Contains(line, "dport") && !strings.Contains(line, "/") {
+			defaultDeny = true
+		}
+	}
+	if !portAccept {
+		t.Errorf("expected a `dport 8080 accept` rule:\n%s", rules)
+	}
+	if !defaultDeny {
+		t.Errorf("expected a default-deny reject after the port cap:\n%s", rules)
+	}
+}
+
+// TestRestrictedModeNoEgressKeys_HistoricRules_Integration is the regression
+// guard: with neither dns_servers nor allowed_ports set, restricted mode emits
+// the historic blanket accept with NO dport match and NO extra default deny.
+func TestRestrictedModeNoEgressKeys_HistoricRules_Integration(t *testing.T) {
+	skipUnlessAllowlistReady(t)
+
+	containerIP, rules := setupNetForContainer(t, "coi-restricted-historic", &config.NetworkConfig{
+		Mode: config.NetworkModeRestricted,
+	})
+	lines := linesWithComment(rules, containerIP)
+
+	// No port scoping anywhere for this container.
+	for _, line := range lines {
+		if strings.Contains(line, "dport") {
+			t.Errorf("unexpected dport match with no egress keys set:\n%s", line)
+		}
+	}
+	// The catch-all must be a bare accept: no daddr, no dport, and not the ICMP
+	// or conntrack accept (those also lack a daddr but are not the blanket rule).
+	var blanketAccept bool
+	for _, line := range lines {
+		if strings.Contains(line, "accept") && !strings.Contains(line, "daddr") &&
+			!strings.Contains(line, "dport") && !strings.Contains(line, "icmp") &&
+			!strings.Contains(line, "ct state") {
+			blanketAccept = true
+		}
+	}
+	if !blanketAccept {
+		t.Errorf("expected the historic blanket `accept` rule:\n%s", rules)
+	}
+}
+
+// TestAllowlistPortCapCoversBothSets_Integration verifies allowed_ports scopes
+// BOTH the static and dynamic set-accept rules (not just one).
+func TestAllowlistPortCapCoversBothSets_Integration(t *testing.T) {
+	skipUnlessAllowlistReady(t)
+
+	containerIP, rules := setupNetForContainer(t, "coi-allowlist-both-sets", &config.NetworkConfig{
+		Mode:           config.NetworkModeAllowlist,
+		AllowedDomains: []string{"203.0.113.0/24"},
+		AllowedPorts:   []int{443},
+	})
+	lines := linesWithComment(rules, containerIP)
+
+	var staticScoped, dynamicScoped bool
+	for _, line := range lines {
+		if !strings.Contains(line, "accept") || !strings.Contains(line, "dport") {
+			continue
+		}
+		if strings.Contains(line, "@coi_s_") {
+			staticScoped = true
+		}
+		if strings.Contains(line, "@coi_d_") {
+			dynamicScoped = true
+		}
+	}
+	if !staticScoped {
+		t.Errorf("static-set accept rule is not port-scoped:\n%s", rules)
+	}
+	if !dynamicScoped {
+		t.Errorf("dynamic-set accept rule is not port-scoped:\n%s", rules)
+	}
+}
+
+// TestRestrictedModeDNSPinOrderedBeforeRFC1918_Integration guards the
+// security-critical ordering: a pinned resolver on the LAN must have its :53
+// accept installed BEFORE the RFC1918 block, or the block would shadow it and the
+// container could never reach its own resolver. Uses a private-range pinned IP
+// with block_private_networks on, then asserts the accept precedes the reject.
+func TestRestrictedModeDNSPinOrderedBeforeRFC1918_Integration(t *testing.T) {
+	skipUnlessAllowlistReady(t)
+
+	const lanResolver = "192.168.222.53" // RFC1918, unlikely to collide
+	yes := true
+
+	containerIP, rules := setupNetForContainer(t, "coi-restricted-dns-order", &config.NetworkConfig{
+		Mode:                 config.NetworkModeRestricted,
+		DNSServers:           []string{lanResolver},
+		BlockPrivateNetworks: &yes,
+	})
+	lines := linesWithComment(rules, containerIP)
+
+	pinIdx, rfcIdx := -1, -1
+	for i, line := range lines {
+		if pinIdx == -1 && strings.Contains(line, lanResolver) &&
+			strings.Contains(line, "dport 53") && strings.Contains(line, "accept") {
+			pinIdx = i
+		}
+		if rfcIdx == -1 && strings.Contains(line, "192.168.0.0/16") && strings.Contains(line, "reject") {
+			rfcIdx = i
+		}
+	}
+	if pinIdx == -1 {
+		t.Fatalf("no :53 accept rule found for pinned LAN resolver %s:\n%s", lanResolver, rules)
+	}
+	if rfcIdx == -1 {
+		t.Fatalf("no RFC1918 (192.168.0.0/16) reject rule found:\n%s", rules)
+	}
+	if pinIdx >= rfcIdx {
+		t.Errorf("DNS pin accept (idx %d) must precede the RFC1918 reject (idx %d), or the LAN resolver is shadowed:\n%s",
+			pinIdx, rfcIdx, rules)
+	}
+}
+
 // TestAllowlistModeRejectsDNSServers_Integration verifies that combining
 // dns_servers with allowlist mode is refused: allowlist mode blocks all DNS by
 // design, so re-opening :53 to a pinned resolver would reintroduce exactly the
