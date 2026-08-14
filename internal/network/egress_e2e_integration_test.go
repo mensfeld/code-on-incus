@@ -36,6 +36,15 @@ func containerCanConnect(t *testing.T, mgr *container.Manager, host string, port
 	return err == nil
 }
 
+// containerCanResolve reports whether the container can resolve a DNS name via
+// its normal resolver. Used to prove that DNS pinning leaves the bridge resolver
+// (the container's default DHCP-provided DNS) working.
+func containerCanResolve(t *testing.T, mgr *container.Manager, name string) bool {
+	t.Helper()
+	_, err := mgr.ExecCommand("timeout 6 getent hosts "+name, container.ExecCommandOptions{Capture: true})
+	return err == nil
+}
+
 // launchE2EContainer launches a fresh container for an egress E2E test and
 // registers cleanup. Returns the container manager and its IP.
 func launchE2EContainer(t *testing.T, containerName string) (*container.Manager, string) {
@@ -125,6 +134,9 @@ func TestE2E_RestrictedDNSPin_BlocksUnpinnedResolver(t *testing.T) {
 		!containerCanConnect(t, mgr, other, httpsPort) {
 		t.Skipf("no baseline connectivity to the DNS/HTTPS targets — skipping")
 	}
+	// Capture baseline resolution BEFORE any rules, so we only assert "still
+	// resolves" on a runner whose bridge DNS actually works to begin with.
+	baselineResolves := containerCanResolve(t, mgr, "one.one.one.one")
 
 	netCfg := &config.NetworkConfig{
 		Mode:       config.NetworkModeRestricted,
@@ -144,6 +156,13 @@ func TestE2E_RestrictedDNSPin_BlocksUnpinnedResolver(t *testing.T) {
 	}
 	if !containerCanConnect(t, mgr, other, httpsPort) {
 		t.Errorf("expected %s:%d (non-53) to be unaffected by the DNS pin, but it was blocked", other, httpsPort)
+	}
+
+	// The bridge resolver (the container's default DNS) must keep working — the pin
+	// only touches the forward path. Only asserted when baseline resolution worked,
+	// so a runner whose bridge has no upstream DNS doesn't false-fail.
+	if baselineResolves && !containerCanResolve(t, mgr, "one.one.one.one") {
+		t.Error("expected normal DNS resolution to keep working after pinning (bridge resolver must be untouched)")
 	}
 
 	if err := netMgr.Teardown(context.Background(), mgr.ContainerName); err != nil {
