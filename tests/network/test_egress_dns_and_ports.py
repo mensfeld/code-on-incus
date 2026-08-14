@@ -22,9 +22,54 @@ for the wrong reason (host simply unreachable):
     8.8.8.8 — Google:     listens on 443 and 53
 """
 
+import json
+import re
 import subprocess
 
 from support.helpers import wait_for_firewall_rules, write_trusted_coi_config
+
+
+def _container_ip(name):
+    """Resolve a container's IPv4 address via incus."""
+    result = subprocess.run(
+        ["incus", "list", name, "--format=json"],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    info = json.loads(result.stdout)
+    if not info:
+        return None
+    for addr in info[0].get("state", {}).get("network", {}).get("eth0", {}).get("addresses", []):
+        if addr.get("family") == "inet":
+            return addr["address"]
+    return None
+
+
+def _container_rule_lines(container_ip):
+    """Return the ip coi forward-chain rule lines whose source is this container."""
+    result = subprocess.run(
+        ["sudo", "-n", "nft", "list", "chain", "ip", "coi", "forward"],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    if result.returncode != 0:
+        return []
+    src_re = re.compile(r"ip saddr " + re.escape(container_ip) + r"\b")
+    return [ln for ln in result.stdout.splitlines() if src_re.search(ln)]
+
+
+def _lan_accept_lines(container_ip):
+    """The container's RFC1918 (local-access) accept rules."""
+    return [
+        ln
+        for ln in _container_rule_lines(container_ip)
+        if "accept" in ln
+        and any(c in ln for c in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"))
+    ]
 
 
 def _start_background_shell(coi_binary, workspace_dir, env):
@@ -156,6 +201,45 @@ def test_allowlist_allowed_ports_constrains_host(coi_binary, workspace_dir, clea
     assert not _can_connect(coi_binary, name, "8.8.8.8", 443), (
         "a non-allowlisted host must be blocked entirely"
     )
+
+
+def test_restricted_allow_local_respects_port_cap(coi_binary, workspace_dir, cleanup_containers):
+    """allow_local_network_access + allowed_ports=[443]: the RFC1918 LAN allow
+    rules must be port-scoped (carry a dport match), so local access does not
+    reopen the LAN on all ports (SSH/DBs) — the port cap applies to the LAN too."""
+    env = write_trusted_coi_config(
+        '[network]\nmode = "restricted"\nallow_local_network_access = true\nallowed_ports = [443]\n'
+    )
+    name = _start_background_shell(coi_binary, workspace_dir, env)
+    ip = _container_ip(name)
+    assert ip, f"should resolve container IP for {name}"
+
+    lan_accepts = _lan_accept_lines(ip)
+    assert lan_accepts, "expected RFC1918 local-access allow rules; found none"
+    for ln in lan_accepts:
+        assert "dport" in ln and "443" in ln, (
+            f"LAN allow rule must be port-scoped to 443 (allowed_ports must apply to the LAN): {ln}"
+        )
+
+
+def test_restricted_allow_local_without_cap_is_blanket(
+    coi_binary, workspace_dir, cleanup_containers
+):
+    """Parity guard: allow_local_network_access with NO allowed_ports keeps the
+    historic all-ports blanket LAN accept (no dport match)."""
+    env = write_trusted_coi_config(
+        '[network]\nmode = "restricted"\nallow_local_network_access = true\n'
+    )
+    name = _start_background_shell(coi_binary, workspace_dir, env)
+    ip = _container_ip(name)
+    assert ip, f"should resolve container IP for {name}"
+
+    lan_accepts = _lan_accept_lines(ip)
+    assert lan_accepts, "expected RFC1918 local-access allow rules; found none"
+    for ln in lan_accepts:
+        assert "dport" not in ln, (
+            f"LAN allow rule should be a blanket accept with no allowed_ports set: {ln}"
+        )
 
 
 def test_dns_servers_rejected_in_allowlist_mode(coi_binary, workspace_dir, cleanup_containers):
