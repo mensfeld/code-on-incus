@@ -91,6 +91,30 @@ install_base_dependencies() {
 }
 
 #######################################
+# Disable host-only services
+# Services that are useless in a container and, in
+# udisks2's case, actively break the host.
+#######################################
+disable_host_only_services() {
+    log "Disabling host-only services..."
+
+    # udisks2 (pulled in as an fwupd dependency) keeps /proc/swaps
+    # open in its main loop. Incus backs /proc/swaps with lxcfs, so
+    # that poll() is a FUSE request to a daemon on the host. When the
+    # host suspends, the kernel freezer stops lxcfs while the request
+    # is in flight; it can never be answered, udisksd wedges in D
+    # state, and the freezer gives up after its 20s timeout. The
+    # host's suspend then aborts with "Device or resource busy" and
+    # logind retries forever, so a laptop with a coi container running
+    # never sleeps with the lid shut and takes ~20s to accept input on
+    # lid open.
+    systemctl disable --now udisks2.service 2>/dev/null || true
+    systemctl mask udisks2.service 2>/dev/null || true
+
+    log "Host-only services disabled"
+}
+
+#######################################
 # Install Node.js LTS
 #######################################
 install_nodejs() {
@@ -690,6 +714,7 @@ main() {
 
     configure_dns_if_needed
     install_base_dependencies
+    disable_host_only_services
     install_nodejs
     create_code_user
     install_mise
