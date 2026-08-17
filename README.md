@@ -294,6 +294,10 @@ coi trust                       # approve   (coi trust --list to view, coi untru
 coi list --all
 coi list --running              # Only running containers (also: --stopped, --status frozen)
 
+# Live overview of running sessions (refreshes every 2s)
+coi overview
+coi overview --refresh-interval 5
+
 # Gracefully shutdown / force kill containers
 coi shutdown coi-abc12345-1
 coi kill --all
