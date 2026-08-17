@@ -42,6 +42,9 @@ tmp/
 *.swo
 *~
 
+# AI agent tooling (local Claude Code config/state at repo root)
+/.claude/
+
 # OS
 .DS_Store
 Thumbs.db
