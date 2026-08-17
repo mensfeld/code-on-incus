@@ -598,6 +598,63 @@ allowed_domains = ["142.250.0.0/15", "172.217.0.0/16", "216.239.32.0/19"]
 A host outside the allowlist has no address in `/etc/hosts` and no route through
 the firewall, so it fails to resolve and fails to connect.
 
+### DNS pinning (`dns_servers`)
+
+In **restricted** mode you can pin the resolvers the container is allowed to reach
+on port 53. COI accepts `:53` only to the listed addresses and rejects every other
+off-box DNS query, so a compromised container cannot bypass your resolver — for
+example by talking straight to `8.8.8.8` or a resolver it hardcoded.
+
+```toml
+[network]
+mode = "restricted"
+dns_servers = ["192.168.1.2"]   # e.g. your Pi-hole
+```
+
+The bridge's own resolver (the container's normal DHCP-provided DNS) travels a
+different path and is left untouched, so ordinary resolution keeps working with no
+`resolv.conf` changes. A pinned resolver on your LAN stays reachable on `:53` even
+when `block_private_networks` is on — but on port 53 only, never on other ports.
+
+- **IPv4 addresses only**, and **trusted-scope only**: a resolver pin from a
+  project `./.coi/config.toml` is a DNS-redirect primitive, so it is ignored from
+  untrusted sources.
+- **Not valid in allowlist mode**, which blocks all DNS by design (COI errors out
+  if you combine them). List the resolver in `allowed_domains` instead.
+- **Caveat:** pinning `:53` only bites when port 443 is also constrained (allowlist
+  mode, or `allowed_ports` below). Otherwise malware can still tunnel
+  DNS-over-HTTPS on 443.
+
+### Egress port allowlist (`allowed_ports`)
+
+Restrict which destination ports the container may reach. In **restricted** mode
+this caps the otherwise-open internet egress to just these ports; in **allowlist**
+mode it further constrains the allowlisted hosts. Everything else is rejected
+(ICMP echo still works, so `ping`/health checks are fine).
+
+```toml
+[network]
+mode = "restricted"
+allowed_ports = [80, 443]        # web only; blocks SSH, DB ports, IoT panels, ...
+```
+
+This turns "installed a malicious package that now scans the LAN" into a far
+smaller problem: even reachable hosts are reachable only on the ports they
+legitimately need, so lateral movement to SSH (22), databases (5432/6379/…), or
+device admin daemons is cut off.
+
+- Bridge-provided DNS is unaffected; add `53` to `allowed_ports` if the container
+  resolves via an **off-box** resolver.
+- **Trusted-scope only** (ignored from a project `./.coi/config.toml`).
+- **Applies to the LAN too.** Even with `allow_local_network_access = true`, the
+  local network is reachable only on these ports — so enabling local access does
+  not silently reopen SSH/DB ports on your LAN. Likewise `dns_servers` filters
+  `:53` everywhere, so a LAN resolver (Pi-hole) must be listed by its exact IP to
+  stay reachable.
+- Combine with `dns_servers` for the full "use my Pi-hole, on these ports only"
+  posture — the two compose: a pinned resolver is reachable on `:53` regardless of
+  `allowed_ports`.
+
 ## Security Monitoring
 
 COI includes **built-in security monitoring** to detect and respond to malicious behavior in real-time:

@@ -397,6 +397,20 @@ func sanitizeUntrustedNetwork(n *NetworkConfig, path string) {
 		refuse("network.hosts")
 		n.Hosts = nil
 	}
+	if len(n.DNSServers) > 0 {
+		// Pinning the resolver a container may reach is a DNS-redirect primitive:
+		// a project config could point DNS at an attacker's box. Trusted scope only.
+		refuse("network.dns_servers")
+		n.DNSServers = nil
+	}
+	if len(n.AllowedPorts) > 0 {
+		// A port allowlist only tightens egress, so it cannot downgrade security on
+		// its own — but it is honored from trusted scope only for a uniform rule,
+		// matching the other network policy keys (and so a project config cannot
+		// silently narrow egress in ways the user did not intend either).
+		refuse("network.allowed_ports")
+		n.AllowedPorts = nil
+	}
 }
 
 // markUntrustedMounts tags mounts from an untrusted source so escaping host
