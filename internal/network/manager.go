@@ -158,7 +158,7 @@ func (m *Manager) applyUserHosts(containerName string) error {
 	if len(m.config.Hosts) == 0 {
 		return nil
 	}
-	if err := ApplyUserHosts(containerName, m.config.Mode, config.BoolVal(m.config.AllowLocalNetworkAccess), m.config.Hosts); err != nil {
+	if err := ApplyUserHosts(containerName, m.config.Mode, config.BoolVal(m.config.AllowLocalNetworkAccess), m.config.Hosts, m.config.AllowedPorts); err != nil {
 		return fmt.Errorf("failed to apply [[network.hosts]]: %w", err)
 	}
 	m.logger.Printf("Applied %d configured host entr(y/ies) to /etc/hosts", len(m.config.Hosts))
@@ -279,6 +279,18 @@ func (m *Manager) setupAllowlist(ctx context.Context, containerName string) erro
 	// Validate configuration
 	if len(m.config.AllowedDomains) == 0 {
 		return fmt.Errorf("allowlist mode requires at least one allowed domain")
+	}
+
+	// dns_servers is meaningless — and actively harmful — in allowlist mode, which
+	// deliberately blocks ALL DNS and makes the container's /etc/hosts the single
+	// source of name resolution. Re-opening :53 to a pinned resolver would let the
+	// container learn addresses the firewall was never told about, the exact
+	// host/container divergence this mode exists to prevent. Fail loudly rather
+	// than silently ignore a security-shaped setting.
+	if len(m.config.DNSServers) > 0 {
+		return fmt.Errorf("network.dns_servers is not compatible with allowlist mode: " +
+			"allowlist mode blocks all DNS and resolves names via /etc/hosts. " +
+			"Use dns_servers with restricted mode, or list the resolver in allowed_domains")
 	}
 
 	policy, err := NewAllowPolicy(m.config.AllowedDomains)

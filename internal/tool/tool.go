@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"text/template"
 
@@ -338,6 +339,9 @@ type ContextInfo struct {
 	HomeDir            string      // Home directory inside container (e.g., "/home/code")
 	Persistent         bool        // Whether the container persists between sessions
 	NetworkMode        string      // "restricted", "open", "allowlist", or ""
+	AllowedPorts       []int       // Egress destination-port allowlist (empty = all ports)
+	DNSServers         []string    // Pinned DNS resolvers, :53 restricted to these (empty = unrestricted)
+	AllowedDomains     []string    // Allowlist-mode reachable destinations (hostnames/IPs/CIDRs)
 	SSHAgentForwarded  bool        // Whether host SSH agent is forwarded
 	RunAsRoot          bool        // Whether the tool runs as root
 	OSName             string      // OS name (e.g., "Ubuntu 22.04")
@@ -435,6 +439,43 @@ func RenderContextFileContent(info ContextInfo) string {
 		data.NetworkLimitation = "Only pre-approved domains are reachable; all other outbound connections and private networks are blocked"
 	case "":
 		data.NetworkDesc = "Default (no explicit network policy)"
+	}
+
+	// Surface the fine-grained egress controls so the agent knows exactly what it
+	// can and cannot reach and does not waste turns dialing blocked ports/resolvers.
+	// Appended to NetworkLimitation, which the template renders only when non-empty.
+	//
+	// These are gated on the mode that actually ENFORCES them, not merely on the
+	// config being present: allowed_ports/dns_servers are inert in open mode (which
+	// installs a blanket accept), and dns_servers is inert in allowlist mode (which
+	// blocks all DNS and is rejected at setup). Announcing a cap the firewall never
+	// installed would tell the agent egress is filtered when it is wide open.
+	portsEnforced := info.NetworkMode == "restricted" || info.NetworkMode == "allowlist"
+	dnsEnforced := info.NetworkMode == "restricted"
+	var egress []string
+	if portsEnforced && len(info.AllowedPorts) > 0 {
+		ports := make([]string, len(info.AllowedPorts))
+		for i, p := range info.AllowedPorts {
+			ports[i] = strconv.Itoa(p)
+		}
+		egress = append(egress, "outbound is restricted to destination port(s) "+strings.Join(ports, ", ")+
+			" — all other ports are blocked (including on the local network), so services on non-listed ports are unreachable")
+	}
+	if dnsEnforced && len(info.DNSServers) > 0 {
+		egress = append(egress, "DNS is pinned to "+strings.Join(info.DNSServers, ", ")+
+			" on port 53 — queries to any other resolver are blocked")
+	}
+	if info.NetworkMode == "allowlist" && len(info.AllowedDomains) > 0 {
+		egress = append(egress, "the only reachable outbound destinations are: "+strings.Join(info.AllowedDomains, ", "))
+	}
+	if len(egress) > 0 {
+		joined := strings.Join(egress, "; ")
+		if data.NetworkLimitation != "" {
+			data.NetworkLimitation += ". Additionally, " + joined
+		} else {
+			data.NetworkLimitation = "Egress is filtered: " + joined
+		}
+		data.NetworkDesc += " — egress-filtered (see Limitations below)"
 	}
 
 	if info.SSHAgentForwarded {
