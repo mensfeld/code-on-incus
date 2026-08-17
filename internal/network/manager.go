@@ -158,7 +158,7 @@ func (m *Manager) applyUserHosts(containerName string) error {
 	if len(m.config.Hosts) == 0 {
 		return nil
 	}
-	if err := ApplyUserHosts(containerName, m.config.Mode, config.BoolVal(m.config.AllowLocalNetworkAccess), m.config.Hosts); err != nil {
+	if err := ApplyUserHosts(containerName, m.config.Mode, config.BoolVal(m.config.AllowLocalNetworkAccess), m.config.Hosts, m.config.AllowedPorts); err != nil {
 		return fmt.Errorf("failed to apply [[network.hosts]]: %w", err)
 	}
 	m.logger.Printf("Applied %d configured host entr(y/ies) to /etc/hosts", len(m.config.Hosts))

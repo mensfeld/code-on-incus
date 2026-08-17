@@ -78,6 +78,8 @@
 # Static name→address entries written into the container's /etc/hosts, made
 # reachable to match the mode (restricted punches a targeted allow for a private
 # IP; allowlist adds it to the firewall set and refuses private/metadata IPs).
+# If allowed_ports is set, that reachability is scoped to those ports too, so a
+# host entry can't reopen the full port range on a LAN box.
 # Trusted-scope only — ignored from a project ./.coi/config.toml. Add on the fly
 # to a running container with `coi hosts add <container> <ip> <hostname...>`.
 # [[network.hosts]]

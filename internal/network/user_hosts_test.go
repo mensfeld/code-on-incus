@@ -1,10 +1,53 @@
 package network
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/mensfeld/code-on-incus/internal/config"
 )
+
+// A [[network.hosts]] private-IP entry punches a targeted accept at the head of
+// the coi forward chain. Without a port cap that is the historic all-protocol
+// hole; with allowed_ports set the accept MUST be scoped to those dports, or a
+// host entry silently reopens the full port range (SSH/DB/admin) on a LAN box —
+// exactly the lateral-movement the egress cap exists to prevent.
+func TestContainerAcceptRuleArgs(t *testing.T) {
+	const c, d = "10.1.2.3", "192.168.1.50"
+	joined := func(a []string) string { return strings.Join(a, " ") }
+
+	t.Run("no cap keeps the all-protocol accept", func(t *testing.T) {
+		got := joined(containerAcceptRuleArgs(c, d, nil))
+		want := `insert rule ip coi forward ip saddr 10.1.2.3 ip daddr 192.168.1.50/32 accept comment "coi-10.1.2.3"`
+		if got != want {
+			t.Fatalf("unscoped rule mismatch:\n got: %s\nwant: %s", got, want)
+		}
+	})
+
+	t.Run("cap scopes the accept to allowed dports", func(t *testing.T) {
+		got := joined(containerAcceptRuleArgs(c, d, []int{80, 443}))
+		// The l4 match must sit between the daddr and the accept verb so the host is
+		// reachable ONLY on the capped ports.
+		want := `insert rule ip coi forward ip saddr 10.1.2.3 ip daddr 192.168.1.50/32 ` +
+			`meta l4proto { tcp, udp } th dport { 80, 443 } accept comment "coi-10.1.2.3"`
+		if got != want {
+			t.Fatalf("scoped rule mismatch:\n got: %s\nwant: %s", got, want)
+		}
+		if strings.Contains(got, "th dport { 80, 443 } accept") == false {
+			t.Errorf("port set must immediately precede accept, got: %s", got)
+		}
+	})
+
+	t.Run("a capped host is not reachable on an un-listed port", func(t *testing.T) {
+		got := joined(containerAcceptRuleArgs(c, d, []int{443}))
+		if strings.Contains(got, "22") {
+			t.Errorf("cap=[443] must not mention port 22 (SSH): %s", got)
+		}
+		if !strings.Contains(got, "dport { 443 }") {
+			t.Errorf("cap=[443] should render a single-port set: %s", got)
+		}
+	})
+}
 
 func TestClassifyHostIP(t *testing.T) {
 	cases := map[string]hostIPClass{
