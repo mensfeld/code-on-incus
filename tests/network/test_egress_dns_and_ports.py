@@ -72,6 +72,17 @@ def _lan_accept_lines(container_ip):
     ]
 
 
+def _host_accept_lines(container_ip, host_ip):
+    """The container's targeted accept rule(s) for a specific [[network.hosts]]
+    destination IP. Restricted mode inserts one at the head of the forward chain."""
+    dst_re = re.compile(r"ip daddr " + re.escape(host_ip) + r"\b")
+    return [
+        ln
+        for ln in _container_rule_lines(container_ip)
+        if "accept" in ln and dst_re.search(ln)
+    ]
+
+
 def _start_background_shell(coi_binary, workspace_dir, env):
     """Start a background coi shell with the given (trusted) env and return the
     container name once its firewall rules are in place."""
@@ -239,6 +250,71 @@ def test_restricted_allow_local_without_cap_is_blanket(
     for ln in lan_accepts:
         assert "dport" not in ln, (
             f"LAN allow rule should be a blanket accept with no allowed_ports set: {ln}"
+        )
+
+
+def test_restricted_host_entry_respects_port_cap(coi_binary, workspace_dir, cleanup_containers):
+    """restricted + allowed_ports=[443] + a private [[network.hosts]] entry: the
+    targeted accept COI inserts for that LAN host must be port-scoped (carry a
+    dport match for 443), so a host entry cannot silently reopen the full port
+    range (SSH/DBs/admin) on a LAN box — the guarantee allowed_ports makes for
+    every other destination.
+
+    Asserts on the emitted rule (the mechanism). Unlike the public-IP probes
+    above, a private [[network.hosts]] target has no deterministic listener in CI
+    to connect to, and the container's own bridge accept would mask a gateway
+    probe; the live-traffic reject of a capped port is already proven by
+    test_restricted_allowed_ports_blocks_other_ports."""
+    host_ip = "192.168.77.10"
+    env = write_trusted_coi_config(
+        '[network]\n'
+        'mode = "restricted"\n'
+        'allowed_ports = [443]\n\n'
+        '[[network.hosts]]\n'
+        f'ip = "{host_ip}"\n'
+        'hostnames = ["capped-host.internal"]\n'
+    )
+    name = _start_background_shell(coi_binary, workspace_dir, env)
+    ip = _container_ip(name)
+    assert ip, f"should resolve container IP for {name}"
+
+    host_accepts = _host_accept_lines(ip, host_ip)
+    assert host_accepts, (
+        f"expected a targeted accept rule for host entry {host_ip}; found none"
+    )
+    for ln in host_accepts:
+        assert "dport" in ln and "443" in ln, (
+            f"host-entry accept must be scoped to allowed_ports (443), not an "
+            f"all-ports hole: {ln}"
+        )
+
+
+def test_restricted_host_entry_without_cap_is_blanket(
+    coi_binary, workspace_dir, cleanup_containers
+):
+    """Parity guard: a private [[network.hosts]] entry with NO allowed_ports keeps
+    the historic all-ports targeted accept (no dport match), so existing configs
+    are unchanged."""
+    host_ip = "192.168.77.11"
+    env = write_trusted_coi_config(
+        '[network]\n'
+        'mode = "restricted"\n\n'
+        '[[network.hosts]]\n'
+        f'ip = "{host_ip}"\n'
+        'hostnames = ["blanket-host.internal"]\n'
+    )
+    name = _start_background_shell(coi_binary, workspace_dir, env)
+    ip = _container_ip(name)
+    assert ip, f"should resolve container IP for {name}"
+
+    host_accepts = _host_accept_lines(ip, host_ip)
+    assert host_accepts, (
+        f"expected a targeted accept rule for host entry {host_ip}; found none"
+    )
+    for ln in host_accepts:
+        assert "dport" not in ln, (
+            f"host-entry accept should be a blanket all-ports accept with no "
+            f"allowed_ports set: {ln}"
         )
 
 
