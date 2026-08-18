@@ -52,6 +52,7 @@ type SetupOptions struct {
 	ForwardSSHAgent       bool                   // Forward host SSH agent to container
 	ForwardedEnvVars      []string               // Names of host env vars being forwarded (for context file)
 	GitIdentity           GitIdentity            // Resolved host git identity to configure inside the container
+	GitReadonly           bool                   // Identity is provided by a read-only ~/.gitconfig mount; skip the in-container git config writes
 	ContextFilePath       string                 // Path to custom context .md file on host (overrides tool default)
 	ProfileContextFile    string                 // Path to profile context .md file (appended to sandbox context)
 	Timezone              string                 // Resolved IANA timezone name (e.g., "America/New_York"), empty for UTC
@@ -757,8 +758,17 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 	// Setting user.useConfigOnly=true forces git to refuse commits until
 	// user.name and user.email are explicitly configured, which ensures AI
 	// tools discover and set the real developer identity.
-	SetupGitIdentityGuard(result.Manager, result.HomeDir, opts.Logger)
-	SetupGitIdentity(result.Manager, result.HomeDir, opts.GitIdentity, opts.Logger)
+	//
+	// git.readonly: the identity (and the useConfigOnly guard) instead arrive via a
+	// read-only ~/.gitconfig mount injected at mount-config time, so writing here is
+	// both unnecessary and would fail against the read-only mount — skip it. The
+	// whole point is that the container agent cannot change this file.
+	if opts.GitReadonly {
+		opts.Logger("Git identity locked read-only (git.readonly): ~/.gitconfig cannot be changed in-container")
+	} else {
+		SetupGitIdentityGuard(result.Manager, result.HomeDir, opts.Logger)
+		SetupGitIdentity(result.Manager, result.HomeDir, opts.GitIdentity, opts.Logger)
+	}
 
 	// 6.6.2. Suppress Claude Code auto-mode prompt via managed settings.
 	// Only applies when the tool is Claude Code — the managed settings path

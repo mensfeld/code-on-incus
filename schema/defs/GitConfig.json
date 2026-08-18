@@ -18,6 +18,10 @@
     "seed_host_identity": {
       "type": "boolean",
       "description": "Read the host's global git user.name/user.email and install it in the container when no explicit name/email is set (default: true). Set false to keep only the fail-closed guard. Trusted-scope only."
+    },
+    "readonly": {
+      "type": "boolean",
+      "description": "Lock the configured commit identity so the container agent cannot overwrite it: instead of writing ~/.gitconfig (which is writable), COI mounts the identity read-only at ~/.gitconfig, so `git config --global user.name …` inside the container fails on a read-only filesystem. Only takes effect with a resolvable identity (name/email, or a seeded host identity). Trusted-scope only. Default false."
     }
   }
 }

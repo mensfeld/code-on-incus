@@ -187,6 +187,13 @@ type GitConfig struct {
 	// the fail-closed guard only (git refuses commits until the tool sets an
 	// identity), e.g. to avoid copying the host identity into the container.
 	SeedHostIdentity *bool `toml:"seed_host_identity"`
+	// Readonly, when true, LOCKS the configured identity: instead of writing the
+	// container's ~/.gitconfig (which the agent can overwrite), COI mounts the
+	// identity read-only at ~/.gitconfig, so `git config --global user.name …`
+	// inside the container fails on a read-only filesystem. Only takes effect with
+	// a resolvable identity (name/email or a seeded host identity). Trusted-scope
+	// only, like name/email. Default false (writable, as before).
+	Readonly *bool `toml:"readonly"`
 }
 
 // IsSeedHostIdentityEnabled reports whether host-global git identity seeding is
@@ -197,6 +204,12 @@ func (g *GitConfig) IsSeedHostIdentityEnabled() bool {
 		return true
 	}
 	return *g.SeedHostIdentity
+}
+
+// IsReadonlyEnabled reports whether the configured git identity should be locked
+// read-only in the container. Default false (nil receiver or field).
+func (g *GitConfig) IsReadonlyEnabled() bool {
+	return g != nil && g.Readonly != nil && *g.Readonly
 }
 
 // SecurityConfig contains security-related settings for workspace protection
@@ -1521,6 +1534,9 @@ func mergeGitInto(dst *GitConfig, src *GitConfig) {
 	}
 	if src.SeedHostIdentity != nil {
 		dst.SeedHostIdentity = src.SeedHostIdentity
+	}
+	if src.Readonly != nil {
+		dst.Readonly = src.Readonly
 	}
 }
 
