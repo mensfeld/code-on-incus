@@ -6,17 +6,23 @@ func TestValidateNetworkHosts(t *testing.T) {
 	ok := []HostEntry{
 		{IP: "10.0.0.5", Hostnames: []string{"db.internal", "cache.internal"}},
 		{IP: "1.2.3.4", Hostnames: []string{"api.example.com"}},
+		{IP: "192.168.1.50", Hostnames: []string{"redmine.local"}, Ports: []int{443}},
+		{IP: "192.168.1.51", Hostnames: []string{"svc.local"}, Ports: []int{80, 443, 8080}},
 	}
 	if err := ValidateNetworkHosts(ok); err != nil {
 		t.Errorf("valid hosts rejected: %v", err)
 	}
 
 	bad := map[string][]HostEntry{
-		"not an IP":     {{IP: "nope", Hostnames: []string{"x"}}},
-		"IPv6":          {{IP: "2001:db8::1", Hostnames: []string{"x"}}},
-		"no hostnames":  {{IP: "10.0.0.5", Hostnames: nil}},
-		"bad hostname":  {{IP: "10.0.0.5", Hostnames: []string{"bad host name"}}},
-		"hostname dash": {{IP: "10.0.0.5", Hostnames: []string{"-leading"}}},
+		"not an IP":       {{IP: "nope", Hostnames: []string{"x"}}},
+		"IPv6":            {{IP: "2001:db8::1", Hostnames: []string{"x"}}},
+		"no hostnames":    {{IP: "10.0.0.5", Hostnames: nil}},
+		"bad hostname":    {{IP: "10.0.0.5", Hostnames: []string{"bad host name"}}},
+		"hostname dash":   {{IP: "10.0.0.5", Hostnames: []string{"-leading"}}},
+		"port zero":       {{IP: "10.0.0.5", Hostnames: []string{"x"}, Ports: []int{0}}},
+		"port over max":   {{IP: "10.0.0.5", Hostnames: []string{"x"}, Ports: []int{70000}}},
+		"port negative":   {{IP: "10.0.0.5", Hostnames: []string{"x"}, Ports: []int{-1}}},
+		"one bad in list": {{IP: "10.0.0.5", Hostnames: []string{"x"}, Ports: []int{443, 99999}}},
 	}
 	for name, entries := range bad {
 		if err := ValidateNetworkHosts(entries); err == nil {

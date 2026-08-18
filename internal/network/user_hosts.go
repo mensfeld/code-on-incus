@@ -260,22 +260,30 @@ func mergeHostEntry(entries []config.HostEntry, add config.HostEntry) []config.H
 // checkHostReachable).
 func applyHostFirewall(mode config.NetworkMode, containerIP string, entry config.HostEntry, allowedPorts []int) error {
 	class := classifyHostIP(entry.IP)
+	// This entry's own ports scope its reachability (e.g. redmine on 443 only);
+	// with none configured it inherits the global allowed_ports (else all ports).
+	// This is what lets restricted mode open one LAN service on one port while the
+	// rest of egress stays wide open — allowed_ports alone can't, since it is global.
+	hostPorts := entry.Ports
+	if len(hostPorts) == 0 {
+		hostPorts = allowedPorts
+	}
 	switch {
 	case mode == config.NetworkModeAllowlist && class == hostPublic:
 		// Allowlist mode keeps addresses in two parallel sets: the address-only set
 		// (ICMP + the security monitor) and the port-scoped concatenated set the L4
-		// accept matches. Add this host to BOTH — the tuple scoped to allowed_ports
-		// (else all ports), so it inherits the same cap every other allowlisted host
-		// does and cannot silently reopen the full port range on a LAN box.
+		// accept matches. Add this host to BOTH — the tuple scoped to hostPorts, so it
+		// inherits the same cap every other allowlisted host does and cannot silently
+		// reopen the full port range on a LAN box.
 		nm := NewNftManager(containerIP, "")
 		if err := nm.AddStaticIPs([]string{entry.IP}); err != nil {
 			return fmt.Errorf("failed to allow host %s in allowlist mode: %w", entry.IP, err)
 		}
-		if err := nm.AddStaticTuples([]staticTuple{{CIDR: entry.IP}}, intsToPortRanges(allowedPorts)); err != nil {
+		if err := nm.AddStaticTuples([]staticTuple{{CIDR: entry.IP}}, intsToPortRanges(hostPorts)); err != nil {
 			return fmt.Errorf("failed to port-scope host %s in allowlist mode: %w", entry.IP, err)
 		}
 	case mode == config.NetworkModeRestricted && class == hostPrivate:
-		if err := insertContainerAcceptRule(containerIP, entry.IP, allowedPorts); err != nil {
+		if err := insertContainerAcceptRule(containerIP, entry.IP, hostPorts); err != nil {
 			return fmt.Errorf("failed to allow private host %s in restricted mode: %w", entry.IP, err)
 		}
 	}

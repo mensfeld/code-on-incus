@@ -56,6 +56,8 @@ var hostsRemoveCmd = &cobra.Command{
 }
 
 func init() {
+	hostsAddCmd.Flags().IntSlice("ports", nil,
+		"restrict this host to these TCP/UDP ports (e.g. --ports 443); empty inherits allowed_ports (else all)")
 	hostsCmd.AddCommand(hostsAddCmd, hostsListCmd, hostsRemoveCmd)
 }
 
@@ -84,11 +86,16 @@ func (a *App) hostsAddCommand(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	entry := config.HostEntry{IP: args[1], Hostnames: args[2:]}
+	ports, _ := cmd.Flags().GetIntSlice("ports")
+	entry := config.HostEntry{IP: args[1], Hostnames: args[2:], Ports: ports}
 	if err := network.AddUserHost(name, a.cfg.Network.Mode, config.BoolVal(a.cfg.Network.AllowLocalNetworkAccess), entry, a.cfg.Network.AllowedPorts); err != nil {
 		return err
 	}
-	fmt.Printf("Added %s -> %s to %s\n", strings.Join(entry.Hostnames, " "), entry.IP, name)
+	scope := ""
+	if len(ports) > 0 {
+		scope = fmt.Sprintf(" (ports %v)", ports)
+	}
+	fmt.Printf("Added %s -> %s%s to %s\n", strings.Join(entry.Hostnames, " "), entry.IP, scope, name)
 	return nil
 }
 

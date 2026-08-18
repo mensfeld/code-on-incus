@@ -33,6 +33,11 @@ func ValidateNetworkHosts(hosts []HostEntry) error {
 				return fmt.Errorf("network.hosts[%d] (%s): %q is not a valid hostname", i, h.IP, name)
 			}
 		}
+		for _, p := range h.Ports {
+			if p < 1 || p > 65535 {
+				return fmt.Errorf("network.hosts[%d] (%s): port %d is out of range (1-65535)", i, h.IP, p)
+			}
+		}
 	}
 	return nil
 }
@@ -386,9 +391,17 @@ type NetworkConfig struct {
 
 // HostEntry maps one IPv4 address to one or more hostnames for the container's
 // /etc/hosts. It is the config form of `[[network.hosts]]`.
+//
+// Ports optionally scopes the firewall reachability of this host to specific
+// TCP/UDP destination ports (e.g. [443]) — the same per-destination cap Phase 3
+// gives allowed_domains, so you can open a single LAN service (redmine:443)
+// without widening the rest of egress. Empty inherits the global allowed_ports
+// (else all ports). Applied in restricted and allowlist mode; ignored in open
+// mode, which blocks nothing.
 type HostEntry struct {
 	IP        string   `toml:"ip"`
 	Hostnames []string `toml:"hostnames"`
+	Ports     []int    `toml:"ports"`
 }
 
 // NetworkLoggingConfig contains network logging settings
