@@ -43,7 +43,11 @@ func nftDump(t *testing.T) string {
 
 func applyTestAllowlist(t *testing.T, f *NftManager, staticCIDRs []string) {
 	t.Helper()
-	cfg := &config.NetworkConfig{Mode: config.NetworkModeAllowlist}
+	// Mirror production: the manager derives staticCIDRs from cfg.AllowedDomains, and
+	// ApplyAllowlist re-reads cfg.AllowedDomains to build the port-scoped tuples — so
+	// the two must be the same source, or the tuple set (L4) and address set (ICMP)
+	// diverge.
+	cfg := &config.NetworkConfig{Mode: config.NetworkModeAllowlist, AllowedDomains: staticCIDRs}
 	if err := f.ApplyAllowlist(cfg, staticCIDRs); err != nil {
 		t.Fatalf("ApplyAllowlist: %v", err)
 	}
@@ -66,8 +70,10 @@ func TestAllowlistSets_Lifecycle(t *testing.T) {
 	// them stable for the container's lifetime and lets updates be pure element
 	// operations, with no window where a stale reject shadows a fresh accept.
 	for _, want := range []string{
-		"@" + staticSetName(testContainerIP),
-		"@" + dynamicSetName(testContainerIP),
+		"@" + staticSetName(testContainerIP),      // address set (ICMP + monitor)
+		"@" + dynamicSetName(testContainerIP),     // address set (ICMP + monitor)
+		"@" + staticPortSetName(testContainerIP),  // port-scoped set (L4)
+		"@" + dynamicPortSetName(testContainerIP), // port-scoped set (L4)
 	} {
 		if !strings.Contains(dump, want) {
 			t.Errorf("expected a rule referencing %s\n%s", want, dump)
@@ -84,8 +90,8 @@ func TestAllowlistSets_Lifecycle(t *testing.T) {
 		t.Errorf("expected a default reject rule\n%s", dump)
 	}
 
-	if err := f.AllowDynamicIPs([]string{"172.217.112.4"}, 300, testRefreshInterval); err != nil {
-		t.Fatalf("AllowDynamicIPs: %v", err)
+	if err := f.AllowDynamicIPsPorts([]string{"172.217.112.4"}, []portRange{{Lo: 443, Hi: 443}}, 300, testRefreshInterval); err != nil {
+		t.Fatalf("AllowDynamicIPsPorts: %v", err)
 	}
 	dump = nftDump(t)
 	if !strings.Contains(dump, "172.217.112.4") {
@@ -93,6 +99,11 @@ func TestAllowlistSets_Lifecycle(t *testing.T) {
 	}
 	if !strings.Contains(dump, "timeout") {
 		t.Errorf("dynamic elements must carry a timeout so a rotated-out address expires\n%s", dump)
+	}
+	// The port-scoped tuple must land in the dynamic concatenated set too, so the
+	// L4 accept reaches the resolved address only on its permitted port.
+	if !strings.Contains(dump, "172.217.112.4 . 443") {
+		t.Errorf("expected the resolved address·port tuple in the dynamic port set\n%s", dump)
 	}
 
 	// Teardown must remove the rules *and* the sets. The kernel refuses to drop a
@@ -105,10 +116,62 @@ func TestAllowlistSets_Lifecycle(t *testing.T) {
 	if strings.Contains(dump, testContainerIP) {
 		t.Errorf("rules for %s survived teardown\n%s", testContainerIP, dump)
 	}
-	for _, set := range []string{staticSetName(testContainerIP), dynamicSetName(testContainerIP)} {
+	for _, set := range []string{
+		staticSetName(testContainerIP), dynamicSetName(testContainerIP),
+		staticPortSetName(testContainerIP), dynamicPortSetName(testContainerIP),
+	} {
 		if strings.Contains(dump, set) {
 			t.Errorf("set %s survived teardown\n%s", set, dump)
 		}
+	}
+}
+
+// TestAllowlistPerDestinationPorts is the Phase 3 guard: each allowed_domains
+// entry's ports land in the concatenated set as the right address·port tuple, a
+// bare entry inherits the global allowed_ports, and the L4 accept matches the set
+// via `ip daddr . th dport`.
+func TestAllowlistPerDestinationPorts(t *testing.T) {
+	skipUnlessNft(t)
+
+	f := NewNftManager(testContainerIP, testGatewayIP)
+	t.Cleanup(func() { _ = DeleteCOIFilterRulesForIP(testContainerIP) })
+
+	cfg := &config.NetworkConfig{
+		Mode:         config.NetworkModeAllowlist,
+		AllowedPorts: []int{443}, // the global cap a bare entry inherits
+		AllowedDomains: []string{
+			"8.8.8.8:53",             // literal, explicit single port
+			"192.0.2.0/24:8000-8100", // literal CIDR, port range
+			"1.1.1.1",                // bare -> inherits global 443
+		},
+	}
+	policy, err := NewAllowPolicy(cfg.AllowedDomains)
+	if err != nil {
+		t.Fatalf("NewAllowPolicy: %v", err)
+	}
+	if err := f.ApplyAllowlist(cfg, policy.StaticCIDRs()); err != nil {
+		t.Fatalf("ApplyAllowlist: %v", err)
+	}
+
+	dump := nftDump(t)
+
+	// Each destination is reachable only on its own ports.
+	for _, want := range []string{
+		"8.8.8.8 . 53",
+		"192.0.2.0/24 . 8000-8100",
+		"1.1.1.1 . 443", // bare entry inherited the global allowed_ports
+	} {
+		if !strings.Contains(dump, want) {
+			t.Errorf("expected tuple %q in the port-scoped set\n%s", want, dump)
+		}
+	}
+	// The bare entry must NOT be reachable on all ports: no 1-65535 tuple for it.
+	if strings.Contains(dump, "1.1.1.1 . 1-65535") {
+		t.Errorf("bare entry with a global cap must not be all-ports\n%s", dump)
+	}
+	// The L4 accept matches the concatenated set, not a bare address set.
+	if !strings.Contains(dump, "th dport @"+staticPortSetName(testContainerIP)) {
+		t.Errorf("L4 accept must match the port-scoped set via th dport\n%s", dump)
 	}
 }
 
@@ -143,7 +206,9 @@ func TestApplyAllowlist_BlocksDNSInBothChains(t *testing.T) {
 	// to sit inside an allowlisted CIDR would otherwise be reachable on port 53
 	// and could hand the container any address it liked.
 	dnsAt := strings.Index(forward, "dport 53")
-	setAt := strings.Index(forward, "@"+staticSetName(testContainerIP))
+	// The port-scoped set backs the L4 accept, which is the FIRST set-accept rule —
+	// so it is the one the DNS/metadata rejects must precede.
+	setAt := strings.Index(forward, "@"+staticPortSetName(testContainerIP))
 	if dnsAt == -1 || setAt == -1 || dnsAt > setAt {
 		t.Errorf("the DNS reject must come BEFORE the allowlist set rules, or a resolver inside an "+
 			"allowlisted CIDR stays reachable on port 53\n%s", forward)
@@ -181,7 +246,7 @@ func TestAllowDynamicIPs_IsIdempotent(t *testing.T) {
 	applyTestAllowlist(t, f, nil)
 
 	for i := 0; i < 3; i++ {
-		if err := f.AllowDynamicIPs([]string{"172.217.112.4"}, 300, testRefreshInterval); err != nil {
+		if err := f.AllowDynamicIPsPorts([]string{"172.217.112.4"}, allPortsRange(), 300, testRefreshInterval); err != nil {
 			t.Fatalf("AllowDynamicIPs call %d: %v", i+1, err)
 		}
 	}
@@ -222,7 +287,7 @@ func TestAllowDynamicIPs_ConcurrentCallersNeverAnswerBeforeInstall(t *testing.T)
 		go func(n int) {
 			defer wg.Done()
 			<-start // maximise overlap
-			if err := f.AllowDynamicIPs(ips, 300, testRefreshInterval); err != nil {
+			if err := f.AllowDynamicIPsPorts(ips, allPortsRange(), 300, testRefreshInterval); err != nil {
 				errs[n] = err
 				return
 			}
@@ -270,7 +335,7 @@ func TestDeleteCOIFilterRulesForIP_RemovesEverything(t *testing.T) {
 	t.Cleanup(func() { _ = DeleteCOIFilterRulesForIP(testContainerIP) })
 
 	applyTestAllowlist(t, f, []string{"8.8.8.8/32"})
-	if err := f.AllowDynamicIPs([]string{"172.217.112.4"}, 300, testRefreshInterval); err != nil {
+	if err := f.AllowDynamicIPsPorts([]string{"172.217.112.4"}, allPortsRange(), 300, testRefreshInterval); err != nil {
 		t.Fatalf("AllowDynamicIPs: %v", err)
 	}
 

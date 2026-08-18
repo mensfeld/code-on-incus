@@ -57,6 +57,10 @@
 # refresh_interval_minutes = 30  # re-resolve allowlist domains (allowlist mode)
 # allowlist mode only — domains/IPs the container may reach:
 # allowed_domains = ["registry.npmjs.org", "api.anthropic.com"]
+# Each entry may carry a per-destination port scope as ":ports" (single ports,
+# comma lists, and lo-hi ranges); an entry with no port inherits allowed_ports
+# (else all ports). So a name/IP is reachable ONLY on the ports you name:
+# allowed_domains = ["github.com:443", "192.168.1.50:8080", "10.0.0.0/8:22", "svc:8000-8100"]
 
 # Pin the DNS resolvers the container may reach on port 53 (restricted mode).
 # COI accepts :53 only to these IPs and rejects all other off-box DNS, so a

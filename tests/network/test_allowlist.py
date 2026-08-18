@@ -735,10 +735,13 @@ refresh_interval_minutes = 30
         # Scope the assertions to the rule line(s) for THIS container, not the whole
         # shared chain — otherwise a leftover/concurrent allowlist rule could satisfy
         # the substrings even if this container's rules were emitted unscoped.
+        # Two families of set-admitting rules: the port-scoped sets (coi_sp_/coi_dp_)
+        # back the L4 (TCP/UDP) accepts, and the address-only sets (coi_s_/coi_d_)
+        # back the rate-limited ICMP echo. Match all of them.
         set_rules = [
             ln
             for ln in chain.stdout.splitlines()
-            if f"@coi_s_{ident}" in ln or f"@coi_d_{ident}" in ln
+            if any(f"@coi_{p}_{ident}" in ln for p in ("s", "d", "sp", "dp"))
         ]
         assert set_rules, f"no allowlist set rules for {ip}:\n{chain.stdout}"
         joined = "\n".join(set_rules)
