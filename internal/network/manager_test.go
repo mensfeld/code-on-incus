@@ -12,11 +12,12 @@ import (
 // stubNft records which nftRuler methods are called, in order.
 // Set failOn to the method name to make that call return an error.
 type stubNft struct {
-	calls          []string
-	failOn         string
-	lastAllowedIPs []string // IPs passed to the most recent ReplaceAllowlist call
-	dynamicIPs     []string // IPs installed into the dynamic set, cumulative
-	lastDynamicTTL uint32   // TTL of the most recent AllowDynamicIPs call
+	calls            []string
+	failOn           string
+	lastAllowedIPs   []string    // IPs passed to the most recent ReplaceAllowlist call
+	dynamicIPs       []string    // IPs installed into the dynamic set, cumulative
+	lastDynamicTTL   uint32      // TTL of the most recent AllowDynamicIPs call
+	lastDynamicPorts []portRange // ports of the most recent AllowDynamicIPs call
 }
 
 func (s *stubNft) ApplyAllowlist(_ *config.NetworkConfig, allowedIPs []string) error {
@@ -28,11 +29,12 @@ func (s *stubNft) ApplyAllowlist(_ *config.NetworkConfig, allowedIPs []string) e
 	return nil
 }
 
-// AllowDynamicIPs makes stubNft satisfy dynAllower, so Manager.nftSetAllower
+// AllowDynamicIPsPorts makes stubNft satisfy dynAllower, so Manager.nftSetAllower
 // routes DNS-learned addresses here instead of to the real nft set.
-func (s *stubNft) AllowDynamicIPs(ips []string, ttl uint32, _ time.Duration) error {
+func (s *stubNft) AllowDynamicIPsPorts(ips []string, ports []portRange, ttl uint32, _ time.Duration) error {
 	s.calls = append(s.calls, "AllowDynamicIPs")
 	s.dynamicIPs = append(s.dynamicIPs, ips...)
+	s.lastDynamicPorts = ports
 	s.lastDynamicTTL = ttl
 	if s.failOn == "AllowDynamicIPs" {
 		return errors.New("stub: AllowDynamicIPs failed")

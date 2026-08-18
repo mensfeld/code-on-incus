@@ -655,6 +655,32 @@ device admin daemons is cut off.
   posture — the two compose: a pinned resolver is reachable on `:53` regardless of
   `allowed_ports`.
 
+### Per-destination ports (`allowed_domains` with `:ports`)
+
+`allowed_ports` applies one port set to **every** allowlisted host. When different
+destinations legitimately need different ports, scope each `allowed_domains` entry
+individually with a `:ports` suffix — a single port, a comma list, or a `lo-hi`
+range:
+
+```toml
+[network]
+mode = "allowlist"
+allowed_domains = [
+    "github.com:443",              # git/HTTPS only
+    "registry.npmjs.org:80,443",   # a port list
+    "192.168.1.50:8080",           # the NAS web UI — and nothing else on it
+    "10.0.0.0/8:22",               # SSH into the lab subnet, but only SSH
+    "svc.internal:8000-8100",      # a port range
+    "api.anthropic.com",           # no port -> inherits allowed_ports (else all)
+]
+```
+
+Each destination is then reachable **only** on its own ports: the NAS answers on
+8080 but not on SSH, GitHub on 443 but nothing else. An entry with no `:ports`
+inherits the global `allowed_ports` (or all ports if none is set), so existing
+allowlists keep working unchanged. IPv4 only; a malformed port fails the session
+closed at startup.
+
 ## Security Monitoring
 
 COI includes **built-in security monitoring** to detect and respond to malicious behavior in real-time:

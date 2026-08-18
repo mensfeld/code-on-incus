@@ -333,12 +333,18 @@ const (
 
 // NetworkConfig contains network isolation settings
 type NetworkConfig struct {
-	Mode                    NetworkMode `toml:"mode"`
-	BlockPrivateNetworks    *bool       `toml:"block_private_networks"`
-	BlockMetadataEndpoint   *bool       `toml:"block_metadata_endpoint"`
-	AllowedDomains          []string    `toml:"allowed_domains"`
-	RefreshIntervalMinutes  int         `toml:"refresh_interval_minutes"`
-	AllowLocalNetworkAccess *bool       `toml:"allow_local_network_access"` // Allow established connections from entire local network (not just gateway)
+	Mode                  NetworkMode `toml:"mode"`
+	BlockPrivateNetworks  *bool       `toml:"block_private_networks"`
+	BlockMetadataEndpoint *bool       `toml:"block_metadata_endpoint"`
+	// AllowedDomains is the allowlist-mode reachable-destination list: hostnames,
+	// IPv4 addresses, and IPv4 CIDRs. Each entry may carry a per-destination port
+	// scope as ":ports" — a comma list of single ports and/or lo-hi ranges, e.g.
+	// "github.com:443", "192.168.1.50:8080", "10.0.0.0/8:22", "svc:8000-8100". An
+	// entry with no port inherits the global allowed_ports (else all ports), so a
+	// per-entry scope tightens just that destination. IPv4 only; wildcards rejected.
+	AllowedDomains          []string `toml:"allowed_domains"`
+	RefreshIntervalMinutes  int      `toml:"refresh_interval_minutes"`
+	AllowLocalNetworkAccess *bool    `toml:"allow_local_network_access"` // Allow established connections from entire local network (not just gateway)
 	// UseSudo controls whether COI may invoke `sudo` for network operations (nft,
 	// iptables). Defaults to true. When false, COI never shells out to sudo: it
 	// behaves as if passwordless sudo were unavailable, so `restricted`/`allowlist`

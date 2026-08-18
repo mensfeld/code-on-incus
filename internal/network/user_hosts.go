@@ -262,11 +262,17 @@ func applyHostFirewall(mode config.NetworkMode, containerIP string, entry config
 	class := classifyHostIP(entry.IP)
 	switch {
 	case mode == config.NetworkModeAllowlist && class == hostPublic:
-		// The allowlisted-set accept rule installed at launch is already scoped to
-		// allowed_ports (see ApplyAllowlist's l4PortMatch), so simply adding this
-		// address to the set inherits the port cap — nothing extra to do here.
-		if err := NewNftManager(containerIP, "").AddStaticIPs([]string{entry.IP}); err != nil {
+		// Allowlist mode keeps addresses in two parallel sets: the address-only set
+		// (ICMP + the security monitor) and the port-scoped concatenated set the L4
+		// accept matches. Add this host to BOTH — the tuple scoped to allowed_ports
+		// (else all ports), so it inherits the same cap every other allowlisted host
+		// does and cannot silently reopen the full port range on a LAN box.
+		nm := NewNftManager(containerIP, "")
+		if err := nm.AddStaticIPs([]string{entry.IP}); err != nil {
 			return fmt.Errorf("failed to allow host %s in allowlist mode: %w", entry.IP, err)
+		}
+		if err := nm.AddStaticTuples([]staticTuple{{CIDR: entry.IP}}, intsToPortRanges(allowedPorts)); err != nil {
+			return fmt.Errorf("failed to port-scope host %s in allowlist mode: %w", entry.IP, err)
 		}
 	case mode == config.NetworkModeRestricted && class == hostPrivate:
 		if err := insertContainerAcceptRule(containerIP, entry.IP, allowedPorts); err != nil {

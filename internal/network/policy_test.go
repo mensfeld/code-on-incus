@@ -1,6 +1,7 @@
 package network
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -97,5 +98,67 @@ func TestAllowPolicy_EmptyEntriesAreSkipped(t *testing.T) {
 	}
 	if len(p.Names()) != 1 || p.Names()[0] != "api.anthropic.com" {
 		t.Errorf("Names() = %v, want just api.anthropic.com", p.Names())
+	}
+}
+
+// TestAllowPolicy_PerEntryPorts covers the Phase 3 `dest:ports` syntax: each entry
+// carries its own port set, literal or name, and a bare entry carries none (nil =
+// inherit the global allowed_ports at set-build time).
+func TestAllowPolicy_PerEntryPorts(t *testing.T) {
+	p, err := NewAllowPolicy([]string{
+		"github.com:443",
+		"registry.npmjs.org", // bare -> inherit
+		"192.168.1.50:8080",
+		"10.0.0.0/8:22",
+		"svc.internal:8000-8100",
+	})
+	if err != nil {
+		t.Fatalf("NewAllowPolicy: %v", err)
+	}
+
+	// Names carry their ports (or nil when bare).
+	if got := p.PortsForName("github.com"); !reflect.DeepEqual(got, []portRange{{443, 443}}) {
+		t.Errorf("PortsForName(github.com) = %v, want [443]", got)
+	}
+	if got := p.PortsForName("registry.npmjs.org"); got != nil {
+		t.Errorf("PortsForName(registry.npmjs.org) = %v, want nil (inherit)", got)
+	}
+	if got := p.PortsForName("svc.internal"); !reflect.DeepEqual(got, []portRange{{8000, 8100}}) {
+		t.Errorf("PortsForName(svc.internal) = %v, want [8000-8100]", got)
+	}
+
+	// Literal tuples carry their address and ports; the address also lands in
+	// StaticCIDRs (which is port-blind, for ICMP + the monitor).
+	wantTuples := map[string][]portRange{
+		"192.168.1.50/32": {{8080, 8080}},
+		"10.0.0.0/8":      {{22, 22}},
+	}
+	for _, tup := range p.StaticTuples() {
+		want, ok := wantTuples[tup.CIDR]
+		if !ok {
+			t.Errorf("unexpected static tuple %q", tup.CIDR)
+			continue
+		}
+		if !reflect.DeepEqual(tup.Ports, want) {
+			t.Errorf("tuple %q ports = %v, want %v", tup.CIDR, tup.Ports, want)
+		}
+	}
+	if len(p.StaticTuples()) != len(wantTuples) {
+		t.Errorf("StaticTuples() = %v, want %d entries", p.StaticTuples(), len(wantTuples))
+	}
+}
+
+// TestAllowPolicy_RejectsBadPorts fails closed on a malformed per-entry port.
+func TestAllowPolicy_RejectsBadPorts(t *testing.T) {
+	for _, entry := range []string{
+		"github.com:0",       // port 0
+		"github.com:70000",   // over max
+		"github.com:443-80",  // inverted range
+		"github.com:",        // empty port spec
+		"192.168.1.50:https", // non-numeric
+	} {
+		if _, err := NewAllowPolicy([]string{entry}); err == nil {
+			t.Errorf("expected %q to be rejected, got nil error", entry)
+		}
 	}
 }

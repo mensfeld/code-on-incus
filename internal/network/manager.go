@@ -418,12 +418,21 @@ func (m *Manager) installNames(containerName string) error {
 func (m *Manager) syncResolved(domainIPs map[string][]string) error {
 	allower := m.nftSetAllower()
 	refreshInterval := m.dynamicElementLifetimeInterval()
+	// The global allowed_ports a name inherits when it named no port of its own.
+	// Already validated at ApplyAllowlist (setup fails closed before we get here),
+	// so a plain conversion is safe.
+	globalPorts := intsToPortRanges(m.config.AllowedPorts)
 	for domain, ips := range domainIPs {
 		if len(ips) == 0 {
 			continue
 		}
 		ttl := m.resolver.DomainTTLs[domain]
-		if err := allower.AllowDynamicIPs(ips, ttl, refreshInterval); err != nil {
+		var entryPorts []portRange
+		if m.policy != nil {
+			entryPorts = m.policy.PortsForName(domain)
+		}
+		ports := resolvePorts(entryPorts, globalPorts)
+		if err := allower.AllowDynamicIPsPorts(ips, ports, ttl, refreshInterval); err != nil {
 			return fmt.Errorf("failed to allow %d addresses for %s: %w", len(ips), domain, err)
 		}
 		m.logger.Printf("  %s -> %v", domain, ips)
@@ -483,7 +492,9 @@ func (m *Manager) dynamicElementLifetimeInterval() time.Duration {
 // noopAllower stands in when the nft layer cannot install set elements (tests).
 type noopAllower struct{}
 
-func (noopAllower) AllowDynamicIPs([]string, uint32, time.Duration) error { return nil }
+func (noopAllower) AllowDynamicIPsPorts([]string, []portRange, uint32, time.Duration) error {
+	return nil
+}
 
 // computeRefreshInterval determines the refresh interval based on DNS TTL and config cap.
 // The configured refresh_interval_minutes acts as a maximum cap.
