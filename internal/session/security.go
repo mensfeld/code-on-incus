@@ -291,6 +291,10 @@ var fileTypeProtectedPaths = map[string]bool{
 	// auto-created — see fileTypeParentAutoCreate). Issue #504 / settings planting.
 	".claude/settings.json":       true,
 	".claude/settings.local.json": true,
+	// Codex project-scoped config can name commands the host would run (e.g.
+	// notify, MCP server launchers) when a host codex session trusts the repo.
+	// Protected read-only for the same planting reason as the Claude settings.
+	".codex/config.toml": true,
 }
 
 // fileTypeParentAutoCreate lists file-type protected entries whose parent
@@ -304,6 +308,7 @@ var fileTypeProtectedPaths = map[string]bool{
 var fileTypeParentAutoCreate = map[string]bool{
 	".claude/settings.json":       true,
 	".claude/settings.local.json": true,
+	".codex/config.toml":          true,
 }
 
 // directoryTypeProtectedPaths lists entries that are materialized as

@@ -22,8 +22,9 @@
 # [container.build]              # how `coi build` builds the base image
 # base = "ubuntu:24.04"          # base image to build from
 # compression = "none"          # image compression: none | gzip | xz ("" = Incus default)
-# agents = ["claude"]            # AI agents to install (subset of claude/opencode/pi);
-#                                #   omit to install all supported agents (the default)
+# agents = ["claude"]            # AI agents to install (any of claude/opencode/pi/codex);
+#                                #   omit to install the default set (claude, opencode, pi —
+#                                #   codex is opt-in and must be listed explicitly, #698)
 
 [defaults]
 # Profile to apply when --profile is not passed, so your setup applies without
@@ -106,12 +107,16 @@
 # path = "~/.coi/logs/network.log"
 
 [tool]
-# name = "claude"                # claude | opencode
+# name = "claude"                # claude | opencode | pi | codex
 # auto_context = true            # inject SANDBOX_CONTEXT.md into the tool
 
 # [tool.claude]
 # model = "opus"                 # Claude model (ANTHROPIC_MODEL): alias like "opus" or a full ID
 # effort_level = "high"          # low | medium | high | xhigh | max | auto (unset = you control it)
+
+# [tool.codex]                   # codex is opt-in at image build: [container.build] agents = ["claude", "codex"]
+# model = "gpt-5-codex"          # Codex model (passed as -m); unset = codex's own default
+# reasoning_effort = "high"      # minimal | low | medium | high (model_reasoning_effort); unset = codex default
 
 [git]
 # writable_hooks = false         # allow the container to write .git/hooks (security-sensitive)
@@ -127,7 +132,7 @@
 
 [security]
 # Paths mounted read-only so the container can't tamper with host-executed files.
-# protected_paths = [".git/hooks", ".git/config", ".git/config.worktree", ".git/info/attributes", ".husky", ".vscode", ".coi"]
+# protected_paths = [".git/hooks", ".git/config", ".git/config.worktree", ".git/info/attributes", ".husky", ".vscode", ".coi", ".claude/settings.json", ".claude/settings.local.json", ".codex/config.toml"]
 # additional_protected_paths = []   # add to (not replace) the defaults above
 # host_immutable = true             # also set chattr +i on protected paths
 # disable_protection = false        # turn protection off entirely (NOT recommended)
