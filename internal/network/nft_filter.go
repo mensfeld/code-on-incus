@@ -20,11 +20,14 @@ type NftManager struct {
 	gatewayIP   string
 
 	// dynSeen tracks the DNS-learned addresses already installed in the dynamic
-	// set, and when each one expires, so AllowDynamicIPs can skip the nft exec
-	// when an address is still fresh. Guarded by dynMu so a re-sync from the
-	// background refresher cannot race a concurrent caller — see AllowDynamicIPs.
-	dynMu   sync.Mutex
-	dynSeen map[string]time.Time
+	// address set, and dynSeenTuples the (address . port) elements in the dynamic
+	// port-scoped set, with each element's expiry, so AllowDynamicIPsPorts can skip
+	// the nft exec when an element is still fresh. Both are guarded by dynMu so a
+	// re-sync from the background refresher cannot race a concurrent caller — see
+	// AllowDynamicIPsPorts.
+	dynMu         sync.Mutex
+	dynSeen       map[string]time.Time
+	dynSeenTuples map[string]time.Time
 }
 
 // NewNftManager creates a new nft manager for a container
@@ -157,6 +160,12 @@ func (f *NftManager) ApplyAllowlist(cfg *config.NetworkConfig, staticCIDRs []str
 	if err := f.AddStaticIPs(staticCIDRs); err != nil {
 		return err
 	}
+	// Port-scoped tuples for the same literal entries (Phase 3). staticCIDRs carries
+	// only addresses, so the per-entry ports are re-derived from cfg.AllowedDomains
+	// (already validated upstream) and installed into the concatenated set.
+	if err := f.addStaticPortTuples(cfg, allowedPorts); err != nil {
+		return err
+	}
 
 	// Block DNS before anything else is allowed. This is what makes the hosts file
 	// authoritative: with no way to query a nameserver, the container cannot learn
@@ -209,20 +218,27 @@ func (f *NftManager) ApplyAllowlist(cfg *config.NetworkConfig, staticCIDRs []str
 		}
 	}
 
-	// Two rules per set. Allow TCP/UDP to allowlisted hosts — covers HTTPS, git,
-	// npm, and QUIC/HTTP3 over UDP/443. Other IP protocols (raw IP, GRE, SCTP,
-	// custom proto numbers) are NOT accepted and fall through to the default
-	// deny, closing non-TCP/UDP exfil channels to allowed hosts.
-	//
-	// ICMP echo-request is allowed but rate-limited (~10/s plus nft's default
-	// burst) so ordinary ping and health checks work while ICMP cannot become a
-	// high-bandwidth covert channel. Excess echo and all other ICMP types fall
-	// through to the default deny.
-	l4match := l4PortMatch(allowedPorts) // meta l4proto {tcp,udp} [th dport { ... }]
-	for _, set := range []string{staticSetName(f.containerIP), dynamicSetName(f.containerIP)} {
-		if err := f.addRuleWithMatch(f.containerIP, "@"+set, l4match, "accept"); err != nil {
+	// L4 accepts are port-scoped per destination (Phase 3): the concatenated set
+	// carries each allowlisted address paired with the ports it may be reached on,
+	// and `ip daddr . th dport @set` matches an address only on its own ports.
+	// `th dport` covers TCP and UDP, so HTTPS/git/npm and QUIC/HTTP3-over-UDP work;
+	// other IP protocols (raw IP, GRE, SCTP, custom proto numbers) are not accepted
+	// and fall through to the default deny, closing non-TCP/UDP exfil channels.
+	// (An entry with no explicit port inherited the global allowed_ports, else all
+	// ports, when its tuples were built.)
+	for _, set := range []string{staticPortSetName(f.containerIP), dynamicPortSetName(f.containerIP)} {
+		if err := f.addRuleWithMatch(f.containerIP, "0.0.0.0/0",
+			[]string{"ip", "daddr", ".", "th", "dport", "@" + set}, "accept"); err != nil {
 			return fmt.Errorf("failed to add allowlist L4 rule for set %s: %w", set, err)
 		}
+	}
+
+	// ICMP echo-request is allowed but rate-limited (~10/s plus nft's default burst)
+	// so ordinary ping and health checks work while ICMP cannot become a
+	// high-bandwidth covert channel. It has no port, so it matches the address-only
+	// sets (which stay populated in parallel with the port-scoped sets above).
+	// Excess echo and all other ICMP types fall through to the default deny.
+	for _, set := range []string{staticSetName(f.containerIP), dynamicSetName(f.containerIP)} {
 		if err := f.addRuleWithMatch(f.containerIP, "@"+set,
 			[]string{"icmp", "type", "echo-request", "limit", "rate", "10/second"}, "accept"); err != nil {
 			return fmt.Errorf("failed to add allowlist ICMP rule for set %s: %w", set, err)
@@ -264,14 +280,39 @@ func (f *NftManager) RemoveRules() error {
 //
 // This method is retained on the nftRuler interface as the static-entry re-sync
 // primitive; a regression test pins that setup does not fall back to it.
-func (f *NftManager) ReplaceAllowlist(_ *config.NetworkConfig, staticCIDRs []string) error {
+func (f *NftManager) ReplaceAllowlist(cfg *config.NetworkConfig, staticCIDRs []string) error {
 	if f.containerIP == "" {
 		return nil
 	}
 	if err := f.ensureAllowlistSets(); err != nil {
 		return err
 	}
-	return f.AddStaticIPs(staticCIDRs)
+	if err := f.AddStaticIPs(staticCIDRs); err != nil {
+		return err
+	}
+	// Re-sync the port-scoped tuples too, so the concatenated set the L4 rules match
+	// stays in step with the address set. cfg carries the per-entry ports (nil cfg —
+	// only reachable via the interface, never the setup path — re-syncs addresses only).
+	if cfg == nil {
+		return nil
+	}
+	allowedPorts, err := validateAllowedPorts(cfg.AllowedPorts)
+	if err != nil {
+		return err
+	}
+	return f.addStaticPortTuples(cfg, allowedPorts)
+}
+
+// addStaticPortTuples installs the port-scoped tuples for the literal
+// allowed_domains entries. The per-entry ports are recovered by re-compiling
+// cfg.AllowedDomains (cheap, and already validated upstream), and any entry with no
+// port of its own inherits the resolved global allowed_ports (empty = all ports).
+func (f *NftManager) addStaticPortTuples(cfg *config.NetworkConfig, allowedPorts []int) error {
+	policy, err := NewAllowPolicy(cfg.AllowedDomains)
+	if err != nil {
+		return fmt.Errorf("failed to compile allowed_domains for port tuples: %w", err)
+	}
+	return f.AddStaticTuples(policy.StaticTuples(), intsToPortRanges(allowedPorts))
 }
 
 // EnsureBaseRules creates the ip coi table/chain and adds the shared conntrack rule.

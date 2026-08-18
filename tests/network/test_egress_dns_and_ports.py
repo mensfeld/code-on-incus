@@ -212,6 +212,33 @@ def test_allowlist_allowed_ports_constrains_host(coi_binary, workspace_dir, clea
     )
 
 
+def test_allowlist_per_destination_ports(coi_binary, workspace_dir, cleanup_containers):
+    """Phase 3: each allowed_domains entry carries its OWN ports. With
+    ["1.1.1.1:443", "8.8.8.8:53"], 443 is reachable on 1.1.1.1 but NOT on 8.8.8.8,
+    and 53 is reachable on 8.8.8.8 — proving the port scope is per destination, not
+    a single global cap. Both entries are literal IPs so no DNS resolution occurs;
+    8.8.8.8 genuinely listens on 443 (DoH), so its block is the firewall's doing,
+    not the host being unreachable."""
+    env = write_trusted_coi_config(
+        '[network]\nmode = "allowlist"\nallowed_domains = ["1.1.1.1:443", "8.8.8.8:53"]\n'
+    )
+    name = _start_background_shell(coi_binary, workspace_dir, env)
+
+    assert _can_connect(coi_binary, name, "1.1.1.1", 443), (
+        "1.1.1.1 is allowlisted on 443 and must be reachable there"
+    )
+    assert not _can_connect(coi_binary, name, "1.1.1.1", 80), (
+        "1.1.1.1 is scoped to 443, so port 80 must be blocked"
+    )
+    assert _can_connect(coi_binary, name, "8.8.8.8", 53), (
+        "8.8.8.8 is allowlisted on 53 and must be reachable there"
+    )
+    assert not _can_connect(coi_binary, name, "8.8.8.8", 443), (
+        "8.8.8.8 is scoped to 53, so 443 must be blocked even though 1.1.1.1:443 "
+        "works — that contrast is the per-destination guarantee"
+    )
+
+
 def test_restricted_allow_local_respects_port_cap(coi_binary, workspace_dir, cleanup_containers):
     """allow_local_network_access + allowed_ports=[443]: the RFC1918 LAN allow
     rules must be port-scoped (carry a dport match), so local access does not
