@@ -653,6 +653,100 @@ func TestRenderContextFileContent_AllNetworkModes(t *testing.T) {
 	}
 }
 
+// The generated sandbox context MUST surface the fine-grained egress controls
+// (allowed_ports, dns_servers, allowlist domains) so the agent knows what it can
+// and cannot reach. These are injected into the tool's system prompt via the
+// auto-context file, so a gap here means the agent dials blocked ports/resolvers
+// blindly.
+func TestRenderContextFileContent_EgressControls(t *testing.T) {
+	t.Run("allowed_ports surfaced", func(t *testing.T) {
+		content := RenderContextFileContent(ContextInfo{
+			WorkspacePath: "/workspace", HomeDir: "/home/code",
+			NetworkMode: "restricted", AllowedPorts: []int{80, 443},
+		})
+		for _, want := range []string{"restricted to destination port(s) 80, 443", "egress-filtered"} {
+			if !strings.Contains(content, want) {
+				t.Errorf("allowed_ports: expected context to contain %q\n---\n%s", want, content)
+			}
+		}
+	})
+
+	t.Run("dns_servers surfaced", func(t *testing.T) {
+		content := RenderContextFileContent(ContextInfo{
+			WorkspacePath: "/workspace", HomeDir: "/home/code",
+			NetworkMode: "restricted", DNSServers: []string{"192.168.1.2"},
+		})
+		if !strings.Contains(content, "DNS is pinned to 192.168.1.2") {
+			t.Errorf("dns_servers: expected pinned-resolver note, got:\n%s", content)
+		}
+	})
+
+	t.Run("allowlist domains enumerated", func(t *testing.T) {
+		content := RenderContextFileContent(ContextInfo{
+			WorkspacePath: "/workspace", HomeDir: "/home/code",
+			NetworkMode: "allowlist", AllowedDomains: []string{"api.anthropic.com", "registry.npmjs.org"},
+		})
+		for _, want := range []string{"api.anthropic.com", "registry.npmjs.org", "only reachable outbound destinations"} {
+			if !strings.Contains(content, want) {
+				t.Errorf("allowlist domains: expected context to contain %q", want)
+			}
+		}
+	})
+
+	t.Run("combined ports+dns", func(t *testing.T) {
+		content := RenderContextFileContent(ContextInfo{
+			WorkspacePath: "/workspace", HomeDir: "/home/code",
+			NetworkMode: "restricted", AllowedPorts: []int{443}, DNSServers: []string{"10.0.0.53"},
+		})
+		if !strings.Contains(content, "destination port(s) 443") || !strings.Contains(content, "DNS is pinned to 10.0.0.53") {
+			t.Errorf("combined: expected both port cap and DNS pin in context:\n%s", content)
+		}
+	})
+
+	t.Run("no controls => no egress-filtered note", func(t *testing.T) {
+		// Parity: without the new controls the context must not gain the egress note,
+		// so existing configs render unchanged.
+		content := RenderContextFileContent(ContextInfo{
+			WorkspacePath: "/workspace", HomeDir: "/home/code", NetworkMode: "open",
+		})
+		if strings.Contains(content, "egress-filtered") || strings.Contains(content, "DNS is pinned") {
+			t.Errorf("open mode with no controls should not mention egress filtering:\n%s", content)
+		}
+	})
+
+	t.Run("open mode does not claim a cap it never enforces", func(t *testing.T) {
+		// Open mode installs a blanket accept: allowed_ports/dns_servers are inert.
+		// The context must not tell the agent egress is filtered, or it would waste
+		// turns avoiding ports/resolvers that are actually reachable.
+		content := RenderContextFileContent(ContextInfo{
+			WorkspacePath: "/workspace", HomeDir: "/home/code",
+			NetworkMode: "open", AllowedPorts: []int{80, 443}, DNSServers: []string{"192.168.1.2"},
+		})
+		for _, unwanted := range []string{"restricted to destination port(s)", "DNS is pinned", "egress-filtered"} {
+			if strings.Contains(content, unwanted) {
+				t.Errorf("open mode must not surface %q (it is not enforced):\n%s", unwanted, content)
+			}
+		}
+	})
+
+	t.Run("allowlist mode does not claim DNS pinning", func(t *testing.T) {
+		// dns_servers is rejected at setup in allowlist mode (all DNS is blocked and
+		// /etc/hosts is authoritative), so the context must not advertise a pin.
+		// allowed_ports, however, IS enforced in allowlist mode and should show.
+		content := RenderContextFileContent(ContextInfo{
+			WorkspacePath: "/workspace", HomeDir: "/home/code",
+			NetworkMode: "allowlist", AllowedPorts: []int{443}, DNSServers: []string{"192.168.1.2"},
+			AllowedDomains: []string{"api.anthropic.com"},
+		})
+		if strings.Contains(content, "DNS is pinned") {
+			t.Errorf("allowlist mode blocks all DNS; must not claim a resolver pin:\n%s", content)
+		}
+		if !strings.Contains(content, "destination port(s) 443") {
+			t.Errorf("allowlist mode enforces allowed_ports; expected it surfaced:\n%s", content)
+		}
+	})
+}
+
 func TestRenderContextFileContent_NoProtectedPaths(t *testing.T) {
 	info := ContextInfo{
 		WorkspacePath: "/workspace",

@@ -13,6 +13,8 @@ Tests that:
 import json
 import subprocess
 
+import pytest
+
 
 def _get_profile_value(key):
     """Get a config value from the default profile."""
@@ -66,6 +68,45 @@ def _run_health_json(coi_binary):
     )
     data = json.loads(result.stdout)
     return result.returncode, data["checks"]["security_posture"]
+
+
+_RAW_OVERRIDE_KEYS = ("raw.seccomp", "raw.apparmor")
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _snapshot_default_raw_overrides():
+    """Capture the real pre-suite state of the shared default profile's raw
+    overrides once, and restore it verbatim when the module is done.
+
+    The warning tests below deliberately mutate raw.seccomp/raw.apparmor on the
+    *shared* default profile. This snapshot ensures that whatever a developer (or
+    the environment) had configured before the suite ran is put back afterwards,
+    so the file leaves no lasting footprint.
+    """
+    saved = {key: _get_profile_value(key) for key in _RAW_OVERRIDE_KEYS}
+    yield
+    for key, value in saved.items():
+        _restore_profile_value(key, value)
+
+
+@pytest.fixture(autouse=True)
+def _clean_default_raw_overrides(_snapshot_default_raw_overrides):
+    """Guarantee every test in this file starts and ends with no raw override on
+    the shared default profile.
+
+    pytest-randomly shuffles test order and pytest-rerunfailures can re-enter a
+    test, so a sibling's raw.seccomp/raw.apparmor override could otherwise bleed
+    into test_health_security_posture_ok_on_default and flake it. Worse, each
+    warning test snapshots its own "original" value and restores it in a finally;
+    once the profile is polluted, that restore perpetuates the override forever.
+    Force-clearing before and after each test breaks that cycle without touching
+    the developer's real config (restored by the module fixture above).
+    """
+    for key in _RAW_OVERRIDE_KEYS:
+        _unset_profile_value(key)
+    yield
+    for key in _RAW_OVERRIDE_KEYS:
+        _unset_profile_value(key)
 
 
 def test_health_security_posture_text(coi_binary):

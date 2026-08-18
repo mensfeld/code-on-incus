@@ -58,9 +58,29 @@
 # allowlist mode only — domains/IPs the container may reach:
 # allowed_domains = ["registry.npmjs.org", "api.anthropic.com"]
 
+# Pin the DNS resolvers the container may reach on port 53 (restricted mode).
+# COI accepts :53 only to these IPs and rejects all other off-box DNS, so a
+# compromised container cannot bypass your resolver (e.g. hit 8.8.8.8 directly).
+# The bridge's own resolver keeps working, so this is safe to enable as-is.
+# IPv4 only; trusted-scope only; not valid in allowlist mode (which blocks all
+# DNS). NOTE: only bites alongside a port/allowlist cap — otherwise malware can
+# still tunnel DNS-over-HTTPS on 443.
+# dns_servers = ["192.168.1.2"]
+
+# Restrict outbound destination ports. In restricted mode this caps the open
+# internet egress to just these dports (ICMP echo still works); in allowlist mode
+# it further constrains the allowlisted hosts. Everything else is rejected.
+# Applies to the LAN too: even with allow_local_network_access, the local network
+# is reachable only on these ports (so local access can't silently reopen SSH/DB
+# ports). Bridge-provided DNS is unaffected — add 53 here if the container resolves
+# via an off-box resolver. Trusted-scope only.
+# allowed_ports = [80, 443]
+
 # Static name→address entries written into the container's /etc/hosts, made
 # reachable to match the mode (restricted punches a targeted allow for a private
 # IP; allowlist adds it to the firewall set and refuses private/metadata IPs).
+# If allowed_ports is set, that reachability is scoped to those ports too, so a
+# host entry can't reopen the full port range on a LAN box.
 # Trusted-scope only — ignored from a project ./.coi/config.toml. Add on the fly
 # to a running container with `coi hosts add <container> <ip> <hostname...>`.
 # [[network.hosts]]

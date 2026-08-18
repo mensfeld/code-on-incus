@@ -73,7 +73,7 @@ func checkHostReachable(mode config.NetworkMode, allowLocalNetworkAccess bool, i
 // active network mode. Reachability is validated for EVERY entry up front, so a
 // refused entry aborts before any /etc/hosts or firewall change. Works on a
 // running container. An empty slice clears the managed block.
-func ApplyUserHosts(containerName string, mode config.NetworkMode, allowLocalNetworkAccess bool, entries []config.HostEntry) error {
+func ApplyUserHosts(containerName string, mode config.NetworkMode, allowLocalNetworkAccess bool, entries []config.HostEntry, allowedPorts []int) error {
 	if len(entries) == 0 {
 		return WriteUserHosts(containerName, nil)
 	}
@@ -95,7 +95,7 @@ func ApplyUserHosts(containerName string, mode config.NetworkMode, allowLocalNet
 			return fmt.Errorf("failed to get container IP for host reachability: %w", err)
 		}
 		for _, e := range entries {
-			if err := applyHostFirewall(mode, containerIP, e); err != nil {
+			if err := applyHostFirewall(mode, containerIP, e, allowedPorts); err != nil {
 				return err
 			}
 		}
@@ -141,7 +141,7 @@ func parseUserHostsBlock(hostsFile string) []config.HostEntry {
 // AddUserHost adds (or, for an existing IP, extends the hostnames of) one host
 // entry on a running container: it applies firewall reachability for the address
 // under the active mode, then merges the entry into the /etc/hosts user block.
-func AddUserHost(containerName string, mode config.NetworkMode, allowLocalNetworkAccess bool, entry config.HostEntry) error {
+func AddUserHost(containerName string, mode config.NetworkMode, allowLocalNetworkAccess bool, entry config.HostEntry, allowedPorts []int) error {
 	if err := config.ValidateNetworkHosts([]config.HostEntry{entry}); err != nil {
 		return err
 	}
@@ -161,9 +161,12 @@ func AddUserHost(containerName string, mode config.NetworkMode, allowLocalNetwor
 	if err := checkHostReachable(mode, allowLocalNetworkAccess, entry.IP); err != nil {
 		return err
 	}
-	// Firewall reachability for just this address (open mode needs none).
+	// Firewall reachability for just this address (open mode needs none). The port
+	// cap is taken from the caller's config; like mode above it may be stale
+	// relative to the container's launch config, but scoping to the caller's
+	// allowed_ports is strictly tighter than the previous all-ports hole.
 	if mode == config.NetworkModeRestricted || mode == config.NetworkModeAllowlist {
-		if err := applyHostFirewall(mode, containerIP, entry); err != nil {
+		if err := applyHostFirewall(mode, containerIP, entry, allowedPorts); err != nil {
 			return err
 		}
 	}
@@ -255,15 +258,18 @@ func mergeHostEntry(entries []config.HostEntry, add config.HostEntry) []config.H
 // applyHostFirewall applies reachability for a single entry under an enforcing
 // mode (caller ensures mode is restricted/allowlist and the entry passed
 // checkHostReachable).
-func applyHostFirewall(mode config.NetworkMode, containerIP string, entry config.HostEntry) error {
+func applyHostFirewall(mode config.NetworkMode, containerIP string, entry config.HostEntry, allowedPorts []int) error {
 	class := classifyHostIP(entry.IP)
 	switch {
 	case mode == config.NetworkModeAllowlist && class == hostPublic:
+		// The allowlisted-set accept rule installed at launch is already scoped to
+		// allowed_ports (see ApplyAllowlist's l4PortMatch), so simply adding this
+		// address to the set inherits the port cap — nothing extra to do here.
 		if err := NewNftManager(containerIP, "").AddStaticIPs([]string{entry.IP}); err != nil {
 			return fmt.Errorf("failed to allow host %s in allowlist mode: %w", entry.IP, err)
 		}
 	case mode == config.NetworkModeRestricted && class == hostPrivate:
-		if err := insertContainerAcceptRule(containerIP, entry.IP); err != nil {
+		if err := insertContainerAcceptRule(containerIP, entry.IP, allowedPorts); err != nil {
 			return fmt.Errorf("failed to allow private host %s in restricted mode: %w", entry.IP, err)
 		}
 	}
@@ -274,14 +280,31 @@ func applyHostFirewall(mode config.NetworkMode, containerIP string, entry config
 // traffic from containerIP to a specific destination, so it is evaluated before
 // the mode's RFC1918 reject. Tagged with the same `coi-<ip>` comment the other
 // per-container rules use, so it is torn down by the existing cleanup path.
-func insertContainerAcceptRule(containerIP, destIP string) error {
-	if _, err := runNFTCommand(
-		"insert", "rule", "ip", "coi", "forward",
-		"ip", "saddr", containerIP,
-		"ip", "daddr", destIP+"/32",
-		"accept", "comment", fmt.Sprintf(`"coi-%s"`, containerIP),
-	); err != nil {
+//
+// When an egress port cap (allowed_ports) is in force the accept is scoped to
+// those TCP/UDP dports, so a [[network.hosts]] entry cannot silently reopen the
+// full port range (SSH, databases, device admin) on a LAN host — the same
+// guarantee allowed_ports makes for every other destination. ICMP echo to the
+// host still works via the mode's global rate-limited echo-request accept. With
+// no cap it stays the historic all-protocol accept.
+func insertContainerAcceptRule(containerIP, destIP string, allowedPorts []int) error {
+	if _, err := runNFTCommand(containerAcceptRuleArgs(containerIP, destIP, allowedPorts)...); err != nil {
 		return fmt.Errorf("nft insert accept rule failed: %w", err)
 	}
 	return nil
+}
+
+// containerAcceptRuleArgs builds the nft `insert` token slice for a host-entry
+// accept. Split out from insertContainerAcceptRule so the port-scoping is unit
+// testable without invoking nft.
+func containerAcceptRuleArgs(containerIP, destIP string, allowedPorts []int) []string {
+	args := []string{
+		"insert", "rule", "ip", "coi", "forward",
+		"ip", "saddr", containerIP,
+		"ip", "daddr", destIP + "/32",
+	}
+	if len(allowedPorts) > 0 {
+		args = append(args, l4PortMatch(allowedPorts)...)
+	}
+	return append(args, "accept", "comment", fmt.Sprintf(`"coi-%s"`, containerIP))
 }
