@@ -2,6 +2,7 @@ package network
 
 import (
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -217,10 +218,12 @@ func TestHostFirewallPerHostPorts(t *testing.T) {
 			t.Errorf("no targeted accept rule for host %s\n%s", c.ip, dump)
 			continue
 		}
-		if !strings.Contains(line, "dport") || !strings.Contains(line, c.wantPort) {
+		// Word-boundary match so "8443" doesn't satisfy a check for "443".
+		portRe := regexp.MustCompile(`\b` + regexp.QuoteMeta(c.wantPort) + `\b`)
+		if !strings.Contains(line, "dport") || !portRe.MatchString(line) {
 			t.Errorf("host %s must be scoped to port %s: %s", c.ip, c.wantPort, line)
 		}
-		if c.ip == "192.168.7.7" && strings.Contains(line, " 80 ") {
+		if c.ip == "192.168.7.7" && regexp.MustCompile(`\b80\b`).MatchString(line) {
 			t.Errorf("entry ports must OVERRIDE the global cap (not fall back to 80): %s", line)
 		}
 	}

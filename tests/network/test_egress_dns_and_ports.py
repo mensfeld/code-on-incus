@@ -254,7 +254,7 @@ def test_restricted_allow_local_respects_port_cap(coi_binary, workspace_dir, cle
     lan_accepts = _lan_accept_lines(ip)
     assert lan_accepts, "expected RFC1918 local-access allow rules; found none"
     for ln in lan_accepts:
-        assert "dport" in ln and "443" in ln, (
+        assert "dport" in ln and re.search(r"\b443\b", ln), (
             f"LAN allow rule must be port-scoped to 443 (allowed_ports must apply to the LAN): {ln}"
         )
 
@@ -307,7 +307,7 @@ def test_restricted_host_entry_respects_port_cap(coi_binary, workspace_dir, clea
     host_accepts = _host_accept_lines(ip, host_ip)
     assert host_accepts, f"expected a targeted accept rule for host entry {host_ip}; found none"
     for ln in host_accepts:
-        assert "dport" in ln and "443" in ln, (
+        assert "dport" in ln and re.search(r"\b443\b", ln), (
             f"host-entry accept must be scoped to allowed_ports (443), not an all-ports hole: {ln}"
         )
 
@@ -366,7 +366,7 @@ def test_restricted_host_entry_per_entry_ports_decouple(
     host_accepts = _host_accept_lines(ip, host_ip)
     assert host_accepts, f"expected a targeted accept rule for host entry {host_ip}; found none"
     for ln in host_accepts:
-        assert "dport" in ln and "443" in ln, (
+        assert "dport" in ln and re.search(r"\b443\b", ln), (
             f"per-entry ports must scope the LAN host to 443: {ln}"
         )
 

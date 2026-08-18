@@ -316,7 +316,11 @@ func applyHostFirewall(mode config.NetworkMode, containerIP string, entry config
 	// otherwise reaches nft raw from config.
 	hostPorts, err := validateAllowedPorts(hostPorts)
 	if err != nil {
-		return err
+		// Both entry.Ports (config load) and the global allowed_ports (ApplyRestricted/
+		// ApplyAllowlist) are already validated, so this is practically unreachable —
+		// but attribute it to the host entry rather than let validateAllowedPorts'
+		// "allowed_ports:" wording misdirect.
+		return fmt.Errorf("network.hosts %s: invalid ports: %w", entry.IP, err)
 	}
 	switch {
 	case mode == config.NetworkModeAllowlist && class == hostPublic:

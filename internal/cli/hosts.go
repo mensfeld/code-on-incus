@@ -86,7 +86,10 @@ func (a *App) hostsAddCommand(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	ports, _ := cmd.Flags().GetIntSlice("ports")
+	ports, err := cmd.Flags().GetIntSlice("ports")
+	if err != nil {
+		return err
+	}
 	entry := config.HostEntry{IP: args[1], Hostnames: args[2:], Ports: ports}
 	if err := network.AddUserHost(name, a.cfg.Network.Mode, config.BoolVal(a.cfg.Network.AllowLocalNetworkAccess), entry, a.cfg.Network.AllowedPorts); err != nil {
 		return err
