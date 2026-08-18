@@ -31,10 +31,15 @@ func (r portRange) nftValue() string {
 func allPortsRange() []portRange { return []portRange{{Lo: 1, Hi: 65535}} }
 
 // intsToPortRanges lifts the Phase 2 global allowed_ports ([]int) into ranges,
-// one single-port range each. Assumes the ints are already validated (1..65535).
+// one single-port range each. The ints are already validated (1..65535); the
+// bounds guard makes that explicit (and satisfies the overflow-conversion linter),
+// skipping any stray out-of-range value rather than wrapping it.
 func intsToPortRanges(ports []int) []portRange {
 	out := make([]portRange, 0, len(ports))
 	for _, p := range ports {
+		if p < 1 || p > 65535 {
+			continue
+		}
 		out = append(out, portRange{Lo: uint16(p), Hi: uint16(p)})
 	}
 	return out
