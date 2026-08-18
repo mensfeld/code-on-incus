@@ -2,6 +2,7 @@ package network
 
 import (
 	"fmt"
+	"net"
 	"sort"
 	"strconv"
 	"strings"
@@ -124,6 +125,12 @@ func parsePort(s string) (uint16, error) {
 // a colon, so the first colon unambiguously begins the ports. Returns hasPort=false
 // (and nil ports) when the entry carries no ":".
 func splitDestPorts(entry string) (dest string, ports []portRange, hasPort bool, err error) {
+	// An IPv6 literal is riddled with colons; splitting it on the first one would
+	// mangle it into a bogus port. Catch it up front so the user gets the real
+	// reason (IPv4-only) instead of a confusing port-parse error.
+	if isIPv6Entry(entry) {
+		return "", nil, false, fmt.Errorf("%q is an IPv6 address; allowed_domains is IPv4-only", entry)
+	}
 	dest, spec, found := strings.Cut(entry, ":")
 	if !found {
 		return entry, nil, false, nil
@@ -136,6 +143,17 @@ func splitDestPorts(entry string) (dest string, ports []portRange, hasPort bool,
 		return "", nil, false, fmt.Errorf("in %q: %w", entry, err)
 	}
 	return dest, ports, true, nil
+}
+
+// isIPv6Entry reports whether an allowed_domains entry is an IPv6 address or CIDR.
+func isIPv6Entry(s string) bool {
+	if ip := net.ParseIP(s); ip != nil {
+		return ip.To4() == nil
+	}
+	if ip, _, err := net.ParseCIDR(s); err == nil {
+		return ip.To4() == nil
+	}
+	return false
 }
 
 // portTupleElem renders one concatenated set element: "<cidr> . <port-or-range>",

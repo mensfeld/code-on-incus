@@ -214,13 +214,14 @@ def test_allowlist_allowed_ports_constrains_host(coi_binary, workspace_dir, clea
 
 def test_allowlist_per_destination_ports(coi_binary, workspace_dir, cleanup_containers):
     """Phase 3: each allowed_domains entry carries its OWN ports. With
-    ["1.1.1.1:443", "8.8.8.8:53"], 443 is reachable on 1.1.1.1 but NOT on 8.8.8.8,
-    and 53 is reachable on 8.8.8.8 — proving the port scope is per destination, not
-    a single global cap. Both entries are literal IPs so no DNS resolution occurs;
-    8.8.8.8 genuinely listens on 443 (DoH), so its block is the firewall's doing,
-    not the host being unreachable."""
+    ["1.1.1.1:443", "1.0.0.1:80"], 443 reaches 1.1.1.1 but NOT 1.0.0.1, and 80
+    reaches 1.0.0.1 but NOT 1.1.1.1 — proving the port scope is per destination, not
+    one global cap. Both are Cloudflare IPs that genuinely listen on 80 AND 443
+    (each block is the firewall's doing, not the host being unreachable), and both
+    are literal IPs so no DNS occurs. Port 53 is deliberately avoided: allowlist
+    mode blocks all DNS, so it can never be granted to any destination."""
     env = write_trusted_coi_config(
-        '[network]\nmode = "allowlist"\nallowed_domains = ["1.1.1.1:443", "8.8.8.8:53"]\n'
+        '[network]\nmode = "allowlist"\nallowed_domains = ["1.1.1.1:443", "1.0.0.1:80"]\n'
     )
     name = _start_background_shell(coi_binary, workspace_dir, env)
 
@@ -228,13 +229,13 @@ def test_allowlist_per_destination_ports(coi_binary, workspace_dir, cleanup_cont
         "1.1.1.1 is allowlisted on 443 and must be reachable there"
     )
     assert not _can_connect(coi_binary, name, "1.1.1.1", 80), (
-        "1.1.1.1 is scoped to 443, so port 80 must be blocked"
+        "1.1.1.1 is scoped to 443, so port 80 must be blocked (it listens on 80)"
     )
-    assert _can_connect(coi_binary, name, "8.8.8.8", 53), (
-        "8.8.8.8 is allowlisted on 53 and must be reachable there"
+    assert _can_connect(coi_binary, name, "1.0.0.1", 80), (
+        "1.0.0.1 is allowlisted on 80 and must be reachable there"
     )
-    assert not _can_connect(coi_binary, name, "8.8.8.8", 443), (
-        "8.8.8.8 is scoped to 53, so 443 must be blocked even though 1.1.1.1:443 "
+    assert not _can_connect(coi_binary, name, "1.0.0.1", 443), (
+        "1.0.0.1 is scoped to 80, so 443 must be blocked even though 1.1.1.1:443 "
         "works — that contrast is the per-destination guarantee"
     )
 

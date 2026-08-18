@@ -127,17 +127,22 @@ func (f *NftManager) ApplyRestricted(cfg *config.NetworkConfig) error {
 // rotating out of DNS) is an element operation on a set, applied atomically by
 // the kernel. See nftset.go.
 //
-// staticCIDRs are the literal IP/CIDR entries from allowed_domains. Resolved name
-// entries land in the dynamic set, and the same addresses are written into the
-// container's /etc/hosts (see hosts.go) — which, with DNS blocked, is the
-// container's only route from a name to an address.
+// The literal IP/CIDR entries come from allowed_domains. Resolved name entries
+// land in the dynamic set, and the same addresses are written into the container's
+// /etc/hosts (see hosts.go) — which, with DNS blocked, is the container's only
+// route from a name to an address.
+//
+// The compiled policy is the SINGLE source for both the address set (ICMP + the
+// security monitor) and the port-scoped set (L4), so the two cannot diverge. The
+// second parameter is retained for the nftRuler interface; the addresses it would
+// carry are exactly policy.StaticCIDRs(), which we derive here instead.
 //
 // A gateway IP is mandatory: allowlist mode is default-reject, so DHCP lease
 // renewal has to be explicitly allowed or the lease eventually lapses and the
 // container loses the IP every rule here is keyed on. setupAllowlist already
 // fails closed when the gateway cannot be detected; this guard states the same
 // requirement at the point that consumes it.
-func (f *NftManager) ApplyAllowlist(cfg *config.NetworkConfig, staticCIDRs []string) error {
+func (f *NftManager) ApplyAllowlist(cfg *config.NetworkConfig, _ []string) error {
 	if f.gatewayIP == "" {
 		return fmt.Errorf("allowlist mode requires a gateway IP (for the DHCP renewal accept rule)")
 	}
@@ -149,6 +154,12 @@ func (f *NftManager) ApplyAllowlist(cfg *config.NetworkConfig, staticCIDRs []str
 	if err != nil {
 		return err
 	}
+	// Compile the allowlist once — both sets are built from it, so the address set
+	// and the port-scoped set share one source of truth.
+	policy, err := NewAllowPolicy(cfg.AllowedDomains)
+	if err != nil {
+		return fmt.Errorf("failed to compile allowed_domains: %w", err)
+	}
 
 	if err := EnsureBaseRules(); err != nil {
 		logWarnf("Warning: failed to ensure base rules: %v", err)
@@ -157,13 +168,10 @@ func (f *NftManager) ApplyAllowlist(cfg *config.NetworkConfig, staticCIDRs []str
 	if err := f.ensureAllowlistSets(); err != nil {
 		return err
 	}
-	if err := f.AddStaticIPs(staticCIDRs); err != nil {
+	if err := f.AddStaticIPs(policy.StaticCIDRs()); err != nil {
 		return err
 	}
-	// Port-scoped tuples for the same literal entries (Phase 3). staticCIDRs carries
-	// only addresses, so the per-entry ports are re-derived from cfg.AllowedDomains
-	// (already validated upstream) and installed into the concatenated set.
-	if err := f.addStaticPortTuples(cfg, allowedPorts); err != nil {
+	if err := f.AddStaticTuples(policy.StaticTuples(), intsToPortRanges(allowedPorts)); err != nil {
 		return err
 	}
 
@@ -220,15 +228,16 @@ func (f *NftManager) ApplyAllowlist(cfg *config.NetworkConfig, staticCIDRs []str
 
 	// L4 accepts are port-scoped per destination (Phase 3): the concatenated set
 	// carries each allowlisted address paired with the ports it may be reached on,
-	// and `ip daddr . th dport @set` matches an address only on its own ports.
-	// `th dport` covers TCP and UDP, so HTTPS/git/npm and QUIC/HTTP3-over-UDP work;
-	// other IP protocols (raw IP, GRE, SCTP, custom proto numbers) are not accepted
-	// and fall through to the default deny, closing non-TCP/UDP exfil channels.
-	// (An entry with no explicit port inherited the global allowed_ports, else all
-	// ports, when its tuples were built.)
+	// and `ip daddr . th dport @set` matches an address only on its own ports. The
+	// explicit `meta l4proto { tcp, udp }` restricts these accepts to TCP and UDP
+	// (covering HTTPS/git/npm and QUIC/HTTP3-over-UDP) — WITHOUT it, `th dport` alone
+	// does not assert the L4 protocol, so other IP protocols (raw IP, GRE, SCTP,
+	// custom proto numbers) could slip through as a covert exfil channel to an
+	// allowed host. With it, they fall through to the default deny. (An entry with no
+	// explicit port inherited the global allowed_ports, else all ports.)
 	for _, set := range []string{staticPortSetName(f.containerIP), dynamicPortSetName(f.containerIP)} {
 		if err := f.addRuleWithMatch(f.containerIP, "0.0.0.0/0",
-			[]string{"ip", "daddr", ".", "th", "dport", "@" + set}, "accept"); err != nil {
+			[]string{"meta", "l4proto", "{", "tcp,", "udp", "}", "ip", "daddr", ".", "th", "dport", "@" + set}, "accept"); err != nil {
 			return fmt.Errorf("failed to add allowlist L4 rule for set %s: %w", set, err)
 		}
 	}
@@ -287,30 +296,23 @@ func (f *NftManager) ReplaceAllowlist(cfg *config.NetworkConfig, staticCIDRs []s
 	if err := f.ensureAllowlistSets(); err != nil {
 		return err
 	}
-	if err := f.AddStaticIPs(staticCIDRs); err != nil {
-		return err
-	}
-	// Re-sync the port-scoped tuples too, so the concatenated set the L4 rules match
-	// stays in step with the address set. cfg carries the per-entry ports (nil cfg —
-	// only reachable via the interface, never the setup path — re-syncs addresses only).
+	// With cfg we recover the per-entry ports and re-sync BOTH sets from that single
+	// source (as ApplyAllowlist does), so the address set and the port-scoped set the
+	// L4 rules match stay in step. A nil cfg — only reachable via the interface, never
+	// the setup path — has no port information, so it re-syncs addresses only.
 	if cfg == nil {
-		return nil
+		return f.AddStaticIPs(staticCIDRs)
 	}
 	allowedPorts, err := validateAllowedPorts(cfg.AllowedPorts)
 	if err != nil {
 		return err
 	}
-	return f.addStaticPortTuples(cfg, allowedPorts)
-}
-
-// addStaticPortTuples installs the port-scoped tuples for the literal
-// allowed_domains entries. The per-entry ports are recovered by re-compiling
-// cfg.AllowedDomains (cheap, and already validated upstream), and any entry with no
-// port of its own inherits the resolved global allowed_ports (empty = all ports).
-func (f *NftManager) addStaticPortTuples(cfg *config.NetworkConfig, allowedPorts []int) error {
 	policy, err := NewAllowPolicy(cfg.AllowedDomains)
 	if err != nil {
-		return fmt.Errorf("failed to compile allowed_domains for port tuples: %w", err)
+		return fmt.Errorf("failed to compile allowed_domains: %w", err)
+	}
+	if err := f.AddStaticIPs(policy.StaticCIDRs()); err != nil {
+		return err
 	}
 	return f.AddStaticTuples(policy.StaticTuples(), intsToPortRanges(allowedPorts))
 }

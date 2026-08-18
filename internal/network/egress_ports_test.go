@@ -2,6 +2,7 @@ package network
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -74,6 +75,21 @@ func TestSplitDestPorts(t *testing.T) {
 					tt.in, dest, ports, has, tt.wantDest, tt.wantPorts, tt.wantHas)
 			}
 		})
+	}
+}
+
+// TestSplitDestPorts_IPv6IsClear checks that an IPv6 literal (riddled with colons)
+// yields the real "IPv4-only" reason rather than a mangled port-parse error.
+func TestSplitDestPorts_IPv6IsClear(t *testing.T) {
+	for _, entry := range []string{"2001:db8::1", "2001:db8::/32", "::1"} {
+		_, _, _, err := splitDestPorts(entry)
+		if err == nil {
+			t.Errorf("expected %q to be rejected", entry)
+			continue
+		}
+		if !strings.Contains(err.Error(), "IPv6") {
+			t.Errorf("expected an IPv4-only message for %q, got: %v", entry, err)
+		}
 	}
 }
 
