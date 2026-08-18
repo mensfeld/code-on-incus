@@ -11,6 +11,7 @@ var registry = map[string]func() Tool{
 	"claude":   NewClaude,
 	"opencode": NewOpencode,
 	"pi":       NewPi,
+	"codex":    NewCodex,
 }
 
 // Get returns a tool by name
@@ -25,6 +26,14 @@ func Get(name string) (Tool, error) {
 // GetDefault returns the default tool (Claude)
 func GetDefault() Tool {
 	return NewClaude()
+}
+
+// DefaultBuildAgents returns the agents installed into the image when no
+// explicit selection is made — it must stay in sync with build.sh's
+// ${COI_AGENTS:-...} default (enforced by TestBuildScriptDispatchMatchesRegistry).
+// codex is supported but opt-in only (issue #698), so it is not in this set.
+func DefaultBuildAgents() []string {
+	return []string{"claude", "opencode", "pi"}
 }
 
 // ListSupported returns a sorted list of supported tool names

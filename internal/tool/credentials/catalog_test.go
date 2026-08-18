@@ -6,7 +6,7 @@ import (
 )
 
 func TestLookup_KnownBundles(t *testing.T) {
-	for _, name := range []string{"claude", "opencode", "pi", "ollama"} {
+	for _, name := range []string{"claude", "opencode", "pi", "codex", "ollama"} {
 		if _, ok := Lookup(name); !ok {
 			t.Errorf("Lookup(%q): expected bundle to exist", name)
 		}
@@ -21,8 +21,8 @@ func TestLookup_UnknownBundle(t *testing.T) {
 
 func TestNames_Sorted(t *testing.T) {
 	names := Names()
-	if !reflect.DeepEqual(names, []string{"claude", "ollama", "opencode", "pi"}) {
-		t.Errorf("Names() = %v, want sorted [claude ollama opencode pi]", names)
+	if !reflect.DeepEqual(names, []string{"claude", "codex", "ollama", "opencode", "pi"}) {
+		t.Errorf("Names() = %v, want sorted [claude codex ollama opencode pi]", names)
 	}
 }
 
@@ -99,6 +99,36 @@ func TestPiBundle_MatchesHardcodedValues(t *testing.T) {
 	}
 	if !b.AlwaysSetup {
 		t.Error("AlwaysSetup = false, want true")
+	}
+}
+
+// TestCodexBundle_Shape locks the codex catalog entry: no sandbox settings file
+// (codex config is TOML — coi's settings merge is JSON-only, so everything is
+// delivered as launch flags), no sibling state file, setup skipped without a
+// host ~/.codex (like claude), context injected into ~/.codex/AGENTS.md.
+func TestCodexBundle_Shape(t *testing.T) {
+	b, ok := Lookup("codex")
+	if !ok {
+		t.Fatal("codex bundle not found")
+	}
+	if b.ConfigDir != ".codex" {
+		t.Errorf("ConfigDir = %q, want %q", b.ConfigDir, ".codex")
+	}
+	want := []string{"auth.json", "config.toml", "AGENTS.md"}
+	if !reflect.DeepEqual(b.Files, want) {
+		t.Errorf("Files = %v, want %v", b.Files, want)
+	}
+	if b.SandboxSettingsFile != "" {
+		t.Errorf("SandboxSettingsFile = %q, want empty", b.SandboxSettingsFile)
+	}
+	if b.StateFile != "" {
+		t.Errorf("StateFile = %q, want empty", b.StateFile)
+	}
+	if b.AlwaysSetup {
+		t.Error("AlwaysSetup = true, want false")
+	}
+	if b.AutoContextFile != ".codex/AGENTS.md" {
+		t.Errorf("AutoContextFile = %q, want %q", b.AutoContextFile, ".codex/AGENTS.md")
 	}
 }
 

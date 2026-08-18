@@ -341,7 +341,7 @@ func (a *App) buildAllProfiles() error {
 
 // validateBuildAgents checks that every name in a [container.build] agents list is a
 // supported agent (the tool registry is the single source of truth). Empty is valid
-// (installs all supported agents). Issue #454.
+// (installs the default agent set). Issue #454.
 func validateBuildAgents(agents []string) error {
 	if len(agents) == 0 {
 		return nil
@@ -382,20 +382,25 @@ func prepareBuildAgents(agents []string, toolName string) error {
 	if err := validateBuildAgents(agents); err != nil {
 		return err
 	}
-	if len(agents) == 0 {
-		return nil // unset installs all agents
-	}
 	if toolName == "" {
 		toolName = "claude"
 	}
-	for _, a := range agents {
+	// An unset selection installs the default agent set, which does not include
+	// opt-in agents like codex (#698) — check the tool against what will
+	// actually be installed so the warning still fires for those.
+	effective := agents
+	if len(effective) == 0 {
+		effective = tool.DefaultBuildAgents()
+	}
+	for _, a := range effective {
 		if a == toolName {
 			return nil
 		}
 	}
 	fmt.Fprintf(os.Stderr,
 		"Warning: building the image without your configured tool %q (agents = %s); "+
-			"add %q to [container.build] agents or change [tool] name, or coi shell/run will fail\n",
-		toolName, strings.Join(agents, ", "), toolName)
+			"add %q to [container.build] agents or change [tool] name, "+
+			"or coi shell/run will fail\n",
+		toolName, strings.Join(effective, ", "), toolName)
 	return nil
 }

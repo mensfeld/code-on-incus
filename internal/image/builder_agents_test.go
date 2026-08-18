@@ -4,10 +4,10 @@ import "testing"
 
 func TestAgentEnv(t *testing.T) {
 	if env := agentEnv(nil); env != nil {
-		t.Errorf("nil agents should yield nil env (all agents), got %v", env)
+		t.Errorf("nil agents should yield nil env (default agent set), got %v", env)
 	}
 	if env := agentEnv([]string{}); env != nil {
-		t.Errorf("empty agents should yield nil env (all agents), got %v", env)
+		t.Errorf("empty agents should yield nil env (default agent set), got %v", env)
 	}
 	env := agentEnv([]string{"claude", "pi"})
 	if env["COI_AGENTS"] != "claude,pi" {
@@ -29,7 +29,7 @@ func TestBuildScriptExecOpts(t *testing.T) {
 		t.Error("build script exec should stream (Capture=false), not capture")
 	}
 
-	// No selection -> no COI_AGENTS, so build.sh keeps its install-all default.
+	// No selection -> no COI_AGENTS, so build.sh keeps its default agent set.
 	b = NewBuilder(BuildOptions{})
 	if opts := b.buildScriptExecOpts(); opts.Env != nil {
 		t.Errorf("empty agents should leave Env nil (COI_AGENTS unset), got %v", opts.Env)

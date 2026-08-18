@@ -754,6 +754,60 @@ func TestClaudeEffortLevelMerge(t *testing.T) {
 	}
 }
 
+// TestCodexToolConfigMerge mirrors TestClaudeEffortLevelMerge for the
+// [tool.codex] knobs: non-empty overlay values win, empty ones preserve base.
+func TestCodexToolConfigMerge(t *testing.T) {
+	tests := []struct {
+		name                      string
+		baseModel, otherModel     string
+		baseEffort, otherEffort   string
+		expectModel, expectEffort string
+	}{
+		{
+			name:       "merge from empty base",
+			otherModel: "gpt-5-codex", otherEffort: "high",
+			expectModel: "gpt-5-codex", expectEffort: "high",
+		},
+		{
+			name:      "overlay overwrites base",
+			baseModel: "gpt-5", baseEffort: "low",
+			otherModel: "gpt-5-codex", otherEffort: "medium",
+			expectModel: "gpt-5-codex", expectEffort: "medium",
+		},
+		{
+			name:      "empty overlay preserves base",
+			baseModel: "gpt-5-codex", baseEffort: "high",
+			expectModel: "gpt-5-codex", expectEffort: "high",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			base := GetDefaultConfig()
+			base.Tool.Codex.Model = tt.baseModel
+			base.Tool.Codex.ReasoningEffort = tt.baseEffort
+
+			other := &Config{
+				Tool: ToolConfig{
+					Codex: CodexToolConfig{
+						Model:           tt.otherModel,
+						ReasoningEffort: tt.otherEffort,
+					},
+				},
+			}
+
+			base.Merge(other)
+
+			if base.Tool.Codex.Model != tt.expectModel {
+				t.Errorf("Model = %q, want %q", base.Tool.Codex.Model, tt.expectModel)
+			}
+			if base.Tool.Codex.ReasoningEffort != tt.expectEffort {
+				t.Errorf("ReasoningEffort = %q, want %q", base.Tool.Codex.ReasoningEffort, tt.expectEffort)
+			}
+		})
+	}
+}
+
 func TestMergeBoolZeroValueBug(t *testing.T) {
 	// This test demonstrates a bug where merging a zero-value Config (simulating
 	// a TOML file that only sets string fields) overwrites security-critical

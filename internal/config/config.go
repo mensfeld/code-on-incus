@@ -81,8 +81,9 @@ type BuildConfig struct {
 	Commands    []string `toml:"commands"`    // Inline build commands (alternative to script)
 	Compression string   `toml:"compression"` // Image compression algorithm (e.g. "none", "gzip", "xz"; empty = Incus default)
 	// Agents selects which AI agents the base image installs (e.g. ["claude"]).
-	// Empty/unset installs all supported agents (the default). Names are validated
-	// against the tool registry at build time. Issue #454.
+	// Empty/unset installs the default agent set (opt-in agents like codex are
+	// excluded — request them explicitly, #698). Names are validated against
+	// the tool registry at build time. Issue #454.
 	Agents []string `toml:"agents"`
 }
 
@@ -454,12 +455,19 @@ type ToolConfig struct {
 	ContextFile    string           `toml:"context_file"`    // Path to custom context .md file (supports ~ expansion)
 	AutoContext    *bool            `toml:"auto_context"`    // Auto-inject sandbox context into tool's native system (default: true)
 	Claude         ClaudeToolConfig `toml:"claude"`          // Claude-specific settings
+	Codex          CodexToolConfig  `toml:"codex"`           // Codex-specific settings
 }
 
 // ClaudeToolConfig contains Claude Code-specific settings
 type ClaudeToolConfig struct {
 	EffortLevel string `toml:"effort_level"` // Effort level: "low", "medium", "high", "xhigh", "max", "auto" (unset = user controls interactively)
 	Model       string `toml:"model"`        // Claude model, delivered as ANTHROPIC_MODEL (e.g. "opus", "claude-opus-4-8"); unset = Claude Code's own default
+}
+
+// CodexToolConfig contains OpenAI Codex CLI-specific settings
+type CodexToolConfig struct {
+	Model           string `toml:"model"`            // Codex model, delivered as -m (e.g. "gpt-5-codex"); unset = codex's own default
+	ReasoningEffort string `toml:"reasoning_effort"` // "minimal", "low", "medium", "high" — delivered as -c model_reasoning_effort=<v>; unset = codex's own default
 }
 
 // MountEntry represents a single directory mount configuration
@@ -1428,6 +1436,12 @@ func mergeToolInto(dst *ToolConfig, src *ToolConfig) {
 	}
 	if src.Claude.Model != "" {
 		dst.Claude.Model = src.Claude.Model
+	}
+	if src.Codex.Model != "" {
+		dst.Codex.Model = src.Codex.Model
+	}
+	if src.Codex.ReasoningEffort != "" {
+		dst.Codex.ReasoningEffort = src.Codex.ReasoningEffort
 	}
 }
 

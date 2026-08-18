@@ -67,6 +67,7 @@ Currently supported:
 - **Claude Code** (default) - Anthropic's official CLI tool
 - **opencode** - Open-source AI coding agent (https://opencode.ai)
 - **pi** - AI coding assistant (https://pi.dev)
+- **Codex CLI** - OpenAI's coding agent (https://developers.openai.com/codex/cli) — supported but not in the default image; opt in at build time with `[container.build] agents = ["claude", "codex"]` and rebuild (`coi build --force`)
 
 Coming soon:
 - Aider - AI pair programming in your terminal
@@ -77,7 +78,7 @@ Coming soon:
 ```toml
 # ~/.coi/config.toml or ./.coi/config.toml
 [tool]
-name = "opencode"            # or "claude" (default), "pi"
+name = "opencode"            # or "claude" (default), "pi", "codex"
 ```
 ```bash
 coi shell                    # Uses the configured tool (Claude Code by default)
@@ -91,6 +92,9 @@ coi shell --profile opencode # Or switch via a profile with [tool] name = "openc
 name = "claude"              # Default AI tool
 permission_mode = "bypass"   # "bypass" (default) or "interactive"
 ```
+For Claude, `bypass` maps to `--permission-mode bypassPermissions`; for codex it maps to `--dangerously-bypass-approvals-and-sandbox` (the container is the sandbox), and `interactive` keeps codex's own approval prompts (`-s workspace-write -a on-request`).
+
+**Codex authentication**: coi seeds the host's `~/.codex/auth.json` into the container (alongside `config.toml` and `AGENTS.md`), so log in on the host first with `codex login`. If the host stores credentials in the OS keyring (no `auth.json`) or you have never logged in, authenticate inside the container with `codex login --device-auth` (requires device-auth enablement in your org) or `codex login --with-api-key` — the plain `codex login` browser flow does not work inside the container because its OAuth localhost callback is unreachable from the host browser.
 
 See the [Supported Tools wiki page](https://github.com/mensfeld/code-on-incus/wiki/Supported-Tools) for detailed configuration, API key setup, and adding new tools.
 
@@ -113,7 +117,7 @@ See the [Supported Tools wiki page](https://github.com/mensfeld/code-on-incus/wi
 - Environment variable forwarding - Selectively forward host env vars by name (`forward_env` in config)
 - Command-sourced env vars - Mint a fresh secret per session by running a host command at start and injecting its output as an env var (`[defaults.env_commands]`) — for short-lived API keys/tokens. Trusted-scope config only
 - Host timezone inheritance - Containers automatically inherit the host's timezone (configurable via `[timezone]` config)
-- Sandbox context file - Auto-injected `~/SANDBOX_CONTEXT.md` tells AI tools about their environment (network mode, workspace path, persistence, etc.). Automatically loaded into each tool's native context system: Claude Code via `~/.claude/CLAUDE.md`, OpenCode via the `instructions` field in `opencode.json`, pi via `~/.pi/agent/APPEND_SYSTEM.md` symlink (opt out with `auto_context = false`)
+- Sandbox context file - Auto-injected `~/SANDBOX_CONTEXT.md` tells AI tools about their environment (network mode, workspace path, persistence, etc.). Automatically loaded into each tool's native context system: Claude Code via `~/.claude/CLAUDE.md`, OpenCode via the `instructions` field in `opencode.json`, pi via `~/.pi/agent/APPEND_SYSTEM.md` symlink, Codex via `~/.codex/AGENTS.md` (opt out with `auto_context = false`)
 
 **Security & Isolation**
 - Credential protection - SSH keys, `.env` files, Git credentials, and environment variables are **never** exposed unless explicitly mounted
