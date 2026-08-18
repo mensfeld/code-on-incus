@@ -14,27 +14,16 @@ cannot remove it.
 """
 
 import os
-import subprocess
 from pathlib import Path
 
+from support.helpers import (
+    make_workspace_writable as _make_workspace_writable,
+)
+from support.helpers import (
+    run_coi_in_workspace as _run,
+)
+
 CLAUDE_FILES = ("settings.json", "settings.local.json")
-
-
-def _run(coi_binary, workspace_dir, argv, env=None, timeout=120):
-    return subprocess.run(
-        [coi_binary, "run", "--", *argv],
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        cwd=workspace_dir,
-        env=env,
-    )
-
-
-def _make_workspace_writable(workspace_dir):
-    # In CI the runner UID differs from the container user UID; with shift=true
-    # the container user can only write files with 'other' write permission.
-    subprocess.run(["chmod", "-R", "a+rwX", workspace_dir], check=True, capture_output=True)
 
 
 def _seed_claude_dir(workspace_dir):

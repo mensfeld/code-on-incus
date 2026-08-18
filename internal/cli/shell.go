@@ -138,19 +138,39 @@ func getConfiguredTool(cfg *config.Config) (tool.Tool, error) {
 		return nil, fmt.Errorf("failed to get tool '%s': %w", toolName, err)
 	}
 
-	// Set effort level if the tool supports it (Claude-specific)
+	// Model/effort knobs live in per-tool config sections ([tool.claude],
+	// [tool.codex]) so one tool's settings never leak into another. Tools
+	// without a section here simply get no model/effort applied.
+	var model, effortLevel string
+	switch t.Name() {
+	case "claude":
+		model, effortLevel = cfg.Tool.Claude.Model, cfg.Tool.Claude.EffortLevel
+	case "codex":
+		model, effortLevel = cfg.Tool.Codex.Model, cfg.Tool.Codex.ReasoningEffort
+		// Codex values travel as launch flags through a shell command string
+		// (unlike Claude's env delivery), and the [tool] section is mergeable
+		// from project-scope config — reject unsafe values loudly here; the
+		// setters below would silently drop them otherwise.
+		if err := tool.ValidateCodexFlagValue("model", model); err != nil {
+			return nil, err
+		}
+		if err := tool.ValidateCodexFlagValue("reasoning_effort", effortLevel); err != nil {
+			return nil, err
+		}
+	}
+
+	// Set effort level if the tool supports it. If not configured, the tool
+	// uses its own default (Claude: user controls interactively).
 	if twel, ok := t.(tool.ToolWithEffortLevel); ok {
-		effortLevel := cfg.Tool.Claude.EffortLevel
-		// If not configured, the tool's GetSandboxSettings will use its default
 		if effortLevel != "" {
 			twel.SetEffortLevel(effortLevel)
 		}
 	}
 
-	// Set model if the tool supports it (Claude-specific). Delivered as
-	// ANTHROPIC_MODEL; when unset the tool uses its own default.
+	// Set model if the tool supports it. Delivery is tool-specific (Claude:
+	// ANTHROPIC_MODEL env; codex: -m flag); when unset the tool uses its own default.
 	if twm, ok := t.(tool.ToolWithModel); ok {
-		if model := cfg.Tool.Claude.Model; model != "" {
+		if model != "" {
 			twm.SetModel(model)
 		}
 	}
