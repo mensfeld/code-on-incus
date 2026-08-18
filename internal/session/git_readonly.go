@@ -75,12 +75,36 @@ func writeReadonlyGitConfigHostFile(id GitIdentity) (string, error) {
 		return "", fmt.Errorf("cannot resolve host home: %w", err)
 	}
 	hostPath := readonlyGitConfigHostPath(hostHome, id)
-	if err := os.MkdirAll(filepath.Dir(hostPath), 0o755); err != nil {
+	dir := filepath.Dir(hostPath)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", fmt.Errorf("failed to create git.readonly dir: %w", err)
 	}
-	// 0644 so the container's code user can read it regardless of uid shift.
-	if err := os.WriteFile(hostPath, []byte(renderReadonlyGitConfig(id)), 0o644); err != nil {
+	// Write atomically (temp in the same dir + rename), so a crash mid-write or two
+	// concurrent launches (parallel slots with the same identity race on the same
+	// hash-keyed file) can never leave a torn config that then gets mounted into a
+	// container. The content is deterministic, so whichever rename wins is correct.
+	tmp, err := os.CreateTemp(dir, ".gitconfig-*.tmp")
+	if err != nil {
+		return "", fmt.Errorf("failed to create git.readonly temp file: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op once the rename succeeds
+	if _, err := tmp.WriteString(renderReadonlyGitConfig(id)); err != nil {
+		tmp.Close()
 		return "", fmt.Errorf("failed to write git.readonly config: %w", err)
+	}
+	// os.CreateTemp makes the file 0600; set 0644 explicitly so the container's code
+	// user can read it regardless of uid shift (and unlike os.WriteFile this applies
+	// even when an install file already existed).
+	if err := tmp.Chmod(0o644); err != nil {
+		tmp.Close()
+		return "", fmt.Errorf("failed to chmod git.readonly config: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return "", fmt.Errorf("failed to close git.readonly temp file: %w", err)
+	}
+	if err := os.Rename(tmpName, hostPath); err != nil {
+		return "", fmt.Errorf("failed to install git.readonly config: %w", err)
 	}
 	return hostPath, nil
 }

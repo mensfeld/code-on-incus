@@ -95,6 +95,15 @@ func TestSetupGitIdentityReadonly(t *testing.T) {
 		if !m.readonly {
 			t.Error("mount must be read-only")
 		}
+		// Atomically installed and world-readable (0644) so the container's code
+		// user can read it regardless of uid shift.
+		fi, err := os.Stat(m.source)
+		if err != nil {
+			t.Fatalf("host gitconfig should exist: %v", err)
+		}
+		if perm := fi.Mode().Perm(); perm != 0o644 {
+			t.Errorf("host gitconfig perms = %o, want 0644", perm)
+		}
 		data, err := os.ReadFile(m.source)
 		if err != nil {
 			t.Fatalf("host gitconfig should exist: %v", err)
