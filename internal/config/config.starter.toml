@@ -109,7 +109,8 @@
 # seed_host_identity = true      # default: copy host `git config --global` user.name/email into the
                                  # container. Set false to keep only the fail-closed guard.
 # readonly = true                # LOCK the identity: mount ~/.gitconfig read-only so the agent
-                                 # can't `git config --global` over it (needs a resolvable identity).
+                                 # can't `git config --global` over it (locks the WHOLE global
+                                 # config — any `git config --global` fails; needs an identity).
                                  # (name/email/seed_host_identity/readonly are trusted-scope only —
                                  #  ignored in a project .coi/config.toml)
 

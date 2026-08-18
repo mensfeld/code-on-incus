@@ -339,22 +339,6 @@ func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.P
 			if err != nil {
 				return nil, fmt.Errorf("invalid mount configuration: %w", err)
 			}
-			// git.readonly: lock the commit identity by mounting it read-only at the
-			// container's ~/.gitconfig (see git_readonly.go), so the agent can't
-			// overwrite it. Injected before ValidateMounts so it is checked like any
-			// other mount, and gated on a resolvable identity — an empty identity has
-			// nothing to lock. On failure we warn and fall back to the writable path.
-			gitIdentity := resolveGitIdentity(&a.cfg.Git)
-			gitReadonly := false
-			if a.cfg.Git.IsReadonlyEnabled() && gitIdentity.Complete() {
-				m, gErr := buildReadonlyGitMount(gitIdentity, "/home/"+container.CodeUser)
-				if gErr != nil {
-					fmt.Fprintf(os.Stderr, "Warning: git.readonly setup failed, falling back to a writable identity: %v\n", gErr)
-				} else {
-					mountConfig.Mounts = append(mountConfig.Mounts, m)
-					gitReadonly = true
-				}
-			}
 			socketConfig, err := ParseSocketConfig(a.cfg)
 			if err != nil {
 				return nil, fmt.Errorf("invalid socket configuration: %w", err)
@@ -401,8 +385,8 @@ func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.P
 				PreserveWorkspacePath: a.cfg.Paths.PreserveWorkspacePath,
 				ForwardSSHAgent:       config.BoolVal(a.cfg.SSH.ForwardAgent),
 				ForwardedEnvVars:      resolvedForwardedEnvVars,
-				GitIdentity:           gitIdentity,
-				GitReadonly:           gitReadonly,
+				GitIdentity:           resolveGitIdentity(&a.cfg.Git),
+				GitReadonly:           a.cfg.Git.IsReadonlyEnabled(),
 				ContextFilePath:       a.cfg.Tool.ContextFile,
 				ProfileContextFile:    a.cfg.ProfileContextFile,
 				AutoContext:           a.cfg.Tool.AutoContext,

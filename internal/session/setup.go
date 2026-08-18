@@ -759,13 +759,22 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 	// user.name and user.email are explicitly configured, which ensures AI
 	// tools discover and set the real developer identity.
 	//
-	// git.readonly: the identity (and the useConfigOnly guard) instead arrive via a
-	// read-only ~/.gitconfig mount injected at mount-config time, so writing here is
-	// both unnecessary and would fail against the read-only mount — skip it. The
-	// whole point is that the container agent cannot change this file.
-	if opts.GitReadonly {
-		opts.Logger("Git identity locked read-only (git.readonly): ~/.gitconfig cannot be changed in-container")
+	// git.readonly: instead of writing ~/.gitconfig in-container (which the agent
+	// could overwrite), mount the identity read-only at result.HomeDir/.gitconfig —
+	// using the home resolved just above, so it is correct for both a code-user and
+	// a run-as-root container. This is fail-CLOSED: if the user asked to lock the
+	// identity and we cannot, the session aborts rather than silently handing back a
+	// writable one. With no resolvable identity there is nothing to lock, so fall
+	// through to the normal guard (which still refuses commits until one is set).
+	if opts.GitReadonly && opts.GitIdentity.Complete() {
+		if err := SetupGitIdentityReadonly(result.Manager, result.HomeDir, opts.GitIdentity); err != nil {
+			return nil, fmt.Errorf("git.readonly: could not lock the commit identity read-only: %w", err)
+		}
+		opts.Logger("Git identity locked read-only (git.readonly): " + result.HomeDir + "/.gitconfig cannot be changed in-container")
 	} else {
+		if opts.GitReadonly {
+			opts.Logger("Warning: git.readonly is set but no identity is resolvable — set [git] name/email (or enable seed_host_identity); nothing to lock")
+		}
 		SetupGitIdentityGuard(result.Manager, result.HomeDir, opts.Logger)
 		SetupGitIdentity(result.Manager, result.HomeDir, opts.GitIdentity, opts.Logger)
 	}

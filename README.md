@@ -125,7 +125,7 @@ See the [Supported Tools wiki page](https://github.com/mensfeld/code-on-incus/wi
 - Network isolation - nftables-based restricted/allowlist/open modes block private network access and prevent exfiltration
 - Protected paths - `.git/hooks`, `.git/config`, `.husky`, `.vscode` mounted read-only to prevent supply-chain attacks
 - Host-side immutable protection - Protected paths are locked with `chattr +i` during sessions, preventing `unshare -m` + `umount` bypass of read-only mounts (opt out: `[security] host_immutable = false`)
-- Git identity guard - Containers enforce `user.useConfigOnly=true`, preventing AI tools from committing as the default "code" user. Pin a fixed identity with `[git] name/email`, and set `[git] readonly = true` to mount `~/.gitconfig` **read-only** so the agent can't `git config --global` over it
+- Git identity guard - Containers enforce `user.useConfigOnly=true`, preventing AI tools from committing as the default "code" user. Pin a fixed identity with `[git] name/email`, and set `[git] readonly = true` to mount `~/.gitconfig` **read-only** so the agent can't `git config --global` over it (locks the whole global config; use `--local` for other settings)
 - Guest API disabled - Incus guest API (`/dev/incus`) disabled by default, preventing host path and topology leaks
 - System containers - Full OS isolation with unprivileged containers, better than Docker privileged mode
 - Automatic UID mapping - No permission hell, files owned correctly
