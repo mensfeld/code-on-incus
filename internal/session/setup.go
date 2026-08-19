@@ -52,6 +52,7 @@ type SetupOptions struct {
 	ForwardSSHAgent       bool                   // Forward host SSH agent to container
 	ForwardedEnvVars      []string               // Names of host env vars being forwarded (for context file)
 	GitIdentity           GitIdentity            // Resolved host git identity to configure inside the container
+	GitReadonly           bool                   // Identity is provided by a read-only ~/.gitconfig mount; skip the in-container git config writes
 	ContextFilePath       string                 // Path to custom context .md file on host (overrides tool default)
 	ProfileContextFile    string                 // Path to profile context .md file (appended to sandbox context)
 	Timezone              string                 // Resolved IANA timezone name (e.g., "America/New_York"), empty for UTC
@@ -757,8 +758,26 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 	// Setting user.useConfigOnly=true forces git to refuse commits until
 	// user.name and user.email are explicitly configured, which ensures AI
 	// tools discover and set the real developer identity.
-	SetupGitIdentityGuard(result.Manager, result.HomeDir, opts.Logger)
-	SetupGitIdentity(result.Manager, result.HomeDir, opts.GitIdentity, opts.Logger)
+	//
+	// git.readonly: instead of writing ~/.gitconfig in-container (which the agent
+	// could overwrite), mount the identity read-only at result.HomeDir/.gitconfig —
+	// using the home resolved just above, so it is correct for both a code-user and
+	// a run-as-root container. This is fail-CLOSED: if the user asked to lock the
+	// identity and we cannot, the session aborts rather than silently handing back a
+	// writable one. With no resolvable identity there is nothing to lock, so fall
+	// through to the normal guard (which still refuses commits until one is set).
+	if opts.GitReadonly && opts.GitIdentity.Complete() {
+		if err := SetupGitIdentityReadonly(result.Manager, result.HomeDir, opts.GitIdentity); err != nil {
+			return nil, fmt.Errorf("git.readonly: could not lock the commit identity read-only: %w", err)
+		}
+		opts.Logger("Git identity locked read-only (git.readonly): " + result.HomeDir + "/.gitconfig cannot be changed in-container")
+	} else {
+		if opts.GitReadonly {
+			opts.Logger("Warning: git.readonly is set but no identity is resolvable — set [git] name/email (or enable seed_host_identity); nothing to lock")
+		}
+		SetupGitIdentityGuard(result.Manager, result.HomeDir, opts.Logger)
+		SetupGitIdentity(result.Manager, result.HomeDir, opts.GitIdentity, opts.Logger)
+	}
 
 	// 6.6.2. Suppress Claude Code auto-mode prompt via managed settings.
 	// Only applies when the tool is Claude Code — the managed settings path
