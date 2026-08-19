@@ -386,6 +386,7 @@ func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.P
 				ForwardSSHAgent:       config.BoolVal(a.cfg.SSH.ForwardAgent),
 				ForwardedEnvVars:      resolvedForwardedEnvVars,
 				GitIdentity:           resolveGitIdentity(&a.cfg.Git),
+				GitReadonly:           a.cfg.Git.IsReadonlyEnabled(),
 				ContextFilePath:       a.cfg.Tool.ContextFile,
 				ProfileContextFile:    a.cfg.ProfileContextFile,
 				AutoContext:           a.cfg.Tool.AutoContext,

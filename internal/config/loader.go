@@ -277,8 +277,10 @@ func sanitizeUntrustedGit(g *GitConfig, path string) {
 		g.Email = ""
 	}
 	// A project config must not influence git-identity behavior at all; drop the
-	// toggle silently (neither value is a protection downgrade on its own).
+	// toggles silently (neither is a protection downgrade on its own — readonly
+	// only ever tightens — but identity behavior is trusted-scope by design).
 	g.SeedHostIdentity = nil
+	g.Readonly = nil
 }
 
 // sanitizeUntrustedEnvCommands strips env_commands (and their timeout) from an
