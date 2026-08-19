@@ -67,7 +67,7 @@ Currently supported:
 - **Claude Code** (default) - Anthropic's official CLI tool
 - **opencode** - Open-source AI coding agent (https://opencode.ai)
 - **pi** - AI coding assistant (https://pi.dev)
-- **Codex CLI** - OpenAI's coding agent (https://developers.openai.com/codex/cli) — supported but not in the default image; opt in at build time with `[container.build] agents = ["claude", "codex"]` and rebuild (`coi build --force`)
+- **Codex CLI** - OpenAI's coding agent (https://developers.openai.com/codex/cli)
 
 Coming soon:
 - Aider - AI pair programming in your terminal
