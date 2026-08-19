@@ -126,7 +126,7 @@ See the [Supported Tools wiki page](https://github.com/mensfeld/code-on-incus/wi
 - Kernel version enforcement - Warns on host kernels below 5.15 that may lack security features for safe isolation
 - Real-time threat detection - Kernel-level nftables monitoring detects reverse shells, C2 connections, data exfiltration, DNS tunneling, and credential scanning
 - Automated response - Auto-pause on HIGH threats, auto-kill on CRITICAL — no manual intervention needed
-- Network isolation - nftables-based restricted/allowlist/open modes block private network access and prevent exfiltration
+- Network isolation - nftables-based restricted/allowlist/open modes block private-network access and exfiltration, with fine-grained egress controls: pin DNS to your own resolver (`dns_servers`), cap outbound ports globally (`allowed_ports`) or per-destination (`allowed_domains` with `:ports`, and per-host `[[network.hosts]] ports`) — e.g. "internet open, on the LAN only `redmine:443`"
 - Protected paths - `.git/hooks`, `.git/config`, `.husky`, `.vscode` mounted read-only to prevent supply-chain attacks
 - Host-side immutable protection - Protected paths are locked with `chattr +i` during sessions, preventing `unshare -m` + `umount` bypass of read-only mounts (opt out: `[security] host_immutable = false`)
 - Git identity guard - Containers enforce `user.useConfigOnly=true`, preventing AI tools from committing as the default "code" user. Pin a fixed identity with `[git] name/email`, and set `[git] readonly = true` to mount `~/.gitconfig` **read-only** so the agent can't `git config --global` over it (locks the whole global config; use `--local` for other settings)
