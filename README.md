@@ -67,7 +67,7 @@ Currently supported:
 - **Claude Code** (default) - Anthropic's official CLI tool
 - **opencode** - Open-source AI coding agent (https://opencode.ai)
 - **pi** - AI coding assistant (https://pi.dev)
-- **Codex CLI** - OpenAI's coding agent (https://developers.openai.com/codex/cli) — supported but not in the default image; opt in at build time with `[container.build] agents = ["claude", "codex"]` and rebuild (`coi build --force`)
+- **Codex CLI** - OpenAI's coding agent (https://developers.openai.com/codex/cli)
 
 Coming soon:
 - Aider - AI pair programming in your terminal
@@ -94,7 +94,7 @@ permission_mode = "bypass"   # "bypass" (default) or "interactive"
 ```
 For Claude, `bypass` maps to `--permission-mode bypassPermissions`; for codex it maps to `--dangerously-bypass-approvals-and-sandbox` (the container is the sandbox), and `interactive` keeps codex's own approval prompts (`-s workspace-write -a on-request`).
 
-**Codex authentication**: coi seeds the host's `~/.codex/auth.json` into the container (alongside `config.toml` and `AGENTS.md`), so log in on the host first with `codex login`. If the host stores credentials in the OS keyring (no `auth.json`) or you have never logged in, authenticate inside the container with `codex login --device-auth` (requires device-auth enablement in your org) or `codex login --with-api-key` — the plain `codex login` browser flow does not work inside the container because its OAuth localhost callback is unreachable from the host browser.
+**Codex authentication**: coi seeds the host's `~/.codex/auth.json` into the container (alongside `config.toml` and `AGENTS.md`), so log in on the host first with `codex login`. If the host stores credentials in the OS keyring (no `auth.json`) or you have never logged in, authenticate inside the container with `codex login --device-auth` (requires device-auth enablement in your org) or `codex login --with-api-key` - the plain `codex login` browser flow does not work inside the container because its OAuth localhost callback is unreachable from the host browser.
 
 See the [Supported Tools wiki page](https://github.com/mensfeld/code-on-incus/wiki/Supported-Tools) for detailed configuration, API key setup, and adding new tools.
 
@@ -112,10 +112,10 @@ See the [Supported Tools wiki page](https://github.com/mensfeld/code-on-incus/wi
 **Host Integration**
 - SSH agent forwarding - Use git-over-SSH inside containers without copying private keys (`[ssh] forward_agent = true`)
 - Host port publishing - Publish container TCP ports on the host (`[ports] pool` for identity-mapped agent-usable ports, `[[ports.map]]` for fixed services): agent-started dev servers become reachable at `localhost:<port>`, with per-slot deterministic allocation, a pre-launch conflict check, and `coi trust` gating for untrusted project configs
-- Host socket forwarding - Forward arbitrary host Unix sockets into the container (`[[sockets]]`) so the host endpoint never enters the container — the building block for credential brokers (mint short-lived tokens on the host, fetch them on demand inside). Untrusted project-config sockets are gated behind `coi trust`
+- Host socket forwarding - Forward arbitrary host Unix sockets into the container (`[[sockets]]`) so the host endpoint never enters the container - the building block for credential brokers (mint short-lived tokens on the host, fetch them on demand inside). Untrusted project-config sockets are gated behind `coi trust`
 - Credential catalog - Copy third-party provider credentials into the container via `[[credentials]]` entries (config or profile): reference a named catalog bundle (`bundle = "ollama"`) or declare an ad-hoc host/container file pair for anything not yet cataloged. `claude`/`opencode`/`pi`'s own credential files come from the same built-in catalog. Ad-hoc entries from an untrusted project `.coi/config.toml` are gated behind `coi trust`; catalog references carry the same trust level the built-in tool credentials already have
 - Environment variable forwarding - Selectively forward host env vars by name (`forward_env` in config)
-- Command-sourced env vars - Mint a fresh secret per session by running a host command at start and injecting its output as an env var (`[defaults.env_commands]`) — for short-lived API keys/tokens. Trusted-scope config only
+- Command-sourced env vars - Mint a fresh secret per session by running a host command at start and injecting its output as an env var (`[defaults.env_commands]`) - for short-lived API keys/tokens. Trusted-scope config only
 - Host timezone inheritance - Containers automatically inherit the host's timezone (configurable via `[timezone]` config)
 - Sandbox context file - Auto-injected `~/SANDBOX_CONTEXT.md` tells AI tools about their environment (network mode, workspace path, persistence, etc.). Automatically loaded into each tool's native context system: Claude Code via `~/.claude/CLAUDE.md`, OpenCode via the `instructions` field in `opencode.json`, pi via `~/.pi/agent/APPEND_SYSTEM.md` symlink, Codex via `~/.codex/AGENTS.md` (opt out with `auto_context = false`)
 
@@ -125,8 +125,8 @@ See the [Supported Tools wiki page](https://github.com/mensfeld/code-on-incus/wi
 - Security posture verification - `coi health` checks seccomp, AppArmor, and privilege settings to confirm full isolation
 - Kernel version enforcement - Warns on host kernels below 5.15 that may lack security features for safe isolation
 - Real-time threat detection - Kernel-level nftables monitoring detects reverse shells, C2 connections, data exfiltration, DNS tunneling, and credential scanning
-- Automated response - Auto-pause on HIGH threats, auto-kill on CRITICAL — no manual intervention needed
-- Network isolation - nftables-based restricted/allowlist/open modes block private network access and prevent exfiltration
+- Automated response - Auto-pause on HIGH threats, auto-kill on CRITICAL - no manual intervention needed
+- Network isolation - nftables-based restricted/allowlist/open modes block private-network access and exfiltration, with fine-grained egress controls: pin DNS to your own resolver (`dns_servers`), cap outbound ports globally (`allowed_ports`) or per-destination (`allowed_domains` with `:ports`, and per-host `[[network.hosts]] ports`) - e.g. "internet open, on the LAN only `redmine:443`"
 - Protected paths - `.git/hooks`, `.git/config`, `.husky`, `.vscode` mounted read-only to prevent supply-chain attacks
 - Host-side immutable protection - Protected paths are locked with `chattr +i` during sessions, preventing `unshare -m` + `umount` bypass of read-only mounts (opt out: `[security] host_immutable = false`)
 - Git identity guard - Containers enforce `user.useConfigOnly=true`, preventing AI tools from committing as the default "code" user. Pin a fixed identity with `[git] name/email`, and set `[git] readonly = true` to mount `~/.gitconfig` **read-only** so the agent can't `git config --global` over it (locks the whole global config; use `--local` for other settings)
@@ -193,7 +193,7 @@ Incus is a modern Linux container and virtual machine manager, forked from LXD. 
 
 - **System containers, not containers-in-VMs.** Incus system containers run a full OS with systemd and native Docker support inside - one clean isolation layer. Docker Sandboxes nests application containers inside microVMs, adding architectural complexity.
 
-- **No permission hell.** Incus automatic UID/GID shifting means files created by agents have correct ownership on the host. No mapping hacks needed. (Note: files created via `sudo` in the workspace will be root-owned — the sandbox context file instructs AI tools to fix ownership after sudo operations.)
+- **No permission hell.** Incus automatic UID/GID shifting means files created by agents have correct ownership on the host. No mapping hacks needed. (Note: files created via `sudo` in the workspace will be root-owned - the sandbox context file instructs AI tools to fix ownership after sudo operations.)
 
 - **Credential isolation by default.** Host environment variables, SSH keys, and Git credentials are never exposed to AI tools unless explicitly mounted.
 
@@ -214,42 +214,11 @@ curl -fsSL https://raw.githubusercontent.com/mensfeld/code-on-incus/master/insta
 # - Show next steps
 ```
 
-**Manual installation:** Download the binary from [GitHub Releases](https://github.com/mensfeld/code-on-incus/releases), make it executable, and move to `/usr/local/bin/`. Requires Linux with Incus installed and user in the `incus-admin` group. **You must log out and back in** (or run `newgrp incus-admin`) after adding your user to the group — COI runs `incus` directly and requires the group to be active in your session. See the [Incus installation guide](https://linuxcontainers.org/incus/docs/main/installing/) for setting up Incus.
+**Manual installation:** Download the binary from [GitHub Releases](https://github.com/mensfeld/code-on-incus/releases), make it executable, and move to `/usr/local/bin/`. Requires Linux with Incus installed and user in the `incus-admin` group. **You must log out and back in** (or run `newgrp incus-admin`) after adding your user to the group - COI runs `incus` directly and requires the group to be active in your session. See the [Incus installation guide](https://linuxcontainers.org/incus/docs/main/installing/) for setting up Incus.
 
 ### Build Images
 
-```bash
-# Build the default coi-default image (5-10 minutes)
-coi build
-
-# Build without compression (faster iteration):
-# set [container.build] compression = "none" in config or the profile
-coi build
-
-# Build a custom image via a profile
-coi profile create my-image
-# Edit .coi/profiles/my-image/config.toml: set [container] image and a [container.build] section
-coi build --profile my-image
-
-# Build images for all profiles that have a [container.build] section
-coi build --all
-
-# Rebuild all profile images from scratch
-coi build --all --force
-```
-
-**What's included in the `coi-default` image:**
-- Ubuntu 24.04 base with Docker (full Docker-in-container support)
-- **mise** (polyglot runtime manager) — Python 3, pnpm, TypeScript, tsx pre-installed; add more with `mise use go@latest`, `mise use ruby@3`, etc.
-- Node.js 22 LTS (system, for Claude CLI) + npm
-- Claude Code CLI (default AI tool) + GitHub CLI (`gh`)
-- tmux, git, curl, build-essential, and common build tools
-- Modern CLI utilities: fd-find, bat, tree
-- Debugging tools: strace, lsof
-- Database clients: sqlite3, postgresql-client, redis-tools
-- imagemagick for image processing
-
-**Custom images:** Build your own specialized images using profile-based build scripts that run on top of the base `coi-default` image. See the [Image Management wiki page](https://github.com/mensfeld/code-on-incus/wiki/Image-Management) for complete profile-based build workflows.
+`coi build` builds the `coi-default` base image - Ubuntu 24.04 with Docker-in-container, **mise**-managed runtimes (Python, pnpm, TypeScript, tsx; add more on demand), Node.js LTS, the AI CLIs, `gh`, and the usual dev tooling (git, tmux, database clients, debugging utilities). Layer your own specialized images on top with a profile `[container.build]` section and `coi build --profile <name>`. See the [Image Management wiki page](https://github.com/mensfeld/code-on-incus/wiki/Image-Management) for the full build workflow, flags, and custom-image recipes.
 
 ## macOS Support
 
@@ -260,57 +229,21 @@ coi build --all --force
 ### Basic Commands
 
 ```bash
-# Interactive session (defaults to Claude Code)
-coi shell
-
-# Use a different AI tool (config/profile-driven: [tool] name = "opencode")
-coi shell --profile opencode
-
-# Use specific slot for parallel sessions
-coi shell --slot 2
-
-# Resume previous session
-coi shell --resume
-
-# Run a command in the sandbox (streams output, propagates exit code)
-coi run -- npm test
-
-# Run the workspace run script (./coi-run) in the sandbox
-coi run
-
-# Attach to existing session
-coi attach
-
-# Real-time security monitoring dashboard
-coi monitor
-
-# View session logs (setup messages, network notices, errors)
-coi logs                        # Auto-detect container from current workspace
-coi logs coi-abc123-1 -f        # Tail logs live
-
-# Stream the structured (JSON Lines) threat-event audit log for a session
-coi audit coi-abc123-1 -f
-
-# Approve out-of-workspace mounts / forwarded sockets from a project .coi/config.toml
-coi trust                       # approve   (coi trust --list to view, coi untrust to revoke)
-
-# List active containers and saved sessions
-coi list --all
-coi list --running              # Only running containers (also: --stopped, --status frozen)
-
-# Gracefully shutdown / force kill containers
-coi shutdown coi-abc12345-1
-coi kill --all
-
-# Cleanup stopped containers and orphaned resources
-coi clean
-coi clean --pools             # Detect containers in unused storage pools
-
-# Update coi to the latest release
-coi update
+coi shell                 # interactive AI session (Claude Code by default)
+coi run -- npm test       # run a command in the sandbox (streams output, propagates exit code)
+coi attach                # attach to a running session
+coi list --all            # active containers + saved sessions
+coi logs / coi audit      # session logs and the JSONL threat-event audit stream
+coi monitor               # real-time security dashboard
+coi trust                 # approve out-of-workspace mounts/sockets from a project .coi/config.toml
+coi shutdown / coi kill   # stop or force-kill containers
+coi clean                 # remove stopped containers and orphaned resources
+coi update                # update coi to the latest release
 ```
 
-> **Upgrading to 0.10?** 0.10 removes all config-shaped CLI flags (`--image`, `--persistent`, `--tmux`, `--tool`, `coi build --compression`, `coi shutdown --timeout`) and the legacy `CLAUDE_ON_INCUS_*` / `COI_LIMIT_*` env-var overrides — everything config-shaped now lives in config files and profiles, and a removed flag fails with a hint naming its replacement key. See the [Upgrading from 0.9 to 0.10 guide](https://github.com/mensfeld/code-on-incus/wiki/Migration-Guide#upgrading-from-09-to-010) (the [0.8→0.9 notes](https://github.com/mensfeld/code-on-incus/wiki/Migration-Guide#upgrading-from-08-to-09) are there too).
+Tool selection, slots (`--slot`), resume (`--resume`), mounts, limits and network mode are config/profile-driven. See the [Container Operations wiki page](https://github.com/mensfeld/code-on-incus/wiki/Container-Operations) for the full command reference (or `coi <command> --help`).
+
+> **Upgrading to 0.10?** 0.10 removes all config-shaped CLI flags (`--image`, `--persistent`, `--tmux`, `--tool`, `coi build --compression`, `coi shutdown --timeout`) and the legacy `CLAUDE_ON_INCUS_*` / `COI_LIMIT_*` env-var overrides - everything config-shaped now lives in config files and profiles, and a removed flag fails with a hint naming its replacement key. See the [Upgrading from 0.9 to 0.10 guide](https://github.com/mensfeld/code-on-incus/wiki/Migration-Guide#upgrading-from-09-to-010) (the [0.8→0.9 notes](https://github.com/mensfeld/code-on-incus/wiki/Migration-Guide#upgrading-from-08-to-09) are there too).
 
 ### Container Aliases
 
@@ -339,7 +272,7 @@ See the [Container Lifecycle and Sessions guide](https://github.com/mensfeld/cod
 --profile NAME          # Use named profile
 ```
 
-Everything else — image selection, persistence, network mode, mounts, socket forwarding, environment variables, SSH agent, monitoring, timezone, resource limits — is configured via config files or profiles, not flags (the former `--image` and `--persistent` flags were removed in 0.10; set `[container] image` / `persistent` instead). See the [Configuration wiki page](https://github.com/mensfeld/code-on-incus/wiki/Configuration) for the full reference.
+Everything else - image selection, persistence, network mode, mounts, socket forwarding, environment variables, SSH agent, monitoring, timezone, resource limits - is configured via config files or profiles, not flags (the former `--image` and `--persistent` flags were removed in 0.10; set `[container] image` / `persistent` instead). See the [Configuration wiki page](https://github.com/mensfeld/code-on-incus/wiki/Configuration) for the full reference.
 
 ### Advanced Usage
 
@@ -353,37 +286,19 @@ See the wiki for detailed documentation:
 
 ## Run Scripts and Commands in the Sandbox
 
-COI's isolation isn't only for AI agents — `coi run` executes regular commands
+COI's isolation isn't only for AI agents - `coi run` executes regular commands
 and scripts with the same protection: workspace mount, read-only protected
 paths, secret masking, network isolation, resource/time limits, and security
 monitoring. Output streams live, stdin is connected, and the command's exit
 code becomes `coi run`'s exit code.
 
-```bash
-# Arbitrary commands
-coi run -- npm test
-coi run -- make build
-cat data.csv | coi run -- ./process.sh
-
-# Workspace run script: with no command, coi runs ./coi-run
-cat > coi-run <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-npm ci && npm test
-EOF
-chmod +x coi-run
-coi run
-```
-
-The run script is executed **directly from the workspace mount** — it comes
-from the host; nothing is copied into the container. It is extensionless and
-must be executable: the shebang decides the interpreter, so a bash, ruby, or
-python `coi-run` all work the same way. The container is cleaned up when the
-script finishes — or kept, with `[container] persistent = true`, so installed
-packages and caches survive between runs.
+`coi run -- <cmd>` runs any command (stdin connected, output streamed), and a
+bare `coi run` executes an extensionless, executable `./coi-run` script **directly
+from the workspace mount** - the shebang picks the interpreter. The container is
+cleaned up afterwards unless `[container] persistent = true`.
 
 **Security note:** a cloned repository can ship its own `coi-run`, so
-`coi run` in a repo you don't trust executes that repo's code — inside the
+`coi run` in a repo you don't trust executes that repo's code - inside the
 sandbox, which is exactly what the sandbox is for. For untrusted projects, use
 a credential-limiting profile (e.g. `coi run --profile hardened`, or your own
 profile with `[ssh] forward_agent = false` and a restricted network mode) so
@@ -399,7 +314,7 @@ coi shell --resume=<session-id> # Resume specific session
 coi list --all                  # List available sessions
 ```
 
-**What's restored:** Full conversation history, tool credentials, user settings, and project context. The profile used when the session was created is also automatically restored — no need to pass `--profile` again (explicitly passing `--profile` overrides the saved one). Sessions are workspace-scoped — `--resume` only finds sessions from the current workspace directory.
+**What's restored:** Full conversation history, tool credentials, user settings, and project context. The profile used when the session was created is also automatically restored - no need to pass `--profile` again (explicitly passing `--profile` overrides the saved one). Sessions are workspace-scoped - `--resume` only finds sessions from the current workspace directory.
 
 See the [Container Lifecycle and Sessions guide](https://github.com/mensfeld/code-on-incus/wiki/Container-Lifecycle-and-Sessions) for details on how session persistence works.
 
@@ -444,24 +359,25 @@ permission_mode = "bypass"
 3. Project config (`./.coi/config.toml`)
 4. Profile (`--profile <name>`)
 
-Config-shaped settings have no CLI flags and no env-var overrides — config
+Config-shaped settings have no CLI flags and no env-var overrides - config
 and profiles are the single source of truth. The remaining CLI flags are
 per-invocation choices only: `--workspace`, `--slot`, `--resume`, `--profile`.
 
-Place a `.coi/config.toml` in any repository root to auto-configure COI for that project — useful for teams to share container image, environment, and resource limits.
+Place a `.coi/config.toml` in any repository root to auto-configure COI for that project - useful for teams to share container image, environment, and resource limits.
 
 See the [Configuration wiki page](https://github.com/mensfeld/code-on-incus/wiki/Configuration) for the full config reference, per-repo setup, profiles, and environment variables.
 
 ### Forwarding host sockets, minting secrets & copying credential files
 
-Three ways to give containerized tools credentials:
-
-- **`[[sockets]]`** forwards any host Unix socket into the container via an Incus proxy device, so the host endpoint never crosses in — the building block for **credential brokers** (a host process mints short-lived tokens; an in-container `credential_process` fetches them on demand).
-- **`[defaults.env_commands]`** runs a host command at session start and injects its trimmed stdout as an env var — for plain env-var credentials (e.g. an AWS Bedrock bearer token). Trade-off: the value lives in the container env for the session, so prefer the broker for high-value/rotatable secrets.
-- **`[ports]`** publishes container TCP ports on the host, so services the agent starts are reachable at `localhost:<port>`: `pool = 3` gives every session identity-mapped ports (the agent binds a pool number, you open the SAME number — the sandbox context file tells the agent to use them), and `[[ports.map]]` publishes fixed container ports (`name = "web"`, `container = 3000`) auto-allocated or pinned on the host side. Deterministic per workspace/slot, preflight-checked before launch, isolation-neutral (userspace proxy, no NAT rules); `coi list` shows each container's published ports. See the [Port Publishing wiki page](https://github.com/mensfeld/code-on-incus/wiki/Port-Publishing).
-- **`[[credentials]]`** copies static credential files from host to container at session setup — for tools that read credentials from disk rather than an env var. Use `bundle = "ollama"` to reference a name from COI's built-in catalog (the same catalog `claude`/`opencode`/`pi` use for their own credentials), or set `host`/`container` (plus optional `mode`) for an ad-hoc file not yet in the catalog. Missing host files are skipped with a log line rather than failing the session.
-
-Sockets, `[ports]`, and ad-hoc `[[credentials]]` entries are gated behind `coi trust` when they come from an untrusted project `.coi/config.toml`; `env_commands` from one is ignored outright; catalog-referenced credentials are never gated (the host path is fixed by COI's own catalog, not the referencing config). See the [Configuration wiki page](https://github.com/mensfeld/code-on-incus/wiki/Configuration) for full examples and the trust model.
+Give containerized tools credentials without exposing your host secrets:
+`[[sockets]]` forwards a host Unix socket (the building block for credential
+brokers that mint short-lived tokens on demand), `[defaults.env_commands]` injects
+a host command's output as an env var, `[[credentials]]` copies credential files
+(from COI's built-in catalog via `bundle = "…"`, or an ad-hoc host/container
+path), and `[ports]` publishes container ports on the host so agent-started
+services are reachable at `localhost:<port>`. Untrusted project-config sockets,
+ports, and ad-hoc credentials are gated behind `coi trust`; `env_commands` from an
+untrusted config is ignored. See the [Configuration](https://github.com/mensfeld/code-on-incus/wiki/Configuration) and [Port Publishing](https://github.com/mensfeld/code-on-incus/wiki/Port-Publishing) wiki pages for full examples and the trust model.
 
 ## Profiles
 
@@ -477,7 +393,7 @@ Each profile is a self-contained directory (`.coi/profiles/<name>/`) bundling a 
 
 ### Opening an untrusted repo safely
 
-For inspecting code you don't trust, COI ships a built-in **`hardened`** profile — a one-flag preset:
+For inspecting code you don't trust, COI ships a built-in **`hardened`** profile - a one-flag preset:
 
 ```bash
 coi shell --profile hardened        # restricted net + secret masking + ephemeral + monitoring
@@ -503,13 +419,7 @@ limit = "2GiB"
 max_duration = "2h"
 ```
 
-**What you can limit:**
-- CPU cores and usage percentage
-- Memory and swap
-- Disk I/O rates
-- Maximum runtime and process count
-- Auto-stop on time limits
-
+CPU, memory/swap, disk I/O, max runtime and process count are all configurable, with auto-stop on time limits - see the wiki page above for the full set.
 
 ## Container Lifecycle & Session Persistence
 
@@ -522,17 +432,7 @@ See the [Container Lifecycle and Sessions guide](https://github.com/mensfeld/cod
 - **Persistent mode** (`[container] persistent = true` in config or a profile): Container kept with all installed packages
 - **Resume** (`--resume`): Restore AI conversation in fresh/existing container
 
-**Quick reference:**
-```bash
-coi shell --resume            # Resume previous conversation
-coi attach                    # Reconnect to running container
-coi persist <container>       # Convert a running ephemeral session to persistent
-coi unfreeze <name>           # Unfreeze paused/frozen container
-coi unfreeze                  # Unfreeze all frozen COI containers
-close                         # Properly stop container (inside, safe alias for poweroff)
-coi shutdown <name>           # Graceful stop (outside)
-coi close <name>              # Alias for 'coi shutdown' (deletes it — even a persistent one)
-```
+The wiki page above covers the full command set (`coi persist`, `coi unfreeze`, `coi shutdown`/`coi close`, the in-container `close` alias) and how resume matches sessions.
 
 ## Network Isolation
 
@@ -546,7 +446,7 @@ See the [Network Isolation guide](https://github.com/mensfeld/code-on-incus/wiki
 ```toml
 # ~/.coi/config.toml
 [network]
-mode = "restricted"   # Default — blocks private networks, allows internet
+mode = "restricted"   # Default - blocks private networks, allows internet
 # mode = "allowlist"  # Only specific domains/IPs allowed
 # mode = "open"       # No restrictions (trusted projects only)
 ```
@@ -561,7 +461,7 @@ an address.
 
 That equality is the whole point: the container cannot reach an address the
 firewall has not already been given, because there is nowhere else for an address
-to come from. Nothing has to stay running for this to hold — it survives `coi`
+to come from. Nothing has to stay running for this to hold - it survives `coi`
 exiting, detaching from tmux, or the process being killed.
 
 ```toml
@@ -570,18 +470,18 @@ mode = "allowlist"
 allowed_domains = [
     "api.anthropic.com",       # exact hostname
     "registry.npmjs.org",
-    "10.0.0.0/8",              # IPv4 CIDR — no name resolution involved
+    "10.0.0.0/8",              # IPv4 CIDR - no name resolution involved
     "8.8.8.8",                 # raw IPv4 address
 ]
 ```
 
 **Wildcards are not supported, and are rejected rather than quietly mishandled.**
 Because each name is resolved up front and written to `/etc/hosts`, there is no
-answer to write for `*.example.com` — you cannot know which subdomains will be
+answer to write for `*.example.com` - you cannot know which subdomains will be
 asked for. List the exact hostnames, or allow the provider's published IP ranges
 as CIDRs.
 
-**Claude via GCP Vertex AI** — list the endpoints, which are enumerable:
+**Claude via GCP Vertex AI** - list the endpoints, which are enumerable:
 
 ```toml
 allowed_domains = [
@@ -592,7 +492,7 @@ allowed_domains = [
 ```
 
 Or, for blanket coverage without naming endpoints, use Google's published ranges
-(from `https://www.gstatic.com/ipranges/goog.json`) — these need no resolution at
+(from `https://www.gstatic.com/ipranges/goog.json`) - these need no resolution at
 all:
 
 ```toml
@@ -606,7 +506,7 @@ the firewall, so it fails to resolve and fails to connect.
 
 In **restricted** mode you can pin the resolvers the container is allowed to reach
 on port 53. COI accepts `:53` only to the listed addresses and rejects every other
-off-box DNS query, so a compromised container cannot bypass your resolver — for
+off-box DNS query, so a compromised container cannot bypass your resolver - for
 example by talking straight to `8.8.8.8` or a resolver it hardcoded.
 
 ```toml
@@ -618,7 +518,7 @@ dns_servers = ["192.168.1.2"]   # e.g. your Pi-hole
 The bridge's own resolver (the container's normal DHCP-provided DNS) travels a
 different path and is left untouched, so ordinary resolution keeps working with no
 `resolv.conf` changes. A pinned resolver on your LAN stays reachable on `:53` even
-when `block_private_networks` is on — but on port 53 only, never on other ports.
+when `block_private_networks` is on - but on port 53 only, never on other ports.
 
 - **IPv4 addresses only**, and **trusted-scope only**: a resolver pin from a
   project `./.coi/config.toml` is a DNS-redirect primitive, so it is ignored from
@@ -651,19 +551,19 @@ device admin daemons is cut off.
   resolves via an **off-box** resolver.
 - **Trusted-scope only** (ignored from a project `./.coi/config.toml`).
 - **Applies to the LAN too.** Even with `allow_local_network_access = true`, the
-  local network is reachable only on these ports — so enabling local access does
+  local network is reachable only on these ports - so enabling local access does
   not silently reopen SSH/DB ports on your LAN. Likewise `dns_servers` filters
   `:53` everywhere, so a LAN resolver (Pi-hole) must be listed by its exact IP to
   stay reachable.
 - Combine with `dns_servers` for the full "use my Pi-hole, on these ports only"
-  posture — the two compose: a pinned resolver is reachable on `:53` regardless of
+  posture - the two compose: a pinned resolver is reachable on `:53` regardless of
   `allowed_ports`.
 
 ### Per-destination ports (`allowed_domains` with `:ports`)
 
 `allowed_ports` applies one port set to **every** allowlisted host. When different
 destinations legitimately need different ports, scope each `allowed_domains` entry
-individually with a `:ports` suffix — a single port, a comma list, or a `lo-hi`
+individually with a `:ports` suffix - a single port, a comma list, or a `lo-hi`
 range:
 
 ```toml
@@ -672,7 +572,7 @@ mode = "allowlist"
 allowed_domains = [
     "github.com:443",              # git/HTTPS only
     "registry.npmjs.org:80,443",   # a port list
-    "192.168.1.50:8080",           # the NAS web UI — and nothing else on it
+    "192.168.1.50:8080",           # the NAS web UI - and nothing else on it
     "10.0.0.0/8:22",               # SSH into the lab subnet, but only SSH
     "svc.internal:8000-8100",      # a port range
     "api.anthropic.com",           # no port -> inherits allowed_ports (else all)
@@ -690,7 +590,7 @@ closed at startup.
 A `[[network.hosts]]` entry can carry its own `ports`, scoping the firewall
 reachability of that one host without touching the rest of egress. This is the
 piece that lets **restricted** mode open a single LAN service on a single port
-while the internet stays fully open — which the global `allowed_ports` alone
+while the internet stays fully open - which the global `allowed_ports` alone
 can't do, because it caps every destination including the internet.
 
 The canonical "internet open, on the LAN only `redmine.susanoo.pl:443`, and my
@@ -743,7 +643,7 @@ See the [Security Best Practices guide](https://github.com/mensfeld/code-on-incu
 COI automatically mounts security-sensitive paths as **read-only** to prevent supply-chain attacks:
 - `.git/hooks`, `.git/config`, `.husky`, `.vscode`, `.coi`, `.claude/settings.json`, `.claude/settings.local.json`
 
-The `.claude/settings.*` files can carry auto-executing hooks, so making them read-only stops a contained agent from planting a hook that a later session (or a native run on the host) would auto-execute on open. To opt a path back out, set `[security] writable_paths = [".claude/settings.json"]` in **trusted-scope** config (`~/.coi/config.toml` or `$COI_CONFIG`) — an untrusted project `.coi/config.toml` cannot remove protections. (`[git] writable_hooks = true` remains as a shorthand for `.git/hooks`.) See the wiki for details.
+The `.claude/settings.*` files can carry auto-executing hooks, so making them read-only stops a contained agent from planting a hook that a later session (or a native run on the host) would auto-execute on open. To opt a path back out, set `[security] writable_paths = [".claude/settings.json"]` in **trusted-scope** config (`~/.coi/config.toml` or `$COI_CONFIG`) - an untrusted project `.coi/config.toml` cannot remove protections. (`[git] writable_hooks = true` remains as a shorthand for `.git/hooks`.) See the wiki for details.
 
 ## System Health Check
 
@@ -756,9 +656,7 @@ coi health --format json      # JSON output
 coi health --verbose          # Additional checks
 ```
 
-**What it checks:** System info, kernel version, Incus setup, permissions, security posture (seccomp/AppArmor), privileged container detection, network configuration, storage, monitoring prerequisites, and running containers.
-
-**Exit codes:** 0 (healthy), 1 (degraded), 2 (unhealthy)
+It checks system/kernel/Incus setup, permissions, security posture (seccomp/AppArmor/privileged), network, storage, monitoring prerequisites, and running containers, exiting 0 (healthy), 1 (degraded), or 2 (unhealthy).
 
 ## Troubleshooting
 
@@ -771,24 +669,11 @@ See the [Troubleshooting guide](https://github.com/mensfeld/code-on-incus/wiki/T
 
 ### Where did the time go?
 
-Set `COI_TIMING_DEBUG=1` on any command to get a wall-clock breakdown on stderr when it
-exits: every pipeline phase, every teardown, and every `incus` subprocess, nested
-by containment and followed by per-category totals. Almost all of a session's
-startup is one `incus` call after another, so this shows exactly which one.
-
-```bash
-COI_TIMING_DEBUG=1 coi run -- true          # timeline + totals to stderr
-COI_TIMING_DEBUG_JSON=/tmp/run.json coi run -- true   # machine-readable, no stderr noise
-scripts/bench-run.py -n 5             # median over N runs, bucketed
-```
-
-The most common culprit is an Incus storage pool on the `dir` driver: with no
-copy-on-write, every launch re-unpacks the full image (~5-6s per unpacked GB,
-so ~18s for a 3 GB image). `coi health` flags this; fix it by recreating the
-pool with a CoW driver (zfs/btrfs) — re-running `install.sh` sets one up.
-Image size is a per-session cost on such pools, so lean images pay off twice.
-
-Nothing is recorded unless one of those variables is set.
+Set `COI_TIMING_DEBUG=1` on any command for a wall-clock breakdown on stderr - every pipeline phase and `incus` subprocess, nested, with per-category totals
+(`COI_TIMING_DEBUG_JSON=<path>` writes JSON instead; `scripts/bench-run.py -n 5`
+reports a median). The usual culprit is a `dir` storage pool that re-unpacks the
+whole image every launch (~5-6s/GB) - `coi health` flags it; recreate the pool on
+a CoW driver (zfs/btrfs, e.g. by re-running `install.sh`) to fix it.
 
 ## Frequently Asked Questions
 
@@ -804,6 +689,6 @@ See the [FAQ](https://github.com/mensfeld/code-on-incus/wiki/FAQ) for answers to
 
 ## Getting Help
 
-- **Slack**: [Join the COI community on Slack](https://slack.karafka.io) — ask questions, report issues, share feedback
+- **Slack**: [Join the COI community on Slack](https://slack.karafka.io) - ask questions, report issues, share feedback
 - **GitHub Issues**: [Open an issue](https://github.com/mensfeld/code-on-incus/issues) for bug reports and feature requests
 - **Wiki**: Browse the [documentation wiki](https://github.com/mensfeld/code-on-incus/wiki) for guides and reference
