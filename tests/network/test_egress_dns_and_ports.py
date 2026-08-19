@@ -254,7 +254,7 @@ def test_restricted_allow_local_respects_port_cap(coi_binary, workspace_dir, cle
     lan_accepts = _lan_accept_lines(ip)
     assert lan_accepts, "expected RFC1918 local-access allow rules; found none"
     for ln in lan_accepts:
-        assert "dport" in ln and "443" in ln, (
+        assert "dport" in ln and re.search(r"\b443\b", ln), (
             f"LAN allow rule must be port-scoped to 443 (allowed_ports must apply to the LAN): {ln}"
         )
 
@@ -307,7 +307,7 @@ def test_restricted_host_entry_respects_port_cap(coi_binary, workspace_dir, clea
     host_accepts = _host_accept_lines(ip, host_ip)
     assert host_accepts, f"expected a targeted accept rule for host entry {host_ip}; found none"
     for ln in host_accepts:
-        assert "dport" in ln and "443" in ln, (
+        assert "dport" in ln and re.search(r"\b443\b", ln), (
             f"host-entry accept must be scoped to allowed_ports (443), not an all-ports hole: {ln}"
         )
 
@@ -337,6 +337,50 @@ def test_restricted_host_entry_without_cap_is_blanket(
             f"host-entry accept should be a blanket all-ports accept with no "
             f"allowed_ports set: {ln}"
         )
+
+
+def test_restricted_host_entry_per_entry_ports_decouple(
+    coi_binary, workspace_dir, cleanup_containers
+):
+    """Phase 4: a [[network.hosts]] entry with its OWN ports scopes just that host
+    while the internet stays wide open — the decoupling the global allowed_ports
+    can't do. This is the "internet open, on the LAN only redmine:443" posture.
+
+    restricted + NO allowed_ports + a redmine-style entry with ports=[443]:
+      - the LAN host's targeted allow is scoped to 443 (has a dport match), AND
+      - the container still has a blanket internet accept (no daddr, no dport),
+        proving per-entry ports did NOT cap the internet."""
+    host_ip = "192.168.77.20"
+    env = write_trusted_coi_config(
+        "[network]\n"
+        'mode = "restricted"\n\n'
+        "[[network.hosts]]\n"
+        f'ip = "{host_ip}"\n'
+        'hostnames = ["redmine.susanoo.pl"]\n'
+        "ports = [443]\n"
+    )
+    name = _start_background_shell(coi_binary, workspace_dir, env)
+    ip = _container_ip(name)
+    assert ip, f"should resolve container IP for {name}"
+
+    host_accepts = _host_accept_lines(ip, host_ip)
+    assert host_accepts, f"expected a targeted accept rule for host entry {host_ip}; found none"
+    for ln in host_accepts:
+        assert "dport" in ln and re.search(r"\b443\b", ln), (
+            f"per-entry ports must scope the LAN host to 443: {ln}"
+        )
+
+    # The internet egress must NOT be capped: a blanket accept for this container
+    # (no daddr, no dport) must still be present alongside the scoped host rule.
+    blanket = [
+        ln
+        for ln in _container_rule_lines(ip)
+        if "accept" in ln and "daddr" not in ln and "dport" not in ln
+    ]
+    assert blanket, (
+        "internet egress must stay all-ports open while the LAN host is scoped — "
+        "per-entry ports must not cap the internet:\n" + "\n".join(_container_rule_lines(ip))
+    )
 
 
 def test_context_file_surfaces_network_limitations(coi_binary, workspace_dir, cleanup_containers):

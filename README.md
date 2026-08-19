@@ -685,6 +685,32 @@ inherits the global `allowed_ports` (or all ports if none is set), so existing
 allowlists keep working unchanged. IPv4 only; a malformed port fails the session
 closed at startup.
 
+### Per-host ports (`[[network.hosts]]` with `ports`)
+
+A `[[network.hosts]]` entry can carry its own `ports`, scoping the firewall
+reachability of that one host without touching the rest of egress. This is the
+piece that lets **restricted** mode open a single LAN service on a single port
+while the internet stays fully open — which the global `allowed_ports` alone
+can't do, because it caps every destination including the internet.
+
+The canonical "internet open, on the LAN only `redmine.susanoo.pl:443`, and my
+Pi-hole resolves it to its local address" posture:
+
+```toml
+[network]
+mode        = "restricted"          # all internet open; LAN + metadata blocked by default
+dns_servers = ["192.168.1.2"]       # your Pi-hole (reachable on :53 even though the LAN is blocked)
+
+[[network.hosts]]
+ip        = "192.168.1.50"          # redmine's LAN address
+hostnames = ["redmine.susanoo.pl"]  # written to /etc/hosts, so it resolves to the local IP
+ports     = [443]                   # ...and reachable ONLY on 443
+```
+
+Empty `ports` inherits the global `allowed_ports` (else all ports). Applies in
+restricted and allowlist mode; in open mode nothing is blocked so it has no
+effect. At runtime: `coi hosts add <container> <ip> <hostname> --ports 443`.
+
 ## Security Monitoring
 
 COI includes **built-in security monitoring** to detect and respond to malicious behavior in real-time:

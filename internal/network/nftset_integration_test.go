@@ -2,6 +2,7 @@ package network
 
 import (
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -172,6 +173,59 @@ func TestAllowlistPerDestinationPorts(t *testing.T) {
 	// The L4 accept matches the concatenated set, not a bare address set.
 	if !strings.Contains(dump, "th dport @"+staticPortSetName(testContainerIP)) {
 		t.Errorf("L4 accept must match the port-scoped set via th dport\n%s", dump)
+	}
+}
+
+// TestHostFirewallPerHostPorts is the Phase 4 guard: a restricted-mode
+// [[network.hosts]] entry's targeted allow is scoped to the entry's OWN ports —
+// entry ports override the global cap, and an entry with no ports falls back to it.
+func TestHostFirewallPerHostPorts(t *testing.T) {
+	skipUnlessNft(t)
+
+	const cip = "10.99.99.99"
+	t.Cleanup(func() { _ = DeleteCOIFilterRulesForIP(cip) })
+	if err := ensureCOITableAndChain(); err != nil {
+		t.Fatalf("ensureCOITableAndChain: %v", err)
+	}
+
+	cases := []struct {
+		ip        string
+		entryPort []int
+		global    []int
+		wantPort  string
+	}{
+		{"192.168.5.5", []int{443}, nil, "443"},         // entry ports, no global
+		{"192.168.6.6", nil, []int{80}, "80"},           // no entry ports -> inherit global
+		{"192.168.7.7", []int{8443}, []int{80}, "8443"}, // entry ports override global
+	}
+	for _, c := range cases {
+		entry := config.HostEntry{IP: c.ip, Hostnames: []string{"h.local"}, Ports: c.entryPort}
+		if err := applyHostFirewall(config.NetworkModeRestricted, cip, entry, c.global); err != nil {
+			t.Fatalf("applyHostFirewall(%s): %v", c.ip, err)
+		}
+	}
+
+	dump := nftDump(t)
+	for _, c := range cases {
+		line := ""
+		for _, ln := range strings.Split(dump, "\n") {
+			if strings.Contains(ln, "ip daddr "+c.ip) && strings.Contains(ln, "accept") {
+				line = ln
+				break
+			}
+		}
+		if line == "" {
+			t.Errorf("no targeted accept rule for host %s\n%s", c.ip, dump)
+			continue
+		}
+		// Word-boundary match so "8443" doesn't satisfy a check for "443".
+		portRe := regexp.MustCompile(`\b` + regexp.QuoteMeta(c.wantPort) + `\b`)
+		if !strings.Contains(line, "dport") || !portRe.MatchString(line) {
+			t.Errorf("host %s must be scoped to port %s: %s", c.ip, c.wantPort, line)
+		}
+		if c.ip == "192.168.7.7" && regexp.MustCompile(`\b80\b`).MatchString(line) {
+			t.Errorf("entry ports must OVERRIDE the global cap (not fall back to 80): %s", line)
+		}
 	}
 }
 

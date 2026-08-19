@@ -83,13 +83,24 @@
 # Static name→address entries written into the container's /etc/hosts, made
 # reachable to match the mode (restricted punches a targeted allow for a private
 # IP; allowlist adds it to the firewall set and refuses private/metadata IPs).
-# If allowed_ports is set, that reachability is scoped to those ports too, so a
-# host entry can't reopen the full port range on a LAN box.
+# Add an optional per-entry `ports` to reach that host on specific ports only —
+# empty inherits allowed_ports (else all ports). This is what lets restricted mode
+# open ONE LAN service (e.g. redmine:443) while the rest of egress stays open.
 # Trusted-scope only — ignored from a project ./.coi/config.toml. Add on the fly
-# to a running container with `coi hosts add <container> <ip> <hostname...>`.
+# to a running container with `coi hosts add <container> <ip> <hostname...> --ports 443`.
 # [[network.hosts]]
 # ip        = "10.0.0.5"
 # hostnames = ["db.internal", "cache.internal"]
+# ports     = [443]        # optional: reach this host on 443 only
+#
+# Example — "internet open, LAN only redmine:443, Pi-hole resolves":
+# [network]
+# mode        = "restricted"
+# dns_servers = ["192.168.1.2"]     # your Pi-hole
+# [[network.hosts]]
+# ip        = "192.168.1.50"
+# hostnames = ["redmine.susanoo.pl"]
+# ports     = [443]
 
 [network.logging]
 # enabled = true

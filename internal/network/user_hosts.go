@@ -68,6 +68,42 @@ func checkHostReachable(mode config.NetworkMode, allowLocalNetworkAccess bool, i
 	return nil
 }
 
+// checkHostPortsEnforceable refuses a per-host `ports` scope that the active
+// mode/class combination cannot actually enforce, rather than silently ignoring
+// it (a false sense of security). Per-host ports take effect ONLY for a private
+// host in restricted mode (targeted allow) and a public host in allowlist mode
+// (port-scoped set tuple). Everywhere else the host is reached — if at all —
+// through a broader rule (restricted's blanket internet accept, or allowlist's
+// allow_local_network_access LAN accept scoped by the GLOBAL allowed_ports), so a
+// per-host cap would do nothing. It fails closed with a message that says why and
+// what to do instead, matching how checkHostReachable refuses unreachable entries.
+func checkHostPortsEnforceable(mode config.NetworkMode, entry config.HostEntry) error {
+	if len(entry.Ports) == 0 {
+		return nil // no per-host ports to enforce
+	}
+	class := classifyHostIP(entry.IP)
+	if (mode == config.NetworkModeRestricted && class == hostPrivate) ||
+		(mode == config.NetworkModeAllowlist && class == hostPublic) {
+		return nil // enforceable
+	}
+	switch {
+	case mode == config.NetworkModeOpen:
+		return fmt.Errorf("network.hosts: %s sets ports=%v, but open mode enforces no egress restrictions "+
+			"so the port scope would do nothing — remove ports, or use restricted/allowlist mode", entry.IP, entry.Ports)
+	case mode == config.NetworkModeRestricted && class == hostPublic:
+		return fmt.Errorf("network.hosts: %s is a public address, which restricted mode already reaches on ALL "+
+			"ports, so ports=%v cannot scope it — per-host ports here apply only to a private (LAN) address; "+
+			"use allowlist mode to port-scope a public host", entry.IP, entry.Ports)
+	case mode == config.NetworkModeAllowlist && class == hostPrivate:
+		return fmt.Errorf("network.hosts: %s is a private address, reachable in allowlist mode only via "+
+			"allow_local_network_access whose LAN rule is scoped by the global allowed_ports (not per-host "+
+			"ports=%v) — drop the per-host ports, or use restricted mode to port-scope a LAN host", entry.IP, entry.Ports)
+	default:
+		return fmt.Errorf("network.hosts: %s ports=%v cannot be enforced for this address in %s mode",
+			entry.IP, entry.Ports, mode)
+	}
+}
+
 // ApplyUserHosts writes the static host entries ([[network.hosts]] / `coi hosts`,
 // #605) into the container's /etc/hosts and makes each address reachable under the
 // active network mode. Reachability is validated for EVERY entry up front, so a
@@ -81,9 +117,13 @@ func ApplyUserHosts(containerName string, mode config.NetworkMode, allowLocalNet
 		mode = config.NetworkModeRestricted // the config default
 	}
 
-	// 1. Fail before touching anything if any entry can't be made reachable.
+	// 1. Fail before touching anything if any entry can't be made reachable, or
+	// carries a per-host port scope this mode/class can't actually enforce.
 	for _, e := range entries {
 		if err := checkHostReachable(mode, allowLocalNetworkAccess, e.IP); err != nil {
+			return err
+		}
+		if err := checkHostPortsEnforceable(mode, e); err != nil {
 			return err
 		}
 	}
@@ -159,6 +199,9 @@ func AddUserHost(containerName string, mode config.NetworkMode, allowLocalNetwor
 	// honor that instead.
 	mode = effectiveContainerMode(containerIP, mode)
 	if err := checkHostReachable(mode, allowLocalNetworkAccess, entry.IP); err != nil {
+		return err
+	}
+	if err := checkHostPortsEnforceable(mode, entry); err != nil {
 		return err
 	}
 	// Firewall reachability for just this address (open mode needs none). The port
@@ -260,22 +303,41 @@ func mergeHostEntry(entries []config.HostEntry, add config.HostEntry) []config.H
 // checkHostReachable).
 func applyHostFirewall(mode config.NetworkMode, containerIP string, entry config.HostEntry, allowedPorts []int) error {
 	class := classifyHostIP(entry.IP)
+	// This entry's own ports scope its reachability (e.g. redmine on 443 only);
+	// with none configured it inherits the global allowed_ports (else all ports).
+	// This is what lets restricted mode open one LAN service on one port while the
+	// rest of egress stays wide open — allowed_ports alone can't, since it is global.
+	hostPorts := entry.Ports
+	if len(hostPorts) == 0 {
+		hostPorts = allowedPorts
+	}
+	// Normalize (range-check + dedup + sort) so the emitted rule is deterministic
+	// and duplicate-free, exactly as the global allowed_ports path does — entry.Ports
+	// otherwise reaches nft raw from config.
+	hostPorts, err := validateAllowedPorts(hostPorts)
+	if err != nil {
+		// Both entry.Ports (config load) and the global allowed_ports (ApplyRestricted/
+		// ApplyAllowlist) are already validated, so this is practically unreachable —
+		// but attribute it to the host entry rather than let validateAllowedPorts'
+		// "allowed_ports:" wording misdirect.
+		return fmt.Errorf("network.hosts %s: invalid ports: %w", entry.IP, err)
+	}
 	switch {
 	case mode == config.NetworkModeAllowlist && class == hostPublic:
 		// Allowlist mode keeps addresses in two parallel sets: the address-only set
 		// (ICMP + the security monitor) and the port-scoped concatenated set the L4
-		// accept matches. Add this host to BOTH — the tuple scoped to allowed_ports
-		// (else all ports), so it inherits the same cap every other allowlisted host
-		// does and cannot silently reopen the full port range on a LAN box.
+		// accept matches. Add this host to BOTH — the tuple scoped to hostPorts, so it
+		// inherits the same cap every other allowlisted host does and cannot silently
+		// reopen the full port range on a LAN box.
 		nm := NewNftManager(containerIP, "")
 		if err := nm.AddStaticIPs([]string{entry.IP}); err != nil {
 			return fmt.Errorf("failed to allow host %s in allowlist mode: %w", entry.IP, err)
 		}
-		if err := nm.AddStaticTuples([]staticTuple{{CIDR: entry.IP}}, intsToPortRanges(allowedPorts)); err != nil {
+		if err := nm.AddStaticTuples([]staticTuple{{CIDR: entry.IP}}, intsToPortRanges(hostPorts)); err != nil {
 			return fmt.Errorf("failed to port-scope host %s in allowlist mode: %w", entry.IP, err)
 		}
 	case mode == config.NetworkModeRestricted && class == hostPrivate:
-		if err := insertContainerAcceptRule(containerIP, entry.IP, allowedPorts); err != nil {
+		if err := insertContainerAcceptRule(containerIP, entry.IP, hostPorts); err != nil {
 			return fmt.Errorf("failed to allow private host %s in restricted mode: %w", entry.IP, err)
 		}
 	}

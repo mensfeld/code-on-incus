@@ -13,6 +13,11 @@
       "items": { "type": "string" },
       "minItems": 1,
       "description": "One or more hostnames that resolve to this address inside the container"
+    },
+    "ports": {
+      "type": "array",
+      "items": { "type": "integer", "minimum": 1, "maximum": 65535 },
+      "description": "Optional TCP/UDP destination ports this host is reachable on (e.g. [443]). Scopes the firewall reachability for this host only, so in restricted mode you can open a single LAN service on one port while the rest of egress stays open. Empty inherits the global allowed_ports (else all ports). Applied in restricted and allowlist mode; ignored in open mode."
     }
   }
 }
