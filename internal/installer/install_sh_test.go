@@ -206,8 +206,9 @@ func TestInstallSh_EnsureIncusInitialized_SkipsWhenAlreadyInitialized(t *testing
 
 	script := installShPath(t)
 
-	// Stub incus: when called with "network list", return a fake network line.
-	// This simulates an already-initialized Incus without needing a real one.
+	// Stub incus: when called with "network list", return a fake MANAGED network
+	// line (column 3 = YES). This simulates an already-initialized Incus without
+	// needing a real one.
 	snippet := `
 		tmpdir=$(mktemp -d)
 		trap "rm -rf $tmpdir" EXIT
@@ -215,7 +216,7 @@ func TestInstallSh_EnsureIncusInitialized_SkipsWhenAlreadyInitialized(t *testing
 		cat > "$tmpdir/incus" <<'STUB'
 #!/bin/bash
 if [[ "$*" == *"network list"* ]]; then
-	echo "incusbr0,bridge,,"
+	echo "incusbr0,bridge,YES,10.87.0.1/24,,,3,RUNNING"
 	exit 0
 fi
 exit 0
@@ -302,6 +303,66 @@ STUB
 	// Verify sudo was called with the right command
 	if !strings.Contains(stdout, "INIT_WAS_CALLED") {
 		t.Errorf("expected sudo incus admin init --auto to be called; stdout: %s", stdout)
+	}
+}
+
+// #703: on a real host, `incus network list` is never empty even before
+// `incus admin init` has run, because it also lists unmanaged physical and
+// loopback interfaces. ensure_incus_initialized must still run
+// `sudo incus admin init --auto` in that case rather than treating a
+// non-empty-but-all-unmanaged list as "already initialized".
+func TestInstallSh_EnsureIncusInitialized_RunsInitWhenOnlyUnmanagedNetworksExist(t *testing.T) {
+	script := installShPath(t)
+
+	// Stub incus network list with the exact CSV shape reported in #703: a
+	// physical NIC and loopback, both unmanaged (column 3, MANAGED, is NO).
+	snippet := `
+		tmpdir=$(mktemp -d)
+		trap "rm -rf $tmpdir" EXIT
+
+		cat > "$tmpdir/incus" <<'STUB'
+#!/bin/bash
+if [[ "$*" == *"network list"* ]]; then
+	printf 'enp7s0,physical,NO,,,,0,\n'
+	printf 'lo,loopback,NO,,,,0,\n'
+	exit 0
+fi
+exit 0
+STUB
+		chmod +x "$tmpdir/incus"
+
+		export COI_TEST_MARKER="$tmpdir/init_called"
+		cat > "$tmpdir/sudo" <<'STUB'
+#!/bin/bash
+if [[ "$*" == *"incus admin init --auto"* ]]; then
+	touch "$COI_TEST_MARKER"
+	exit 0
+fi
+exec /usr/bin/sudo "$@"
+STUB
+		chmod +x "$tmpdir/sudo"
+		export PATH="$tmpdir:$PATH"
+
+		export NONINTERACTIVE=1
+		source <(sed '/^main "\$@"/d; /^trap error_handler ERR/d' "` + script + `")
+		ensure_incus_initialized
+		if [ -f "$COI_TEST_MARKER" ]; then
+			echo "INIT_WAS_CALLED"
+		fi
+		echo "COMPLETED"
+	`
+	stdout, _, exitCode := runBashSnippet(t, snippet, "NONINTERACTIVE=1")
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0, got %d; stdout: %s", exitCode, stdout)
+	}
+	if !strings.Contains(stdout, "COMPLETED") {
+		t.Errorf("function did not complete; stdout: %s", stdout)
+	}
+	if !strings.Contains(stdout, "has not been initialized") {
+		t.Errorf("expected 'has not been initialized' message when only unmanaged networks exist, got: %s", stdout)
+	}
+	if !strings.Contains(stdout, "INIT_WAS_CALLED") {
+		t.Errorf("expected sudo incus admin init --auto to be called when only unmanaged networks exist (#703); stdout: %s", stdout)
 	}
 }
 

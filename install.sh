@@ -458,8 +458,9 @@ ensure_incus_initialized() {
         return
     fi
 
-    # Check if Incus has been initialized by looking for any networks.
-    # `incus admin init` creates incusbr0; an empty list means never initialized.
+    # Check for a MANAGED network (CSV column 3), not just any network: unmanaged
+    # physical/loopback interfaces are on every real host and would otherwise
+    # make this non-empty, falsely skipping init (#703).
     # If the query itself fails (daemon down, no permissions), warn and bail out
     # rather than incorrectly triggering init.
     local networks
@@ -468,7 +469,7 @@ ensure_incus_initialized() {
         echo "  Could not query Incus networks. Ensure the Incus daemon is running and your user has access."
         return 1
     fi
-    if [ -n "$networks" ]; then
+    if printf '%s\n' "$networks" | cut -d',' -f3 | grep -q '^YES$'; then
         return
     fi
 
@@ -589,7 +590,7 @@ setup_zfs_storage() {
                 printf "${YELLOW}  %s${NC}\n" "$profile_output"
             fi
             echo -e "${YELLOW}  You can manually configure it later with:${NC}"
-            echo -e "  ${BLUE}incus profile device set default root pool=zfs-pool${NC}"
+            echo -e "  ${BLUE}incus profile device add default root disk pool=zfs-pool path=/${NC}"
         fi
     else
         echo -e "${YELLOW}⚠ ZFS storage pool creation failed${NC}"
@@ -649,7 +650,7 @@ setup_btrfs_storage() {
                 printf "${YELLOW}  %s${NC}\n" "$profile_output"
             fi
             echo -e "${YELLOW}  You can manually configure it later with:${NC}"
-            echo -e "  ${BLUE}incus profile device set default root pool=btrfs-pool${NC}"
+            echo -e "  ${BLUE}incus profile device add default root disk pool=btrfs-pool path=/${NC}"
         fi
     else
         echo -e "${YELLOW}⚠ btrfs storage pool creation failed${NC}"
