@@ -102,13 +102,12 @@ var containerDeleteCmd = &cobra.Command{
 			containerIP, _ = network.GetContainerIPFast(name)
 		}
 
-		// Clean up nft rules BEFORE deleting container
-		if containerIP != "" {
-			fm := network.NewNftManager(containerIP, "")
-			if err := fm.RemoveRules(); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: Failed to cleanup nft rules: %v\n", err)
-			}
-		}
+		// Clean up ALL host-side firewall artefacts BEFORE deleting the
+		// container: the IP-keyed rule bundle + sets, the monitoring LOG rules,
+		// and the NAME-keyed coi6-<name> IPv6 block. Using the shared helper
+		// (same one kill/shutdown use) closes #696 item 5 — the old inline
+		// RemoveRules() left the LOG rules and the IPv6 block behind.
+		cleanupContainerFirewall(name, containerIP)
 
 		if err := mgr.Delete(force); err != nil {
 			return fmt.Errorf("failed to delete container: %v", err)

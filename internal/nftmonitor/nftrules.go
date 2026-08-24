@@ -23,11 +23,39 @@ func NewRuleManager(cfg *Config) *RuleManager {
 	}
 }
 
+// monitorRulesPresentForIP reports whether any NFT_COI/NFT_DNS/NFT_SUSPICIOUS
+// LOG rule for exactly this IP already exists in the given `nft list chain`
+// output text. It matches the same bracketed tokens RemoveRules deletes on
+// (e.g. "NFT_COI[10.0.0.5]"), so "10.0.0.5" never matches a rule for
+// "10.0.0.50". Pure and text-only so it is unit-testable without nft.
+func monitorRulesPresentForIP(chainText, ip string) bool {
+	if ip == "" {
+		return false
+	}
+	for _, prefix := range []string{"NFT_COI", "NFT_DNS", "NFT_SUSPICIOUS"} {
+		if strings.Contains(chainText, fmt.Sprintf("%s[%s]", prefix, ip)) {
+			return true
+		}
+	}
+	return false
+}
+
 // AddRules adds nftables LOG rules for the container
 func (rm *RuleManager) AddRules() error {
 	// First, ensure the ip filter table and FORWARD chain exist
 	if err := rm.ensureChainExists(); err != nil {
 		return fmt.Errorf("failed to ensure chain exists: %w", err)
+	}
+
+	// Idempotency guard (#696 item 3a): the three rules below are inserted and
+	// removed as a per-IP set, so if a set for this exact IP already exists in
+	// the FORWARD chain, re-running would just stack 3-4 duplicates. Skip in
+	// that case. On a list failure we fall through and insert, preserving the
+	// previous behaviour and never silently disabling monitoring.
+	if out, err := rm.runNFTCommand("list", "chain", "ip", "filter", "FORWARD"); err == nil {
+		if monitorRulesPresentForIP(string(out), rm.config.ContainerIP) {
+			return nil
+		}
 	}
 
 	// Rule 1: High priority - Always log suspicious traffic (no rate limit)
