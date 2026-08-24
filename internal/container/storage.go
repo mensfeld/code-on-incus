@@ -9,9 +9,10 @@ import (
 // Only the fields COI cares about are decoded — Incus's full schema is
 // significantly larger and changes between releases.
 type StoragePool struct {
-	Name   string   `json:"name"`
-	Driver string   `json:"driver"`
-	UsedBy []string `json:"used_by"`
+	Name   string            `json:"name"`
+	Driver string            `json:"driver"`
+	Config map[string]string `json:"config"`
+	UsedBy []string          `json:"used_by"`
 }
 
 // ListStoragePools returns all storage pools known to the local Incus daemon.

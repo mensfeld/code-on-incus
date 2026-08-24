@@ -1527,6 +1527,38 @@ var listPoolDrivers = func() map[string]string {
 	return drivers
 }
 
+// isNonThinLVM reports whether an lvm/lvmcluster pool lacks a thin pool, so
+// every launch does a full logical-volume copy instead of a CoW clone, the
+// same per-launch cost `dir` has (#686).
+func isNonThinLVM(driver string, config map[string]string) bool {
+	switch driver {
+	case "lvmcluster":
+		return true
+	case "lvm":
+		switch strings.ToLower(config["lvm.use_thinpool"]) {
+		case "false", "0", "no", "off":
+			return true
+		}
+	}
+	return false
+}
+
+// listNonThinLVMPools returns pool names flagged by isNonThinLVM, read from
+// the same `storage list --format=json` call listPoolDrivers already makes.
+var listNonThinLVMPools = func() map[string]bool {
+	pools, err := container.ListStoragePools()
+	if err != nil {
+		return nil
+	}
+	nonThin := make(map[string]bool)
+	for _, p := range pools {
+		if isNonThinLVM(p.Driver, p.Config) {
+			nonThin[p.Name] = true
+		}
+	}
+	return nonThin
+}
+
 // CheckIncusStoragePools checks Incus storage pool usage for all pools the
 // loaded config references (global + every profile), de-duplicated. An empty
 // pool name in config falls back to the Incus default profile's pool so we
@@ -1536,7 +1568,8 @@ var listPoolDrivers = func() map[string]string {
 // status is the worst status across the inspected pools (failed > warning > ok).
 // Besides usage thresholds, a pool on the `dir` driver is flagged as a warning:
 // it forces `incus init` to re-unpack the whole image on every launch, which
-// dominates session startup time (#659).
+// dominates session startup time (#659). A non-thin lvm/lvmcluster pool gets
+// the same warning for the same reason (#686).
 func CheckIncusStoragePools(pools []string) HealthCheck {
 	// De-dupe + replace empty entries with the actual default pool name.
 	seen := map[string]bool{}
@@ -1567,6 +1600,7 @@ func CheckIncusStoragePools(pools []string) HealthCheck {
 	}
 
 	drivers := listPoolDrivers()
+	nonThinLVM := listNonThinLVMPools()
 
 	for _, pool := range unique {
 		u := gatherPoolUsage(pool)
@@ -1579,7 +1613,7 @@ func CheckIncusStoragePools(pools []string) HealthCheck {
 			driver = u.driver
 		}
 
-		status, msgs, entry := evaluatePool(pool, driver, u)
+		status, msgs, entry := evaluatePool(pool, driver, u, nonThinLVM[pool])
 		worsen(status)
 		details[pool] = entry
 		messages = append(messages, msgs...)
@@ -1595,9 +1629,9 @@ func CheckIncusStoragePools(pools []string) HealthCheck {
 
 // evaluatePool turns one pool's driver + gathered usage into its status,
 // message lines, and details entry. Both the usage-error and success paths
-// flow through here, so driver-based diagnoses (the dir warning today,
-// non-thin LVM per #686 tomorrow) cannot drift between the two paths.
-func evaluatePool(pool, driver string, u poolUsage) (CheckStatus, []string, map[string]interface{}) {
+// flow through here, so driver-based diagnoses (the dir warning, the
+// non-thin LVM warning, #686) cannot drift between the two paths.
+func evaluatePool(pool, driver string, u poolUsage, nonThinLVM bool) (CheckStatus, []string, map[string]interface{}) {
 	label := pool
 	if driver != "" {
 		label = fmt.Sprintf("%s (%s)", pool, driver)
@@ -1635,7 +1669,7 @@ func evaluatePool(pool, driver string, u poolUsage) (CheckStatus, []string, map[
 		default:
 			status = StatusOK
 		}
-		if driver == "dir" && status == StatusOK {
+		if (driver == "dir" || nonThinLVM) && status == StatusOK {
 			status = StatusWarning
 		}
 
@@ -1655,6 +1689,14 @@ func evaluatePool(pool, driver string, u poolUsage) (CheckStatus, []string, map[
 		// launch re-unpacks the full image tarball (~5-6s per unpacked GB,
 		// #659). Copy-on-write drivers make instance creation near-free.
 		msgs = append(msgs, fmt.Sprintf("%s: 'dir' storage driver re-unpacks the image on every launch — recreate the pool with a copy-on-write driver (zfs/btrfs), e.g. by re-running install.sh", label))
+	} else if nonThinLVM {
+		// Same per-launch cost as `dir`, just reached through LVM instead of
+		// the driver name: no thin pool means no CoW clone (#686).
+		reason := "lvm.use_thinpool is disabled"
+		if driver == "lvmcluster" {
+			reason = "clustered LVM pools never use a thin pool"
+		}
+		msgs = append(msgs, fmt.Sprintf("%s: %s, so every launch does a full logical-volume copy instead of a thin-provisioned clone: recreate the pool with lvm.use_thinpool enabled or a copy-on-write driver (zfs/btrfs)", label, reason))
 	}
 
 	return status, msgs, entry
