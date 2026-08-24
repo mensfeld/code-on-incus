@@ -192,17 +192,15 @@ func cleanStoppedContainers() (int, bool, error) {
 	cleaned := 0
 	for _, name := range stoppedContainers {
 		fmt.Printf("Deleting container %s...\n", name)
-		// Reclaim the container's host-side firewall artefacts before deleting
-		// it (#696 item 4): the default reap path used to delete with zero nft
-		// cleanup, leaking the coi-<ip> bundle + sets, the monitoring LOG rules,
-		// and the coi6-<name> IPv6 block until an exact-IP DHCP reuse or a manual
-		// --orphans. Mirrors container.go's resolve-IP -> firewall-cleanup ->
-		// delete ordering.
-		var ip string
-		if network.NftAvailable() {
-			ip, _ = network.GetContainerIPFast(name)
-		}
-		cleanupContainerFirewall(name, ip)
+		// Reclaim host-side firewall artefacts before deleting (#696 item 4):
+		// the default reap path used to delete with zero nft cleanup. These
+		// containers are already Stopped, so they hold no DHCP lease and their
+		// IP is unresolvable here — GetContainerIPFast would only burn ~2s of
+		// retries and still return "". So pass "" and reclaim the NAME-keyed
+		// coi6-<name> IPv6 block; the IP-keyed coi-<ip> bundle + monitoring LOG
+		// rules are left to the orphan sweep (coi clean --orphans), which
+		// matches on the rules themselves rather than a live IP.
+		cleanupContainerFirewall(name, "")
 		mgr := container.NewManager(name)
 		if err := mgr.Delete(true); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: Failed to delete %s: %v\n", name, err)

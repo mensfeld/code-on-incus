@@ -149,11 +149,9 @@ def test_container_delete_removes_all_firewall_artifacts(
         comment = f"coi6-{name}"
         assert comment in _ip6_chain(), f"precondition: {comment} present while running"
 
-        # LOG rules only exist when nft monitoring is enabled+available in this
-        # environment; assert their removal only if they were present.
-        monitor_present = _count_monitor_rules_for_ip(ip) > 0
-
-        # Delete the container — must reclaim every artefact.
+        # Delete the container — must reclaim the IPv4 bundle and IPv6 block.
+        # (The monitoring LOG-rule path is covered by the dedicated,
+        # monitoring-gated test below.)
         dele = subprocess.run(
             [coi_binary, "container", "delete", name, "--force"],
             capture_output=True,
@@ -168,9 +166,91 @@ def test_container_delete_removes_all_firewall_artifacts(
         assert _poll_until(lambda: comment not in _ip6_chain()), (
             f"{comment} IPv6 block still present after delete:\n{_ip6_chain()}"
         )
-        if monitor_present:
-            assert _poll_until(lambda: _count_monitor_rules_for_ip(ip) == 0), (
-                f"NFT_*[{ip}] monitoring LOG rules still present after delete"
-            )
+    finally:
+        os.unlink(config_file)
+
+
+def _monitoring_available():
+    """nft monitoring needs nft-with-sudo AND journal access (the daemon reads
+    the kernel log). Mirrors tests/integration/test_nft_monitoring.py's gate."""
+    if (
+        subprocess.run(["sudo", "-n", "nft", "list", "ruleset"], capture_output=True).returncode
+        != 0
+    ):
+        return "nft sudo not available"
+    if subprocess.run(["journalctl", "-n", "1", "-k"], capture_output=True).returncode != 0:
+        return "journal access not available"
+    return None
+
+
+def _poll_for_monitor_rules(ip, timeout=40):
+    """Poll until >=1 NFT_*[ip] LOG rule appears (the daemon installs them
+    asynchronously after the session starts); return the final count."""
+    deadline = time.time() + timeout
+    count = _count_monitor_rules_for_ip(ip)
+    while count == 0 and time.time() < deadline:
+        time.sleep(1)
+        count = _count_monitor_rules_for_ip(ip)
+    return count
+
+
+def test_container_delete_removes_monitoring_log_rules(
+    coi_binary, workspace_dir, cleanup_containers
+):
+    """`coi container delete` must also remove the NFT_*[ip] monitoring LOG rules
+    in `ip filter FORWARD` (#696 item 5). This is the artefact the old inline
+    RemoveRules() left behind. Enables nft monitoring so the rules actually
+    exist, then asserts they are gone after delete. Skips (never silently
+    passes) when monitoring can't run in this environment."""
+    reason = _skip_unless_ready() or _monitoring_available()
+    if reason:
+        pytest.skip(reason)
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as f:
+        f.write(
+            "[monitoring]\nenabled = true\n\n"
+            "[monitoring.nft]\nenabled = true\n\n"
+            '[network]\nmode = "restricted"\n'
+        )
+        config_file = f.name
+
+    name = None
+    try:
+        env = os.environ.copy()
+        env["COI_CONFIG"] = config_file
+        result = subprocess.run(
+            [coi_binary, "shell", "--workspace", workspace_dir, "--background"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env=env,
+        )
+        assert result.returncode == 0, f"Failed to start container: {result.stderr}"
+        for line in (result.stdout + result.stderr).split("\n"):
+            if "Container: " in line:
+                name = line.split("Container: ")[1].strip()
+                break
+        assert name, f"no container name: {result.stdout + result.stderr}"
+
+        ip, _count = _wait_for_rules_for_ip(coi_binary, name)
+        if not ip:
+            pytest.skip("container never got a DHCP IP; cannot assert LOG-rule cleanup")
+
+        # The monitoring daemon installs the LOG rules asynchronously; require
+        # them as a precondition so this test genuinely exercises their removal.
+        if _poll_for_monitor_rules(ip) == 0:
+            pytest.skip("nft monitoring LOG rules never installed in this environment")
+
+        dele = subprocess.run(
+            [coi_binary, "container", "delete", name, "--force"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert dele.returncode == 0, f"container delete failed: {dele.stderr}"
+
+        assert _poll_until(lambda: _count_monitor_rules_for_ip(ip) == 0), (
+            f"NFT_*[{ip}] monitoring LOG rules still present after delete (#696 item 5)"
+        )
     finally:
         os.unlink(config_file)
