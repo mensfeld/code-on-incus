@@ -95,6 +95,18 @@ cache:
 			wantSources: []string{"/home/user/project"},
 			wantShift:   false,
 		},
+		{
+			// Hardening: an Incus version that emits shift as an unquoted bool
+			// must still be understood (a string-typed unmarshal would fail the
+			// whole parse and silently disable the heal).
+			name: "shift as unquoted bool",
+			yaml: `workspace:
+  type: disk
+  source: /home/user/project
+  shift: true`,
+			wantSources: []string{"/home/user/project"},
+			wantShift:   true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

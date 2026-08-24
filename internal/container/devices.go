@@ -1,6 +1,7 @@
 package container
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -31,11 +32,11 @@ func DiskDeviceSources(containerName string) (sources []string, hasShiftDevice b
 // iteration is random); FirstBlockingSource is order-independent, but tests and
 // log output are not.
 func parseDiskDeviceSources(yamlOut string) (sources []string, hasShiftDevice bool) {
-	var devices map[string]struct {
-		Type   string `yaml:"type"`
-		Source string `yaml:"source"`
-		Shift  string `yaml:"shift"`
-	}
+	// Decode device fields as `any`, not `string`: Incus renders device config
+	// values as quoted strings today (shift: "true"), but a version that emitted
+	// an unquoted scalar (shift: true) would fail a `string`-typed unmarshal and
+	// silently disable the whole heal. scalarString coerces either shape.
+	var devices map[string]map[string]any
 	if err := yaml.Unmarshal([]byte(yamlOut), &devices); err != nil {
 		return nil, false
 	}
@@ -46,15 +47,36 @@ func parseDiskDeviceSources(yamlOut string) (sources []string, hasShiftDevice bo
 	sort.Strings(names)
 	for _, name := range names {
 		d := devices[name]
-		if d.Type != "disk" {
+		if scalarString(d["type"]) != "disk" {
 			continue
 		}
-		if strings.TrimSpace(d.Source) != "" {
-			sources = append(sources, d.Source)
+		if src := strings.TrimSpace(scalarString(d["source"])); src != "" {
+			sources = append(sources, src)
 		}
-		if strings.TrimSpace(d.Shift) == "true" {
+		if strings.TrimSpace(scalarString(d["shift"])) == "true" {
 			hasShiftDevice = true
 		}
 	}
 	return sources, hasShiftDevice
+}
+
+// scalarString renders a scalar YAML value (string/bool/int) as a string, so a
+// device field survives whether Incus emits it quoted or unquoted. Returns ""
+// for nil or a non-scalar value.
+func scalarString(v any) string {
+	switch t := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return t
+	case bool:
+		if t {
+			return "true"
+		}
+		return "false"
+	case map[string]any, []any:
+		return ""
+	default:
+		return fmt.Sprintf("%v", t)
+	}
 }

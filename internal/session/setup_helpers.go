@@ -170,8 +170,23 @@ func ResolveStartUIDMapping(containerName string, disableShift bool, logger func
 	if logger == nil {
 		logger = func(string) {}
 	}
+	// `coi container start` can target an arbitrary container in any state, so
+	// scope the heal tightly (#691 review):
+	//   - Skip a RUNNING container: raw.idmap/shift can't be changed to effect
+	//     without a restart, and mutating a live instance only emits misleading
+	//     "unwritable"/"could not convert" warnings. Skip on error too (don't
+	//     act on uncertain state).
+	if running, err := container.ContainerRunning(containerName); err != nil || running {
+		return
+	}
 	sources, hasShiftDevice := container.DiskDeviceSources(containerName)
 	if !hasShiftDevice {
+		return
+	}
+	//   - Skip a container that isn't coi-managed: coi always mounts a disk
+	//     device named "workspace", so an empty workspace source means this is
+	//     someone else's container we must not rewrite.
+	if container.NewManager(containerName).GetWorkspaceSource() == "" {
 		return
 	}
 	hadRawIdmap := container.ContainerUsesRawIdmap(containerName)
