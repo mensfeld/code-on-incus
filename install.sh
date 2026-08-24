@@ -458,18 +458,26 @@ ensure_incus_initialized() {
         return
     fi
 
-    # Check for a MANAGED network (CSV column 3), not just any network: unmanaged
-    # physical/loopback interfaces are on every real host and would otherwise
-    # make this non-empty, falsely skipping init (#703).
-    # If the query itself fails (daemon down, no permissions), warn and bail out
-    # rather than incorrectly triggering init.
-    local networks
+    # Decide whether Incus has been initialized without being fooled by the
+    # unmanaged physical/loopback interfaces that appear on every real host: a
+    # bare "is the network list non-empty?" check is never empty and falsely
+    # skips init (#703). `incus admin init --auto` creates both a MANAGED network
+    # (incusbr0) and a storage pool, so treat either as proof of initialization -
+    # a host set up with an existing/custom network and no managed bridge still
+    # has a pool, which is the reliable signal.
+    # If the network query itself fails (daemon down, no permissions), warn and
+    # bail out rather than incorrectly triggering init.
+    local networks pools
     if ! networks="$(incus network list --format=csv 2>/dev/null)"; then
         echo -e "${YELLOW}⚠ Unable to determine whether Incus has been initialized${NC}"
         echo "  Could not query Incus networks. Ensure the Incus daemon is running and your user has access."
         return 1
     fi
-    if printf '%s\n' "$networks" | cut -d',' -f3 | grep -q '^YES$'; then
+    pools="$(incus storage list --format=csv 2>/dev/null)"
+    # MANAGED is CSV column 3 (YES/NO); awk avoids the cut|grep -q pipe whose
+    # early exit trips `set -o pipefail`.
+    if printf '%s\n' "$networks" | awk -F, '$3 == "YES" { found=1 } END { exit !found }' \
+        || [ -n "$pools" ]; then
         return
     fi
 

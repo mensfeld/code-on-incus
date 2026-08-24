@@ -366,6 +366,71 @@ STUB
 	}
 }
 
+// A host can be initialized with an existing/custom network and no managed
+// bridge, so the network list holds only unmanaged interfaces. `incus admin
+// init --auto` always creates a storage pool too, so a non-empty storage list
+// must count as "already initialized" and skip re-running init - otherwise the
+// installer prints a false "not initialized" warning and fires a doomed
+// `sudo incus admin init --auto` (which refuses on a configured host).
+func TestInstallSh_EnsureIncusInitialized_SkipsWhenOnlyStoragePoolExists(t *testing.T) {
+	script := installShPath(t)
+
+	// incus network list returns only unmanaged interfaces (MANAGED=NO), but
+	// storage list returns a pool - the reliable signal of prior init.
+	snippet := `
+		tmpdir=$(mktemp -d)
+		trap "rm -rf $tmpdir" EXIT
+
+		cat > "$tmpdir/incus" <<'STUB'
+#!/bin/bash
+if [[ "$*" == *"network list"* ]]; then
+	printf 'enp7s0,physical,NO,,,,0,\n'
+	printf 'lo,loopback,NO,,,,0,\n'
+	exit 0
+fi
+if [[ "$*" == *"storage list"* ]]; then
+	echo "default,zfs,,,3,CREATED"
+	exit 0
+fi
+exit 0
+STUB
+		chmod +x "$tmpdir/incus"
+
+		export COI_TEST_MARKER="$tmpdir/init_called"
+		cat > "$tmpdir/sudo" <<'STUB'
+#!/bin/bash
+if [[ "$*" == *"incus admin init --auto"* ]]; then
+	touch "$COI_TEST_MARKER"
+	exit 0
+fi
+exec /usr/bin/sudo "$@"
+STUB
+		chmod +x "$tmpdir/sudo"
+		export PATH="$tmpdir:$PATH"
+
+		export NONINTERACTIVE=1
+		source <(sed '/^main "\$@"/d; /^trap error_handler ERR/d' "` + script + `")
+		ensure_incus_initialized
+		if [ -f "$COI_TEST_MARKER" ]; then
+			echo "INIT_WAS_CALLED"
+		fi
+		echo "COMPLETED"
+	`
+	stdout, _, exitCode := runBashSnippet(t, snippet, "NONINTERACTIVE=1")
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0, got %d; stdout: %s", exitCode, stdout)
+	}
+	if !strings.Contains(stdout, "COMPLETED") {
+		t.Errorf("function did not complete; stdout: %s", stdout)
+	}
+	if strings.Contains(stdout, "has not been initialized") {
+		t.Errorf("should skip init when a storage pool exists, got: %s", stdout)
+	}
+	if strings.Contains(stdout, "INIT_WAS_CALLED") {
+		t.Errorf("must not run sudo incus admin init --auto when a storage pool already exists; stdout: %s", stdout)
+	}
+}
+
 // When `sudo incus admin init --auto` fails, ensure_incus_initialized should
 // print a warning with the error output and return non-zero.
 func TestInstallSh_EnsureIncusInitialized_HandlesInitFailure(t *testing.T) {
