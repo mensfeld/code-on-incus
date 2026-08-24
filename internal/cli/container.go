@@ -8,6 +8,7 @@ import (
 
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/network"
+	"github.com/mensfeld/code-on-incus/internal/session"
 	"github.com/spf13/cobra"
 )
 
@@ -51,6 +52,20 @@ var containerStartCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
+
+		// #691: proactively apply the #683 shift→raw.idmap decision before
+		// starting, deriving the statfs-sweep sources from the container's own
+		// disk devices (this command has no session context). On OrbStack ≥2.2.2
+		// a shift=true mount succeeds-but-unwritable, so the reactive fallback
+		// below never fires; this heals a pre-#689 container up front. No-op
+		// unless the container still carries a shift=true disk device.
+		disableShift := false
+		if app.cfg != nil {
+			disableShift = app.cfg.Incus.DisableShift
+		}
+		session.ResolveStartUIDMapping(name, disableShift, func(msg string) {
+			fmt.Fprintln(os.Stderr, msg)
+		})
 
 		// Recover from the #678 idmapped-mount start failure here too, rather
 		// than handing back a raw Incus error the user can't act on (#685). The
