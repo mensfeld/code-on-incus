@@ -14,8 +14,11 @@ This test closes that gap by running the ACTUAL install.sh logic against a
 genuine, freshly-installed-but-not-`admin init`'d Incus daemon inside a nested
 container. It validates the three real-world facts the Go stubs cannot:
 
-  1. A fresh daemon's `incus network list --format=csv` is non-empty but has no
-     MANAGED=YES row  -> ensure_incus_initialized must decide to run init.
+  1. A fresh daemon has no MANAGED=YES network -> ensure_incus_initialized must
+     decide to run init. (On bare metal the list is also non-empty with unmanaged
+     interfaces -- the exact #703 trigger -- but a nested daemon does not surface
+     host interfaces, so we don't require that shape here; the Go stub tests pin
+     it deterministically.)
   2. A real storage pool makes `incus storage list --format=csv` non-empty ->
      ensure_incus_initialized must decide to SKIP init (the mitigation added on
      top of the #703 fix: a host with a custom network and no managed bridge is
@@ -185,20 +188,27 @@ def _run_harness(container):
 def test_ensure_incus_initialized_against_real_daemon(incus_init_container):
     container = incus_init_container
 
-    # --- Premise checks against REAL incus output (the #703 root cause) --------
-    # A fresh daemon's network list is non-empty (host interfaces) but has no
-    # MANAGED=YES row. This is exactly the state that fooled the old
-    # `[ -n "$networks" ]` check.
+    # --- Premise check against REAL incus output -------------------------------
+    # A fresh daemon must have no MANAGED=YES network yet. On a bare-metal host
+    # its `incus network list` is additionally non-empty (unmanaged physical /
+    # loopback interfaces) -- that was the exact #703 trigger -- but a nested
+    # daemon does not surface the host's interfaces, so the list is legitimately
+    # empty here. Both shapes correctly mean "not initialized"; the unmanaged-
+    # but-non-empty shape is pinned deterministically by the Go stub test
+    # TestInstallSh_EnsureIncusInitialized_RunsInitWhenOnlyUnmanagedNetworksExist,
+    # so we only require "no managed network" and note which shape we got.
     nets = _exec(container, "incus network list --format=csv")
     assert nets.returncode == 0, f"network list failed: {nets.stderr}"
-    assert nets.stdout.strip() != "", (
-        "fresh Incus network list was empty; expected unmanaged host interfaces. "
-        "Premise of #703 no longer holds on this image."
-    )
     managed_rows = [ln for ln in nets.stdout.splitlines() if ln.split(",")[2:3] == ["YES"]]
     assert managed_rows == [], f"fresh daemon unexpectedly has a MANAGED network: {managed_rows!r}"
+    if nets.stdout.strip():
+        print("premise: fresh list carries unmanaged interfaces (the #703 shape)")
+    else:
+        print("premise: fresh list is empty (nested daemon; no host interfaces surfaced)")
 
     # --- Phase A: fresh daemon -> must DECIDE to init --------------------------
+    # No MANAGED network and no storage pool, whether the list is empty or only
+    # unmanaged interfaces -> ensure_incus_initialized must run init.
     out = _run_harness(container)
     assert "has not been initialized" in out, (
         f"on a fresh daemon the installer should report it is not initialized.\n{out}"
