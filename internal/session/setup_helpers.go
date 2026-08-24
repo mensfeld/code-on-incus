@@ -129,21 +129,69 @@ func ResolveReuseUIDMapping(containerName string, sources []string, disableShift
 	hadRawIdmap := container.ContainerUsesRawIdmap(containerName)
 	configuredShift, idmapApplied := ConfigureUIDMapping(containerName, sources, disableShift, logger)
 	useShift := reuseShiftDecision(configuredShift, hadRawIdmap || idmapApplied)
-	// Convert creation-time devices only on the TRANSITION to raw.idmap: a
-	// container that already carried it had its devices converted when that
-	// happened (creation, the #678 fallback, or an earlier reuse), so the
-	// per-device incus scan is skipped on the steady state every later
-	// session hits.
-	if idmapApplied && !hadRawIdmap {
-		converted, failed := container.ConvertShiftedDiskDevices(containerName)
-		if converted > 0 {
-			logger(fmt.Sprintf("Converted %d creation-time shift=true disk device(s) to shift=false to match raw.idmap (#683)", converted))
-		}
-		if failed > 0 {
-			logger(fmt.Sprintf("Warning: %d shift=true disk device(s) could not be converted to shift=false; the container may fail to start with raw.idmap set — retry, or recreate the container", failed))
-		}
-	}
+	convertCreationTimeShiftDevices(containerName, idmapApplied, hadRawIdmap, logger)
 	return useShift
+}
+
+// convertCreationTimeShiftDevices strips a container's creation-time shift=true
+// disk devices (setting shift=false) when the mapping decision has just
+// transitioned to raw.idmap (idmapApplied && !hadRawIdmap), so the newly-set
+// raw.idmap actually takes effect (#683). It is a no-op on the steady state: a
+// container that already carried raw.idmap had its devices converted when that
+// first happened (creation, the #678 fallback, or an earlier reuse), so the
+// per-device incus scan is skipped every later session. Shared by the reuse
+// (ResolveReuseUIDMapping) and start (ResolveStartUIDMapping) paths.
+func convertCreationTimeShiftDevices(containerName string, idmapApplied, hadRawIdmap bool, logger func(string)) {
+	if !idmapApplied || hadRawIdmap {
+		return
+	}
+	converted, failed := container.ConvertShiftedDiskDevices(containerName)
+	if converted > 0 {
+		logger(fmt.Sprintf("Converted %d creation-time shift=true disk device(s) to shift=false to match raw.idmap (#683)", converted))
+	}
+	if failed > 0 {
+		logger(fmt.Sprintf("Warning: %d shift=true disk device(s) could not be converted to shift=false; the container may fail to start with raw.idmap set — retry, or recreate the container", failed))
+	}
+}
+
+// ResolveStartUIDMapping is the `coi container start` counterpart of
+// ResolveReuseUIDMapping. That command has no session context (workspace path,
+// mount config), so it derives the statfs-sweep sources from the container's
+// OWN disk devices and proactively applies the #683 shift→raw.idmap decision
+// before start. On OrbStack ≥2.2.2 the shift mount succeeds-but-unwritable, so
+// the reactive #678 fallback in StartWithIdmapFallback never fires; this heals
+// a pre-#689 container up front (#691).
+//
+// It is deliberately a no-op when the container carries no shift=true disk
+// device: `coi container start` runs against an arbitrary container, and — like
+// the reactive fallbackShiftToRawIdmap, which only acts when shift devices
+// exist — it must not mutate a container that has nothing to heal.
+func ResolveStartUIDMapping(containerName string, disableShift bool, logger func(string)) {
+	if logger == nil {
+		logger = func(string) {}
+	}
+	// `coi container start` can target an arbitrary container in any state, so
+	// scope the heal tightly (#691 review):
+	//   - Skip a RUNNING container: raw.idmap/shift can't be changed to effect
+	//     without a restart, and mutating a live instance only emits misleading
+	//     "unwritable"/"could not convert" warnings. Skip on error too (don't
+	//     act on uncertain state).
+	if running, err := container.ContainerRunning(containerName); err != nil || running {
+		return
+	}
+	sources, hasShiftDevice := container.DiskDeviceSources(containerName)
+	if !hasShiftDevice {
+		return
+	}
+	//   - Skip a container that isn't coi-managed: coi always mounts a disk
+	//     device named "workspace", so an empty workspace source means this is
+	//     someone else's container we must not rewrite.
+	if container.NewManager(containerName).GetWorkspaceSource() == "" {
+		return
+	}
+	hadRawIdmap := container.ContainerUsesRawIdmap(containerName)
+	_, idmapApplied := ConfigureUIDMapping(containerName, sources, disableShift, logger)
+	convertCreationTimeShiftDevices(containerName, idmapApplied, hadRawIdmap, logger)
 }
 
 // decideUIDMapping is the pure decision behind ConfigureUIDMapping (no I/O), so
