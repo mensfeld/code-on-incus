@@ -149,7 +149,9 @@ def incus_init_container():
         # Push the real install.sh and the harness alongside it.
         push = subprocess.run(
             ["incus", "file", "push", INSTALL_SH, f"{name}/root/install.sh"],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         assert push.returncode == 0, f"failed to push install.sh: {push.stderr}"
 
@@ -159,7 +161,9 @@ def incus_init_container():
         try:
             push = subprocess.run(
                 ["incus", "file", "push", harness_path, f"{name}/root/harness.sh"],
-                capture_output=True, text=True, timeout=30,
+                capture_output=True,
+                text=True,
+                timeout=30,
             )
             assert push.returncode == 0, f"failed to push harness.sh: {push.stderr}"
         finally:
@@ -191,12 +195,8 @@ def test_ensure_incus_initialized_against_real_daemon(incus_init_container):
         "fresh Incus network list was empty; expected unmanaged host interfaces. "
         "Premise of #703 no longer holds on this image."
     )
-    managed_rows = [
-        ln for ln in nets.stdout.splitlines() if ln.split(",")[2:3] == ["YES"]
-    ]
-    assert managed_rows == [], (
-        f"fresh daemon unexpectedly has a MANAGED network: {managed_rows!r}"
-    )
+    managed_rows = [ln for ln in nets.stdout.splitlines() if ln.split(",")[2:3] == ["YES"]]
+    assert managed_rows == [], f"fresh daemon unexpectedly has a MANAGED network: {managed_rows!r}"
 
     # --- Phase A: fresh daemon -> must DECIDE to init --------------------------
     out = _run_harness(container)
