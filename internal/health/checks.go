@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mensfeld/code-on-incus/internal/cleanup"
 	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/monitor"
@@ -2006,6 +2007,15 @@ func CheckOrphanedResources() HealthCheck {
 					orphanedRules++
 				}
 			}
+		}
+
+		// Count orphaned monitoring LOG rules too (#696 item 6): the per-IP /
+		// per-name tallies above ignore the NFT_COI/NFT_DNS/NFT_SUSPICIOUS rules
+		// in ip filter FORWARD, so heavy LOG-rule bloat used to under-report.
+		// Reuse the cleanup detector (which does exact-IP matching) rather than
+		// DetectAll, which would re-count the veth/IPv4/IPv6 dimensions above.
+		if handles, err := cleanup.DetectOrphanedNFTMonitorRules(); err == nil {
+			orphanedRules += len(handles)
 		}
 	}
 

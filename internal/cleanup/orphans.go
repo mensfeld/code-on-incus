@@ -238,6 +238,60 @@ func CleanupOrphanedNftRules(rules []string, logger func(string)) (int, error) {
 	return cleaned, nil
 }
 
+// monitorRuleIP returns the IP embedded in a FORWARD-chain rule's own
+// NFT_COI[<ip>] / NFT_DNS[<ip>] / NFT_SUSPICIOUS[<ip>] log-prefix token, or ""
+// if the line carries no such token. The closing ']' bounds the IP, so the
+// match is exact (10.47.6.2 is never confused with 10.47.6.20). Pure/text-only
+// so it is unit-testable without nft.
+func monitorRuleIP(line string) string {
+	for _, prefix := range []string{"NFT_COI[", "NFT_DNS[", "NFT_SUSPICIOUS["} {
+		start := strings.Index(line, prefix)
+		if start == -1 {
+			continue
+		}
+		start += len(prefix)
+		end := strings.IndexByte(line[start:], ']')
+		if end == -1 {
+			continue
+		}
+		return line[start : start+end]
+	}
+	return ""
+}
+
+// classifyMonitorLine decides whether a single FORWARD-chain rule line is an
+// orphaned monitoring LOG rule. It returns the rule's nft handle and whether it
+// is orphaned. A line is orphaned iff it carries a parseable NFT_*[<ip>] token
+// whose IP is NOT in the running-container set — compared by EXACT equality on
+// the extracted IP, not by substring against the whole line (#696 item 3b).
+// Lines without a monitoring token or without a handle are skipped
+// (orphaned=false).
+//
+// Bounded limitation: once the bridge DHCP pool legitimately recycles a dead
+// container's IP to a new running container, a stale rule embedding that same
+// IP is indistinguishable from a live one by IP alone, so it is (correctly, but
+// conservatively) treated as live. Fully solving that requires keying the LOG
+// rules by container name instead of IP — future work.
+func classifyMonitorLine(line string, running map[string]bool) (handle string, orphaned bool) {
+	ip := monitorRuleIP(line)
+	if ip == "" {
+		return "", false
+	}
+	handleIdx := strings.Index(line, "# handle ")
+	if handleIdx == -1 {
+		return "", false
+	}
+	handle = line[handleIdx+len("# handle "):]
+	if spaceIdx := strings.Index(handle, " "); spaceIdx != -1 {
+		handle = handle[:spaceIdx]
+	}
+	handle = strings.TrimSpace(handle)
+	if handle == "" {
+		return "", false
+	}
+	return handle, !running[ip]
+}
+
 // DetectOrphanedNFTMonitorRules finds nft monitoring rules for IPs that don't belong to any running container
 // These are rules with prefixes: NFT_COI[ip], NFT_DNS[ip], NFT_SUSPICIOUS[ip]
 func DetectOrphanedNFTMonitorRules() ([]string, error) {
@@ -253,47 +307,22 @@ func DetectOrphanedNFTMonitorRules() ([]string, error) {
 		return nil, nil
 	}
 
-	// Get all running container IPs
+	// Get all running container IPs as an exact-match set.
 	containerIPs, err := getRunningContainerIPs()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get container IPs: %w", err)
+	}
+	running := make(map[string]bool, len(containerIPs))
+	for _, ip := range containerIPs {
+		running[ip] = true
 	}
 
 	var orphaned []string
 	scanner := bufio.NewScanner(strings.NewReader(string(output)))
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-
-		// Look for our monitoring rule prefixes
-		if !strings.Contains(line, "NFT_COI[") &&
-			!strings.Contains(line, "NFT_DNS[") &&
-			!strings.Contains(line, "NFT_SUSPICIOUS[") {
-			continue
-		}
-
-		// Extract handle for cleanup
-		handleIdx := strings.Index(line, "# handle ")
-		if handleIdx == -1 {
-			continue
-		}
-
-		// Check if any running container IP is referenced in this rule
-		isOrphaned := true
-		for _, ip := range containerIPs {
-			if strings.Contains(line, ip) {
-				isOrphaned = false
-				break
-			}
-		}
-
-		if isOrphaned {
-			// Store the handle number for cleanup
-			handlePart := line[handleIdx+9:] // skip "# handle "
-			if spaceIdx := strings.Index(handlePart, " "); spaceIdx != -1 {
-				handlePart = handlePart[:spaceIdx]
-			}
-			handlePart = strings.TrimSpace(handlePart)
-			orphaned = append(orphaned, handlePart)
+		if handle, isOrphaned := classifyMonitorLine(line, running); isOrphaned {
+			orphaned = append(orphaned, handle)
 		}
 	}
 

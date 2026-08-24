@@ -9,6 +9,7 @@ import (
 
 	"github.com/mensfeld/code-on-incus/internal/cleanup"
 	"github.com/mensfeld/code-on-incus/internal/container"
+	"github.com/mensfeld/code-on-incus/internal/network"
 	"github.com/mensfeld/code-on-incus/internal/session"
 	"github.com/spf13/cobra"
 )
@@ -191,6 +192,15 @@ func cleanStoppedContainers() (int, bool, error) {
 	cleaned := 0
 	for _, name := range stoppedContainers {
 		fmt.Printf("Deleting container %s...\n", name)
+		// Reclaim host-side firewall artefacts before deleting (#696 item 4):
+		// the default reap path used to delete with zero nft cleanup. These
+		// containers are already Stopped, so they hold no DHCP lease and their
+		// IP is unresolvable here — GetContainerIPFast would only burn ~2s of
+		// retries and still return "". So pass "" and reclaim the NAME-keyed
+		// coi6-<name> IPv6 block; the IP-keyed coi-<ip> bundle + monitoring LOG
+		// rules are left to the orphan sweep (coi clean --orphans), which
+		// matches on the rules themselves rather than a live IP.
+		cleanupContainerFirewall(name, "")
 		mgr := container.NewManager(name)
 		if err := mgr.Delete(true); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: Failed to delete %s: %v\n", name, err)
@@ -485,9 +495,19 @@ func (a *App) cleanUnreferencedPools() (int, bool, error) {
 	for _, plan := range plans {
 		for _, name := range plan.containers {
 			fmt.Printf("Deleting container %s (pool %s)...\n", name, plan.pool)
+			// Resolve the IP BEFORE stopping — a stopped container may not report
+			// one via GetContainerIPFast — then reclaim its firewall artefacts
+			// before delete (#696 item 4). If the IP is unresolvable the
+			// name-keyed coi6-<name> block is still removed and the orphan sweep
+			// remains the backstop for the IP-keyed rules.
+			var ip string
+			if network.NftAvailable() {
+				ip, _ = network.GetContainerIPFast(name)
+			}
 			mgr := container.NewManager(name)
 			// Best-effort stop; ignore errors (container may already be stopped).
 			_ = mgr.Stop(true)
+			cleanupContainerFirewall(name, ip)
 			if err := mgr.Delete(true); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: Failed to delete %s: %v\n", name, err)
 				continue
