@@ -390,6 +390,8 @@ func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.P
 				ContextFilePath:       a.cfg.Tool.ContextFile,
 				ProfileContextFile:    a.cfg.ProfileContextFile,
 				AutoContext:           a.cfg.Tool.AutoContext,
+				ContextJSON:           a.cfg.Tool.ContextJSON,
+				ContextJSONFilePath:   a.cfg.Tool.ContextJSONFile,
 				ContainerName:         containerName,
 				Timezone:              resolvedTimezone,
 				Alias:                 a.cfg.Container.Alias,

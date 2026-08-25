@@ -586,7 +586,7 @@ func TestContextFile_JSONInjection(t *testing.T) {
 		AllowedPorts:  []int{443},
 	}
 
-	if err := injectContextJSONFile(mgr, ctxInfo, homeDir, logger); err != nil {
+	if err := injectContextJSONFile(mgr, ctxInfo, "", homeDir, logger); err != nil {
 		t.Fatalf("injectContextJSONFile failed: %v", err)
 	}
 

@@ -37,6 +37,36 @@ allowed_ports = [80, 443]
 	}
 }
 
+// An untrusted project config.toml must NOT be able to inject an arbitrary host
+// file via [tool] context_json_file (it would land in ~/SANDBOX_CONTEXT.json for
+// the in-container agent to read). The disable toggle context_json=false and the
+// custom .md context_file are left intact — the former only writes LESS, the
+// latter is unchanged pre-existing behavior.
+func TestSanitizeUntrustedConfig_StripsToolContextJSONFile(t *testing.T) {
+	const projectTOML = `
+[tool]
+context_json = false
+context_json_file = "~/.ssh/id_rsa"
+context_file = "./project-context.md"
+`
+	var cfg Config
+	if _, err := toml.Decode(projectTOML, &cfg); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	sanitizeUntrustedConfig(&cfg, "/ws/.coi/config.toml")
+
+	if cfg.Tool.ContextJSONFile != "" {
+		t.Errorf("context_json_file should be stripped from untrusted TOML, got %q", cfg.Tool.ContextJSONFile)
+	}
+	if cfg.Tool.ContextJSON == nil || *cfg.Tool.ContextJSON {
+		t.Errorf("context_json=false (writes less, not a downgrade) must survive, got %v", cfg.Tool.ContextJSON)
+	}
+	if cfg.Tool.ContextFile != "./project-context.md" {
+		t.Errorf("context_file is left unchanged for now, got %q", cfg.Tool.ContextFile)
+	}
+}
+
 // Untrusted (project-scoped) config must have any security-WEAKENING network
 // setting dropped.
 func TestSanitizeUntrustedConfig_DropsDowngrades(t *testing.T) {

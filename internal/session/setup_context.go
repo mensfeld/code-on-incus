@@ -47,16 +47,27 @@ func injectContextFile(mgr container.ContainerManager, info tool.ContextInfo, cu
 
 // injectContextJSONFile creates ~/SANDBOX_CONTEXT.json inside the container: the
 // machine-readable companion to SANDBOX_CONTEXT.md for programmatic consumers
-// (#705). It is always rendered from the resolved ContextInfo (the real sandbox
-// facts) — unlike the .md it is not overridable by a custom context_file, since
-// a custom file is human prose while this is structured data. Reuses the same
-// container write path as injectContextFile.
-func injectContextJSONFile(mgr container.ContainerManager, info tool.ContextInfo, homeDir string, logger func(string)) error {
+// (#705). If customPath is provided ([tool] context_json_file), that host file
+// is injected verbatim; otherwise the JSON is rendered from the resolved
+// ContextInfo (the real sandbox facts). Reuses the same container write path as
+// injectContextFile.
+func injectContextJSONFile(mgr container.ContainerManager, info tool.ContextInfo, customPath, homeDir string, logger func(string)) error {
 	destPath := filepath.Join(homeDir, "SANDBOX_CONTEXT.json")
 
-	content, err := tool.RenderContextFileJSON(info)
-	if err != nil {
-		return fmt.Errorf("failed to render context JSON: %w", err)
+	var content string
+	if customPath != "" {
+		data, err := os.ReadFile(customPath)
+		if err != nil {
+			return fmt.Errorf("failed to read custom context JSON file %s: %w", customPath, err)
+		}
+		content = string(data)
+		logger(fmt.Sprintf("Using custom context JSON file: %s", customPath))
+	} else {
+		rendered, err := tool.RenderContextFileJSON(info)
+		if err != nil {
+			return fmt.Errorf("failed to render context JSON: %w", err)
+		}
+		content = rendered
 	}
 
 	if err := mgr.CreateFile(destPath, content); err != nil {

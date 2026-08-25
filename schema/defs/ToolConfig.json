@@ -24,6 +24,14 @@
       "type": "boolean",
       "description": "Automatically inject the COI sandbox context into the tool's native system (default: true)"
     },
+    "context_json": {
+      "type": "boolean",
+      "description": "Write a machine-readable ~/SANDBOX_CONTEXT.json alongside the .md for programmatic consumers (default: true; set false to disable)"
+    },
+    "context_json_file": {
+      "type": "string",
+      "description": "Path to a custom context JSON file injected verbatim instead of the generated ~/SANDBOX_CONTEXT.json (supports ~ expansion)"
+    },
     "claude": {
       "$ref": "#/$defs/ClaudeToolConfig"
     }

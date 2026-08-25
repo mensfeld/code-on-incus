@@ -462,13 +462,15 @@ type ProfileConfig struct {
 
 // ToolConfig represents AI coding tool configuration
 type ToolConfig struct {
-	Name           string           `toml:"name"`            // Tool name: "claude", "aider", "cursor", etc.
-	Binary         string           `toml:"binary"`          // Binary name to execute (if empty, uses tool name)
-	PermissionMode string           `toml:"permission_mode"` // Permission mode: "bypass" (default) or "interactive"
-	ContextFile    string           `toml:"context_file"`    // Path to custom context .md file (supports ~ expansion)
-	AutoContext    *bool            `toml:"auto_context"`    // Auto-inject sandbox context into tool's native system (default: true)
-	Claude         ClaudeToolConfig `toml:"claude"`          // Claude-specific settings
-	Codex          CodexToolConfig  `toml:"codex"`           // Codex-specific settings
+	Name            string           `toml:"name"`              // Tool name: "claude", "aider", "cursor", etc.
+	Binary          string           `toml:"binary"`            // Binary name to execute (if empty, uses tool name)
+	PermissionMode  string           `toml:"permission_mode"`   // Permission mode: "bypass" (default) or "interactive"
+	ContextFile     string           `toml:"context_file"`      // Path to custom context .md file (supports ~ expansion)
+	AutoContext     *bool            `toml:"auto_context"`      // Auto-inject sandbox context into tool's native system (default: true)
+	ContextJSON     *bool            `toml:"context_json"`      // Write ~/SANDBOX_CONTEXT.json for programmatic consumers (default: true)
+	ContextJSONFile string           `toml:"context_json_file"` // Path to custom context .json file (supports ~ expansion; overrides the generated JSON)
+	Claude          ClaudeToolConfig `toml:"claude"`            // Claude-specific settings
+	Codex           CodexToolConfig  `toml:"codex"`             // Codex-specific settings
 }
 
 // ClaudeToolConfig contains Claude Code-specific settings
@@ -688,6 +690,7 @@ func expandConfigPaths(cfg *Config) {
 	cfg.Paths.StorageDir = ExpandPath(cfg.Paths.StorageDir)
 	cfg.Paths.LogsDir = ExpandPath(cfg.Paths.LogsDir)
 	cfg.Tool.ContextFile = ExpandPath(cfg.Tool.ContextFile)
+	cfg.Tool.ContextJSONFile = ExpandPath(cfg.Tool.ContextJSONFile)
 	cfg.Network.Logging.Path = ExpandPath(cfg.Network.Logging.Path)
 	cfg.Detection.GTFOBinsDir = ExpandPath(cfg.Detection.GTFOBinsDir)
 	cfg.Detection.SigmaDir = ExpandPath(cfg.Detection.SigmaDir)
@@ -1443,6 +1446,12 @@ func mergeToolInto(dst *ToolConfig, src *ToolConfig) {
 	}
 	if src.AutoContext != nil {
 		dst.AutoContext = src.AutoContext
+	}
+	if src.ContextJSON != nil {
+		dst.ContextJSON = src.ContextJSON
+	}
+	if src.ContextJSONFile != "" {
+		dst.ContextJSONFile = src.ContextJSONFile
 	}
 	if src.Claude.EffortLevel != "" {
 		dst.Claude.EffortLevel = src.Claude.EffortLevel
