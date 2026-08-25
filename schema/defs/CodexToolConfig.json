@@ -1,0 +1,16 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "description": "OpenAI Codex CLI-specific settings",
+  "properties": {
+    "model": {
+      "type": "string",
+      "description": "Codex model, delivered as -m (e.g. \"gpt-5-codex\"). Empty means codex's own default."
+    },
+    "reasoning_effort": {
+      "type": "string",
+      "enum": ["minimal", "low", "medium", "high", ""],
+      "description": "Codex reasoning effort, delivered as -c model_reasoning_effort=<v>. Empty means codex's own default."
+    }
+  }
+}

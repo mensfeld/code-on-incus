@@ -34,6 +34,9 @@
     },
     "claude": {
       "$ref": "#/$defs/ClaudeToolConfig"
+    },
+    "codex": {
+      "$ref": "#/$defs/CodexToolConfig"
     }
   }
 }
