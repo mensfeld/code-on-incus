@@ -184,6 +184,7 @@ func sanitizeUntrustedConfig(fileCfg *Config, path string) {
 	sanitizeUntrustedSessionName(&fileCfg.Container, path)
 	sanitizeUntrustedSecurity(&fileCfg.Security, path)
 	sanitizeUntrustedGit(&fileCfg.Git, path)
+	sanitizeUntrustedTool(&fileCfg.Tool, path)
 
 	// Persistence is honored from project scope (not a protection downgrade —
 	// the container stays fully sandboxed), but a cloned repo opting the user
@@ -203,6 +204,28 @@ func warnUntrustedDowngrade(path, field string) {
 		"WARNING: ignoring '%s' in project config %s; removing read-only "+
 			"protection is a security downgrade. Move it to ~/.coi/config.toml or "+
 			"set COI_CONFIG to apply it.\n", field, path)
+}
+
+// sanitizeUntrustedTool drops [tool] fields that read an arbitrary HOST file and
+// inject it into the container, since honoring them from an untrusted
+// (project-scoped) config would let a cloned/agent-planted repo exfiltrate host
+// secrets into the sandbox: e.g. context_file = "~/.ssh/id_rsa" lands the key in
+// ~/SANDBOX_CONTEXT.md, and context_json_file = "~/.aws/credentials" lands it in
+// ~/SANDBOX_CONTEXT.json — both readable by the in-container agent. Both are
+// therefore honored only from trusted scope (~/.coi/config.toml or $COI_CONFIG).
+// nil is a no-op.
+func sanitizeUntrustedTool(tc *ToolConfig, path string) {
+	if tc == nil {
+		return
+	}
+	if tc.ContextFile != "" {
+		warnUntrustedDowngrade(path, "tool.context_file")
+		tc.ContextFile = ""
+	}
+	if tc.ContextJSONFile != "" {
+		warnUntrustedDowngrade(path, "tool.context_json_file")
+		tc.ContextJSONFile = ""
+	}
 }
 
 // sanitizeUntrustedSecurity drops security-weakening fields from an untrusted

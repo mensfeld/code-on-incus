@@ -37,6 +37,36 @@ allowed_ports = [80, 443]
 	}
 }
 
+// An untrusted project config.toml must NOT be able to inject an arbitrary host
+// file into the container via [tool] context_file / context_json_file — both
+// read a host path and write it where the in-container agent can read it, so a
+// cloned repo could point them at a host secret. The disable toggle
+// context_json=false survives (it only writes LESS, not a downgrade).
+func TestSanitizeUntrustedConfig_StripsToolContextInjectors(t *testing.T) {
+	const projectTOML = `
+[tool]
+context_json = false
+context_file = "~/.ssh/id_rsa"
+context_json_file = "~/.aws/credentials"
+`
+	var cfg Config
+	if _, err := toml.Decode(projectTOML, &cfg); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	sanitizeUntrustedConfig(&cfg, "/ws/.coi/config.toml")
+
+	if cfg.Tool.ContextFile != "" {
+		t.Errorf("context_file should be stripped from untrusted TOML, got %q", cfg.Tool.ContextFile)
+	}
+	if cfg.Tool.ContextJSONFile != "" {
+		t.Errorf("context_json_file should be stripped from untrusted TOML, got %q", cfg.Tool.ContextJSONFile)
+	}
+	if cfg.Tool.ContextJSON == nil || *cfg.Tool.ContextJSON {
+		t.Errorf("context_json=false (writes less, not a downgrade) must survive, got %v", cfg.Tool.ContextJSON)
+	}
+}
+
 // Untrusted (project-scoped) config must have any security-WEAKENING network
 // setting dropped.
 func TestSanitizeUntrustedConfig_DropsDowngrades(t *testing.T) {

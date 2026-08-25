@@ -57,6 +57,8 @@ type SetupOptions struct {
 	ProfileContextFile    string                 // Path to profile context .md file (appended to sandbox context)
 	Timezone              string                 // Resolved IANA timezone name (e.g., "America/New_York"), empty for UTC
 	AutoContext           *bool                  // Auto-inject sandbox context into tool's native system (default: true)
+	ContextJSON           *bool                  // Write ~/SANDBOX_CONTEXT.json for programmatic consumers (default: true)
+	ContextJSONFilePath   string                 // Path to custom context .json file on host (overrides the generated JSON)
 	HostImmutable         bool                   // Apply chattr +i on host-side protected paths (set by CLI from config)
 	Alias                 string                 // Human-friendly alias for this container (set user.coi.alias)
 	ReadyTimeout          int                    // Seconds to wait for the container to become ready (<=0 = default 30)
@@ -1001,6 +1003,15 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		contextContent = resolveContextContent(ctxInfo, opts.ContextFilePath, opts.Logger)
 		if err := injectContextFile(result.Manager, ctxInfo, opts.ContextFilePath, result.HomeDir, opts.Logger); err != nil {
 			opts.Logger(fmt.Sprintf("Warning: Failed to inject context file: %v", err))
+		}
+		// Machine-readable companion for programmatic consumers (#705), enabled
+		// by default. Written from ctxInfo (the real facts) unless [tool]
+		// context_json_file provides a custom JSON to inject verbatim; disable
+		// entirely with context_json = false.
+		if config.BoolVal(opts.ContextJSON) {
+			if err := injectContextJSONFile(result.Manager, ctxInfo, opts.ContextJSONFilePath, result.HomeDir, opts.Logger); err != nil {
+				opts.Logger(fmt.Sprintf("Warning: Failed to inject context JSON file: %v", err))
+			}
 		}
 	}
 
