@@ -121,3 +121,44 @@ func TestRenderContextFileJSON_NilSlicesBecomeEmptyArrays(t *testing.T) {
 		t.Errorf("defaults not applied: os=%q arch=%q", got.OS, got.Architecture)
 	}
 }
+
+// The JSON egress fields must mirror the .md: a control is reported only in the
+// mode that actually enforces it, so a consumer never reads an inert config
+// value as an installed cap (#705 review #1).
+func TestRenderContextFileJSON_EgressGatedByMode(t *testing.T) {
+	base := ContextInfo{
+		WorkspacePath:  "/workspace",
+		HomeDir:        "/home/code",
+		AllowedPorts:   []int{443},
+		DNSServers:     []string{"192.168.1.2"},
+		AllowedDomains: []string{"github.com"},
+	}
+
+	render := func(t *testing.T, mode string) SandboxNetworkJSON {
+		t.Helper()
+		info := base
+		info.NetworkMode = mode
+		out, err := RenderContextFileJSON(info)
+		if err != nil {
+			t.Fatalf("render(%s): %v", mode, err)
+		}
+		var got SandboxContextJSON
+		if err := json.Unmarshal([]byte(out), &got); err != nil {
+			t.Fatalf("render(%s) invalid JSON: %v", mode, err)
+		}
+		return got.Network
+	}
+
+	// open: nothing is enforced even though all three are configured.
+	if n := render(t, "open"); len(n.AllowedPorts) != 0 || len(n.DNSServers) != 0 || len(n.AllowedDomains) != 0 {
+		t.Errorf("open mode should report no enforced egress, got %+v", n)
+	}
+	// restricted: ports + DNS enforced, domains are not (allowlist-only).
+	if n := render(t, "restricted"); len(n.AllowedPorts) != 1 || len(n.DNSServers) != 1 || len(n.AllowedDomains) != 0 {
+		t.Errorf("restricted mode gating wrong, got %+v", n)
+	}
+	// allowlist: ports + domains enforced, DNS pinning is not (allowlist blocks all DNS).
+	if n := render(t, "allowlist"); len(n.AllowedPorts) != 1 || len(n.AllowedDomains) != 1 || len(n.DNSServers) != 0 {
+		t.Errorf("allowlist mode gating wrong, got %+v", n)
+	}
+}

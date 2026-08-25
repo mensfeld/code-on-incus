@@ -374,6 +374,25 @@ func (info ContextInfo) withDefaults() ContextInfo {
 	return info
 }
 
+// portsEnforced / dnsEnforced / domainsEnforced report whether the corresponding
+// egress control is actually installed by the firewall in the current mode, as
+// opposed to merely being present in config. allowed_ports/dns_servers are inert
+// in open mode (blanket accept), dns_servers is inert in allowlist mode (all DNS
+// blocked), and allowed_domains only bites in allowlist mode. Both the .md and
+// the .json gate on these so they never announce a cap the firewall never
+// installed (which would read as "egress is filtered" when it is wide open).
+func (info ContextInfo) portsEnforced() bool {
+	return info.NetworkMode == "restricted" || info.NetworkMode == "allowlist"
+}
+
+func (info ContextInfo) dnsEnforced() bool {
+	return info.NetworkMode == "restricted"
+}
+
+func (info ContextInfo) domainsEnforced() bool {
+	return info.NetworkMode == "allowlist"
+}
+
 // contextTemplateData holds the resolved values passed to the context file template.
 type contextTemplateData struct {
 	WorkspacePath       string
@@ -458,10 +477,8 @@ func RenderContextFileContent(info ContextInfo) string {
 	// installs a blanket accept), and dns_servers is inert in allowlist mode (which
 	// blocks all DNS and is rejected at setup). Announcing a cap the firewall never
 	// installed would tell the agent egress is filtered when it is wide open.
-	portsEnforced := info.NetworkMode == "restricted" || info.NetworkMode == "allowlist"
-	dnsEnforced := info.NetworkMode == "restricted"
 	var egress []string
-	if portsEnforced && len(info.AllowedPorts) > 0 {
+	if info.portsEnforced() && len(info.AllowedPorts) > 0 {
 		ports := make([]string, len(info.AllowedPorts))
 		for i, p := range info.AllowedPorts {
 			ports[i] = strconv.Itoa(p)
@@ -469,11 +486,11 @@ func RenderContextFileContent(info ContextInfo) string {
 		egress = append(egress, "outbound is restricted to destination port(s) "+strings.Join(ports, ", ")+
 			" — all other ports are blocked (including on the local network), so services on non-listed ports are unreachable")
 	}
-	if dnsEnforced && len(info.DNSServers) > 0 {
+	if info.dnsEnforced() && len(info.DNSServers) > 0 {
 		egress = append(egress, "DNS is pinned to "+strings.Join(info.DNSServers, ", ")+
 			" on port 53 — queries to any other resolver are blocked")
 	}
-	if info.NetworkMode == "allowlist" && len(info.AllowedDomains) > 0 {
+	if info.domainsEnforced() && len(info.AllowedDomains) > 0 {
 		egress = append(egress, "the only reachable outbound destinations are: "+strings.Join(info.AllowedDomains, ", "))
 	}
 	if len(egress) > 0 {
@@ -642,10 +659,12 @@ type SandboxContextJSON struct {
 	ProfileContext string `json:"profile_context,omitempty"`
 }
 
-// SandboxNetworkJSON carries the effective egress posture. AllowedPorts/
-// DNSServers/AllowedDomains are the configured values; combine with Mode to know
-// which are actually enforced (ports bite in restricted/allowlist, DNS pinning
-// in restricted, domains in allowlist).
+// SandboxNetworkJSON carries the EFFECTIVE egress posture, matching what the .md
+// tells the agent. A field is populated only in the mode that actually enforces
+// it — allowed_ports in restricted/allowlist, dns_servers in restricted,
+// allowed_domains in allowlist — so an empty array means "not enforced" (e.g. in
+// open mode all ports are reachable regardless of a configured allowed_ports).
+// This avoids a consumer misreading an inert config value as an installed cap.
 type SandboxNetworkJSON struct {
 	Mode           string   `json:"mode"` // restricted | open | allowlist | ""
 	AllowedPorts   []int    `json:"allowed_ports"`
@@ -704,9 +723,9 @@ func RenderContextFileJSON(info ContextInfo) (string, error) {
 		RunAsRoot:     info.RunAsRoot,
 		Network: SandboxNetworkJSON{
 			Mode:           info.NetworkMode,
-			AllowedPorts:   nonNilInts(info.AllowedPorts),
-			DNSServers:     nonNilStrings(info.DNSServers),
-			AllowedDomains: nonNilStrings(info.AllowedDomains),
+			AllowedPorts:   effectiveInts(info.portsEnforced(), info.AllowedPorts),
+			DNSServers:     effectiveStrings(info.dnsEnforced(), info.DNSServers),
+			AllowedDomains: effectiveStrings(info.domainsEnforced(), info.AllowedDomains),
 		},
 		SSHAgentForwarded:  info.SSHAgentForwarded,
 		GHCLIAuthenticated: info.GHCLIAuthenticated,
@@ -743,4 +762,21 @@ func nonNilInts(s []int) []int {
 		return []int{}
 	}
 	return s
+}
+
+// effectiveStrings / effectiveInts return the configured slice only when the
+// control is actually enforced in the current mode; otherwise an empty [] — so
+// the JSON never reports an inert config value as an installed egress cap.
+func effectiveStrings(enforced bool, s []string) []string {
+	if !enforced {
+		return []string{}
+	}
+	return nonNilStrings(s)
+}
+
+func effectiveInts(enforced bool, s []int) []int {
+	if !enforced {
+		return []int{}
+	}
+	return nonNilInts(s)
 }
