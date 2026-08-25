@@ -684,7 +684,7 @@ fetch_detection_databases() {
         echo -e "${GREEN}✓ Detection databases fetched${NC}"
     else
         echo -e "${YELLOW}⚠ Detection database fetch failed (requires git and network access)${NC}"
-        echo "  Run manually later: ${BLUE}coi update patterns${NC}"
+        echo -e "  Run manually later: ${BLUE}coi update patterns${NC}"
     fi
 }
 
@@ -707,29 +707,29 @@ post_install() {
     echo "Next steps:"
     echo ""
     echo "  1. Build the COI image:"
-    echo "     ${BLUE}coi build${NC}"
+    echo -e "     ${BLUE}coi build${NC}"
     echo ""
     echo "  2. Start your first session:"
-    echo "     ${BLUE}coi shell${NC}"
+    echo -e "     ${BLUE}coi shell${NC}"
     echo ""
     echo "  3. View available commands:"
-    echo "     ${BLUE}coi --help${NC}"
+    echo -e "     ${BLUE}coi --help${NC}"
     echo ""
 
     if ! groups | grep -q incus-admin; then
         echo -e "${YELLOW}⚠ Remember to add yourself to incus-admin group:${NC}"
-        echo "   ${BLUE}sudo usermod -aG incus-admin \$USER${NC}"
+        echo -e "   ${BLUE}sudo usermod -aG incus-admin \$USER${NC}"
         echo "   Then log out and back in."
         echo ""
     fi
 
     if ! command -v nft &> /dev/null; then
         echo -e "${YELLOW}⚠ nftables is not installed — network isolation (restricted/allowlist modes) will not work.${NC}"
-        echo "   Install with: ${BLUE}sudo apt install nftables${NC}"
+        echo -e "   Install with: ${BLUE}sudo apt install nftables${NC}"
         echo ""
     elif ! [ -f /etc/sudoers.d/coi-nft ]; then
         echo -e "${YELLOW}⚠ Passwordless sudo for nft not configured — network isolation will not work.${NC}"
-        echo "   Run: ${BLUE}echo \"\$USER ALL=(ALL) NOPASSWD: \$(command -v nft)\" | sudo tee /etc/sudoers.d/coi-nft && sudo chmod 0440 /etc/sudoers.d/coi-nft${NC}"
+        echo -e "   Run: ${BLUE}echo \"\$USER ALL=(ALL) NOPASSWD: \$(command -v nft)\" | sudo tee /etc/sudoers.d/coi-nft && sudo chmod 0440 /etc/sudoers.d/coi-nft${NC}"
         echo ""
     fi
 

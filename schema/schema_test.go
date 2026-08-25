@@ -55,7 +55,7 @@ func TestGetProfileSchema_AllDefsPresent(t *testing.T) {
 	expected := []string{
 		"BuildConfig", "ContainerConfig",
 		"CPULimits", "MemoryLimits", "DiskLimits", "RuntimeLimits", "LimitsConfig",
-		"ClaudeToolConfig", "ToolConfig",
+		"ClaudeToolConfig", "CodexToolConfig", "ToolConfig",
 		"MountEntry", "SocketEntry", "CredentialEntry",
 		"NetworkLoggingConfig", "NetworkConfig",
 		"PathsConfig", "IncusConfig",

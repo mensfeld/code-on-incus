@@ -1,6 +1,7 @@
 package session
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -43,6 +44,60 @@ func injectContextFile(mgr container.ContainerManager, info tool.ContextInfo, cu
 
 	logger(fmt.Sprintf("Context file injected at %s", destPath))
 	return nil
+}
+
+// injectContextJSONFile creates ~/SANDBOX_CONTEXT.json inside the container: the
+// machine-readable companion to SANDBOX_CONTEXT.md for programmatic consumers
+// (#705). If customPath is provided ([tool] context_json_file), that host file
+// is injected verbatim; otherwise the JSON is rendered from the resolved
+// ContextInfo (the real sandbox facts). Reuses the same container write path as
+// injectContextFile.
+func injectContextJSONFile(mgr container.ContainerManager, info tool.ContextInfo, customPath, homeDir string, logger func(string)) error {
+	destPath := filepath.Join(homeDir, "SANDBOX_CONTEXT.json")
+
+	content, err := resolveContextJSON(customPath, info, logger)
+	if err != nil {
+		return err
+	}
+
+	if err := mgr.CreateFile(destPath, content); err != nil {
+		return fmt.Errorf("failed to create context JSON file %s: %w", destPath, err)
+	}
+
+	// Fix ownership if running as non-root user (mirrors injectContextFile).
+	if homeDir != "/root" {
+		if err := mgr.Chown(destPath, container.CodeUID, container.CodeUID); err != nil {
+			return fmt.Errorf("failed to set context JSON file ownership: %w", err)
+		}
+	}
+
+	logger(fmt.Sprintf("Context JSON file injected at %s", destPath))
+	return nil
+}
+
+// resolveContextJSON returns the content for ~/SANDBOX_CONTEXT.json. A custom
+// file ([tool] context_json_file) is injected verbatim ONLY if it is actually
+// valid JSON — that file exists for programmatic consumers, so a malformed or
+// unreadable custom file (typo, truncated write, wrong path) would break exactly
+// them. On any problem it warns and falls back to the generated JSON, so the
+// file is always present and always valid. Only the host read is I/O; the rest
+// is pure, so the fallback logic is unit-testable.
+func resolveContextJSON(customPath string, info tool.ContextInfo, logger func(string)) (string, error) {
+	if customPath != "" {
+		if data, err := os.ReadFile(customPath); err != nil {
+			logger(fmt.Sprintf("Warning: could not read custom context JSON file %s (%v); using the generated SANDBOX_CONTEXT.json", customPath, err))
+		} else if !json.Valid(data) {
+			logger(fmt.Sprintf("Warning: custom context JSON file %s is not valid JSON; using the generated SANDBOX_CONTEXT.json", customPath))
+		} else {
+			logger(fmt.Sprintf("Using custom context JSON file: %s", customPath))
+			return string(data), nil
+		}
+	}
+	rendered, err := tool.RenderContextFileJSON(info)
+	if err != nil {
+		return "", fmt.Errorf("failed to render context JSON: %w", err)
+	}
+	return rendered, nil
 }
 
 // resolveContextContent returns the sandbox context content string.

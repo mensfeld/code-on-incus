@@ -699,6 +699,48 @@ func TestContextFileMerge(t *testing.T) {
 	}
 }
 
+func TestContextJSONMerge(t *testing.T) {
+	homeDir, _ := os.UserHomeDir()
+	boolPtr := func(b bool) *bool { return &b }
+
+	t.Run("context_json_file is ~-expanded and overrides", func(t *testing.T) {
+		base := GetDefaultConfig()
+		base.Tool.ContextJSONFile = "/old/path.json"
+		base.Merge(&Config{Tool: ToolConfig{ContextJSONFile: "~/custom.json"}})
+		if want := filepath.Join(homeDir, "custom.json"); base.Tool.ContextJSONFile != want {
+			t.Errorf("ContextJSONFile = %q, want %q", base.Tool.ContextJSONFile, want)
+		}
+	})
+
+	t.Run("empty context_json_file preserves base", func(t *testing.T) {
+		base := GetDefaultConfig()
+		base.Tool.ContextJSONFile = "/keep.json"
+		base.Merge(&Config{Tool: ToolConfig{ContextJSONFile: ""}})
+		if base.Tool.ContextJSONFile != "/keep.json" {
+			t.Errorf("ContextJSONFile = %q, want /keep.json", base.Tool.ContextJSONFile)
+		}
+	})
+
+	t.Run("context_json=false overrides the default true", func(t *testing.T) {
+		base := GetDefaultConfig() // embedded default = true
+		if base.Tool.ContextJSON == nil || !*base.Tool.ContextJSON {
+			t.Fatalf("precondition: default context_json should be true, got %v", base.Tool.ContextJSON)
+		}
+		base.Merge(&Config{Tool: ToolConfig{ContextJSON: boolPtr(false)}})
+		if base.Tool.ContextJSON == nil || *base.Tool.ContextJSON {
+			t.Errorf("context_json should be false after merge, got %v", base.Tool.ContextJSON)
+		}
+	})
+
+	t.Run("nil context_json preserves base", func(t *testing.T) {
+		base := GetDefaultConfig()
+		base.Merge(&Config{Tool: ToolConfig{ContextJSON: nil}})
+		if base.Tool.ContextJSON == nil || !*base.Tool.ContextJSON {
+			t.Errorf("nil override should preserve default true, got %v", base.Tool.ContextJSON)
+		}
+	})
+}
+
 func TestClaudeEffortLevelMerge(t *testing.T) {
 	tests := []struct {
 		name          string

@@ -62,6 +62,7 @@ path = "~/.coi/logs/network.log"
 [tool]
 name = "claude"
 auto_context = true
+context_json = true
 
 [git]
 writable_hooks = false

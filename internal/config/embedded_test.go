@@ -52,6 +52,9 @@ func TestEmbeddedDefaultConfigValues(t *testing.T) {
 	if cfg.Tool.AutoContext == nil || !*cfg.Tool.AutoContext {
 		t.Error("Expected auto_context=true")
 	}
+	if cfg.Tool.ContextJSON == nil || !*cfg.Tool.ContextJSON {
+		t.Error("Expected context_json=true")
+	}
 	if cfg.Incus.Project != "default" {
 		t.Errorf("Expected incus project 'default', got %q", cfg.Incus.Project)
 	}
