@@ -209,17 +209,18 @@ func warnUntrustedDowngrade(path, field string) {
 // sanitizeUntrustedTool drops [tool] fields that read an arbitrary HOST file and
 // inject it into the container, since honoring them from an untrusted
 // (project-scoped) config would let a cloned/agent-planted repo exfiltrate host
-// secrets into the sandbox (e.g. context_json_file = "~/.ssh/id_rsa" → the key
-// lands in ~/SANDBOX_CONTEXT.json where the in-container agent can read it).
-// context_json_file is therefore honored only from trusted scope
-// (~/.coi/config.toml or $COI_CONFIG). nil is a no-op.
-//
-// NOTE: the pre-existing context_file (the .md counterpart) has the same
-// arbitrary-host-file-read shape and is NOT yet gated here — deliberately left
-// unchanged to avoid altering existing behavior; worth a follow-up decision.
+// secrets into the sandbox: e.g. context_file = "~/.ssh/id_rsa" lands the key in
+// ~/SANDBOX_CONTEXT.md, and context_json_file = "~/.aws/credentials" lands it in
+// ~/SANDBOX_CONTEXT.json — both readable by the in-container agent. Both are
+// therefore honored only from trusted scope (~/.coi/config.toml or $COI_CONFIG).
+// nil is a no-op.
 func sanitizeUntrustedTool(tc *ToolConfig, path string) {
 	if tc == nil {
 		return
+	}
+	if tc.ContextFile != "" {
+		warnUntrustedDowngrade(path, "tool.context_file")
+		tc.ContextFile = ""
 	}
 	if tc.ContextJSONFile != "" {
 		warnUntrustedDowngrade(path, "tool.context_json_file")
