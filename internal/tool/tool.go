@@ -655,8 +655,9 @@ type SandboxContextJSON struct {
 	PublishedPorts     []SandboxPortJSON `json:"published_ports"`
 
 	Limits SandboxLimitsJSON `json:"limits"`
-
-	ProfileContext string `json:"profile_context,omitempty"`
+	// ProfileContext (the profile CONTEXT.md prose) is intentionally NOT included:
+	// it is a free-text markdown blob for the human .md / tool auto-context, not
+	// structured data a programmatic consumer needs.
 }
 
 // SandboxNetworkJSON carries the EFFECTIVE egress posture, matching what the .md
@@ -738,7 +739,6 @@ func RenderContextFileJSON(info ContextInfo) (string, error) {
 			Memory:      info.MemoryLimit,
 			MaxDuration: info.MaxDuration,
 		},
-		ProfileContext: info.ProfileContext,
 	}
 
 	b, err := json.MarshalIndent(out, "", "  ")

@@ -96,6 +96,9 @@ func TestRenderContextFileJSON_NilSlicesBecomeEmptyArrays(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
+	// Every list field must render as [] (not null). These explicit checks are
+	// the real contract; a blanket strings.Contains(out, "null") would be
+	// brittle (it would also match a value that happens to contain "null").
 	for _, key := range []string{
 		`"protected_paths": []`,
 		`"forwarded_env_vars": []`,
@@ -109,8 +112,11 @@ func TestRenderContextFileJSON_NilSlicesBecomeEmptyArrays(t *testing.T) {
 			t.Errorf("expected %s in output (arrays must be [] not null):\n%s", key, out)
 		}
 	}
-	if strings.Contains(out, "null") {
-		t.Errorf("output should contain no null values:\n%s", out)
+	// No field should serialize to a JSON null value ("key": null). Checked on
+	// the ": null" token so a string value containing the word "null" can't
+	// trip it.
+	if strings.Contains(out, ": null") {
+		t.Errorf("output should contain no null field values:\n%s", out)
 	}
 
 	var got SandboxContextJSON
