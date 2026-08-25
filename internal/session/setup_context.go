@@ -45,6 +45,35 @@ func injectContextFile(mgr container.ContainerManager, info tool.ContextInfo, cu
 	return nil
 }
 
+// injectContextJSONFile creates ~/SANDBOX_CONTEXT.json inside the container: the
+// machine-readable companion to SANDBOX_CONTEXT.md for programmatic consumers
+// (#705). It is always rendered from the resolved ContextInfo (the real sandbox
+// facts) — unlike the .md it is not overridable by a custom context_file, since
+// a custom file is human prose while this is structured data. Reuses the same
+// container write path as injectContextFile.
+func injectContextJSONFile(mgr container.ContainerManager, info tool.ContextInfo, homeDir string, logger func(string)) error {
+	destPath := filepath.Join(homeDir, "SANDBOX_CONTEXT.json")
+
+	content, err := tool.RenderContextFileJSON(info)
+	if err != nil {
+		return fmt.Errorf("failed to render context JSON: %w", err)
+	}
+
+	if err := mgr.CreateFile(destPath, content); err != nil {
+		return fmt.Errorf("failed to create context JSON file %s: %w", destPath, err)
+	}
+
+	// Fix ownership if running as non-root user (mirrors injectContextFile).
+	if homeDir != "/root" {
+		if err := mgr.Chown(destPath, container.CodeUID, container.CodeUID); err != nil {
+			return fmt.Errorf("failed to set context JSON file ownership: %w", err)
+		}
+	}
+
+	logger(fmt.Sprintf("Context JSON file injected at %s", destPath))
+	return nil
+}
+
 // resolveContextContent returns the sandbox context content string.
 // If customPath is provided, it reads the file from the host; otherwise it
 // renders the default embedded template. This is used both for ~/SANDBOX_CONTEXT.md

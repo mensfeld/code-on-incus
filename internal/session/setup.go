@@ -1002,6 +1002,12 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		if err := injectContextFile(result.Manager, ctxInfo, opts.ContextFilePath, result.HomeDir, opts.Logger); err != nil {
 			opts.Logger(fmt.Sprintf("Warning: Failed to inject context file: %v", err))
 		}
+		// Machine-readable companion for programmatic consumers (#705). Always
+		// written from ctxInfo (the real facts), even when a custom context_file
+		// overrides the human-readable .md.
+		if err := injectContextJSONFile(result.Manager, ctxInfo, result.HomeDir, opts.Logger); err != nil {
+			opts.Logger(fmt.Sprintf("Warning: Failed to inject context JSON file: %v", err))
+		}
 	}
 
 	// 13. Inject auto-context file for tools that support it (e.g., Claude's ~/.claude/CLAUDE.md)

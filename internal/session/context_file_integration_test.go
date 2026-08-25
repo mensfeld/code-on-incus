@@ -1,6 +1,7 @@
 package session
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -561,4 +562,71 @@ func TestContextFile_WithAllNewFields(t *testing.T) {
 	}
 
 	t.Logf("New fields context file content:\n%s", content)
+}
+
+// TestContextFile_JSONInjection verifies ~/SANDBOX_CONTEXT.json is created inside
+// the container, is valid JSON carrying the sandbox facts, and is owned by the
+// code user (#705).
+func TestContextFile_JSONInjection(t *testing.T) {
+	skipUnlessContextFileTestable(t)
+
+	containerName := "coi-test-ctx-json"
+	mgr := launchContextTestContainer(t, containerName)
+
+	homeDir := "/home/" + container.CodeUser
+	logger := func(msg string) { t.Logf("[context] %s", msg) }
+
+	ctxInfo := tool.ContextInfo{
+		ContainerName: containerName,
+		ToolName:      "claude",
+		WorkspacePath: "/workspace",
+		HomeDir:       homeDir,
+		Persistent:    false,
+		NetworkMode:   "restricted",
+		AllowedPorts:  []int{443},
+	}
+
+	if err := injectContextJSONFile(mgr, ctxInfo, homeDir, logger); err != nil {
+		t.Fatalf("injectContextJSONFile failed: %v", err)
+	}
+
+	destPath := filepath.Join(homeDir, "SANDBOX_CONTEXT.json")
+	exists, err := mgr.FileExists(destPath)
+	if err != nil {
+		t.Fatalf("Failed to check if JSON context file exists: %v", err)
+	}
+	if !exists {
+		t.Fatalf("Expected %s to exist in container", destPath)
+	}
+
+	user := container.CodeUID
+	content, err := mgr.ExecCommand("cat "+destPath, container.ExecCommandOptions{Capture: true, User: &user})
+	if err != nil {
+		t.Fatalf("Failed to read JSON context file: %v", err)
+	}
+
+	var got tool.SandboxContextJSON
+	if err := json.Unmarshal([]byte(content), &got); err != nil {
+		t.Fatalf("SANDBOX_CONTEXT.json is not valid JSON: %v\n%s", err, content)
+	}
+	if got.SchemaVersion == 0 {
+		t.Errorf("schema_version missing/zero: %+v", got)
+	}
+	if got.WorkspacePath != "/workspace" || got.Network.Mode != "restricted" {
+		t.Errorf("fields not carried through: %+v", got)
+	}
+	if len(got.Network.AllowedPorts) != 1 || got.Network.AllowedPorts[0] != 443 {
+		t.Errorf("allowed_ports = %v, want [443]", got.Network.AllowedPorts)
+	}
+	if got.OS == "" || got.Architecture == "" {
+		t.Errorf("os/arch defaults not applied: os=%q arch=%q", got.OS, got.Architecture)
+	}
+
+	statOut, err := mgr.ExecCommand("stat -c '%u:%g' "+destPath, container.ExecCommandOptions{Capture: true})
+	if err != nil {
+		t.Fatalf("Failed to stat JSON context file: %v", err)
+	}
+	if ownership := strings.TrimSpace(statOut); ownership != "1000:1000" {
+		t.Errorf("Expected ownership 1000:1000, got %s", ownership)
+	}
 }

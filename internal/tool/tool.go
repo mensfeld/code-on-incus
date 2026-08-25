@@ -3,6 +3,7 @@ package tool
 import (
 	"bytes"
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -360,6 +361,19 @@ type ContextInfo struct {
 	ProfileContext     string      // User-provided profile context content (from profile CONTEXT.md)
 }
 
+// withDefaults fills the fields setup leaves zero-valued (OS name, architecture)
+// with the same fallbacks the human-readable renderer uses, so the .md and .json
+// context files can never disagree on them.
+func (info ContextInfo) withDefaults() ContextInfo {
+	if info.OSName == "" {
+		info.OSName = "Ubuntu (container)"
+	}
+	if info.Architecture == "" {
+		info.Architecture = runtime.GOARCH
+	}
+	return info
+}
+
 // contextTemplateData holds the resolved values passed to the context file template.
 type contextTemplateData struct {
 	WorkspacePath       string
@@ -402,6 +416,7 @@ type contextTemplateData struct {
 // dynamic environment info. This is tool-agnostic — the resulting file is
 // placed at ~/SANDBOX_CONTEXT.md by setup and can be consumed by any AI tool.
 func RenderContextFileContent(info ContextInfo) string {
+	info = info.withDefaults()
 	data := contextTemplateData{
 		WorkspacePath:   info.WorkspacePath,
 		HomeDir:         info.HomeDir,
@@ -415,13 +430,6 @@ func RenderContextFileContent(info ContextInfo) string {
 		DockerDesc:      "Available (Docker-in-Docker)",
 		UserDesc:        "Non-root user (code)",
 		SudoDesc:        "Available via passwordless sudo",
-	}
-
-	if data.OSDesc == "" {
-		data.OSDesc = "Ubuntu (container)"
-	}
-	if data.ArchDesc == "" {
-		data.ArchDesc = runtime.GOARCH
 	}
 
 	if info.Persistent {
@@ -595,4 +603,148 @@ func RenderContextFileContent(info ContextInfo) string {
 	}
 
 	return buf.String()
+}
+
+// sandboxContextSchemaVersion is the version of the SANDBOX_CONTEXT.json schema.
+// Bump it on any backwards-incompatible change so programmatic consumers can
+// gate on it.
+const sandboxContextSchemaVersion = 1
+
+// SandboxContextJSON is the machine-readable form of the sandbox context,
+// written to ~/SANDBOX_CONTEXT.json next to the human-readable .md (#705). It is
+// a STABLE PUBLIC CONTRACT — deliberately decoupled from the internal
+// ContextInfo struct so that renaming/reshaping internals never silently
+// changes what external nodes parse. Change it only with a SchemaVersion bump.
+type SandboxContextJSON struct {
+	SchemaVersion int `json:"schema_version"`
+
+	ContainerName string `json:"container_name"`
+	ToolName      string `json:"tool_name"`
+	WorkspacePath string `json:"workspace_path"`
+	HomeDir       string `json:"home_dir"`
+	OS            string `json:"os"`
+	Architecture  string `json:"architecture"`
+	Timezone      string `json:"timezone,omitempty"`
+	Persistent    bool   `json:"persistent"`
+	RunAsRoot     bool   `json:"run_as_root"`
+
+	Network SandboxNetworkJSON `json:"network"`
+
+	SSHAgentForwarded  bool              `json:"ssh_agent_forwarded"`
+	GHCLIAuthenticated bool              `json:"gh_cli_authenticated"`
+	ForwardedEnvVars   []string          `json:"forwarded_env_vars"`
+	ProtectedPaths     []string          `json:"protected_paths"`
+	ExtraMounts        []string          `json:"extra_mounts"` // container paths
+	PublishedPorts     []SandboxPortJSON `json:"published_ports"`
+
+	Limits SandboxLimitsJSON `json:"limits"`
+
+	ProfileContext string `json:"profile_context,omitempty"`
+}
+
+// SandboxNetworkJSON carries the effective egress posture. AllowedPorts/
+// DNSServers/AllowedDomains are the configured values; combine with Mode to know
+// which are actually enforced (ports bite in restricted/allowlist, DNS pinning
+// in restricted, domains in allowlist).
+type SandboxNetworkJSON struct {
+	Mode           string   `json:"mode"` // restricted | open | allowlist | ""
+	AllowedPorts   []int    `json:"allowed_ports"`
+	DNSServers     []string `json:"dns_servers"`
+	AllowedDomains []string `json:"allowed_domains"`
+}
+
+// SandboxPortJSON is one container port published on the host.
+type SandboxPortJSON struct {
+	Name          string `json:"name,omitempty"`
+	HostPort      int    `json:"host_port"`
+	ContainerPort int    `json:"container_port"`
+	Listen        string `json:"listen,omitempty"`
+	Pool          bool   `json:"pool"`
+	EnvVar        string `json:"env_var,omitempty"`
+}
+
+// SandboxLimitsJSON carries the resource limits ("" = unlimited).
+type SandboxLimitsJSON struct {
+	CPU         string `json:"cpu,omitempty"`
+	Memory      string `json:"memory,omitempty"`
+	MaxDuration string `json:"max_duration,omitempty"`
+}
+
+// RenderContextFileJSON serializes a ContextInfo to the SANDBOX_CONTEXT.json
+// contract. Tool-agnostic, like RenderContextFileContent; the result is written
+// to ~/SANDBOX_CONTEXT.json by setup. List fields are emitted as [] (never null)
+// so consumers never special-case a missing array. No timestamp is included, so
+// the output is deterministic and does not churn on persistent-container reuse.
+func RenderContextFileJSON(info ContextInfo) (string, error) {
+	info = info.withDefaults()
+
+	mounts := make([]string, 0, len(info.ExtraMounts))
+	for _, m := range info.ExtraMounts {
+		mounts = append(mounts, m.ContainerPath)
+	}
+
+	ports := make([]SandboxPortJSON, 0, len(info.PublishedPorts))
+	for _, p := range info.PublishedPorts {
+		ports = append(ports, SandboxPortJSON{
+			Name:          p.Name,
+			HostPort:      p.HostPort,
+			ContainerPort: p.ContainerPort,
+			Listen:        p.Listen,
+			Pool:          p.Pool,
+			EnvVar:        p.EnvVar,
+		})
+	}
+
+	out := SandboxContextJSON{
+		SchemaVersion: sandboxContextSchemaVersion,
+		ContainerName: info.ContainerName,
+		ToolName:      info.ToolName,
+		WorkspacePath: info.WorkspacePath,
+		HomeDir:       info.HomeDir,
+		OS:            info.OSName,
+		Architecture:  info.Architecture,
+		Timezone:      info.Timezone,
+		Persistent:    info.Persistent,
+		RunAsRoot:     info.RunAsRoot,
+		Network: SandboxNetworkJSON{
+			Mode:           info.NetworkMode,
+			AllowedPorts:   nonNilInts(info.AllowedPorts),
+			DNSServers:     nonNilStrings(info.DNSServers),
+			AllowedDomains: nonNilStrings(info.AllowedDomains),
+		},
+		SSHAgentForwarded:  info.SSHAgentForwarded,
+		GHCLIAuthenticated: info.GHCLIAuthenticated,
+		ForwardedEnvVars:   nonNilStrings(info.ForwardedEnvVars),
+		ProtectedPaths:     nonNilStrings(info.ProtectedPaths),
+		ExtraMounts:        mounts,
+		PublishedPorts:     ports,
+		Limits: SandboxLimitsJSON{
+			CPU:         info.CPULimit,
+			Memory:      info.MemoryLimit,
+			MaxDuration: info.MaxDuration,
+		},
+		ProfileContext: info.ProfileContext,
+	}
+
+	b, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal sandbox context JSON: %w", err)
+	}
+	return string(b) + "\n", nil
+}
+
+// nonNilStrings / nonNilInts return an empty (non-nil) slice for a nil input so
+// the field marshals as [] rather than null.
+func nonNilStrings(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
+}
+
+func nonNilInts(s []int) []int {
+	if s == nil {
+		return []int{}
+	}
+	return s
 }
