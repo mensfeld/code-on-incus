@@ -685,14 +685,10 @@ func RenderContextFileJSON(info ContextInfo) (string, error) {
 
 	ports := make([]SandboxPortJSON, 0, len(info.PublishedPorts))
 	for _, p := range info.PublishedPorts {
-		ports = append(ports, SandboxPortJSON{
-			Name:          p.Name,
-			HostPort:      p.HostPort,
-			ContainerPort: p.ContainerPort,
-			Listen:        p.Listen,
-			Pool:          p.Pool,
-			EnvVar:        p.EnvVar,
-		})
+		// PortInfo and SandboxPortJSON share identical fields (tags aside), so a
+		// direct conversion copies them; if the two ever diverge this stops
+		// compiling, forcing an explicit mapping rather than a silent mismatch.
+		ports = append(ports, SandboxPortJSON(p))
 	}
 
 	out := SandboxContextJSON{
