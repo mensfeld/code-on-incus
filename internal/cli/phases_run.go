@@ -11,6 +11,7 @@ import (
 	"github.com/mensfeld/code-on-incus/internal/limits"
 	"github.com/mensfeld/code-on-incus/internal/logger"
 	"github.com/mensfeld/code-on-incus/internal/monitor"
+	"github.com/mensfeld/code-on-incus/internal/network"
 	"github.com/mensfeld/code-on-incus/internal/nftmonitor"
 	"github.com/mensfeld/code-on-incus/internal/session"
 	"github.com/mensfeld/code-on-incus/internal/timing"
@@ -43,6 +44,7 @@ type runState struct {
 	gitWorktree        *session.GitWorktreeLayout // external git dirs for a worktree checkout (#533), nil otherwise
 	mountConfig        *session.MountConfig       // trust-gated
 	socketConfig       *session.SocketConfig      // trust-gated
+	credentialConfig   *session.CredentialConfig  // trust-gated [[credentials]] to seed (#726 follow-up)
 	portConfig         *session.PortConfig        // trust-gated [[ports]] to publish (#558)
 	slot               int                        // resolved slot number (for port allocation)
 	resolvedPorts      []session.PublishedPort    // preflighted port plan (see session.ResolvePorts)
@@ -146,10 +148,14 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 			if err != nil {
 				return nil, fmt.Errorf("invalid socket configuration: %w", err)
 			}
-			// One combined trust gate over mounts + sockets, so the per-source
-			// fingerprint matches what `coi trust` recorded.
+			cc, err := ParseCredentialConfig(a.cfg)
+			if err != nil {
+				return nil, fmt.Errorf("invalid credential configuration: %w", err)
+			}
+			// One combined trust gate over mounts + sockets + credentials + ports,
+			// so the per-source fingerprint matches what `coi trust` recorded.
 			pc := ParsePortConfig(a.cfg)
-			s.mountConfig, s.socketConfig, s.portConfig = a.gateRunForwarding(mc, sc, pc, s.absWorkspace, s.wasRestarted)
+			s.mountConfig, s.socketConfig, s.credentialConfig, s.portConfig = a.gateRunForwarding(mc, sc, cc, pc, s.absWorkspace, s.wasRestarted)
 
 			// A reused persistent container still carries the previous
 			// session's port devices; strip them while it is STOPPED so they
@@ -209,11 +215,31 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 				}
 				s.gitWorktree = layout
 				s.useShift, _ = session.ConfigureUIDMapping(s.containerName, session.MountSources(s.absWorkspace, s.mountConfig, session.WorktreeSources(layout)...), a.cfg.Incus.DisableShift, logFn)
-				// Restricted/allowlist disable IPv6 in the container (post-start,
-				// via the network manager). Pre-seed an IPv4-only networkd config
-				// so the link reaches "configured" and systemd-networkd-wait-online
-				// does not hang (#548). Non-fatal.
+				// Harden the bridge NIC against egress-isolation bypass: anti-spoof
+				// the source IP/MAC (so saddr-keyed nft rules can't be dodged) and
+				// isolate the bridge port (no L2 reach to sibling containers). The
+				// shell path applies this; coi run must too, or a restricted/allowlist
+				// run can bypass its own egress allowlist (#726 follow-up). Must be set
+				// before first boot; non-fatal on unmanaged/static NICs.
+				if err := container.EnableNICSecurity(s.containerName); err != nil {
+					logFn(fmt.Sprintf("Warning: NIC security hardening not applied: %v", err))
+				}
+				// Cap /tmp tmpfs size before boot when [limits.disk] tmpfs_size is set,
+				// matching the shell path (else a big build ENOSPCs on the default /tmp).
+				if ts := a.cfg.Limits.Disk.TmpfsSize; ts != "" {
+					if err := mgr.SetTmpfsSize(ts); err != nil {
+						logFn(fmt.Sprintf("Warning: failed to set /tmp size: %v", err))
+					}
+				}
+				// Restricted/allowlist: kill IPv6 from the kernel's first instant so
+				// there is no IPv6 egress window before the host-side ip6 drop lands
+				// (shell parity), and pre-seed an IPv4-only networkd config so the link
+				// reaches "configured" and systemd-networkd-wait-online does not hang
+				// (#548). Non-fatal. Open mode opts into unrestricted egress.
 				if m := a.cfg.Network.Mode; m != "" && m != config.NetworkModeOpen {
+					if err := container.DisableIPv6AtBoot(s.containerName); err != nil {
+						logFn(fmt.Sprintf("Warning: pre-boot IPv6 disable not applied: %v", err))
+					}
 					if err := container.ConfigureNetworkdIPv4Only(s.containerName); err != nil {
 						logFn(fmt.Sprintf("Warning: networkd IPv4-only config not applied: %v", err))
 					}
@@ -305,6 +331,20 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 			// From here the container is definitively ours (we created or
 			// restarted it) — register the teardown, including alongside an
 			// error: the pipeline registers teardowns returned with a failed Run.
+
+			// Block egress immediately after first boot, before the container's
+			// init can phone home, until the real isolation rules land in
+			// apply-network (which removes this temporary rule). Shell parity
+			// (#726 follow-up). Only for non-open modes: open opts into
+			// unrestricted egress, and its network path never removes a boot
+			// block (applyNetworkIsolation short-circuits), so installing one
+			// there would strand the container with no network. Fail closed.
+			if m := a.cfg.Network.Mode; m != "" && m != config.NetworkModeOpen {
+				if err := network.ApplyBootBlockRule(s.containerName); err != nil {
+					return teardown, fmt.Errorf("boot network block failed in %s mode; refusing to run with an unprotected boot window: %w", m, err)
+				}
+			}
+
 			if err := applyContainerAlias(s.effectiveAlias, s.containerName, s.absWorkspace); err != nil {
 				return teardown, err
 			}
@@ -372,6 +412,25 @@ func (a *App) configureContainerRunPhase(s *runState) session.Phase {
 				}
 				if err := remapContainerUserIfNeeded(s.mgr, s.wasRestarted); err != nil {
 					return nil, err
+				}
+
+				// Git commit identity + [[credentials]], applied the same way the
+				// shell path does so `coi run -- git commit`/credential-consuming
+				// scripts behave identically (#726 follow-up). A reused persistent
+				// container already has both from its first launch.
+				homeDir := "/home/" + container.CodeUser
+				gitID := resolveGitIdentity(&a.cfg.Git)
+				if a.cfg.Git.IsReadonlyEnabled() && gitID.Complete() {
+					// Fail closed: the user asked to lock the identity read-only.
+					if err := session.SetupGitIdentityReadonly(s.mgr, homeDir, gitID); err != nil {
+						return nil, fmt.Errorf("git.readonly: could not lock the commit identity read-only: %w", err)
+					}
+				} else {
+					session.SetupGitIdentityGuard(s.mgr, homeDir, logFn)
+					session.SetupGitIdentity(s.mgr, homeDir, gitID, logFn)
+				}
+				if err := session.SetupCredentials(s.mgr, homeDir, s.credentialConfig, logFn); err != nil {
+					return nil, fmt.Errorf("failed to set up credentials: %w", err)
 				}
 			}
 
