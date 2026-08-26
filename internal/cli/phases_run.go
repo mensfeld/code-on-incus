@@ -413,25 +413,30 @@ func (a *App) configureContainerRunPhase(s *runState) session.Phase {
 				if err := remapContainerUserIfNeeded(s.mgr, s.wasRestarted); err != nil {
 					return nil, err
 				}
+			}
 
-				// Git commit identity + [[credentials]], applied the same way the
-				// shell path does so `coi run -- git commit`/credential-consuming
-				// scripts behave identically (#726 follow-up). A reused persistent
-				// container already has both from its first launch.
-				homeDir := "/home/" + container.CodeUser
-				gitID := resolveGitIdentity(&a.cfg.Git)
-				if a.cfg.Git.IsReadonlyEnabled() && gitID.Complete() {
-					// Fail closed: the user asked to lock the identity read-only.
-					if err := session.SetupGitIdentityReadonly(s.mgr, homeDir, gitID); err != nil {
-						return nil, fmt.Errorf("git.readonly: could not lock the commit identity read-only: %w", err)
-					}
-				} else {
-					session.SetupGitIdentityGuard(s.mgr, homeDir, logFn)
-					session.SetupGitIdentity(s.mgr, homeDir, gitID, logFn)
+			// Git commit identity + [[credentials]], applied the same way the
+			// shell path does so `coi run -- git commit`/credential-consuming
+			// scripts behave identically (#726 follow-up). Applied on reuse too,
+			// not just fresh launches: the shell path re-applies both on reuse
+			// (setup.go runs them outside its fresh-only block), and the helpers
+			// are idempotent (SetupGitIdentityReadonly re-mounts, SetupGitIdentity
+			// re-writes, SetupCredentials re-pushes) — so a reused persistent
+			// container picks up identity/credential config changes made since it
+			// was created, instead of silently keeping stale values.
+			homeDir := "/home/" + container.CodeUser
+			gitID := resolveGitIdentity(&a.cfg.Git)
+			if a.cfg.Git.IsReadonlyEnabled() && gitID.Complete() {
+				// Fail closed: the user asked to lock the identity read-only.
+				if err := session.SetupGitIdentityReadonly(s.mgr, homeDir, gitID); err != nil {
+					return nil, fmt.Errorf("git.readonly: could not lock the commit identity read-only: %w", err)
 				}
-				if err := session.SetupCredentials(s.mgr, homeDir, s.credentialConfig, logFn); err != nil {
-					return nil, fmt.Errorf("failed to set up credentials: %w", err)
-				}
+			} else {
+				session.SetupGitIdentityGuard(s.mgr, homeDir, logFn)
+				session.SetupGitIdentity(s.mgr, homeDir, gitID, logFn)
+			}
+			if err := session.SetupCredentials(s.mgr, homeDir, s.credentialConfig, logFn); err != nil {
+				return nil, fmt.Errorf("failed to set up credentials: %w", err)
 			}
 
 			// Disk devices (workspace, additional mounts, security + secret masks)
