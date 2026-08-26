@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -87,8 +88,13 @@ func runTop(cmd *cobra.Command, args []string) error {
 	}
 
 	// A named container, or --procs, selects the process view; bare `coi top`
-	// is the container view.
+	// is the container view. Each view supports a different --sort vocabulary,
+	// so validate against the chosen view rather than silently falling back to
+	// cpu on a typo (matching how `coi list` rejects an unknown --status).
 	if len(args) > 0 || topProcs {
+		if err := validateSortKey(topSort, procSortKeys); err != nil {
+			return err
+		}
 		var only string
 		if len(args) > 0 {
 			resolved, err := resolveTopContainer(args[0])
@@ -99,7 +105,30 @@ func runTop(cmd *cobra.Command, args []string) error {
 		}
 		return runTopProcesses(ctx, only, interval)
 	}
+	if err := validateSortKey(topSort, containerSortKeys); err != nil {
+		return err
+	}
 	return runTopContainers(ctx, interval)
+}
+
+// Sort vocabularies per view. Containers can be sorted by four metrics;
+// processes only carry cpu and memory.
+var (
+	containerSortKeys = []string{"cpu", "mem", "disk", "net"}
+	procSortKeys      = []string{"cpu", "mem"}
+)
+
+// validateSortKey rejects a --sort value outside the view's vocabulary with an
+// exit-code-2 usage error, so a typo is caught instead of quietly sorting by
+// cpu (the default case in the sort functions).
+func validateSortKey(key string, allowed []string) error {
+	lower := strings.ToLower(key)
+	for _, k := range allowed {
+		if lower == k {
+			return nil
+		}
+	}
+	return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid --sort %q: must be one of %s", key, strings.Join(allowed, ", "))}
 }
 
 // resolveTopContainer turns a container name or alias into a concrete running
@@ -231,11 +260,11 @@ func sampleContainerRows(ctx context.Context, interval time.Duration) ([]contain
 func sortContainerRows(rows []containerTopRow, key string) {
 	metric := func(r containerTopRow) float64 {
 		switch strings.ToLower(key) {
-		case "mem", "memory":
+		case "mem":
 			return r.MemMB
-		case "disk", "io":
+		case "disk":
 			return r.DiskReadMBs + r.DiskWriteMBs
-		case "net", "network":
+		case "net":
 			return r.NetRxMBs + r.NetTxMBs
 		default: // cpu
 			return r.CPUPercent
@@ -326,7 +355,9 @@ func runTopProcesses(ctx context.Context, only string, interval time.Duration) e
 	}
 	secs := interval.Seconds()
 
-	var rows []procTopRow
+	// Non-nil so an empty result marshals to `[]`, not `null` (matching the
+	// container view's JSON shape).
+	rows := []procTopRow{}
 	for _, name := range names {
 		ps, err := topCollectProcesses(ctx, name)
 		if err != nil {
@@ -369,7 +400,7 @@ func runTopProcesses(ctx context.Context, only string, interval time.Duration) e
 
 func sortProcRows(rows []procTopRow, key string) {
 	metric := func(r procTopRow) float64 {
-		if strings.EqualFold(key, "mem") || strings.EqualFold(key, "memory") {
+		if strings.EqualFold(key, "mem") {
 			return r.MemMB
 		}
 		return r.CPUPercent
@@ -444,7 +475,11 @@ func (e incusTopEntry) netBytes() (rx, tx int64) {
 
 func listTopEntries() ([]incusTopEntry, error) {
 	prefix := session.GetContainerPrefix()
-	output, err := container.IncusOutput("list", "^"+prefix, "--format=json")
+	// `incus list`'s positional filter is a regex, but the prefix is a literal
+	// (COI_CONTAINER_PREFIX may contain '.', '[', etc.), so escape it before
+	// anchoring — otherwise a metacharacter prefix would match the wrong
+	// containers or none at all.
+	output, err := container.IncusOutput("list", "^"+regexp.QuoteMeta(prefix), "--format=json")
 	if err != nil {
 		return nil, err
 	}

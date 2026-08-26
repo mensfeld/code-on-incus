@@ -174,18 +174,19 @@ func TestSampleContainerRows_CPUAndFilter(t *testing.T) {
 			entry("coi-stopped-1", "Stopped"), // must be filtered out
 		}, nil
 	}
-	// First call returns t0 (cpu=1s), subsequent calls t1 (cpu=3s): a 2s delta
-	// over a 2s interval => 100% CPU.
+	// t0 cpu=1.00s, t1 cpu=1.01s: a 0.01s delta over a 10ms interval => 100% CPU.
+	// A tiny interval keeps the assertion while avoiding a real multi-second
+	// sleep in the unit test.
 	call := 0
 	topCollectResources = func(_ context.Context, name string) (monitor.ResourceStats, error) {
 		call++
 		if call == 1 {
-			return monitor.ResourceStats{CPUTimeSeconds: 1, MemoryMB: 128}, nil
+			return monitor.ResourceStats{CPUTimeSeconds: 1.00, MemoryMB: 128}, nil
 		}
-		return monitor.ResourceStats{CPUTimeSeconds: 3, MemoryMB: 256}, nil
+		return monitor.ResourceStats{CPUTimeSeconds: 1.01, MemoryMB: 256}, nil
 	}
 
-	rows, err := sampleContainerRows(context.Background(), 2*time.Second)
+	rows, err := sampleContainerRows(context.Background(), 10*time.Millisecond)
 	if err != nil {
 		t.Fatalf("sampleContainerRows: %v", err)
 	}
@@ -226,7 +227,7 @@ func TestSampleContainerRows_MissingBaselineStaysZero(t *testing.T) {
 		return monitor.ResourceStats{CPUTimeSeconds: 9000, MemoryMB: 256, IOReadMB: 500}, nil
 	}
 
-	rows, err := sampleContainerRows(context.Background(), 2*time.Second)
+	rows, err := sampleContainerRows(context.Background(), 10*time.Millisecond)
 	if err != nil {
 		t.Fatalf("sampleContainerRows: %v", err)
 	}
@@ -257,6 +258,26 @@ func TestSampleContainerRows_NoneRunning(t *testing.T) {
 	}
 	if rows != nil {
 		t.Errorf("expected nil rows when nothing is running, got %v", names(rows))
+	}
+}
+
+func TestValidateSortKey(t *testing.T) {
+	// Canonical keys (any case) pass; unknown keys are rejected with exit 2.
+	for _, k := range []string{"cpu", "CPU", "mem", "disk", "net"} {
+		if err := validateSortKey(k, containerSortKeys); err != nil {
+			t.Errorf("validateSortKey(%q, container) = %v; want nil", k, err)
+		}
+	}
+	if err := validateSortKey("disk", procSortKeys); err == nil {
+		t.Error("validateSortKey(disk, proc) = nil; want error (disk is container-only)")
+	}
+	err := validateSortKey("ram", containerSortKeys)
+	if err == nil {
+		t.Fatal("validateSortKey(ram) = nil; want error")
+	}
+	var ec *ExitCodeError
+	if !errors.As(err, &ec) || ec.Code != 2 {
+		t.Errorf("expected ExitCodeError code 2, got %v", err)
 	}
 }
 
