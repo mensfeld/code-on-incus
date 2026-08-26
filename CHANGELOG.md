@@ -4,6 +4,8 @@
 
 ### New Features
 
+- **`coi top` — per-container (and per-process) resource usage (#707)** — shows live CPU%, memory, disk I/O, and network I/O for your running containers, sorted busiest-first and resolved to each container's alias + workspace, so you can tell which container is loading your machine without mapping PIDs by hand. `coi top <name|alias>` (or `coi top --procs` across all containers) drills into per-process rows showing the **host-side PID**, so a runaway is directly `sudo kill`-able. CPU%/IO are sampled over a short `--interval` (default 2s); `--sort cpu|mem|disk|net` and `--json` are supported. Reuses the existing cgroup/`/proc` collectors from the monitor subsystem.
+
 - **Machine-readable `~/SANDBOX_CONTEXT.json` (#705)** — a structured, versioned companion to `SANDBOX_CONTEXT.md` for programmatic consumers. Toggle with `[tool] context_json`, override with `context_json_file`. Custom context files (`context_file`/`context_json_file`) are now honored only from trusted config.
 
 - **OpenAI Codex CLI is now a supported tool (#698, thanks @breml)** — `[tool] name = "codex"` launches straight into codex like the other tools, with per-tool `model`/`reasoning_effort`. Opt it into the image with `[container.build] agents = ["claude", "codex"]`.

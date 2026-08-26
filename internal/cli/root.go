@@ -285,6 +285,7 @@ func init() {
 	rootCmd.AddCommand(attachCmd)
 	rootCmd.AddCommand(shutdownCmd)
 	rootCmd.AddCommand(monitorCmd)
+	rootCmd.AddCommand(topCmd)
 }
 
 var versionCmd = &cobra.Command{
