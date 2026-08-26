@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -200,6 +201,47 @@ func TestSampleContainerRows_CPUAndFilter(t *testing.T) {
 	}
 	if r.MemMB != 256 {
 		t.Errorf("MemMB = %.0f; want 256 (second sample)", r.MemMB)
+	}
+}
+
+func TestSampleContainerRows_MissingBaselineStaysZero(t *testing.T) {
+	// A container whose t0 sample fails but t1 succeeds must NOT report the
+	// cumulative counter as a single-interval delta (#707): CPU%/disk stay 0.
+	origList, origRes := topListEntries, topCollectResources
+	defer func() { topListEntries, topCollectResources = origList, origRes }()
+
+	topListEntries = func() ([]incusTopEntry, error) {
+		return []incusTopEntry{{Name: "coi-run-1", Status: "Running", Config: map[string]string{}}}, nil
+	}
+	call := 0
+	topCollectResources = func(_ context.Context, _ string) (monitor.ResourceStats, error) {
+		call++
+		if call == 1 {
+			// t0 read fails -> no baseline recorded.
+			return monitor.ResourceStats{}, errors.New("cgroup not ready")
+		}
+		// t1: a container that has accumulated 9000 CPU-seconds and 500MB of I/O
+		// over its lifetime. Without the baseline guard this would render as a
+		// wildly inflated rate.
+		return monitor.ResourceStats{CPUTimeSeconds: 9000, MemoryMB: 256, IOReadMB: 500}, nil
+	}
+
+	rows, err := sampleContainerRows(context.Background(), 2*time.Second)
+	if err != nil {
+		t.Fatalf("sampleContainerRows: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	r := rows[0]
+	if r.CPUPercent != 0 {
+		t.Errorf("CPUPercent = %.2f; want 0 when t0 baseline is missing", r.CPUPercent)
+	}
+	if r.DiskReadMBs != 0 {
+		t.Errorf("DiskReadMBs = %.2f; want 0 when t0 baseline is missing", r.DiskReadMBs)
+	}
+	if r.MemMB != 256 {
+		t.Errorf("MemMB = %.0f; want 256 (instantaneous, no baseline needed)", r.MemMB)
 	}
 }
 

@@ -200,16 +200,22 @@ func sampleContainerRows(ctx context.Context, interval time.Duration) ([]contain
 			rows = append(rows, containerTopRow{Name: e.Name, Alias: e.alias(), Workspace: workspaces[e.Name]})
 			continue
 		}
-		r0 := res0[e.Name]
 		row := containerTopRow{
-			Name:         e.Name,
-			Alias:        e.alias(),
-			Workspace:    workspaces[e.Name],
-			CPUPercent:   rate(r0.CPUTimeSeconds, r1.CPUTimeSeconds, secs) * 100,
-			MemMB:        r1.MemoryMB,
-			MemLimitMB:   r1.MemoryLimitMB,
-			DiskReadMBs:  rate(r0.IOReadMB, r1.IOReadMB, secs),
-			DiskWriteMBs: rate(r0.IOWriteMB, r1.IOWriteMB, secs),
+			Name:       e.Name,
+			Alias:      e.alias(),
+			Workspace:  workspaces[e.Name],
+			MemMB:      r1.MemoryMB,
+			MemLimitMB: r1.MemoryLimitMB,
+		}
+		// CPU% and disk I/O are deltas of cumulative counters, so they are only
+		// meaningful with a t0 baseline. When the first sample was missing (a
+		// transient collection failure), leave them at 0 rather than treating the
+		// whole cumulative counter as a single-interval delta — which would render
+		// an absurd multi-thousand-percent CPU spike (#707).
+		if r0, ok := res0[e.Name]; ok {
+			row.CPUPercent = rate(r0.CPUTimeSeconds, r1.CPUTimeSeconds, secs) * 100
+			row.DiskReadMBs = rate(r0.IOReadMB, r1.IOReadMB, secs)
+			row.DiskWriteMBs = rate(r0.IOWriteMB, r1.IOWriteMB, secs)
 		}
 		rx0, tx0 := e.netBytes()
 		rx1, tx1 := net1[e.Name].netBytes()
