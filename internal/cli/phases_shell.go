@@ -317,6 +317,12 @@ func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.P
 			if err := CheckAndReportStaleBase(a.cfg, img); err != nil {
 				return nil, err
 			}
+			// Validate the configured storage pool up front (matching coi run),
+			// so a typo fails clearly instead of the container silently landing
+			// on the default pool (#726).
+			if err := container.ValidateStoragePool(a.cfg.Container.StoragePool); err != nil {
+				return nil, err
+			}
 
 			// Build config-derived options.
 			networkConfig := a.cfg.Network
@@ -364,6 +370,7 @@ func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.P
 				WorkspacePath:         s.absWorkspace,
 				SessionName:           a.sessionName(),
 				Image:                 img,
+				StoragePool:           a.cfg.Container.StoragePool,
 				Persistent:            a.persistent,
 				ResumeFromID:          resumeID,
 				Slot:                  slotNum,
