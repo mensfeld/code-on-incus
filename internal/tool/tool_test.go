@@ -569,8 +569,8 @@ func TestRenderContextFileContent(t *testing.T) {
 		{"ssh forwarded", "Forwarded from host"},
 		{"non-root user", "Non-root user"},
 		{"COI header", "COI Sandbox Environment"},
-		{"full root access", "Full root access"},
-		{"docker available", "Docker is available"},
+		{"full root access", "full root"},
+		{"docker available", "Docker (Docker-in-Docker)"},
 		{"OS info", "Ubuntu"},
 		{"architecture", "amd64"},
 		{"docker row", "Docker-in-Docker"},
@@ -583,7 +583,7 @@ func TestRenderContextFileContent(t *testing.T) {
 		{"container name", "coi-test-1"},
 		{"autonomous operation section", "Autonomous Operation"},
 		{"never ask confirmation", "Never ask for confirmation"},
-		{"act autonomously guidance", "Act autonomously"},
+		{"act autonomously guidance", "expected to act, not ask"},
 		{"git configuration section", "Git Configuration"},
 		{"git ssh recommendation", "Use SSH for git operations"},
 		{"git identity warning", `NEVER fabricate`},
@@ -880,10 +880,10 @@ func TestRenderContextFileContent_GitAuthHints_TokenOnly(t *testing.T) {
 	if !strings.Contains(content, "Git Configuration") {
 		t.Error("Expected 'Git Configuration' section when token is available")
 	}
-	if !strings.Contains(content, "Token-based git authentication is available") {
+	if !strings.Contains(content, "Token-based git auth is available") {
 		t.Error("Expected token-based auth description")
 	}
-	if !strings.Contains(content, "token may have limited scope") {
+	if !strings.Contains(content, "may have limited scope") {
 		t.Error("Expected scope warning for forwarded token")
 	}
 	if !strings.Contains(content, "gh api user") {
