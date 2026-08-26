@@ -31,7 +31,8 @@ type SetupOptions struct {
 	WorkspacePath         string
 	SessionName           string // [container] session_name: keys the session identity instead of the workspace path when set
 	Image                 string
-	Persistent            bool // Keep container between sessions (don't delete on cleanup)
+	StoragePool           string // [container] storage_pool: Incus storage pool to launch on (empty = Incus default)
+	Persistent            bool   // Keep container between sessions (don't delete on cleanup)
 	ResumeFromID          string
 	Slot                  int
 	MountConfig           *MountConfig      // Multi-mount support
@@ -453,8 +454,14 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 	// (e.g., via 'sudo shutdown 0' from within). Cleanup will delete unless persistent mode is configured.
 	if !skipLaunch {
 		opts.Logger(fmt.Sprintf("Creating container from %s...", image))
-		// Create container without starting it (init)
-		if err := container.IncusExec("init", image, result.ContainerName); err != nil {
+		// Create container without starting it (init). An empty StoragePool
+		// falls back to Incus's default pool (whatever the `default` profile
+		// points at), matching the run/build pipeline (#726).
+		initArgs := []string{"init", image, result.ContainerName}
+		if opts.StoragePool != "" {
+			initArgs = append(initArgs, "-s", opts.StoragePool)
+		}
+		if err := container.IncusExec(initArgs...); err != nil {
 			return nil, fmt.Errorf("failed to create container: %w", err)
 		}
 

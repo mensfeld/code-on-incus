@@ -139,6 +139,9 @@ func (a *App) validateEnvPhase(cmd *cobra.Command, s *shellState) session.Phase 
 			if warning := container.CheckKernelVersion(); warning != "" {
 				fmt.Fprintf(os.Stderr, "%s\n", warning)
 			}
+			if err := container.ValidateStoragePool(a.cfg.Container.StoragePool); err != nil {
+				return nil, err
+			}
 			return nil, nil
 		},
 	}
@@ -364,6 +367,7 @@ func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.P
 				WorkspacePath:         s.absWorkspace,
 				SessionName:           a.sessionName(),
 				Image:                 img,
+				StoragePool:           a.cfg.Container.StoragePool,
 				Persistent:            a.persistent,
 				ResumeFromID:          resumeID,
 				Slot:                  slotNum,
