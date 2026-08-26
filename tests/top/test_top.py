@@ -12,7 +12,6 @@ import subprocess
 
 from support.helpers import calculate_container_name, wait_for_container_started
 
-
 # --- Fast tests (no container required) -------------------------------------
 
 
