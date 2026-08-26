@@ -16,6 +16,10 @@
 
 - **`[network] dns_servers` and `allowed_ports` (#704)** — pin which DNS resolvers are reachable and cap outbound destination ports, tightening egress beyond the active network mode.
 
+### Changed
+
+- **Trimmed the injected `SANDBOX_CONTEXT.md` ~30% to save per-session tokens (#718)** — the sandbox context prepended to the agent's instructions every session dropped from ~2,260 to ~1,570 tokens (SSH+GitHub case) by removing sections that only restated others: `What You Can Do` and `Best Practices` duplicated the autonomy, mise, and file-ownership guidance already present elsewhere. All distinct instructions are preserved (a second, deliberate autonomy reminder is kept), and the triplicated git-identity block is now a set of shared template blocks so the three auth variants no longer drift. No behavior or config changes.
+
 ### Fixed
 
 - **Masked the container's `udisks2` service (#706, thanks @blegat)** — a running coi container no longer blocks host suspend / lid-close.
