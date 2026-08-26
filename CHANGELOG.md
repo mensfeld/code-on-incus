@@ -26,6 +26,8 @@
 
 - **`coi container start` no longer leaves a silently unwritable workspace on OrbStack ≥2.2.2 (#691)** — it applies the UID-mapping fix a pre-upgrade container needs, scoped to stopped coi-managed containers.
 
+- **`coi health` now flags non-thin LVM pools the same way it flags `dir` (#686)**: an `lvm` pool with `lvm.use_thinpool` disabled, or any `lvmcluster` pool (which never gets a thin pool, regardless of config), does a full logical-volume copy on every launch instead of a thin-provisioned CoW clone, the same per-launch cost `dir` has. `#684 follow-up` deferred this because flagging it looked like it needed an extra `incus storage show` call per pool; `incus storage list --format=json` already returns each pool's full config in the same response `evaluatePool`'s driver detection reads, so no extra call is needed. Covered by unit tests for the new detection helper and for the warning on both the usage-ok and usage-error paths.
+
 ## 0.11.2 (2026-08-11)
 
 ### Fixed
