@@ -11,7 +11,7 @@
 
 **Give every AI coding agent its own machine - with active defense.**
 
-`coi` runs your AI coding tool (Claude Code, Codex, opencode, pi) inside its own full Linux machine: root access, systemd, Docker, install anything. The agent works like it would on a real server - but it can't touch your host, can't see your credentials, and if it does something dangerous, `coi` pauses or kills the container on its own.
+`coi` runs your AI coding tool (Claude Code, Codex, opencode, pi) inside its own isolated Linux system - a full-OS container with root access, systemd, Docker, and the freedom to install anything. The agent works like it would on a real server - but it can't touch your host, can't see your credentials, and if it does something dangerous, `coi` pauses or kills the container on its own.
 
 One command drops you into a coding session. Your project is mounted, file permissions just work, and your SSH keys, tokens, and environment variables never enter the container unless you explicitly say so.
 
@@ -144,7 +144,7 @@ The README is the pitch; the wiki is the manual. Everything below lives there in
 
 ## Why Incus, not Docker?
 
-Incus (a modern LXD fork) gives you **system containers** - lightweight VMs with a real init system - instead of Docker's application containers. That means one clean isolation layer running a full OS with native Docker inside, correct file ownership on the host by default, and no Docker Desktop, no vendor lock-in, no opaque VM nesting. It's Linux-native and fully open source. (More in the [FAQ](https://github.com/mensfeld/code-on-incus/wiki/FAQ).)
+Incus (a modern LXD fork) gives you **system containers** - which behave like lightweight VMs (a real init system and full OS userspace) while sharing the host kernel, so they start in seconds - instead of Docker's application containers. That means one clean isolation layer running a full OS with native Docker inside, correct file ownership on the host by default, and no Docker Desktop, no vendor lock-in, no opaque VM nesting. It's Linux-native and fully open source. (More in the [FAQ](https://github.com/mensfeld/code-on-incus/wiki/FAQ).)
 
 ## Getting help
 
