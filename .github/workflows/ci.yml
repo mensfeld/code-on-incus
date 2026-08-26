@@ -141,8 +141,8 @@ jobs:
             path: tests/meta tests/snapshot tests/image
             description: "Snapshot, image, and meta command tests"
           - name: misc-commands
-            path: tests/audit tests/clean tests/completion tests/docker tests/errors tests/help tests/info tests/mount tests/monitor tests/shutdown tests/update tests/version tests/main_help_flag.py tests/main_help_shorthand.py
-            description: "Misc commands: audit/clean/completion/docker/errors/help/info/mount/monitor/shutdown/update/version + root help files"
+            path: tests/audit tests/clean tests/completion tests/docker tests/errors tests/help tests/info tests/mount tests/monitor tests/top tests/shutdown tests/update tests/version tests/main_help_flag.py tests/main_help_shorthand.py
+            description: "Misc commands: audit/clean/completion/docker/errors/help/info/mount/monitor/top/shutdown/update/version + root help files"
           - name: misc-config
             path: tests/config tests/health tests/limits tests/schema
             description: "Config, health, limits, and schema tests"

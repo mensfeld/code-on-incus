@@ -25,6 +25,7 @@ var (
 	topSort     string
 	topProcs    bool
 	topJSON     bool
+	topWatch    int
 )
 
 // userHZ is the kernel clock-tick rate assumed for converting /proc/<pid>/stat
@@ -58,6 +59,7 @@ Examples:
   coi top -i 5                  # sample over 5 seconds
   coi top my-api                # processes inside the 'my-api' container
   coi top --procs               # every container's processes, busiest first
+  coi top --watch 2             # re-render every 2s until Ctrl+C
   coi top --json                # machine-readable output`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runTop,
@@ -68,6 +70,7 @@ func init() {
 	topCmd.Flags().StringVar(&topSort, "sort", "cpu", "Sort key: cpu, mem, disk, or net (containers); cpu or mem (processes)")
 	topCmd.Flags().BoolVar(&topProcs, "procs", false, "Show processes (across all containers when no container is named)")
 	topCmd.Flags().BoolVar(&topJSON, "json", false, "Output as JSON")
+	topCmd.Flags().IntVar(&topWatch, "watch", 0, "Re-render every N seconds until Ctrl+C (0 = one-shot)")
 }
 
 // Seams so tests can supply canned data without a live Incus/cgroup.
@@ -81,6 +84,12 @@ func runTop(cmd *cobra.Command, args []string) error {
 	if topInterval <= 0 {
 		return &ExitCodeError{Code: 2, Message: "invalid --interval: must be greater than 0"}
 	}
+	if topWatch < 0 {
+		return &ExitCodeError{Code: 2, Message: "invalid --watch: must be >= 0"}
+	}
+	if topWatch > 0 && topJSON {
+		return &ExitCodeError{Code: 2, Message: "--json is not supported with --watch"}
+	}
 	interval := time.Duration(topInterval * float64(time.Second))
 	ctx := cmd.Context()
 	if ctx == nil {
@@ -91,24 +100,59 @@ func runTop(cmd *cobra.Command, args []string) error {
 	// is the container view. Each view supports a different --sort vocabulary,
 	// so validate against the chosen view rather than silently falling back to
 	// cpu on a typo (matching how `coi list` rejects an unknown --status).
-	if len(args) > 0 || topProcs {
+	procView := len(args) > 0 || topProcs
+	if procView {
 		if err := validateSortKey(topSort, procSortKeys); err != nil {
 			return err
 		}
-		var only string
-		if len(args) > 0 {
-			resolved, err := resolveTopContainer(args[0])
-			if err != nil {
-				return err
-			}
-			only = resolved
-		}
-		return runTopProcesses(ctx, only, interval)
-	}
-	if err := validateSortKey(topSort, containerSortKeys); err != nil {
+	} else if err := validateSortKey(topSort, containerSortKeys); err != nil {
 		return err
 	}
+
+	var only string
+	if len(args) > 0 {
+		resolved, err := resolveTopContainer(args[0])
+		if err != nil {
+			return err
+		}
+		only = resolved
+	}
+
+	// One render pass (text output). Watch mode repeats it; one-shot runs it once
+	// — except one-shot --json, which the view functions handle directly.
+	renderOnce := func() error {
+		if procView {
+			return renderProcessesText(ctx, only, interval)
+		}
+		return renderContainersText(ctx, interval)
+	}
+	if topWatch > 0 {
+		return runTopWatch(ctx, renderOnce, topWatch)
+	}
+	if procView {
+		return runTopProcesses(ctx, only, interval)
+	}
 	return runTopContainers(ctx, interval)
+}
+
+// runTopWatch re-renders every watchSec seconds until the context is cancelled
+// (Ctrl+C). Each pass clears the screen first, mirroring `coi monitor --watch`.
+// The render itself blocks ~--interval while sampling, so the effective refresh
+// period is interval + watchSec.
+func runTopWatch(ctx context.Context, render func() error, watchSec int) error {
+	for {
+		fmt.Print("\033[2J\033[H") // clear screen, cursor home
+		if err := render(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		}
+		fmt.Printf("\nLast updated: %s | refresh every %ds | Press Ctrl+C to exit\n",
+			time.Now().Format("15:04:05"), watchSec)
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(time.Duration(watchSec) * time.Second):
+		}
+	}
 }
 
 // Sort vocabularies per view. Containers can be sorted by four metrics;
@@ -159,22 +203,33 @@ type containerTopRow struct {
 }
 
 func runTopContainers(ctx context.Context, interval time.Duration) error {
+	if !topJSON {
+		return renderContainersText(ctx, interval)
+	}
 	rows, err := sampleContainerRows(ctx, interval)
 	if err != nil {
 		return err
 	}
 	if rows == nil {
-		if topJSON {
-			fmt.Println("[]")
-		} else {
-			fmt.Println("No running containers.")
-		}
+		fmt.Println("[]")
 		return nil
 	}
 	sortContainerRows(rows, topSort)
-	if topJSON {
-		return printJSON(rows)
+	return printJSON(rows)
+}
+
+// renderContainersText samples and prints the container table (no JSON). Shared
+// by the one-shot text path and watch mode.
+func renderContainersText(ctx context.Context, interval time.Duration) error {
+	rows, err := sampleContainerRows(ctx, interval)
+	if err != nil {
+		return err
 	}
+	if rows == nil {
+		fmt.Println("No running containers.")
+		return nil
+	}
+	sortContainerRows(rows, topSort)
 	printContainerTable(rows)
 	return nil
 }
@@ -310,35 +365,80 @@ type procTopRow struct {
 }
 
 func runTopProcesses(ctx context.Context, only string, interval time.Duration) error {
-	// Which containers to inspect.
-	var names []string
+	names, err := resolveProcNames(only)
+	if err != nil {
+		return err
+	}
+	if len(names) == 0 {
+		if topJSON {
+			fmt.Println("[]")
+		} else {
+			fmt.Println("No running containers.")
+		}
+		return nil
+	}
+	rows, err := sampleProcessRows(ctx, names, interval, only != "")
+	if err != nil {
+		return err
+	}
+	sortProcRows(rows, topSort)
+	if topJSON {
+		return printJSON(rows)
+	}
+	printProcessTable(rows, only == "")
+	return nil
+}
+
+// renderProcessesText samples and prints the process table (no JSON). Shared by
+// the one-shot text path and watch mode.
+func renderProcessesText(ctx context.Context, only string, interval time.Duration) error {
+	names, err := resolveProcNames(only)
+	if err != nil {
+		return err
+	}
+	if len(names) == 0 {
+		fmt.Println("No running containers.")
+		return nil
+	}
+	rows, err := sampleProcessRows(ctx, names, interval, only != "")
+	if err != nil {
+		return err
+	}
+	sortProcRows(rows, topSort)
+	printProcessTable(rows, only == "")
+	return nil
+}
+
+// resolveProcNames returns the containers to inspect: just `only` when set,
+// otherwise every running coi container.
+func resolveProcNames(only string) ([]string, error) {
 	if only != "" {
-		names = []string{only}
-	} else {
-		entries, err := topListEntries()
-		if err != nil {
-			return fmt.Errorf("failed to list containers: %w", err)
-		}
-		for _, e := range entries {
-			if strings.EqualFold(e.Status, "Running") {
-				names = append(names, e.Name)
-			}
-		}
-		if len(names) == 0 {
-			if topJSON {
-				fmt.Println("[]")
-			} else {
-				fmt.Println("No running containers.")
-			}
-			return nil
+		return []string{only}, nil
+	}
+	entries, err := topListEntries()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list containers: %w", err)
+	}
+	var names []string
+	for _, e := range entries {
+		if strings.EqualFold(e.Status, "Running") {
+			names = append(names, e.Name)
 		}
 	}
+	return names, nil
+}
 
-	// t0: record CPU jiffies for every process in each container.
+// sampleProcessRows samples per-process CPU%/RSS across the named containers by
+// reading /proc jiffies at two points interval apart. When strict is true (a
+// single named container), a process-collection failure is returned; otherwise
+// (across all containers) it is skipped best-effort. The returned slice is
+// non-nil so an empty result marshals to `[]`, not `null`.
+func sampleProcessRows(ctx context.Context, names []string, interval time.Duration, strict bool) ([]procTopRow, error) {
 	type key struct {
 		container string
 		pid       int
 	}
+	// t0: record CPU jiffies for every process in each container.
 	jiffies0 := make(map[key]float64)
 	for _, name := range names {
 		if ps, err := topCollectProcesses(ctx, name); err == nil {
@@ -351,18 +451,16 @@ func runTopProcesses(ctx context.Context, only string, interval time.Duration) e
 	}
 
 	if err := sleepCtx(ctx, interval); err != nil {
-		return err
+		return nil, err
 	}
 	secs := interval.Seconds()
 
-	// Non-nil so an empty result marshals to `[]`, not `null` (matching the
-	// container view's JSON shape).
 	rows := []procTopRow{}
 	for _, name := range names {
 		ps, err := topCollectProcesses(ctx, name)
 		if err != nil {
-			if only != "" {
-				return fmt.Errorf("failed to read processes for %s: %w", name, err)
+			if strict {
+				return nil, fmt.Errorf("failed to read processes for %s: %w", name, err)
 			}
 			continue // best-effort across all containers
 		}
@@ -388,14 +486,7 @@ func runTopProcesses(ctx context.Context, only string, interval time.Duration) e
 			})
 		}
 	}
-
-	sortProcRows(rows, topSort)
-
-	if topJSON {
-		return printJSON(rows)
-	}
-	printProcessTable(rows, only == "")
-	return nil
+	return rows, nil
 }
 
 func sortProcRows(rows []procTopRow, key string) {

@@ -3,10 +3,12 @@ package cli
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/mensfeld/code-on-incus/internal/monitor"
+	"github.com/spf13/cobra"
 )
 
 func TestParseProcJiffies(t *testing.T) {
@@ -258,6 +260,88 @@ func TestSampleContainerRows_NoneRunning(t *testing.T) {
 	}
 	if rows != nil {
 		t.Errorf("expected nil rows when nothing is running, got %v", names(rows))
+	}
+}
+
+func TestSampleProcessRows_Self(t *testing.T) {
+	// Fake the container-process discovery to return THIS test process, so the
+	// real /proc jiffies/RSS reads have a live PID to work against.
+	orig := topCollectProcesses
+	defer func() { topCollectProcesses = orig }()
+	self := os.Getpid()
+	topCollectProcesses = func(_ context.Context, _ string) (monitor.ProcessStats, error) {
+		return monitor.ProcessStats{
+			Available:  true,
+			TotalCount: 1,
+			Processes:  []monitor.Process{{PID: self, User: "1000", Command: "top.test"}},
+		}, nil
+	}
+
+	rows, err := sampleProcessRows(context.Background(), []string{"coi-x"}, 10*time.Millisecond, true)
+	if err != nil {
+		t.Fatalf("sampleProcessRows: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	if rows[0].PID != self {
+		t.Errorf("PID = %d; want self %d", rows[0].PID, self)
+	}
+	if rows[0].MemMB <= 0 {
+		t.Errorf("MemMB = %v; want > 0 (live RSS)", rows[0].MemMB)
+	}
+	if rows[0].Container != "coi-x" {
+		t.Errorf("Container = %q; want coi-x", rows[0].Container)
+	}
+}
+
+func TestSampleProcessRows_StrictPropagatesError(t *testing.T) {
+	orig := topCollectProcesses
+	defer func() { topCollectProcesses = orig }()
+	topCollectProcesses = func(_ context.Context, _ string) (monitor.ProcessStats, error) {
+		return monitor.ProcessStats{}, errors.New("cgroup gone")
+	}
+	// strict=true (a single named container) surfaces the error...
+	if _, err := sampleProcessRows(context.Background(), []string{"coi-x"}, time.Millisecond, true); err == nil {
+		t.Error("strict sampleProcessRows should return the collection error")
+	}
+	// ...best-effort (strict=false) skips it and returns an empty (non-nil) slice.
+	rows, err := sampleProcessRows(context.Background(), []string{"coi-x"}, time.Millisecond, false)
+	if err != nil {
+		t.Fatalf("best-effort sampleProcessRows: %v", err)
+	}
+	if rows == nil {
+		t.Error("rows should be non-nil (marshals to [] not null) even when all containers fail")
+	}
+}
+
+func TestRunTopWatch_StopsOnCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already cancelled: one render pass runs, then the loop exits.
+
+	calls := 0
+	err := runTopWatch(ctx, func() error { calls++; return nil }, 1)
+	if err != nil {
+		t.Fatalf("runTopWatch returned %v; want nil on cancel", err)
+	}
+	if calls != 1 {
+		t.Errorf("render called %d times; want exactly 1 before cancel", calls)
+	}
+}
+
+func TestRunTop_JSONWithWatchRejected(t *testing.T) {
+	// Save/restore the flag globals the command binds to.
+	oi, os_, op, oj, ow := topInterval, topSort, topProcs, topJSON, topWatch
+	defer func() { topInterval, topSort, topProcs, topJSON, topWatch = oi, os_, op, oj, ow }()
+	topInterval, topSort, topProcs, topJSON, topWatch = 2, "cpu", false, true, 2
+
+	err := runTop(&cobra.Command{}, nil)
+	if err == nil {
+		t.Fatal("expected error for --json with --watch")
+	}
+	var ec *ExitCodeError
+	if !errors.As(err, &ec) || ec.Code != 2 {
+		t.Errorf("expected ExitCodeError code 2, got %v", err)
 	}
 }
 
