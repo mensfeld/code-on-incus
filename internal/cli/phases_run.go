@@ -224,13 +224,6 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 				if err := container.EnableNICSecurity(s.containerName); err != nil {
 					logFn(fmt.Sprintf("Warning: NIC security hardening not applied: %v", err))
 				}
-				// Cap /tmp tmpfs size before boot when [limits.disk] tmpfs_size is set,
-				// matching the shell path (else a big build ENOSPCs on the default /tmp).
-				if ts := a.cfg.Limits.Disk.TmpfsSize; ts != "" {
-					if err := mgr.SetTmpfsSize(ts); err != nil {
-						logFn(fmt.Sprintf("Warning: failed to set /tmp size: %v", err))
-					}
-				}
 				// Restricted/allowlist: kill IPv6 from the kernel's first instant so
 				// there is no IPv6 egress window before the host-side ip6 drop lands
 				// (shell parity), and pre-seed an IPv4-only networkd config so the link
@@ -412,6 +405,15 @@ func (a *App) configureContainerRunPhase(s *runState) session.Phase {
 				}
 				if err := remapContainerUserIfNeeded(s.mgr, s.wasRestarted); err != nil {
 					return nil, err
+				}
+				// Cap the /tmp tmpfs size from [limits.disk] tmpfs_size, matching the
+				// shell path (else a big build ENOSPCs on the default /tmp). Applied
+				// post-start on the running container — the tmpfs disk device is
+				// hot-plugged, the same proven path as container.TestSetTmpfsSize.
+				if ts := a.cfg.Limits.Disk.TmpfsSize; ts != "" {
+					if err := s.mgr.SetTmpfsSize(ts); err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: failed to set /tmp size: %v\n", err)
+					}
 				}
 			}
 
