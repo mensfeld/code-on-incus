@@ -651,8 +651,8 @@ func (a *App) applySecurityMounts(mgr container.ContainerManager, absWorkspace, 
 // every launch, so the gate always applies to them; a reused persistent
 // container keeps its creation-time mount devices, so for those we only warn
 // that trust changes won't take effect until the container is recreated.
-func (a *App) gateRunForwarding(mc *session.MountConfig, sc *session.SocketConfig, pc *session.PortConfig, workspace string, wasRestarted bool) (*session.MountConfig, *session.SocketConfig, *session.PortConfig) {
-	keptMC, droppedM, keptSC, droppedS, _, _, keptPC, droppedP := session.FilterTrusted(mc, sc, nil, pc, workspace)
+func (a *App) gateRunForwarding(mc *session.MountConfig, sc *session.SocketConfig, cc *session.CredentialConfig, pc *session.PortConfig, workspace string, wasRestarted bool) (*session.MountConfig, *session.SocketConfig, *session.CredentialConfig, *session.PortConfig) {
+	keptMC, droppedM, keptSC, droppedS, keptCC, droppedC, keptPC, droppedP := session.FilterTrusted(mc, sc, cc, pc, workspace)
 	if wasRestarted {
 		if len(droppedM) > 0 {
 			fmt.Fprintf(os.Stderr,
@@ -665,7 +665,10 @@ func (a *App) gateRunForwarding(mc *session.MountConfig, sc *session.SocketConfi
 	}
 	warnDroppedSockets(droppedS)
 	warnDroppedPorts(droppedP)
-	return keptMC, keptSC, keptPC
+	if len(droppedC) > 0 {
+		fmt.Fprintf(os.Stderr, "Warning: %d untrusted credential entr(ies) skipped from an untrusted project config\n", len(droppedC))
+	}
+	return keptMC, keptSC, keptCC, keptPC
 }
 
 // applyForwardSockets forwards the host SSH agent (when ssh.forward_agent is

@@ -26,6 +26,8 @@
 
 - **`coi shell` now honors `[container] storage_pool` (#726)** — only `coi run` and `coi build` read it; `coi shell` (the primary interactive command) dropped it silently and always landed on the Incus default pool, because `session.SetupOptions` had no `StoragePool` field and `session.Setup()`'s `incus init` never passed `-s <pool>`. The pool is now threaded through the shell path (and validated up front like `coi run`), so interactive sessions land on the configured pool. Covered by an ephemeral shell integration test.
 
+- **`coi run` now applies the same container hardening and setup as `coi shell` (#726 follow-up)** — `coi run` and `coi shell` are two separate launch paths, and several settings the shell path applied were silently dropped by `coi run`. Now fixed and each covered by an end-to-end test: **NIC anti-spoofing** (`security.ipv4_filtering`/`mac_filtering`/`port_isolation` on eth0 — without it a restricted/allowlisted `coi run` could spoof its source IP/MAC to bypass its own egress allowlist), the **boot-window egress block** (restricted/allowlist runs now block egress until the real isolation rules land), **pre-boot IPv6 disable** in restricted/allowlist mode, **`[[credentials]]`** seeding, and the **git commit identity + `git.readonly` lock + `useConfigOnly` guard**.
+
 - **Masked the container's `udisks2` service (#706, thanks @blegat)** — a running coi container no longer blocks host suspend / lid-close.
 
 - **`install.sh` initializes a fresh Incus correctly (#703)** — it no longer skips `incus admin init` on real hosts, which left the default profile unusable.

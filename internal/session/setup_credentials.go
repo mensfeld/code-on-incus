@@ -54,6 +54,17 @@ func seedHostFile(mgr container.ContainerManager, hostPath, destPath, homeDir, m
 // and skips rather than failing the whole session. Safe to call again on
 // session resume: each entry is independently idempotent (re-push, re-chown,
 // re-chmod).
+// SetupCredentials applies a (possibly nil) CredentialConfig to a running
+// container, seeding each [[credentials]] entry from host to container. Exported
+// so the run pipeline can apply credentials the same way session.Setup does for
+// the shell path (#726 follow-up). A nil/empty config is a no-op.
+func SetupCredentials(mgr container.ContainerManager, homeDir string, cc *CredentialConfig, logger func(string)) error {
+	if cc == nil || len(cc.Entries) == 0 {
+		return nil
+	}
+	return setupCredentials(mgr, homeDir, cc.Entries, logger)
+}
+
 func setupCredentials(mgr container.ContainerManager, homeDir string, entries []CredentialEntry, logger func(string)) error {
 	for _, entry := range entries {
 		dest := entry.ContainerPath
