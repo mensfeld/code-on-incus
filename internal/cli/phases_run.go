@@ -406,15 +406,6 @@ func (a *App) configureContainerRunPhase(s *runState) session.Phase {
 				if err := remapContainerUserIfNeeded(s.mgr, s.wasRestarted); err != nil {
 					return nil, err
 				}
-				// Cap the /tmp tmpfs size from [limits.disk] tmpfs_size, matching the
-				// shell path (else a big build ENOSPCs on the default /tmp). Applied
-				// post-start on the running container — the tmpfs disk device is
-				// hot-plugged, the same proven path as container.TestSetTmpfsSize.
-				if ts := a.cfg.Limits.Disk.TmpfsSize; ts != "" {
-					if err := s.mgr.SetTmpfsSize(ts); err != nil {
-						fmt.Fprintf(os.Stderr, "Warning: failed to set /tmp size: %v\n", err)
-					}
-				}
 			}
 
 			// Git commit identity + [[credentials]], applied the same way the
