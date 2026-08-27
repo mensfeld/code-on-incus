@@ -36,7 +36,7 @@ func CollectProcessStats(ctx context.Context, containerName string) (ProcessStat
 // naturally covers processes that create nested PID namespaces inside the
 // container via unshare -p.
 func collectProcessesViaHostProc(ctx context.Context, containerName string) ([]Process, error) {
-	cgroupPath, err := GetCgroupPath(ctx, containerName)
+	rawPath, err := GetCgroupPath(ctx, containerName)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -44,19 +44,18 @@ func collectProcessesViaHostProc(ctx context.Context, containerName string) ([]P
 		return nil, fmt.Errorf("could not resolve container cgroup path: %w", err)
 	}
 
+	// GetCgroupPath may return the init process's sub-scope (e.g. /init.scope)
+	// when falling back to incus info. Strip it so the prefix match covers all
+	// processes in the container, not just init.scope — same container-root
+	// resolution CollectResourceStats uses so both views agree.
+	cgroupPath := containerRootCgroupPath(rawPath)
+
 	// /proc/<pid>/cgroup lines use paths relative to /sys/fs/cgroup.
-	// e.g. "0::/incus.monitor/coi-abc123-1/init.scope"
+	// e.g. "0::/incus.monitor/coi-abc123-1"
 	const cgroupMount = "/sys/fs/cgroup"
 	relCgroup := strings.TrimPrefix(cgroupPath, cgroupMount)
 	if relCgroup == cgroupPath {
 		return nil, fmt.Errorf("unexpected cgroup path format (no %s prefix): %s", cgroupMount, cgroupPath)
-	}
-
-	// GetCgroupPath may return the init process's sub-scope (e.g. /init.scope)
-	// when falling back to incus info. Strip known systemd scope/service suffixes
-	// so the prefix match covers all processes in the container, not just init.scope.
-	if last := relCgroup[strings.LastIndex(relCgroup, "/")+1:]; strings.HasSuffix(last, ".scope") || strings.HasSuffix(last, ".service") {
-		relCgroup = relCgroup[:strings.LastIndex(relCgroup, "/")]
 	}
 
 	entries, err := os.ReadDir("/proc")
