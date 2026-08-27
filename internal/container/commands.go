@@ -439,6 +439,23 @@ func withDisableShiftHint(err error) error {
 		"~/.coi/config.toml (or your active profile) to use raw.idmap for the workspace mount instead", err)
 }
 
+// recreateAfterDeletionError decides what error the ephemeral recreate-after-
+// deletion path returns. A successful recreate (nil) returns nil. When the
+// recreate also fails, a #678 idmapped-mount failure (identified from the
+// ORIGINAL start error) gets the disable_shift hint — matching the other retry
+// paths, which this branch previously did not, dropping the hint (#716). Any
+// other failure is returned unchanged. Kept pure so the decision is unit-tested
+// without the live-Incus recreate path.
+func recreateAfterDeletionError(firstErr, recreateErr error) error {
+	if recreateErr == nil {
+		return nil
+	}
+	if isIdmapMountUnsupported(firstErr) {
+		return withDisableShiftHint(recreateErr)
+	}
+	return recreateErr
+}
+
 // ContainerUsesRawIdmap reports whether the container already has raw.idmap set,
 // i.e. its workspace UID mapping is on the non-shift path — either because the
 // config asked for it (disable_shift, a host/code UID mismatch) or because
@@ -618,10 +635,16 @@ func LaunchContainerWithPreStart(imageAlias, containerName, pool string, ephemer
 		// Check for deletion: stopped ephemeral containers are deleted by Incus.
 		out, err := IncusOutput("list", "^"+containerName+"$", "--format=csv", "--columns=n")
 		if err == nil && strings.TrimSpace(out) == "" {
-			// Recreate without isolation and start fresh (preStart re-runs so the
-			// idmap is re-applied on the recreated container).
-			fmt.Fprintf(os.Stderr, "Warning: UID namespace isolation not supported in this environment\n")
-			return initConfigureAndStart(imageAlias, containerName, pool, true, preStart)
+			// Incus deleted the ephemeral container after the start failure.
+			// Recreate + start fresh (preStart re-runs so raw.idmap is re-applied);
+			// initConfigureAndStart does not set security.idmap.isolated, so the
+			// retry drops isolation. State that neutrally rather than asserting
+			// isolation was unsupported — the recreate *succeeding* is what would
+			// prove that, and an idmapped-mount failure (#678) is a different
+			// class entirely (#716).
+			fmt.Fprintf(os.Stderr, "Warning: container start failed; recreating without UID namespace isolation and retrying\n")
+			return recreateAfterDeletionError(firstErr,
+				initConfigureAndStart(imageAlias, containerName, pool, true, preStart))
 		}
 	}
 

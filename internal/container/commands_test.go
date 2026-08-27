@@ -106,3 +106,37 @@ func TestWithDisableShiftHint(t *testing.T) {
 		t.Errorf("hint must mention the disable_shift workaround, got: %s", wrapped.Error())
 	}
 }
+
+// TestRecreateAfterDeletionError covers the #716 fix: the ephemeral recreate-
+// after-deletion path adds the disable_shift hint for the #678 idmapped-mount
+// class (keyed on the ORIGINAL start error) and only then, matching the other
+// retry paths — and returns anything else unchanged.
+func TestRecreateAfterDeletionError(t *testing.T) {
+	idmapErr := errors.New("idmapping abilities are required but aren't supported on system")
+	otherErr := errors.New("Permission denied - Failed to mount .incus-systemd-credentials")
+	recreateErr := errors.New("recreate start failed")
+
+	// Successful recreate -> nil regardless of the original error.
+	if got := recreateAfterDeletionError(idmapErr, nil); got != nil {
+		t.Errorf("successful recreate should return nil, got %v", got)
+	}
+
+	// #678 original error + failed recreate -> hinted, wrapping the recreate error.
+	got := recreateAfterDeletionError(idmapErr, recreateErr)
+	if !errors.Is(got, recreateErr) {
+		t.Error("must wrap the recreate error (errors.Is)")
+	}
+	if !strings.Contains(got.Error(), "disable_shift = true") {
+		t.Errorf("idmap-class failure must get the disable_shift hint, got: %s", got.Error())
+	}
+
+	// Non-idmap original error + failed recreate -> returned unchanged (no hint,
+	// no misattribution).
+	got = recreateAfterDeletionError(otherErr, recreateErr)
+	if got != recreateErr {
+		t.Errorf("non-idmap failure must be returned unchanged, got: %v", got)
+	}
+	if strings.Contains(got.Error(), "disable_shift") {
+		t.Errorf("non-idmap failure must NOT get the disable_shift hint, got: %s", got.Error())
+	}
+}
