@@ -439,21 +439,21 @@ func withDisableShiftHint(err error) error {
 		"~/.coi/config.toml (or your active profile) to use raw.idmap for the workspace mount instead", err)
 }
 
-// recreateAfterDeletionError decides what error the ephemeral recreate-after-
-// deletion path returns. A successful recreate (nil) returns nil. When the
-// recreate also fails, a #678 idmapped-mount failure (identified from the
-// ORIGINAL start error) gets the disable_shift hint — matching the other retry
-// paths, which this branch previously did not, dropping the hint (#716). Any
-// other failure is returned unchanged. Kept pure so the decision is unit-tested
-// without the live-Incus recreate path.
-func recreateAfterDeletionError(firstErr, recreateErr error) error {
-	if recreateErr == nil {
+// startRetryError decides what error a start-retry branch returns. A successful
+// retry (nil) returns nil. When the retry also fails, a #678 idmapped-mount
+// failure — identified from the ORIGINAL start error — gets the disable_shift
+// hint; any other failure is returned unchanged. Shared by the ephemeral
+// recreate-after-deletion and the unset-isolation branches so their hint
+// routing can't drift (#716). Kept pure so the decision is unit-tested without
+// the live-Incus retry paths.
+func startRetryError(firstErr, retryErr error) error {
+	if retryErr == nil {
 		return nil
 	}
 	if isIdmapMountUnsupported(firstErr) {
-		return withDisableShiftHint(recreateErr)
+		return withDisableShiftHint(retryErr)
 	}
-	return recreateErr
+	return retryErr
 }
 
 // ContainerUsesRawIdmap reports whether the container already has raw.idmap set,
@@ -643,8 +643,17 @@ func LaunchContainerWithPreStart(imageAlias, containerName, pool string, ephemer
 			// prove that, and an idmapped-mount failure (#678) is a different
 			// class entirely (#716).
 			fmt.Fprintf(os.Stderr, "Warning: container start failed; recreating without UID namespace isolation and retrying\n")
-			return recreateAfterDeletionError(firstErr,
-				initConfigureAndStart(imageAlias, containerName, pool, true, preStart))
+			recreateErr := initConfigureAndStart(imageAlias, containerName, pool, true, preStart)
+			// The recreate's start (a plain `incus start`) can soft-fail —
+			// forkstart exits non-zero though the container came up — on the same
+			// nested/CI hosts the initial start does; treat a running container as
+			// success before reporting failure, matching the other retry branches.
+			if recreateErr != nil {
+				if running, _ := ContainerRunning(containerName); running {
+					return nil
+				}
+			}
+			return startRetryError(firstErr, recreateErr)
 		}
 	}
 
@@ -669,10 +678,7 @@ func LaunchContainerWithPreStart(imageAlias, containerName, pool string, ephemer
 		if running, _ := ContainerRunning(containerName); running {
 			return nil
 		}
-		if isIdmapMountUnsupported(firstErr) {
-			return withDisableShiftHint(retryErr)
-		}
-		return retryErr
+		return startRetryError(firstErr, retryErr)
 	}
 	return nil
 }
