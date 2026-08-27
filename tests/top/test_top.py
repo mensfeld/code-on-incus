@@ -121,6 +121,79 @@ def test_top_lists_running_container(coi_binary, cleanup_containers, workspace_d
         )
 
 
+def test_top_container_memory_aggregates_whole_tree(coi_binary, cleanup_containers, workspace_dir):
+    """Container-view memory must aggregate the whole cgroup tree, not just init.
+
+    Regression test for the container-root cgroup fix: the per-container row used
+    to read the container's `init.scope` sub-cgroup (PID 1 / systemd only), so it
+    reported a near-constant handful of MB while the process tree used far more.
+    Two invariants pin the fix, both impossible if only init.scope were counted:
+
+      1. The cgroup charge must cover its largest single member, so the
+         container's memory_mb must be >= the largest per-process RSS.
+      2. A running container is more than its init process, so the container's
+         memory_mb must comfortably exceed the init process's own RSS (the
+         lowest host PID in the process view).
+    """
+    container_name = calculate_container_name(workspace_dir, 1)
+    launch = subprocess.run(
+        [coi_binary, "container", "launch", "coi-default", container_name],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert launch.returncode == 0, f"launch failed. stderr: {launch.stderr}"
+    try:
+        wait_for_container_started(coi_binary, container_name)
+
+        container_view = subprocess.run(
+            [coi_binary, "top", "--json", "-i", "0.5"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert container_view.returncode == 0, f"top --json failed. stderr: {container_view.stderr}"
+        rows = json.loads(container_view.stdout)
+        match = next((r for r in rows if r.get("name") == container_name), None)
+        assert match is not None, f"launched container not in `coi top`: {rows}"
+        container_mem = match["memory_mb"]
+
+        process_view = subprocess.run(
+            [coi_binary, "top", container_name, "--json", "-i", "0.5"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert process_view.returncode == 0, (
+            f"top <container> --json failed. stderr: {process_view.stderr}"
+        )
+        procs = json.loads(process_view.stdout)
+        assert len(procs) > 1, f"a real container runs more than one process: {procs}"
+
+        max_proc_mem = max(p["memory_mb"] for p in procs)
+        init_proc = min(procs, key=lambda p: p["pid"])  # lowest host PID == container init
+        init_mem = init_proc["memory_mb"]
+
+        # (1) cgroup charge covers its largest member (hard kernel invariant for
+        # the whole-tree cgroup; violated when only init.scope is read).
+        assert container_mem >= max_proc_mem * 0.9, (
+            f"container memory {container_mem:.1f} MB is below its largest process "
+            f"{max_proc_mem:.1f} MB — the row is reading init.scope, not the container root"
+        )
+        # (2) the container is more than its init process.
+        assert container_mem >= init_mem * 1.5, (
+            f"container memory {container_mem:.1f} MB is ~= its init process "
+            f"{init_mem:.1f} MB — the row is counting only init.scope, not the whole tree"
+        )
+    finally:
+        subprocess.run(
+            [coi_binary, "container", "delete", container_name, "--force"],
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+
+
 def test_top_processes_for_container(coi_binary, cleanup_containers, workspace_dir):
     """`coi top <container> --json` lists processes with host PIDs."""
     container_name = calculate_container_name(workspace_dir, 1)
