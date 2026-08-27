@@ -107,3 +107,28 @@ func TestParseInitPIDFromIncusInfo_Missing(t *testing.T) {
 		t.Error("expected error when PID line absent, got nil")
 	}
 }
+
+// containerRootCgroupPath must strip the init.scope (or any systemd
+// scope/service) leaf that GetCgroupPath's incus-info fallback returns, so
+// resource stats read the container root whose v2 counters aggregate the whole
+// tree — not init.scope, which only accounts for systemd PID 1. A path that is
+// already a container root must be returned unchanged.
+func TestContainerRootCgroupPath(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"init.scope stripped", "/sys/fs/cgroup/incus.payload/coi-abc-1/init.scope", "/sys/fs/cgroup/incus.payload/coi-abc-1"},
+		{"service stripped", "/sys/fs/cgroup/lxc.payload/coi-abc-1/system.slice/foo.service", "/sys/fs/cgroup/lxc.payload/coi-abc-1/system.slice"},
+		{"already root unchanged", "/sys/fs/cgroup/incus.payload/coi-abc-1", "/sys/fs/cgroup/incus.payload/coi-abc-1"},
+		{"monitor root unchanged", "/sys/fs/cgroup/incus.monitor/coi-abc-1", "/sys/fs/cgroup/incus.monitor/coi-abc-1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := containerRootCgroupPath(tc.in); got != tc.want {
+				t.Errorf("containerRootCgroupPath(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
