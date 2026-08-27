@@ -2,6 +2,7 @@ package container
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -168,40 +169,34 @@ func (m *Manager) ListDevices() ([]string, error) {
 	return names, nil
 }
 
-// tmpfsMountEntry is the raw.lxc line that mounts a sized tmpfs at /tmp.
-const tmpfsMountEntry = "lxc.mount.entry ="
+// buildTmpMountUnit returns a systemd tmp.mount unit that mounts /tmp as a
+// tmpfs of the given size in bytes. Kept pure so it is unit-testable.
+func buildTmpMountUnit(sizeBytes int64) string {
+	return fmt.Sprintf(`[Unit]
+Description=coi sized /tmp (tmpfs)
+DefaultDependencies=no
+Conflicts=umount.target
+Before=local-fs.target umount.target
 
-// buildTmpfsRawLXC returns the raw.lxc value that mounts /tmp as a tmpfs of the
-// given size, preserving any existing raw.lxc lines except a prior /tmp tmpfs
-// entry (which it replaces, so a persistent container reused with a new size
-// doesn't stack duplicate entries). Kept pure so it is unit-testable.
-func buildTmpfsRawLXC(existing string, sizeBytes int64) string {
-	entry := fmt.Sprintf(
-		"lxc.mount.entry = tmpfs tmp tmpfs rw,nosuid,nodev,size=%d,mode=1777,create=dir 0 0",
-		sizeBytes,
-	)
-	var kept []string
-	for _, line := range strings.Split(existing, "\n") {
-		t := strings.TrimSpace(line)
-		if t == "" {
-			continue
-		}
-		// Drop any previous /tmp tmpfs entry so we replace rather than duplicate.
-		if strings.HasPrefix(t, tmpfsMountEntry) && strings.Contains(t, " tmp tmpfs ") {
-			continue
-		}
-		kept = append(kept, t)
-	}
-	kept = append(kept, entry)
-	return strings.Join(kept, "\n")
+[Mount]
+What=tmpfs
+Where=/tmp
+Type=tmpfs
+Options=mode=1777,strictatime,nosuid,nodev,size=%d
+
+[Install]
+WantedBy=local-fs.target
+`, sizeBytes)
 }
 
 // SetTmpfsSize mounts /tmp as a tmpfs of the given size (e.g. "2GiB",
-// "1024MiB", "512MB", or a raw byte count). Incus has no valid tmpfs *disk*
-// device (the old `disk source=tmpfs` form was silently rejected, so /tmp
-// stayed the default size — #733), so this uses a raw.lxc `lxc.mount.entry`,
-// which liblxc applies when the container STARTS. It must therefore be set
-// before first boot; a running container needs a restart to pick it up.
+// "1024MiB", "512MB", or a raw byte count), inside a RUNNING container.
+//
+// It uses a systemd tmp.mount unit — a normal in-namespace mount the
+// container's own init performs — because Incus silently ignores both a `disk
+// source=tmpfs` device and a raw.lxc `lxc.mount.entry` for unprivileged
+// containers, leaving /tmp at the default size (#733). `enable --now` mounts it
+// immediately and (for persistent containers) again at every subsequent boot.
 func (m *Manager) SetTmpfsSize(size string) error {
 	sizeBytes, err := parseSizeBytes(size)
 	if err != nil {
@@ -210,14 +205,14 @@ func (m *Manager) SetTmpfsSize(size string) error {
 	if sizeBytes <= 0 {
 		return fmt.Errorf("invalid tmpfs size %q: must be greater than 0", size)
 	}
-	// Preserve any existing raw.lxc. `config get` of an unset key returns empty
-	// with no error; a real error (missing container, daemon problem) must NOT
-	// be swallowed, or we'd overwrite raw.lxc and drop whatever it held.
-	existing, err := IncusOutput("config", "get", m.ContainerName, "raw.lxc")
-	if err != nil {
-		return fmt.Errorf("failed to read existing raw.lxc: %w", err)
+	// base64 so the unit's newlines/spaces need no shell quoting.
+	b64 := base64.StdEncoding.EncodeToString([]byte(buildTmpMountUnit(sizeBytes)))
+	script := "set -e; echo '" + b64 + "' | base64 -d > /etc/systemd/system/tmp.mount; " +
+		"systemctl daemon-reload; systemctl enable --now tmp.mount"
+	if _, err := m.ExecCommand(script, ExecCommandOptions{Capture: true}); err != nil {
+		return fmt.Errorf("failed to configure sized /tmp tmpfs: %w", err)
 	}
-	return IncusExec("config", "set", m.ContainerName, "raw.lxc", buildTmpfsRawLXC(existing, sizeBytes))
+	return nil
 }
 
 // parseSizeBytes parses a size string into bytes. It accepts IEC suffixes

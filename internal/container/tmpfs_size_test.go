@@ -44,31 +44,19 @@ func TestParseSizeBytes(t *testing.T) {
 	}
 }
 
-func TestBuildTmpfsRawLXC(t *testing.T) {
-	const wantEntry = "lxc.mount.entry = tmpfs tmp tmpfs rw,nosuid,nodev,size=268435456,mode=1777,create=dir 0 0"
-
-	// From empty raw.lxc: just the tmpfs entry.
-	if got := buildTmpfsRawLXC("", 256<<20); got != wantEntry {
-		t.Errorf("empty base:\n got %q\nwant %q", got, wantEntry)
-	}
-
-	// Preserves unrelated existing raw.lxc lines, appends the tmpfs entry.
-	base := "lxc.some.other = value\n"
-	got := buildTmpfsRawLXC(base, 256<<20)
-	if !strings.Contains(got, "lxc.some.other = value") {
-		t.Errorf("dropped an unrelated raw.lxc line: %q", got)
-	}
-	if !strings.Contains(got, wantEntry) {
-		t.Errorf("missing tmpfs entry: %q", got)
-	}
-
-	// Replaces (does not duplicate) a prior /tmp tmpfs entry.
-	prior := "lxc.mount.entry = tmpfs tmp tmpfs rw,size=99999,create=dir 0 0"
-	got = buildTmpfsRawLXC(prior, 256<<20)
-	if strings.Count(got, "tmp tmpfs") != 1 {
-		t.Errorf("expected exactly one /tmp tmpfs entry, got:\n%s", got)
-	}
-	if !strings.Contains(got, "size=268435456") || strings.Contains(got, "size=99999") {
-		t.Errorf("prior tmpfs entry not replaced: %q", got)
+func TestBuildTmpMountUnit(t *testing.T) {
+	got := buildTmpMountUnit(256 << 20)
+	for _, want := range []string{
+		"[Mount]",
+		"What=tmpfs",
+		"Where=/tmp",
+		"Type=tmpfs",
+		"size=268435456", // 256 MiB in bytes
+		"mode=1777",
+		"WantedBy=local-fs.target",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("tmp.mount unit missing %q; got:\n%s", want, got)
+		}
 	}
 }
