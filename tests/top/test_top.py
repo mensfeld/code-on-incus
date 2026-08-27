@@ -146,18 +146,11 @@ def test_top_container_memory_aggregates_whole_tree(coi_binary, cleanup_containe
     try:
         wait_for_container_started(coi_binary, container_name)
 
-        container_view = subprocess.run(
-            [coi_binary, "top", "--json", "-i", "0.5"],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-        assert container_view.returncode == 0, f"top --json failed. stderr: {container_view.stderr}"
-        rows = json.loads(container_view.stdout)
-        match = next((r for r in rows if r.get("name") == container_name), None)
-        assert match is not None, f"launched container not in `coi top`: {rows}"
-        container_mem = match["memory_mb"]
-
+        # Sample the process view FIRST, then the container view, so the
+        # container total is the *later* of the two reads. A freshly-booted
+        # container is still warming (services allocating), so memory only
+        # climbs; taking the whole-tree total last keeps it >= the per-process
+        # RSS captured earlier, instead of racing a growing container.
         process_view = subprocess.run(
             [coi_binary, "top", container_name, "--json", "-i", "0.5"],
             capture_output=True,
@@ -173,6 +166,18 @@ def test_top_container_memory_aggregates_whole_tree(coi_binary, cleanup_containe
         max_proc_mem = max(p["memory_mb"] for p in procs)
         init_proc = min(procs, key=lambda p: p["pid"])  # lowest host PID == container init
         init_mem = init_proc["memory_mb"]
+
+        container_view = subprocess.run(
+            [coi_binary, "top", "--json", "-i", "0.5"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert container_view.returncode == 0, f"top --json failed. stderr: {container_view.stderr}"
+        rows = json.loads(container_view.stdout)
+        match = next((r for r in rows if r.get("name") == container_name), None)
+        assert match is not None, f"launched container not in `coi top`: {rows}"
+        container_mem = match["memory_mb"]
 
         # (1) cgroup charge covers its largest member (hard kernel invariant for
         # the whole-tree cgroup; violated when only init.scope is read).
