@@ -37,14 +37,15 @@ func TestSetTmpfsSize(t *testing.T) {
 		_ = mgr.Delete(true)
 	}
 
-	if err := mgr.Launch("coi-default", false, ""); err != nil {
-		t.Fatalf("Failed to launch container: %v", err)
-	}
-
-	// Set /tmp to 1GiB (small value to keep the test lightweight)
+	// Set /tmp to 1GiB (small value to keep the test lightweight). SetTmpfsSize
+	// configures a raw.lxc mount entry that liblxc applies at container START, so
+	// it must be set BEFORE first boot — exactly how the shell path does it. Use
+	// the pre-start hook rather than SetTmpfsSize-on-a-running-container (#733).
 	const requestedSize = "1GiB"
-	if err := mgr.SetTmpfsSize(requestedSize); err != nil {
-		t.Fatalf("SetTmpfsSize(%q) failed: %v", requestedSize, err)
+	if err := mgr.LaunchWithPreStart("coi-default", false, "", func() error {
+		return mgr.SetTmpfsSize(requestedSize)
+	}); err != nil {
+		t.Fatalf("Failed to launch container with tmpfs pre-start hook: %v", err)
 	}
 
 	// Read the size back from inside the container using df (1K-blocks output)

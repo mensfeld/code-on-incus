@@ -24,6 +24,8 @@
 
 ### Fixed
 
+- **`[limits.disk] tmpfs_size` now actually resizes `/tmp` (#733)** — `SetTmpfsSize` configured `/tmp` with an `incus config device … disk source=tmpfs` device, but `source=tmpfs` is not a valid Incus disk source, so the device was never created and `/tmp` silently kept its default size. It now mounts a sized tmpfs via a `raw.lxc` `lxc.mount.entry` (applied at container start, where the shell path already sets it). The size string is parsed to bytes (IEC/SI suffixes or a raw count). Covered by unit tests for the parser/entry builder and an ephemeral shell end-to-end test that checks the in-container `/tmp` size.
+
 - **`coi shell` now honors `[container] storage_pool` (#726)** — only `coi run` and `coi build` read it; `coi shell` (the primary interactive command) dropped it silently and always landed on the Incus default pool, because `session.SetupOptions` had no `StoragePool` field and `session.Setup()`'s `incus init` never passed `-s <pool>`. The pool is now threaded through the shell path (and validated up front like `coi run`), so interactive sessions land on the configured pool. Covered by an ephemeral shell integration test.
 
 - **Masked the container's `udisks2` service (#706, thanks @blegat)** — a running coi container no longer blocks host suspend / lid-close.

@@ -168,23 +168,88 @@ func (m *Manager) ListDevices() ([]string, error) {
 	return names, nil
 }
 
-// SetTmpfsSize configures the tmpfs size for /tmp in the container
-// size should be a string like "2GiB", "1024MiB", etc.
-func (m *Manager) SetTmpfsSize(size string) error {
-	args := []string{
-		"config", "device", "override", m.ContainerName, "tmp", "disk",
-		"source=tmpfs",
-		"path=/tmp",
-		fmt.Sprintf("size=%s", size),
+// tmpfsMountEntry is the raw.lxc line that mounts a sized tmpfs at /tmp.
+const tmpfsMountEntry = "lxc.mount.entry ="
+
+// buildTmpfsRawLXC returns the raw.lxc value that mounts /tmp as a tmpfs of the
+// given size, preserving any existing raw.lxc lines except a prior /tmp tmpfs
+// entry (which it replaces, so a persistent container reused with a new size
+// doesn't stack duplicate entries). Kept pure so it is unit-testable.
+func buildTmpfsRawLXC(existing string, sizeBytes int64) string {
+	entry := fmt.Sprintf(
+		"lxc.mount.entry = tmpfs tmp tmpfs rw,nosuid,nodev,size=%d,mode=1777,create=dir 0 0",
+		sizeBytes,
+	)
+	var kept []string
+	for _, line := range strings.Split(existing, "\n") {
+		t := strings.TrimSpace(line)
+		if t == "" {
+			continue
+		}
+		// Drop any previous /tmp tmpfs entry so we replace rather than duplicate.
+		if strings.HasPrefix(t, tmpfsMountEntry) && strings.Contains(t, " tmp tmpfs ") {
+			continue
+		}
+		kept = append(kept, t)
 	}
-	if err := IncusExec(args...); err != nil {
-		// If override fails, try adding (container might not have tmp device)
-		args[2] = "add"
-		if err := IncusExec(args...); err != nil {
-			return err
+	kept = append(kept, entry)
+	return strings.Join(kept, "\n")
+}
+
+// SetTmpfsSize mounts /tmp as a tmpfs of the given size (e.g. "2GiB",
+// "1024MiB", "512MB", or a raw byte count). Incus has no valid tmpfs *disk*
+// device (the old `disk source=tmpfs` form was silently rejected, so /tmp
+// stayed the default size — #733), so this uses a raw.lxc `lxc.mount.entry`,
+// which liblxc applies when the container STARTS. It must therefore be set
+// before first boot; a running container needs a restart to pick it up.
+func (m *Manager) SetTmpfsSize(size string) error {
+	sizeBytes, err := parseSizeBytes(size)
+	if err != nil {
+		return fmt.Errorf("invalid tmpfs size %q: %w", size, err)
+	}
+	if sizeBytes <= 0 {
+		return fmt.Errorf("invalid tmpfs size %q: must be greater than 0", size)
+	}
+	// Preserve any existing raw.lxc (best-effort: absent key -> empty).
+	existing, _ := IncusOutput("config", "get", m.ContainerName, "raw.lxc")
+	return IncusExec("config", "set", m.ContainerName, "raw.lxc", buildTmpfsRawLXC(existing, sizeBytes))
+}
+
+// parseSizeBytes parses a size string into bytes. It accepts IEC suffixes
+// (KiB/MiB/GiB/TiB, 1024-based), SI suffixes (KB/MB/GB/TB, 1000-based), bare
+// binary suffixes (K/M/G/T, 1024-based), an optional trailing B, and a plain
+// integer (bytes). Case-insensitive; whitespace around the value is ignored.
+func parseSizeBytes(s string) (int64, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, fmt.Errorf("empty size")
+	}
+	lower := strings.ToLower(s)
+	// Longest suffixes first so "MiB" wins over "B"/"M".
+	units := []struct {
+		suffix string
+		mul    float64
+	}{
+		{"kib", 1 << 10}, {"mib", 1 << 20}, {"gib", 1 << 30}, {"tib", 1 << 40},
+		{"kb", 1e3}, {"mb", 1e6}, {"gb", 1e9}, {"tb", 1e12},
+		{"k", 1 << 10}, {"m", 1 << 20}, {"g", 1 << 30}, {"t", 1 << 40},
+		{"b", 1},
+	}
+	for _, u := range units {
+		if strings.HasSuffix(lower, u.suffix) {
+			num := strings.TrimSpace(lower[:len(lower)-len(u.suffix)])
+			f, err := strconv.ParseFloat(num, 64)
+			if err != nil {
+				return 0, fmt.Errorf("bad numeric value in %q", s)
+			}
+			return int64(f * u.mul), nil
 		}
 	}
-	return nil
+	n, err := strconv.ParseInt(lower, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("unrecognized size %q", s)
+	}
+	return n, nil
 }
 
 // GetWorkspacePath returns the container path where the "workspace" device is mounted.
