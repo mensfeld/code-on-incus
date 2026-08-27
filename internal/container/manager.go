@@ -210,8 +210,13 @@ func (m *Manager) SetTmpfsSize(size string) error {
 	if sizeBytes <= 0 {
 		return fmt.Errorf("invalid tmpfs size %q: must be greater than 0", size)
 	}
-	// Preserve any existing raw.lxc (best-effort: absent key -> empty).
-	existing, _ := IncusOutput("config", "get", m.ContainerName, "raw.lxc")
+	// Preserve any existing raw.lxc. `config get` of an unset key returns empty
+	// with no error; a real error (missing container, daemon problem) must NOT
+	// be swallowed, or we'd overwrite raw.lxc and drop whatever it held.
+	existing, err := IncusOutput("config", "get", m.ContainerName, "raw.lxc")
+	if err != nil {
+		return fmt.Errorf("failed to read existing raw.lxc: %w", err)
+	}
 	return IncusExec("config", "set", m.ContainerName, "raw.lxc", buildTmpfsRawLXC(existing, sizeBytes))
 }
 
@@ -230,9 +235,18 @@ func parseSizeBytes(s string) (int64, error) {
 		suffix string
 		mul    float64
 	}{
-		{"kib", 1 << 10}, {"mib", 1 << 20}, {"gib", 1 << 30}, {"tib", 1 << 40},
-		{"kb", 1e3}, {"mb", 1e6}, {"gb", 1e9}, {"tb", 1e12},
-		{"k", 1 << 10}, {"m", 1 << 20}, {"g", 1 << 30}, {"t", 1 << 40},
+		{"kib", 1 << 10},
+		{"mib", 1 << 20},
+		{"gib", 1 << 30},
+		{"tib", 1 << 40},
+		{"kb", 1e3},
+		{"mb", 1e6},
+		{"gb", 1e9},
+		{"tb", 1e12},
+		{"k", 1 << 10},
+		{"m", 1 << 20},
+		{"g", 1 << 30},
+		{"t", 1 << 40},
 		{"b", 1},
 	}
 	for _, u := range units {
