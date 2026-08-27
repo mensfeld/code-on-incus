@@ -2,6 +2,7 @@ package container
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -168,23 +169,96 @@ func (m *Manager) ListDevices() ([]string, error) {
 	return names, nil
 }
 
-// SetTmpfsSize configures the tmpfs size for /tmp in the container
-// size should be a string like "2GiB", "1024MiB", etc.
+// buildTmpMountUnit returns a systemd tmp.mount unit that mounts /tmp as a
+// tmpfs of the given size in bytes. Kept pure so it is unit-testable.
+func buildTmpMountUnit(sizeBytes int64) string {
+	return fmt.Sprintf(`[Unit]
+Description=coi sized /tmp (tmpfs)
+DefaultDependencies=no
+Conflicts=umount.target
+Before=local-fs.target umount.target
+
+[Mount]
+What=tmpfs
+Where=/tmp
+Type=tmpfs
+Options=mode=1777,strictatime,nosuid,nodev,size=%d
+
+[Install]
+WantedBy=local-fs.target
+`, sizeBytes)
+}
+
+// SetTmpfsSize mounts /tmp as a tmpfs of the given size (e.g. "2GiB",
+// "1024MiB", "512MB", or a raw byte count), inside a RUNNING container.
+//
+// It uses a systemd tmp.mount unit — a normal in-namespace mount the
+// container's own init performs — because Incus silently ignores both a `disk
+// source=tmpfs` device and a raw.lxc `lxc.mount.entry` for unprivileged
+// containers, leaving /tmp at the default size (#733). `enable --now` mounts it
+// immediately and (for persistent containers) again at every subsequent boot.
 func (m *Manager) SetTmpfsSize(size string) error {
-	args := []string{
-		"config", "device", "override", m.ContainerName, "tmp", "disk",
-		"source=tmpfs",
-		"path=/tmp",
-		fmt.Sprintf("size=%s", size),
+	sizeBytes, err := parseSizeBytes(size)
+	if err != nil {
+		return fmt.Errorf("invalid tmpfs size %q: %w", size, err)
 	}
-	if err := IncusExec(args...); err != nil {
-		// If override fails, try adding (container might not have tmp device)
-		args[2] = "add"
-		if err := IncusExec(args...); err != nil {
-			return err
-		}
+	if sizeBytes <= 0 {
+		return fmt.Errorf("invalid tmpfs size %q: must be greater than 0", size)
+	}
+	// base64 so the unit's newlines/spaces need no shell quoting.
+	b64 := base64.StdEncoding.EncodeToString([]byte(buildTmpMountUnit(sizeBytes)))
+	script := "set -e; echo '" + b64 + "' | base64 -d > /etc/systemd/system/tmp.mount; " +
+		"systemctl daemon-reload; systemctl enable --now tmp.mount"
+	if _, err := m.ExecCommand(script, ExecCommandOptions{Capture: true}); err != nil {
+		return fmt.Errorf("failed to configure sized /tmp tmpfs: %w", err)
 	}
 	return nil
+}
+
+// parseSizeBytes parses a size string into bytes. It accepts IEC suffixes
+// (KiB/MiB/GiB/TiB, 1024-based), SI suffixes (KB/MB/GB/TB, 1000-based), bare
+// binary suffixes (K/M/G/T, 1024-based), an optional trailing B, and a plain
+// integer (bytes). Case-insensitive; whitespace around the value is ignored.
+func parseSizeBytes(s string) (int64, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, fmt.Errorf("empty size")
+	}
+	lower := strings.ToLower(s)
+	// Longest suffixes first so "MiB" wins over "B"/"M".
+	units := []struct {
+		suffix string
+		mul    float64
+	}{
+		{"kib", 1 << 10},
+		{"mib", 1 << 20},
+		{"gib", 1 << 30},
+		{"tib", 1 << 40},
+		{"kb", 1e3},
+		{"mb", 1e6},
+		{"gb", 1e9},
+		{"tb", 1e12},
+		{"k", 1 << 10},
+		{"m", 1 << 20},
+		{"g", 1 << 30},
+		{"t", 1 << 40},
+		{"b", 1},
+	}
+	for _, u := range units {
+		if strings.HasSuffix(lower, u.suffix) {
+			num := strings.TrimSpace(lower[:len(lower)-len(u.suffix)])
+			f, err := strconv.ParseFloat(num, 64)
+			if err != nil {
+				return 0, fmt.Errorf("bad numeric value in %q", s)
+			}
+			return int64(f * u.mul), nil
+		}
+	}
+	n, err := strconv.ParseInt(lower, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("unrecognized size %q", s)
+	}
+	return n, nil
 }
 
 // GetWorkspacePath returns the container path where the "workspace" device is mounted.

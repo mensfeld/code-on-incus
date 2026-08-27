@@ -522,15 +522,6 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 			opts.Logger(fmt.Sprintf("Mounted git worktree common dir (read-write): %s", worktreeLayout.CommonDir))
 		}
 
-		// Configure /tmp tmpfs size (prevent space exhaustion during builds/operations)
-		if opts.LimitsConfig != nil && opts.LimitsConfig.Disk.TmpfsSize != "" {
-			if err := result.Manager.SetTmpfsSize(opts.LimitsConfig.Disk.TmpfsSize); err != nil {
-				opts.Logger(fmt.Sprintf("Warning: Failed to set /tmp size: %v", err))
-			} else {
-				opts.Logger(fmt.Sprintf("Set /tmp size to %s", opts.LimitsConfig.Disk.TmpfsSize))
-			}
-		}
-
 		// Mount all configured directories
 		if err := setupMounts(result.Manager, opts.MountConfig, useShift, opts.Logger); err != nil {
 			return nil, err
@@ -688,6 +679,18 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 	if !skipLaunch {
 		if err := ConfigureDockerDaemon(result.Manager, opts.Logger); err != nil {
 			opts.Logger(fmt.Sprintf("Warning: Failed to configure Docker daemon: %v", err))
+		}
+
+		// Size /tmp from [limits.disk] tmpfs_size (prevents space exhaustion in
+		// big builds). Applied POST-start: it installs a systemd tmp.mount unit,
+		// which the running container's init mounts immediately and again at
+		// every subsequent boot (#733). Non-fatal.
+		if opts.LimitsConfig != nil && opts.LimitsConfig.Disk.TmpfsSize != "" {
+			if err := result.Manager.SetTmpfsSize(opts.LimitsConfig.Disk.TmpfsSize); err != nil {
+				opts.Logger(fmt.Sprintf("Warning: Failed to set /tmp size: %v", err))
+			} else {
+				opts.Logger(fmt.Sprintf("Set /tmp size to %s", opts.LimitsConfig.Disk.TmpfsSize))
+			}
 		}
 	}
 

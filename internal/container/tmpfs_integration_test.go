@@ -41,7 +41,9 @@ func TestSetTmpfsSize(t *testing.T) {
 		t.Fatalf("Failed to launch container: %v", err)
 	}
 
-	// Set /tmp to 1GiB (small value to keep the test lightweight)
+	// Set /tmp to 1GiB (small value to keep the test lightweight). SetTmpfsSize
+	// installs a systemd tmp.mount unit and starts it, so it operates on a
+	// RUNNING container (#733).
 	const requestedSize = "1GiB"
 	if err := mgr.SetTmpfsSize(requestedSize); err != nil {
 		t.Fatalf("SetTmpfsSize(%q) failed: %v", requestedSize, err)
