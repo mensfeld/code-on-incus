@@ -3,6 +3,7 @@ package monitor
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -105,6 +106,43 @@ func TestParseInitPIDFromIncusInfo_Missing(t *testing.T) {
 	_, err := parseInitPIDFromIncusInfo(output)
 	if err == nil {
 		t.Error("expected error when PID line absent, got nil")
+	}
+}
+
+// wellKnownCgroupPaths must probe the container's payload cgroup before its
+// monitor cgroup: on a monitor/payload-split layout the monitor holds only the
+// host-side forkstart process, so preferring it would make GetCgroupPath
+// under-report resources and GetContainerInitPID return the monitor's PID. Each
+// payload candidate must appear at a lower index than every monitor candidate.
+func TestWellKnownCgroupPaths_PayloadBeforeMonitor(t *testing.T) {
+	paths := wellKnownCgroupPaths("coi-abc-1")
+
+	indexOf := func(substr string) int {
+		for i, p := range paths {
+			if strings.Contains(p, substr) {
+				return i
+			}
+		}
+		return -1
+	}
+
+	payloadIdx := indexOf(".payload/")
+	monitorIdx := indexOf(".monitor/")
+	if payloadIdx == -1 {
+		t.Fatalf("expected a .payload candidate in %v", paths)
+	}
+	if monitorIdx == -1 {
+		t.Fatalf("expected a .monitor candidate in %v", paths)
+	}
+	if payloadIdx >= monitorIdx {
+		t.Errorf("payload cgroup (idx %d) must be probed before monitor cgroup (idx %d): %v",
+			payloadIdx, monitorIdx, paths)
+	}
+	// Every candidate must be under the container's own name (no cross-container match).
+	for _, p := range paths {
+		if !strings.HasSuffix(p, "/coi-abc-1") {
+			t.Errorf("candidate %q is not scoped to the container name", p)
+		}
 	}
 }
 
