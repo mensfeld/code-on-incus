@@ -3174,14 +3174,18 @@ class TestThresholdBoundaries:
     def test_file_read_below_threshold_no_alert(
         self, test_workspace, enable_monitoring_low_thresholds, coi_binary
     ):
-        """Test that reading 30MB (below 50MB threshold) doesn't trigger.
+        """Test that reading 10MB (well below 50MB threshold) doesn't trigger.
 
-        Uses 30MB instead of 49MB to leave headroom for container startup I/O
-        that may accumulate in the same monitoring interval.
+        Detection is a per-interval delta of the container's *whole-tree* read
+        counter, so background container I/O (dockerd/containerd/journald/apt)
+        in the same 1s poll interval as the read is counted too. 30MB left only
+        20MB of headroom and flaked on I/O-loaded CI runners (crossing 50MB);
+        10MB leaves ~40MB, which background I/O can't realistically fill in one
+        interval, while still exercising the read-accounting path. See #738.
         """
-        # Create a 30MB file (well below 50MB threshold)
-        large_file = Path(test_workspace) / "data30mb.bin"
-        large_file.write_bytes(b"A" * (30 * 1024 * 1024))
+        # Create a 10MB file (well below 50MB threshold)
+        large_file = Path(test_workspace) / "data10mb.bin"
+        large_file.write_bytes(b"A" * (10 * 1024 * 1024))
 
         proc = subprocess.Popen(
             [
@@ -3206,7 +3210,7 @@ class TestThresholdBoundaries:
         # Wait for monitoring baseline to stabilize (15s to ensure startup I/O settles)
         time.sleep(15)
 
-        # Read the 30MB file
+        # Read the 10MB file
         subprocess.Popen(
             [
                 "incus",
@@ -3214,7 +3218,7 @@ class TestThresholdBoundaries:
                 container_name,
                 "--",
                 "cat",
-                "/workspace/data30mb.bin",
+                "/workspace/data10mb.bin",
             ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -3240,7 +3244,7 @@ class TestThresholdBoundaries:
             )
 
         assert state == "Running", (
-            f"Container should stay running for 30MB read (below 50MB threshold), got {state}."
+            f"Container should stay running for 10MB read (below 50MB threshold), got {state}."
         )
 
         # No HIGH filesystem threats
@@ -3248,7 +3252,7 @@ class TestThresholdBoundaries:
         high_fs = [
             e for e in events if e.get("level") == "high" and e.get("category") == "filesystem"
         ]
-        assert len(high_fs) == 0, "30MB read should not trigger HIGH threat (threshold is 50MB)"
+        assert len(high_fs) == 0, "10MB read should not trigger HIGH threat (threshold is 50MB)"
 
         proc.terminate()
         cleanup_container(container_name, coi_binary)
