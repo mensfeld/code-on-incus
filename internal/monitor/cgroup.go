@@ -61,12 +61,25 @@ func getInitPIDViaIncus(ctx context.Context, containerName string) (int, error) 
 // wellKnownCgroupPaths returns the candidate cgroup v2 paths for a container
 // in the order they should be probed. Shared with GetCgroupPath so both
 // functions check exactly the same list without duplicating it.
+//
+// The .payload paths come FIRST: on an Incus/LXC layout that splits the
+// instance into a monitor cgroup (the host-side forkstart process) and a
+// payload cgroup (the container's own process tree), only the payload holds
+// the container's processes. Probing .monitor first there would make
+// GetCgroupPath read the monitor's tiny memory/IO (under-reporting the whole
+// container) and make GetContainerInitPID return the monitor's PID instead of
+// the container init. The .monitor paths stay in the list as a fallback for
+// layouts where the monitor cgroup is itself the combined instance root, but
+// after payload and the legacy single-hierarchy roots. Non-existent candidates
+// are Stat-probed and skipped, so listing extra forms is always safe.
 func wellKnownCgroupPaths(containerName string) []string {
 	return []string{
-		fmt.Sprintf("/sys/fs/cgroup/incus.monitor/%s", containerName),
-		fmt.Sprintf("/sys/fs/cgroup/lxc.monitor/%s", containerName),
+		fmt.Sprintf("/sys/fs/cgroup/incus.payload/%s", containerName),
+		fmt.Sprintf("/sys/fs/cgroup/lxc.payload/%s", containerName),
 		fmt.Sprintf("/sys/fs/cgroup/lxc/%s", containerName),
 		fmt.Sprintf("/sys/fs/cgroup/incus/%s", containerName),
+		fmt.Sprintf("/sys/fs/cgroup/incus.monitor/%s", containerName),
+		fmt.Sprintf("/sys/fs/cgroup/lxc.monitor/%s", containerName),
 	}
 }
 
