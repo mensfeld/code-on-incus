@@ -46,9 +46,9 @@ func collectProcessesViaHostProc(ctx context.Context, containerName string) ([]P
 
 	// GetCgroupPath may return the init process's sub-scope (e.g. /init.scope)
 	// when falling back to incus info. Strip it so the prefix match covers all
-	// processes in the container, not just init.scope — same container-root
-	// resolution CollectResourceStats uses so both views agree.
-	cgroupPath := containerRootCgroupPath(rawPath)
+	// processes in the container, not just init.scope — same strip
+	// CollectResourceStats uses so both views agree on the container root.
+	cgroupPath := stripSystemdScopeSuffix(rawPath)
 
 	// /proc/<pid>/cgroup lines use paths relative to /sys/fs/cgroup.
 	// e.g. "0::/incus.monitor/coi-abc123-1"
