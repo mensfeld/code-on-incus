@@ -167,16 +167,22 @@ func findCgroupPathViaIncus(ctx context.Context, containerName string) (string, 
 	return "", fmt.Errorf("could not parse cgroup path from %s", cgroupFile)
 }
 
-// containerRootCgroupPath strips a trailing systemd scope/service segment
-// (e.g. "/init.scope") from a cgroup path so reads hit the container's
+// stripSystemdScopeSuffix removes a single trailing systemd scope/service
+// segment (e.g. "/init.scope") from a cgroup path, so reads hit the container's
 // top-level cgroup, whose cgroup v2 counters (memory.current, cpu.stat,
 // io.stat) aggregate the whole process tree. GetCgroupPath's incus-info
 // fallback returns the init process's own sub-scope, which accounts for only
 // systemd PID 1 — reading resource stats there under-reports the container by
-// orders of magnitude (#top-mem). A path that isn't a scope/service is a
-// container root already and is returned unchanged. Matches the suffix strip
-// collectProcessesViaHostProc uses so both views agree on the container root.
-func containerRootCgroupPath(cgroupPath string) string {
+// orders of magnitude (#top-mem).
+//
+// It strips exactly ONE leaf, which is all GetCgroupPath ever produces: either
+// the container root itself, or "<root>/init.scope". It is NOT a general
+// container-root resolver — a deeper path like "<root>/system.slice/foo.service"
+// yields "<root>/system.slice", not the root. Callers rely on the ≤1-level
+// contract. A path whose leaf is neither .scope nor .service is returned
+// unchanged. collectProcessesViaHostProc uses the same strip so both views
+// agree on the container root.
+func stripSystemdScopeSuffix(cgroupPath string) string {
 	base := filepath.Base(cgroupPath)
 	if strings.HasSuffix(base, ".scope") || strings.HasSuffix(base, ".service") {
 		return filepath.Dir(cgroupPath)
@@ -192,7 +198,7 @@ func CollectResourceStats(ctx context.Context, containerName string) (ResourceSt
 	}
 	// Read from the container's top-level cgroup, not init.scope, so the v2
 	// counters aggregate every process in the container (#top-mem).
-	cgroupPath := containerRootCgroupPath(rawPath)
+	cgroupPath := stripSystemdScopeSuffix(rawPath)
 
 	stats := ResourceStats{}
 
