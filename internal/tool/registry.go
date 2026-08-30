@@ -12,6 +12,7 @@ var registry = map[string]func() Tool{
 	"opencode": NewOpencode,
 	"pi":       NewPi,
 	"codex":    NewCodex,
+	"omp":      NewOmp,
 }
 
 // Get returns a tool by name

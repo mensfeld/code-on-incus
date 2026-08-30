@@ -6,7 +6,7 @@ import (
 )
 
 func TestLookup_KnownBundles(t *testing.T) {
-	for _, name := range []string{"claude", "opencode", "pi", "codex", "ollama"} {
+	for _, name := range []string{"claude", "opencode", "pi", "codex", "ollama", "omp"} {
 		if _, ok := Lookup(name); !ok {
 			t.Errorf("Lookup(%q): expected bundle to exist", name)
 		}
@@ -21,8 +21,8 @@ func TestLookup_UnknownBundle(t *testing.T) {
 
 func TestNames_Sorted(t *testing.T) {
 	names := Names()
-	if !reflect.DeepEqual(names, []string{"claude", "codex", "ollama", "opencode", "pi"}) {
-		t.Errorf("Names() = %v, want sorted [claude codex ollama opencode pi]", names)
+	if !reflect.DeepEqual(names, []string{"claude", "codex", "ollama", "omp", "opencode", "pi"}) {
+		t.Errorf("Names() = %v, want sorted [claude codex ollama omp opencode pi]", names)
 	}
 }
 
@@ -148,3 +148,24 @@ func TestOllamaBundle_Shape(t *testing.T) {
 		t.Errorf("Mode = %q, want %q", b.Mode, "0600")
 	}
 }
+
+func TestOmpBundle_MatchesHardcodedValues(t *testing.T) {
+	b, ok := Lookup("omp")
+	if !ok {
+		t.Fatal("omp bundle not found")
+	}
+	if b.ConfigDir != ".omp" {
+		t.Errorf("ConfigDir = %q, want %q", b.ConfigDir, ".omp")
+	}
+	want := []string{"settings.json", "models.json", "auth.json", "AGENTS.md"}
+	if !reflect.DeepEqual(b.Files, want) {
+		t.Errorf("Files = %v, want %v", b.Files, want)
+	}
+	if b.SandboxSettingsFile != "settings.json" {
+		t.Errorf("SandboxSettingsFile = %q, want %q", b.SandboxSettingsFile, "settings.json")
+	}
+	if !b.AlwaysSetup {
+		t.Error("AlwaysSetup = false, want true")
+	}
+}
+
