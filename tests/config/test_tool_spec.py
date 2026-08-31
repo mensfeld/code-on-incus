@@ -33,14 +33,27 @@ from support.helpers import (
 )
 
 
-def _write_config(workspace_dir, tool="claude", model=None):
+def _write_config(workspace_dir, tool="claude", model=None, preserve_workspace=False):
     config_dir = os.path.join(workspace_dir, ".coi")
     os.makedirs(config_dir, exist_ok=True)
     body = f'[container]\npersistent = true\n\n[tool]\nname = "{tool}"\n'
     if model:
         body += f'\n[tool.{tool}]\nmodel = "{model}"\n'
+    if preserve_workspace:
+        body += "\n[paths]\npreserve_workspace_path = true\n"
     with open(os.path.join(config_dir, "config.toml"), "w") as f:
         f.write(body)
+
+
+def _container_workspace_path(container):
+    """The path the workspace disk is actually mounted at inside the container."""
+    r = subprocess.run(
+        ["incus", "config", "device", "get", container, "workspace", "path"],
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    return r.stdout.strip() or "/workspace"
 
 
 def _boot_container(coi_binary, workspace_dir):
@@ -247,6 +260,25 @@ def test_tool_spec_opencode_out_of_band_prompt(coi_binary, workspace_dir, cleanu
         assert "opencode please" in _cat_in_container(
             container, f"/home/code/.coi/runs/{sid}.prompt"
         )
+    finally:
+        _teardown(coi_binary, child, container)
+
+
+def test_tool_spec_env_uses_container_workspace_path(coi_binary, workspace_dir, cleanup_containers):
+    """A tool whose GetContainerEnv derives paths from the workspace (opencode's
+    XDG_*) must be computed against the container's ACTUAL workspace mount, not a
+    hardcoded /workspace. With preserve_workspace_path the workspace mounts at the
+    host path (under /tmp, not a system dir), so the env must reflect that."""
+    _write_config(workspace_dir, tool="opencode", preserve_workspace=True)
+    child, container = _boot_container(coi_binary, workspace_dir)
+    try:
+        ws = _container_workspace_path(container)
+        # Sanity: preserve_workspace_path really did move the mount off the default.
+        assert ws != "/workspace", f"expected a preserved non-default mount, got {ws!r}"
+
+        spec = _spec(coi_binary, container, workspace_dir, "spec-ws-1")
+        assert spec["env"].get("XDG_DATA_HOME") == f"{ws}/.local/share", spec["env"]
+        assert spec["env"].get("XDG_STATE_HOME") == f"{ws}/.local/state", spec["env"]
     finally:
         _teardown(coi_binary, child, container)
 

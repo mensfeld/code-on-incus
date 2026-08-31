@@ -138,7 +138,10 @@ func (a *App) toolSpecCommand(cmd *cobra.Command) error {
 		return fmt.Errorf("container %s is not running", toolSpecContainer)
 	}
 
-	uid, homeDir := toolSpecUserHome(mgr)
+	uid, homeDir, err := toolSpecUserHome(mgr)
+	if err != nil {
+		return err
+	}
 	runsDir := filepath.Join(homeDir, ".coi", "runs")
 
 	// The tool runs as the code user; write run files owned by it.
@@ -184,32 +187,32 @@ func (a *App) toolSpecCommand(cmd *cobra.Command) error {
 		return err
 	}
 
-	// Env: tool-derived only (model/effort). Secrets/auth stay with the caller,
-	// which adds its own --env when it execs the command.
+	// Env: tool-derived only (model/effort), computed against the container's
+	// ACTUAL workspace mount — pi/omp/opencode derive session-dir/XDG paths from
+	// it, so a container that mounts the workspace somewhere other than
+	// /workspace (preserve_workspace_path / worktree) must get the real path,
+	// not a hardcoded default. Secrets/auth stay with the caller.
 	env := map[string]string{}
-	mergeToolEnv(env, t, toolSpecWorkspacePath)
+	mergeToolEnv(env, t, mgr.GetWorkspacePath())
 
 	return emitToolSpec(toolSpecResult{Command: argv, Env: env, Prompt: outOfBandPrompt})
 }
 
-// toolSpecWorkspacePath is the in-container workspace the tool env is computed
-// against. The shipped tools' GetContainerEnv ignore it (model/effort don't
-// depend on the path); it's a stable default so the spec is deterministic.
-const toolSpecWorkspacePath = "/workspace"
-
 // toolSpecUserHome resolves the uid the run files are owned by and the home dir
-// the runs directory lives under, for an existing container. Falls back to root
-// on images without the code user.
-func toolSpecUserHome(mgr container.ContainerManager) (uid int, home string) {
-	hasCode, err := session.DetectCodeUser(mgr, container.CodeUser)
-	if err != nil || !hasCode {
-		return 0, "/root"
-	}
-	u, err := session.ResolveCodeUID(mgr, container.CodeUser)
+// the runs directory lives under, for an existing container. It reuses the
+// canonical session.ResolveCodeUID, which distinguishes a genuinely-absent code
+// user (→ root) from an infra probe failure (→ error): a transient probe error
+// therefore surfaces loudly instead of silently misrouting staging to /root
+// (the #588 failure mode) for a container that actually has the code user.
+func toolSpecUserHome(mgr container.ContainerManager) (uid int, home string, err error) {
+	uid, err = session.ResolveCodeUID(mgr, container.CodeUser)
 	if err != nil {
-		return container.CodeUID, "/home/" + container.CodeUser
+		return 0, "", fmt.Errorf("failed to resolve container code user: %w", err)
 	}
-	return u, "/home/" + container.CodeUser
+	if uid == 0 {
+		return 0, "/root", nil // no code user: the tool runs as root
+	}
+	return uid, "/home/" + container.CodeUser, nil
 }
 
 // stageSpecFile copies a host prompt file into the container at destPath and
