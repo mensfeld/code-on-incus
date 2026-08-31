@@ -32,6 +32,13 @@ type App struct {
 	continueSession string
 	profile         string
 	cfg             *config.Config
+
+	// Headless launch (coi shell --headless, #746): non-interactive tool run an
+	// external orchestrator drives via coi's tool abstraction.
+	headless         bool
+	promptFile       string
+	systemPromptFile string
+	jsonOutput       bool
 }
 
 // sessionName returns the resolved [container] session_name — the identity-key

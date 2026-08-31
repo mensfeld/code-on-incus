@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/session"
@@ -59,12 +62,57 @@ Examples:
 	RunE: tmuxListCommand,
 }
 
+var (
+	tmuxStatusSessionID string
+	tmuxStatusWait      bool
+	tmuxStatusJSON      bool
+	tmuxStatusTimeout   int
+)
+
+var tmuxStatusCmd = &cobra.Command{
+	Use:   "status <container>",
+	Short: "Report completion of a headless tool run (#746)",
+	Long: `Report whether a headless run (coi shell --headless) is still running or has
+finished, reading the exit sentinel the launch script writes. Pass the session
+id printed by the headless launch. With --wait, block until the run completes
+(or the tmux session disappears) and exit with the tool's exit code.`,
+	Args: cobra.ExactArgs(1),
+	RunE: tmuxStatusCommand,
+}
+
 func init() {
 	tmuxListCmd.Flags().StringVar(&tmuxFormat, "format", "text", "Output format: text or json")
+	tmuxStatusCmd.Flags().StringVar(&tmuxStatusSessionID, "session-id", "", "Session id of the headless run (from the launch output)")
+	tmuxStatusCmd.Flags().BoolVar(&tmuxStatusWait, "wait", false, "Block until the run completes, then exit with its exit code")
+	tmuxStatusCmd.Flags().BoolVar(&tmuxStatusJSON, "json", false, "Print status as JSON")
+	tmuxStatusCmd.Flags().IntVar(&tmuxStatusTimeout, "timeout", 0, "With --wait, seconds to wait before giving up (0 = no limit)")
 
 	tmuxCmd.AddCommand(tmuxSendCmd)
 	tmuxCmd.AddCommand(tmuxCaptureCmd)
 	tmuxCmd.AddCommand(tmuxListCmd)
+	tmuxCmd.AddCommand(tmuxStatusCmd)
+}
+
+// runStatus is the machine-readable completion state of a headless run.
+type runStatus struct {
+	SessionID string `json:"session_id"`
+	State     string `json:"state"` // "running" | "done"
+	ExitCode  *int   `json:"exit_code,omitempty"`
+}
+
+// parseExitSentinel turns the `cat` of the exit file into a status. present is
+// false when the file doesn't exist yet (run still going); otherwise the trimmed
+// content is the tool's exit code (non-numeric content is treated as -1, a
+// completed-but-unparseable run rather than a hang).
+func parseExitSentinel(sessionID, content string, present bool) runStatus {
+	if !present {
+		return runStatus{SessionID: sessionID, State: "running"}
+	}
+	code := -1
+	if n, err := strconv.Atoi(strings.TrimSpace(content)); err == nil {
+		code = n
+	}
+	return runStatus{SessionID: sessionID, State: "done", ExitCode: &code}
 }
 
 func tmuxSendCommand(cmd *cobra.Command, args []string) error {
@@ -220,5 +268,97 @@ func tmuxListCommand(cmd *cobra.Command, args []string) error {
 		tbl.AddRow(s.Container, s.Session)
 	}
 	tbl.Render()
+	return nil
+}
+
+// readExitSentinel reads the headless run's exit file (as the code user, so ~
+// resolves to its home) and reports whether it exists and its content.
+func readExitSentinel(mgr container.ContainerManager, user *int, sessionID string) (content string, present bool, err error) {
+	path := "~/.coi/runs/" + shellQuote(sessionID) + ".exit"
+	// Marker keeps "file absent" distinct from "file present but empty".
+	cmd := fmt.Sprintf(`if [ -f %s ]; then cat %s; else printf __COI_ABSENT__; fi`, path, path)
+	out, err := mgr.ExecCommand(cmd, container.ExecCommandOptions{Capture: true, User: user})
+	if err != nil {
+		return "", false, err
+	}
+	if strings.Contains(out, "__COI_ABSENT__") {
+		return "", false, nil
+	}
+	return out, true, nil
+}
+
+// tmuxSessionAlive reports whether the run's tmux session still exists, so a
+// --wait doesn't block forever if the pane died without writing the sentinel.
+func tmuxSessionAlive(mgr container.ContainerManager, user *int, containerName string) bool {
+	session := fmt.Sprintf("coi-%s", containerName)
+	_, err := mgr.ExecCommand(fmt.Sprintf("tmux has-session -t %s 2>/dev/null", shellQuote(session)),
+		container.ExecCommandOptions{Capture: true, User: user})
+	return err == nil
+}
+
+func tmuxStatusCommand(_ *cobra.Command, args []string) error {
+	containerName := args[0]
+	if tmuxStatusSessionID == "" {
+		return &ExitCodeError{Code: 2, Message: "--session-id is required (use the id printed by the headless launch)"}
+	}
+	mgr := container.NewManager(containerName)
+	if running, err := mgr.Running(); err != nil {
+		return fmt.Errorf("failed to check container status: %w", err)
+	} else if !running {
+		return fmt.Errorf("container %s is not running", containerName)
+	}
+	user, err := tmuxExecUser(mgr)
+	if err != nil {
+		return err
+	}
+
+	deadline := time.Time{}
+	if tmuxStatusWait && tmuxStatusTimeout > 0 {
+		deadline = time.Now().Add(time.Duration(tmuxStatusTimeout) * time.Second)
+	}
+
+	for {
+		content, present, err := readExitSentinel(mgr, user, tmuxStatusSessionID)
+		if err != nil {
+			return fmt.Errorf("failed to read run status: %w", err)
+		}
+		st := parseExitSentinel(tmuxStatusSessionID, content, present)
+
+		if !tmuxStatusWait || st.State == "done" {
+			return emitRunStatus(st)
+		}
+		// Still running and waiting: bail out if the pane died without a
+		// sentinel, or if the timeout elapsed.
+		if !tmuxSessionAlive(mgr, user, containerName) {
+			// Re-read once in case the sentinel landed as the pane exited.
+			if content, present, _ := readExitSentinel(mgr, user, tmuxStatusSessionID); present {
+				return emitRunStatus(parseExitSentinel(tmuxStatusSessionID, content, true))
+			}
+			return &ExitCodeError{Code: 1, Message: fmt.Sprintf("tmux session for %s ended without a completion sentinel", containerName)}
+		}
+		if !deadline.IsZero() && time.Now().After(deadline) {
+			return &ExitCodeError{Code: 124, Message: fmt.Sprintf("timed out after %ds waiting for run %s", tmuxStatusTimeout, tmuxStatusSessionID)}
+		}
+		time.Sleep(2 * time.Second)
+	}
+}
+
+// emitRunStatus prints the status (JSON with --json) and, for a completed run
+// under --wait, propagates the tool's exit code as coi's own.
+func emitRunStatus(st runStatus) error {
+	if tmuxStatusJSON {
+		b, err := json.Marshal(st)
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(b))
+	} else if st.State == "done" {
+		fmt.Printf("done (exit %d)\n", *st.ExitCode)
+	} else {
+		fmt.Println("running")
+	}
+	if tmuxStatusWait && st.State == "done" && *st.ExitCode != 0 {
+		return &ExitCodeError{Code: *st.ExitCode, Message: ""}
+	}
 	return nil
 }

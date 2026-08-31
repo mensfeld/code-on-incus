@@ -271,6 +271,22 @@ func (c *ClaudeTool) GetContainerEnv(_ string) map[string]string {
 	return env
 }
 
+// BuildCommandLaunch implements ToolWithPrompt for Claude. It layers the
+// headless dynamics onto the normal command: an optional system prompt via
+// --append-system-prompt, and the initial user prompt as the trailing
+// positional argument Claude Code runs on start. Both are passed as
+// `"$(cat <file>)"` so arbitrary content stays in the file, never on the line.
+func (c *ClaudeTool) BuildCommandLaunch(spec LaunchSpec) ([]string, error) {
+	cmd := c.BuildCommand(spec.SessionID, spec.Resume, spec.ResumeSessionID)
+	if spec.SystemPromptFile != "" {
+		cmd = append(cmd, "--append-system-prompt", catSubst(spec.SystemPromptFile))
+	}
+	if spec.PromptFile != "" {
+		cmd = append(cmd, catSubst(spec.PromptFile))
+	}
+	return cmd, nil
+}
+
 // ToolWithModel is an optional interface for tools that support selecting a
 // model (e.g., Claude via ANTHROPIC_MODEL).
 type ToolWithModel interface {
