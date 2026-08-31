@@ -924,6 +924,15 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		}
 	}
 
+	// 11.1 Persist the tool's resolved env as container-level environment.* so
+	// EVERY exec — coi's own launch and an external `coi container exec` alike —
+	// inherits the profile's tool config (#744). Runs even when skipLaunch is
+	// true (reused/persistent containers), unlike the settings.json injection
+	// above, so a per-workflow model/effort change actually takes effect.
+	if opts.Tool != nil {
+		applyToolContainerEnv(ctx, result.ContainerName, result.ContainerWorkspacePath, opts.Tool, opts.Logger)
+	}
+
 	// 11.5 Setup configured [[credentials]] entries (skip if resuming - the
 	// refresh above already handled it; skip on container reuse - persists
 	// from creation, matching how step 11 handles the builtin tool config).

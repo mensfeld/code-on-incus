@@ -250,6 +250,27 @@ func (c *ClaudeTool) SetModel(model string) {
 	c.model = model
 }
 
+// GetContainerEnv implements ToolWithContainerEnv. It exposes the model and
+// effort knobs as environment variables so they can be applied at the
+// container level (see session setup), which makes them reach EVERY tool
+// launch — including an external `coi container exec` — not just coi's own
+// launcher and the in-container settings.json (#744). The same variables are
+// also written into settings.json by GetSandboxSettings (which additionally
+// carries the effort-lock/permission keys that are not env vars); setting them
+// here as well is harmless (identical values) and gives a single, launcher- and
+// settings.json-independent source of truth. Empty knobs contribute nothing, so
+// Claude keeps its own defaults.
+func (c *ClaudeTool) GetContainerEnv(_ string) map[string]string {
+	env := map[string]string{}
+	if c.model != "" {
+		env["ANTHROPIC_MODEL"] = c.model
+	}
+	if c.effortLevel != "" {
+		env["CLAUDE_CODE_EFFORT_LEVEL"] = c.effortLevel
+	}
+	return env
+}
+
 // ToolWithModel is an optional interface for tools that support selecting a
 // model (e.g., Claude via ANTHROPIC_MODEL).
 type ToolWithModel interface {
