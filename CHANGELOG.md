@@ -12,6 +12,8 @@
 
 - **OpenAI Codex CLI is now a supported tool (#698, thanks @breml)** — `[tool] name = "codex"` launches straight into codex like the other tools, with per-tool `model`/`reasoning_effort`. Opt it into the image with `[container.build] agents = ["claude", "codex"]`.
 
+- **Oh My Pi (`omp`) is now a supported tool (#743, thanks @VIVAAN-DHAWAN)** — `[tool] name = "omp"` launches straight into [omp](https://github.com/can1357/oh-my-pi) like the other tools. Following the `pi` integration, session data is redirected to the workspace mount (`OMP_SESSION_DIR`) to survive ephemeral container recreation, and the sandbox context is wired into omp's config dir (`~/.omp/APPEND_SYSTEM.md`). Opt it into the image with `[container.build] agents = ["claude", "omp"]`. Note: the session-dir and system-prompt mechanisms are modeled on `pi`'s and should be validated against the omp version you run.
+
 - **Per-host ports on `[[network.hosts]]`** — scope a single LAN service to specific ports (`ports = [443]`) while the rest of the internet stays open; also available at runtime via `coi hosts add … --ports`.
 
 - **`[git] readonly = true`** — lock the container's git commit identity read-only so the agent can't overwrite who commits are authored by.

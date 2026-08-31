@@ -11,7 +11,7 @@
 
 **Give every AI coding agent its own machine - with active defense.**
 
-`coi` runs your AI coding tool (Claude Code, Codex, opencode, pi) inside its own isolated Linux system - a full-OS container with root access, systemd, Docker, and the freedom to install anything. The agent works like it would on a real server - but it can't touch your host, can't see your credentials, and if it does something dangerous, `coi` pauses or kills the container on its own.
+`coi` runs your AI coding tool (Claude Code, Codex, opencode, pi, omp) inside its own isolated Linux system - a full-OS container with root access, systemd, Docker, and the freedom to install anything. The agent works like it would on a real server - but it can't touch your host, can't see your credentials, and if it does something dangerous, `coi` pauses or kills the container on its own.
 
 One command drops you into a coding session. Your project is mounted, file permissions just work, and your SSH keys, tokens, and environment variables never enter the container unless you explicitly say so.
 
@@ -100,12 +100,12 @@ It overrides a weaker global config (a global `mode = "open"` still becomes rest
 
 ## Supported AI tools
 
-**Claude Code** (default) · **Codex CLI** · **opencode** · **pi** - pick one in config or a profile:
+**Claude Code** (default) · **Codex CLI** · **opencode** · **pi** · **omp** (Oh My Pi) - pick one in config or a profile:
 
 ```toml
 # ~/.coi/config.toml or ./.coi/config.toml
 [tool]
-name = "claude"              # or "codex", "opencode", "pi"
+name = "claude"              # or "codex", "opencode", "pi", "omp"
 permission_mode = "bypass"   # run autonomously ("bypass") or ask first ("interactive")
 ```
 
