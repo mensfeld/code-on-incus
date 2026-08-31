@@ -168,4 +168,3 @@ func TestOmpBundle_MatchesHardcodedValues(t *testing.T) {
 		t.Error("AlwaysSetup = false, want true")
 	}
 }
-
