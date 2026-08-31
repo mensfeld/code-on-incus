@@ -98,3 +98,69 @@ func TestBuildToolSpecCommand_ToolWithoutPromptOutOfBand(t *testing.T) {
 		t.Errorf("no-prompt opencode: want base cmd and empty prompt, got argv=%v prompt=%q", argv, prompt)
 	}
 }
+
+func TestBuildToolSpecCommand_ResumeIDClaude(t *testing.T) {
+	// --resume-id renders as claude's `--resume <id>`, replacing --session-id.
+	argv, _, err := buildToolSpecCommand(tool.NewClaude(), tool.LaunchSpec{
+		SessionID: "new-run", Resume: true, ResumeSessionID: "sess-abc",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(argv, " ")
+	if !strings.Contains(joined, "--resume sess-abc") {
+		t.Errorf("claude resume-id must render `--resume <id>`: %q", joined)
+	}
+	if strings.Contains(joined, "--session-id") {
+		t.Errorf("a resume must not also pass --session-id: %q", joined)
+	}
+}
+
+func TestBuildToolSpecCommand_ResumeIDCodex(t *testing.T) {
+	// --resume-id renders as codex's `resume <id>`.
+	argv, _, err := buildToolSpecCommand(tool.NewCodex(), tool.LaunchSpec{
+		SessionID: "new-run", Resume: true, ResumeSessionID: "sess-abc",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if joined := strings.Join(argv, " "); !strings.Contains(joined, "resume sess-abc") {
+		t.Errorf("codex resume-id must render `resume <id>`: %q", joined)
+	}
+}
+
+func TestBuildToolSpecCommand_ResumeLatest(t *testing.T) {
+	// --resume (no id): claude renders bare `--resume`, codex `resume --last`.
+	argvC, _, err := buildToolSpecCommand(tool.NewClaude(), tool.LaunchSpec{SessionID: "n", Resume: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if jc := strings.Join(argvC, " "); !strings.Contains(jc, "--resume") || strings.Contains(jc, "--session-id") {
+		t.Errorf("claude resume-latest: want bare --resume and no --session-id, got %q", jc)
+	}
+	argvX, _, err := buildToolSpecCommand(tool.NewCodex(), tool.LaunchSpec{SessionID: "n", Resume: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if jx := strings.Join(argvX, " "); !strings.Contains(jx, "resume --last") {
+		t.Errorf("codex resume-latest: want `resume --last`, got %q", jx)
+	}
+}
+
+func TestCountTrue(t *testing.T) {
+	cases := []struct {
+		in   []bool
+		want int
+	}{
+		{[]bool{}, 0},
+		{[]bool{false, false}, 0},
+		{[]bool{true, false, false}, 1},
+		{[]bool{true, true, false}, 2},
+		{[]bool{true, true, true}, 3},
+	}
+	for _, c := range cases {
+		if got := countTrue(c.in...); got != c.want {
+			t.Errorf("countTrue(%v) = %d, want %d", c.in, got, c.want)
+		}
+	}
+}

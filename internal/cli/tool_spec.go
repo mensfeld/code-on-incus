@@ -25,6 +25,8 @@ var (
 	toolSpecPromptFile       string
 	toolSpecSystemPromptFile string
 	toolSpecContinue         string
+	toolSpecResumeID         string
+	toolSpecResume           bool
 	toolSpecJSON             bool
 )
 
@@ -56,8 +58,13 @@ opencode) instead get a "prompt" field: the in-container path to the staged
 prompt file, for the orchestrator to deliver out-of-band after launch (e.g.
 tmux load-buffer + paste-buffer).
 
+Resume strategies (at most one): --continue[=<id>] discovers coi's host-side
+session store and resumes if found, else starts fresh; --resume-id <id> asserts
+an exact session id verbatim (no discovery) for an orchestrator that owns
+session state itself; --resume resumes the latest conversation with no id.
+
   coi tool spec --container <ctr> --session-id <id> --prompt-file <host> \
-      [--system-prompt-file <host>] [--continue[=<id>]] --json`,
+      [--system-prompt-file <host>] [--continue[=<id>] | --resume-id <id> | --resume] --json`,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		return app.toolSpecCommand(cmd)
 	},
@@ -70,6 +77,8 @@ func init() {
 	toolSpecCmd.Flags().StringVar(&toolSpecSystemPromptFile, "system-prompt-file", "", "Host file whose contents are staged as the tool's system prompt (tools that support one)")
 	toolSpecCmd.Flags().StringVar(&toolSpecContinue, "continue", "", "Resume-or-fresh: resume a session (default: --session-id) if prior state exists, else start fresh. Optional value: --continue=<id>")
 	toolSpecCmd.Flags().Lookup("continue").NoOptDefVal = continueSelfSentinel
+	toolSpecCmd.Flags().StringVar(&toolSpecResumeID, "resume-id", "", "Orchestrator-owned resume: build a resume command for this exact session id, verbatim (no host-side discovery). Mutually exclusive with --continue/--resume")
+	toolSpecCmd.Flags().BoolVar(&toolSpecResume, "resume", false, "Resume the latest conversation with no id. Mutually exclusive with --continue/--resume-id")
 	toolSpecCmd.Flags().BoolVar(&toolSpecJSON, "json", false, "Print the spec as JSON (the machine-readable form orchestrators consume)")
 
 	toolCmd.AddCommand(toolSpecCmd)
@@ -112,16 +121,33 @@ func (a *App) toolSpecCommand(cmd *cobra.Command) error {
 		return &ExitCodeError{Code: 2, Message: err.Error()}
 	}
 
-	// Resolve and validate the continue/resume target up front — before any
-	// container or filesystem access — so an unsafe id (it selects a session
-	// directory to read) is rejected early. Empty means "no resume".
-	resumeID := ""
-	if cmd.Flags().Changed("continue") {
-		resumeID = toolSpecContinue
-		if resumeID == continueSelfSentinel || resumeID == "" {
-			resumeID = toolSpecSessionID
+	// Resolve and validate the resume strategy up front — before any container or
+	// filesystem access — so a bad combination or unsafe id is rejected early.
+	// At most one of --continue / --resume-id / --resume may be set; they express
+	// conflicting contracts (discover-or-fresh vs assert-this-id vs resume-latest).
+	continueSet := cmd.Flags().Changed("continue")
+	resumeIDSet := cmd.Flags().Changed("resume-id")
+	if countTrue(continueSet, resumeIDSet, toolSpecResume) > 1 {
+		return &ExitCodeError{Code: 2, Message: "--continue, --resume-id, and --resume are mutually exclusive"}
+	}
+
+	// discoverResumeID is the --continue target to look up (discover-or-fresh);
+	// empty when --continue isn't used. --resume-id / --resume don't discover.
+	discoverResumeID := ""
+	if continueSet {
+		discoverResumeID = toolSpecContinue
+		if discoverResumeID == continueSelfSentinel || discoverResumeID == "" {
+			discoverResumeID = toolSpecSessionID
 		}
-		if err := session.ValidateSessionID(resumeID); err != nil {
+		if err := session.ValidateSessionID(discoverResumeID); err != nil {
+			return &ExitCodeError{Code: 2, Message: err.Error()}
+		}
+	}
+	if resumeIDSet {
+		// Orchestrator-owned resume: the caller asserts the id (it's
+		// shell-interpolated / a filename component), so validate it — but do NOT
+		// discover or otherwise probe for it.
+		if err := session.ValidateSessionID(toolSpecResumeID); err != nil {
 			return &ExitCodeError{Code: 2, Message: err.Error()}
 		}
 	}
@@ -168,15 +194,26 @@ func (a *App) toolSpecCommand(cmd *cobra.Command) error {
 		SystemPromptFile: systemPromptPath,
 	}
 
-	// --continue/--resume resolve continue-or-fresh: resume only if prior state
-	// for the (already-validated) target session exists, else start fresh.
-	if resumeID != "" {
+	// Apply the resume strategy resolved above.
+	switch {
+	case resumeIDSet:
+		// Assert the caller's id verbatim — no host-side discovery. Correct when
+		// the orchestrator owns session state (it restored the tool's state dir
+		// into the container and knows the id).
+		spec.Resume = true
+		spec.ResumeSessionID = toolSpecResumeID
+	case toolSpecResume:
+		// Resume-latest with no id: latest-only tools (pi/omp) resume the last
+		// conversation; claude/codex render bare `--resume` / `resume --last`.
+		spec.Resume = true
+	case discoverResumeID != "":
+		// --continue: discover-or-fresh against coi's host-side session store.
 		hostHome, err := os.UserHomeDir()
 		if err != nil {
 			return fmt.Errorf("failed to get home directory: %w", err)
 		}
 		sessionsDir := session.GetSessionsDir(filepath.Join(hostHome, ".coi"), t)
-		if prior := discoverResumeSessionID(t, sessionsDir, resumeID); prior != "" {
+		if prior := discoverResumeSessionID(t, sessionsDir, discoverResumeID); prior != "" {
 			spec.Resume = true
 			spec.ResumeSessionID = prior
 		}
@@ -285,6 +322,18 @@ func emitToolSpec(res toolSpecResult) error {
 		fmt.Printf("prompt (deliver out-of-band): %s\n", res.Prompt)
 	}
 	return nil
+}
+
+// countTrue returns how many of the given booleans are true — used to enforce
+// "at most one" among mutually exclusive flags.
+func countTrue(bs ...bool) int {
+	n := 0
+	for _, b := range bs {
+		if b {
+			n++
+		}
+	}
+	return n
 }
 
 // discoverResumeSessionID mirrors buildCLICommand's resume discovery: it looks

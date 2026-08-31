@@ -283,6 +283,69 @@ def test_tool_spec_env_uses_container_workspace_path(coi_binary, workspace_dir, 
         _teardown(coi_binary, child, container)
 
 
+def test_tool_spec_resume_id_asserts_without_discovery(
+    coi_binary, workspace_dir, cleanup_containers
+):
+    """--resume-id builds a resume command for the given id verbatim, without
+    consulting coi's host-side session store (#753). The test workspace has no
+    ~/.coi session for the id, so a discovery path (--continue) would fall back
+    to fresh; --resume-id must still render a resume command."""
+    _write_config(workspace_dir)
+    child, container = _boot_container(coi_binary, workspace_dir)
+    try:
+        spec = _spec(
+            coi_binary,
+            container,
+            workspace_dir,
+            "new-run-1",
+            extra=["--resume-id", "prior-run-xyz"],
+        )
+        cmd = spec["command"]
+        # claude renders `--resume <id>`, and a resume replaces --session-id.
+        assert "--resume" in cmd, cmd
+        assert "prior-run-xyz" in cmd, cmd
+        assert "--session-id" not in cmd, cmd
+        # No secrets leaked into env regardless of the resume strategy.
+        assert not any("TOKEN" in k or "KEY" in k for k in spec["env"]), spec["env"]
+    finally:
+        _teardown(coi_binary, child, container)
+
+
+def test_tool_spec_resume_modes_mutually_exclusive(coi_binary, workspace_dir):
+    """--continue / --resume-id / --resume express conflicting resume strategies;
+    setting more than one is a usage error (fast: checked before container access)."""
+    _write_config(workspace_dir)
+    for extra in (
+        ["--resume-id", "abc", "--continue"],
+        ["--resume-id", "abc", "--resume"],
+        ["--resume", "--continue"],
+    ):
+        r = _run_spec_raw(coi_binary, workspace_dir, "good-sid", extra=extra)
+        out = r.stdout + r.stderr
+        assert r.returncode == 2, f"{extra}: expected exit 2, got {r.returncode}: {out}"
+        assert "mutually exclusive" in out, f"{extra}: {out}"
+
+
+def test_tool_spec_rejects_unsafe_resume_id(coi_binary, workspace_dir):
+    """--resume-id is shell-interpolated / a filename component, so an unsafe
+    value is rejected (same as --session-id / --continue)."""
+    _write_config(workspace_dir)
+    r = _run_spec_raw(coi_binary, workspace_dir, "good-sid", extra=["--resume-id", "bad id"])
+    assert r.returncode == 2, r.stdout + r.stderr
+    assert "invalid session id" in (r.stdout + r.stderr)
+
+
+def test_tool_spec_accepts_safe_resume_id(coi_binary, workspace_dir):
+    """A safe --resume-id passes validation (and mutual-exclusion), then fails
+    downstream on the bogus container — proving it was accepted, not discovered."""
+    _write_config(workspace_dir)
+    r = _run_spec_raw(coi_binary, workspace_dir, "good-sid", extra=["--resume-id", "prior-abc"])
+    out = r.stdout + r.stderr
+    assert "invalid session id" not in out, out
+    assert "mutually exclusive" not in out, out
+    assert r.returncode != 0
+
+
 def test_tool_spec_requires_container(coi_binary, workspace_dir):
     """`coi tool spec` without --container is a usage error (fast: the check
     short-circuits before any container access, so no boot needed)."""
@@ -389,5 +452,13 @@ def test_tool_spec_help(coi_binary):
         [coi_binary, "tool", "spec", "--help"], capture_output=True, text=True, timeout=30
     )
     out = r.stdout + r.stderr
-    for needle in ("--container", "--session-id", "--prompt-file", "--continue", "--json"):
+    for needle in (
+        "--container",
+        "--session-id",
+        "--prompt-file",
+        "--continue",
+        "--resume-id",
+        "--resume",
+        "--json",
+    ):
         assert needle in out, f"expected {needle!r} in `coi tool spec --help`, got:\n{out}"
