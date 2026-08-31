@@ -64,6 +64,50 @@ file_read_rate_mb_per_sec = 1000
 
 
 @pytest.fixture
+def enable_monitoring_high_read_threshold():
+    """Enable monitoring with a HIGH file-read threshold (500MB) for the
+    below-threshold negative test.
+
+    Read detection compares a per-interval delta of the container's *whole-tree*
+    cgroup read counter against the threshold, so background container I/O
+    (dockerd/containerd/journald/apt) in the same poll interval is counted too.
+    Against the default 50MB that background burst alone can cross the threshold
+    and freeze the container regardless of how small the test's own read is —
+    reducing the read from 49→30→10MB never stabilized it (#738). A 500MB
+    threshold leaves headroom no plausible 1s interval of background reads can
+    fill, so the negative assertion ("a sub-threshold read does not alert")
+    becomes deterministic while still exercising the full read-accounting path.
+
+    Includes [network] mode = "open" to avoid false-positive network threats.
+    """
+    config_path = Path.home() / ".coi" / "config.toml"
+    backup = config_path.read_text() if config_path.exists() else None
+
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        """
+[network]
+mode = "open"
+
+[monitoring]
+enabled = true
+auto_pause_on_high = true
+auto_kill_on_critical = true
+poll_interval_sec = 1
+file_read_threshold_mb = 500
+file_read_rate_mb_per_sec = 10000
+"""
+    )
+
+    yield config_path
+
+    if backup:
+        config_path.write_text(backup)
+    elif config_path.exists():
+        config_path.unlink()
+
+
+@pytest.fixture
 def enable_monitoring_low_thresholds():
     """Enable monitoring with default low thresholds for threshold-specific tests.
 
@@ -3172,20 +3216,24 @@ class TestThresholdBoundaries:
     """Test detector behavior at threshold boundaries."""
 
     def test_file_read_below_threshold_no_alert(
-        self, test_workspace, enable_monitoring_low_thresholds, coi_binary
+        self, test_workspace, enable_monitoring_high_read_threshold, coi_binary
     ):
-        """Test that reading 10MB (well below 50MB threshold) doesn't trigger.
+        """Test that a 100MB read (well below the 500MB threshold) doesn't trigger.
 
-        Detection is a per-interval delta of the container's *whole-tree* read
-        counter, so background container I/O (dockerd/containerd/journald/apt)
-        in the same 1s poll interval as the read is counted too. 30MB left only
-        20MB of headroom and flaked on I/O-loaded CI runners (crossing 50MB);
-        10MB leaves ~40MB, which background I/O can't realistically fill in one
-        interval, while still exercising the read-accounting path. See #738.
+        Detection compares a per-interval delta of the container's *whole-tree*
+        cgroup read counter against the threshold, so background container I/O
+        (dockerd/containerd/journald/apt) in the same 1s poll interval is counted
+        too. Against a 50MB threshold that background burst alone crossed the
+        line and froze the container regardless of the test's own read size —
+        shrinking the read 49→30→10MB never stabilized it (#738). This test now
+        runs against a 500MB threshold (see the fixture), which no plausible 1s
+        interval of background reads can fill, so a genuinely large 100MB read
+        deterministically stays below it while still exercising the read path.
+        Above-threshold detection is covered by the large-read tests.
         """
-        # Create a 10MB file (well below 50MB threshold)
-        large_file = Path(test_workspace) / "data10mb.bin"
-        large_file.write_bytes(b"A" * (10 * 1024 * 1024))
+        # Create a 100MB file — a substantial read, still far below 500MB.
+        large_file = Path(test_workspace) / "data100mb.bin"
+        large_file.write_bytes(b"A" * (100 * 1024 * 1024))
 
         proc = subprocess.Popen(
             [
@@ -3210,7 +3258,7 @@ class TestThresholdBoundaries:
         # Wait for monitoring baseline to stabilize (15s to ensure startup I/O settles)
         time.sleep(15)
 
-        # Read the 10MB file
+        # Read the 100MB file
         subprocess.Popen(
             [
                 "incus",
@@ -3218,7 +3266,7 @@ class TestThresholdBoundaries:
                 container_name,
                 "--",
                 "cat",
-                "/workspace/data10mb.bin",
+                "/workspace/data100mb.bin",
             ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -3244,7 +3292,7 @@ class TestThresholdBoundaries:
             )
 
         assert state == "Running", (
-            f"Container should stay running for 10MB read (below 50MB threshold), got {state}."
+            f"Container should stay running for 100MB read (below 500MB threshold), got {state}."
         )
 
         # No HIGH filesystem threats
@@ -3252,7 +3300,7 @@ class TestThresholdBoundaries:
         high_fs = [
             e for e in events if e.get("level") == "high" and e.get("category") == "filesystem"
         ]
-        assert len(high_fs) == 0, "10MB read should not trigger HIGH threat (threshold is 50MB)"
+        assert len(high_fs) == 0, "100MB read should not trigger HIGH threat (threshold is 500MB)"
 
         proc.terminate()
         cleanup_container(container_name, coi_binary)
