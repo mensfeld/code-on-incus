@@ -287,6 +287,41 @@ func TestClaudeModelAndEffortCoexist(t *testing.T) {
 	}
 }
 
+// Claude must expose model/effort via GetContainerEnv too, so session setup can
+// persist them as container-level environment.* that any exec inherits (#744).
+func TestClaudeGetContainerEnv(t *testing.T) {
+	twce, ok := NewClaude().(ToolWithContainerEnv)
+	if !ok {
+		t.Fatal("Claude tool should implement ToolWithContainerEnv")
+	}
+
+	// Nothing configured -> no env (tool keeps its own defaults).
+	if env := twce.GetContainerEnv("/workspace"); len(env) != 0 {
+		t.Errorf("unconfigured Claude should return no container env, got %v", env)
+	}
+
+	twce.(ToolWithModel).SetModel("opus")
+	twce.(ToolWithEffortLevel).SetEffortLevel("high")
+	env := twce.GetContainerEnv("/workspace")
+	if env["ANTHROPIC_MODEL"] != "opus" {
+		t.Errorf("ANTHROPIC_MODEL = %q, want opus", env["ANTHROPIC_MODEL"])
+	}
+	if env["CLAUDE_CODE_EFFORT_LEVEL"] != "high" {
+		t.Errorf("CLAUDE_CODE_EFFORT_LEVEL = %q, want high", env["CLAUDE_CODE_EFFORT_LEVEL"])
+	}
+
+	// Only model set -> only ANTHROPIC_MODEL, no effort key.
+	only := NewClaude()
+	only.(ToolWithModel).SetModel("sonnet")
+	oenv := only.(ToolWithContainerEnv).GetContainerEnv("/workspace")
+	if oenv["ANTHROPIC_MODEL"] != "sonnet" {
+		t.Errorf("ANTHROPIC_MODEL = %q, want sonnet", oenv["ANTHROPIC_MODEL"])
+	}
+	if _, ok := oenv["CLAUDE_CODE_EFFORT_LEVEL"]; ok {
+		t.Error("CLAUDE_CODE_EFFORT_LEVEL must be absent when effort not configured")
+	}
+}
+
 func TestClaudeToolConfigDirFiles(t *testing.T) {
 	tool := NewClaude()
 	tcf, ok := tool.(ToolWithConfigDirFiles)
