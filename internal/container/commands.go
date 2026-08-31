@@ -1113,6 +1113,18 @@ func ConfigSet(ctx context.Context, containerName, key, value string) error {
 	return IncusExecContext(ctx, "config", "set", containerName, key+"="+value)
 }
 
+// ConfigGet returns the value of a configuration key on a container (trimmed).
+// An unset key yields an empty string with no error, matching `incus config get`.
+func ConfigGet(ctx context.Context, containerName, key string) (string, error) {
+	out, err := IncusOutputContext(ctx, "config", "get", containerName, key)
+	return strings.TrimSpace(out), err
+}
+
+// ConfigUnset removes a configuration key from a container.
+func ConfigUnset(ctx context.Context, containerName, key string) error {
+	return IncusExecContext(ctx, "config", "unset", containerName, key)
+}
+
 // ConfigShow returns the container's YAML configuration.
 // If expanded is true, profile-inherited devices and config are included.
 func ConfigShow(ctx context.Context, containerName string, expanded bool) (string, error) {
