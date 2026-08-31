@@ -503,15 +503,6 @@ func (a *App) runToolPhase(s *shellState) session.Phase {
 			fmt.Fprintf(os.Stderr, "Container: %s\n", s.result.ContainerName)
 			fmt.Fprintf(os.Stderr, "Workspace: %s\n", s.absWorkspace)
 
-			// Headless (#746): coi builds and launches the tool non-interactively
-			// into a detached tmux the caller drives, then returns with handles.
-			if a.headless {
-				if err := a.launchHeadless(s); err != nil {
-					return nil, err
-				}
-				return nil, nil
-			}
-
 			useResumeFlag := (s.resumeID != "") && a.persistent
 			restoreOnly := (s.resumeID != "") && !a.persistent
 

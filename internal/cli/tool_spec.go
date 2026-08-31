@@ -1,0 +1,260 @@
+package cli
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"github.com/mensfeld/code-on-incus/internal/container"
+	"github.com/mensfeld/code-on-incus/internal/session"
+	"github.com/mensfeld/code-on-incus/internal/tool"
+	"github.com/spf13/cobra"
+)
+
+// continueSelfSentinel is the value a bare `--continue` (no `=id`) carries via
+// the flag's NoOptDefVal, meaning "resume the --session-id session if it has
+// prior state". A distinct sentinel keeps it apart from an explicit
+// `--continue=<id>` and from the flag being absent. The `@` prefix can't collide
+// with a real coi session id (those are workspace-derived slugs / UUIDs).
+const continueSelfSentinel = "@self"
+
+var (
+	toolSpecContainer        string
+	toolSpecSessionID        string
+	toolSpecPromptFile       string
+	toolSpecSystemPromptFile string
+	toolSpecContinue         string
+	toolSpecJSON             bool
+)
+
+var toolCmd = &cobra.Command{
+	Use:   "tool",
+	Short: "Work with the profile's configured AI tool",
+	Long: `Inspect the profile's configured AI coding tool without launching an
+interactive session.`,
+}
+
+var toolSpecCmd = &cobra.Command{
+	Use:   "spec",
+	Short: "Print a tool's launch command + env for an orchestrator to run (#751)",
+	Long: `Print, without executing, the exact command and tool-derived environment for
+launching the profile's tool inside an existing container. An external
+orchestrator then runs that command through its own container exec + tmux,
+owning the terminal, streaming, input, and lifecycle.
+
+coi builds the command from the profile's tool via the tool.Tool abstraction
+(session id, resume, model, permission), so it is correct for any supported
+tool (claude/codex/…). The prompt (and optional system prompt) are staged into
+the container as files and referenced via "$(cat <file>)", keeping arbitrary
+prompt content off the command line. Only tool-derived env (model/effort) is
+emitted; secrets and auth stay with the caller, which adds its own --env when it
+execs.
+
+  coi tool spec --container <ctr> --session-id <id> --prompt-file <host> \
+      [--system-prompt-file <host>] [--continue[=<id>]] --json`,
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		return app.toolSpecCommand(cmd)
+	},
+}
+
+func init() {
+	toolSpecCmd.Flags().StringVar(&toolSpecContainer, "container", "", "Existing container to build the launch spec for (required)")
+	toolSpecCmd.Flags().StringVar(&toolSpecSessionID, "session-id", "", "Session id for the launch (required)")
+	toolSpecCmd.Flags().StringVar(&toolSpecPromptFile, "prompt-file", "", "Host file whose contents are staged as the tool's initial prompt")
+	toolSpecCmd.Flags().StringVar(&toolSpecSystemPromptFile, "system-prompt-file", "", "Host file whose contents are staged as the tool's system prompt (tools that support one)")
+	toolSpecCmd.Flags().StringVar(&toolSpecContinue, "continue", "", "Resume-or-fresh: resume a session (default: --session-id) if prior state exists, else start fresh. Optional value: --continue=<id>")
+	toolSpecCmd.Flags().Lookup("continue").NoOptDefVal = continueSelfSentinel
+	toolSpecCmd.Flags().BoolVar(&toolSpecJSON, "json", false, "Print the spec as JSON (the machine-readable form orchestrators consume)")
+
+	toolCmd.AddCommand(toolSpecCmd)
+}
+
+// toolSpecResult is the machine-readable spec a `coi tool spec` prints: the
+// exact argv to run in the container and the tool-derived env (model/effort)
+// only. Secrets/auth are deliberately absent — the caller adds those itself.
+type toolSpecResult struct {
+	Command []string          `json:"command"`
+	Env     map[string]string `json:"env"`
+}
+
+// toolSpecCommand builds and prints the launch spec for the profile's tool
+// against an existing container (#751). It stages the prompt(s) into the
+// container and reuses the same tool.Tool / ToolWithPrompt / ToolWithContainerEnv
+// methods the interactive launch uses, but never executes anything — the
+// orchestrator owns execution.
+func (a *App) toolSpecCommand(cmd *cobra.Command) error {
+	if toolSpecContainer == "" {
+		return &ExitCodeError{Code: 2, Message: "--container is required"}
+	}
+	if toolSpecSessionID == "" {
+		return &ExitCodeError{Code: 2, Message: "--session-id is required"}
+	}
+
+	t, err := getConfiguredTool(a.cfg)
+	if err != nil {
+		return err
+	}
+
+	mgr := container.NewManager(toolSpecContainer)
+	if running, err := mgr.Running(); err != nil {
+		return fmt.Errorf("failed to check container status: %w", err)
+	} else if !running {
+		return fmt.Errorf("container %s is not running", toolSpecContainer)
+	}
+
+	uid, homeDir := toolSpecUserHome(mgr)
+	runsDir := filepath.Join(homeDir, ".coi", "runs")
+
+	// The tool runs as the code user; write run files owned by it.
+	if _, err := mgr.ExecCommand(fmt.Sprintf("mkdir -p %s && chown %d:%d %s",
+		shellQuote(runsDir), uid, uid, shellQuote(runsDir)),
+		container.ExecCommandOptions{Capture: true}); err != nil {
+		return fmt.Errorf("failed to create runs dir: %w", err)
+	}
+
+	// Stage prompt / system prompt as in-container files so their (arbitrary)
+	// content never touches the launch command line.
+	promptPath, err := a.stageSpecFile(mgr, toolSpecPromptFile, filepath.Join(runsDir, toolSpecSessionID+".prompt"), uid)
+	if err != nil {
+		return err
+	}
+	systemPromptPath, err := a.stageSpecFile(mgr, toolSpecSystemPromptFile, filepath.Join(runsDir, toolSpecSessionID+".sys"), uid)
+	if err != nil {
+		return err
+	}
+
+	spec := tool.LaunchSpec{
+		SessionID:        toolSpecSessionID,
+		PromptFile:       promptPath,
+		SystemPromptFile: systemPromptPath,
+	}
+
+	// --continue/--resume resolve continue-or-fresh: resume only if prior state
+	// for the target session exists, else start fresh.
+	if cmd.Flags().Changed("continue") {
+		resumeID := toolSpecContinue
+		if resumeID == continueSelfSentinel || resumeID == "" {
+			resumeID = toolSpecSessionID
+		}
+		hostHome, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("failed to get home directory: %w", err)
+		}
+		sessionsDir := session.GetSessionsDir(filepath.Join(hostHome, ".coi"), t)
+		if prior := discoverResumeSessionID(t, sessionsDir, resumeID); prior != "" {
+			spec.Resume = true
+			spec.ResumeSessionID = prior
+		}
+	}
+
+	argv, err := buildToolSpecCommand(t, spec)
+	if err != nil {
+		return err
+	}
+
+	// Env: tool-derived only (model/effort). Secrets/auth stay with the caller,
+	// which adds its own --env when it execs the command.
+	env := map[string]string{}
+	mergeToolEnv(env, t, toolSpecWorkspacePath)
+
+	return emitToolSpec(toolSpecResult{Command: argv, Env: env})
+}
+
+// toolSpecWorkspacePath is the in-container workspace the tool env is computed
+// against. The shipped tools' GetContainerEnv ignore it (model/effort don't
+// depend on the path); it's a stable default so the spec is deterministic.
+const toolSpecWorkspacePath = "/workspace"
+
+// toolSpecUserHome resolves the uid the run files are owned by and the home dir
+// the runs directory lives under, for an existing container. Falls back to root
+// on images without the code user.
+func toolSpecUserHome(mgr container.ContainerManager) (uid int, home string) {
+	hasCode, err := session.DetectCodeUser(mgr, container.CodeUser)
+	if err != nil || !hasCode {
+		return 0, "/root"
+	}
+	u, err := session.ResolveCodeUID(mgr, container.CodeUser)
+	if err != nil {
+		return container.CodeUID, "/home/" + container.CodeUser
+	}
+	return u, "/home/" + container.CodeUser
+}
+
+// stageSpecFile copies a host prompt file into the container at destPath and
+// returns destPath; an empty hostPath returns "" (no file, no path emitted).
+func (a *App) stageSpecFile(mgr container.ContainerManager, hostPath, destPath string, uid int) (string, error) {
+	if hostPath == "" {
+		return "", nil
+	}
+	content, err := os.ReadFile(hostPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read %q: %w", hostPath, err)
+	}
+	if err := mgr.CreateFileWithOwner(destPath, string(content), uid, uid, "0600"); err != nil {
+		return "", fmt.Errorf("failed to stage prompt file in container: %w", err)
+	}
+	return destPath, nil
+}
+
+// buildToolSpecCommand returns the launch argv for the tool, embedding the
+// staged prompt (and system prompt) via ToolWithPrompt. Tools without prompt
+// embedding fail loudly when a prompt is requested — the orchestrator must then
+// deliver it out-of-band (e.g. `coi tmux send`) rather than have it silently
+// dropped. The dummy-mode override used by tests mirrors buildCLICommand.
+func buildToolSpecCommand(t tool.Tool, spec tool.LaunchSpec) ([]string, error) {
+	var argv []string
+	if twp, ok := t.(tool.ToolWithPrompt); ok {
+		var err error
+		argv, err = twp.BuildCommandLaunch(spec)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		if spec.PromptFile != "" || spec.SystemPromptFile != "" {
+			return nil, fmt.Errorf("tool %q cannot embed a prompt in its launch command; deliver it out-of-band after launch (e.g. coi tmux send)", t.Name())
+		}
+		argv = t.BuildCommand(spec.SessionID, spec.Resume, spec.ResumeSessionID)
+	}
+	if os.Getenv("COI_USE_DUMMY") == "1" && len(argv) > 0 {
+		argv[0] = "dummy"
+	}
+	return argv, nil
+}
+
+// emitToolSpec prints the spec: JSON on stdout with --json (the orchestrator
+// form), otherwise a human-readable summary.
+func emitToolSpec(res toolSpecResult) error {
+	if toolSpecJSON {
+		b, err := json.Marshal(res)
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(b))
+		return nil
+	}
+	fmt.Println("command:")
+	for _, arg := range res.Command {
+		fmt.Printf("  %s\n", arg)
+	}
+	if len(res.Env) > 0 {
+		fmt.Println("env:")
+		for _, k := range sortedEnvKeys(res.Env) {
+			fmt.Printf("  %s=%s\n", k, res.Env[k])
+		}
+	}
+	return nil
+}
+
+// discoverResumeSessionID mirrors buildCLICommand's resume discovery: it looks
+// up the tool's internal session id from saved state, returning "" when none
+// exists (so resume degrades to a fresh start).
+func discoverResumeSessionID(t tool.Tool, sessionsDir, resumeID string) string {
+	var statePath string
+	if configDir := t.ConfigDirName(); configDir != "" {
+		statePath = filepath.Join(sessionsDir, resumeID, configDir)
+	} else {
+		statePath = filepath.Join(sessionsDir, resumeID)
+	}
+	return t.DiscoverSessionID(statePath)
+}

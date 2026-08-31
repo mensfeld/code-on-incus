@@ -87,10 +87,10 @@ func TestCodexBuildCommandLaunch_SystemPromptRejected(t *testing.T) {
 }
 
 // opencode intentionally does NOT implement ToolWithPrompt (its interactive
-// prompt injection has no clean flag); the headless launcher falls back to
-// pasting the prompt into the tmux pane for such tools.
+// prompt injection has no clean flag); `coi tool spec` fails loudly for such
+// tools when a prompt is requested, so the orchestrator delivers it out-of-band.
 func TestOpencodeDoesNotImplementToolWithPrompt(t *testing.T) {
 	if _, ok := NewOpencode().(ToolWithPrompt); ok {
-		t.Error("opencode should not implement ToolWithPrompt (uses paste-buffer fallback)")
+		t.Error("opencode should not implement ToolWithPrompt (orchestrator delivers prompt out-of-band)")
 	}
 }

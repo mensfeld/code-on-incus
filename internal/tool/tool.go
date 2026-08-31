@@ -272,7 +272,7 @@ func (c *ClaudeTool) GetContainerEnv(_ string) map[string]string {
 }
 
 // BuildCommandLaunch implements ToolWithPrompt for Claude. It layers the
-// headless dynamics onto the normal command: an optional system prompt via
+// launch dynamics onto the normal command: an optional system prompt via
 // --append-system-prompt, and the initial user prompt as the trailing
 // positional argument Claude Code runs on start. Both are passed as
 // `"$(cat <file>)"` so arbitrary content stays in the file, never on the line.
