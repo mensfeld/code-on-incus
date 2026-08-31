@@ -98,6 +98,22 @@ func (c *CodexTool) BuildCommand(sessionID string, resume bool, resumeSessionID 
 	return cmd
 }
 
+// BuildCommandLaunch implements ToolWithPrompt for Codex. Codex takes the
+// initial prompt as a trailing positional argument. It has no first-class
+// system-prompt flag (instructions live in AGENTS.md), so a SystemPromptFile is
+// rejected rather than silently dropped. The prompt is passed as
+// `"$(cat <file>)"` so arbitrary content stays in the file.
+func (c *CodexTool) BuildCommandLaunch(spec LaunchSpec) ([]string, error) {
+	if spec.SystemPromptFile != "" {
+		return nil, fmt.Errorf("codex has no system-prompt flag; use AGENTS.md instead of --system-prompt-file")
+	}
+	cmd := c.BuildCommand(spec.SessionID, spec.Resume, spec.ResumeSessionID)
+	if spec.PromptFile != "" {
+		cmd = append(cmd, catSubst(spec.PromptFile))
+	}
+	return cmd, nil
+}
+
 // DiscoverSessionID finds the newest codex session UUID in the saved state dir.
 // Codex stores sessions as sessions/YYYY/MM/DD/rollout-<timestamp>-<uuid>.jsonl,
 // so the lexicographically greatest matching path is the newest session
