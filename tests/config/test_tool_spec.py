@@ -23,6 +23,7 @@ import os
 import subprocess
 import time
 
+import pytest
 from pexpect import EOF, TIMEOUT
 
 from support.helpers import (
@@ -278,6 +279,77 @@ def test_tool_spec_requires_session_id(coi_binary, workspace_dir):
     )
     assert r.returncode != 0, "missing --session-id must fail"
     assert "session-id" in (r.stdout + r.stderr)
+
+
+def _run_spec_raw(coi_binary, workspace_dir, session_id, extra=None):
+    """Run `coi tool spec` with a raw (possibly unsafe) session id and return the
+    completed process. Uses a bogus --container: session-id validation runs
+    before any container access, so a rejected id fails without booting."""
+    argv = [
+        coi_binary,
+        "tool",
+        "spec",
+        "--container",
+        "nonexistent-ctr",
+        "--session-id",
+        session_id,
+        "--json",
+    ]
+    if extra:
+        argv += extra
+    return subprocess.run(argv, capture_output=True, text=True, timeout=30, cwd=workspace_dir)
+
+
+@pytest.mark.parametrize(
+    "bad_sid,label",
+    [
+        ("has space", "space"),
+        ("x;reboot", "shell-metachar"),
+        ("$(whoami)", "command-substitution"),
+        ("a`id`", "backtick"),
+        ('a"b', "double-quote"),
+        ("../../etc/passwd", "path-traversal"),
+        ("a/b", "path-separator"),
+        ("-leadingdash", "leading-dash"),
+        ("x" * 65, "too-long"),
+    ],
+)
+def test_tool_spec_rejects_unsafe_session_id(coi_binary, workspace_dir, bad_sid, label):
+    """An unsafe --session-id is rejected up front (exit 2) before the id can
+    reach a filesystem path or the shell-joined launch command. The error must
+    be about the session id, not a downstream 'container not found'."""
+    _write_config(workspace_dir)
+    r = _run_spec_raw(coi_binary, workspace_dir, bad_sid)
+    assert r.returncode == 2, f"[{label}] expected exit 2, got {r.returncode}: {r.stdout}{r.stderr}"
+    out = r.stdout + r.stderr
+    assert "invalid session id" in out, f"[{label}] expected validation error, got:\n{out}"
+    # It must NOT have proceeded to container access.
+    assert "not running" not in out and "not found" not in out, (
+        f"[{label}] validation must precede container access:\n{out}"
+    )
+
+
+def test_tool_spec_rejects_unsafe_continue_id(coi_binary, workspace_dir):
+    """An explicit --continue=<id> is validated too (it selects a session dir to
+    read); an unsafe value is rejected before any filesystem lookup."""
+    _write_config(workspace_dir)
+    r = _run_spec_raw(coi_binary, workspace_dir, "good-sid", extra=["--continue=../escape"])
+    assert r.returncode == 2, f"expected exit 2, got {r.returncode}: {r.stdout}{r.stderr}"
+    assert "invalid session id" in (r.stdout + r.stderr)
+
+
+def test_tool_spec_accepts_safe_session_id(coi_binary, workspace_dir):
+    """A safe session id passes validation — it then fails later on the bogus
+    container, proving the id itself was accepted (no 'invalid session id')."""
+    _write_config(workspace_dir)
+    # UUID-shaped and slug-shaped ids are both valid.
+    for sid in ("1b4e28ba-2fa1-11d2-883f-0016d3cca427", "workspace-session"):
+        r = _run_spec_raw(coi_binary, workspace_dir, sid)
+        out = r.stdout + r.stderr
+        # The id passed validation (no validation error) but the run still fails
+        # because the container doesn't exist — proving it got past the id check.
+        assert "invalid session id" not in out, f"{sid!r} should be accepted, got:\n{out}"
+        assert r.returncode != 0, f"{sid!r}: expected downstream failure on a bogus container"
 
 
 def test_tool_spec_help(coi_binary):

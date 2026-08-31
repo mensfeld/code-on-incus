@@ -65,7 +65,7 @@ tmux load-buffer + paste-buffer).
 
 func init() {
 	toolSpecCmd.Flags().StringVar(&toolSpecContainer, "container", "", "Existing container to build the launch spec for (required)")
-	toolSpecCmd.Flags().StringVar(&toolSpecSessionID, "session-id", "", "Session id for the launch (required)")
+	toolSpecCmd.Flags().StringVar(&toolSpecSessionID, "session-id", "", "Session id for the launch (required; letters, digits, '.', '_', '-', start alphanumeric, max 64)")
 	toolSpecCmd.Flags().StringVar(&toolSpecPromptFile, "prompt-file", "", "Host file whose contents are staged as the tool's initial prompt")
 	toolSpecCmd.Flags().StringVar(&toolSpecSystemPromptFile, "system-prompt-file", "", "Host file whose contents are staged as the tool's system prompt (tools that support one)")
 	toolSpecCmd.Flags().StringVar(&toolSpecContinue, "continue", "", "Resume-or-fresh: resume a session (default: --session-id) if prior state exists, else start fresh. Optional value: --continue=<id>")
@@ -103,6 +103,27 @@ func (a *App) toolSpecCommand(cmd *cobra.Command) error {
 	}
 	if toolSpecSessionID == "" {
 		return &ExitCodeError{Code: 2, Message: "--session-id is required"}
+	}
+	// The session id is a caller-supplied value that becomes a filename
+	// component and is joined into the shell-run launch command (referenced via
+	// "$(cat …/<id>.prompt)"); reject anything that isn't a safe token so it
+	// can't break or inject the command.
+	if err := session.ValidateSessionID(toolSpecSessionID); err != nil {
+		return &ExitCodeError{Code: 2, Message: err.Error()}
+	}
+
+	// Resolve and validate the continue/resume target up front — before any
+	// container or filesystem access — so an unsafe id (it selects a session
+	// directory to read) is rejected early. Empty means "no resume".
+	resumeID := ""
+	if cmd.Flags().Changed("continue") {
+		resumeID = toolSpecContinue
+		if resumeID == continueSelfSentinel || resumeID == "" {
+			resumeID = toolSpecSessionID
+		}
+		if err := session.ValidateSessionID(resumeID); err != nil {
+			return &ExitCodeError{Code: 2, Message: err.Error()}
+		}
 	}
 
 	t, err := getConfiguredTool(a.cfg)
@@ -145,12 +166,8 @@ func (a *App) toolSpecCommand(cmd *cobra.Command) error {
 	}
 
 	// --continue/--resume resolve continue-or-fresh: resume only if prior state
-	// for the target session exists, else start fresh.
-	if cmd.Flags().Changed("continue") {
-		resumeID := toolSpecContinue
-		if resumeID == continueSelfSentinel || resumeID == "" {
-			resumeID = toolSpecSessionID
-		}
+	// for the (already-validated) target session exists, else start fresh.
+	if resumeID != "" {
 		hostHome, err := os.UserHomeDir()
 		if err != nil {
 			return fmt.Errorf("failed to get home directory: %w", err)
