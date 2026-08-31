@@ -561,6 +561,43 @@ install_codex() {
 }
 
 #######################################
+# Install Oh My Pi (omp) using the native installer
+# See: https://github.com/can1357/oh-my-pi
+#
+# Not in the default agent set — opt in via [container.build]
+# agents = ["claude", "omp"] before building (issue #699).
+#######################################
+install_omp() {
+    log "Installing omp..."
+
+    # Install as the code user via the official installer. `set -o pipefail`
+    # makes a failed curl actually trigger the retries — see install_pi.
+    local attempt
+    for attempt in 1 2 3; do
+        if su - "$CODE_USER" -c 'set -o pipefail; curl -fsSL https://omp.sh/install | sh'; then
+            break
+        fi
+        if [ "$attempt" -eq 3 ]; then
+            log "ERROR: omp installation failed after 3 attempts."
+            exit 1
+        fi
+        log "omp install failed (attempt $attempt/3), retrying in 10s..."
+        sleep 10
+    done
+
+    # Ensure omp is available system-wide for non-login/non-interactive shells
+    local OMP_BIN
+    OMP_BIN="$(su - "$CODE_USER" -c 'which omp' 2>/dev/null || true)"
+    if [[ -z "$OMP_BIN" ]]; then
+        log "ERROR: omp binary not found after installation."
+        exit 1
+    fi
+    ln -sf "$OMP_BIN" /usr/local/bin/omp
+
+    log "omp $(su - "$CODE_USER" -c 'omp --version' 2>/dev/null || echo 'installed')"
+}
+
+#######################################
 # Install dummy (test stub for testing)
 #######################################
 install_dummy() {
@@ -762,6 +799,7 @@ install_selected_agents() {
             opencode) install_opencode ;;
             pi) install_pi ;;
             codex) install_codex ;;
+            omp) install_omp ;;
             "") ;;
             *) log "WARNING: unknown agent '$agent' in COI_AGENTS, skipping" ;;
         esac
