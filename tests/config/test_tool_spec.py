@@ -182,9 +182,7 @@ def test_tool_spec_system_prompt_staging(coi_binary, workspace_dir, cleanup_cont
         joined = " ".join(spec["command"])
         assert "--append-system-prompt" in joined, spec["command"]
         assert f'"$(cat /home/code/.coi/runs/{sid}.sys)"' in joined, spec["command"]
-        assert "terse assistant" in _cat_in_container(
-            container, f"/home/code/.coi/runs/{sid}.sys"
-        )
+        assert "terse assistant" in _cat_in_container(container, f"/home/code/.coi/runs/{sid}.sys")
     finally:
         _teardown(coi_binary, child, container)
 
@@ -222,9 +220,7 @@ def test_tool_spec_codex_tool_agnostic(coi_binary, workspace_dir, cleanup_contai
         spec = _spec(coi_binary, container, workspace_dir, sid, prompt_file)
         assert spec["command"][0] == "dummy", spec["command"]
         assert spec["command"][-1] == f'"$(cat /home/code/.coi/runs/{sid}.prompt)"', spec["command"]
-        assert "codex please" in _cat_in_container(
-            container, f"/home/code/.coi/runs/{sid}.prompt"
-        )
+        assert "codex please" in _cat_in_container(container, f"/home/code/.coi/runs/{sid}.prompt")
     finally:
         _teardown(coi_binary, child, container)
 
