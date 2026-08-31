@@ -51,6 +51,11 @@ prompt content off the command line. Only tool-derived env (model/effort) is
 emitted; secrets and auth stay with the caller, which adds its own --env when it
 execs.
 
+Tools that can't embed the initial prompt in their launch command (e.g.
+opencode) instead get a "prompt" field: the in-container path to the staged
+prompt file, for the orchestrator to deliver out-of-band after launch (e.g.
+tmux load-buffer + paste-buffer).
+
   coi tool spec --container <ctr> --session-id <id> --prompt-file <host> \
       [--system-prompt-file <host>] [--continue[=<id>]] --json`,
 	RunE: func(cmd *cobra.Command, _ []string) error {
@@ -73,9 +78,18 @@ func init() {
 // toolSpecResult is the machine-readable spec a `coi tool spec` prints: the
 // exact argv to run in the container and the tool-derived env (model/effort)
 // only. Secrets/auth are deliberately absent — the caller adds those itself.
+//
+// Prompt is set only for tools that can't embed the initial prompt in their
+// launch command (they don't implement ToolWithPrompt, e.g. opencode). It is the
+// in-container path to the staged prompt file — the same file embedding tools
+// reference via "$(cat …)" in Command — so the orchestrator delivers it
+// out-of-band after launch (e.g. `tmux load-buffer <prompt>` + `paste-buffer`,
+// which is file-based and safe for arbitrary content). Empty when the prompt is
+// embedded in Command, or when no prompt was given.
 type toolSpecResult struct {
 	Command []string          `json:"command"`
 	Env     map[string]string `json:"env"`
+	Prompt  string            `json:"prompt,omitempty"`
 }
 
 // toolSpecCommand builds and prints the launch spec for the profile's tool
@@ -148,7 +162,7 @@ func (a *App) toolSpecCommand(cmd *cobra.Command) error {
 		}
 	}
 
-	argv, err := buildToolSpecCommand(t, spec)
+	argv, outOfBandPrompt, err := buildToolSpecCommand(t, spec)
 	if err != nil {
 		return err
 	}
@@ -158,7 +172,7 @@ func (a *App) toolSpecCommand(cmd *cobra.Command) error {
 	env := map[string]string{}
 	mergeToolEnv(env, t, toolSpecWorkspacePath)
 
-	return emitToolSpec(toolSpecResult{Command: argv, Env: env})
+	return emitToolSpec(toolSpecResult{Command: argv, Env: env, Prompt: outOfBandPrompt})
 }
 
 // toolSpecWorkspacePath is the in-container workspace the tool env is computed
@@ -197,29 +211,33 @@ func (a *App) stageSpecFile(mgr container.ContainerManager, hostPath, destPath s
 	return destPath, nil
 }
 
-// buildToolSpecCommand returns the launch argv for the tool, embedding the
-// staged prompt (and system prompt) via ToolWithPrompt. Tools without prompt
-// embedding fail loudly when a prompt is requested — the orchestrator must then
-// deliver it out-of-band (e.g. `coi tmux send`) rather than have it silently
-// dropped. The dummy-mode override used by tests mirrors buildCLICommand.
-func buildToolSpecCommand(t tool.Tool, spec tool.LaunchSpec) ([]string, error) {
-	var argv []string
+// buildToolSpecCommand returns the launch argv for the tool and, when the tool
+// can't embed the prompt in argv, the in-container prompt-file path to deliver
+// out-of-band (the toolSpecResult.Prompt field). Tools implementing
+// ToolWithPrompt (claude/codex) embed the prompt (and system prompt) directly;
+// tools without it (opencode) get the base command plus outOfBandPrompt so the
+// prompt is surfaced rather than silently dropped. A system prompt on a tool
+// without one is still rejected loudly (those tools have no such concept). The
+// dummy-mode override used by tests mirrors buildCLICommand.
+func buildToolSpecCommand(t tool.Tool, spec tool.LaunchSpec) (argv []string, outOfBandPrompt string, err error) {
 	if twp, ok := t.(tool.ToolWithPrompt); ok {
-		var err error
 		argv, err = twp.BuildCommandLaunch(spec)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 	} else {
-		if spec.PromptFile != "" || spec.SystemPromptFile != "" {
-			return nil, fmt.Errorf("tool %q cannot embed a prompt in its launch command; deliver it out-of-band after launch (e.g. coi tmux send)", t.Name())
+		if spec.SystemPromptFile != "" {
+			return nil, "", fmt.Errorf("tool %q has no system-prompt support for a launch spec", t.Name())
 		}
 		argv = t.BuildCommand(spec.SessionID, spec.Resume, spec.ResumeSessionID)
+		// The prompt can't ride in argv for this tool; hand its staged path back
+		// so the orchestrator delivers it out-of-band after launch.
+		outOfBandPrompt = spec.PromptFile
 	}
 	if os.Getenv("COI_USE_DUMMY") == "1" && len(argv) > 0 {
 		argv[0] = "dummy"
 	}
-	return argv, nil
+	return argv, outOfBandPrompt, nil
 }
 
 // emitToolSpec prints the spec: JSON on stdout with --json (the orchestrator
@@ -242,6 +260,9 @@ func emitToolSpec(res toolSpecResult) error {
 		for _, k := range sortedEnvKeys(res.Env) {
 			fmt.Printf("  %s=%s\n", k, res.Env[k])
 		}
+	}
+	if res.Prompt != "" {
+		fmt.Printf("prompt (deliver out-of-band): %s\n", res.Prompt)
 	}
 	return nil
 }

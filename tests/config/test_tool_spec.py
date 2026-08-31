@@ -148,6 +148,9 @@ def test_tool_spec_command_and_prompt_staging(coi_binary, workspace_dir, cleanup
         staged_ref = f'"$(cat /home/code/.coi/runs/{sid}.prompt)"'
         assert spec["command"][-1] == staged_ref, spec["command"]
 
+        # Claude embeds the prompt in argv, so no out-of-band prompt field.
+        assert "prompt" not in spec, spec
+
         # Env is tool-derived only (model), no secrets.
         assert spec["env"].get("ANTHROPIC_MODEL") == "coi-test-spec-opus", spec["env"]
         assert not any("TOKEN" in k or "KEY" in k for k in spec["env"]), spec["env"]
@@ -220,6 +223,31 @@ def test_tool_spec_codex_tool_agnostic(coi_binary, workspace_dir, cleanup_contai
         assert spec["command"][0] == "dummy", spec["command"]
         assert spec["command"][-1] == f'"$(cat /home/code/.coi/runs/{sid}.prompt)"', spec["command"]
         assert "codex please" in _cat_in_container(
+            container, f"/home/code/.coi/runs/{sid}.prompt"
+        )
+    finally:
+        _teardown(coi_binary, child, container)
+
+
+def test_tool_spec_opencode_out_of_band_prompt(coi_binary, workspace_dir, cleanup_containers):
+    """A tool that can't embed the prompt in argv (opencode) gets a `prompt`
+    field with the staged in-container path, and the command has no "$(cat …)"
+    prompt arg — the orchestrator delivers it out-of-band after launch."""
+    _write_config(workspace_dir, tool="opencode")
+    prompt_file = os.path.join(workspace_dir, "p.txt")
+    with open(prompt_file, "w") as f:
+        f.write("opencode please")
+
+    child, container = _boot_container(coi_binary, workspace_dir)
+    try:
+        sid = "spec-opencode-1"
+        spec = _spec(coi_binary, container, workspace_dir, sid, prompt_file)
+        assert spec["command"][0] == "dummy", spec["command"]
+        # Prompt is NOT embedded in argv for a non-embedding tool.
+        assert not any("$(cat" in a for a in spec["command"]), spec["command"]
+        # It's surfaced as the staged in-container prompt path instead.
+        assert spec.get("prompt") == f"/home/code/.coi/runs/{sid}.prompt", spec
+        assert "opencode please" in _cat_in_container(
             container, f"/home/code/.coi/runs/{sid}.prompt"
         )
     finally:

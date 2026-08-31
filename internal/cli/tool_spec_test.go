@@ -8,7 +8,7 @@ import (
 )
 
 func TestBuildToolSpecCommand_ClaudeNative(t *testing.T) {
-	argv, err := buildToolSpecCommand(tool.NewClaude(), tool.LaunchSpec{
+	argv, prompt, err := buildToolSpecCommand(tool.NewClaude(), tool.LaunchSpec{
 		SessionID: "sid", PromptFile: "/run/p", SystemPromptFile: "/run/s",
 	})
 	if err != nil {
@@ -26,11 +26,15 @@ func TestBuildToolSpecCommand_ClaudeNative(t *testing.T) {
 	if argv[len(argv)-1] != `"$(cat /run/p)"` {
 		t.Errorf("prompt must be trailing cat-subst: %q", joined)
 	}
+	// Claude embeds the prompt, so there's no out-of-band prompt.
+	if prompt != "" {
+		t.Errorf("embedding tool must not surface an out-of-band prompt, got %q", prompt)
+	}
 }
 
 func TestBuildToolSpecCommand_DummyOverride(t *testing.T) {
 	t.Setenv("COI_USE_DUMMY", "1")
-	argv, err := buildToolSpecCommand(tool.NewClaude(), tool.LaunchSpec{SessionID: "sid"})
+	argv, _, err := buildToolSpecCommand(tool.NewClaude(), tool.LaunchSpec{SessionID: "sid"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,7 +45,7 @@ func TestBuildToolSpecCommand_DummyOverride(t *testing.T) {
 
 func TestBuildToolSpecCommand_CodexPrompt(t *testing.T) {
 	// Codex embeds the prompt as a trailing positional and has no system prompt.
-	argv, err := buildToolSpecCommand(tool.NewCodex(), tool.LaunchSpec{
+	argv, prompt, err := buildToolSpecCommand(tool.NewCodex(), tool.LaunchSpec{
 		SessionID: "sid", PromptFile: "/run/p",
 	})
 	if err != nil {
@@ -50,27 +54,47 @@ func TestBuildToolSpecCommand_CodexPrompt(t *testing.T) {
 	if argv[len(argv)-1] != `"$(cat /run/p)"` {
 		t.Errorf("codex prompt must be trailing cat-subst: %v", argv)
 	}
-	if _, err := buildToolSpecCommand(tool.NewCodex(), tool.LaunchSpec{
+	if prompt != "" {
+		t.Errorf("codex embeds the prompt; no out-of-band prompt expected, got %q", prompt)
+	}
+	if _, _, err := buildToolSpecCommand(tool.NewCodex(), tool.LaunchSpec{
 		SessionID: "sid", SystemPromptFile: "/run/s",
 	}); err == nil {
 		t.Error("codex must reject a system prompt (no such flag)")
 	}
 }
 
-func TestBuildToolSpecCommand_ToolWithoutPromptRejected(t *testing.T) {
-	// opencode doesn't implement ToolWithPrompt: a requested prompt can't be
-	// embedded in argv, so spec fails loudly instead of dropping it.
-	if _, err := buildToolSpecCommand(tool.NewOpencode(), tool.LaunchSpec{
+func TestBuildToolSpecCommand_ToolWithoutPromptOutOfBand(t *testing.T) {
+	// opencode doesn't implement ToolWithPrompt: the prompt can't ride in argv,
+	// so it comes back as the out-of-band prompt (the staged file path), not in
+	// the command and not dropped.
+	argv, prompt, err := buildToolSpecCommand(tool.NewOpencode(), tool.LaunchSpec{
 		SessionID: "sid", PromptFile: "/run/p",
-	}); err == nil {
-		t.Error("a prompt on a tool without embedding support must error")
-	}
-	// With no prompt, the base command is fine.
-	argv, err := buildToolSpecCommand(tool.NewOpencode(), tool.LaunchSpec{SessionID: "sid"})
+	})
 	if err != nil {
-		t.Fatalf("no-prompt launch for opencode should succeed: %v", err)
+		t.Fatal(err)
 	}
 	if len(argv) == 0 {
 		t.Error("expected a base command for opencode")
+	}
+	if strings.Contains(strings.Join(argv, " "), "$(cat") {
+		t.Errorf("opencode must not embed the prompt in argv: %v", argv)
+	}
+	if prompt != "/run/p" {
+		t.Errorf("expected out-of-band prompt path /run/p, got %q", prompt)
+	}
+	// A system prompt on a tool without one is still rejected loudly.
+	if _, _, err := buildToolSpecCommand(tool.NewOpencode(), tool.LaunchSpec{
+		SessionID: "sid", SystemPromptFile: "/run/s",
+	}); err == nil {
+		t.Error("a system prompt on a tool without support must error")
+	}
+	// With no prompt, the base command is fine and there's nothing out-of-band.
+	argv, prompt, err = buildToolSpecCommand(tool.NewOpencode(), tool.LaunchSpec{SessionID: "sid"})
+	if err != nil {
+		t.Fatalf("no-prompt launch for opencode should succeed: %v", err)
+	}
+	if len(argv) == 0 || prompt != "" {
+		t.Errorf("no-prompt opencode: want base cmd and empty prompt, got argv=%v prompt=%q", argv, prompt)
 	}
 }
