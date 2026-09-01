@@ -311,30 +311,14 @@ func mergeContainerInto(dst *ContainerConfig, src *ContainerConfig) {
 	if src == nil {
 		return
 	}
-	if src.Image != "" {
-		dst.Image = src.Image
-	}
-	if src.Persistent != nil {
-		dst.Persistent = src.Persistent
-	}
-	if src.ShutdownTimeout != 0 {
-		dst.ShutdownTimeout = src.ShutdownTimeout
-	}
-	if src.ReadyTimeout != 0 {
-		dst.ReadyTimeout = src.ReadyTimeout
-	}
-	if src.StoragePool != "" {
-		dst.StoragePool = src.StoragePool
-	}
-	if src.Alias != "" {
-		dst.Alias = src.Alias
-	}
-	if src.StaleBaseCheck != "" {
-		dst.StaleBaseCheck = src.StaleBaseCheck
-	}
-	if src.SessionName != "" {
-		dst.SessionName = src.SessionName
-	}
+	mergeScalar(&dst.Image, src.Image)
+	mergePtr(&dst.Persistent, src.Persistent)
+	mergeScalar(&dst.ShutdownTimeout, src.ShutdownTimeout)
+	mergeScalar(&dst.ReadyTimeout, src.ReadyTimeout)
+	mergeScalar(&dst.StoragePool, src.StoragePool)
+	mergeScalar(&dst.Alias, src.Alias)
+	mergeScalar(&dst.StaleBaseCheck, src.StaleBaseCheck)
+	mergeScalar(&dst.SessionName, src.SessionName)
 	mergeBuildInto(&dst.Build, &src.Build)
 }
 
@@ -487,101 +471,81 @@ func mergeStructPtr[T any](parent, child *T, mergeFn func(dst *T, src *T)) *T {
 	return &merged
 }
 
+// mergeScalar copies src into *dst when src is non-zero — the config "unset"
+// sentinel for strings, ints, and named-string types. Equivalent to the
+// historical `if src.X != "" { dst.X = src.X }` / `!= 0` field merges.
+func mergeScalar[T comparable](dst *T, src T) {
+	var zero T
+	if src != zero {
+		*dst = src
+	}
+}
+
+// mergePtr copies a non-nil src pointer into *dst — for optional/tristate
+// (*bool) fields. Equivalent to `if src.X != nil { dst.X = src.X }`.
+func mergePtr[T any](dst **T, src *T) {
+	if src != nil {
+		*dst = src
+	}
+}
+
+// mergeSlice copies a non-nil src slice into *dst (replace semantics), for the
+// slice fields merged with `if src.X != nil { dst.X = src.X }`.
+func mergeSlice[T any](dst *[]T, src []T) {
+	if src != nil {
+		*dst = src
+	}
+}
+
+// mergeFlag ORs a bool: a true src wins; a false src never clears an existing
+// true. Equivalent to `if src.X { dst.X = true }`.
+func mergeFlag(dst *bool, src bool) {
+	if src {
+		*dst = true
+	}
+}
+
 func mergeLimitsInto(dst *LimitsConfig, src *LimitsConfig) {
 	mergeLimits(dst, src)
 }
 
 func mergeToolInto(dst *ToolConfig, src *ToolConfig) {
-	if src.Name != "" {
-		dst.Name = src.Name
-	}
-	if src.Binary != "" {
-		dst.Binary = src.Binary
-	}
-	if src.PermissionMode != "" {
-		dst.PermissionMode = src.PermissionMode
-	}
-	if src.ContextFile != "" {
-		dst.ContextFile = src.ContextFile
-	}
-	if src.AutoContext != nil {
-		dst.AutoContext = src.AutoContext
-	}
-	if src.ContextJSON != nil {
-		dst.ContextJSON = src.ContextJSON
-	}
-	if src.ContextJSONFile != "" {
-		dst.ContextJSONFile = src.ContextJSONFile
-	}
-	if src.Claude.EffortLevel != "" {
-		dst.Claude.EffortLevel = src.Claude.EffortLevel
-	}
-	if src.Claude.Model != "" {
-		dst.Claude.Model = src.Claude.Model
-	}
-	if src.Codex.Model != "" {
-		dst.Codex.Model = src.Codex.Model
-	}
-	if src.Codex.ReasoningEffort != "" {
-		dst.Codex.ReasoningEffort = src.Codex.ReasoningEffort
-	}
+	mergeScalar(&dst.Name, src.Name)
+	mergeScalar(&dst.Binary, src.Binary)
+	mergeScalar(&dst.PermissionMode, src.PermissionMode)
+	mergeScalar(&dst.ContextFile, src.ContextFile)
+	mergePtr(&dst.AutoContext, src.AutoContext)
+	mergePtr(&dst.ContextJSON, src.ContextJSON)
+	mergeScalar(&dst.ContextJSONFile, src.ContextJSONFile)
+	mergeScalar(&dst.Claude.EffortLevel, src.Claude.EffortLevel)
+	mergeScalar(&dst.Claude.Model, src.Claude.Model)
+	mergeScalar(&dst.Codex.Model, src.Codex.Model)
+	mergeScalar(&dst.Codex.ReasoningEffort, src.Codex.ReasoningEffort)
 }
 
 func mergeBuildInto(dst *BuildConfig, src *BuildConfig) {
-	if src.Base != "" {
-		dst.Base = src.Base
-	}
-	if src.Script != "" {
-		dst.Script = src.Script
-	}
-	if src.Commands != nil {
-		dst.Commands = src.Commands
-	}
-	if src.Compression != "" {
-		dst.Compression = src.Compression
-	}
+	mergeScalar(&dst.Base, src.Base)
+	mergeScalar(&dst.Script, src.Script)
+	mergeSlice(&dst.Commands, src.Commands)
+	mergeScalar(&dst.Compression, src.Compression)
 	if len(src.Agents) > 0 {
 		dst.Agents = src.Agents
 	}
 }
 
 func mergeNetworkInto(dst *NetworkConfig, src *NetworkConfig) {
-	if src.Mode != "" {
-		dst.Mode = src.Mode
-	}
-	if src.BlockPrivateNetworks != nil {
-		dst.BlockPrivateNetworks = src.BlockPrivateNetworks
-	}
-	if src.BlockMetadataEndpoint != nil {
-		dst.BlockMetadataEndpoint = src.BlockMetadataEndpoint
-	}
-	if src.AllowLocalNetworkAccess != nil {
-		dst.AllowLocalNetworkAccess = src.AllowLocalNetworkAccess
-	}
-	if src.UseSudo != nil {
-		dst.UseSudo = src.UseSudo
-	}
-	if src.AllowedDomains != nil {
-		dst.AllowedDomains = src.AllowedDomains
-	}
-	if src.RefreshIntervalMinutes != 0 {
-		dst.RefreshIntervalMinutes = src.RefreshIntervalMinutes
-	}
-	if src.Hosts != nil {
-		dst.Hosts = src.Hosts
-	}
-	if src.DNSServers != nil {
-		dst.DNSServers = src.DNSServers
-	}
-	if src.AllowedPorts != nil {
-		dst.AllowedPorts = src.AllowedPorts
-	}
-	if src.Logging.Path != "" {
-		dst.Logging.Path = src.Logging.Path
-	}
-	if src.Logging.Enabled != nil {
-		dst.Logging.Enabled = src.Logging.Enabled
-	}
+	mergeScalar(&dst.Mode, src.Mode)
+	mergePtr(&dst.BlockPrivateNetworks, src.BlockPrivateNetworks)
+	mergePtr(&dst.BlockMetadataEndpoint, src.BlockMetadataEndpoint)
+	mergePtr(&dst.AllowLocalNetworkAccess, src.AllowLocalNetworkAccess)
+	mergePtr(&dst.UseSudo, src.UseSudo)
+	mergeSlice(&dst.AllowedDomains, src.AllowedDomains)
+	mergeScalar(&dst.RefreshIntervalMinutes, src.RefreshIntervalMinutes)
+	mergeSlice(&dst.Hosts, src.Hosts)
+	mergeSlice(&dst.DNSServers, src.DNSServers)
+	mergeSlice(&dst.AllowedPorts, src.AllowedPorts)
+	mergeScalar(&dst.Logging.Path, src.Logging.Path)
+	mergePtr(&dst.Logging.Enabled, src.Logging.Enabled)
 }
 
 func mergeMonitoringInto(dst *MonitoringConfig, src *MonitoringConfig) {
@@ -589,60 +553,30 @@ func mergeMonitoringInto(dst *MonitoringConfig, src *MonitoringConfig) {
 }
 
 func mergePathsInto(dst *PathsConfig, src *PathsConfig) {
-	if src.SessionsDir != "" {
-		dst.SessionsDir = src.SessionsDir
-	}
-	if src.StorageDir != "" {
-		dst.StorageDir = src.StorageDir
-	}
-	if src.LogsDir != "" {
-		dst.LogsDir = src.LogsDir
-	}
-	if src.PreserveWorkspacePath {
-		dst.PreserveWorkspacePath = true
-	}
+	mergeScalar(&dst.SessionsDir, src.SessionsDir)
+	mergeScalar(&dst.StorageDir, src.StorageDir)
+	mergeScalar(&dst.LogsDir, src.LogsDir)
+	mergeFlag(&dst.PreserveWorkspacePath, src.PreserveWorkspacePath)
 }
 
 func mergeIncusInto(dst *IncusConfig, src *IncusConfig) {
-	if src.Project != "" {
-		dst.Project = src.Project
-	}
-	if src.Group != "" {
-		dst.Group = src.Group
-	}
-	if src.CodeUID != 0 {
-		dst.CodeUID = src.CodeUID
-	}
-	if src.CodeUser != "" {
-		dst.CodeUser = src.CodeUser
-	}
-	if src.DisableShift {
-		dst.DisableShift = true
-	}
+	mergeScalar(&dst.Project, src.Project)
+	mergeScalar(&dst.Group, src.Group)
+	mergeScalar(&dst.CodeUID, src.CodeUID)
+	mergeScalar(&dst.CodeUser, src.CodeUser)
+	mergeFlag(&dst.DisableShift, src.DisableShift)
 }
 
 func mergeGitInto(dst *GitConfig, src *GitConfig) {
-	if src.WritableHooks != nil {
-		dst.WritableHooks = src.WritableHooks
-	}
-	if src.Name != "" {
-		dst.Name = src.Name
-	}
-	if src.Email != "" {
-		dst.Email = src.Email
-	}
-	if src.SeedHostIdentity != nil {
-		dst.SeedHostIdentity = src.SeedHostIdentity
-	}
-	if src.Readonly != nil {
-		dst.Readonly = src.Readonly
-	}
+	mergePtr(&dst.WritableHooks, src.WritableHooks)
+	mergeScalar(&dst.Name, src.Name)
+	mergeScalar(&dst.Email, src.Email)
+	mergePtr(&dst.SeedHostIdentity, src.SeedHostIdentity)
+	mergePtr(&dst.Readonly, src.Readonly)
 }
 
 func mergeSSHInto(dst *SSHConfig, src *SSHConfig) {
-	if src.ForwardAgent != nil {
-		dst.ForwardAgent = src.ForwardAgent
-	}
+	mergePtr(&dst.ForwardAgent, src.ForwardAgent)
 }
 
 func mergeSecurityInto(dst *SecurityConfig, src *SecurityConfig) {
@@ -652,12 +586,8 @@ func mergeSecurityInto(dst *SecurityConfig, src *SecurityConfig) {
 	if len(src.AdditionalProtectedPaths) > 0 {
 		dst.AdditionalProtectedPaths = MergeStringSliceUnique(dst.AdditionalProtectedPaths, src.AdditionalProtectedPaths)
 	}
-	if src.DisableProtection {
-		dst.DisableProtection = true
-	}
-	if src.HostImmutable != nil {
-		dst.HostImmutable = src.HostImmutable
-	}
+	mergeFlag(&dst.DisableProtection, src.DisableProtection)
+	mergePtr(&dst.HostImmutable, src.HostImmutable)
 	if len(src.WritablePaths) > 0 {
 		dst.WritablePaths = MergeStringSliceUnique(dst.WritablePaths, src.WritablePaths)
 	}
@@ -667,33 +597,19 @@ func mergeSecurityInto(dst *SecurityConfig, src *SecurityConfig) {
 }
 
 func mergeTimezoneInto(dst *TimezoneConfig, src *TimezoneConfig) {
-	if src.Mode != "" {
-		dst.Mode = src.Mode
-	}
-	if src.Name != "" {
-		dst.Name = src.Name
-	}
+	mergeScalar(&dst.Mode, src.Mode)
+	mergeScalar(&dst.Name, src.Name)
 }
 
 func mergeShellInto(dst *ShellConfig, src *ShellConfig) {
-	if src.UseTmux != nil {
-		dst.UseTmux = src.UseTmux
-	}
+	mergePtr(&dst.UseTmux, src.UseTmux)
 }
 
 func mergeDetectionInto(dst *DetectionConfig, src *DetectionConfig) {
-	if src.GTFOBinsSource != "" {
-		dst.GTFOBinsSource = src.GTFOBinsSource
-	}
-	if src.GTFOBinsDir != "" {
-		dst.GTFOBinsDir = src.GTFOBinsDir
-	}
-	if src.SigmaSource != "" {
-		dst.SigmaSource = src.SigmaSource
-	}
-	if src.SigmaDir != "" {
-		dst.SigmaDir = src.SigmaDir
-	}
+	mergeScalar(&dst.GTFOBinsSource, src.GTFOBinsSource)
+	mergeScalar(&dst.GTFOBinsDir, src.GTFOBinsDir)
+	mergeScalar(&dst.SigmaSource, src.SigmaSource)
+	mergeScalar(&dst.SigmaDir, src.SigmaDir)
 }
 
 // ResolveProfileInheritance resolves all inheritance chains in loaded profiles.
