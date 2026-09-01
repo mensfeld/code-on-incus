@@ -165,10 +165,7 @@ func updateCoreCommand(cmd *cobra.Command, args []string) error {
 
 	// Confirm unless --force
 	if !updateForce {
-		fmt.Print("\nInstall update? [y/N]: ")
-		var response string
-		_, _ = fmt.Scanln(&response)
-		if response != "y" && response != "Y" {
+		if !confirmYN("\nInstall update? [y/N]: ") {
 			fmt.Println("Cancelled.")
 			return nil
 		}

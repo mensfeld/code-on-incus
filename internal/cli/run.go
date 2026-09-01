@@ -608,7 +608,7 @@ func (a *App) applySecurityMounts(mgr container.ContainerManager, absWorkspace, 
 		}
 	}
 	if len(effectivePaths) > 0 && a.cfg.Security.IsHostImmutableEnabled() {
-		logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
+		logFn := stderrLogFn
 		immutablePaths := session.ApplyImmutable(absWorkspace, effectivePaths, containerName, logFn)
 		if len(immutablePaths) > 0 {
 			fmt.Fprintf(os.Stderr, "Host-side immutable protection applied: %s\n", strings.Join(immutablePaths, ", "))
@@ -675,7 +675,7 @@ func (a *App) gateRunForwarding(mc *session.MountConfig, sc *session.SocketConfi
 // true) plus every trust-gated [[sockets]] entry into the container. Returns a
 // map of env var name -> container-side socket path for those that declare one.
 func (a *App) applyForwardSockets(mgr container.ContainerManager, socketConfig *session.SocketConfig) map[string]string {
-	logger := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
+	logger := stderrLogFn
 	return session.ForwardConfiguredSockets(mgr, socketConfig, config.BoolVal(a.cfg.SSH.ForwardAgent), logger)
 }
 

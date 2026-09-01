@@ -168,7 +168,7 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 			// port forwards must not be yanked here.)
 			if s.wasRestarted {
 				if running, _ := mgr.Running(); !running {
-					logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
+					logFn := stderrLogFn
 					session.RemoveStalePortDevices(mgr, logFn)
 				}
 			}
@@ -200,7 +200,7 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 			// hook re-runs on the fresh container, re-applying mapping and devices.
 			// s.useShift is set by whichever hook runs (preStart or preRestart)
 			// before anything reads it.
-			logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
+			logFn := stderrLogFn
 			preStart := func() error {
 				defer timing.Start(timing.CatStep, "pre-start-hook")()
 				// Detect a git worktree checkout (.git is a file → external git dirs)
@@ -293,7 +293,7 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 			// one) fails first. Leaked +i flags make the workspace undeletable
 			// (pytest tmpdir cleanup EPERM).
 			teardown := func() {
-				logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
+				logFn := stderrLogFn
 				session.RemoveImmutable(s.containerName, logFn)
 				if !a.persistent {
 					fmt.Fprintf(os.Stderr, "Cleaning up container %s...\n", s.containerName)
@@ -316,7 +316,7 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 				// teardown's unconditional delete must not fire on a container
 				// that may not be ours. Only the immutable flags the pre-start
 				// hook may have applied need releasing here.
-				logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
+				logFn := stderrLogFn
 				session.RemoveImmutable(s.containerName, logFn)
 				return nil, launchErr
 			}
@@ -390,7 +390,7 @@ func (a *App) configureContainerRunPhase(s *runState) session.Phase {
 				}
 			}
 
-			logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
+			logFn := stderrLogFn
 
 			// ctx is the pipeline's signal-cancelled context (run.go's
 			// NotifyContext), so Ctrl+C aborts the wait instead of polling
@@ -465,7 +465,7 @@ func (a *App) applyNetworkRunPhase(s *runState) session.Phase {
 			// Publish [ports] on the host (localhost:<port> -> container)
 			// and expose the mapping to the command env (COI_PORTS /
 			// COI_PORT_<NAME>).
-			logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
+			logFn := stderrLogFn
 			_, portsEnv := session.PublishResolvedPorts(s.mgr, s.resolvedPorts, logFn)
 			for k, v := range portsEnv {
 				if s.socketEnv == nil {

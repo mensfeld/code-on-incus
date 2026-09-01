@@ -147,6 +147,20 @@ func ImportImage(lxdTar, squashfs, alias string) error {
 }
 
 // IncusOutputContext executes an Incus command with context support and returns the output (trimmed)
+// toExitError wraps a failed incus command's error as *ExitError when it is an
+// *exec.ExitError (capturing the exit code and the given stderr), and returns
+// the original error unchanged otherwise. Pass "" for stderr when none was
+// captured separately (e.g. combined stdout+stderr, or streamed output).
+func toExitError(err error, stderr string) error {
+	if err == nil {
+		return nil
+	}
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		return &ExitError{ExitCode: exitErr.ExitCode(), Err: err, Stderr: stderr}
+	}
+	return err
+}
+
 func IncusOutputContext(ctx context.Context, args ...string) (string, error) {
 	cmdArgs := buildIncusCommand(args...)
 	cmd := execIncusCommandContext(ctx, cmdArgs)
@@ -159,14 +173,7 @@ func IncusOutputContext(ctx context.Context, args ...string) (string, error) {
 	output := strings.TrimSpace(stdout.String())
 
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return output, &ExitError{
-				ExitCode: exitErr.ExitCode(),
-				Err:      err,
-				Stderr:   strings.TrimSpace(stderr.String()),
-			}
-		}
-		return output, err
+		return output, toExitError(err, strings.TrimSpace(stderr.String()))
 	}
 
 	return output, nil
@@ -190,14 +197,7 @@ func IncusOutputRawContext(ctx context.Context, args ...string) (string, error) 
 	output := stdout.String()
 
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return output, &ExitError{
-				ExitCode: exitErr.ExitCode(),
-				Err:      err,
-				Stderr:   strings.TrimSpace(stderr.String()),
-			}
-		}
-		return output, err
+		return output, toExitError(err, strings.TrimSpace(stderr.String()))
 	}
 
 	return output, nil
@@ -221,13 +221,7 @@ func IncusOutputWithStderrContext(ctx context.Context, args ...string) (string, 
 	output := strings.TrimSpace(combined.String())
 
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return output, &ExitError{
-				ExitCode: exitErr.ExitCode(),
-				Err:      err,
-			}
-		}
-		return output, err
+		return output, toExitError(err, "")
 	}
 
 	return output, nil
@@ -252,14 +246,7 @@ func IncusOutputWithArgsContext(ctx context.Context, args ...string) (string, er
 	output := strings.TrimSpace(stdout.String())
 
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return output, &ExitError{
-				ExitCode: exitErr.ExitCode(),
-				Err:      err,
-				Stderr:   strings.TrimSpace(stderr.String()),
-			}
-		}
-		return output, err
+		return output, toExitError(err, strings.TrimSpace(stderr.String()))
 	}
 
 	return output, nil
@@ -316,10 +303,7 @@ func IncusExecStreamedContext(ctx context.Context, args ...string) error {
 
 	err := runIncus(cmd)
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return &ExitError{ExitCode: exitErr.ExitCode(), Err: err}
-		}
-		return err
+		return toExitError(err, "")
 	}
 	return nil
 }

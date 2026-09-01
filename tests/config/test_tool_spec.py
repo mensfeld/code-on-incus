@@ -311,18 +311,20 @@ def test_tool_spec_resume_id_asserts_without_discovery(
         _teardown(coi_binary, child, container)
 
 
-def test_tool_spec_resume_latest_renders_bare_resume(coi_binary, workspace_dir, cleanup_containers):
+def test_tool_spec_resume_latest_renders_continue(coi_binary, workspace_dir, cleanup_containers):
     """--resume (no id) renders a resume-latest command with no id and no
-    --session-id (#753). For claude that's a bare `--resume`; it must not carry
-    a session id or fall through to a fresh launch."""
+    --session-id (#753). For claude the launch path emits a trailing
+    `--continue` (not bare `--resume`, which would open Claude's interactive
+    picker and hang a headless launch — #754)."""
     _write_config(workspace_dir)
     child, container = _boot_container(coi_binary, workspace_dir)
     try:
         spec = _spec(coi_binary, container, workspace_dir, "new-run-1", extra=["--resume"])
         cmd = spec["command"]
-        # claude renders resume-latest as a trailing bare `--resume`: no id after
-        # it, no --session-id (not a fresh launch), and no prompt embedded.
-        assert cmd[-1] == "--resume", cmd
+        # Resume-latest for claude is a trailing `--continue`: no id after it, no
+        # --session-id (not a fresh launch), no bare --resume, and no prompt.
+        assert cmd[-1] == "--continue", cmd
+        assert "--resume" not in cmd, cmd
         assert "--session-id" not in cmd, cmd
         assert not any("$(cat" in a for a in cmd), cmd
     finally:

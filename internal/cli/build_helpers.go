@@ -150,7 +150,7 @@ func runInlineBuild(cfg *config.Config, imageName string) error {
 			Description: "coi image (Docker + build tools + AI agents + GitHub CLI)",
 			StoragePool: buildPool,
 			Agents:      cfg.Container.Build.Agents,
-			Logger:      func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) },
+			Logger:      stderrLogFn,
 		}
 		fmt.Fprintf(os.Stderr, "Building image '%s'...\n", imageName)
 		result := image.NewBuilder(opts).Build()
@@ -192,7 +192,7 @@ func runInlineBuild(cfg *config.Config, imageName string) error {
 		BuildScript: scriptPath,
 		Force:       false,
 		StoragePool: buildPool,
-		Logger:      func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) },
+		Logger:      stderrLogFn,
 	}
 
 	fmt.Fprintf(os.Stderr, "Building image '%s' (base: %s)...\n", imageName, baseImage)

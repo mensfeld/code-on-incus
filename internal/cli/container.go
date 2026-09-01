@@ -419,8 +419,8 @@ var containerInfoCmd = &cobra.Command{
 		format, _ := cmd.Flags().GetString("format")
 
 		// Validate format
-		if format != "text" && format != "json" {
-			return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid format '%s': must be 'text' or 'json'", format)}
+		if err := validateTextOrJSON(format); err != nil {
+			return err
 		}
 
 		var output string

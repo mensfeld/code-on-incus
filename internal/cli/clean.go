@@ -180,10 +180,7 @@ func cleanStoppedContainers() (int, bool, error) {
 	}
 
 	if !cleanForce {
-		fmt.Print("\nDelete these containers? [y/N]: ")
-		var response string
-		_, _ = fmt.Scanln(&response)
-		if response != "y" && response != "Y" {
+		if !confirmYN("\nDelete these containers? [y/N]: ") {
 			fmt.Println("Cancelled.")
 			return 0, true, nil
 		}
@@ -244,10 +241,7 @@ func cleanSavedSessions(sessionsDir string) (int, bool, error) {
 	}
 
 	if !cleanForce {
-		fmt.Print("\nDelete all session data? [y/N]: ")
-		var response string
-		_, _ = fmt.Scanln(&response)
-		if response != "y" && response != "Y" {
+		if !confirmYN("\nDelete all session data? [y/N]: ") {
 			fmt.Println("Cancelled.")
 			return 0, true, nil
 		}
@@ -294,10 +288,7 @@ func cleanOrphanedResources() (int, bool) {
 	}
 
 	if !cleanForce {
-		fmt.Print("\nClean up orphaned resources? [y/N]: ")
-		var response string
-		_, _ = fmt.Scanln(&response)
-		if response != "y" && response != "Y" {
+		if !confirmYN("\nClean up orphaned resources? [y/N]: ") {
 			fmt.Println("Cancelled.")
 			return 0, true
 		}
@@ -482,10 +473,7 @@ func (a *App) cleanUnreferencedPools() (int, bool, error) {
 	}
 
 	if !cleanForce {
-		fmt.Print("Delete these containers? [y/N]: ")
-		var response string
-		_, _ = fmt.Scanln(&response)
-		if response != "y" && response != "Y" {
+		if !confirmYN("Delete these containers? [y/N]: ") {
 			fmt.Println("Cancelled.")
 			return 0, true, nil
 		}

@@ -68,10 +68,7 @@ func persistCommand(cmd *cobra.Command, args []string) error {
 
 		// Confirm unless --force
 		if !persistForce {
-			fmt.Print("\nPersist all these containers? [y/N]: ")
-			var response string
-			_, _ = fmt.Scanln(&response)
-			if response != "y" && response != "Y" {
+			if !confirmYN("\nPersist all these containers? [y/N]: ") {
 				fmt.Println("Cancelled.")
 				return nil
 			}
@@ -85,10 +82,7 @@ func persistCommand(cmd *cobra.Command, args []string) error {
 
 		// Confirm unless --force or single container
 		if !persistForce && len(containerNames) > 1 {
-			fmt.Printf("Persist %d container(s)? [y/N]: ", len(containerNames))
-			var response string
-			_, _ = fmt.Scanln(&response)
-			if response != "y" && response != "Y" {
+			if !confirmYN(fmt.Sprintf("Persist %d container(s)? [y/N]: ", len(containerNames))) {
 				fmt.Println("Cancelled.")
 				return nil
 			}

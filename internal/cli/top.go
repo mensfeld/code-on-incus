@@ -13,7 +13,6 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/mensfeld/code-on-incus/internal/alias"
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/monitor"
 	"github.com/mensfeld/code-on-incus/internal/session"
@@ -111,7 +110,7 @@ func runTop(cmd *cobra.Command, args []string) error {
 
 	var only string
 	if len(args) > 0 {
-		resolved, err := resolveTopContainer(args[0])
+		resolved, err := resolveNameOrAlias(args[0])
 		if err != nil {
 			return err
 		}
@@ -173,17 +172,6 @@ func validateSortKey(key string, allowed []string) error {
 		}
 	}
 	return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid --sort %q: must be one of %s", key, strings.Join(allowed, ", "))}
-}
-
-// resolveTopContainer turns a container name or alias into a concrete running
-// container name, reusing the same alias resolution the other ops commands use.
-func resolveTopContainer(nameOrAlias string) (string, error) {
-	if resolved, err := alias.ResolveAliasForRunning(nameOrAlias); err == nil {
-		return resolved, nil
-	} else if !alias.IsContainerName(nameOrAlias) {
-		return "", err
-	}
-	return nameOrAlias, nil
 }
 
 // --- Container view ---------------------------------------------------------

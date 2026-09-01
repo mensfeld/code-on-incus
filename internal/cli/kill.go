@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/mensfeld/code-on-incus/internal/alias"
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/network"
 	"github.com/spf13/cobra"
@@ -66,10 +65,7 @@ func resolveContainerArgs(args []string, all bool, force bool, action string) ([
 		}
 
 		if !force {
-			fmt.Printf("\n%s all these containers? [y/N]: ", action)
-			var response string
-			_, _ = fmt.Scanln(&response)
-			if response != "y" && response != "Y" {
+			if !confirmYN(fmt.Sprintf("\n%s all these containers? [y/N]: ", action)) {
 				fmt.Println("Cancelled.")
 				return nil, nil
 			}
@@ -80,20 +76,15 @@ func resolveContainerArgs(args []string, all bool, force bool, action string) ([
 		}
 		containerNames = make([]string, 0, len(args))
 		for _, arg := range args {
-			if resolved, err := alias.ResolveAliasForRunning(arg); err == nil {
-				containerNames = append(containerNames, resolved)
-			} else if alias.IsContainerName(arg) {
-				containerNames = append(containerNames, arg)
-			} else {
+			name, err := resolveNameOrAlias(arg)
+			if err != nil {
 				return nil, err
 			}
+			containerNames = append(containerNames, name)
 		}
 
 		if !force && len(containerNames) > 1 {
-			fmt.Printf("%s %d container(s)? [y/N]: ", action, len(containerNames))
-			var response string
-			_, _ = fmt.Scanln(&response)
-			if response != "y" && response != "Y" {
+			if !confirmYN(fmt.Sprintf("%s %d container(s)? [y/N]: ", action, len(containerNames))) {
 				fmt.Println("Cancelled.")
 				return nil, nil
 			}
