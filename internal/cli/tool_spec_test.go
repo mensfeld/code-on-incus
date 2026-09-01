@@ -130,13 +130,19 @@ func TestBuildToolSpecCommand_ResumeIDCodex(t *testing.T) {
 }
 
 func TestBuildToolSpecCommand_ResumeLatest(t *testing.T) {
-	// --resume (no id): claude renders bare `--resume`, codex `resume --last`.
+	// --resume (no id): claude renders `--continue` (headless "resume most recent" - bare
+	// `--resume` would open the interactive picker and hang, #754), codex `resume --last`.
 	argvC, _, err := buildToolSpecCommand(tool.NewClaude(), tool.LaunchSpec{SessionID: "n", Resume: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if jc := strings.Join(argvC, " "); !strings.Contains(jc, "--resume") || strings.Contains(jc, "--session-id") {
-		t.Errorf("claude resume-latest: want bare --resume and no --session-id, got %q", jc)
+	if jc := strings.Join(argvC, " "); !strings.Contains(jc, "--continue") || strings.Contains(jc, "--session-id") {
+		t.Errorf("claude resume-latest: want --continue and no --session-id, got %q", jc)
+	}
+	for _, a := range argvC {
+		if a == "--resume" {
+			t.Errorf("claude resume-latest launch must not emit bare --resume (picker): %v", argvC)
+		}
 	}
 	argvX, _, err := buildToolSpecCommand(tool.NewCodex(), tool.LaunchSpec{SessionID: "n", Resume: true})
 	if err != nil {

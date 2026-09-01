@@ -278,6 +278,19 @@ func (c *ClaudeTool) GetContainerEnv(_ string) map[string]string {
 // `"$(cat <file>)"` so arbitrary content stays in the file, never on the line.
 func (c *ClaudeTool) BuildCommandLaunch(spec LaunchSpec) ([]string, error) {
 	cmd := c.BuildCommand(spec.SessionID, spec.Resume, spec.ResumeSessionID)
+	// Resume-latest with no id: BuildCommand emits bare `claude --resume`, which opens Claude's
+	// interactive session PICKER and hangs in a headless launch. A launch wants "resume the most
+	// recent conversation" non-interactively, which for Claude is `--continue`. Rewrite it here so
+	// only the launch path is affected - interactive `coi shell --resume` (via BuildCommand) keeps
+	// the picker, which is the right behavior for an attached human (#754).
+	if spec.Resume && spec.ResumeSessionID == "" {
+		for i, arg := range cmd {
+			if arg == "--resume" {
+				cmd[i] = "--continue"
+				break
+			}
+		}
+	}
 	if spec.SystemPromptFile != "" {
 		cmd = append(cmd, "--append-system-prompt", catSubst(spec.SystemPromptFile))
 	}

@@ -67,6 +67,26 @@ func TestClaudeBuildCommandLaunch_Resume(t *testing.T) {
 	}
 }
 
+// Resume-latest (no id) in a LAUNCH must be `--continue` (headless "resume most recent"), not bare
+// `--resume`, which would open Claude's interactive picker and hang. Interactive `coi shell` keeps
+// the picker via BuildCommand; only the launch path rewrites it (#754).
+func TestClaudeBuildCommandLaunch_ResumeLatestUsesContinue(t *testing.T) {
+	c := NewClaude().(ToolWithPrompt)
+	cmd, err := c.BuildCommandLaunch(LaunchSpec{Resume: true, PromptFile: "/run/p"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(cmd, " ")
+	if !strings.Contains(joined, "--continue") {
+		t.Errorf("resume-latest launch should use --continue: %q", joined)
+	}
+	for _, arg := range cmd {
+		if arg == "--resume" {
+			t.Errorf("resume-latest launch must not emit bare --resume (picker): %q", joined)
+		}
+	}
+}
+
 func TestCodexBuildCommandLaunch_Prompt(t *testing.T) {
 	c := NewCodex().(ToolWithPrompt)
 	cmd, err := c.BuildCommandLaunch(LaunchSpec{SessionID: "sid-1", PromptFile: "/run/p"})
