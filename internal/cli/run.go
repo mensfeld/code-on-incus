@@ -144,25 +144,7 @@ func (a *App) runCommand(cmd *cobra.Command, args []string) error {
 	pipeline := &session.Pipeline{}
 	defer pipeline.Teardown()
 
-	// Signal handler: trigger cleanup immediately on SIGINT while incus exec blocks.
-	// Uses a dedicated sigChan (not ctx.Done) to avoid non-determinism when both fire
-	// simultaneously. pipeline.Teardown is idempotent so the deferred call above is safe.
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(sigChan)
-	done := make(chan struct{})
-	defer close(done)
-	go func() {
-		select {
-		case <-sigChan:
-			fmt.Fprintf(os.Stderr, "\nReceived interrupt signal, cleaning up...\n")
-			pipeline.Teardown()
-		case <-done:
-		}
-	}()
-
-	return pipeline.Run(
-		ctx,
+	return runPipelineWithSignals(ctx, pipeline,
 		a.validateEnvRunPhase(s),
 		a.launchContainerRunPhase(s),
 		a.configureContainerRunPhase(s),
@@ -350,28 +332,10 @@ func (a *App) appendEnvArgs(incusArgs []string, tz string, socketEnv map[string]
 		env[name] = path
 	}
 
-	// Static environment from config (defaults.environment + profile environment)
-	for k, v := range a.cfg.Defaults.Environment {
-		env[k] = v
-	}
-
-	// Resolve forward_env from config, look up host values
-	for _, name := range a.cfg.Defaults.ForwardEnv {
-		if val, ok := os.LookupEnv(name); ok {
-			env[name] = val
-		} else {
-			fmt.Fprintf(os.Stderr, "Warning: forward_env variable %q is not set on host, skipping\n", name)
-		}
-	}
-
-	// Command-sourced env vars (highest precedence — freshly minted per session).
-	// A failing env_command is fatal: don't launch a half-credentialed session.
-	envCommandValues, err := a.resolveEnvCommands()
-	if err != nil {
+	// Apply the config-sourced env layers (defaults.environment -> forward_env ->
+	// env_commands, last-wins), shared with coi shell's buildContainerEnv.
+	if err := a.applyConfigEnv(env); err != nil {
 		return nil, err
-	}
-	for k, v := range envCommandValues {
-		env[k] = v
 	}
 
 	// Emit each var once, in a stable (sorted) order for deterministic args.
