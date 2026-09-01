@@ -558,6 +558,22 @@ install_codex() {
     ln -sf "$CODEX_PATH" /usr/local/bin/codex
 
     log "Codex CLI $(codex --version 2>/dev/null || echo 'installed')"
+
+    # Smoke-check the resume grammar coi's codex integration depends on. coi
+    # renders `codex resume <id> "$(cat prompt)"` (CodexTool.BuildCommandLaunch),
+    # which requires the `resume` subcommand to accept a trailing [PROMPT]
+    # positional. codex is unpinned (latest at build time), so fail the build
+    # loudly if a release drops it — instead of silently shipping a broken
+    # resume+prompt path (coi#755). Run as the code user (login shell, so codex
+    # is on PATH with its HOME); --help is offline and needs no auth.
+    local resume_help
+    resume_help="$(su - "$CODE_USER" -c 'codex resume --help' 2>&1 || true)"
+    if ! printf '%s' "$resume_help" | grep -qi '\[prompt\]'; then
+        log "ERROR: 'codex resume' no longer advertises a [PROMPT] positional."
+        log "coi's resume+prompt rendering (internal/tool/codex.go, coi#755) would break;"
+        log "update CodexTool.BuildCommandLaunch to match the current codex grammar."
+        exit 1
+    fi
 }
 
 #######################################
