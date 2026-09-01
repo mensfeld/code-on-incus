@@ -32,6 +32,48 @@ func TestGenerateSessionID(t *testing.T) {
 	}
 }
 
+func TestValidateSessionID(t *testing.T) {
+	// A freshly generated id must always pass.
+	gen, err := GenerateSessionID()
+	if err != nil {
+		t.Fatalf("GenerateSessionID() failed: %v", err)
+	}
+
+	valid := []string{
+		gen,
+		"workspace-session",
+		"my.session_1",
+		"A0",
+		"a", // single alphanumeric
+		"0123456789012345678901234567890123456789012345678901234567890123", // 64 chars
+	}
+	for _, id := range valid {
+		if err := ValidateSessionID(id); err != nil {
+			t.Errorf("ValidateSessionID(%q) = %v, want nil", id, err)
+		}
+	}
+
+	invalid := []string{
+		"",              // empty
+		"a b",           // space -> would split argv / break $(cat)
+		"a;reboot",      // shell metacharacter -> injection
+		"$(whoami)",     // command substitution
+		"a`id`",         // backtick substitution
+		"a\"b",          // quote -> breaks the "$(cat …)" wrapper
+		"../etc/passwd", // path traversal (leading . ok, but '/' isn't)
+		"a/b",           // path separator
+		"a\nb",          // newline
+		"-leading-dash", // must start alphanumeric
+		".leading-dot",  // must start alphanumeric
+		"0123456789012345678901234567890123456789012345678901234567890123X", // 65 chars
+	}
+	for _, id := range invalid {
+		if err := ValidateSessionID(id); err == nil {
+			t.Errorf("ValidateSessionID(%q) = nil, want error", id)
+		}
+	}
+}
+
 func TestGenerateSessionIDUnique(t *testing.T) {
 	// Generate multiple IDs and check they're unique
 	ids := make(map[string]bool)

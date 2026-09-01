@@ -70,10 +70,6 @@ func init() {
 	shellCmd.Flags().BoolVar(&debugShell, "debug", false, "Launch interactive bash instead of AI tool (for debugging)")
 	shellCmd.Flags().BoolVar(&background, "background", false, "Run AI tool in background tmux session (detached)")
 	shellCmd.Flags().StringVar(&containerName, "container", "", "Use existing container (for testing)")
-	shellCmd.Flags().BoolVar(&app.headless, "headless", false, "Non-interactive tool run for orchestrators: launch into a detached tmux, apply the profile's tool config, and print machine-readable handles (#746)")
-	shellCmd.Flags().StringVar(&app.promptFile, "prompt-file", "", "Headless: file whose contents are fed to the tool as the initial prompt")
-	shellCmd.Flags().StringVar(&app.systemPromptFile, "system-prompt-file", "", "Headless: file whose contents are passed as the tool's system prompt (tools that support one)")
-	shellCmd.Flags().BoolVar(&app.jsonOutput, "json", false, "Headless: print run handles as JSON on stdout")
 }
 
 func (a *App) shellCommand(cmd *cobra.Command, args []string) error {

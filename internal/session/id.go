@@ -3,7 +3,27 @@ package session
 import (
 	"crypto/rand"
 	"fmt"
+	"regexp"
 )
+
+// sessionIDRe mirrors the config session_name pattern (config.sessionNameRe):
+// letters, digits, '.', '_', '-'; must start alphanumeric; max 64 chars.
+// Generated ids (UUIDs) and saved-session directory names already satisfy it.
+var sessionIDRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$`)
+
+// ValidateSessionID rejects a session id that isn't a safe single token. The id
+// is used as a filesystem path component and, for `coi tool spec`, is joined
+// into a shell-run launch command (and referenced via `"$(cat …/<id>.prompt)"`),
+// so a value with spaces, shell metacharacters, or path separators would break
+// or inject the command. Callers that accept an id from outside coi (e.g.
+// `--session-id`) must validate it; ids coi generates/discovers itself already
+// conform.
+func ValidateSessionID(id string) error {
+	if sessionIDRe.MatchString(id) {
+		return nil
+	}
+	return fmt.Errorf("invalid session id %q: must match %s (letters, digits, '.', '_', '-'; start alphanumeric; max 64 chars)", id, sessionIDRe.String())
+}
 
 // GenerateSessionID creates a new session ID in UUID format
 // Returns a UUID v4 format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
