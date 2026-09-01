@@ -87,36 +87,7 @@ func (a *App) shellCommand(cmd *cobra.Command, args []string) error {
 	pipeline := &session.Pipeline{}
 	defer pipeline.Teardown()
 
-	// Signal handler: explicitly trigger cleanup when SIGINT/SIGTERM arrives
-	// while runCLI is blocking on an interactive incus exec.
-	//
-	// We cannot use ctx.Done() as the "signal received" branch because
-	// signal.NotifyContext cancels ctx AND delivers to sigChan at the same
-	// time — a select over both is non-deterministic. If ctx.Done() is chosen,
-	// the goroutine exits without calling Teardown, leaving cleanup to the
-	// deferred call, which won't run until the blocking incus exec returns.
-	//
-	// Instead we use a dedicated `done` channel closed when shellCommand
-	// returns. On signal, cleanup is always called. On normal return, the
-	// goroutine exits via the done branch without a second cleanup attempt
-	// (pipeline.Teardown is idempotent). signal.Stop ensures no further
-	// signals are queued after shellCommand returns.
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(sigChan)
-	done := make(chan struct{})
-	defer close(done)
-	go func() {
-		select {
-		case <-sigChan:
-			fmt.Fprintf(os.Stderr, "\nReceived interrupt signal, cleaning up...\n")
-			pipeline.Teardown()
-		case <-done:
-		}
-	}()
-
-	return pipeline.Run(
-		ctx,
+	return runPipelineWithSignals(ctx, pipeline,
 		a.resolveWorkspacePhase(cmd, s),
 		a.validateEnvPhase(cmd, s),
 		a.configureSessionPhase(cmd, s),
@@ -297,28 +268,10 @@ func (a *App) buildContainerEnv(result *session.SetupResult) (map[string]string,
 		containerEnv["TZ"] = result.Timezone
 	}
 
-	// Apply static environment from config (defaults.environment + profile environment)
-	for k, v := range a.cfg.Defaults.Environment {
-		containerEnv[k] = v
-	}
-
-	// Resolve forward_env from config, deduplicate, then look up host values
-	for _, name := range a.cfg.Defaults.ForwardEnv {
-		if val, ok := os.LookupEnv(name); ok {
-			containerEnv[name] = val
-		} else {
-			fmt.Fprintf(os.Stderr, "Warning: forward_env variable %q is not set on host, skipping\n", name)
-		}
-	}
-
-	// Command-sourced env vars (highest precedence — freshly minted per session).
-	// Applied last so a minted value wins over static environment/forward_env.
-	envCommandValues, err := a.resolveEnvCommands()
-	if err != nil {
+	// Apply the config-sourced env layers (defaults.environment -> forward_env ->
+	// env_commands, last-wins), shared with coi run's appendEnvArgs.
+	if err := a.applyConfigEnv(containerEnv); err != nil {
 		return nil, nil, err
-	}
-	for k, v := range envCommandValues {
-		containerEnv[k] = v
 	}
 
 	// Sanitize TERM if user explicitly provided it via config
