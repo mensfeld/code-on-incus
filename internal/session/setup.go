@@ -419,39 +419,8 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 	// different value, remap the user inside the container so /etc/passwd, home directory
 	// ownership, and file permissions all match the configured UID.
 	if !skipLaunch && hasCodeUser && container.CodeUID != 1000 {
-		opts.Logger(fmt.Sprintf("Remapping user %s from UID 1000 to %d...", container.CodeUser, container.CodeUID))
-		remapCmd := fmt.Sprintf(
-			"groupmod -g %d %s && usermod -u %d -g %d %s",
-			container.CodeUID, container.CodeUser,
-			container.CodeUID, container.CodeUID, container.CodeUser,
-		)
-		if _, err := result.Manager.ExecCommand(remapCmd, container.ExecCommandOptions{Capture: true}); err != nil {
-			// usermod -u, even without -m, walks the home directory chowning
-			// files it finds owned by the old UID — that walk hits any
-			// read-only mount already living under /home/<code> (protected
-			// paths, [[mounts]] entries; disk devices attach pre-start per
-			// #534) and usermod exits non-zero (E_HOMEDIR) despite the passwd
-			// update having already been committed. Don't trust the exit code
-			// alone: probe whether the account really did move to the target
-			// UID before treating this as fatal. groupmod ran first in the
-			// chain and usermod commits uid+gid in the same passwd write, so
-			// a confirmed UID implies the full remap landed.
-			actualUID, _, probeErr := probeCodeUser(result.Manager, container.CodeUser)
-			if probeErr != nil || actualUID != container.CodeUID {
-				return nil, fmt.Errorf("failed to remap user %s to UID %d: %w", container.CodeUser, container.CodeUID, err)
-			}
-			opts.Logger(fmt.Sprintf("Warning: UID/GID remap for %s succeeded but usermod's home-directory ownership walk hit an unwritable path: %v", container.CodeUser, err))
-		}
-		// The home-ownership sweep is best-effort, separately from the remap
-		// itself (mirrors the coi run path, #534): a read-only mount under
-		// /home/<code> makes chown -R exit non-zero after fixing everything it
-		// could, which must not abort setup. Keeping it OUT of the fatal &&
-		// chain also means it still runs when usermod exited non-zero above —
-		// fused, the chain would skip it and leave writable home files owned
-		// by the old UID (the code user unable to write its own dotfiles).
-		chownCmd := fmt.Sprintf("chown -R %s:%s /home/%s", container.CodeUser, container.CodeUser, container.CodeUser)
-		if _, err := result.Manager.ExecCommand(chownCmd, container.ExecCommandOptions{Capture: true}); err != nil {
-			opts.Logger(fmt.Sprintf("Warning: could not chown all of /home/%s after UID remap (a read-only mount under it is expected to fail): %v", container.CodeUser, err))
+		if err := remapContainerUser(result, opts); err != nil {
+			return nil, err
 		}
 	}
 
@@ -482,17 +451,8 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 	// identity and we cannot, the session aborts rather than silently handing back a
 	// writable one. With no resolvable identity there is nothing to lock, so fall
 	// through to the normal guard (which still refuses commits until one is set).
-	if opts.GitReadonly && opts.GitIdentity.Complete() {
-		if err := SetupGitIdentityReadonly(result.Manager, result.HomeDir, opts.GitIdentity); err != nil {
-			return nil, fmt.Errorf("git.readonly: could not lock the commit identity read-only: %w", err)
-		}
-		opts.Logger("Git identity locked read-only (git.readonly): " + result.HomeDir + "/.gitconfig cannot be changed in-container")
-	} else {
-		if opts.GitReadonly {
-			opts.Logger("Warning: git.readonly is set but no identity is resolvable — set [git] name/email (or enable seed_host_identity); nothing to lock")
-		}
-		SetupGitIdentityGuard(result.Manager, result.HomeDir, opts.Logger)
-		SetupGitIdentity(result.Manager, result.HomeDir, opts.GitIdentity, opts.Logger)
+	if err := configureGitIdentity(result, opts); err != nil {
+		return nil, err
 	}
 
 	// 6.6.2. Suppress Claude Code auto-mode prompt via managed settings.
@@ -1276,4 +1236,67 @@ func injectSandboxContext(result *SetupResult, opts SetupOptions) string {
 		}
 	}
 	return contextContent
+}
+
+// remapContainerUser remaps the container's `code` user to a non-default
+// [incus] code_uid (groupmod+usermod), then best-effort chowns its home.
+// usermod's home-ownership walk may exit non-zero against a read-only mount
+// even though the passwd change committed, so the UID is re-probed before
+// treating the failure as fatal. Extracted verbatim from Setup (§6.5).
+func remapContainerUser(result *SetupResult, opts SetupOptions) error {
+	opts.Logger(fmt.Sprintf("Remapping user %s from UID 1000 to %d...", container.CodeUser, container.CodeUID))
+	remapCmd := fmt.Sprintf(
+		"groupmod -g %d %s && usermod -u %d -g %d %s",
+		container.CodeUID, container.CodeUser,
+		container.CodeUID, container.CodeUID, container.CodeUser,
+	)
+	if _, err := result.Manager.ExecCommand(remapCmd, container.ExecCommandOptions{Capture: true}); err != nil {
+		// usermod -u, even without -m, walks the home directory chowning
+		// files it finds owned by the old UID — that walk hits any
+		// read-only mount already living under /home/<code> (protected
+		// paths, [[mounts]] entries; disk devices attach pre-start per
+		// #534) and usermod exits non-zero (E_HOMEDIR) despite the passwd
+		// update having already been committed. Don't trust the exit code
+		// alone: probe whether the account really did move to the target
+		// UID before treating this as fatal. groupmod ran first in the
+		// chain and usermod commits uid+gid in the same passwd write, so
+		// a confirmed UID implies the full remap landed.
+		actualUID, _, probeErr := probeCodeUser(result.Manager, container.CodeUser)
+		if probeErr != nil || actualUID != container.CodeUID {
+			return fmt.Errorf("failed to remap user %s to UID %d: %w", container.CodeUser, container.CodeUID, err)
+		}
+		opts.Logger(fmt.Sprintf("Warning: UID/GID remap for %s succeeded but usermod's home-directory ownership walk hit an unwritable path: %v", container.CodeUser, err))
+	}
+	// The home-ownership sweep is best-effort, separately from the remap
+	// itself (mirrors the coi run path, #534): a read-only mount under
+	// /home/<code> makes chown -R exit non-zero after fixing everything it
+	// could, which must not abort setup. Keeping it OUT of the fatal &&
+	// chain also means it still runs when usermod exited non-zero above —
+	// fused, the chain would skip it and leave writable home files owned
+	// by the old UID (the code user unable to write its own dotfiles).
+	chownCmd := fmt.Sprintf("chown -R %s:%s /home/%s", container.CodeUser, container.CodeUser, container.CodeUser)
+	if _, err := result.Manager.ExecCommand(chownCmd, container.ExecCommandOptions{Capture: true}); err != nil {
+		opts.Logger(fmt.Sprintf("Warning: could not chown all of /home/%s after UID remap (a read-only mount under it is expected to fail): %v", container.CodeUser, err))
+	}
+	return nil
+}
+
+// configureGitIdentity locks the commit identity read-only when git.readonly
+// is set with a complete identity (fail-closed), otherwise installs the
+// useConfigOnly guard and writes the identity. Extracted verbatim from Setup
+// (§6.6.1).
+func configureGitIdentity(result *SetupResult, opts SetupOptions) error {
+	if opts.GitReadonly && opts.GitIdentity.Complete() {
+		if err := SetupGitIdentityReadonly(result.Manager, result.HomeDir, opts.GitIdentity); err != nil {
+			return fmt.Errorf("git.readonly: could not lock the commit identity read-only: %w", err)
+		}
+		opts.Logger("Git identity locked read-only (git.readonly): " + result.HomeDir + "/.gitconfig cannot be changed in-container")
+	} else {
+		if opts.GitReadonly {
+			opts.Logger("Warning: git.readonly is set but no identity is resolvable — set [git] name/email (or enable seed_host_identity); nothing to lock")
+		}
+		SetupGitIdentityGuard(result.Manager, result.HomeDir, opts.Logger)
+		SetupGitIdentity(result.Manager, result.HomeDir, opts.GitIdentity, opts.Logger)
+	}
+	return nil
 }
