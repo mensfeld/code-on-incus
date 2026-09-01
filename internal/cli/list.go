@@ -57,8 +57,8 @@ func init() {
 
 func listCommand(cmd *cobra.Command, args []string) error {
 	// Validate format value
-	if listFormat != "text" && listFormat != "json" {
-		return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid format '%s': must be 'text' or 'json'", listFormat)}
+	if err := validateTextOrJSON(listFormat); err != nil {
+		return err
 	}
 
 	// Resolve the status filter before touching Incus so flag misuse fails

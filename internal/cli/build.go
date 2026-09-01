@@ -266,7 +266,7 @@ func (a *App) buildAllProfiles() error {
 				Compression: p.Container.Build.Compression,
 				StoragePool: buildPool,
 				Agents:      p.Container.Build.Agents,
-				Logger:      func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) },
+				Logger:      stderrLogFn,
 			}
 			result := image.NewBuilder(opts).Build()
 			if result.Error != nil {
@@ -305,7 +305,7 @@ func (a *App) buildAllProfiles() error {
 				Force:       buildForce,
 				Compression: p.Container.Build.Compression,
 				StoragePool: buildPool,
-				Logger:      func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) },
+				Logger:      stderrLogFn,
 			}
 			result := image.NewBuilder(opts).Build()
 			cleanup()

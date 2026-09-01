@@ -145,8 +145,8 @@ func tmuxCaptureCommand(cmd *cobra.Command, args []string) error {
 }
 
 func tmuxListCommand(cmd *cobra.Command, args []string) error {
-	if tmuxFormat != "text" && tmuxFormat != "json" {
-		return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid format '%s': must be 'text' or 'json'", tmuxFormat)}
+	if err := validateTextOrJSON(tmuxFormat); err != nil {
+		return err
 	}
 
 	// List all running containers with configured prefix

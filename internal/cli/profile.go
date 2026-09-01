@@ -38,8 +38,8 @@ Examples:
 }
 
 func (a *App) profileListRunE(cmd *cobra.Command, args []string) error {
-	if profileFormat != "text" && profileFormat != "json" {
-		return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid format '%s': must be 'text' or 'json'", profileFormat)}
+	if err := validateTextOrJSON(profileFormat); err != nil {
+		return err
 	}
 
 	if len(a.cfg.Profiles) == 0 {

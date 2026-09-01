@@ -43,8 +43,8 @@ func init() {
 
 func healthCommand(cmd *cobra.Command, args []string) error {
 	// Validate format
-	if healthFormat != "text" && healthFormat != "json" {
-		return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid format '%s': must be 'text' or 'json'", healthFormat)}
+	if err := validateTextOrJSON(healthFormat); err != nil {
+		return err
 	}
 
 	// Use package-level cfg from PersistentPreRunE, fall back to defaults

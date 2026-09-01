@@ -297,15 +297,11 @@ func (m *Manager) Exec(args ...string) error {
 	return IncusExec(cmdArgs...)
 }
 
-// ExecArgs executes command arguments in the container with options
-func (m *Manager) ExecArgs(commandArgs []string, opts ExecCommandOptions) error {
-	args := []string{"exec", m.ContainerName}
-
-	// Add force-interactive flag for interactive sessions (required for tmux attach)
-	if opts.Interactive {
-		args = append(args, "--force-interactive")
-	}
-
+// appendExecOpts appends the env, working-directory, and user/group flags shared
+// by the exec builders, in that order. It deliberately does NOT add
+// --force-interactive (caller-specific, must precede these) or the trailing
+// "--"/command, so callers keep control of those.
+func appendExecOpts(args []string, opts ExecCommandOptions) []string {
 	// Add environment variables
 	for k, v := range opts.Env {
 		args = append(args, "--env", fmt.Sprintf("%s=%s", k, v))
@@ -325,6 +321,20 @@ func (m *Manager) ExecArgs(commandArgs []string, opts ExecCommandOptions) error 
 		}
 		args = append(args, "--group", fmt.Sprintf("%d", *group))
 	}
+
+	return args
+}
+
+// ExecArgs executes command arguments in the container with options
+func (m *Manager) ExecArgs(commandArgs []string, opts ExecCommandOptions) error {
+	args := []string{"exec", m.ContainerName}
+
+	// Add force-interactive flag for interactive sessions (required for tmux attach)
+	if opts.Interactive {
+		args = append(args, "--force-interactive")
+	}
+
+	args = appendExecOpts(args, opts)
 
 	// Add command arguments
 	args = append(args, "--")
@@ -340,27 +350,7 @@ func (m *Manager) ExecArgs(commandArgs []string, opts ExecCommandOptions) error 
 
 // ExecArgsCapture executes a command with raw arguments and captures output (no bash -c wrapping, preserves whitespace)
 func (m *Manager) ExecArgsCapture(commandArgs []string, opts ExecCommandOptions) (string, error) {
-	args := []string{"exec", m.ContainerName}
-
-	// Add environment variables
-	for k, v := range opts.Env {
-		args = append(args, "--env", fmt.Sprintf("%s=%s", k, v))
-	}
-
-	// Add working directory
-	if opts.Cwd != "" {
-		args = append(args, "--cwd", opts.Cwd)
-	}
-
-	// Add user/group
-	if opts.User != nil {
-		args = append(args, "--user", fmt.Sprintf("%d", *opts.User))
-		group := opts.User // default to same as user
-		if opts.Group != nil {
-			group = opts.Group
-		}
-		args = append(args, "--group", fmt.Sprintf("%d", *group))
-	}
+	args := appendExecOpts([]string{"exec", m.ContainerName}, opts)
 
 	// Add command arguments
 	args = append(args, "--")
@@ -389,25 +379,7 @@ func (m *Manager) ExecCommand(command string, opts ExecCommandOptions) (string, 
 		args = append(args, "--force-interactive")
 	}
 
-	// Add environment variables
-	for k, v := range opts.Env {
-		args = append(args, "--env", fmt.Sprintf("%s=%s", k, v))
-	}
-
-	// Add working directory
-	if opts.Cwd != "" {
-		args = append(args, "--cwd", opts.Cwd)
-	}
-
-	// Add user/group
-	if opts.User != nil {
-		args = append(args, "--user", fmt.Sprintf("%d", *opts.User))
-		group := opts.User // default to same as user
-		if opts.Group != nil {
-			group = opts.Group
-		}
-		args = append(args, "--group", fmt.Sprintf("%d", *group))
-	}
+	args = appendExecOpts(args, opts)
 
 	// Add command
 	args = append(args, "--", "bash", "-c", command)
@@ -500,27 +472,9 @@ func (m *Manager) PullDirectory(containerPath, localPath string) error {
 		return err
 	}
 
-	// Rename (move) the pulled directory to the final location
-	// If rename fails with cross-device error, fall back to copy via a temp dir
-	if err := os.Rename(pulledDir, localPath); err != nil {
-		if isCrossDeviceError(err) {
-			// Create a temporary directory on the same filesystem as localPath
-			tempDestDir, err := os.MkdirTemp(filepath.Dir(localPath), "coi-pull-*")
-			if err != nil {
-				return err
-			}
-			defer os.RemoveAll(tempDestDir)
-
-			// Copy into a temp target, then atomically rename to the final location
-			tempTarget := filepath.Join(tempDestDir, filepath.Base(localPath))
-			if err := copyDirRecursive(pulledDir, tempTarget); err != nil {
-				return err
-			}
-			return os.Rename(tempTarget, localPath)
-		}
-		return err
-	}
-	return nil
+	// Move the pulled directory to the final location, falling back to a copy
+	// when it's on a different filesystem (cross-device rename).
+	return renameOrCopy(pulledDir, localPath, copyDirRecursive)
 }
 
 // ErrRemoteIsDirectory is returned by PullFile when the remote source is a
@@ -598,23 +552,34 @@ func (m *Manager) PullFile(containerPath, localPath string) error {
 		return err
 	}
 
-	if err := os.Rename(staged, localPath); err != nil {
-		if isCrossDeviceError(err) {
-			// Copy to a temp file on the destination filesystem, then rename
-			// so the destination is still replaced atomically.
-			tempDestDir, err := os.MkdirTemp(filepath.Dir(localPath), "coi-pull-*")
-			if err != nil {
-				return err
-			}
-			defer os.RemoveAll(tempDestDir)
+	// Replace the destination atomically, falling back to a copy when staged and
+	// localPath are on different filesystems (cross-device rename).
+	return renameOrCopy(staged, localPath, copyFile)
+}
 
-			tempTarget := filepath.Join(tempDestDir, filepath.Base(localPath))
-			if err := copyFile(staged, tempTarget); err != nil {
-				return err
-			}
-			return os.Rename(tempTarget, localPath)
+// renameOrCopy moves src to dst with os.Rename, falling back — only on a
+// cross-device (EXDEV) rename — to copying (via copyFn) into a temp dir on dst's
+// filesystem and then atomically renaming into place, so dst is still replaced
+// atomically. copyFn is copyFile for a single file or copyDirRecursive for a
+// tree.
+func renameOrCopy(src, dst string, copyFn func(src, dst string) error) error {
+	if err := os.Rename(src, dst); err != nil {
+		if !isCrossDeviceError(err) {
+			return err
 		}
-		return err
+		// Create a temporary directory on the same filesystem as dst.
+		tempDestDir, err := os.MkdirTemp(filepath.Dir(dst), "coi-pull-*")
+		if err != nil {
+			return err
+		}
+		defer os.RemoveAll(tempDestDir)
+
+		// Copy into a temp target, then atomically rename to the final location.
+		tempTarget := filepath.Join(tempDestDir, filepath.Base(dst))
+		if err := copyFn(src, tempTarget); err != nil {
+			return err
+		}
+		return os.Rename(tempTarget, dst)
 	}
 	return nil
 }

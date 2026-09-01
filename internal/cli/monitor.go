@@ -63,8 +63,8 @@ func (a *App) monitorCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	// Validate format value
-	if monitorFormat != "text" && monitorFormat != "json" {
-		return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid format '%s': must be 'text' or 'json'", monitorFormat)}
+	if err := validateTextOrJSON(monitorFormat); err != nil {
+		return err
 	}
 
 	// Watch mode doesn't support JSON output
