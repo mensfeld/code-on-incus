@@ -104,7 +104,10 @@ func (c *CodexTool) BuildCommand(sessionID string, resume bool, resumeSessionID 
 // [PROMPT]` and `codex resume [OPTIONS] --last [PROMPT]` both accept the prompt
 // positional (verified against codex-cli 0.152.0, the version coi's installer
 // pulls — #755), so appending it after BuildCommand's resume rendering is
-// correct and the prompt is not dropped. Codex has no first-class system-prompt
+// correct and the prompt is not dropped. codex is unpinned (latest at image
+// build), so install_codex in internal/image/build.sh smoke-checks that `codex
+// resume --help` still advertises the [PROMPT] positional and fails the build if
+// a future release drops it. Codex has no first-class system-prompt
 // flag (instructions live in AGENTS.md), so a SystemPromptFile is rejected
 // rather than silently dropped. The prompt is passed as `"$(cat <file>)"` so
 // arbitrary content stays in the file.
