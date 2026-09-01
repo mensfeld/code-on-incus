@@ -141,220 +141,23 @@ func (a *App) profileInfoRunE(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Source:  %s\n", p.Source)
 	}
 	fmt.Println()
-
-	if p.Inherits != "" {
-		fmt.Printf("inherits = %q\n", p.Inherits)
-	}
-	if p.Context != "" {
-		fmt.Printf("context = %q\n", p.Context)
-	}
-	if len(p.ForwardEnv) > 0 {
-		fmt.Printf("forward_env = [%s]\n", formatStringSlice(p.ForwardEnv))
-	}
-
-	if p.Container.HasContainerConfig() {
-		fmt.Println()
-		fmt.Println("[container]")
-		if p.Container.Image != "" {
-			fmt.Printf("image = %q\n", p.Container.Image)
-		}
-		if p.Container.Persistent != nil {
-			fmt.Printf("persistent = %v\n", *p.Container.Persistent)
-		}
-		if p.Container.StoragePool != "" {
-			fmt.Printf("storage_pool = %q\n", p.Container.StoragePool)
-		}
-	}
-
-	if len(p.Environment) > 0 {
-		fmt.Println()
-		fmt.Println("[environment]")
-		keys := make([]string, 0, len(p.Environment))
-		for k := range p.Environment {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			fmt.Printf("%s = %q\n", k, p.Environment[k])
-		}
-	}
-
-	if p.Tool != nil {
-		fmt.Println()
-		fmt.Println("[tool]")
-		if p.Tool.Name != "" {
-			fmt.Printf("name = %q\n", p.Tool.Name)
-		}
-		if p.Tool.Binary != "" {
-			fmt.Printf("binary = %q\n", p.Tool.Binary)
-		}
-		if p.Tool.PermissionMode != "" {
-			fmt.Printf("permission_mode = %q\n", p.Tool.PermissionMode)
-		}
-		if p.Tool.ContextFile != "" {
-			fmt.Printf("context_file = %q\n", p.Tool.ContextFile)
-		}
-		if p.Tool.AutoContext != nil {
-			fmt.Printf("auto_context = %v\n", *p.Tool.AutoContext)
-		}
-		if p.Tool.Claude.EffortLevel != "" || p.Tool.Claude.Model != "" {
-			fmt.Println()
-			fmt.Println("[tool.claude]")
-			if p.Tool.Claude.EffortLevel != "" {
-				fmt.Printf("effort_level = %q\n", p.Tool.Claude.EffortLevel)
-			}
-			if p.Tool.Claude.Model != "" {
-				fmt.Printf("model = %q\n", p.Tool.Claude.Model)
-			}
-		}
-		if p.Tool.Codex.Model != "" || p.Tool.Codex.ReasoningEffort != "" {
-			fmt.Println()
-			fmt.Println("[tool.codex]")
-			if p.Tool.Codex.Model != "" {
-				fmt.Printf("model = %q\n", p.Tool.Codex.Model)
-			}
-			if p.Tool.Codex.ReasoningEffort != "" {
-				fmt.Printf("reasoning_effort = %q\n", p.Tool.Codex.ReasoningEffort)
-			}
-		}
-	}
-
-	if p.Container.Build.HasBuildConfig() {
-		fmt.Println()
-		fmt.Println("[container.build]")
-		if p.Container.Build.Base != "" {
-			fmt.Printf("base = %q\n", p.Container.Build.Base)
-		}
-		if p.Container.Build.Script != "" {
-			fmt.Printf("script = %q\n", p.Container.Build.Script)
-		}
-		if len(p.Container.Build.Commands) > 0 {
-			fmt.Printf("commands = [%s]\n", formatStringSlice(p.Container.Build.Commands))
-		}
-	}
-
-	if len(p.Mounts) > 0 {
-		for _, m := range p.Mounts {
-			fmt.Println()
-			fmt.Println("[[mounts]]")
-			fmt.Printf("host = %q\n", m.Host)
-			fmt.Printf("container = %q\n", m.Container)
-		}
-	}
-
-	if p.Network != nil {
-		fmt.Println()
-		fmt.Println("[network]")
-		if p.Network.Mode != "" {
-			fmt.Printf("mode = %q\n", string(p.Network.Mode))
-		}
-		if len(p.Network.AllowedDomains) > 0 {
-			fmt.Printf("allowed_domains = [%s]\n", formatStringSlice(p.Network.AllowedDomains))
-		}
-	}
-
+	printProfileTopLevel(p)
+	printProfileContainer(p)
+	printProfileEnvironment(p)
+	printProfileTool(p)
+	printProfileBuild(p)
+	printProfileMounts(p)
+	printProfileNetwork(p)
 	if p.Limits != nil {
 		printLimits(p.Limits)
 	}
-
-	if p.Paths != nil {
-		fmt.Println()
-		fmt.Println("[paths]")
-		if p.Paths.SessionsDir != "" {
-			fmt.Printf("sessions_dir = %q\n", p.Paths.SessionsDir)
-		}
-		if p.Paths.StorageDir != "" {
-			fmt.Printf("storage_dir = %q\n", p.Paths.StorageDir)
-		}
-		if p.Paths.LogsDir != "" {
-			fmt.Printf("logs_dir = %q\n", p.Paths.LogsDir)
-		}
-		if p.Paths.PreserveWorkspacePath {
-			fmt.Println("preserve_workspace_path = true")
-		}
-	}
-
-	if p.Incus != nil {
-		fmt.Println()
-		fmt.Println("[incus]")
-		if p.Incus.Project != "" {
-			fmt.Printf("project = %q\n", p.Incus.Project)
-		}
-		if p.Incus.Group != "" {
-			fmt.Printf("group = %q\n", p.Incus.Group)
-		}
-		if p.Incus.CodeUID != 0 {
-			fmt.Printf("code_uid = %d\n", p.Incus.CodeUID)
-		}
-		if p.Incus.CodeUser != "" {
-			fmt.Printf("code_user = %q\n", p.Incus.CodeUser)
-		}
-	}
-
-	if p.Git != nil {
-		fmt.Println()
-		fmt.Println("[git]")
-		if p.Git.WritableHooks != nil {
-			fmt.Printf("writable_hooks = %v\n", *p.Git.WritableHooks)
-		}
-	}
-
-	if p.SSH != nil {
-		fmt.Println()
-		fmt.Println("[ssh]")
-		if p.SSH.ForwardAgent != nil {
-			fmt.Printf("forward_agent = %v\n", *p.SSH.ForwardAgent)
-		}
-	}
-
-	if p.Security != nil {
-		fmt.Println()
-		fmt.Println("[security]")
-		if len(p.Security.ProtectedPaths) > 0 {
-			fmt.Printf("protected_paths = [%s]\n", formatStringSlice(p.Security.ProtectedPaths))
-		}
-		if len(p.Security.AdditionalProtectedPaths) > 0 {
-			fmt.Printf("additional_protected_paths = [%s]\n", formatStringSlice(p.Security.AdditionalProtectedPaths))
-		}
-		if p.Security.DisableProtection {
-			fmt.Println("disable_protection = true")
-		}
-		if p.Security.HostImmutable != nil {
-			fmt.Printf("host_immutable = %v\n", *p.Security.HostImmutable)
-		}
-		if len(p.Security.WritablePaths) > 0 {
-			fmt.Printf("writable_paths = [%s]\n", formatStringSlice(p.Security.WritablePaths))
-		}
-		if len(p.Security.SecretPaths) > 0 {
-			fmt.Printf("secret_paths = [%s]\n", formatStringSlice(p.Security.SecretPaths))
-		}
-	}
-
-	if p.Monitoring != nil {
-		fmt.Println()
-		fmt.Println("[monitoring]")
-		if p.Monitoring.Enabled != nil {
-			fmt.Printf("enabled = %v\n", *p.Monitoring.Enabled)
-		}
-		if p.Monitoring.AutoPauseOnHigh != nil {
-			fmt.Printf("auto_pause_on_high = %v\n", *p.Monitoring.AutoPauseOnHigh)
-		}
-		if p.Monitoring.AutoKillOnCritical != nil {
-			fmt.Printf("auto_kill_on_critical = %v\n", *p.Monitoring.AutoKillOnCritical)
-		}
-	}
-
-	if p.Timezone != nil {
-		fmt.Println()
-		fmt.Println("[timezone]")
-		if p.Timezone.Mode != "" {
-			fmt.Printf("mode = %q\n", p.Timezone.Mode)
-		}
-		if p.Timezone.Name != "" {
-			fmt.Printf("name = %q\n", p.Timezone.Name)
-		}
-	}
-
+	printProfilePaths(p)
+	printProfileIncus(p)
+	printProfileGit(p)
+	printProfileSSH(p)
+	printProfileSecurity(p)
+	printProfileMonitoring(p)
+	printProfileTimezone(p)
 	return nil
 }
 
@@ -742,4 +545,255 @@ func init() {
 	profileCmd.AddCommand(profileCreateCmd)
 	profileCmd.AddCommand(profileEditCmd)
 	profileCmd.AddCommand(profileDeleteCmd)
+}
+
+// printProfileTopLevel prints its section of a profile's config, if present.
+func printProfileTopLevel(p *config.ProfileConfig) {
+	if p.Inherits != "" {
+		fmt.Printf("inherits = %q\n", p.Inherits)
+	}
+	if p.Context != "" {
+		fmt.Printf("context = %q\n", p.Context)
+	}
+	if len(p.ForwardEnv) > 0 {
+		fmt.Printf("forward_env = [%s]\n", formatStringSlice(p.ForwardEnv))
+	}
+}
+
+// printProfileContainer prints its section of a profile's config, if present.
+func printProfileContainer(p *config.ProfileConfig) {
+	if p.Container.HasContainerConfig() {
+		fmt.Println()
+		fmt.Println("[container]")
+		if p.Container.Image != "" {
+			fmt.Printf("image = %q\n", p.Container.Image)
+		}
+		if p.Container.Persistent != nil {
+			fmt.Printf("persistent = %v\n", *p.Container.Persistent)
+		}
+		if p.Container.StoragePool != "" {
+			fmt.Printf("storage_pool = %q\n", p.Container.StoragePool)
+		}
+	}
+}
+
+// printProfileEnvironment prints its section of a profile's config, if present.
+func printProfileEnvironment(p *config.ProfileConfig) {
+	if len(p.Environment) > 0 {
+		fmt.Println()
+		fmt.Println("[environment]")
+		keys := make([]string, 0, len(p.Environment))
+		for k := range p.Environment {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			fmt.Printf("%s = %q\n", k, p.Environment[k])
+		}
+	}
+}
+
+// printProfileTool prints its section of a profile's config, if present.
+func printProfileTool(p *config.ProfileConfig) {
+	if p.Tool != nil {
+		fmt.Println()
+		fmt.Println("[tool]")
+		if p.Tool.Name != "" {
+			fmt.Printf("name = %q\n", p.Tool.Name)
+		}
+		if p.Tool.Binary != "" {
+			fmt.Printf("binary = %q\n", p.Tool.Binary)
+		}
+		if p.Tool.PermissionMode != "" {
+			fmt.Printf("permission_mode = %q\n", p.Tool.PermissionMode)
+		}
+		if p.Tool.ContextFile != "" {
+			fmt.Printf("context_file = %q\n", p.Tool.ContextFile)
+		}
+		if p.Tool.AutoContext != nil {
+			fmt.Printf("auto_context = %v\n", *p.Tool.AutoContext)
+		}
+		if p.Tool.Claude.EffortLevel != "" || p.Tool.Claude.Model != "" {
+			fmt.Println()
+			fmt.Println("[tool.claude]")
+			if p.Tool.Claude.EffortLevel != "" {
+				fmt.Printf("effort_level = %q\n", p.Tool.Claude.EffortLevel)
+			}
+			if p.Tool.Claude.Model != "" {
+				fmt.Printf("model = %q\n", p.Tool.Claude.Model)
+			}
+		}
+		if p.Tool.Codex.Model != "" || p.Tool.Codex.ReasoningEffort != "" {
+			fmt.Println()
+			fmt.Println("[tool.codex]")
+			if p.Tool.Codex.Model != "" {
+				fmt.Printf("model = %q\n", p.Tool.Codex.Model)
+			}
+			if p.Tool.Codex.ReasoningEffort != "" {
+				fmt.Printf("reasoning_effort = %q\n", p.Tool.Codex.ReasoningEffort)
+			}
+		}
+	}
+}
+
+// printProfileBuild prints its section of a profile's config, if present.
+func printProfileBuild(p *config.ProfileConfig) {
+	if p.Container.Build.HasBuildConfig() {
+		fmt.Println()
+		fmt.Println("[container.build]")
+		if p.Container.Build.Base != "" {
+			fmt.Printf("base = %q\n", p.Container.Build.Base)
+		}
+		if p.Container.Build.Script != "" {
+			fmt.Printf("script = %q\n", p.Container.Build.Script)
+		}
+		if len(p.Container.Build.Commands) > 0 {
+			fmt.Printf("commands = [%s]\n", formatStringSlice(p.Container.Build.Commands))
+		}
+	}
+}
+
+// printProfileMounts prints its section of a profile's config, if present.
+func printProfileMounts(p *config.ProfileConfig) {
+	if len(p.Mounts) > 0 {
+		for _, m := range p.Mounts {
+			fmt.Println()
+			fmt.Println("[[mounts]]")
+			fmt.Printf("host = %q\n", m.Host)
+			fmt.Printf("container = %q\n", m.Container)
+		}
+	}
+}
+
+// printProfileNetwork prints its section of a profile's config, if present.
+func printProfileNetwork(p *config.ProfileConfig) {
+	if p.Network != nil {
+		fmt.Println()
+		fmt.Println("[network]")
+		if p.Network.Mode != "" {
+			fmt.Printf("mode = %q\n", string(p.Network.Mode))
+		}
+		if len(p.Network.AllowedDomains) > 0 {
+			fmt.Printf("allowed_domains = [%s]\n", formatStringSlice(p.Network.AllowedDomains))
+		}
+	}
+}
+
+// printProfilePaths prints its section of a profile's config, if present.
+func printProfilePaths(p *config.ProfileConfig) {
+	if p.Paths != nil {
+		fmt.Println()
+		fmt.Println("[paths]")
+		if p.Paths.SessionsDir != "" {
+			fmt.Printf("sessions_dir = %q\n", p.Paths.SessionsDir)
+		}
+		if p.Paths.StorageDir != "" {
+			fmt.Printf("storage_dir = %q\n", p.Paths.StorageDir)
+		}
+		if p.Paths.LogsDir != "" {
+			fmt.Printf("logs_dir = %q\n", p.Paths.LogsDir)
+		}
+		if p.Paths.PreserveWorkspacePath {
+			fmt.Println("preserve_workspace_path = true")
+		}
+	}
+}
+
+// printProfileIncus prints its section of a profile's config, if present.
+func printProfileIncus(p *config.ProfileConfig) {
+	if p.Incus != nil {
+		fmt.Println()
+		fmt.Println("[incus]")
+		if p.Incus.Project != "" {
+			fmt.Printf("project = %q\n", p.Incus.Project)
+		}
+		if p.Incus.Group != "" {
+			fmt.Printf("group = %q\n", p.Incus.Group)
+		}
+		if p.Incus.CodeUID != 0 {
+			fmt.Printf("code_uid = %d\n", p.Incus.CodeUID)
+		}
+		if p.Incus.CodeUser != "" {
+			fmt.Printf("code_user = %q\n", p.Incus.CodeUser)
+		}
+	}
+}
+
+// printProfileGit prints its section of a profile's config, if present.
+func printProfileGit(p *config.ProfileConfig) {
+	if p.Git != nil {
+		fmt.Println()
+		fmt.Println("[git]")
+		if p.Git.WritableHooks != nil {
+			fmt.Printf("writable_hooks = %v\n", *p.Git.WritableHooks)
+		}
+	}
+}
+
+// printProfileSSH prints its section of a profile's config, if present.
+func printProfileSSH(p *config.ProfileConfig) {
+	if p.SSH != nil {
+		fmt.Println()
+		fmt.Println("[ssh]")
+		if p.SSH.ForwardAgent != nil {
+			fmt.Printf("forward_agent = %v\n", *p.SSH.ForwardAgent)
+		}
+	}
+}
+
+// printProfileSecurity prints its section of a profile's config, if present.
+func printProfileSecurity(p *config.ProfileConfig) {
+	if p.Security != nil {
+		fmt.Println()
+		fmt.Println("[security]")
+		if len(p.Security.ProtectedPaths) > 0 {
+			fmt.Printf("protected_paths = [%s]\n", formatStringSlice(p.Security.ProtectedPaths))
+		}
+		if len(p.Security.AdditionalProtectedPaths) > 0 {
+			fmt.Printf("additional_protected_paths = [%s]\n", formatStringSlice(p.Security.AdditionalProtectedPaths))
+		}
+		if p.Security.DisableProtection {
+			fmt.Println("disable_protection = true")
+		}
+		if p.Security.HostImmutable != nil {
+			fmt.Printf("host_immutable = %v\n", *p.Security.HostImmutable)
+		}
+		if len(p.Security.WritablePaths) > 0 {
+			fmt.Printf("writable_paths = [%s]\n", formatStringSlice(p.Security.WritablePaths))
+		}
+		if len(p.Security.SecretPaths) > 0 {
+			fmt.Printf("secret_paths = [%s]\n", formatStringSlice(p.Security.SecretPaths))
+		}
+	}
+}
+
+// printProfileMonitoring prints its section of a profile's config, if present.
+func printProfileMonitoring(p *config.ProfileConfig) {
+	if p.Monitoring != nil {
+		fmt.Println()
+		fmt.Println("[monitoring]")
+		if p.Monitoring.Enabled != nil {
+			fmt.Printf("enabled = %v\n", *p.Monitoring.Enabled)
+		}
+		if p.Monitoring.AutoPauseOnHigh != nil {
+			fmt.Printf("auto_pause_on_high = %v\n", *p.Monitoring.AutoPauseOnHigh)
+		}
+		if p.Monitoring.AutoKillOnCritical != nil {
+			fmt.Printf("auto_kill_on_critical = %v\n", *p.Monitoring.AutoKillOnCritical)
+		}
+	}
+}
+
+// printProfileTimezone prints its section of a profile's config, if present.
+func printProfileTimezone(p *config.ProfileConfig) {
+	if p.Timezone != nil {
+		fmt.Println()
+		fmt.Println("[timezone]")
+		if p.Timezone.Mode != "" {
+			fmt.Printf("mode = %q\n", p.Timezone.Mode)
+		}
+		if p.Timezone.Name != "" {
+			fmt.Printf("name = %q\n", p.Timezone.Name)
+		}
+	}
 }
