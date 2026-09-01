@@ -277,107 +277,8 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 			if opts.Persistent || opts.ContainerName != "" {
 				// Restart the stopped container
 				// This includes: persistent containers OR containers specified via --container flag
-				opts.Logger("Starting existing container...")
-				// Strip stale port devices while STOPPED: they would re-bind
-				// their old host ports at start (colliding with the preflight
-				// below, or failing the start outright if another process took
-				// a port meanwhile). The current plan is re-published later.
-				RemoveStalePortDevices(result.Manager, opts.Logger)
-				// Reconcile the workspace-sourced security devices against the
-				// CURRENT workspace BEFORE start (issue #610). A protect-*/mask-*/
-				// gitc-* device attached at first launch keeps its original host
-				// source; if that source was removed while the container was stopped,
-				// Incus rejects the container at start-validation with "Missing
-				// source path" and no fresh coi invocation self-heals it. Strip those
-				// devices and re-run the SAME security setup a fresh launch uses, so
-				// materialization / symlink-rejection / type handling all come from
-				// one place and protection matches the current workspace.
-				reuseCWP := result.Manager.GetWorkspacePath()
-				result.ContainerWorkspacePath = reuseCWP
-				reuseLayout, reuseWtErr := ResolveGitWorktree(opts.WorkspacePath)
-				if reuseWtErr != nil {
-					// The layout also feeds the shift decision below; losing it
-					// silently would drop the common dir's vote (#683).
-					opts.Logger(fmt.Sprintf("Warning: git worktree not resolved (%v); its git dirs are skipped by the UID-mapping check and git commands may fail in the container", reuseWtErr))
-				}
-				reuseWritableHooks := !containsGitHooksPath(opts.ProtectedPaths)
-				StripSecurityDevices(result.Manager, opts.Logger)
-				// Decide the shift flag the same way a fresh launch does (issue
-				// #685). The old `!opts.DisableShift` ignored both cases that turn
-				// shift off at first launch — a host/code UID mismatch and a
-				// Colima/Lima guest that maps UIDs itself — so every reuse re-added
-				// the protect-* devices with shift=true. On a container the #678
-				// fallback had already converted to raw.idmap that re-armed the
-				// exact configuration whose start failure caused the conversion,
-				// once per session. ResolveReuseUIDMapping additionally converts
-				// creation-time shift=true devices when the decision is raw.idmap
-				// (#683 — a pre-upgrade container on OrbStack ≥2.2.2 never hits
-				// the start failure the reactive fallback keys on).
-				//
-				// The decision deliberately sees the UNGATED mount config: on
-				// reuse, mount devices persist from creation regardless of
-				// current trust (the 4.6 gate below only warns), so the
-				// currently-declared mounts are the closest available stand-in
-				// for the devices actually attached. Trust-gating the vote
-				// would be both unsafe and pointless here: a mount whose trust
-				// was revoked after creation is still attached and its
-				// filesystem still matters, while the only influence any path
-				// has on the vote is flipping toward raw.idmap — whose value
-				// derives from host/code UIDs, never from the path — so an
-				// untrusted entry cannot inject anything.
-				reuseSources := MountSources(opts.WorkspacePath, opts.MountConfig, WorktreeSources(reuseLayout)...)
-				reuseUseShift := ResolveReuseUIDMapping(containerName, reuseSources, opts.DisableShift, opts.Logger)
-				// A named session (session_name) can be reused from a different
-				// workspace location than the container was created with — the
-				// persisted workspace device then points at the old source and
-				// must be replaced before the security mounts derive their
-				// overlays from the container-side workspace path.
-				// An EXPLICIT --container is exempt: it means "enter that
-				// container as it is" — rebinding its workspace to whatever
-				// directory the caller happens to be in would both break the
-				// testing flow and silently mount an unintended directory
-				// (e.g. $HOME) read-write into the container.
-				if opts.ContainerName == "" {
-					if cwp, moved, remountErr := RemountMovedWorkspace(result.Manager, opts.WorkspacePath, opts.PreserveWorkspacePath, reuseLayout, reuseUseShift, opts.Logger); remountErr != nil {
-						return nil, remountErr
-					} else if moved {
-						reuseCWP = cwp
-						result.ContainerWorkspacePath = cwp
-					}
-				}
-				reusePaths, reuseImmutable, reuseErr := applySessionSecurity(result.Manager, opts, reuseCWP, reuseUseShift, reuseLayout, reuseWritableHooks, containerName)
-				opts.ProtectedPaths = reusePaths
-				if reuseImmutable {
-					result.HasImmutableProtection = true
-				}
-				if reuseErr != nil {
-					return nil, reuseErr
-				}
-				// Reuse gets the same start fallbacks as a fresh launch and as
-				// run's persistent reuse (internal/cli/run.go): a persistent
-				// container may carry security.idmap.isolated, and its disk devices
-				// only materialize at start, so an idmap-incompatible mount fails
-				// right here with nothing to catch it (#685).
-				if err := container.StartWithIsolationFallback(result.ContainerName); err != nil {
-					return nil, fmt.Errorf("failed to start container: %w", err)
-				}
-				// Block network immediately: a previous session's AI agent may have
-				// planted startup scripts (systemd units, cron jobs, shell hooks) that
-				// would otherwise phone home during the boot window before
-				// SetupForContainer installs proper isolation rules.
-				if opts.NetworkConfig != nil {
-					if err := network.ApplyBootBlockRule(result.ContainerName); err != nil {
-						// Fail closed in restricted/allowlist mode: rather than let
-						// the container run unblocked during the boot window, stop it
-						// and abort. Open mode opts into unrestricted egress.
-						if opts.NetworkConfig.Mode != config.NetworkModeOpen {
-							_ = result.Manager.Stop(true)
-							return nil, fmt.Errorf("boot network block failed in %s mode; stopped container to avoid an unprotected boot window: %w", opts.NetworkConfig.Mode, err)
-						}
-						opts.Logger(fmt.Sprintf("Warning: boot block not applied (open mode): %v", err))
-					} else {
-						opts.Logger("Boot network block applied (lifted after isolation rules are set up)")
-					}
+				if err := restartStoppedContainer(result, &opts, containerName); err != nil {
+					return nil, err
 				}
 				skipLaunch = true
 			} else {
@@ -453,206 +354,8 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 	// Always launch as non-ephemeral so we can save session data even if container is stopped
 	// (e.g., via 'sudo shutdown 0' from within). Cleanup will delete unless persistent mode is configured.
 	if !skipLaunch {
-		opts.Logger(fmt.Sprintf("Creating container from %s...", image))
-		// Create container without starting it (init). Honor the configured
-		// storage pool ([container] storage_pool) the same way the run pipeline
-		// does via `-s <pool>` — otherwise `coi shell` silently lands on the
-		// Incus default pool (#726). An empty pool means "use the default".
-		initArgs := []string{"init", image, result.ContainerName}
-		if opts.StoragePool != "" {
-			initArgs = append(initArgs, "-s", opts.StoragePool)
-		}
-		if err := container.IncusExec(initArgs...); err != nil {
-			return nil, fmt.Errorf("failed to create container: %w", err)
-		}
-
-		// Detect a git worktree checkout (.git is a file whose real git internals
-		// live outside the workspace) BEFORE the UID-mapping decision: the common
-		// dir is mounted as its own shift-carrying disk device, so its filesystem
-		// must vote on that decision too (#683). A valid layout forces
-		// preserve-path so git's pointers resolve identically host<->container,
-		// and its external git dirs are mounted + protected below (issue #533). A
-		// pointer that fails the safety guard is not mounted; git fails loudly
-		// rather than exposing a mis-pointed dir.
-		worktreeLayout, wtErr := ResolveGitWorktree(opts.WorkspacePath)
-		if wtErr != nil {
-			opts.Logger(fmt.Sprintf("Warning: git worktree not mounted (%v); git commands may fail in the container", wtErr))
-		}
-		worktreeWritableHooks := !containsGitHooksPath(opts.ProtectedPaths)
-
-		// Configure UID/GID mapping for the workspace bind mount. Shared with
-		// the run pipeline via ConfigureUIDMapping so both honor Colima/Lima
-		// auto-detection AND set raw.idmap on any host-UID/code-UID mismatch
-		// (issue #530).
-		// Shell path sets raw.idmap before its own start (below), so the
-		// idmapApplied signal is not needed here.
-		useShift, _ := ConfigureUIDMapping(result.ContainerName, MountSources(opts.WorkspacePath, opts.MountConfig, WorktreeSources(worktreeLayout)...), opts.DisableShift, opts.Logger)
-
-		// Determine container mount path - either /workspace (default) or same as host path
-		preserveWorkspace := opts.PreserveWorkspacePath || worktreeLayout != nil
-		containerWorkspacePath := "/workspace"
-		if preserveWorkspace {
-			// Validate that the path doesn't conflict with critical system directories.
-			if WorkspaceUnderSystemDir(opts.WorkspacePath) {
-				if worktreeLayout != nil {
-					// Can't preserve the path, so the worktree's git pointers can't
-					// resolve and its internals can't be protected — fail closed.
-					return nil, fmt.Errorf("git worktree workspace %q is under a system directory; cannot preserve its host path to mount git internals safely", opts.WorkspacePath)
-				}
-				opts.Logger(fmt.Sprintf("Warning: preserve_workspace_path requested for %q conflicts with system directories; using /workspace instead", opts.WorkspacePath))
-			} else {
-				containerWorkspacePath = filepath.Clean(opts.WorkspacePath)
-				opts.Logger(fmt.Sprintf("Adding workspace mount: %s -> %s (preserving host path)", opts.WorkspacePath, containerWorkspacePath))
-			}
-		}
-		if containerWorkspacePath == "/workspace" && !preserveWorkspace {
-			opts.Logger(fmt.Sprintf("Adding workspace mount: %s -> %s", opts.WorkspacePath, containerWorkspacePath))
-		}
-		result.ContainerWorkspacePath = containerWorkspacePath
-		if err := result.Manager.MountDisk("workspace", opts.WorkspacePath, containerWorkspacePath, useShift, false); err != nil {
-			return nil, fmt.Errorf("failed to add workspace device: %w", err)
-		}
-		// Mount the worktree's external git common dir (read-write, at its host path)
-		// so git resolves; its RCE sinks are re-covered read-only after the security
-		// mounts below (issue #533).
-		if worktreeLayout != nil {
-			if err := MountGitWorktreeDirs(result.Manager, worktreeLayout, useShift); err != nil {
-				return nil, fmt.Errorf("failed to mount git worktree dirs: %w", err)
-			}
-			opts.Logger(fmt.Sprintf("Mounted git worktree common dir (read-write): %s", worktreeLayout.CommonDir))
-		}
-
-		// Mount all configured directories
-		if err := setupMounts(result.Manager, opts.MountConfig, useShift, opts.Logger); err != nil {
+		if err := createAndStartContainer(result, &opts, image, containerName); err != nil {
 			return nil, err
-		}
-
-		// Protect security-sensitive paths (read-only mounts), extend protection to a
-		// worktree's external git common dir, apply the host-immutable belt, and mask
-		// secret paths — all via applySessionSecurity, the single implementation shared
-		// with the reuse/restart reconcile below (issue #610). Must be added after the
-		// workspace mount for the overlays to layer on top.
-		effectivePaths, hasImmutable, secErr := applySessionSecurity(result.Manager, opts, containerWorkspacePath, useShift, worktreeLayout, worktreeWritableHooks, containerName)
-		// Adopt the expanded list as the canonical protected set so downstream
-		// consumers (the SANDBOX_CONTEXT.md "Protected paths" listing built from
-		// opts.ProtectedPaths below) reflect what was actually mounted, including the
-		// per-worktree configs.
-		opts.ProtectedPaths = effectivePaths
-		if hasImmutable {
-			result.HasImmutableProtection = true
-		}
-		if secErr != nil {
-			return nil, secErr
-		}
-
-		// Apply resource limits before starting (if configured)
-		if opts.LimitsConfig != nil && hasLimits(opts.LimitsConfig) {
-			opts.Logger("Applying resource limits...")
-			applyOpts := limits.ApplyOptions{
-				ContainerName: result.ContainerName,
-				CPU: limits.CPULimits{
-					Count:     opts.LimitsConfig.CPU.Count,
-					Allowance: opts.LimitsConfig.CPU.Allowance,
-					Priority:  opts.LimitsConfig.CPU.Priority,
-				},
-				Memory: limits.MemoryLimits{
-					Limit:   opts.LimitsConfig.Memory.Limit,
-					Enforce: opts.LimitsConfig.Memory.Enforce,
-					Swap:    opts.LimitsConfig.Memory.Swap,
-				},
-				Disk: limits.DiskLimits{
-					Read:     opts.LimitsConfig.Disk.Read,
-					Write:    opts.LimitsConfig.Disk.Write,
-					Max:      opts.LimitsConfig.Disk.Max,
-					Priority: opts.LimitsConfig.Disk.Priority,
-				},
-				Runtime: limits.RuntimeLimits{
-					MaxProcesses: opts.LimitsConfig.Runtime.MaxProcesses,
-				},
-				Project: opts.IncusProject,
-			}
-			if err := limits.ApplyResourceLimits(applyOpts); err != nil {
-				return nil, fmt.Errorf("failed to apply resource limits: %w", err)
-			}
-		}
-
-		// Enable Docker/nested container support (must be set before first boot)
-		opts.Logger("Enabling Docker support...")
-		if err := container.EnableDockerSupport(result.ContainerName); err != nil {
-			return nil, fmt.Errorf("failed to enable Docker support: %w", err)
-		}
-
-		// Isolate UID/GID namespace so each container gets a unique host-side UID
-		// range, preventing cross-container file access via shared host UIDs.
-		// Non-fatal: some environments (nested containers, CI runners) don't have
-		// enough subuid/subgid space. The fallback at start time handles this.
-		idmapIsolated := false
-		if err := container.IsolateUIDNamespace(result.ContainerName); err != nil {
-			opts.Logger(fmt.Sprintf("Warning: UID namespace isolation unavailable: %v", err))
-		} else {
-			idmapIsolated = true
-		}
-
-		// Disable guest API to prevent host topology leaks (FLAWS Finding 3)
-		if err := container.DisableGuestAPI(result.ContainerName); err != nil {
-			return nil, fmt.Errorf("failed to disable guest API: %w", err)
-		}
-
-		// Harden the bridge NIC against egress-isolation bypass: anti-spoof the
-		// source IP/MAC (so saddr-keyed nft rules can't be dodged) and isolate the
-		// bridge port (so the container can't reach sibling containers at L2).
-		// Non-fatal: unmanaged/static/macvlan NICs degrade to nft-only enforcement.
-		if err := container.EnableNICSecurity(result.ContainerName); err != nil {
-			opts.Logger(fmt.Sprintf("Warning: NIC security hardening not applied: %v", err))
-		}
-
-		// For restricted/allowlist modes, disable IPv6 from the kernel's first
-		// instant so there is no IPv6 egress window before the host-side ip6 drop
-		// is installed. Open mode opts into unrestricted egress, so skip it.
-		if opts.NetworkConfig != nil && opts.NetworkConfig.Mode != config.NetworkModeOpen {
-			if err := container.DisableIPv6AtBoot(result.ContainerName); err != nil {
-				opts.Logger(fmt.Sprintf("Warning: pre-boot IPv6 disable not applied: %v", err))
-			}
-			// With IPv6 disabled, keep systemd-networkd from wedging on it (#548).
-			if err := container.ConfigureNetworkdIPv4Only(result.ContainerName); err != nil {
-				opts.Logger(fmt.Sprintf("Warning: networkd IPv4-only config not applied: %v", err))
-			}
-		}
-
-		// Block privileged containers — they defeat all isolation
-		if err := container.CheckNotPrivileged(result.ContainerName); err != nil {
-			return nil, err
-		}
-
-		// Now start the container
-		opts.Logger("Starting container...")
-		if idmapIsolated {
-			if err := container.StartWithIsolationFallback(result.ContainerName); err != nil {
-				return nil, fmt.Errorf("failed to start container: %w", err)
-			}
-		} else {
-			// Isolation was never set, so the isolation fallback has nothing to
-			// unset — but the #678 idmapped-mount failure is orthogonal to it and
-			// hits this branch just the same (#685).
-			if err := container.StartWithIdmapFallback(result.ContainerName); err != nil {
-				return nil, fmt.Errorf("failed to start container: %w", err)
-			}
-		}
-		// Block network immediately after first boot as well: defence-in-depth
-		// against a malicious base image that runs something on init.
-		if opts.NetworkConfig != nil {
-			if err := network.ApplyBootBlockRule(result.ContainerName); err != nil {
-				// Fail closed in restricted/allowlist mode: stop the just-started
-				// container and abort rather than leave an unprotected boot window.
-				// Open mode opts into unrestricted egress.
-				if opts.NetworkConfig.Mode != config.NetworkModeOpen {
-					_ = result.Manager.Stop(true)
-					return nil, fmt.Errorf("boot network block failed in %s mode; stopped container to avoid an unprotected boot window: %w", opts.NetworkConfig.Mode, err)
-				}
-				opts.Logger(fmt.Sprintf("Warning: boot block not applied (open mode): %v", err))
-			} else {
-				opts.Logger("Boot network block applied (lifted after isolation rules are set up)")
-			}
 		}
 	}
 
@@ -946,94 +649,7 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 	// 12. Inject sandbox context file (~/SANDBOX_CONTEXT.md)
 	// This runs for both new and resumed sessions so dynamic info stays current.
 	// The file is tool-agnostic — any AI tool can be configured to read it.
-	var contextContent string
-	{
-		networkMode := ""
-		var allowedPorts []int
-		var dnsServers, allowedDomains []string
-		if opts.NetworkConfig != nil {
-			networkMode = string(opts.NetworkConfig.Mode)
-			allowedPorts = opts.NetworkConfig.AllowedPorts
-			dnsServers = opts.NetworkConfig.DNSServers
-			allowedDomains = opts.NetworkConfig.AllowedDomains
-		}
-		// Check if GH_TOKEN or GITHUB_TOKEN is among forwarded env vars
-		ghAuthenticated := false
-		for _, name := range opts.ForwardedEnvVars {
-			if name == "GH_TOKEN" || name == "GITHUB_TOKEN" {
-				ghAuthenticated = true
-				break
-			}
-		}
-
-		toolName := "AI coding tool"
-		if opts.Tool != nil {
-			toolName = opts.Tool.Name()
-		}
-
-		var extraMounts []tool.MountInfo
-		if opts.MountConfig != nil {
-			for _, m := range opts.MountConfig.Mounts {
-				extraMounts = append(extraMounts, tool.MountInfo{ContainerPath: m.ContainerPath})
-			}
-		}
-
-		var cpuLimit, memoryLimit, maxDuration string
-		if opts.LimitsConfig != nil {
-			cpuLimit = opts.LimitsConfig.CPU.Count
-			memoryLimit = opts.LimitsConfig.Memory.Limit
-			maxDuration = opts.LimitsConfig.Runtime.MaxDuration
-		}
-
-		// Read profile context file content if configured
-		var profileContext string
-		if opts.ProfileContextFile != "" {
-			data, err := os.ReadFile(opts.ProfileContextFile)
-			if err != nil {
-				opts.Logger(fmt.Sprintf("Warning: Failed to read profile context file %s: %v", opts.ProfileContextFile, err))
-			} else {
-				profileContext = string(data)
-				opts.Logger(fmt.Sprintf("Loaded profile context from %s", opts.ProfileContextFile))
-			}
-		}
-
-		ctxInfo := tool.ContextInfo{
-			WorkspacePath:      result.ContainerWorkspacePath,
-			HomeDir:            result.HomeDir,
-			Persistent:         opts.Persistent,
-			NetworkMode:        networkMode,
-			AllowedPorts:       allowedPorts,
-			DNSServers:         dnsServers,
-			AllowedDomains:     allowedDomains,
-			SSHAgentForwarded:  result.SSHAgentSocketPath != "",
-			RunAsRoot:          result.RunAsRoot,
-			ProtectedPaths:     opts.ProtectedPaths,
-			GHCLIAuthenticated: ghAuthenticated,
-			ForwardedEnvVars:   opts.ForwardedEnvVars,
-			Timezone:           result.Timezone,
-			ExtraMounts:        extraMounts,
-			PublishedPorts:     publishedPortInfos(result.PublishedPorts),
-			CPULimit:           cpuLimit,
-			MemoryLimit:        memoryLimit,
-			MaxDuration:        maxDuration,
-			ToolName:           toolName,
-			ContainerName:      result.ContainerName,
-			ProfileContext:     profileContext,
-		}
-		contextContent = resolveContextContent(ctxInfo, opts.ContextFilePath, opts.Logger)
-		if err := injectContextFile(result.Manager, ctxInfo, opts.ContextFilePath, result.HomeDir, opts.Logger); err != nil {
-			opts.Logger(fmt.Sprintf("Warning: Failed to inject context file: %v", err))
-		}
-		// Machine-readable companion for programmatic consumers (#705), enabled
-		// by default. Written from ctxInfo (the real facts) unless [tool]
-		// context_json_file provides a custom JSON to inject verbatim; disable
-		// entirely with context_json = false.
-		if config.BoolVal(opts.ContextJSON) {
-			if err := injectContextJSONFile(result.Manager, ctxInfo, opts.ContextJSONFilePath, result.HomeDir, opts.Logger); err != nil {
-				opts.Logger(fmt.Sprintf("Warning: Failed to inject context JSON file: %v", err))
-			}
-		}
-	}
+	contextContent := injectSandboxContext(result, opts)
 
 	// 13. Inject auto-context file for tools that support it (e.g., Claude's ~/.claude/CLAUDE.md)
 	// This writes sandbox context into the tool's native auto-load file so it's available at session start.
@@ -1247,4 +863,417 @@ func ResolveCodeUID(mgr container.ContainerExecution, codeUser string) (int, err
 		return 0, nil // no code user: sessions run as root
 	}
 	return uid, nil
+}
+
+// restartStoppedContainer reconciles and restarts a stopped, reusable container
+// (persistent or explicit --container). It re-runs the same workspace-mount and
+// security-device setup a fresh launch uses (issue #610) and applies the boot
+// network block; it mutates result (workspace path, immutable flag) and
+// opts.ProtectedPaths in place. Extracted verbatim from Setup.
+func restartStoppedContainer(result *SetupResult, opts *SetupOptions, containerName string) error {
+	opts.Logger("Starting existing container...")
+	// Strip stale port devices while STOPPED: they would re-bind
+	// their old host ports at start (colliding with the preflight
+	// below, or failing the start outright if another process took
+	// a port meanwhile). The current plan is re-published later.
+	RemoveStalePortDevices(result.Manager, opts.Logger)
+	// Reconcile the workspace-sourced security devices against the
+	// CURRENT workspace BEFORE start (issue #610). A protect-*/mask-*/
+	// gitc-* device attached at first launch keeps its original host
+	// source; if that source was removed while the container was stopped,
+	// Incus rejects the container at start-validation with "Missing
+	// source path" and no fresh coi invocation self-heals it. Strip those
+	// devices and re-run the SAME security setup a fresh launch uses, so
+	// materialization / symlink-rejection / type handling all come from
+	// one place and protection matches the current workspace.
+	reuseCWP := result.Manager.GetWorkspacePath()
+	result.ContainerWorkspacePath = reuseCWP
+	reuseLayout, reuseWtErr := ResolveGitWorktree(opts.WorkspacePath)
+	if reuseWtErr != nil {
+		// The layout also feeds the shift decision below; losing it
+		// silently would drop the common dir's vote (#683).
+		opts.Logger(fmt.Sprintf("Warning: git worktree not resolved (%v); its git dirs are skipped by the UID-mapping check and git commands may fail in the container", reuseWtErr))
+	}
+	reuseWritableHooks := !containsGitHooksPath(opts.ProtectedPaths)
+	StripSecurityDevices(result.Manager, opts.Logger)
+	// Decide the shift flag the same way a fresh launch does (issue
+	// #685). The old `!opts.DisableShift` ignored both cases that turn
+	// shift off at first launch — a host/code UID mismatch and a
+	// Colima/Lima guest that maps UIDs itself — so every reuse re-added
+	// the protect-* devices with shift=true. On a container the #678
+	// fallback had already converted to raw.idmap that re-armed the
+	// exact configuration whose start failure caused the conversion,
+	// once per session. ResolveReuseUIDMapping additionally converts
+	// creation-time shift=true devices when the decision is raw.idmap
+	// (#683 — a pre-upgrade container on OrbStack ≥2.2.2 never hits
+	// the start failure the reactive fallback keys on).
+	//
+	// The decision deliberately sees the UNGATED mount config: on
+	// reuse, mount devices persist from creation regardless of
+	// current trust (the 4.6 gate below only warns), so the
+	// currently-declared mounts are the closest available stand-in
+	// for the devices actually attached. Trust-gating the vote
+	// would be both unsafe and pointless here: a mount whose trust
+	// was revoked after creation is still attached and its
+	// filesystem still matters, while the only influence any path
+	// has on the vote is flipping toward raw.idmap — whose value
+	// derives from host/code UIDs, never from the path — so an
+	// untrusted entry cannot inject anything.
+	reuseSources := MountSources(opts.WorkspacePath, opts.MountConfig, WorktreeSources(reuseLayout)...)
+	reuseUseShift := ResolveReuseUIDMapping(containerName, reuseSources, opts.DisableShift, opts.Logger)
+	// A named session (session_name) can be reused from a different
+	// workspace location than the container was created with — the
+	// persisted workspace device then points at the old source and
+	// must be replaced before the security mounts derive their
+	// overlays from the container-side workspace path.
+	// An EXPLICIT --container is exempt: it means "enter that
+	// container as it is" — rebinding its workspace to whatever
+	// directory the caller happens to be in would both break the
+	// testing flow and silently mount an unintended directory
+	// (e.g. $HOME) read-write into the container.
+	if opts.ContainerName == "" {
+		if cwp, moved, remountErr := RemountMovedWorkspace(result.Manager, opts.WorkspacePath, opts.PreserveWorkspacePath, reuseLayout, reuseUseShift, opts.Logger); remountErr != nil {
+			return remountErr
+		} else if moved {
+			reuseCWP = cwp
+			result.ContainerWorkspacePath = cwp
+		}
+	}
+	reusePaths, reuseImmutable, reuseErr := applySessionSecurity(result.Manager, *opts, reuseCWP, reuseUseShift, reuseLayout, reuseWritableHooks, containerName)
+	opts.ProtectedPaths = reusePaths
+	if reuseImmutable {
+		result.HasImmutableProtection = true
+	}
+	if reuseErr != nil {
+		return reuseErr
+	}
+	// Reuse gets the same start fallbacks as a fresh launch and as
+	// run's persistent reuse (internal/cli/run.go): a persistent
+	// container may carry security.idmap.isolated, and its disk devices
+	// only materialize at start, so an idmap-incompatible mount fails
+	// right here with nothing to catch it (#685).
+	if err := container.StartWithIsolationFallback(result.ContainerName); err != nil {
+		return fmt.Errorf("failed to start container: %w", err)
+	}
+	// Block network immediately: a previous session's AI agent may have
+	// planted startup scripts (systemd units, cron jobs, shell hooks) that
+	// would otherwise phone home during the boot window before
+	// SetupForContainer installs proper isolation rules.
+	if opts.NetworkConfig != nil {
+		if err := network.ApplyBootBlockRule(result.ContainerName); err != nil {
+			// Fail closed in restricted/allowlist mode: rather than let
+			// the container run unblocked during the boot window, stop it
+			// and abort. Open mode opts into unrestricted egress.
+			if opts.NetworkConfig.Mode != config.NetworkModeOpen {
+				_ = result.Manager.Stop(true)
+				return fmt.Errorf("boot network block failed in %s mode; stopped container to avoid an unprotected boot window: %w", opts.NetworkConfig.Mode, err)
+			}
+			opts.Logger(fmt.Sprintf("Warning: boot block not applied (open mode): %v", err))
+		} else {
+			opts.Logger("Boot network block applied (lifted after isolation rules are set up)")
+		}
+	}
+	return nil
+}
+
+// createAndStartContainer creates a fresh container (init), mounts the
+// workspace + configured/worktree/security devices, applies limits and the
+// pre-boot hardening, starts it, and applies the boot network block. It mutates
+// result and opts.ProtectedPaths in place. Extracted verbatim from Setup.
+func createAndStartContainer(result *SetupResult, opts *SetupOptions, image, containerName string) error {
+	opts.Logger(fmt.Sprintf("Creating container from %s...", image))
+	// Create container without starting it (init). Honor the configured
+	// storage pool ([container] storage_pool) the same way the run pipeline
+	// does via `-s <pool>` — otherwise `coi shell` silently lands on the
+	// Incus default pool (#726). An empty pool means "use the default".
+	initArgs := []string{"init", image, result.ContainerName}
+	if opts.StoragePool != "" {
+		initArgs = append(initArgs, "-s", opts.StoragePool)
+	}
+	if err := container.IncusExec(initArgs...); err != nil {
+		return fmt.Errorf("failed to create container: %w", err)
+	}
+
+	// Detect a git worktree checkout (.git is a file whose real git internals
+	// live outside the workspace) BEFORE the UID-mapping decision: the common
+	// dir is mounted as its own shift-carrying disk device, so its filesystem
+	// must vote on that decision too (#683). A valid layout forces
+	// preserve-path so git's pointers resolve identically host<->container,
+	// and its external git dirs are mounted + protected below (issue #533). A
+	// pointer that fails the safety guard is not mounted; git fails loudly
+	// rather than exposing a mis-pointed dir.
+	worktreeLayout, wtErr := ResolveGitWorktree(opts.WorkspacePath)
+	if wtErr != nil {
+		opts.Logger(fmt.Sprintf("Warning: git worktree not mounted (%v); git commands may fail in the container", wtErr))
+	}
+	worktreeWritableHooks := !containsGitHooksPath(opts.ProtectedPaths)
+
+	// Configure UID/GID mapping for the workspace bind mount. Shared with
+	// the run pipeline via ConfigureUIDMapping so both honor Colima/Lima
+	// auto-detection AND set raw.idmap on any host-UID/code-UID mismatch
+	// (issue #530).
+	// Shell path sets raw.idmap before its own start (below), so the
+	// idmapApplied signal is not needed here.
+	useShift, _ := ConfigureUIDMapping(result.ContainerName, MountSources(opts.WorkspacePath, opts.MountConfig, WorktreeSources(worktreeLayout)...), opts.DisableShift, opts.Logger)
+
+	// Determine container mount path - either /workspace (default) or same as host path
+	preserveWorkspace := opts.PreserveWorkspacePath || worktreeLayout != nil
+	containerWorkspacePath := "/workspace"
+	if preserveWorkspace {
+		// Validate that the path doesn't conflict with critical system directories.
+		if WorkspaceUnderSystemDir(opts.WorkspacePath) {
+			if worktreeLayout != nil {
+				// Can't preserve the path, so the worktree's git pointers can't
+				// resolve and its internals can't be protected — fail closed.
+				return fmt.Errorf("git worktree workspace %q is under a system directory; cannot preserve its host path to mount git internals safely", opts.WorkspacePath)
+			}
+			opts.Logger(fmt.Sprintf("Warning: preserve_workspace_path requested for %q conflicts with system directories; using /workspace instead", opts.WorkspacePath))
+		} else {
+			containerWorkspacePath = filepath.Clean(opts.WorkspacePath)
+			opts.Logger(fmt.Sprintf("Adding workspace mount: %s -> %s (preserving host path)", opts.WorkspacePath, containerWorkspacePath))
+		}
+	}
+	if containerWorkspacePath == "/workspace" && !preserveWorkspace {
+		opts.Logger(fmt.Sprintf("Adding workspace mount: %s -> %s", opts.WorkspacePath, containerWorkspacePath))
+	}
+	result.ContainerWorkspacePath = containerWorkspacePath
+	if err := result.Manager.MountDisk("workspace", opts.WorkspacePath, containerWorkspacePath, useShift, false); err != nil {
+		return fmt.Errorf("failed to add workspace device: %w", err)
+	}
+	// Mount the worktree's external git common dir (read-write, at its host path)
+	// so git resolves; its RCE sinks are re-covered read-only after the security
+	// mounts below (issue #533).
+	if worktreeLayout != nil {
+		if err := MountGitWorktreeDirs(result.Manager, worktreeLayout, useShift); err != nil {
+			return fmt.Errorf("failed to mount git worktree dirs: %w", err)
+		}
+		opts.Logger(fmt.Sprintf("Mounted git worktree common dir (read-write): %s", worktreeLayout.CommonDir))
+	}
+
+	// Mount all configured directories
+	if err := setupMounts(result.Manager, opts.MountConfig, useShift, opts.Logger); err != nil {
+		return err
+	}
+
+	// Protect security-sensitive paths (read-only mounts), extend protection to a
+	// worktree's external git common dir, apply the host-immutable belt, and mask
+	// secret paths — all via applySessionSecurity, the single implementation shared
+	// with the reuse/restart reconcile below (issue #610). Must be added after the
+	// workspace mount for the overlays to layer on top.
+	effectivePaths, hasImmutable, secErr := applySessionSecurity(result.Manager, *opts, containerWorkspacePath, useShift, worktreeLayout, worktreeWritableHooks, containerName)
+	// Adopt the expanded list as the canonical protected set so downstream
+	// consumers (the SANDBOX_CONTEXT.md "Protected paths" listing built from
+	// opts.ProtectedPaths below) reflect what was actually mounted, including the
+	// per-worktree configs.
+	opts.ProtectedPaths = effectivePaths
+	if hasImmutable {
+		result.HasImmutableProtection = true
+	}
+	if secErr != nil {
+		return secErr
+	}
+
+	// Apply resource limits before starting (if configured)
+	if opts.LimitsConfig != nil && hasLimits(opts.LimitsConfig) {
+		opts.Logger("Applying resource limits...")
+		applyOpts := limits.ApplyOptions{
+			ContainerName: result.ContainerName,
+			CPU: limits.CPULimits{
+				Count:     opts.LimitsConfig.CPU.Count,
+				Allowance: opts.LimitsConfig.CPU.Allowance,
+				Priority:  opts.LimitsConfig.CPU.Priority,
+			},
+			Memory: limits.MemoryLimits{
+				Limit:   opts.LimitsConfig.Memory.Limit,
+				Enforce: opts.LimitsConfig.Memory.Enforce,
+				Swap:    opts.LimitsConfig.Memory.Swap,
+			},
+			Disk: limits.DiskLimits{
+				Read:     opts.LimitsConfig.Disk.Read,
+				Write:    opts.LimitsConfig.Disk.Write,
+				Max:      opts.LimitsConfig.Disk.Max,
+				Priority: opts.LimitsConfig.Disk.Priority,
+			},
+			Runtime: limits.RuntimeLimits{
+				MaxProcesses: opts.LimitsConfig.Runtime.MaxProcesses,
+			},
+			Project: opts.IncusProject,
+		}
+		if err := limits.ApplyResourceLimits(applyOpts); err != nil {
+			return fmt.Errorf("failed to apply resource limits: %w", err)
+		}
+	}
+
+	// Enable Docker/nested container support (must be set before first boot)
+	opts.Logger("Enabling Docker support...")
+	if err := container.EnableDockerSupport(result.ContainerName); err != nil {
+		return fmt.Errorf("failed to enable Docker support: %w", err)
+	}
+
+	// Isolate UID/GID namespace so each container gets a unique host-side UID
+	// range, preventing cross-container file access via shared host UIDs.
+	// Non-fatal: some environments (nested containers, CI runners) don't have
+	// enough subuid/subgid space. The fallback at start time handles this.
+	idmapIsolated := false
+	if err := container.IsolateUIDNamespace(result.ContainerName); err != nil {
+		opts.Logger(fmt.Sprintf("Warning: UID namespace isolation unavailable: %v", err))
+	} else {
+		idmapIsolated = true
+	}
+
+	// Disable guest API to prevent host topology leaks (FLAWS Finding 3)
+	if err := container.DisableGuestAPI(result.ContainerName); err != nil {
+		return fmt.Errorf("failed to disable guest API: %w", err)
+	}
+
+	// Harden the bridge NIC against egress-isolation bypass: anti-spoof the
+	// source IP/MAC (so saddr-keyed nft rules can't be dodged) and isolate the
+	// bridge port (so the container can't reach sibling containers at L2).
+	// Non-fatal: unmanaged/static/macvlan NICs degrade to nft-only enforcement.
+	if err := container.EnableNICSecurity(result.ContainerName); err != nil {
+		opts.Logger(fmt.Sprintf("Warning: NIC security hardening not applied: %v", err))
+	}
+
+	// For restricted/allowlist modes, disable IPv6 from the kernel's first
+	// instant so there is no IPv6 egress window before the host-side ip6 drop
+	// is installed. Open mode opts into unrestricted egress, so skip it.
+	if opts.NetworkConfig != nil && opts.NetworkConfig.Mode != config.NetworkModeOpen {
+		if err := container.DisableIPv6AtBoot(result.ContainerName); err != nil {
+			opts.Logger(fmt.Sprintf("Warning: pre-boot IPv6 disable not applied: %v", err))
+		}
+		// With IPv6 disabled, keep systemd-networkd from wedging on it (#548).
+		if err := container.ConfigureNetworkdIPv4Only(result.ContainerName); err != nil {
+			opts.Logger(fmt.Sprintf("Warning: networkd IPv4-only config not applied: %v", err))
+		}
+	}
+
+	// Block privileged containers — they defeat all isolation
+	if err := container.CheckNotPrivileged(result.ContainerName); err != nil {
+		return err
+	}
+
+	// Now start the container
+	opts.Logger("Starting container...")
+	if idmapIsolated {
+		if err := container.StartWithIsolationFallback(result.ContainerName); err != nil {
+			return fmt.Errorf("failed to start container: %w", err)
+		}
+	} else {
+		// Isolation was never set, so the isolation fallback has nothing to
+		// unset — but the #678 idmapped-mount failure is orthogonal to it and
+		// hits this branch just the same (#685).
+		if err := container.StartWithIdmapFallback(result.ContainerName); err != nil {
+			return fmt.Errorf("failed to start container: %w", err)
+		}
+	}
+	// Block network immediately after first boot as well: defence-in-depth
+	// against a malicious base image that runs something on init.
+	if opts.NetworkConfig != nil {
+		if err := network.ApplyBootBlockRule(result.ContainerName); err != nil {
+			// Fail closed in restricted/allowlist mode: stop the just-started
+			// container and abort rather than leave an unprotected boot window.
+			// Open mode opts into unrestricted egress.
+			if opts.NetworkConfig.Mode != config.NetworkModeOpen {
+				_ = result.Manager.Stop(true)
+				return fmt.Errorf("boot network block failed in %s mode; stopped container to avoid an unprotected boot window: %w", opts.NetworkConfig.Mode, err)
+			}
+			opts.Logger(fmt.Sprintf("Warning: boot block not applied (open mode): %v", err))
+		} else {
+			opts.Logger("Boot network block applied (lifted after isolation rules are set up)")
+		}
+	}
+	return nil
+}
+
+// injectSandboxContext builds the tool.ContextInfo from the resolved session
+// facts, injects ~/SANDBOX_CONTEXT.md (and the optional .json companion), and
+// returns the rendered context content for the auto-context step. Extracted
+// verbatim from Setup's phase-12 block.
+func injectSandboxContext(result *SetupResult, opts SetupOptions) string {
+	networkMode := ""
+	var allowedPorts []int
+	var dnsServers, allowedDomains []string
+	if opts.NetworkConfig != nil {
+		networkMode = string(opts.NetworkConfig.Mode)
+		allowedPorts = opts.NetworkConfig.AllowedPorts
+		dnsServers = opts.NetworkConfig.DNSServers
+		allowedDomains = opts.NetworkConfig.AllowedDomains
+	}
+	// Check if GH_TOKEN or GITHUB_TOKEN is among forwarded env vars
+	ghAuthenticated := false
+	for _, name := range opts.ForwardedEnvVars {
+		if name == "GH_TOKEN" || name == "GITHUB_TOKEN" {
+			ghAuthenticated = true
+			break
+		}
+	}
+
+	toolName := "AI coding tool"
+	if opts.Tool != nil {
+		toolName = opts.Tool.Name()
+	}
+
+	var extraMounts []tool.MountInfo
+	if opts.MountConfig != nil {
+		for _, m := range opts.MountConfig.Mounts {
+			extraMounts = append(extraMounts, tool.MountInfo{ContainerPath: m.ContainerPath})
+		}
+	}
+
+	var cpuLimit, memoryLimit, maxDuration string
+	if opts.LimitsConfig != nil {
+		cpuLimit = opts.LimitsConfig.CPU.Count
+		memoryLimit = opts.LimitsConfig.Memory.Limit
+		maxDuration = opts.LimitsConfig.Runtime.MaxDuration
+	}
+
+	// Read profile context file content if configured
+	var profileContext string
+	if opts.ProfileContextFile != "" {
+		data, err := os.ReadFile(opts.ProfileContextFile)
+		if err != nil {
+			opts.Logger(fmt.Sprintf("Warning: Failed to read profile context file %s: %v", opts.ProfileContextFile, err))
+		} else {
+			profileContext = string(data)
+			opts.Logger(fmt.Sprintf("Loaded profile context from %s", opts.ProfileContextFile))
+		}
+	}
+
+	ctxInfo := tool.ContextInfo{
+		WorkspacePath:      result.ContainerWorkspacePath,
+		HomeDir:            result.HomeDir,
+		Persistent:         opts.Persistent,
+		NetworkMode:        networkMode,
+		AllowedPorts:       allowedPorts,
+		DNSServers:         dnsServers,
+		AllowedDomains:     allowedDomains,
+		SSHAgentForwarded:  result.SSHAgentSocketPath != "",
+		RunAsRoot:          result.RunAsRoot,
+		ProtectedPaths:     opts.ProtectedPaths,
+		GHCLIAuthenticated: ghAuthenticated,
+		ForwardedEnvVars:   opts.ForwardedEnvVars,
+		Timezone:           result.Timezone,
+		ExtraMounts:        extraMounts,
+		PublishedPorts:     publishedPortInfos(result.PublishedPorts),
+		CPULimit:           cpuLimit,
+		MemoryLimit:        memoryLimit,
+		MaxDuration:        maxDuration,
+		ToolName:           toolName,
+		ContainerName:      result.ContainerName,
+		ProfileContext:     profileContext,
+	}
+	contextContent := resolveContextContent(ctxInfo, opts.ContextFilePath, opts.Logger)
+	if err := injectContextFile(result.Manager, ctxInfo, opts.ContextFilePath, result.HomeDir, opts.Logger); err != nil {
+		opts.Logger(fmt.Sprintf("Warning: Failed to inject context file: %v", err))
+	}
+	// Machine-readable companion for programmatic consumers (#705), enabled
+	// by default. Written from ctxInfo (the real facts) unless [tool]
+	// context_json_file provides a custom JSON to inject verbatim; disable
+	// entirely with context_json = false.
+	if config.BoolVal(opts.ContextJSON) {
+		if err := injectContextJSONFile(result.Manager, ctxInfo, opts.ContextJSONFilePath, result.HomeDir, opts.Logger); err != nil {
+			opts.Logger(fmt.Sprintf("Warning: Failed to inject context JSON file: %v", err))
+		}
+	}
+	return contextContent
 }
