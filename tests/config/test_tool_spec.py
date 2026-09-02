@@ -312,14 +312,14 @@ def test_tool_spec_resume_id_asserts_without_discovery(
 
 
 def test_tool_spec_resume_latest_renders_continue(coi_binary, workspace_dir, cleanup_containers):
-    """--resume (no id) renders a resume-latest command with no id and no
+    """--resume-latest (no id) renders a resume-latest command with no id and no
     --session-id (#753). For claude the launch path emits a trailing
     `--continue` (not bare `--resume`, which would open Claude's interactive
     picker and hang a headless launch — #754)."""
     _write_config(workspace_dir)
     child, container = _boot_container(coi_binary, workspace_dir)
     try:
-        spec = _spec(coi_binary, container, workspace_dir, "new-run-1", extra=["--resume"])
+        spec = _spec(coi_binary, container, workspace_dir, "new-run-1", extra=["--resume-latest"])
         cmd = spec["command"]
         # Resume-latest for claude is a trailing `--continue`: no id after it, no
         # --session-id (not a fresh launch), no bare --resume, and no prompt.
@@ -332,18 +332,35 @@ def test_tool_spec_resume_latest_renders_continue(coi_binary, workspace_dir, cle
 
 
 def test_tool_spec_resume_modes_mutually_exclusive(coi_binary, workspace_dir):
-    """--continue / --resume-id / --resume express conflicting resume strategies;
-    setting more than one is a usage error (fast: checked before container access)."""
+    """--continue / --resume-id / --resume-latest express conflicting resume
+    strategies; setting more than one is a usage error (fast: checked before
+    container access)."""
     _write_config(workspace_dir)
     for extra in (
         ["--resume-id", "abc", "--continue"],
-        ["--resume-id", "abc", "--resume"],
-        ["--resume", "--continue"],
+        ["--resume-id", "abc", "--resume-latest"],
+        ["--resume-latest", "--continue"],
     ):
         r = _run_spec_raw(coi_binary, workspace_dir, "good-sid", extra=extra)
         out = r.stdout + r.stderr
         assert r.returncode == 2, f"{extra}: expected exit 2, got {r.returncode}: {out}"
         assert "mutually exclusive" in out, f"{extra}: {out}"
+
+
+def test_tool_spec_rejects_inherited_global_resume(coi_binary, workspace_dir):
+    """`coi tool spec` has no bare --resume of its own: that name is the root's
+    persistent session-resume flag (a string), inherited here but never read by
+    this handler. Left alone it would be silently swallowed (fresh launch, no
+    error) — a quiet foot-gun. The command rejects it loudly and points at the
+    two real strategies. Both `--resume` (NoOptDefVal) and `--resume=<id>` are
+    rejected; checked before container access, so no incus needed."""
+    _write_config(workspace_dir)
+    for extra in (["--resume"], ["--resume=abc"]):
+        r = _run_spec_raw(coi_binary, workspace_dir, "good-sid", extra=extra)
+        out = r.stdout + r.stderr
+        assert r.returncode == 2, f"{extra}: expected exit 2, got {r.returncode}: {out}"
+        assert "has no --resume" in out, f"{extra}: {out}"
+        assert "--resume-latest" in out and "--resume-id" in out, f"{extra}: {out}"
 
 
 def test_tool_spec_rejects_unsafe_resume_id(coi_binary, workspace_dir):
@@ -478,7 +495,7 @@ def test_tool_spec_help(coi_binary):
         "--prompt-file",
         "--continue",
         "--resume-id",
-        "--resume",
+        "--resume-latest",
         "--json",
     ):
         assert needle in out, f"expected {needle!r} in `coi tool spec --help`, got:\n{out}"
