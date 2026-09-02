@@ -22,11 +22,13 @@ JSON_COMMANDS = [
     ["tmux", "list"],
     ["container", "info", "nonexistent-xyz"],
     ["container", "list"],
-    ["health"],
     ["list"],
     ["snapshot", "list", "--all"],
     ["validate", "profile", "nonexistent-xyz"],
 ]
+# health omitted here on purpose: `coi health --json` runs the full (container-
+# launching) health suite, too heavy just to check flag parsing. Its --json flag
+# is guaranteed by the in-package TestFormatCommandsHaveJSONAlias tree walk.
 
 
 @pytest.mark.parametrize("argv", JSON_COMMANDS, ids=lambda a: " ".join(a))

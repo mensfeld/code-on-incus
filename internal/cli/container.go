@@ -162,7 +162,6 @@ Examples:
 
 		capture, _ := cmd.Flags().GetBool("capture")
 		format, _ := cmd.Flags().GetString("format")
-		applyJSONFormatAlias(cmd, &format)
 		tty, _ := cmd.Flags().GetBool("tty")
 		mgr := container.NewManager(containerName)
 
