@@ -18,25 +18,25 @@ JSON_COMMANDS = [
     ["version"],
     ["profile", "list"],
     ["image", "list"],
-    ["image", "info", "coi-default"],
+    ["image", "info"],
     ["tmux", "list"],
-    ["container", "info", "nonexistent-xyz"],
+    ["container", "info"],
     ["container", "list"],
     ["list"],
-    ["snapshot", "list", "--all"],
-    ["validate", "profile", "nonexistent-xyz"],
+    ["snapshot", "list"],
+    ["validate", "profile"],
+    ["health"],
 ]
-# health omitted here on purpose: `coi health --json` runs the full (container-
-# launching) health suite, too heavy just to check flag parsing. Its --json flag
-# is guaranteed by the in-package TestFormatCommandsHaveJSONAlias tree walk.
 
 
 @pytest.mark.parametrize("argv", JSON_COMMANDS, ids=lambda a: " ".join(a))
 def test_json_flag_recognized(coi_binary, argv):
-    """`coi <cmd> --json` must be a recognized flag (never 'unknown flag')."""
-    r = subprocess.run([coi_binary, *argv, "--json"], capture_output=True, text=True, timeout=60)
-    combined = (r.stdout + r.stderr).lower()
-    assert "unknown flag" not in combined, f"`{' '.join(argv)} --json` not recognized:\n{combined}"
+    """`coi <cmd>` must expose --json in its help. Checked via --help (not by
+    running the command) because a command's runtime error path can itself
+    contain the substring 'unknown flag' (e.g. a downstream incus error),
+    which would make a run-and-grep check flaky."""
+    r = subprocess.run([coi_binary, *argv, "--help"], capture_output=True, text=True, timeout=30)
+    assert "--json" in (r.stdout + r.stderr), f"`{' '.join(argv)}` help is missing --json"
 
 
 def test_version_json_equals_format_json(coi_binary):
