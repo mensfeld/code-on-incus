@@ -26,7 +26,7 @@ var (
 	toolSpecSystemPromptFile string
 	toolSpecContinue         string
 	toolSpecResumeID         string
-	toolSpecResume           bool
+	toolSpecResumeLatest     bool
 	toolSpecJSON             bool
 )
 
@@ -61,10 +61,12 @@ tmux load-buffer + paste-buffer).
 Resume strategies (at most one): --continue[=<id>] discovers coi's host-side
 session store and resumes if found, else starts fresh; --resume-id <id> asserts
 an exact session id verbatim (no discovery) for an orchestrator that owns
-session state itself; --resume resumes the latest conversation with no id.
+session state itself; --resume-latest resumes the most recent conversation with
+no id. (There is no bare --resume here — it is the global session-resume flag and
+is rejected on this command; use --resume-latest or --resume-id.)
 
   coi tool spec --container <ctr> --session-id <id> --prompt-file <host> \
-      [--system-prompt-file <host>] [--continue[=<id>] | --resume-id <id> | --resume] --json`,
+      [--system-prompt-file <host>] [--continue[=<id>] | --resume-id <id> | --resume-latest] --json`,
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		return app.toolSpecCommand(cmd)
 	},
@@ -77,8 +79,8 @@ func init() {
 	toolSpecCmd.Flags().StringVar(&toolSpecSystemPromptFile, "system-prompt-file", "", "Host file whose contents are staged as the tool's system prompt (tools that support one)")
 	toolSpecCmd.Flags().StringVar(&toolSpecContinue, "continue", "", "Resume-or-fresh: resume a session (default: --session-id) if prior state exists, else start fresh. Optional value: --continue=<id>")
 	toolSpecCmd.Flags().Lookup("continue").NoOptDefVal = continueSelfSentinel
-	toolSpecCmd.Flags().StringVar(&toolSpecResumeID, "resume-id", "", "Orchestrator-owned resume: build a resume command for this exact session id, verbatim (no host-side discovery). Mutually exclusive with --continue/--resume")
-	toolSpecCmd.Flags().BoolVar(&toolSpecResume, "resume", false, "Resume the latest conversation with no id. Mutually exclusive with --continue/--resume-id")
+	toolSpecCmd.Flags().StringVar(&toolSpecResumeID, "resume-id", "", "Orchestrator-owned resume: build a resume command for this exact session id, verbatim (no host-side discovery). Mutually exclusive with --continue/--resume-latest")
+	toolSpecCmd.Flags().BoolVar(&toolSpecResumeLatest, "resume-latest", false, "Resume the latest conversation with no id. Mutually exclusive with --continue/--resume-id")
 	toolSpecCmd.Flags().BoolVar(&toolSpecJSON, "json", false, "Print the spec as JSON (the machine-readable form orchestrators consume)")
 
 	toolCmd.AddCommand(toolSpecCmd)
@@ -121,14 +123,23 @@ func (a *App) toolSpecCommand(cmd *cobra.Command) error {
 		return &ExitCodeError{Code: 2, Message: err.Error()}
 	}
 
+	// `coi tool spec` has no bare --resume: that name is the global session-resume
+	// flag (resume a coi session by id), which is inherited here but this handler
+	// never reads — so a `--resume`/`--resume=<id>` would be silently ignored
+	// (fresh launch). Reject it loudly and point at the two real strategies.
+	if cmd.Flags().Changed("resume") {
+		return &ExitCodeError{Code: 2, Message: "coi tool spec has no --resume; use --resume-latest (resume the most recent conversation) or --resume-id <id> (resume a specific session)"}
+	}
+
 	// Resolve and validate the resume strategy up front — before any container or
 	// filesystem access — so a bad combination or unsafe id is rejected early.
-	// At most one of --continue / --resume-id / --resume may be set; they express
-	// conflicting contracts (discover-or-fresh vs assert-this-id vs resume-latest).
+	// At most one of --continue / --resume-id / --resume-latest may be set; they
+	// express conflicting contracts (discover-or-fresh vs assert-this-id vs
+	// resume-latest).
 	continueSet := cmd.Flags().Changed("continue")
 	resumeIDSet := cmd.Flags().Changed("resume-id")
-	if countTrue(continueSet, resumeIDSet, toolSpecResume) > 1 {
-		return &ExitCodeError{Code: 2, Message: "--continue, --resume-id, and --resume are mutually exclusive"}
+	if countTrue(continueSet, resumeIDSet, toolSpecResumeLatest) > 1 {
+		return &ExitCodeError{Code: 2, Message: "--continue, --resume-id, and --resume-latest are mutually exclusive"}
 	}
 
 	// discoverResumeID is the --continue target to look up (discover-or-fresh);
@@ -202,9 +213,9 @@ func (a *App) toolSpecCommand(cmd *cobra.Command) error {
 		// into the container and knows the id).
 		spec.Resume = true
 		spec.ResumeSessionID = toolSpecResumeID
-	case toolSpecResume:
+	case toolSpecResumeLatest:
 		// Resume-latest with no id: latest-only tools (pi/omp) resume the last
-		// conversation; claude/codex render bare `--resume` / `resume --last`.
+		// conversation; claude/codex render `--continue` / `resume --last`.
 		spec.Resume = true
 	case discoverResumeID != "":
 		// --continue: discover-or-fresh against coi's host-side session store.
