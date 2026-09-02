@@ -38,11 +38,13 @@ Exit codes:
 
 func init() {
 	healthCmd.Flags().StringVar(&healthFormat, "format", "text", "Output format: text or json")
+	healthCmd.Flags().Bool("json", false, "Alias for --format json")
 	healthCmd.Flags().BoolVarP(&healthVerbose, "verbose", "v", false, "Include additional verbose checks")
 }
 
 func healthCommand(cmd *cobra.Command, args []string) error {
 	// Validate format
+	applyJSONFormatAlias(cmd, &healthFormat)
 	if err := validateTextOrJSON(healthFormat); err != nil {
 		return err
 	}

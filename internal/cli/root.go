@@ -294,6 +294,7 @@ var versionCmd = &cobra.Command{
 	Short: "Print version information",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		format, _ := cmd.Flags().GetString("format")
+		applyJSONFormatAlias(cmd, &format)
 		if format != "text" && format != "json" {
 			return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid format %q: must be 'text' or 'json'", format)}
 		}
@@ -309,4 +310,5 @@ var versionCmd = &cobra.Command{
 
 func init() {
 	versionCmd.Flags().String("format", "text", "Output format: text or json")
+	versionCmd.Flags().Bool("json", false, "Alias for --format json")
 }

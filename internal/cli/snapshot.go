@@ -136,6 +136,7 @@ func init() {
 	// Add flags to list command
 	snapshotListCmd.Flags().StringVarP(&snapshotContainer, "container", "c", "", "Container name (default: auto-detect from workspace)")
 	snapshotListCmd.Flags().StringVar(&snapshotFormat, "format", "text", "Output format: text or json")
+	snapshotListCmd.Flags().Bool("json", false, "Alias for --format json")
 	snapshotListCmd.Flags().BoolVarP(&snapshotAll, "all", "a", false, "List snapshots for all COI containers")
 
 	// Add flags to restore command
@@ -151,6 +152,7 @@ func init() {
 	// Add flags to info command
 	snapshotInfoCmd.Flags().StringVarP(&snapshotContainer, "container", "c", "", "Container name (default: auto-detect from workspace)")
 	snapshotInfoCmd.Flags().StringVar(&snapshotFormat, "format", "text", "Output format: text or json")
+	snapshotInfoCmd.Flags().Bool("json", false, "Alias for --format json")
 
 	// Add subcommands to snapshot command
 	snapshotCmd.AddCommand(snapshotCreateCmd)
@@ -288,6 +290,7 @@ func snapshotCreateCommand(cmd *cobra.Command, args []string) error {
 func snapshotListCommand(cmd *cobra.Command, args []string) error {
 	app.applyDefaultProfileForOps(cmd) // profile-carried session_name (#607-tolerant)
 	// Validate format
+	applyJSONFormatAlias(cmd, &snapshotFormat)
 	if err := validateTextOrJSON(snapshotFormat); err != nil {
 		return err
 	}
@@ -541,6 +544,7 @@ func snapshotDeleteCommand(cmd *cobra.Command, args []string) error {
 func snapshotInfoCommand(cmd *cobra.Command, args []string) error {
 	app.applyDefaultProfileForOps(cmd) // profile-carried session_name (#607-tolerant)
 	// Validate format
+	applyJSONFormatAlias(cmd, &snapshotFormat)
 	if err := validateTextOrJSON(snapshotFormat); err != nil {
 		return err
 	}

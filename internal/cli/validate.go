@@ -52,6 +52,7 @@ Examples:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cmd.SilenceUsage = true
 		format, _ := cmd.Flags().GetString("format")
+		applyJSONFormatAlias(cmd, &format)
 		if format != "text" && format != "json" {
 			return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid format %q: must be 'text' or 'json'", format)}
 		}
@@ -108,5 +109,6 @@ func emitValidateOutput(format string, valid bool, issues []coischema.Validation
 
 func init() {
 	validateProfileCmd.Flags().String("format", "text", "Output format: text or json")
+	validateProfileCmd.Flags().Bool("json", false, "Alias for --format json")
 	validateCmd.AddCommand(validateProfileCmd)
 }
