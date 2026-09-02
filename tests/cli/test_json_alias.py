@@ -6,14 +6,14 @@ exec` (--format json|raw) is deliberately excluded. These drive the real binary.
 """
 
 import json
+import re
 import subprocess
 
 import pytest
 
-# Each entry is the argv (after the binary) for a command that must accept --json.
-# The flag-recognition check only asserts the flag PARSES (no "unknown flag"),
-# so commands that then fail for other reasons (missing container, no incus) are
-# fine — we're testing flag wiring, not the command's full behavior.
+# Command paths that must expose the --json alias. Recognition is checked via
+# `--help` (see test_json_flag_recognized) rather than by running the command,
+# so the list needs no live container/incus and no positional args.
 JSON_COMMANDS = [
     ["version"],
     ["profile", "list"],
@@ -36,7 +36,11 @@ def test_json_flag_recognized(coi_binary, argv):
     contain the substring 'unknown flag' (e.g. a downstream incus error),
     which would make a run-and-grep check flaky."""
     r = subprocess.run([coi_binary, *argv, "--help"], capture_output=True, text=True, timeout=30)
-    assert "--json" in (r.stdout + r.stderr), f"`{' '.join(argv)}` help is missing --json"
+    # Match --json as a flag entry in the help (start-of-line, word boundary),
+    # not an incidental mention in prose or a longer --json-* flag name.
+    assert re.search(r"(?m)^\s*--json\b", r.stdout + r.stderr), (
+        f"`{' '.join(argv)}` help is missing the --json flag"
+    )
 
 
 def test_version_json_equals_format_json(coi_binary):
