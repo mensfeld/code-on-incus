@@ -9,6 +9,7 @@ import (
 
 	"github.com/mensfeld/code-on-incus/internal/alias"
 	"github.com/mensfeld/code-on-incus/internal/session"
+	"github.com/spf13/cobra"
 )
 
 // confirmYN prints prompt and reads a line from stdin, returning true only when
@@ -99,4 +100,13 @@ func runPipelineWithSignals(ctx context.Context, pipeline *session.Pipeline, pha
 		}
 	}()
 	return pipeline.Run(ctx, phases...)
+}
+
+// applyJSONFormatAlias overrides *format to "json" when the --json alias flag is
+// set on cmd. Standardizes the text|json output convention: every command that
+// offers --format text|json also accepts --json as a convenience alias.
+func applyJSONFormatAlias(cmd *cobra.Command, format *string) {
+	if j, _ := cmd.Flags().GetBool("json"); j {
+		*format = "json"
+	}
 }

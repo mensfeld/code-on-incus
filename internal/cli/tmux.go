@@ -61,6 +61,7 @@ Examples:
 
 func init() {
 	tmuxListCmd.Flags().StringVar(&tmuxFormat, "format", "text", "Output format: text or json")
+	tmuxListCmd.Flags().Bool("json", false, "Alias for --format json")
 
 	tmuxCmd.AddCommand(tmuxSendCmd)
 	tmuxCmd.AddCommand(tmuxCaptureCmd)
@@ -145,6 +146,7 @@ func tmuxCaptureCommand(cmd *cobra.Command, args []string) error {
 }
 
 func tmuxListCommand(cmd *cobra.Command, args []string) error {
+	applyJSONFormatAlias(cmd, &tmuxFormat)
 	if err := validateTextOrJSON(tmuxFormat); err != nil {
 		return err
 	}

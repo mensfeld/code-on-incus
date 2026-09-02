@@ -38,6 +38,7 @@ Examples:
 }
 
 func (a *App) profileListRunE(cmd *cobra.Command, args []string) error {
+	applyJSONFormatAlias(cmd, &profileFormat)
 	if err := validateTextOrJSON(profileFormat); err != nil {
 		return err
 	}
@@ -532,6 +533,7 @@ func (a *App) profileDeleteRunE(cmd *cobra.Command, args []string) error {
 
 func init() {
 	profileListCmd.Flags().StringVar(&profileFormat, "format", "text", "Output format: text or json")
+	profileListCmd.Flags().Bool("json", false, "Alias for --format json")
 
 	profileCreateCmd.Flags().String("inherits", "", "Set the parent profile to inherit from")
 	profileCreateCmd.Flags().Bool("user", false, "Force creation in ~/.coi/profiles/")

@@ -384,6 +384,7 @@ Examples:
   coi container list --format=json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		format, _ := cmd.Flags().GetString("format")
+		applyJSONFormatAlias(cmd, &format)
 
 		// Validate format
 		if format != "json" && format != "text" {
@@ -417,6 +418,7 @@ var containerInfoCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 		format, _ := cmd.Flags().GetString("format")
+		applyJSONFormatAlias(cmd, &format)
 
 		// Validate format
 		if err := validateTextOrJSON(format); err != nil {
@@ -467,9 +469,11 @@ func init() {
 
 	// Add flags to info command
 	containerInfoCmd.Flags().String("format", "text", "Output format: text or json")
+	containerInfoCmd.Flags().Bool("json", false, "Alias for --format json")
 
 	// Add flags to list command
 	containerListCmd.Flags().String("format", "text", "Output format: text or json")
+	containerListCmd.Flags().Bool("json", false, "Alias for --format json")
 
 	// Add subcommands to container command
 	containerCmd.AddCommand(containerLaunchCmd)
