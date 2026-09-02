@@ -22,13 +22,14 @@ type ConfigureOptions struct {
 	WorkspacePath string // Host workspace path (for security protection context)
 
 	// Features to apply (all optional)
-	NetworkConfig *config.NetworkConfig // Network isolation mode and rules
-	LimitsConfig  *config.LimitsConfig  // Runtime limits (max_duration, max_processes)
-	ForwardSSH    bool                  // Forward host SSH agent into container
-	Timezone      string                // IANA timezone name (e.g., "Europe/Warsaw"), empty = UTC
-	ToolName      string                // "claude" triggers managed settings injection
-	GitGuard      bool                  // Set git user.useConfigOnly=true
-	GitIdentity   GitIdentity           // Optional pre-resolved identity to configure when GitGuard is true
+	NetworkConfig  *config.NetworkConfig // Network isolation mode and rules
+	LimitsConfig   *config.LimitsConfig  // Runtime limits (max_duration, max_processes)
+	ForwardSSH     bool                  // Forward host SSH agent into container
+	Timezone       string                // IANA timezone name (e.g., "Europe/Warsaw"), empty = UTC
+	ToolName       string                // "claude" triggers managed settings injection
+	PermissionMode string                // Tool permission mode: "bypass" (default) or "interactive"; "interactive" skips Claude auto-mode suppression (#764)
+	GitGuard       bool                  // Set git user.useConfigOnly=true
+	GitIdentity    GitIdentity           // Optional pre-resolved identity to configure when GitGuard is true
 
 	Logger func(string)
 }
@@ -100,8 +101,9 @@ func ConfigureContainer(ctx context.Context, opts ConfigureOptions) (*ConfigureR
 		SetupGitIdentity(mgr, homeDir, opts.GitIdentity, opts.Logger)
 	}
 
-	// 3. Claude managed settings
-	if opts.ToolName == "claude" {
+	// 3. Claude managed settings (skipped under interactive mode, see
+	// shouldSuppressClaudeAutoMode — #764).
+	if shouldSuppressClaudeAutoMode(opts.ToolName, opts.PermissionMode) {
 		SetupClaudeManagedSettings(mgr, opts.Logger)
 	}
 

@@ -42,6 +42,7 @@ type SetupOptions struct {
 	SessionsDir           string            // e.g., ~/.coi/sessions-claude
 	CLIConfigPath         string            // e.g., ~/.claude (host CLI config to copy credentials from)
 	Tool                  tool.Tool         // AI coding tool being used
+	PermissionMode        string            // Tool permission mode: "bypass" (default) or "interactive"; gates Claude auto-mode suppression (#764)
 	NetworkConfig         *config.NetworkConfig
 	DisableShift          bool                   // Disable UID shifting (for Colima/Lima environments)
 	LimitsConfig          *config.LimitsConfig   // Resource and time limits
@@ -455,10 +456,10 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		return nil, err
 	}
 
-	// 6.6.2. Suppress Claude Code auto-mode prompt via managed settings.
-	// Only applies when the tool is Claude Code — the managed settings path
-	// (/etc/claude-code/managed-settings.json) is Claude-specific.
-	if opts.Tool != nil && opts.Tool.Name() == "claude" {
+	// 6.6.2. Suppress the Claude Code auto-mode prompt via managed settings.
+	// Claude-specific and skipped under interactive mode — see
+	// shouldSuppressClaudeAutoMode for the rationale (#764).
+	if opts.Tool != nil && shouldSuppressClaudeAutoMode(opts.Tool.Name(), opts.PermissionMode) {
 		SetupClaudeManagedSettings(result.Manager, opts.Logger)
 	}
 

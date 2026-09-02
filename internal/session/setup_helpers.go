@@ -447,6 +447,18 @@ func SetupGitIdentity(mgr container.ContainerExecution, homeDir string, identity
 	logger("Configured container git identity from host global git config")
 }
 
+// shouldSuppressClaudeAutoMode reports whether coi should write the Claude
+// managed-settings policy that disables auto mode. It is Claude-specific and,
+// per #764, deliberately skipped under interactive permission mode: managed
+// settings are Claude Code's highest-precedence tier and cannot be overridden
+// by any user/project setting, so writing the policy also strips auto mode from
+// the in-session Shift+Tab cycle. Under interactive the user is present and
+// owns that per-session choice; the sandbox boundary is enforced by the
+// container, not by Claude's permission gate. Default (bypass) is unchanged.
+func shouldSuppressClaudeAutoMode(toolName, permissionMode string) bool {
+	return toolName == "claude" && permissionMode != "interactive"
+}
+
 // SetupClaudeManagedSettings writes /etc/claude-code/managed-settings.json
 // inside the container to disable the "Enable auto mode?" prompt that newer
 // Claude Code versions show at startup. The managed-settings path is the only
