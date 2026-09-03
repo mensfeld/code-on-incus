@@ -41,8 +41,9 @@ func (f *fakeRemounter) AddProxyDevice(name, connect, listen string, uid, gid in
 func (f *fakeRemounter) AddHostPortDevice(name, listenAddr string, hostPort, containerPort int) error {
 	return nil
 }
-func (f *fakeRemounter) ListDevices() ([]string, error) { return nil, nil }
-func (f *fakeRemounter) SetTmpfsSize(size string) error { return nil }
+func (f *fakeRemounter) ListDevices() ([]string, error)                    { return nil, nil }
+func (f *fakeRemounter) SetTmpfsSize(size string) error                    { return nil }
+func (f *fakeRemounter) SetTmpfsSizeIfUnbounded(size string) (bool, error) { return false, nil }
 
 func TestRemountMovedWorkspace(t *testing.T) {
 	ws := t.TempDir()

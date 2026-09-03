@@ -447,6 +447,11 @@ func SetupGitIdentity(mgr container.ContainerExecution, homeDir string, identity
 	logger("Configured container git identity from host global git config")
 }
 
+// defaultTmpfsSize is the /tmp cap coi applies when [limits.disk] tmpfs_size is
+// unset and /tmp is not already a bounded tmpfs, preventing runaway builds from
+// exhausting /tmp (#728). An explicit tmpfs_size always overrides it.
+const defaultTmpfsSize = "2GiB"
+
 // shouldSuppressClaudeAutoMode reports whether coi should write the Claude
 // managed-settings policy that disables auto mode. It is Claude-specific and,
 // per #764, deliberately skipped under interactive permission mode: managed
@@ -500,6 +505,7 @@ func hasLimits(cfg *config.LimitsConfig) bool {
 		cfg.Disk.Read != "" ||
 		cfg.Disk.Write != "" ||
 		cfg.Disk.Max != "" ||
+		cfg.Disk.Size != "" ||
 		cfg.Disk.Priority != 0 ||
 		cfg.Runtime.MaxProcesses != 0
 }

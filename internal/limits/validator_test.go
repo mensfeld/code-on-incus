@@ -48,6 +48,56 @@ func TestValidateDiskIO(t *testing.T) {
 	}
 }
 
+// TestValidateDiskSize is the format matrix for the [limits.disk] size quota
+// (#728). Unlike disk I/O rates it takes an absolute size and rejects a
+// percentage; unlike memory it has no "%" form.
+func TestValidateDiskSize(t *testing.T) {
+	valid := []string{
+		"", // empty = unlimited
+		"20GiB",
+		"512MiB",
+		"1TiB",
+		"10GB",
+		"500MB",
+	}
+	for _, s := range valid {
+		if err := ValidateDiskSize(s); err != nil {
+			t.Errorf("ValidateDiskSize(%q) should be valid, got: %v", s, err)
+		}
+	}
+	invalid := []string{
+		"50%",  // percentages are not accepted for an absolute quota
+		"1000", // bare number: must carry a unit
+		"20 GiB",
+		"big",
+		"20gib", // IEC gibi must carry uppercase G/i pattern
+		"1000iops",
+		"-5GiB",
+		"10.5GiB",
+	}
+	for _, s := range invalid {
+		if err := ValidateDiskSize(s); err == nil {
+			t.Errorf("ValidateDiskSize(%q) should be rejected", s)
+		}
+	}
+}
+
+// TestPoolDriverEnforcesQuota pins which storage drivers can back a rootfs
+// size quota. dir MUST be rejected (Incus silently ignores size= there), which
+// is what makes coi's hard error correct (#728).
+func TestPoolDriverEnforcesQuota(t *testing.T) {
+	for _, d := range []string{"btrfs", "zfs", "lvm", "ceph"} {
+		if !poolDriverEnforcesQuota(d) {
+			t.Errorf("driver %q should be quota-capable", d)
+		}
+	}
+	for _, d := range []string{"dir", "", "overlay", "unknown"} {
+		if poolDriverEnforcesQuota(d) {
+			t.Errorf("driver %q must NOT be treated as quota-capable", d)
+		}
+	}
+}
+
 // The matrices below are the authoritative format coverage for the remaining
 // validators — the same consolidation as TestValidateDiskIO. The e2e tests in
 // tests/limits/test_limits_validation.py boot ONE container per limit family
@@ -146,10 +196,10 @@ func TestValidateAllReportsDiskFields(t *testing.T) {
 	errs := ValidateAll(
 		CPULimits{},
 		MemoryLimits{},
-		DiskLimits{Read: "fast", Write: "10MB/s", Max: "1000"},
+		DiskLimits{Read: "fast", Write: "10MB/s", Max: "1000", Size: "50%"},
 		RuntimeLimits{},
 	)
-	for _, field := range []string{"disk.read", "disk.write", "disk.max"} {
+	for _, field := range []string{"disk.read", "disk.write", "disk.max", "disk.size"} {
 		if errs[field] == nil {
 			t.Errorf("ValidateAll should report %s as invalid", field)
 		}

@@ -28,6 +28,7 @@ type ContainerDevices interface {
 	RemoveDevice(name string) error
 	ListDevices() ([]string, error)
 	SetTmpfsSize(size string) error
+	SetTmpfsSizeIfUnbounded(size string) (bool, error)
 }
 
 // ContainerFiles covers file operations on the container filesystem: pushing and

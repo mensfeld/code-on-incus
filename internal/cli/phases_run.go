@@ -377,6 +377,7 @@ func (a *App) configureContainerRunPhase(s *runState) session.Phase {
 							Read:     limitsConfig.Disk.Read,
 							Write:    limitsConfig.Disk.Write,
 							Max:      limitsConfig.Disk.Max,
+							Size:     limitsConfig.Disk.Size,
 							Priority: limitsConfig.Disk.Priority,
 						},
 						Runtime: limits.RuntimeLimits{

@@ -593,13 +593,14 @@ type MemoryLimits struct {
 	Swap    string `toml:"swap"`    // "true", "false", or size
 }
 
-// DiskLimits contains disk I/O resource limits
+// DiskLimits contains disk I/O and disk-size resource limits
 type DiskLimits struct {
-	Read      string `toml:"read"`       // "10MiB/s", "1000iops", "" (unlimited)
-	Write     string `toml:"write"`      // "5MiB/s", "1000iops", "" (unlimited)
-	Max       string `toml:"max"`        // combined read+write limit
+	Read      string `toml:"read"`       // I/O rate: "10MiB/s", "1000iops", "" (unlimited)
+	Write     string `toml:"write"`      // I/O rate: "5MiB/s", "1000iops", "" (unlimited)
+	Max       string `toml:"max"`        // combined read+write I/O rate limit
 	Priority  int    `toml:"priority"`   // 0-10
-	TmpfsSize string `toml:"tmpfs_size"` // /tmp size: "2GiB", "1024MiB" (default: "2GiB")
+	Size      string `toml:"size"`       // whole-container rootfs quota: "20GiB", "" (unlimited). Requires a quota-capable pool (btrfs/zfs/lvm); rejected on a dir pool (#728).
+	TmpfsSize string `toml:"tmpfs_size"` // /tmp size: "2GiB", "1024MiB", "" (coi applies a 2GiB default when unset, unless /tmp is already bounded — #728)
 }
 
 // RuntimeLimits contains time-based and process limits

@@ -525,9 +525,37 @@ func TestToolConfigDefaults(t *testing.T) {
 func TestDefaultTmpfsSize(t *testing.T) {
 	cfg := GetDefaultConfig()
 
-	// Default is empty: /tmp uses the container's root disk, not a RAM-backed tmpfs.
+	// The CONFIG default is empty (no explicit user value). coi applies its own
+	// runtime /tmp cap at setup when this is unset (session.defaultTmpfsSize,
+	// #728); that is deliberately not encoded here so an explicit user value and
+	// "unset" remain distinguishable through config merge.
 	if cfg.Limits.Disk.TmpfsSize != "" {
-		t.Errorf("Expected default TmpfsSize '' (disk-backed), got '%s'", cfg.Limits.Disk.TmpfsSize)
+		t.Errorf("Expected default TmpfsSize '' (unset), got '%s'", cfg.Limits.Disk.TmpfsSize)
+	}
+}
+
+func TestLimitsMergeDiskSize(t *testing.T) {
+	tests := []struct {
+		name       string
+		baseSize   string
+		otherSize  string
+		expectSize string
+	}{
+		{"other overrides base", "10GiB", "20GiB", "20GiB"},
+		{"empty other keeps base", "10GiB", "", "10GiB"},
+		{"both empty stays empty", "", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			base := GetDefaultConfig()
+			base.Limits.Disk.Size = tt.baseSize
+			other := &Config{}
+			other.Limits.Disk.Size = tt.otherSize
+			base.Merge(other)
+			if base.Limits.Disk.Size != tt.expectSize {
+				t.Errorf("Disk.Size: expected %q, got %q", tt.expectSize, base.Limits.Disk.Size)
+			}
+		})
 	}
 }
 
