@@ -403,7 +403,7 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		} else if applied {
 			opts.Logger(fmt.Sprintf("Set /tmp size to %s (default)", defaultTmpfsSize))
 		} else {
-			opts.Logger("Left /tmp size as-is (already bounded by the image)")
+			opts.Logger("Left /tmp size as-is (already bounded, or has submounts a tmpfs would shadow)")
 		}
 	}
 

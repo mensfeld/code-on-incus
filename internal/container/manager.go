@@ -239,10 +239,32 @@ func tmpMountIsBounded(procMounts string) bool {
 	return false
 }
 
+// tmpHasSubmount reports whether anything is mounted UNDER /tmp (a mountpoint
+// with the "/tmp/" prefix). Mounting a fresh tmpfs at /tmp would shadow such a
+// submount, so the opportunistic default cap must skip this case. The canonical
+// trigger is preserve_workspace_path with a host workspace under /tmp — coi
+// mounts the workspace at /tmp/<...>/workspace inside the container, and a
+// default /tmp tmpfs would hide it (#728). Kept pure so it is unit-testable.
+func tmpHasSubmount(procMounts string) bool {
+	for _, line := range strings.Split(procMounts, "\n") {
+		f := strings.Fields(line)
+		if len(f) < 2 {
+			continue
+		}
+		if strings.HasPrefix(f[1], "/tmp/") {
+			return true
+		}
+	}
+	return false
+}
+
 // SetTmpfsSizeIfUnbounded applies a sized /tmp tmpfs of the given size only when
-// /tmp is not already a bounded tmpfs. This backs coi's default /tmp cap: an
-// image that deliberately sizes /tmp is left untouched, while an unbounded /tmp
-// gets capped to prevent space exhaustion (#728). Returns whether it applied.
+// it is safe to do so opportunistically: /tmp must not already be a bounded
+// tmpfs (an image may size it deliberately) and must have no submounts (a fresh
+// tmpfs over /tmp would shadow them — e.g. a preserve_workspace_path workspace
+// living under /tmp). This backs coi's default /tmp cap to prevent space
+// exhaustion (#728). An explicit tmpfs_size bypasses this via SetTmpfsSize.
+// Returns whether it applied.
 func (m *Manager) SetTmpfsSizeIfUnbounded(size string) (bool, error) {
 	out, err := m.ExecCommand("cat /proc/mounts", ExecCommandOptions{Capture: true})
 	if err != nil {
@@ -250,6 +272,9 @@ func (m *Manager) SetTmpfsSizeIfUnbounded(size string) (bool, error) {
 	}
 	if tmpMountIsBounded(out) {
 		return false, nil // already limited — leave it as the image set it
+	}
+	if tmpHasSubmount(out) {
+		return false, nil // a tmpfs over /tmp would shadow a submount — leave it
 	}
 	if err := m.SetTmpfsSize(size); err != nil {
 		return false, err
