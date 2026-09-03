@@ -579,6 +579,30 @@ type LimitsConfig struct {
 	Runtime RuntimeLimits `toml:"runtime"`
 }
 
+// HasAny reports whether any resource limit applied through
+// limits.ApplyResourceLimits is set (non-empty string or non-zero int). It is
+// the single source of truth for both the shell (session.Setup) and run
+// (coi run) launch paths, so a new limit field can never be honored on one
+// path but silently dropped on the other. Note: Disk.TmpfsSize is deliberately
+// excluded — /tmp sizing is applied separately from the resource-limit applier.
+func (c *LimitsConfig) HasAny() bool {
+	if c == nil {
+		return false
+	}
+	return c.CPU.Count != "" ||
+		c.CPU.Allowance != "" ||
+		c.CPU.Priority != 0 ||
+		c.Memory.Limit != "" ||
+		c.Memory.Enforce != "" ||
+		c.Memory.Swap != "" ||
+		c.Disk.Read != "" ||
+		c.Disk.Write != "" ||
+		c.Disk.Max != "" ||
+		c.Disk.Size != "" ||
+		c.Disk.Priority != 0 ||
+		c.Runtime.MaxProcesses != 0
+}
+
 // CPULimits contains CPU resource limits
 type CPULimits struct {
 	Count     string `toml:"count"`     // "2", "0-3", "" (unlimited)
@@ -593,13 +617,14 @@ type MemoryLimits struct {
 	Swap    string `toml:"swap"`    // "true", "false", or size
 }
 
-// DiskLimits contains disk I/O resource limits
+// DiskLimits contains disk I/O and disk-size resource limits
 type DiskLimits struct {
-	Read      string `toml:"read"`       // "10MiB/s", "1000iops", "" (unlimited)
-	Write     string `toml:"write"`      // "5MiB/s", "1000iops", "" (unlimited)
-	Max       string `toml:"max"`        // combined read+write limit
+	Read      string `toml:"read"`       // I/O rate: "10MiB/s", "1000iops", "" (unlimited)
+	Write     string `toml:"write"`      // I/O rate: "5MiB/s", "1000iops", "" (unlimited)
+	Max       string `toml:"max"`        // combined read+write I/O rate limit
 	Priority  int    `toml:"priority"`   // 0-10
-	TmpfsSize string `toml:"tmpfs_size"` // /tmp size: "2GiB", "1024MiB" (default: "2GiB")
+	Size      string `toml:"size"`       // whole-container rootfs quota: "20GiB", "" (unlimited). Requires a quota-capable pool (btrfs/zfs/lvm); rejected on a dir pool (#728).
+	TmpfsSize string `toml:"tmpfs_size"` // /tmp size: "2GiB", "1024MiB", "" (coi applies a 2GiB default when unset, unless /tmp is already bounded — #728)
 }
 
 // RuntimeLimits contains time-based and process limits

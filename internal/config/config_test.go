@@ -525,9 +525,79 @@ func TestToolConfigDefaults(t *testing.T) {
 func TestDefaultTmpfsSize(t *testing.T) {
 	cfg := GetDefaultConfig()
 
-	// Default is empty: /tmp uses the container's root disk, not a RAM-backed tmpfs.
+	// The CONFIG default is empty (no explicit user value). coi applies its own
+	// runtime /tmp cap at setup when this is unset (session.defaultTmpfsSize,
+	// #728); that is deliberately not encoded here so an explicit user value and
+	// "unset" remain distinguishable through config merge.
 	if cfg.Limits.Disk.TmpfsSize != "" {
-		t.Errorf("Expected default TmpfsSize '' (disk-backed), got '%s'", cfg.Limits.Disk.TmpfsSize)
+		t.Errorf("Expected default TmpfsSize '' (unset), got '%s'", cfg.Limits.Disk.TmpfsSize)
+	}
+}
+
+// TestLimitsHasAny pins the single limit-presence predicate shared by the shell
+// and run launch paths. The size-only case is the regression guard: a disk size
+// quota must trigger the applier (and its dir-pool safety check) on BOTH paths,
+// not be silently dropped on one (#728).
+func TestLimitsHasAny(t *testing.T) {
+	var nilCfg *LimitsConfig
+	if nilCfg.HasAny() {
+		t.Error("nil LimitsConfig must report no limits")
+	}
+	if (&LimitsConfig{}).HasAny() {
+		t.Error("zero LimitsConfig must report no limits")
+	}
+
+	sizeOnly := &LimitsConfig{}
+	sizeOnly.Disk.Size = "20GiB"
+	if !sizeOnly.HasAny() {
+		t.Error("a size-only [limits.disk] config must report limits present")
+	}
+
+	// TmpfsSize is applied outside the resource-limit applier, so it must NOT
+	// flip HasAny on its own.
+	tmpfsOnly := &LimitsConfig{}
+	tmpfsOnly.Disk.TmpfsSize = "2GiB"
+	if tmpfsOnly.HasAny() {
+		t.Error("tmpfs_size alone must not report resource limits present")
+	}
+
+	for _, mut := range []func(*LimitsConfig){
+		func(c *LimitsConfig) { c.CPU.Count = "2" },
+		func(c *LimitsConfig) { c.Memory.Limit = "1GiB" },
+		func(c *LimitsConfig) { c.Disk.Read = "10MB" },
+		func(c *LimitsConfig) { c.Disk.Priority = 5 },
+		func(c *LimitsConfig) { c.Runtime.MaxProcesses = 100 },
+	} {
+		c := &LimitsConfig{}
+		mut(c)
+		if !c.HasAny() {
+			t.Errorf("expected HasAny() true for %+v", c)
+		}
+	}
+}
+
+func TestLimitsMergeDiskSize(t *testing.T) {
+	tests := []struct {
+		name       string
+		baseSize   string
+		otherSize  string
+		expectSize string
+	}{
+		{"other overrides base", "10GiB", "20GiB", "20GiB"},
+		{"empty other keeps base", "10GiB", "", "10GiB"},
+		{"both empty stays empty", "", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			base := GetDefaultConfig()
+			base.Limits.Disk.Size = tt.baseSize
+			other := &Config{}
+			other.Limits.Disk.Size = tt.otherSize
+			base.Merge(other)
+			if base.Limits.Disk.Size != tt.expectSize {
+				t.Errorf("Disk.Size: expected %q, got %q", tt.expectSize, base.Limits.Disk.Size)
+			}
+		})
 	}
 }
 

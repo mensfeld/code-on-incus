@@ -95,6 +95,9 @@ func mergeLimits(base *LimitsConfig, other *LimitsConfig) {
 	if other.Disk.Priority != 0 {
 		base.Disk.Priority = other.Disk.Priority
 	}
+	if other.Disk.Size != "" {
+		base.Disk.Size = other.Disk.Size
+	}
 	if other.Disk.TmpfsSize != "" {
 		base.Disk.TmpfsSize = other.Disk.TmpfsSize
 	}

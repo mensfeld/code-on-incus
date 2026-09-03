@@ -968,9 +968,10 @@ func (r *recordingDevices) AddProxyDevice(_, _, _ string, _, _ int) error { retu
 func (r *recordingDevices) AddHostPortDevice(name, listenAddr string, hostPort, containerPort int) error {
 	return nil
 }
-func (r *recordingDevices) RemoveDevice(_ string) error    { return nil }
-func (r *recordingDevices) ListDevices() ([]string, error) { return nil, nil }
-func (r *recordingDevices) SetTmpfsSize(_ string) error    { return nil }
+func (r *recordingDevices) RemoveDevice(_ string) error                    { return nil }
+func (r *recordingDevices) ListDevices() ([]string, error)                 { return nil, nil }
+func (r *recordingDevices) SetTmpfsSize(_ string) error                    { return nil }
+func (r *recordingDevices) SetTmpfsSizeIfUnbounded(_ string) (bool, error) { return false, nil }
 
 // SetupSecurityMounts must expand the dynamic per-worktree git configs itself —
 // the single chokepoint every caller passes through (issue #545). Passing an EMPTY

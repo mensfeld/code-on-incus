@@ -202,7 +202,7 @@ func printLimits(l *config.LimitsConfig) {
 			fmt.Printf("swap = %q\n", l.Memory.Swap)
 		}
 	}
-	if l.Disk.Read != "" || l.Disk.Write != "" || l.Disk.Max != "" {
+	if l.Disk.Read != "" || l.Disk.Write != "" || l.Disk.Max != "" || l.Disk.Size != "" || l.Disk.TmpfsSize != "" {
 		fmt.Println()
 		fmt.Println("[limits.disk]")
 		if l.Disk.Read != "" {
@@ -213,6 +213,12 @@ func printLimits(l *config.LimitsConfig) {
 		}
 		if l.Disk.Max != "" {
 			fmt.Printf("max = %q\n", l.Disk.Max)
+		}
+		if l.Disk.Size != "" {
+			fmt.Printf("size = %q\n", l.Disk.Size)
+		}
+		if l.Disk.TmpfsSize != "" {
+			fmt.Printf("tmpfs_size = %q\n", l.Disk.TmpfsSize)
 		}
 	}
 	if l.Runtime.MaxDuration != "" || l.Runtime.MaxProcesses != 0 {

@@ -9,6 +9,7 @@ Tests that:
 5. Multiple limits can be combined
 """
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -424,3 +425,97 @@ limit = "2GiB"
     config = result.stdout
     assert 'limits.cpu: "2"' in config, "CPU limit should persist"
     assert "limits.memory: 2GiB" in config, "Memory limit should persist"
+
+
+def _default_root_pool_driver():
+    """Resolve the storage driver backing the default profile's root disk.
+
+    Returns the driver string (e.g. "dir", "btrfs", "zfs") or None if it can't
+    be determined. Used to branch the disk-size quota test: Incus only enforces
+    a root ``size=`` quota on quota-capable drivers, and coi hard-errors on the
+    rest (#728).
+
+    ``driver`` is a top-level pool PROPERTY, not a config key, so it must be read
+    from ``incus storage list --format json`` — ``incus storage get <pool>
+    driver`` returns empty (it only exposes config keys). This mirrors how coi
+    itself resolves the driver (container.ListStoragePools).
+    """
+    pool = subprocess.run(
+        ["incus", "profile", "device", "get", "default", "root", "pool"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if pool.returncode != 0 or not pool.stdout.strip():
+        return None
+    pool_name = pool.stdout.strip()
+
+    listed = subprocess.run(
+        ["incus", "storage", "list", "--format", "json"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if listed.returncode != 0:
+        return None
+    try:
+        pools = json.loads(listed.stdout)
+    except json.JSONDecodeError:
+        return None
+    for p in pools:
+        if p.get("name") == pool_name:
+            return p.get("driver") or None
+    return None
+
+
+def test_disk_size_quota_by_pool_driver(coi_binary, workspace_dir, cleanup_containers):
+    """[limits.disk] size sets the root device quota on a quota-capable pool,
+    and is a hard error on a dir pool that cannot enforce it (#728)."""
+    driver = _default_root_pool_driver()
+    if driver is None:
+        import pytest
+
+        pytest.skip("could not resolve default root pool driver")
+
+    container_name = calculate_container_name(workspace_dir, 1)
+    config_dir = Path(workspace_dir) / ".coi"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "config.toml").write_text(
+        """
+[container]
+persistent = true
+
+[limits.disk]
+size = "5GiB"
+"""
+    )
+
+    result = subprocess.run(
+        [coi_binary, "run", "--workspace", workspace_dir, "echo", "test"],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        cwd=workspace_dir,
+    )
+
+    quota_capable = driver in ("btrfs", "zfs", "lvm", "ceph")
+    if quota_capable:
+        assert result.returncode == 0, (
+            f"size quota should apply on a {driver} pool. stderr: {result.stderr}"
+        )
+        show = subprocess.run(
+            ["incus", "config", "show", container_name],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert "size: 5GiB" in show.stdout, (
+            f"root device should carry size=5GiB. Config: {show.stdout}"
+        )
+    else:
+        assert result.returncode != 0, (
+            f"size quota must be rejected on a {driver} pool that can't enforce it"
+        )
+        assert "quota-capable" in result.stderr, (
+            f"error should explain the pool cannot enforce a quota. stderr: {result.stderr}"
+        )

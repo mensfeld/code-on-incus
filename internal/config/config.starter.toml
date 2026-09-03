@@ -157,7 +157,8 @@
 # write = ""
 # max = ""                       # combined read+write (overrides read/write)
 # priority = 0
-# tmpfs_size = ""                # "" = /tmp on container disk; "4GiB" = RAM-backed tmpfs
+# size = ""                      # whole-container rootfs quota, e.g. "20GiB"; needs a btrfs/zfs/lvm pool (rejected on a dir pool)
+# tmpfs_size = ""                # /tmp cap; "" = coi applies a 2GiB default unless /tmp is already bounded; e.g. "4GiB"
 
 [limits.runtime]
 # max_duration = ""              # "2h", "30m", "1h30m" ("" = unlimited)

@@ -385,16 +385,25 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 			opts.Logger(fmt.Sprintf("Warning: Failed to configure Docker daemon: %v", err))
 		}
 
-		// Size /tmp from [limits.disk] tmpfs_size (prevents space exhaustion in
-		// big builds). Applied POST-start: it installs a systemd tmp.mount unit,
-		// which the running container's init mounts immediately and again at
-		// every subsequent boot (#733). Non-fatal.
+		// Size /tmp to prevent space exhaustion in big builds. Applied POST-start:
+		// it installs a systemd tmp.mount unit, which the running container's init
+		// mounts immediately and again at every subsequent boot (#733). Non-fatal.
+		// An explicit [limits.disk] tmpfs_size always applies; when unset, coi
+		// applies a default cap but only if /tmp is not already a bounded tmpfs,
+		// so an image that deliberately sizes /tmp is left untouched (#728).
 		if opts.LimitsConfig != nil && opts.LimitsConfig.Disk.TmpfsSize != "" {
-			if err := result.Manager.SetTmpfsSize(opts.LimitsConfig.Disk.TmpfsSize); err != nil {
+			size := opts.LimitsConfig.Disk.TmpfsSize
+			if err := result.Manager.SetTmpfsSize(size); err != nil {
 				opts.Logger(fmt.Sprintf("Warning: Failed to set /tmp size: %v", err))
 			} else {
-				opts.Logger(fmt.Sprintf("Set /tmp size to %s", opts.LimitsConfig.Disk.TmpfsSize))
+				opts.Logger(fmt.Sprintf("Set /tmp size to %s", size))
 			}
+		} else if applied, err := result.Manager.SetTmpfsSizeIfUnbounded(defaultTmpfsSize); err != nil {
+			opts.Logger(fmt.Sprintf("Warning: Failed to set default /tmp size: %v", err))
+		} else if applied {
+			opts.Logger(fmt.Sprintf("Set /tmp size to %s (default)", defaultTmpfsSize))
+		} else {
+			opts.Logger("Left /tmp size as-is (already bounded, or has submounts a tmpfs would shadow)")
 		}
 	}
 
@@ -1035,7 +1044,7 @@ func createAndStartContainer(result *SetupResult, opts *SetupOptions, image, con
 	}
 
 	// Apply resource limits before starting (if configured)
-	if opts.LimitsConfig != nil && hasLimits(opts.LimitsConfig) {
+	if opts.LimitsConfig.HasAny() {
 		opts.Logger("Applying resource limits...")
 		applyOpts := limits.ApplyOptions{
 			ContainerName: result.ContainerName,
@@ -1053,6 +1062,7 @@ func createAndStartContainer(result *SetupResult, opts *SetupOptions, image, con
 				Read:     opts.LimitsConfig.Disk.Read,
 				Write:    opts.LimitsConfig.Disk.Write,
 				Max:      opts.LimitsConfig.Disk.Max,
+				Size:     opts.LimitsConfig.Disk.Size,
 				Priority: opts.LimitsConfig.Disk.Priority,
 			},
 			Runtime: limits.RuntimeLimits{

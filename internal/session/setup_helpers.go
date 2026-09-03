@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/vmhost"
 )
@@ -447,6 +446,11 @@ func SetupGitIdentity(mgr container.ContainerExecution, homeDir string, identity
 	logger("Configured container git identity from host global git config")
 }
 
+// defaultTmpfsSize is the /tmp cap coi applies when [limits.disk] tmpfs_size is
+// unset and /tmp is not already a bounded tmpfs, preventing runaway builds from
+// exhausting /tmp (#728). An explicit tmpfs_size always overrides it.
+const defaultTmpfsSize = "2GiB"
+
 // shouldSuppressClaudeAutoMode reports whether coi should write the Claude
 // managed-settings policy that disables auto mode. It is Claude-specific and,
 // per #764, deliberately skipped under interactive permission mode: managed
@@ -482,24 +486,4 @@ func SetupClaudeManagedSettings(mgr container.ContainerManager, logger func(stri
 	if err := mgr.CreateFileWithOwner("/etc/claude-code/managed-settings.json", content, 0, 0, "0644"); err != nil {
 		logger(fmt.Sprintf("Warning: Failed to write Claude managed settings: %v", err))
 	}
-}
-
-// hasLimits checks if any limits are configured
-func hasLimits(cfg *config.LimitsConfig) bool {
-	if cfg == nil {
-		return false
-	}
-
-	// Check if any limit is set (non-empty strings or non-zero integers)
-	return cfg.CPU.Count != "" ||
-		cfg.CPU.Allowance != "" ||
-		cfg.CPU.Priority != 0 ||
-		cfg.Memory.Limit != "" ||
-		cfg.Memory.Enforce != "" ||
-		cfg.Memory.Swap != "" ||
-		cfg.Disk.Read != "" ||
-		cfg.Disk.Write != "" ||
-		cfg.Disk.Max != "" ||
-		cfg.Disk.Priority != 0 ||
-		cfg.Runtime.MaxProcesses != 0
 }
