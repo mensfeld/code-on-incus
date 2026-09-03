@@ -404,9 +404,9 @@ func (a *App) configureContainerRunPhase(s *runState) session.Phase {
 				if err := session.ConfigureDockerDaemon(s.mgr, logFn); err != nil {
 					fmt.Fprintf(os.Stderr, "Warning: failed to configure Docker daemon: %v\n", err)
 				}
-				// Size /tmp the same way the shell path does, so a profile's
-				// [limits.disk] tmpfs_size (and the default cap) applies to
-				// `coi run` too — the container is running now (#728).
+				// Apply an explicit [limits.disk] tmpfs_size the same way the
+				// shell path does, so a profile's /tmp sizing applies to
+				// `coi run` too — the container is running now (#728/#769).
 				session.ApplyTmpfsSizing(s.mgr, &a.cfg.Limits, logFn)
 				if err := remapContainerUserIfNeeded(s.mgr, s.wasRestarted); err != nil {
 					return nil, err

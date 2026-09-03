@@ -447,40 +447,28 @@ func SetupGitIdentity(mgr container.ContainerExecution, homeDir string, identity
 	logger("Configured container git identity from host global git config")
 }
 
-// defaultTmpfsSize is the /tmp cap coi applies when [limits.disk] tmpfs_size is
-// unset and /tmp is not already a bounded tmpfs, preventing runaway builds from
-// exhausting /tmp (#728). An explicit tmpfs_size always overrides it.
-const defaultTmpfsSize = "2GiB"
-
 // tmpfsSizer is the subset of container operations ApplyTmpfsSizing needs.
 type tmpfsSizer interface {
 	SetTmpfsSize(size string) error
-	SetTmpfsSizeIfUnbounded(size string) (bool, error)
 }
 
-// ApplyTmpfsSizing sizes /tmp for a freshly launched, RUNNING container. It is
-// the single source of truth for both the shell (session.Setup) and run
-// (coi run) launch paths, so /tmp sizing from a profile applies uniformly
-// regardless of how the container was started (#728). An explicit
-// [limits.disk] tmpfs_size always applies; when unset, coi applies a default cap
-// opportunistically — skipped if /tmp is already a bounded tmpfs, or has
-// submounts a fresh tmpfs would shadow. Non-fatal: logs warnings.
+// ApplyTmpfsSizing sizes /tmp for a freshly launched, RUNNING container when
+// [limits.disk] tmpfs_size is set. It is the single source of truth for both
+// the shell (session.Setup) and run (coi run) launch paths, so an explicit
+// tmpfs_size from a profile applies uniformly regardless of how the container
+// was started (#728/#769). No default is applied: coi does NOT convert /tmp to
+// a RAM-backed tmpfs on its own — that would silently move /tmp off disk and
+// onto RAM for every container. To bound /tmp without RAM cost, cap the whole
+// rootfs with [limits.disk] size instead. Non-fatal: logs warnings.
 func ApplyTmpfsSizing(mgr tmpfsSizer, limitsCfg *config.LimitsConfig, logger func(string)) {
-	if limitsCfg != nil && limitsCfg.Disk.TmpfsSize != "" {
-		size := limitsCfg.Disk.TmpfsSize
-		if err := mgr.SetTmpfsSize(size); err != nil {
-			logger(fmt.Sprintf("Warning: Failed to set /tmp size: %v", err))
-		} else {
-			logger(fmt.Sprintf("Set /tmp size to %s", size))
-		}
+	if limitsCfg == nil || limitsCfg.Disk.TmpfsSize == "" {
 		return
 	}
-	if applied, err := mgr.SetTmpfsSizeIfUnbounded(defaultTmpfsSize); err != nil {
-		logger(fmt.Sprintf("Warning: Failed to set default /tmp size: %v", err))
-	} else if applied {
-		logger(fmt.Sprintf("Set /tmp size to %s (default)", defaultTmpfsSize))
+	size := limitsCfg.Disk.TmpfsSize
+	if err := mgr.SetTmpfsSize(size); err != nil {
+		logger(fmt.Sprintf("Warning: Failed to set /tmp size: %v", err))
 	} else {
-		logger("Left /tmp size as-is (already bounded, or has submounts a tmpfs would shadow)")
+		logger(fmt.Sprintf("Set /tmp size to %s", size))
 	}
 }
 
