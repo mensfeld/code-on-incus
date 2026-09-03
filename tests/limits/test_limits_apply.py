@@ -9,6 +9,7 @@ Tests that:
 5. Multiple limits can be combined
 """
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -433,6 +434,11 @@ def _default_root_pool_driver():
     be determined. Used to branch the disk-size quota test: Incus only enforces
     a root ``size=`` quota on quota-capable drivers, and coi hard-errors on the
     rest (#728).
+
+    ``driver`` is a top-level pool PROPERTY, not a config key, so it must be read
+    from ``incus storage list --format json`` — ``incus storage get <pool>
+    driver`` returns empty (it only exposes config keys). This mirrors how coi
+    itself resolves the driver (container.ListStoragePools).
     """
     pool = subprocess.run(
         ["incus", "profile", "device", "get", "default", "root", "pool"],
@@ -442,15 +448,24 @@ def _default_root_pool_driver():
     )
     if pool.returncode != 0 or not pool.stdout.strip():
         return None
-    driver = subprocess.run(
-        ["incus", "storage", "get", pool.stdout.strip(), "driver"],
+    pool_name = pool.stdout.strip()
+
+    listed = subprocess.run(
+        ["incus", "storage", "list", "--format", "json"],
         capture_output=True,
         text=True,
         timeout=30,
     )
-    if driver.returncode != 0:
+    if listed.returncode != 0:
         return None
-    return driver.stdout.strip()
+    try:
+        pools = json.loads(listed.stdout)
+    except json.JSONDecodeError:
+        return None
+    for p in pools:
+        if p.get("name") == pool_name:
+            return p.get("driver") or None
+    return None
 
 
 def test_disk_size_quota_by_pool_driver(coi_binary, workspace_dir, cleanup_containers):
