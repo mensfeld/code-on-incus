@@ -359,7 +359,7 @@ func (a *App) configureContainerRunPhase(s *runState) session.Phase {
 		RunFn: func(ctx context.Context) (session.Teardown, error) {
 			if !s.wasRestarted {
 				limitsConfig := &a.cfg.Limits
-				if hasAnyLimits(limitsConfig) {
+				if limitsConfig.HasAny() {
 					fmt.Fprintf(os.Stderr, "Applying resource limits...\n")
 					applyOpts := limits.ApplyOptions{
 						ContainerName: s.containerName,

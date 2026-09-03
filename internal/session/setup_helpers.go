@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/vmhost"
 )
@@ -487,25 +486,4 @@ func SetupClaudeManagedSettings(mgr container.ContainerManager, logger func(stri
 	if err := mgr.CreateFileWithOwner("/etc/claude-code/managed-settings.json", content, 0, 0, "0644"); err != nil {
 		logger(fmt.Sprintf("Warning: Failed to write Claude managed settings: %v", err))
 	}
-}
-
-// hasLimits checks if any limits are configured
-func hasLimits(cfg *config.LimitsConfig) bool {
-	if cfg == nil {
-		return false
-	}
-
-	// Check if any limit is set (non-empty strings or non-zero integers)
-	return cfg.CPU.Count != "" ||
-		cfg.CPU.Allowance != "" ||
-		cfg.CPU.Priority != 0 ||
-		cfg.Memory.Limit != "" ||
-		cfg.Memory.Enforce != "" ||
-		cfg.Memory.Swap != "" ||
-		cfg.Disk.Read != "" ||
-		cfg.Disk.Write != "" ||
-		cfg.Disk.Max != "" ||
-		cfg.Disk.Size != "" ||
-		cfg.Disk.Priority != 0 ||
-		cfg.Runtime.MaxProcesses != 0
 }

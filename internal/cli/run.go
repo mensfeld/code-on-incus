@@ -351,26 +351,6 @@ func (a *App) appendEnvArgs(incusArgs []string, tz string, socketEnv map[string]
 	return incusArgs, nil
 }
 
-// hasAnyLimits checks if any limits are configured (used in run.go)
-func hasAnyLimits(cfg *config.LimitsConfig) bool {
-	if cfg == nil {
-		return false
-	}
-
-	// Check if any limit is set (non-empty strings or non-zero integers)
-	return cfg.CPU.Count != "" ||
-		cfg.CPU.Allowance != "" ||
-		cfg.CPU.Priority != 0 ||
-		cfg.Memory.Limit != "" ||
-		cfg.Memory.Enforce != "" ||
-		cfg.Memory.Swap != "" ||
-		cfg.Disk.Read != "" ||
-		cfg.Disk.Write != "" ||
-		cfg.Disk.Max != "" ||
-		cfg.Disk.Priority != 0 ||
-		cfg.Runtime.MaxProcesses != 0
-}
-
 // filterWritableGitHooks removes .git/hooks from protected paths when writable hooks are enabled.
 func filterWritableGitHooks(paths []string, cfg *config.Config) []string {
 	if !config.BoolVal(cfg.Git.WritableHooks) {

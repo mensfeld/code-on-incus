@@ -1044,7 +1044,7 @@ func createAndStartContainer(result *SetupResult, opts *SetupOptions, image, con
 	}
 
 	// Apply resource limits before starting (if configured)
-	if opts.LimitsConfig != nil && hasLimits(opts.LimitsConfig) {
+	if opts.LimitsConfig.HasAny() {
 		opts.Logger("Applying resource limits...")
 		applyOpts := limits.ApplyOptions{
 			ContainerName: result.ContainerName,

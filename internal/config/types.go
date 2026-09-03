@@ -579,6 +579,30 @@ type LimitsConfig struct {
 	Runtime RuntimeLimits `toml:"runtime"`
 }
 
+// HasAny reports whether any resource limit applied through
+// limits.ApplyResourceLimits is set (non-empty string or non-zero int). It is
+// the single source of truth for both the shell (session.Setup) and run
+// (coi run) launch paths, so a new limit field can never be honored on one
+// path but silently dropped on the other. Note: Disk.TmpfsSize is deliberately
+// excluded — /tmp sizing is applied separately from the resource-limit applier.
+func (c *LimitsConfig) HasAny() bool {
+	if c == nil {
+		return false
+	}
+	return c.CPU.Count != "" ||
+		c.CPU.Allowance != "" ||
+		c.CPU.Priority != 0 ||
+		c.Memory.Limit != "" ||
+		c.Memory.Enforce != "" ||
+		c.Memory.Swap != "" ||
+		c.Disk.Read != "" ||
+		c.Disk.Write != "" ||
+		c.Disk.Max != "" ||
+		c.Disk.Size != "" ||
+		c.Disk.Priority != 0 ||
+		c.Runtime.MaxProcesses != 0
+}
+
 // CPULimits contains CPU resource limits
 type CPULimits struct {
 	Count     string `toml:"count"`     // "2", "0-3", "" (unlimited)
