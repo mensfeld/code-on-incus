@@ -525,12 +525,10 @@ func TestToolConfigDefaults(t *testing.T) {
 func TestDefaultTmpfsSize(t *testing.T) {
 	cfg := GetDefaultConfig()
 
-	// The CONFIG default is empty (no explicit user value). coi applies its own
-	// runtime /tmp cap at setup when this is unset (session.defaultTmpfsSize,
-	// #728); that is deliberately not encoded here so an explicit user value and
-	// "unset" remain distinguishable through config merge.
+	// Default is empty: /tmp stays disk-backed. coi never sizes /tmp on its own
+	// (that would make it RAM-backed); tmpfs_size is strictly opt-in (#728).
 	if cfg.Limits.Disk.TmpfsSize != "" {
-		t.Errorf("Expected default TmpfsSize '' (unset), got '%s'", cfg.Limits.Disk.TmpfsSize)
+		t.Errorf("Expected default TmpfsSize '' (disk-backed /tmp), got '%s'", cfg.Limits.Disk.TmpfsSize)
 	}
 }
 

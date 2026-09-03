@@ -624,7 +624,7 @@ type DiskLimits struct {
 	Max       string `toml:"max"`        // combined read+write I/O rate limit
 	Priority  int    `toml:"priority"`   // 0-10
 	Size      string `toml:"size"`       // whole-container rootfs quota: "20GiB", "" (unlimited). Requires a quota-capable pool (btrfs/zfs/lvm); rejected on a dir pool (#728).
-	TmpfsSize string `toml:"tmpfs_size"` // /tmp size: "2GiB", "1024MiB", "" (coi applies a 2GiB default when unset, unless /tmp is already bounded — #728)
+	TmpfsSize string `toml:"tmpfs_size"` // opt-in RAM-backed /tmp of this size (systemd tmpfs mount): "2GiB", "1024MiB", "" (unset = /tmp stays disk-backed; use [limits.disk] size to bound total disk — #728)
 }
 
 // RuntimeLimits contains time-based and process limits

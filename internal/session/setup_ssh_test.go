@@ -26,9 +26,8 @@ type addedDevice struct {
 	uid, gid              int
 }
 
-func (f *fakeForwarder) MountDisk(_, _, _ string, _, _ bool) error      { return nil }
-func (f *fakeForwarder) SetTmpfsSize(_ string) error                    { return nil }
-func (f *fakeForwarder) SetTmpfsSizeIfUnbounded(_ string) (bool, error) { return false, nil }
+func (f *fakeForwarder) MountDisk(_, _, _ string, _, _ bool) error { return nil }
+func (f *fakeForwarder) SetTmpfsSize(_ string) error               { return nil }
 
 func (f *fakeForwarder) AddProxyDevice(name, connect, listen string, uid, gid int) error {
 	f.addCalls++

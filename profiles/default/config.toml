@@ -96,7 +96,7 @@ write = ""
 max = ""
 priority = 0
 size = ""          # whole-container rootfs quota, e.g. "20GiB"; needs a btrfs/zfs/lvm pool (rejected on a dir pool)
-tmpfs_size = ""    # /tmp cap; "" = coi applies a 2GiB default unless /tmp is already bounded
+tmpfs_size = ""    # opt-in RAM-backed /tmp of this size (e.g. "4GiB"); "" = /tmp stays disk-backed
 
 [limits.runtime]
 max_duration = ""

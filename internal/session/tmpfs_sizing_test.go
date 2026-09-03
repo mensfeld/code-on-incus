@@ -9,55 +9,43 @@ import (
 
 // fakeTmpfsSizer records how ApplyTmpfsSizing drives the container.
 type fakeTmpfsSizer struct {
-	explicitSize   string // arg passed to SetTmpfsSize (explicit path)
-	ifUnboundedArg string // arg passed to SetTmpfsSizeIfUnbounded (default path)
-	applied        bool   // value SetTmpfsSizeIfUnbounded returns
-	err            error
+	explicitSize string // arg passed to SetTmpfsSize
+	called       bool
+	err          error
 }
 
 func (f *fakeTmpfsSizer) SetTmpfsSize(size string) error {
+	f.called = true
 	f.explicitSize = size
 	return f.err
-}
-
-func (f *fakeTmpfsSizer) SetTmpfsSizeIfUnbounded(size string) (bool, error) {
-	f.ifUnboundedArg = size
-	return f.applied, f.err
 }
 
 func TestApplyTmpfsSizing(t *testing.T) {
 	log := func(string) {}
 
-	t.Run("explicit tmpfs_size is applied verbatim, no default probe", func(t *testing.T) {
+	t.Run("explicit tmpfs_size is applied verbatim", func(t *testing.T) {
 		f := &fakeTmpfsSizer{}
 		cfg := &config.LimitsConfig{}
 		cfg.Disk.TmpfsSize = "8GiB"
 		ApplyTmpfsSizing(f, cfg, log)
-		if f.explicitSize != "8GiB" {
-			t.Errorf("SetTmpfsSize arg = %q, want 8GiB", f.explicitSize)
-		}
-		if f.ifUnboundedArg != "" {
-			t.Errorf("default probe must not run when tmpfs_size is explicit, got %q", f.ifUnboundedArg)
+		if !f.called || f.explicitSize != "8GiB" {
+			t.Errorf("SetTmpfsSize called=%v arg=%q, want true/8GiB", f.called, f.explicitSize)
 		}
 	})
 
-	t.Run("unset tmpfs_size falls back to the opportunistic default", func(t *testing.T) {
-		f := &fakeTmpfsSizer{applied: true}
-		cfg := &config.LimitsConfig{} // TmpfsSize == ""
-		ApplyTmpfsSizing(f, cfg, log)
-		if f.ifUnboundedArg != defaultTmpfsSize {
-			t.Errorf("default probe arg = %q, want %q", f.ifUnboundedArg, defaultTmpfsSize)
-		}
-		if f.explicitSize != "" {
-			t.Errorf("explicit setter must not run on the default path, got %q", f.explicitSize)
+	t.Run("unset tmpfs_size is a no-op (no default RAM tmpfs)", func(t *testing.T) {
+		f := &fakeTmpfsSizer{}
+		ApplyTmpfsSizing(f, &config.LimitsConfig{}, log) // TmpfsSize == ""
+		if f.called {
+			t.Errorf("SetTmpfsSize must not run when tmpfs_size is unset (arg %q)", f.explicitSize)
 		}
 	})
 
-	t.Run("nil limits config still applies the default", func(t *testing.T) {
+	t.Run("nil limits config is a no-op", func(t *testing.T) {
 		f := &fakeTmpfsSizer{}
 		ApplyTmpfsSizing(f, nil, log)
-		if f.ifUnboundedArg != defaultTmpfsSize {
-			t.Errorf("nil config should apply default cap, got arg %q", f.ifUnboundedArg)
+		if f.called {
+			t.Error("nil config must not size /tmp")
 		}
 	})
 
