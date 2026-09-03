@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/vmhost"
 )
@@ -450,6 +451,38 @@ func SetupGitIdentity(mgr container.ContainerExecution, homeDir string, identity
 // unset and /tmp is not already a bounded tmpfs, preventing runaway builds from
 // exhausting /tmp (#728). An explicit tmpfs_size always overrides it.
 const defaultTmpfsSize = "2GiB"
+
+// tmpfsSizer is the subset of container operations ApplyTmpfsSizing needs.
+type tmpfsSizer interface {
+	SetTmpfsSize(size string) error
+	SetTmpfsSizeIfUnbounded(size string) (bool, error)
+}
+
+// ApplyTmpfsSizing sizes /tmp for a freshly launched, RUNNING container. It is
+// the single source of truth for both the shell (session.Setup) and run
+// (coi run) launch paths, so /tmp sizing from a profile applies uniformly
+// regardless of how the container was started (#728). An explicit
+// [limits.disk] tmpfs_size always applies; when unset, coi applies a default cap
+// opportunistically — skipped if /tmp is already a bounded tmpfs, or has
+// submounts a fresh tmpfs would shadow. Non-fatal: logs warnings.
+func ApplyTmpfsSizing(mgr tmpfsSizer, limitsCfg *config.LimitsConfig, logger func(string)) {
+	if limitsCfg != nil && limitsCfg.Disk.TmpfsSize != "" {
+		size := limitsCfg.Disk.TmpfsSize
+		if err := mgr.SetTmpfsSize(size); err != nil {
+			logger(fmt.Sprintf("Warning: Failed to set /tmp size: %v", err))
+		} else {
+			logger(fmt.Sprintf("Set /tmp size to %s", size))
+		}
+		return
+	}
+	if applied, err := mgr.SetTmpfsSizeIfUnbounded(defaultTmpfsSize); err != nil {
+		logger(fmt.Sprintf("Warning: Failed to set default /tmp size: %v", err))
+	} else if applied {
+		logger(fmt.Sprintf("Set /tmp size to %s (default)", defaultTmpfsSize))
+	} else {
+		logger("Left /tmp size as-is (already bounded, or has submounts a tmpfs would shadow)")
+	}
+}
 
 // shouldSuppressClaudeAutoMode reports whether coi should write the Claude
 // managed-settings policy that disables auto mode. It is Claude-specific and,

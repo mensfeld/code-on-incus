@@ -387,24 +387,9 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 
 		// Size /tmp to prevent space exhaustion in big builds. Applied POST-start:
 		// it installs a systemd tmp.mount unit, which the running container's init
-		// mounts immediately and again at every subsequent boot (#733). Non-fatal.
-		// An explicit [limits.disk] tmpfs_size always applies; when unset, coi
-		// applies a default cap but only if /tmp is not already a bounded tmpfs,
-		// so an image that deliberately sizes /tmp is left untouched (#728).
-		if opts.LimitsConfig != nil && opts.LimitsConfig.Disk.TmpfsSize != "" {
-			size := opts.LimitsConfig.Disk.TmpfsSize
-			if err := result.Manager.SetTmpfsSize(size); err != nil {
-				opts.Logger(fmt.Sprintf("Warning: Failed to set /tmp size: %v", err))
-			} else {
-				opts.Logger(fmt.Sprintf("Set /tmp size to %s", size))
-			}
-		} else if applied, err := result.Manager.SetTmpfsSizeIfUnbounded(defaultTmpfsSize); err != nil {
-			opts.Logger(fmt.Sprintf("Warning: Failed to set default /tmp size: %v", err))
-		} else if applied {
-			opts.Logger(fmt.Sprintf("Set /tmp size to %s (default)", defaultTmpfsSize))
-		} else {
-			opts.Logger("Left /tmp size as-is (already bounded, or has submounts a tmpfs would shadow)")
-		}
+		// mounts immediately and again at every subsequent boot (#733). Shared with
+		// the run path via ApplyTmpfsSizing so /tmp sizing is uniform (#728).
+		ApplyTmpfsSizing(result.Manager, opts.LimitsConfig, opts.Logger)
 	}
 
 	// 6.4. Finalize execution context by probing the container for the
