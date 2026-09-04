@@ -43,6 +43,20 @@ func TestBuildToolSpecCommand_DummyOverride(t *testing.T) {
 	}
 }
 
+// buildToolLaunchArgv (used by `coi run --prompt`) must NOT apply the dummy
+// override — the dummy image installs the stub as `claude`, so rewriting argv[0]
+// to "dummy" would exec a nonexistent command (#701 review).
+func TestBuildToolLaunchArgv_NoDummyOverride(t *testing.T) {
+	t.Setenv("COI_USE_DUMMY", "1")
+	argv, _, err := buildToolLaunchArgv(tool.NewClaude(), tool.LaunchSpec{SessionID: "sid", Print: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(argv) == 0 || argv[0] != "claude" {
+		t.Errorf("prompt-mode launch must keep the real binary name, got: %v", argv)
+	}
+}
+
 func TestBuildToolSpecCommand_CodexPrompt(t *testing.T) {
 	// Codex embeds the prompt as a trailing positional and has no system prompt.
 	argv, prompt, err := buildToolSpecCommand(tool.NewCodex(), tool.LaunchSpec{

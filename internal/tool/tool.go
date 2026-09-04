@@ -291,6 +291,14 @@ func (c *ClaudeTool) BuildCommandLaunch(spec LaunchSpec) ([]string, error) {
 			}
 		}
 	}
+	// Headless print mode: run the prompt to completion and exit with a status
+	// code instead of opening an interactive session (#701). Drop --verbose so
+	// the fire-and-forget output stays clean for cron logs; -p keeps Claude's
+	// default text output.
+	if spec.Print {
+		cmd = removeArg(cmd, "--verbose")
+		cmd = append(cmd, "-p")
+	}
 	if spec.SystemPromptFile != "" {
 		cmd = append(cmd, "--append-system-prompt", catSubst(spec.SystemPromptFile))
 	}
@@ -298,6 +306,17 @@ func (c *ClaudeTool) BuildCommandLaunch(spec LaunchSpec) ([]string, error) {
 		cmd = append(cmd, catSubst(spec.PromptFile))
 	}
 	return cmd, nil
+}
+
+// removeArg returns cmd with the first occurrence of arg removed. Used to drop
+// flags that conflict with a launch variant (e.g. --verbose in print mode).
+func removeArg(cmd []string, arg string) []string {
+	for i, a := range cmd {
+		if a == arg {
+			return append(cmd[:i:i], cmd[i+1:]...)
+		}
+	}
+	return cmd
 }
 
 // ToolWithModel is an optional interface for tools that support selecting a

@@ -116,6 +116,7 @@ _Aider and Cursor are on the way._ See the [Supported Tools wiki page](https://g
 ```bash
 coi shell                 # interactive AI session (Claude Code by default)
 coi run -- npm test       # run any command in the sandbox (streams output, propagates exit code)
+coi run --prompt-name nightly   # fire-and-forget: run the agent headlessly from a predefined prompt
 coi top                   # per-container CPU/memory/IO, resolved to workspace + alias
 coi monitor               # real-time security dashboard
 coi list --all            # active containers + saved sessions
@@ -126,6 +127,34 @@ coi clean                 # remove stopped containers and orphaned resources
 ```
 
 Drop a `.coi/config.toml` in any repo to auto-configure `coi` for that project - teams share one image, network mode, and limits. Run `coi <command> --help` for any command.
+
+## Fire and forget: headless prompts + cron
+
+`coi run --prompt` runs the AI agent **headlessly** - it executes a prompt to completion, streams output, and exits with the agent's status code. No TTY, no interaction. That makes it a clean building block for automation: a **list of predefined prompts** + a **persistent setup** + your host's **cron**.
+
+```bash
+coi run --prompt "update dependencies, run the tests, and open a PR if green"
+coi run --prompt-file ./task.md --profile hardened
+coi run --prompt-name nightly-maintenance          # from the [prompts] config table
+```
+
+Define reusable prompts once, in your trusted config `~/.coi/config.toml` (or a profile under it):
+
+```toml
+[prompts]
+nightly-maintenance = "Update dependencies, run the tests, and open a PR if green."
+triage = { file = "prompts/triage.md" }            # long prompts can live in a file
+```
+
+Then schedule them with plain host cron - exit codes propagate, so failures show up in your logs:
+
+```cron
+# crontab -e   (runs on the host, which owns cron and drives coi)
+0 3 * * *    cd ~/project && coi run --prompt-name nightly-maintenance >> ~/coi-nightly.log 2>&1
+*/30 * * * * cd ~/project && coi run --profile triage --prompt-name triage >> ~/coi-triage.log 2>&1
+```
+
+Each fire is a fresh ephemeral session by default, and prompt mode currently supports the `claude` tool with `permission_mode = "bypass"` (a headless run has no TTY to approve tool use). **Prompts are honored only from trusted-scope config** (`~/.coi/config.toml` / `$COI_CONFIG`); a `[prompts]` table in an untrusted project `.coi/config.toml` (or a project-scoped profile) is ignored entirely - so a cloned repo can never define or redefine a prompt you invoke by name. This matches how `env_commands` and the default-profile selector are treated.
 
 ## Documentation
 

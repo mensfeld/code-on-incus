@@ -31,6 +31,14 @@ func (c *Config) Merge(other *Config) {
 	if other.Defaults.EnvCommandTimeout != "" {
 		c.Defaults.EnvCommandTimeout = other.Defaults.EnvCommandTimeout
 	}
+	if len(other.Prompts) > 0 {
+		if c.Prompts == nil {
+			c.Prompts = make(map[string]PromptEntry)
+		}
+		for k, v := range other.Prompts {
+			c.Prompts[k] = v
+		}
+	}
 	if len(other.Mounts.Default) > 0 {
 		c.Mounts.Default = append(c.Mounts.Default, other.Mounts.Default...)
 	}
@@ -234,6 +242,17 @@ func (c *Config) ApplyProfile(name string) error {
 	if len(profile.ForwardEnv) > 0 {
 		c.Defaults.ForwardEnv = MergeStringSliceUnique(c.Defaults.ForwardEnv, profile.ForwardEnv)
 	}
+	if len(profile.Prompts) > 0 {
+		// Untrusted (project-scoped) profiles have their [prompts] stripped at
+		// load (sanitizeUntrustedPrompts), so anything here came from trusted
+		// scope and may layer onto the base config.
+		if c.Prompts == nil {
+			c.Prompts = make(map[string]PromptEntry)
+		}
+		for k, v := range profile.Prompts {
+			c.Prompts[k] = v
+		}
+	}
 	if len(profile.Mounts) > 0 {
 		c.Mounts.Default = append(c.Mounts.Default, profile.Mounts...)
 	}
@@ -423,6 +442,24 @@ func mergeProfiles(parent, child ProfileConfig) ProfileConfig {
 			}
 		}
 		result.EnvCommands = merged
+	}
+
+	// Prompts: deep merge — parent keys preserved, child keys override (#701).
+	// A child entry with empty text AND empty file clears the inherited key,
+	// mirroring the Environment/EnvCommands clear-on-empty semantics.
+	if len(parent.Prompts) > 0 {
+		merged := make(map[string]PromptEntry, len(parent.Prompts)+len(result.Prompts))
+		for k, v := range parent.Prompts {
+			merged[k] = v
+		}
+		for k, v := range result.Prompts {
+			if v.Text == "" && v.File == "" {
+				delete(merged, k)
+			} else {
+				merged[k] = v
+			}
+		}
+		result.Prompts = merged
 	}
 
 	// Arrays: if child defines them, they fully replace parent's. If not, inherit.

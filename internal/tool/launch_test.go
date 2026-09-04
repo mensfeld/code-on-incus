@@ -37,6 +37,59 @@ func TestClaudeBuildCommandLaunch_PromptAndSystem(t *testing.T) {
 	}
 }
 
+// Print mode (#701) adds -p so Claude runs to completion and exits, and drops
+// --verbose so the fire-and-forget output stays clean. The prompt stays the
+// trailing positional.
+func TestClaudeBuildCommandLaunch_PrintMode(t *testing.T) {
+	c := NewClaude().(ToolWithPrompt)
+	cmd, err := c.BuildCommandLaunch(LaunchSpec{
+		SessionID:  "sid-1",
+		PromptFile: "/run/p",
+		Print:      true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(cmd, " ")
+	if !containsArg(cmd, "-p") {
+		t.Errorf("print mode must add -p: %q", joined)
+	}
+	if containsArg(cmd, "--verbose") {
+		t.Errorf("print mode must drop --verbose: %q", joined)
+	}
+	if !strings.Contains(joined, "--permission-mode bypassPermissions") {
+		t.Errorf("print mode must keep bypass permissions: %q", joined)
+	}
+	if last := cmd[len(cmd)-1]; last != `"$(cat /run/p)"` {
+		t.Errorf("prompt must be the trailing positional, got %q", cmd)
+	}
+}
+
+// Without print mode, the launch keeps --verbose and adds no -p (interactive
+// seeding), so the two paths stay distinct.
+func TestClaudeBuildCommandLaunch_NoPrintKeepsVerbose(t *testing.T) {
+	c := NewClaude().(ToolWithPrompt)
+	cmd, err := c.BuildCommandLaunch(LaunchSpec{SessionID: "sid-1", PromptFile: "/run/p"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsArg(cmd, "--verbose") {
+		t.Errorf("non-print launch should keep --verbose: %q", cmd)
+	}
+	if containsArg(cmd, "-p") {
+		t.Errorf("non-print launch must not add -p: %q", cmd)
+	}
+}
+
+func containsArg(cmd []string, arg string) bool {
+	for _, a := range cmd {
+		if a == arg {
+			return true
+		}
+	}
+	return false
+}
+
 func TestClaudeBuildCommandLaunch_NoPrompt(t *testing.T) {
 	c := NewClaude().(ToolWithPrompt)
 	cmd, err := c.BuildCommandLaunch(LaunchSpec{SessionID: "sid-1"})

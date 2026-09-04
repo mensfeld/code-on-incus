@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -167,6 +168,11 @@ func loadConfigFileScoped(cfg *Config, path string, trusted bool) error {
 		fileCfg.Container.Build.Script = resolveRelativePath(configDir, fileCfg.Container.Build.Script)
 	}
 
+	// Resolve [prompts] file= paths relative to the config file dir, like the
+	// build script above (#701). Untrusted prompts were already stripped
+	// wholesale by sanitizeUntrustedConfig, so only trusted entries reach here.
+	resolvePromptFiles(fileCfg.Prompts, configDir)
+
 	// Merge into main config
 	cfg.Merge(&fileCfg)
 
@@ -185,6 +191,7 @@ func sanitizeUntrustedConfig(fileCfg *Config, path string) {
 	sanitizeUntrustedSecurity(&fileCfg.Security, path)
 	sanitizeUntrustedGit(&fileCfg.Git, path)
 	sanitizeUntrustedTool(&fileCfg.Tool, path)
+	sanitizeUntrustedPrompts(fileCfg.Prompts, path)
 
 	// Persistence is honored from project scope (not a protection downgrade —
 	// the container stays fully sandboxed), but a cloned repo opting the user
@@ -225,6 +232,46 @@ func sanitizeUntrustedTool(tc *ToolConfig, path string) {
 	if tc.ContextJSONFile != "" {
 		warnUntrustedDowngrade(path, "tool.context_json_file")
 		tc.ContextJSONFile = ""
+	}
+}
+
+// sanitizeUntrustedPrompts drops ALL [prompts] entries from an untrusted
+// (project-scoped) source. A named prompt is exactly what `coi run --prompt-name
+// X` feeds to the agent, so it must come only from trusted scope
+// (~/.coi/config.toml / $COI_CONFIG): a cloned/agent-planted repo defining a
+// prompt — whether it reads a host file (file = "~/.ssh/id_rsa") or is inline
+// text redefining a name the user trusts — must never be honored. Handled the
+// same way as [defaults] env_commands and the default-profile selector. nil is a
+// no-op.
+func sanitizeUntrustedPrompts(prompts map[string]PromptEntry, path string) {
+	if len(prompts) == 0 {
+		return
+	}
+	// One message per config (not per entry) — a project that ships several
+	// prompts shouldn't spam a line for each on every coi command.
+	names := make([]string, 0, len(prompts))
+	for name := range prompts {
+		names = append(names, name)
+		delete(prompts, name)
+	}
+	sort.Strings(names)
+	fmt.Fprintf(os.Stderr,
+		"WARNING: ignoring [prompts] (%s) in project config %s; named prompts are "+
+			"honored only from trusted config (~/.coi/config.toml or $COI_CONFIG).\n",
+		strings.Join(names, ", "), path)
+}
+
+// resolvePromptFiles resolves each prompt entry's file= path relative to the
+// config/profile directory (like [container.build] script). Inline-text entries
+// are untouched; absolute and ~-prefixed paths pass through resolveRelativePath.
+// Only trusted-scope prompts reach here — untrusted ones are stripped wholesale
+// by sanitizeUntrustedPrompts before this runs.
+func resolvePromptFiles(prompts map[string]PromptEntry, baseDir string) {
+	for name, entry := range prompts {
+		if entry.File != "" {
+			entry.File = resolveRelativePath(baseDir, entry.File)
+			prompts[name] = entry
+		}
 	}
 }
 
@@ -611,6 +658,7 @@ func loadProfileDirectories(cfg *Config, configDir string, trusted bool) error {
 			sanitizeUntrustedSessionName(&profileCfg.Container, profileConfigPath)
 			sanitizeUntrustedSecurity(profileCfg.Security, profileConfigPath)
 			sanitizeUntrustedGit(profileCfg.Git, profileConfigPath)
+			sanitizeUntrustedPrompts(profileCfg.Prompts, profileConfigPath)
 			markUntrustedMounts(profileCfg.Mounts, profileConfigPath)
 			markUntrustedSockets(profileCfg.Sockets, profileConfigPath)
 			markUntrustedPorts(profileCfg.Ports, profileConfigPath)
@@ -623,6 +671,11 @@ func loadProfileDirectories(cfg *Config, configDir string, trusted bool) error {
 				profileCfg.EnvCommands = nil
 			}
 		}
+
+		// Resolve [prompts] file= paths AFTER the untrusted strip above, so only
+		// surviving (trusted) entries are resolved — matching the top-level
+		// loadConfigFileScoped order (sanitize first, then resolve).
+		resolvePromptFiles(profileCfg.Prompts, profileDir)
 
 		if cfg.Profiles == nil {
 			cfg.Profiles = make(map[string]ProfileConfig)
