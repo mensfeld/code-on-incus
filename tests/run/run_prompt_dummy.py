@@ -86,7 +86,7 @@ def test_run_prompt_shell_metacharacters(
     execute the embedded substitution/backticks."""
     write_workspace_container_config(workspace_dir, image=dummy_image)
 
-    nasty = 'oops "; rm -rf / ; echo `whoami` $(id) ${HOME} \'quote'
+    nasty = "oops \"; rm -rf / ; echo `whoami` $(id) ${HOME} 'quote"
     result = subprocess.run(
         [coi_binary, "run", "--workspace", workspace_dir, "--prompt", nasty],
         capture_output=True,
