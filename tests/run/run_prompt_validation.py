@@ -58,3 +58,26 @@ def test_missing_prompt_file_rejected(coi_binary, workspace_dir):
     r = _run(coi_binary, workspace_dir, "--prompt-file", "/no/such/prompt.md")
     assert r.returncode == 2, f"want exit 2, got {r.returncode}: {r.stderr}"
     assert "failed to read --prompt-file" in (r.stdout + r.stderr)
+
+
+def test_untrusted_project_prompt_is_ignored(coi_binary, workspace_dir):
+    """A [prompts] entry in an untrusted project .coi/config.toml must be ignored
+    entirely — prompts are honored only from trusted scope (~/.coi / $COI_CONFIG),
+    so a cloned repo can't define a prompt the user then invokes by name (#701).
+    Running from the workspace makes its .coi/config.toml the (untrusted) project
+    config; --prompt-name must then fail to resolve it."""
+    coi_dir = os.path.join(workspace_dir, ".coi")
+    os.makedirs(coi_dir, exist_ok=True)
+    with open(os.path.join(coi_dir, "config.toml"), "w") as f:
+        f.write('[prompts]\nprojectonly = "should be ignored"\n')
+
+    result = subprocess.run(
+        [coi_binary, "run", "--prompt-name", "projectonly"],
+        cwd=workspace_dir,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 2, f"want exit 2, got {result.returncode}: {result.stderr}"
+    out = result.stdout + result.stderr
+    assert 'no prompt named "projectonly"' in out, out

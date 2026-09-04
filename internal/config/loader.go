@@ -167,17 +167,9 @@ func loadConfigFileScoped(cfg *Config, path string, trusted bool) error {
 		fileCfg.Container.Build.Script = resolveRelativePath(configDir, fileCfg.Container.Build.Script)
 	}
 
-	// Untrusted scope may ADD prompt names but must not OVERRIDE a name already
-	// defined by a trusted scope loaded earlier (#701 review): a `coi run
-	// --prompt-name X` invocation trusts what runs, so a cloned repo's project
-	// config must not be able to silently redefine the user's named prompt.
-	if !trusted {
-		dropUntrustedPromptOverrides(fileCfg.Prompts, cfg.Prompts, path)
-	}
-
 	// Resolve [prompts] file= paths relative to the config file dir, like the
-	// build script above (#701). Untrusted file= entries were already stripped
-	// by sanitizeUntrustedConfig, so only trusted survivors are resolved here.
+	// build script above (#701). Untrusted prompts were already stripped
+	// wholesale by sanitizeUntrustedConfig, so only trusted entries reach here.
 	resolvePromptFiles(fileCfg.Prompts, configDir)
 
 	// Merge into main config
@@ -242,37 +234,26 @@ func sanitizeUntrustedTool(tc *ToolConfig, path string) {
 	}
 }
 
-// sanitizeUntrustedPrompts drops [prompts] entries that read an arbitrary HOST
-// file (file = "...") from an untrusted (project-scoped) source, for the same
-// reason as sanitizeUntrustedTool: a cloned/agent-planted repo could otherwise
-// stage a host secret (e.g. file = "~/.ssh/id_rsa") into a headless agent prompt
-// via `coi run --prompt-name`. Inline-text prompts perform no host read and are
-// kept, so a project can still ship predefined prompts. nil is a no-op.
+// sanitizeUntrustedPrompts drops ALL [prompts] entries from an untrusted
+// (project-scoped) source. A named prompt is exactly what `coi run --prompt-name
+// X` feeds to the agent, so it must come only from trusted scope
+// (~/.coi/config.toml / $COI_CONFIG): a cloned/agent-planted repo defining a
+// prompt — whether it reads a host file (file = "~/.ssh/id_rsa") or is inline
+// text redefining a name the user trusts — must never be honored. Handled the
+// same way as [defaults] env_commands and the default-profile selector. nil is a
+// no-op.
 func sanitizeUntrustedPrompts(prompts map[string]PromptEntry, path string) {
-	for name, entry := range prompts {
-		if entry.File != "" {
-			warnUntrustedDowngrade(path, fmt.Sprintf("prompts.%s (file=)", name))
-			delete(prompts, name)
-		}
-	}
-}
-
-// dropUntrustedPromptOverrides removes prompt entries from an untrusted source
-// whose name is already defined by a trusted scope (existing), so an untrusted
-// project config/profile can add new named prompts but never shadow a trusted
-// one (#701 review). New names are kept. nil maps are no-ops.
-func dropUntrustedPromptOverrides(untrusted, existing map[string]PromptEntry, path string) {
-	for name := range untrusted {
-		if _, ok := existing[name]; ok {
-			warnUntrustedDowngrade(path, fmt.Sprintf("prompts.%s (overrides a trusted prompt)", name))
-			delete(untrusted, name)
-		}
+	for name := range prompts {
+		warnUntrustedDowngrade(path, fmt.Sprintf("prompts.%s", name))
+		delete(prompts, name)
 	}
 }
 
 // resolvePromptFiles resolves each prompt entry's file= path relative to the
 // config/profile directory (like [container.build] script). Inline-text entries
 // are untouched; absolute and ~-prefixed paths pass through resolveRelativePath.
+// Only trusted-scope prompts reach here — untrusted ones are stripped wholesale
+// by sanitizeUntrustedPrompts before this runs.
 func resolvePromptFiles(prompts map[string]PromptEntry, baseDir string) {
 	for name, entry := range prompts {
 		if entry.File != "" {

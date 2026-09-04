@@ -243,18 +243,13 @@ func (c *Config) ApplyProfile(name string) error {
 		c.Defaults.ForwardEnv = MergeStringSliceUnique(c.Defaults.ForwardEnv, profile.ForwardEnv)
 	}
 	if len(profile.Prompts) > 0 {
+		// Untrusted (project-scoped) profiles have their [prompts] stripped at
+		// load (sanitizeUntrustedPrompts), so anything here came from trusted
+		// scope and may layer onto the base config.
 		if c.Prompts == nil {
 			c.Prompts = make(map[string]PromptEntry)
 		}
 		for k, v := range profile.Prompts {
-			// An untrusted (project-scoped) profile may add new named prompts
-			// but must not shadow one already defined by trusted scope (#701
-			// review) — the same rule the top-level config merge enforces.
-			if !profile.Trusted {
-				if _, exists := c.Prompts[k]; exists {
-					continue
-				}
-			}
 			c.Prompts[k] = v
 		}
 	}

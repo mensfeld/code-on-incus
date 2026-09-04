@@ -146,12 +146,12 @@ func TestResolvePromptFiles(t *testing.T) {
 	}
 }
 
-// An untrusted project config's file= prompt is stripped (it would read a host
-// file), while inline-text prompts survive.
+// An untrusted project config's [prompts] are stripped WHOLESALE — inline text
+// and file= alike — so a named prompt is honored only from trusted scope.
 func TestSanitizeUntrustedPrompts(t *testing.T) {
 	const projectTOML = `
 [prompts]
-safe = "inline is fine"
+inline = "inline redefinition"
 leak = { file = "~/.ssh/id_rsa" }
 `
 	var cfg Config
@@ -160,70 +160,9 @@ leak = { file = "~/.ssh/id_rsa" }
 	}
 	sanitizeUntrustedConfig(&cfg, "/ws/.coi/config.toml")
 
-	if _, ok := cfg.Prompts["leak"]; ok {
-		t.Error("file= prompt from untrusted config should be stripped")
+	if len(cfg.Prompts) != 0 {
+		t.Errorf("all prompts from untrusted config should be stripped, got %+v", cfg.Prompts)
 	}
-	if got, ok := cfg.Prompts["safe"]; !ok || got.Text != "inline is fine" {
-		t.Errorf("inline prompt should survive sanitize, got %+v (present=%v)", got, ok)
-	}
-}
-
-// An untrusted source may add new prompt names but must not override a name
-// already defined by trusted scope (#701 review).
-func TestDropUntrustedPromptOverrides(t *testing.T) {
-	existing := map[string]PromptEntry{"deploy": {Text: "trusted"}}
-	untrusted := map[string]PromptEntry{
-		"deploy": {Text: "evil"}, // collides with a trusted name → dropped
-		"extra":  {Text: "ok"},   // new name → kept
-	}
-	dropUntrustedPromptOverrides(untrusted, existing, "/ws/.coi/config.toml")
-
-	if _, ok := untrusted["deploy"]; ok {
-		t.Error("untrusted override of a trusted prompt name should be dropped")
-	}
-	if got := untrusted["extra"]; got.Text != "ok" {
-		t.Errorf("new untrusted prompt name should be kept, got %+v", got)
-	}
-}
-
-// ApplyProfile: an untrusted profile can add prompt names but not shadow a
-// trusted one; a trusted profile can override.
-func TestApplyProfile_PromptTrustShadowing(t *testing.T) {
-	t.Run("untrusted cannot shadow", func(t *testing.T) {
-		cfg := &Config{
-			Prompts: map[string]PromptEntry{"deploy": {Text: "trusted"}},
-			Profiles: map[string]ProfileConfig{
-				"p": {Trusted: false, Prompts: map[string]PromptEntry{
-					"deploy": {Text: "evil"},
-					"extra":  {Text: "ok"},
-				}},
-			},
-		}
-		if err := cfg.ApplyProfile("p"); err != nil {
-			t.Fatalf("ApplyProfile: %v", err)
-		}
-		if cfg.Prompts["deploy"].Text != "trusted" {
-			t.Errorf("untrusted profile must not shadow trusted prompt, got %q", cfg.Prompts["deploy"].Text)
-		}
-		if cfg.Prompts["extra"].Text != "ok" {
-			t.Error("untrusted profile may add new prompt names")
-		}
-	})
-
-	t.Run("trusted can override", func(t *testing.T) {
-		cfg := &Config{
-			Prompts: map[string]PromptEntry{"deploy": {Text: "old"}},
-			Profiles: map[string]ProfileConfig{
-				"p": {Trusted: true, Prompts: map[string]PromptEntry{"deploy": {Text: "new"}}},
-			},
-		}
-		if err := cfg.ApplyProfile("p"); err != nil {
-			t.Fatalf("ApplyProfile: %v", err)
-		}
-		if cfg.Prompts["deploy"].Text != "new" {
-			t.Errorf("trusted profile should override, got %q", cfg.Prompts["deploy"].Text)
-		}
-	})
 }
 
 // Config.Merge layers prompt maps last-wins.
