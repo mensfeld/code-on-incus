@@ -62,6 +62,17 @@ bad = { file = 3 }
 			t.Fatal("expected error for non-string 'file' value")
 		}
 	})
+
+	t.Run("table with unknown key is rejected", func(t *testing.T) {
+		const in = `
+[prompts]
+bad = { file = "a.md", fille = "b.md" }
+`
+		var cfg Config
+		if _, err := toml.Decode(in, &cfg); err == nil {
+			t.Fatal("expected error for a table with an unknown key (typo should not be silently ignored)")
+		}
+	})
 }
 
 // ResolvePrompt returns inline text, reads file entries, and errors clearly on a

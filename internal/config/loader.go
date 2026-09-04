@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -243,10 +244,21 @@ func sanitizeUntrustedTool(tc *ToolConfig, path string) {
 // same way as [defaults] env_commands and the default-profile selector. nil is a
 // no-op.
 func sanitizeUntrustedPrompts(prompts map[string]PromptEntry, path string) {
+	if len(prompts) == 0 {
+		return
+	}
+	// One message per config (not per entry) — a project that ships several
+	// prompts shouldn't spam a line for each on every coi command.
+	names := make([]string, 0, len(prompts))
 	for name := range prompts {
-		warnUntrustedDowngrade(path, fmt.Sprintf("prompts.%s", name))
+		names = append(names, name)
 		delete(prompts, name)
 	}
+	sort.Strings(names)
+	fmt.Fprintf(os.Stderr,
+		"WARNING: ignoring [prompts] (%s) in project config %s; named prompts are "+
+			"honored only from trusted config (~/.coi/config.toml or $COI_CONFIG).\n",
+		strings.Join(names, ", "), path)
 }
 
 // resolvePromptFiles resolves each prompt entry's file= path relative to the
@@ -632,7 +644,6 @@ func loadProfileDirectories(cfg *Config, configDir string, trusted bool) error {
 		if profileCfg.Context != "" {
 			profileCfg.Context = resolveRelativePath(profileDir, profileCfg.Context)
 		}
-		resolvePromptFiles(profileCfg.Prompts, profileDir)
 
 		// Tag with source location and the scan root's trust
 		profileCfg.Source = profileConfigPath
@@ -660,6 +671,11 @@ func loadProfileDirectories(cfg *Config, configDir string, trusted bool) error {
 				profileCfg.EnvCommands = nil
 			}
 		}
+
+		// Resolve [prompts] file= paths AFTER the untrusted strip above, so only
+		// surviving (trusted) entries are resolved — matching the top-level
+		// loadConfigFileScoped order (sanitize first, then resolve).
+		resolvePromptFiles(profileCfg.Prompts, profileDir)
 
 		if cfg.Profiles == nil {
 			cfg.Profiles = make(map[string]ProfileConfig)

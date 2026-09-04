@@ -289,15 +289,19 @@ func (a *App) stageSpecFile(mgr container.ContainerManager, hostPath, destPath s
 	return destPath, nil
 }
 
-// buildToolSpecCommand returns the launch argv for the tool and, when the tool
+// buildToolLaunchArgv returns the launch argv for the tool and, when the tool
 // can't embed the prompt in argv, the in-container prompt-file path to deliver
 // out-of-band (the toolSpecResult.Prompt field). Tools implementing
 // ToolWithPrompt (claude/codex) embed the prompt (and system prompt) directly;
 // tools without it (opencode) get the base command plus outOfBandPrompt so the
 // prompt is surfaced rather than silently dropped. A system prompt on a tool
-// without one is still rejected loudly (those tools have no such concept). The
-// dummy-mode override used by tests mirrors buildCLICommand.
-func buildToolSpecCommand(t tool.Tool, spec tool.LaunchSpec) (argv []string, outOfBandPrompt string, err error) {
+// without one is still rejected loudly (those tools have no such concept).
+//
+// It does NOT apply the COI_USE_DUMMY test override: `coi run --prompt` runs the
+// tool by its real binary name (the dummy test image installs the stub AS
+// `claude`), so rewriting argv[0] to "dummy" would exec a nonexistent command.
+// buildToolSpecCommand layers that override on for the orchestrator path.
+func buildToolLaunchArgv(t tool.Tool, spec tool.LaunchSpec) (argv []string, outOfBandPrompt string, err error) {
 	if twp, ok := t.(tool.ToolWithPrompt); ok {
 		argv, err = twp.BuildCommandLaunch(spec)
 		if err != nil {
@@ -311,6 +315,17 @@ func buildToolSpecCommand(t tool.Tool, spec tool.LaunchSpec) (argv []string, out
 		// The prompt can't ride in argv for this tool; hand its staged path back
 		// so the orchestrator delivers it out-of-band after launch.
 		outOfBandPrompt = spec.PromptFile
+	}
+	return argv, outOfBandPrompt, nil
+}
+
+// buildToolSpecCommand is buildToolLaunchArgv plus the COI_USE_DUMMY test
+// override (argv[0] -> "dummy"), for the `coi tool spec` orchestrator path where
+// the caller provides its own dummy binary. Mirrors buildCLICommand.
+func buildToolSpecCommand(t tool.Tool, spec tool.LaunchSpec) (argv []string, outOfBandPrompt string, err error) {
+	argv, outOfBandPrompt, err = buildToolLaunchArgv(t, spec)
+	if err != nil {
+		return nil, "", err
 	}
 	if os.Getenv("COI_USE_DUMMY") == "1" && len(argv) > 0 {
 		argv[0] = "dummy"

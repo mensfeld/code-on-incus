@@ -109,6 +109,14 @@ func (p *PromptEntry) UnmarshalTOML(v interface{}) error {
 		if !ok {
 			return fmt.Errorf("prompt table entry 'file' must be a string")
 		}
+		// Reject unknown keys so a typo (e.g. `fille`) fails loudly instead of
+		// being silently ignored — matches the profile JSON schema, which sets
+		// additionalProperties:false on a PromptEntry table.
+		for k := range t {
+			if k != "file" {
+				return fmt.Errorf("prompt table entry has unknown key %q (only 'file' is allowed)", k)
+			}
+		}
 		p.File = file
 		return nil
 	default:

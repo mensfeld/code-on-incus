@@ -620,6 +620,9 @@ func (a *App) runPromptPhase(s *runState) session.Phase {
 			// The tool was resolved and validated (claude-only, non-interactive)
 			// in resolvePromptMode; reuse it rather than rebuilding.
 			t := s.promptTool
+			if t == nil {
+				return nil, fmt.Errorf("internal error: prompt tool was not resolved before run-prompt phase")
+			}
 
 			// Resolve the uid the agent runs as and the home its runs dir lives
 			// under (code user, or root when the image has none).
@@ -678,7 +681,7 @@ func (a *App) runPromptPhase(s *runState) session.Phase {
 			// Build the headless (print-mode) launch command. A fresh session per
 			// fire (Resume:false) is the right cron default — deterministic, no
 			// accumulating conversation state.
-			argv, outOfBand, err := buildToolSpecCommand(t, tool.LaunchSpec{
+			argv, outOfBand, err := buildToolLaunchArgv(t, tool.LaunchSpec{
 				SessionID:  s.promptSessionID,
 				PromptFile: promptPath,
 				Print:      true,
