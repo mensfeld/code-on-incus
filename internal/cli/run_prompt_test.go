@@ -85,6 +85,18 @@ func TestResolvePromptMode_InlineSuccess(t *testing.T) {
 	if !s.promptMode || s.promptText != "do the thing" || s.promptSessionID == "" {
 		t.Errorf("bad state: %+v", s)
 	}
+	if s.promptTool == nil || s.promptTool.Name() != "claude" {
+		t.Errorf("resolved tool should be stored on runState, got %v", s.promptTool)
+	}
+}
+
+func TestResolvePromptMode_InteractivePermissionRejected(t *testing.T) {
+	a := &App{cfg: &config.Config{Tool: config.ToolConfig{PermissionMode: "interactive"}}}
+	cmd := newRunPromptCmd(t, []string{"--prompt", "do it"})
+	err := a.resolvePromptMode(cmd, &runState{}, nil)
+	if code := exitCode(t, err); code != 2 {
+		t.Errorf("interactive permission mode should exit 2, got %d", code)
+	}
 }
 
 func TestResolvePromptMode_NameSuccess(t *testing.T) {

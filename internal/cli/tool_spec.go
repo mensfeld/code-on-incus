@@ -179,13 +179,9 @@ func (a *App) toolSpecCommand(cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
-	runsDir := filepath.Join(homeDir, ".coi", "runs")
-
-	// The tool runs as the code user; write run files owned by it.
-	if _, err := mgr.ExecCommand(fmt.Sprintf("mkdir -p %s && chown %d:%d %s",
-		shellQuote(runsDir), uid, uid, shellQuote(runsDir)),
-		container.ExecCommandOptions{Capture: true}); err != nil {
-		return fmt.Errorf("failed to create runs dir: %w", err)
+	runsDir, err := ensureContainerRunsDir(mgr, homeDir, uid)
+	if err != nil {
+		return err
 	}
 
 	// Stage prompt / system prompt as in-container files so their (arbitrary)
@@ -261,6 +257,20 @@ func toolSpecUserHome(mgr container.ContainerManager) (uid int, home string, err
 		return 0, "/root", nil // no code user: the tool runs as root
 	}
 	return uid, "/home/" + container.CodeUser, nil
+}
+
+// ensureContainerRunsDir creates ~/.coi/runs in the container owned by the run
+// user (uid) and returns its path. Shared by `coi tool spec` and the headless
+// `coi run --prompt` path so the runs-dir convention and ownership stay in one
+// place.
+func ensureContainerRunsDir(mgr container.ContainerManager, homeDir string, uid int) (string, error) {
+	runsDir := filepath.Join(homeDir, ".coi", "runs")
+	if _, err := mgr.ExecCommand(fmt.Sprintf("mkdir -p %s && chown %d:%d %s",
+		shellQuote(runsDir), uid, uid, shellQuote(runsDir)),
+		container.ExecCommandOptions{Capture: true}); err != nil {
+		return "", fmt.Errorf("failed to create runs dir: %w", err)
+	}
+	return runsDir, nil
 }
 
 // stageSpecFile copies a host prompt file into the container at destPath and

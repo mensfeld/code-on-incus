@@ -154,7 +154,7 @@ Then schedule them with plain host cron - exit codes propagate, so failures show
 */30 * * * * cd ~/project && coi run --profile triage --prompt-name triage >> ~/coi-triage.log 2>&1
 ```
 
-Each fire is a fresh ephemeral session by default. A named prompt's `file = "..."` reads a host file, so it's honored only from trusted-scope config (`~/.coi/config.toml` / `$COI_CONFIG`) - an untrusted project config's `file=` entry is stripped at load. Prompt mode currently supports the `claude` tool.
+Each fire is a fresh ephemeral session by default, and prompt mode currently supports the `claude` tool with `permission_mode = "bypass"` (a headless run has no TTY to approve tool use). Trust rules: a named prompt's `file = "..."` reads a host file, so it's honored only from trusted-scope config (`~/.coi/config.toml` / `$COI_CONFIG`) - an untrusted project config's `file=` entry is stripped at load; and an untrusted project config/profile can *add* inline prompts but can't *override* a name you've defined in trusted scope (so a cloned repo can't silently redefine a prompt you invoke by name).
 
 ## Documentation
 

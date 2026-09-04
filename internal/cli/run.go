@@ -54,7 +54,8 @@ the container as a file (never on the command line), the agent's auth and
 context are seeded exactly as in an interactive session, and each fire is a
 fresh ephemeral session by default. --prompt-name looks the prompt up in the
 [prompts] config table (inline text or { file = "..." }, profile-inheritable).
-Only the claude tool is supported in prompt mode for now.
+Prompt mode currently supports the claude tool with permission_mode = "bypass"
+(a headless run has no TTY to approve tool use).
 
 The container is ephemeral: it is cleaned up after the command completes (or
 stopped and kept, when [container] persistent = true is configured).
@@ -236,9 +237,16 @@ func (a *App) resolvePromptMode(cmd *cobra.Command, s *runState, args []string) 
 		return &ExitCodeError{Code: 2, Message: "the resolved prompt is empty"}
 	}
 
+	// Headless print mode can't answer permission prompts (no TTY), so an
+	// interactive permission_mode would silently block every tool use. Reject it
+	// up front rather than launch an agent that can do nothing (#701 review).
+	if a.cfg.Tool.PermissionMode == "interactive" {
+		return &ExitCodeError{Code: 2, Message: "headless prompt mode needs [tool] permission_mode = \"bypass\" — \"interactive\" can't approve tool use without a TTY"}
+	}
+
 	// Fail fast on an unsupported tool before any container work, so cron doesn't
 	// spin up (and tear down) a container just to be told the tool can't run
-	// headlessly. runPromptPhase re-checks as defense in depth.
+	// headlessly. The resolved tool is reused by runPromptPhase.
 	t, err := getConfiguredTool(a.cfg)
 	if err != nil {
 		return &ExitCodeError{Code: 2, Message: err.Error()}
@@ -255,6 +263,7 @@ func (a *App) resolvePromptMode(cmd *cobra.Command, s *runState, args []string) 
 	s.promptMode = true
 	s.promptText = text
 	s.promptSessionID = sessionID
+	s.promptTool = t
 	return nil
 }
 
@@ -402,7 +411,7 @@ func remapContainerUserIfNeeded(mgr container.ContainerManager, wasRestarted boo
 // tz is the resolved timezone name (may be empty).
 // socketEnv maps env var names to container-side socket paths for every
 // forwarded socket (SSH_AUTH_SOCK plus any configured [[sockets]] entries).
-func (a *App) appendEnvArgs(incusArgs []string, tz string, socketEnv map[string]string) ([]string, error) {
+func (a *App) appendEnvArgs(incusArgs []string, homeDir, tz string, socketEnv map[string]string) ([]string, error) {
 	// Assemble the environment in a map so precedence is deterministic: each
 	// source in turn overwrites the previous one (last-wins), and every key is
 	// emitted as a single --env flag below. This mirrors how `coi shell` builds
@@ -421,10 +430,11 @@ func (a *App) appendEnvArgs(incusArgs []string, tz string, socketEnv map[string]
 	// Baseline identity. incus exec does not set HOME/USER for a --user exec, so
 	// without this a `coi run` command runs with no HOME — anything resolving ~
 	// or reading a --global config breaks (`git config --global` ->
-	// "fatal: $HOME not set", #623). `coi run` execs as the code user, whose home
-	// is /home/<code_user>. A user can still override any of these via
-	// [defaults].environment (they are applied later, below).
-	env["HOME"] = "/home/" + container.CodeUser
+	// "fatal: $HOME not set", #623). homeDir is the run user's home resolved by
+	// the caller (usually /home/<code_user>; /root for a no-code-user image), so
+	// HOME matches where per-user state was seeded. A user can still override any
+	// of these via [defaults].environment (they are applied later, below).
+	env["HOME"] = homeDir
 	env["USER"] = container.CodeUser
 	env["LOGNAME"] = container.CodeUser
 

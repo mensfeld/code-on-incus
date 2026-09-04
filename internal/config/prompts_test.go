@@ -168,6 +168,64 @@ leak = { file = "~/.ssh/id_rsa" }
 	}
 }
 
+// An untrusted source may add new prompt names but must not override a name
+// already defined by trusted scope (#701 review).
+func TestDropUntrustedPromptOverrides(t *testing.T) {
+	existing := map[string]PromptEntry{"deploy": {Text: "trusted"}}
+	untrusted := map[string]PromptEntry{
+		"deploy": {Text: "evil"}, // collides with a trusted name → dropped
+		"extra":  {Text: "ok"},   // new name → kept
+	}
+	dropUntrustedPromptOverrides(untrusted, existing, "/ws/.coi/config.toml")
+
+	if _, ok := untrusted["deploy"]; ok {
+		t.Error("untrusted override of a trusted prompt name should be dropped")
+	}
+	if got := untrusted["extra"]; got.Text != "ok" {
+		t.Errorf("new untrusted prompt name should be kept, got %+v", got)
+	}
+}
+
+// ApplyProfile: an untrusted profile can add prompt names but not shadow a
+// trusted one; a trusted profile can override.
+func TestApplyProfile_PromptTrustShadowing(t *testing.T) {
+	t.Run("untrusted cannot shadow", func(t *testing.T) {
+		cfg := &Config{
+			Prompts: map[string]PromptEntry{"deploy": {Text: "trusted"}},
+			Profiles: map[string]ProfileConfig{
+				"p": {Trusted: false, Prompts: map[string]PromptEntry{
+					"deploy": {Text: "evil"},
+					"extra":  {Text: "ok"},
+				}},
+			},
+		}
+		if err := cfg.ApplyProfile("p"); err != nil {
+			t.Fatalf("ApplyProfile: %v", err)
+		}
+		if cfg.Prompts["deploy"].Text != "trusted" {
+			t.Errorf("untrusted profile must not shadow trusted prompt, got %q", cfg.Prompts["deploy"].Text)
+		}
+		if cfg.Prompts["extra"].Text != "ok" {
+			t.Error("untrusted profile may add new prompt names")
+		}
+	})
+
+	t.Run("trusted can override", func(t *testing.T) {
+		cfg := &Config{
+			Prompts: map[string]PromptEntry{"deploy": {Text: "old"}},
+			Profiles: map[string]ProfileConfig{
+				"p": {Trusted: true, Prompts: map[string]PromptEntry{"deploy": {Text: "new"}}},
+			},
+		}
+		if err := cfg.ApplyProfile("p"); err != nil {
+			t.Fatalf("ApplyProfile: %v", err)
+		}
+		if cfg.Prompts["deploy"].Text != "new" {
+			t.Errorf("trusted profile should override, got %q", cfg.Prompts["deploy"].Text)
+		}
+	})
+}
+
 // Config.Merge layers prompt maps last-wins.
 func TestConfigMerge_Prompts(t *testing.T) {
 	base := &Config{Prompts: map[string]PromptEntry{

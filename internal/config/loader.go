@@ -167,6 +167,14 @@ func loadConfigFileScoped(cfg *Config, path string, trusted bool) error {
 		fileCfg.Container.Build.Script = resolveRelativePath(configDir, fileCfg.Container.Build.Script)
 	}
 
+	// Untrusted scope may ADD prompt names but must not OVERRIDE a name already
+	// defined by a trusted scope loaded earlier (#701 review): a `coi run
+	// --prompt-name X` invocation trusts what runs, so a cloned repo's project
+	// config must not be able to silently redefine the user's named prompt.
+	if !trusted {
+		dropUntrustedPromptOverrides(fileCfg.Prompts, cfg.Prompts, path)
+	}
+
 	// Resolve [prompts] file= paths relative to the config file dir, like the
 	// build script above (#701). Untrusted file= entries were already stripped
 	// by sanitizeUntrustedConfig, so only trusted survivors are resolved here.
@@ -245,6 +253,19 @@ func sanitizeUntrustedPrompts(prompts map[string]PromptEntry, path string) {
 		if entry.File != "" {
 			warnUntrustedDowngrade(path, fmt.Sprintf("prompts.%s (file=)", name))
 			delete(prompts, name)
+		}
+	}
+}
+
+// dropUntrustedPromptOverrides removes prompt entries from an untrusted source
+// whose name is already defined by a trusted scope (existing), so an untrusted
+// project config/profile can add new named prompts but never shadow a trusted
+// one (#701 review). New names are kept. nil maps are no-ops.
+func dropUntrustedPromptOverrides(untrusted, existing map[string]PromptEntry, path string) {
+	for name := range untrusted {
+		if _, ok := existing[name]; ok {
+			warnUntrustedDowngrade(path, fmt.Sprintf("prompts.%s (overrides a trusted prompt)", name))
+			delete(untrusted, name)
 		}
 	}
 }

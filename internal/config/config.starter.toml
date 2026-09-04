@@ -127,7 +127,10 @@
                                  # or a { file = "..." } table (path resolved relative to this config
                                  # file). A file= entry reads a host file and is honored only from
                                  # trusted scope (~/.coi/config.toml / $COI_CONFIG); an untrusted
-                                 # project .coi/config.toml's file= entry is stripped at load.
+                                 # project .coi/config.toml's file= entry is stripped at load, and an
+                                 # untrusted project may add inline prompts but not override a name
+                                 # defined in trusted scope. Prompt mode needs [tool] permission_mode
+                                 # = "bypass" (headless has no TTY to approve tool use).
 # nightly-maintenance = "Update dependencies, run the tests, and open a PR if green."
 # triage = { file = "prompts/triage.md" }
 

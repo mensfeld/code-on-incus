@@ -37,6 +37,7 @@ type runState struct {
 	promptMode      bool
 	promptText      string
 	promptSessionID string
+	promptTool      tool.Tool // resolved once in resolvePromptMode, reused by runPromptPhase
 
 	// After validate-env
 	containerName  string
@@ -558,7 +559,7 @@ func (a *App) runCommandPhase(args []string, s *runState) session.Phase {
 				"exec", s.containerName, "--user", fmt.Sprintf("%d", container.CodeUID),
 				"--group", fmt.Sprintf("%d", container.CodeUID), "--cwd", s.containerWorkspace,
 			}
-			incusArgs, err := a.appendEnvArgs(incusArgs, s.tz, s.socketEnv)
+			incusArgs, err := a.appendEnvArgs(incusArgs, "/home/"+container.CodeUser, s.tz, s.socketEnv)
 			if err != nil {
 				return nil, err
 			}
@@ -616,17 +617,9 @@ func (a *App) runPromptPhase(s *runState) session.Phase {
 				}
 			}()
 
-			t, err := getConfiguredTool(a.cfg)
-			if err != nil {
-				return nil, err
-			}
-			// Headless prompt mode currently supports only Claude. Other tools
-			// would either open an interactive session (bad for cron) or need
-			// out-of-band prompt delivery; reject them loudly instead.
-			if t.Name() != "claude" {
-				return nil, &ExitCodeError{Code: 2, Message: fmt.Sprintf(
-					"coi run headless prompt mode currently supports only the claude tool (configured: %q)", t.Name())}
-			}
+			// The tool was resolved and validated (claude-only, non-interactive)
+			// in resolvePromptMode; reuse it rather than rebuilding.
+			t := s.promptTool
 
 			// Resolve the uid the agent runs as and the home its runs dir lives
 			// under (code user, or root when the image has none).
@@ -671,12 +664,11 @@ func (a *App) runPromptPhase(s *runState) session.Phase {
 				return nil, err
 			}
 
-			// Stage the prompt as an in-container file owned by the run user.
-			runsDir := filepath.Join(homeDir, ".coi", "runs")
-			if _, err := s.mgr.ExecCommand(fmt.Sprintf("mkdir -p %s && chown %d:%d %s",
-				shellQuote(runsDir), uid, uid, shellQuote(runsDir)),
-				container.ExecCommandOptions{Capture: true}); err != nil {
-				return nil, fmt.Errorf("failed to create runs dir: %w", err)
+			// Stage the prompt as an in-container file owned by the run user
+			// (shared runs-dir helper with `coi tool spec`).
+			runsDir, err := ensureContainerRunsDir(s.mgr, homeDir, uid)
+			if err != nil {
+				return nil, err
 			}
 			promptPath := filepath.Join(runsDir, s.promptSessionID+".prompt")
 			if err := s.mgr.CreateFileWithOwner(promptPath, s.promptText, uid, uid, "0600"); err != nil {
@@ -701,24 +693,22 @@ func (a *App) runPromptPhase(s *runState) session.Phase {
 					"tool %q cannot run a prompt headlessly via coi run", t.Name())}
 			}
 
-			// incus exec as the run user; route through a shell so the argv's
-			// "$(cat <prompt-file>)" substitution expands.
+			// incus exec as the run user; route through a non-login shell so the
+			// argv's "$(cat <prompt-file>)" substitution expands without sourcing
+			// profile scripts (whose stdout would pollute the agent's output).
+			// HOME is pinned to the resolved home so it matches where the tool
+			// config was seeded (matters for a no-code-user/root image). Model and
+			// effort reach the agent via SeedToolConfigForRun (container-level env
+			// + settings.json), so no per-exec tool env is needed here.
 			incusArgs := []string{
 				"exec", s.containerName, "--user", fmt.Sprintf("%d", uid),
 				"--group", fmt.Sprintf("%d", uid), "--cwd", s.containerWorkspace,
 			}
-			incusArgs, err = a.appendEnvArgs(incusArgs, s.tz, s.socketEnv)
+			incusArgs, err = a.appendEnvArgs(incusArgs, homeDir, s.tz, s.socketEnv)
 			if err != nil {
 				return nil, err
 			}
-			// Belt-and-suspenders model/effort env (also persisted at the
-			// container level by SeedToolConfigForRun's applyToolContainerEnv).
-			toolEnv := map[string]string{}
-			mergeToolEnv(toolEnv, t, s.containerWorkspace)
-			for k, v := range toolEnv {
-				incusArgs = append(incusArgs, "--env", fmt.Sprintf("%s=%s", k, v))
-			}
-			incusArgs = append(incusArgs, "--", "bash", "-lc", strings.Join(argv, " "))
+			incusArgs = append(incusArgs, "--", "bash", "-c", strings.Join(argv, " "))
 
 			fmt.Fprintf(os.Stderr, "Running headless prompt with %s (session %s)...\n", t.Name(), s.promptSessionID)
 			if err := container.IncusExecStreamedContext(ctx, incusArgs...); err != nil {

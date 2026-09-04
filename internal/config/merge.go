@@ -247,6 +247,14 @@ func (c *Config) ApplyProfile(name string) error {
 			c.Prompts = make(map[string]PromptEntry)
 		}
 		for k, v := range profile.Prompts {
+			// An untrusted (project-scoped) profile may add new named prompts
+			// but must not shadow one already defined by trusted scope (#701
+			// review) — the same rule the top-level config merge enforces.
+			if !profile.Trusted {
+				if _, exists := c.Prompts[k]; exists {
+					continue
+				}
+			}
 			c.Prompts[k] = v
 		}
 	}
