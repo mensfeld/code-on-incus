@@ -167,6 +167,11 @@ func loadConfigFileScoped(cfg *Config, path string, trusted bool) error {
 		fileCfg.Container.Build.Script = resolveRelativePath(configDir, fileCfg.Container.Build.Script)
 	}
 
+	// Resolve [prompts] file= paths relative to the config file dir, like the
+	// build script above (#701). Untrusted file= entries were already stripped
+	// by sanitizeUntrustedConfig, so only trusted survivors are resolved here.
+	resolvePromptFiles(fileCfg.Prompts, configDir)
+
 	// Merge into main config
 	cfg.Merge(&fileCfg)
 
@@ -185,6 +190,7 @@ func sanitizeUntrustedConfig(fileCfg *Config, path string) {
 	sanitizeUntrustedSecurity(&fileCfg.Security, path)
 	sanitizeUntrustedGit(&fileCfg.Git, path)
 	sanitizeUntrustedTool(&fileCfg.Tool, path)
+	sanitizeUntrustedPrompts(fileCfg.Prompts, path)
 
 	// Persistence is honored from project scope (not a protection downgrade —
 	// the container stays fully sandboxed), but a cloned repo opting the user
@@ -225,6 +231,33 @@ func sanitizeUntrustedTool(tc *ToolConfig, path string) {
 	if tc.ContextJSONFile != "" {
 		warnUntrustedDowngrade(path, "tool.context_json_file")
 		tc.ContextJSONFile = ""
+	}
+}
+
+// sanitizeUntrustedPrompts drops [prompts] entries that read an arbitrary HOST
+// file (file = "...") from an untrusted (project-scoped) source, for the same
+// reason as sanitizeUntrustedTool: a cloned/agent-planted repo could otherwise
+// stage a host secret (e.g. file = "~/.ssh/id_rsa") into a headless agent prompt
+// via `coi run --prompt-name`. Inline-text prompts perform no host read and are
+// kept, so a project can still ship predefined prompts. nil is a no-op.
+func sanitizeUntrustedPrompts(prompts map[string]PromptEntry, path string) {
+	for name, entry := range prompts {
+		if entry.File != "" {
+			warnUntrustedDowngrade(path, fmt.Sprintf("prompts.%s (file=)", name))
+			delete(prompts, name)
+		}
+	}
+}
+
+// resolvePromptFiles resolves each prompt entry's file= path relative to the
+// config/profile directory (like [container.build] script). Inline-text entries
+// are untouched; absolute and ~-prefixed paths pass through resolveRelativePath.
+func resolvePromptFiles(prompts map[string]PromptEntry, baseDir string) {
+	for name, entry := range prompts {
+		if entry.File != "" {
+			entry.File = resolveRelativePath(baseDir, entry.File)
+			prompts[name] = entry
+		}
 	}
 }
 
@@ -597,6 +630,7 @@ func loadProfileDirectories(cfg *Config, configDir string, trusted bool) error {
 		if profileCfg.Context != "" {
 			profileCfg.Context = resolveRelativePath(profileDir, profileCfg.Context)
 		}
+		resolvePromptFiles(profileCfg.Prompts, profileDir)
 
 		// Tag with source location and the scan root's trust
 		profileCfg.Source = profileConfigPath
@@ -611,6 +645,7 @@ func loadProfileDirectories(cfg *Config, configDir string, trusted bool) error {
 			sanitizeUntrustedSessionName(&profileCfg.Container, profileConfigPath)
 			sanitizeUntrustedSecurity(profileCfg.Security, profileConfigPath)
 			sanitizeUntrustedGit(profileCfg.Git, profileConfigPath)
+			sanitizeUntrustedPrompts(profileCfg.Prompts, profileConfigPath)
 			markUntrustedMounts(profileCfg.Mounts, profileConfigPath)
 			markUntrustedSockets(profileCfg.Sockets, profileConfigPath)
 			markUntrustedPorts(profileCfg.Ports, profileConfigPath)

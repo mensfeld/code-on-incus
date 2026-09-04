@@ -17,6 +17,13 @@ type LaunchSpec struct {
 	ResumeSessionID  string
 	PromptFile       string // in-container path; empty = no initial prompt
 	SystemPromptFile string // in-container path; empty = no system prompt
+	// Print requests a headless "run to completion and exit" launch (fire and
+	// forget) rather than an interactive session — for Claude, this adds `-p`
+	// (`--print`) so the agent runs the prompt, prints its response, and exits
+	// with a status code, which is what `coi run --prompt` relies on for cron
+	// automation (#701). Tools that can't run headlessly ignore it (the caller
+	// gates on tool support before building).
+	Print bool
 }
 
 // ToolWithPrompt is implemented by tools that can embed an initial prompt (and

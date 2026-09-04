@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/mensfeld/code-on-incus/internal/config"
@@ -15,6 +16,7 @@ import (
 	"github.com/mensfeld/code-on-incus/internal/nftmonitor"
 	"github.com/mensfeld/code-on-incus/internal/session"
 	"github.com/mensfeld/code-on-incus/internal/timing"
+	"github.com/mensfeld/code-on-incus/internal/tool"
 )
 
 // runState is the mutable state accumulated across run pipeline phases.
@@ -27,6 +29,14 @@ type runState struct {
 	// from the workspace mount. The file is required to be executable, so it
 	// runs directly and its shebang decides the interpreter.
 	runScript bool
+
+	// Prompt mode (coi run --prompt / --prompt-file / --prompt-name): run the
+	// AI agent headlessly with a predefined prompt and exit with its status
+	// code (#701). promptText is the resolved prompt; promptSessionID is a fresh
+	// session id used to stage the prompt file and as the tool's --session-id.
+	promptMode      bool
+	promptText      string
+	promptSessionID string
 
 	// After validate-env
 	containerName  string
@@ -526,18 +536,7 @@ func (a *App) runCommandPhase(args []string, s *runState) session.Phase {
 	return session.PhaseFunc{
 		PhaseName: "run-command",
 		RunFn: func(ctx context.Context) (session.Teardown, error) {
-			var timeoutMon *limits.TimeoutMonitor
-			if a.cfg.Limits.Runtime.MaxDuration != "" {
-				maxDur, _ := limits.ParseDuration(a.cfg.Limits.Runtime.MaxDuration)
-				autoStop := config.BoolVal(a.cfg.Limits.Runtime.AutoStop)
-				if a.cfg.Limits.Runtime.AutoStop == nil {
-					autoStop = true
-				}
-				stopGraceful := config.BoolVal(a.cfg.Limits.Runtime.StopGraceful)
-				runLog := logger.NewDiscard()
-				timeoutMon = limits.NewTimeoutMonitor(ctx, s.containerName, maxDur, autoStop, stopGraceful, a.cfg.Incus.Project, runLog)
-				timeoutMon.Start()
-			}
+			timeoutMon := a.startRunTimeoutMonitor(ctx, s.containerName)
 			defer func() {
 				if timeoutMon != nil {
 					timeoutMon.Stop()
@@ -577,6 +576,160 @@ func (a *App) runCommandPhase(args []string, s *runState) session.Phase {
 			}
 
 			fmt.Fprintf(os.Stderr, "\nCommand completed successfully\n")
+			return nil, nil
+		},
+	}
+}
+
+// startRunTimeoutMonitor starts the [limits.runtime] max_duration monitor for a
+// run container, or returns nil when no max_duration is configured. Shared by
+// the command and prompt run phases. Call Stop() on the result when done.
+func (a *App) startRunTimeoutMonitor(ctx context.Context, containerName string) *limits.TimeoutMonitor {
+	if a.cfg.Limits.Runtime.MaxDuration == "" {
+		return nil
+	}
+	maxDur, _ := limits.ParseDuration(a.cfg.Limits.Runtime.MaxDuration)
+	autoStop := config.BoolVal(a.cfg.Limits.Runtime.AutoStop)
+	if a.cfg.Limits.Runtime.AutoStop == nil {
+		autoStop = true
+	}
+	stopGraceful := config.BoolVal(a.cfg.Limits.Runtime.StopGraceful)
+	mon := limits.NewTimeoutMonitor(ctx, containerName, maxDur, autoStop, stopGraceful, a.cfg.Incus.Project, logger.NewDiscard())
+	mon.Start()
+	return mon
+}
+
+// runPromptPhase runs the AI agent headlessly with a predefined prompt and
+// propagates its exit code (#701). It seeds the agent's auth/context/model env
+// (which the lean run pipeline otherwise skips), stages the prompt into a
+// container file so arbitrary text never touches the command line, builds the
+// tool's headless (print-mode) launch command, and execs it through `bash -lc`
+// so the "$(cat <file>)" prompt substitution expands.
+func (a *App) runPromptPhase(s *runState) session.Phase {
+	return session.PhaseFunc{
+		PhaseName: "run-prompt",
+		RunFn: func(ctx context.Context) (session.Teardown, error) {
+			timeoutMon := a.startRunTimeoutMonitor(ctx, s.containerName)
+			defer func() {
+				if timeoutMon != nil {
+					timeoutMon.Stop()
+				}
+			}()
+
+			t, err := getConfiguredTool(a.cfg)
+			if err != nil {
+				return nil, err
+			}
+			// Headless prompt mode currently supports only Claude. Other tools
+			// would either open an interactive session (bad for cron) or need
+			// out-of-band prompt delivery; reject them loudly instead.
+			if t.Name() != "claude" {
+				return nil, &ExitCodeError{Code: 2, Message: fmt.Sprintf(
+					"coi run headless prompt mode currently supports only the claude tool (configured: %q)", t.Name())}
+			}
+
+			// Resolve the uid the agent runs as and the home its runs dir lives
+			// under (code user, or root when the image has none).
+			uid, homeDir, err := toolSpecUserHome(s.mgr)
+			if err != nil {
+				return nil, err
+			}
+
+			// Seed tool auth + context + model/effort env, exactly as an
+			// interactive `coi shell` session does — the lean run pipeline skips
+			// this, but a headless agent needs it to authenticate and load context.
+			hostHome, err := os.UserHomeDir()
+			if err != nil {
+				return nil, fmt.Errorf("failed to resolve host home directory: %w", err)
+			}
+			var cliConfigPath string
+			if dirName := t.ConfigDirName(); dirName != "" {
+				cliConfigPath = filepath.Join(hostHome, dirName)
+			}
+			seedResult := &session.SetupResult{
+				Manager:                s.mgr,
+				ContainerName:          s.containerName,
+				ContainerWorkspacePath: s.containerWorkspace,
+				HomeDir:                homeDir,
+				Timezone:               s.tz,
+			}
+			seedOpts := session.SetupOptions{
+				Tool:                t,
+				CLIConfigPath:       cliConfigPath,
+				AutoContext:         a.cfg.Tool.AutoContext,
+				ContextJSON:         a.cfg.Tool.ContextJSON,
+				ContextFilePath:     a.cfg.Tool.ContextFile,
+				ContextJSONFilePath: a.cfg.Tool.ContextJSONFile,
+				ProfileContextFile:  a.cfg.ProfileContextFile,
+				NetworkConfig:       &a.cfg.Network,
+				LimitsConfig:        &a.cfg.Limits,
+				Persistent:          a.persistent,
+				ForwardedEnvVars:    resolveForwardedEnvVarNames(a.cfg.Defaults.ForwardEnv),
+				Logger:              stderrLogFn,
+			}
+			if err := session.SeedToolConfigForRun(ctx, seedResult, seedOpts); err != nil {
+				return nil, err
+			}
+
+			// Stage the prompt as an in-container file owned by the run user.
+			runsDir := filepath.Join(homeDir, ".coi", "runs")
+			if _, err := s.mgr.ExecCommand(fmt.Sprintf("mkdir -p %s && chown %d:%d %s",
+				shellQuote(runsDir), uid, uid, shellQuote(runsDir)),
+				container.ExecCommandOptions{Capture: true}); err != nil {
+				return nil, fmt.Errorf("failed to create runs dir: %w", err)
+			}
+			promptPath := filepath.Join(runsDir, s.promptSessionID+".prompt")
+			if err := s.mgr.CreateFileWithOwner(promptPath, s.promptText, uid, uid, "0600"); err != nil {
+				return nil, fmt.Errorf("failed to stage prompt file in container: %w", err)
+			}
+
+			// Build the headless (print-mode) launch command. A fresh session per
+			// fire (Resume:false) is the right cron default — deterministic, no
+			// accumulating conversation state.
+			argv, outOfBand, err := buildToolSpecCommand(t, tool.LaunchSpec{
+				SessionID:  s.promptSessionID,
+				PromptFile: promptPath,
+				Print:      true,
+			})
+			if err != nil {
+				return nil, err
+			}
+			if outOfBand != "" {
+				// Tool can't embed the prompt in argv and coi run has no
+				// orchestrator to deliver it out-of-band.
+				return nil, &ExitCodeError{Code: 2, Message: fmt.Sprintf(
+					"tool %q cannot run a prompt headlessly via coi run", t.Name())}
+			}
+
+			// incus exec as the run user; route through a shell so the argv's
+			// "$(cat <prompt-file>)" substitution expands.
+			incusArgs := []string{
+				"exec", s.containerName, "--user", fmt.Sprintf("%d", uid),
+				"--group", fmt.Sprintf("%d", uid), "--cwd", s.containerWorkspace,
+			}
+			incusArgs, err = a.appendEnvArgs(incusArgs, s.tz, s.socketEnv)
+			if err != nil {
+				return nil, err
+			}
+			// Belt-and-suspenders model/effort env (also persisted at the
+			// container level by SeedToolConfigForRun's applyToolContainerEnv).
+			toolEnv := map[string]string{}
+			mergeToolEnv(toolEnv, t, s.containerWorkspace)
+			for k, v := range toolEnv {
+				incusArgs = append(incusArgs, "--env", fmt.Sprintf("%s=%s", k, v))
+			}
+			incusArgs = append(incusArgs, "--", "bash", "-lc", strings.Join(argv, " "))
+
+			fmt.Fprintf(os.Stderr, "Running headless prompt with %s (session %s)...\n", t.Name(), s.promptSessionID)
+			if err := container.IncusExecStreamedContext(ctx, incusArgs...); err != nil {
+				if exitErr, ok := err.(*container.ExitError); ok {
+					fmt.Fprintf(os.Stderr, "\nAgent exited with code %d\n", exitErr.ExitCode)
+					return nil, &ExitCodeError{Code: exitErr.ExitCode}
+				}
+				return nil, fmt.Errorf("headless prompt run failed: %w", err)
+			}
+
+			fmt.Fprintf(os.Stderr, "\nPrompt run completed successfully\n")
 			return nil, nil
 		},
 	}

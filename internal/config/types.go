@@ -47,26 +47,73 @@ type DetectionConfig struct {
 
 // Config represents the complete configuration
 type Config struct {
-	Container          ContainerConfig          `toml:"container"`
-	Defaults           DefaultsConfig           `toml:"defaults"`
-	Paths              PathsConfig              `toml:"paths"`
-	Incus              IncusConfig              `toml:"incus"`
-	Network            NetworkConfig            `toml:"network"`
-	Tool               ToolConfig               `toml:"tool"`
-	Shell              ShellConfig              `toml:"shell"`
-	Mounts             MountsConfig             `toml:"mounts"`
-	Sockets            []SocketEntry            `toml:"sockets"`
-	Ports              PortsConfig              `toml:"ports"`
-	Credentials        []CredentialEntry        `toml:"credentials"`
-	Limits             LimitsConfig             `toml:"limits"`
-	Git                GitConfig                `toml:"git"`
-	SSH                SSHConfig                `toml:"ssh"`
-	Security           SecurityConfig           `toml:"security"`
-	Monitoring         MonitoringConfig         `toml:"monitoring"`
-	Timezone           TimezoneConfig           `toml:"timezone"`
-	Detection          DetectionConfig          `toml:"detection"`
+	Container   ContainerConfig   `toml:"container"`
+	Defaults    DefaultsConfig    `toml:"defaults"`
+	Paths       PathsConfig       `toml:"paths"`
+	Incus       IncusConfig       `toml:"incus"`
+	Network     NetworkConfig     `toml:"network"`
+	Tool        ToolConfig        `toml:"tool"`
+	Shell       ShellConfig       `toml:"shell"`
+	Mounts      MountsConfig      `toml:"mounts"`
+	Sockets     []SocketEntry     `toml:"sockets"`
+	Ports       PortsConfig       `toml:"ports"`
+	Credentials []CredentialEntry `toml:"credentials"`
+	Limits      LimitsConfig      `toml:"limits"`
+	Git         GitConfig         `toml:"git"`
+	SSH         SSHConfig         `toml:"ssh"`
+	Security    SecurityConfig    `toml:"security"`
+	Monitoring  MonitoringConfig  `toml:"monitoring"`
+	Timezone    TimezoneConfig    `toml:"timezone"`
+	Detection   DetectionConfig   `toml:"detection"`
+	// Prompts is the named "fire and forget" prompt registry consumed by
+	// `coi run --prompt-name <name>` (#701). Each value is either an inline
+	// string or a { file = "..." } table; see PromptEntry.
+	Prompts            map[string]PromptEntry   `toml:"prompts"`
 	Profiles           map[string]ProfileConfig `toml:"-"` // Populated by loadProfileDirectories, not from TOML
 	ProfileContextFile string                   `toml:"-"` // Set by ApplyProfile, read by session setup
+}
+
+// PromptEntry is one entry in the [prompts] registry. It is a union that
+// accepts either a bare TOML string (inline prompt text) or a table with a
+// single `file` key pointing at a Markdown/text file whose contents are the
+// prompt:
+//
+//	[prompts]
+//	quick   = "Summarize the open issues."
+//	triage  = { file = "prompts/triage.md" }
+//
+// Exactly one of Text/File is set. A `file` path is resolved relative to the
+// config file's directory at load time (like [container.build] script) and is
+// honored only from trusted-scope config — an untrusted project config's
+// file= entry is stripped at load, since it would read an arbitrary host file
+// into an agent the container controls (same risk class as [tool] context_file).
+type PromptEntry struct {
+	Text string `toml:"-"`    // inline string form
+	File string `toml:"file"` // table form; resolved to an absolute host path at load
+}
+
+// UnmarshalTOML implements toml.Unmarshaler so a [prompts] value can be either
+// a bare string or a { file = "..." } table. Any other shape is a hard error
+// so a malformed entry fails loudly at load instead of resolving to empty.
+func (p *PromptEntry) UnmarshalTOML(v interface{}) error {
+	switch t := v.(type) {
+	case string:
+		p.Text = t
+		return nil
+	case map[string]interface{}:
+		raw, ok := t["file"]
+		if !ok {
+			return fmt.Errorf("prompt table entry must have a string 'file' key")
+		}
+		file, ok := raw.(string)
+		if !ok {
+			return fmt.Errorf("prompt table entry 'file' must be a string")
+		}
+		p.File = file
+		return nil
+	default:
+		return fmt.Errorf("prompt entry must be a string or a { file = \"...\" } table")
+	}
 }
 
 // BuildConfig defines how to build the project's custom image
@@ -405,20 +452,21 @@ type NetworkLoggingConfig struct {
 
 // ProfileConfig represents a named profile
 type ProfileConfig struct {
-	Inherits    string            `toml:"inherits"` // Parent profile name for inheritance
-	Container   ContainerConfig   `toml:"container"`
-	Context     string            `toml:"context"` // Path to context .md file (resolved relative to profile dir)
-	Environment map[string]string `toml:"environment"`
-	EnvCommands map[string]string `toml:"env_commands"`
-	Limits      *LimitsConfig     `toml:"limits"`
-	Tool        *ToolConfig       `toml:"tool"`
-	Mounts      []MountEntry      `toml:"mounts"`
-	Sockets     []SocketEntry     `toml:"sockets"`
-	Ports       *PortsConfig      `toml:"ports"`
-	Credentials []CredentialEntry `toml:"credentials"`
-	Network     *NetworkConfig    `toml:"network"`
-	ForwardEnv  []string          `toml:"forward_env"`
-	Source      string            `toml:"-"` // Where this profile was loaded from (not serialized)
+	Inherits    string                 `toml:"inherits"` // Parent profile name for inheritance
+	Container   ContainerConfig        `toml:"container"`
+	Context     string                 `toml:"context"` // Path to context .md file (resolved relative to profile dir)
+	Environment map[string]string      `toml:"environment"`
+	EnvCommands map[string]string      `toml:"env_commands"`
+	Prompts     map[string]PromptEntry `toml:"prompts"` // Named prompt registry (#701); file= resolved relative to profile dir
+	Limits      *LimitsConfig          `toml:"limits"`
+	Tool        *ToolConfig            `toml:"tool"`
+	Mounts      []MountEntry           `toml:"mounts"`
+	Sockets     []SocketEntry          `toml:"sockets"`
+	Ports       *PortsConfig           `toml:"ports"`
+	Credentials []CredentialEntry      `toml:"credentials"`
+	Network     *NetworkConfig         `toml:"network"`
+	ForwardEnv  []string               `toml:"forward_env"`
+	Source      string                 `toml:"-"` // Where this profile was loaded from (not serialized)
 	// Trusted records whether the profile was loaded from a trusted scan root
 	// (~/.coi or the COI_CONFIG dir), stamped by loadProfileDirectories at
 	// load time — the authoritative signal for post-inheritance trust checks,

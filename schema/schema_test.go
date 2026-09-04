@@ -295,6 +295,40 @@ func TestValidateProfileMap_RejectsUnknownKey(t *testing.T) {
 	}
 }
 
+// A profile with a [prompts] table (both inline-string and { file = "..." }
+// forms) must validate, and a malformed entry must be rejected (#701).
+func TestValidateProfileMap_Prompts(t *testing.T) {
+	valid := map[string]any{
+		"prompts": map[string]any{
+			"inline": "say hello",
+			"fromfile": map[string]any{
+				"file": "prompts/triage.md",
+			},
+		},
+	}
+	if err := schema.ValidateProfileMap(valid); err != nil {
+		t.Fatalf("valid [prompts] should pass, got %v", err)
+	}
+
+	badShape := map[string]any{
+		"prompts": map[string]any{
+			"x": 123, // neither string nor { file }
+		},
+	}
+	if err := schema.ValidateProfileMap(badShape); err == nil {
+		t.Fatal("a non-string, non-file prompt entry should be rejected")
+	}
+
+	badKey := map[string]any{
+		"prompts": map[string]any{
+			"x": map[string]any{"path": "nope"}, // wrong key
+		},
+	}
+	if err := schema.ValidateProfileMap(badKey); err == nil {
+		t.Fatal("a prompt table with the wrong key should be rejected")
+	}
+}
+
 func TestGetProfileSchema_Deterministic(t *testing.T) {
 	a, err := schema.GetProfileSchema()
 	if err != nil {

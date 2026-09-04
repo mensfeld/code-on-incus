@@ -120,6 +120,17 @@
 # model = "gpt-5-codex"          # Codex model (passed as -m); unset = codex's own default
 # reasoning_effort = "high"      # minimal | low | medium | high (model_reasoning_effort); unset = codex default
 
+# [prompts]                      # named prompts for headless "fire and forget" runs (#701):
+                                 #   coi run --prompt-name <name>
+                                 # runs the agent to completion and exits with its status code —
+                                 # pair with host cron for automation. A value is either inline text
+                                 # or a { file = "..." } table (path resolved relative to this config
+                                 # file). A file= entry reads a host file and is honored only from
+                                 # trusted scope (~/.coi/config.toml / $COI_CONFIG); an untrusted
+                                 # project .coi/config.toml's file= entry is stripped at load.
+# nightly-maintenance = "Update dependencies, run the tests, and open a PR if green."
+# triage = { file = "prompts/triage.md" }
+
 [git]
 # writable_hooks = false         # allow the container to write .git/hooks (security-sensitive)
 # name  = "Jane Dev"             # pin the container commit identity (overrides host git config)

@@ -29,6 +29,11 @@
       "additionalProperties": { "type": "string" },
       "description": "Map of env var name to a host command run at session start; the command's trimmed stdout is injected as the value. Honored only from trusted-scope config (~/.coi/config.toml / $COI_CONFIG); the minted value is present in the container env for the session."
     },
+    "prompts": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/PromptEntry" },
+      "description": "Named predefined prompts for `coi run --prompt-name <name>` (#701). Each value is either an inline string or a { file = \"...\" } table. A file= entry is honored only from trusted-scope config (it reads a host file); an untrusted project config's file= entry is stripped at load."
+    },
     "container": { "$ref": "#/$defs/ContainerConfig" },
     "limits":    { "$ref": "#/$defs/LimitsConfig" },
     "tool":      { "$ref": "#/$defs/ToolConfig" },
