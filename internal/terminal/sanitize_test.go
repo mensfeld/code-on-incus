@@ -69,6 +69,19 @@ func TestSanitizeTerm(t *testing.T) {
 			want: "xterm-256color",
 		},
 		{
+			// xterm-16color/xterm-88color live in ncurses-term, not the minimal
+			// ncurses-base, so they're mapped to the always-present superset
+			// rather than trusted to exist (#772 review).
+			name: "xterm-16color maps to 256color",
+			term: "xterm-16color",
+			want: "xterm-256color",
+		},
+		{
+			name: "xterm-88color maps to 256color",
+			term: "xterm-88color",
+			want: "xterm-256color",
+		},
+		{
 			name: "tmux-256color",
 			term: "tmux-256color",
 			want: "xterm-256color",

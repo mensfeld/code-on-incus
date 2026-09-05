@@ -2,15 +2,15 @@ package terminal
 
 import "strings"
 
-// standardXterm is the set of xterm-* TERM values that container base images
-// reliably ship terminfo for, so they pass through untouched. Any OTHER xterm-*
-// value (xterm-kitty, xterm-ghostty, …) is a terminal-emulator-specific variant
-// that usually has no terminfo entry in the container and must be mapped.
+// standardXterm is the set of xterm-* TERM values that a minimal container
+// (ncurses-base, no ncurses-term) reliably ships terminfo for, so they pass
+// through untouched. Any OTHER xterm-* value — emulator variants (xterm-kitty,
+// xterm-ghostty, …) AND the less-common xterm-16color/xterm-88color, which live
+// in ncurses-term and may be absent — is mapped to xterm-256color, a safe
+// superset that is always present.
 var standardXterm = map[string]bool{
 	"xterm":          true,
 	"xterm-color":    true,
-	"xterm-16color":  true,
-	"xterm-88color":  true,
 	"xterm-256color": true,
 }
 
