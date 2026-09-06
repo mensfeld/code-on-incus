@@ -563,12 +563,25 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 				hostDirExists := statErr == nil
 
 				if hostDirExists || tcf.AlwaysSetupConfig() {
-					if !skipLaunch {
+					switch {
+					case !skipLaunch:
 						opts.Logger(fmt.Sprintf("Setting up %s config...", opts.Tool.Name()))
 						if err := setupCLIConfig(result.Manager, opts.CLIConfigPath, result.HomeDir, tcf, opts.Logger); err != nil {
 							opts.Logger(fmt.Sprintf("Warning: Failed to setup %s config: %v", opts.Tool.Name(), err))
 						}
-					} else {
+					case !toolConfigDirPresent(result.Manager, result.HomeDir, tcf):
+						// Persistent reuse with a tool this container hasn't seen
+						// yet — e.g. a profile that shares [container] session_name
+						// but sets a different [tool] name, so you re-enter the same
+						// container (code, packages, state) with another tool (#708
+						// follow-up). Seed its config once so it authenticates,
+						// without touching the original tool's config or any
+						// conversation history.
+						opts.Logger(fmt.Sprintf("Setting up %s config in reused container (first use of this tool here)...", opts.Tool.Name()))
+						if err := setupCLIConfig(result.Manager, opts.CLIConfigPath, result.HomeDir, tcf, opts.Logger); err != nil {
+							opts.Logger(fmt.Sprintf("Warning: Failed to setup %s config: %v", opts.Tool.Name(), err))
+						}
+					default:
 						opts.Logger(fmt.Sprintf("Reusing existing %s config (persistent container)", opts.Tool.Name()))
 					}
 				} else if statErr != nil && !os.IsNotExist(statErr) {

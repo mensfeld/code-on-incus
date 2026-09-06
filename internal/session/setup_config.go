@@ -151,6 +151,24 @@ func injectCredentials(mgr container.ContainerManager, hostCLIConfigPath, homeDi
 	return nil
 }
 
+// containerCommandRunner is the narrow slice of the container manager that
+// toolConfigDirPresent needs, so the probe can be unit-tested with a tiny fake.
+type containerCommandRunner interface {
+	ExecCommand(command string, opts container.ExecCommandOptions) (string, error)
+}
+
+// toolConfigDirPresent reports whether the tool's config dir (e.g. ~/.codex)
+// already exists inside the container. On persistent reuse this decides whether
+// a re-entering tool needs its config seeded: a profile that shares
+// [container] session_name but sets a different [tool] name lands in the
+// existing container, where the new tool's config dir won't exist yet (#708
+// follow-up). `test -d` exits non-zero (→ error) when the dir is absent.
+func toolConfigDirPresent(mgr containerCommandRunner, homeDir string, tcf tool.ToolWithConfigDirFiles) bool {
+	dir := filepath.Join(homeDir, tcf.ConfigDirName())
+	_, err := mgr.ExecCommand("test -d "+dir, container.ExecCommandOptions{Capture: true})
+	return err == nil
+}
+
 // setupCLIConfig copies tool config directory and injects sandbox settings
 func setupCLIConfig(mgr container.ContainerManager, hostCLIConfigPath, homeDir string, tcf tool.ToolWithConfigDirFiles, logger func(string)) error {
 	configDirName := tcf.ConfigDirName()

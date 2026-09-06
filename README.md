@@ -109,6 +109,23 @@ name = "claude"              # or "codex", "opencode", "pi", "omp"
 permission_mode = "bypass"   # run autonomously ("bypass") or ask first ("interactive")
 ```
 
+**Switching tools on the same container.** Tool choice is config/profile-shaped, not a per-command flag. To re-enter one persistent container (same code, packages, and running services) with a different tool, give two profiles the **same `[container] session_name`** — a container's identity is `hash(workspace, session_name)`, so they resolve to the same box:
+
+```toml
+# ~/.coi/profiles/box-claude/config.toml        # ~/.coi/profiles/box-codex/config.toml
+[container]                                      # [container]
+persistent = true                                # persistent = true
+session_name = "box"                             # session_name = "box"
+[tool]                                           # [tool]
+name = "claude"                                  # name = "codex"
+```
+```bash
+coi shell --profile box-claude    # create/enter the "box" running claude
+coi shell --profile box-codex     # re-enter the SAME box running codex
+```
+
+On reuse, coi seeds the re-entering tool's credentials/config the first time that tool is used in the box (without disturbing the other tool's config or history). Session history is per-tool (`~/.coi/sessions-<tool>`), so `--resume`/`--continue` resume that tool's own conversations.
+
 _Aider and Cursor are on the way._ See the [Supported Tools wiki page](https://github.com/mensfeld/code-on-incus/wiki/Supported-Tools) for per-tool auth and configuration.
 
 ## Everyday commands
