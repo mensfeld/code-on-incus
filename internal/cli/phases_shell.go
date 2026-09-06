@@ -153,7 +153,7 @@ func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.P
 	return session.PhaseFunc{
 		PhaseName: "configure-session",
 		RunFn: func(_ context.Context) (session.Teardown, error) {
-			ti, err := a.resolveConfiguredTool()
+			ti, err := getConfiguredTool(a.cfg)
 			if err != nil {
 				return nil, err
 			}

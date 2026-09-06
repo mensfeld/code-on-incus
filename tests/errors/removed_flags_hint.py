@@ -35,14 +35,10 @@ def test_removed_image_flag_hint(coi_binary):
 
 
 def test_removed_tmux_tool_compression_timeout_hints(coi_binary):
-    """Each removed config-shaped flag points at its replacement config key.
-
-    Note: --tool is intentionally NOT here — it was reinstated as a
-    per-invocation flag on shell/attach/run (#708), so it is a real flag again,
-    not a removed one.
-    """
+    """Each removed config-shaped flag points at its replacement config key."""
     cases = [
         (["shell", "--tmux=false"], "[shell] use_tmux"),
+        (["shell", "--tool", "opencode"], "[tool] name"),
         (["build", "--compression", "none"], "[container.build] compression"),
         (["shutdown", "--timeout=5", "x"], "[container] shutdown_timeout"),
     ]

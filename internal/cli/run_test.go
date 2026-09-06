@@ -110,6 +110,7 @@ func TestRemovedFlagHint_NoFalsePositiveOnPrefixCollision(t *testing.T) {
 		"unknown flag: --image",
 		"unknown flag: --persistent",
 		"unknown flag: --tmux",
+		"unknown flag: --tool",
 		"unknown flag: --compression",
 		"unknown flag: --timeout",
 		"flag needs an argument: --image",
@@ -123,6 +124,7 @@ func TestRemovedFlagHint_NoFalsePositiveOnPrefixCollision(t *testing.T) {
 func TestRemovedFlagHint_PointsAtTheRightConfigKey(t *testing.T) {
 	cases := map[string]string{
 		"--tmux":        "[shell] use_tmux",
+		"--tool":        "[tool] name",
 		"--compression": "[container.build] compression",
 		"--timeout":     "[container] shutdown_timeout",
 		"--image":       "[container] image",

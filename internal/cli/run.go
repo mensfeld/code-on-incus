@@ -77,7 +77,6 @@ func init() {
 	runCmd.Flags().StringVar(&runPrompt, "prompt", "", "Run the AI agent headlessly with this prompt text, then exit (fire and forget)")
 	runCmd.Flags().StringVar(&runPromptFile, "prompt-file", "", "Run the AI agent headlessly with the prompt read from this host file")
 	runCmd.Flags().StringVar(&runPromptName, "prompt-name", "", "Run the AI agent headlessly with a named prompt from the [prompts] config table")
-	runCmd.Flags().StringVar(&toolOverride, "tool", "", "AI tool for a headless prompt run, overriding [tool] name (headless currently supports: claude)")
 }
 
 // detectRunScript checks for the workspace run script. The script must carry
@@ -247,16 +246,14 @@ func (a *App) resolvePromptMode(cmd *cobra.Command, s *runState, args []string) 
 
 	// Fail fast on an unsupported tool before any container work, so cron doesn't
 	// spin up (and tear down) a container just to be told the tool can't run
-	// headlessly. Honors --tool (#708); the resolved tool is reused by
-	// runPromptPhase.
-	t, err := a.resolveConfiguredTool()
+	// headlessly. The resolved tool is reused by runPromptPhase.
+	t, err := getConfiguredTool(a.cfg)
 	if err != nil {
 		return &ExitCodeError{Code: 2, Message: err.Error()}
 	}
 	if t.Name() != "claude" {
 		return &ExitCodeError{Code: 2, Message: fmt.Sprintf(
-			"headless prompt mode currently supports only the claude tool (got %q); "+
-				"run it interactively instead: coi shell --tool %s", t.Name(), t.Name())}
+			"coi run headless prompt mode currently supports only the claude tool (configured: %q)", t.Name())}
 	}
 
 	sessionID, err := session.GenerateSessionID()

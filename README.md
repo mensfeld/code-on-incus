@@ -109,16 +109,6 @@ name = "claude"              # or "codex", "opencode", "pi", "omp"
 permission_mode = "bypass"   # run autonomously ("bypass") or ask first ("interactive")
 ```
 
-Keep your default in config, but launch a different tool for a single invocation with `--tool` — no profile needed:
-
-```bash
-coi shell --tool codex        # start this session in codex, though name = "claude"
-coi attach --tool codex       # start codex in an already-running container (like attach --bash)
-coi shell --tool codex --resume   # resume codex's own last session (history is per-tool)
-```
-
-`--tool` picks the tool for that run only and overrides `[tool] name` from every config scope. Session history is **per-tool** (each tool stores its own transcripts under `~/.coi/sessions-<tool>`), so `--resume`/`--continue` resume the chosen tool's own history — history is not shared across tools. `coi run --prompt … --tool <name>` also accepts it, but headless prompt mode currently supports `claude` only.
-
 _Aider and Cursor are on the way._ See the [Supported Tools wiki page](https://github.com/mensfeld/code-on-incus/wiki/Supported-Tools) for per-tool auth and configuration.
 
 ## Everyday commands
