@@ -648,7 +648,7 @@ func (b *Builder) updateAlias(versionAlias, mainAlias string) error {
 
 // getImageFingerprint gets the fingerprint of an image by alias
 func getImageFingerprint(alias string) (string, error) {
-	output, err := container.IncusOutput("image", "list", alias, "--project", "default", "--format=json")
+	output, err := container.IncusOutput("image", "list", alias, "--project", container.IncusProject, "--format=json")
 	if err != nil {
 		return "", err
 	}
