@@ -28,6 +28,10 @@ var (
 	debugShell    bool
 	background    bool
 	containerName string
+	// toolOverride is the per-invocation --tool flag shared by shell/attach/run
+	// (#708): it overrides [tool] name so you can launch a non-default tool
+	// without editing config or making a profile.
+	toolOverride string
 )
 
 var shellCmd = &cobra.Command{
@@ -70,6 +74,7 @@ func init() {
 	shellCmd.Flags().BoolVar(&debugShell, "debug", false, "Launch interactive bash instead of AI tool (for debugging)")
 	shellCmd.Flags().BoolVar(&background, "background", false, "Run AI tool in background tmux session (detached)")
 	shellCmd.Flags().StringVar(&containerName, "container", "", "Use existing container (for testing)")
+	shellCmd.Flags().StringVar(&toolOverride, "tool", "", "Launch this AI tool for the session, overriding [tool] name (claude, codex, opencode, pi, omp)")
 }
 
 func (a *App) shellCommand(cmd *cobra.Command, args []string) error {
@@ -154,6 +159,18 @@ func getConfiguredTool(cfg *config.Config) (tool.Tool, error) {
 	}
 
 	return t, nil
+}
+
+// resolveConfiguredTool returns the configured tool, applying the per-invocation
+// --tool override (#708) when set. The override is applied here, at resolution
+// time — after every config/profile/project-overlay merge has run — so an
+// explicit --tool wins over all config scopes (including a project [tool] name).
+// An unknown name surfaces as tool.Get's "unknown tool: … (supported: …)" error.
+func (a *App) resolveConfiguredTool() (tool.Tool, error) {
+	if toolOverride != "" {
+		a.cfg.Tool.Name = toolOverride
+	}
+	return getConfiguredTool(a.cfg)
 }
 
 // resolveGitIdentity picks the commit identity to install in the container, in
