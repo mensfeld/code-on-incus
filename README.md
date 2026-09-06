@@ -109,15 +109,22 @@ name = "claude"              # or "codex", "opencode", "pi", "omp"
 permission_mode = "bypass"   # run autonomously ("bypass") or ask first ("interactive")
 ```
 
-Keep your default in config, but launch a different tool for a single invocation with `--tool` — no profile needed:
+**Switching tools on the same container.** Tool choice is config/profile-shaped, not a per-command flag. To re-enter one persistent container (same code, packages, and running services) with a different tool, give two profiles the **same `[container] session_name`** — a container's identity is `hash(workspace, session_name)`, so they resolve to the same box:
 
+```toml
+# ~/.coi/profiles/box-claude/config.toml        # ~/.coi/profiles/box-codex/config.toml
+[container]                                      # [container]
+persistent = true                                # persistent = true
+session_name = "box"                             # session_name = "box"
+[tool]                                           # [tool]
+name = "claude"                                  # name = "codex"
+```
 ```bash
-coi shell --tool codex        # start this session in codex, though name = "claude"
-coi attach --tool codex       # start codex in an already-running container (like attach --bash)
-coi shell --tool codex --resume   # resume codex's own last session (history is per-tool)
+coi shell --profile box-claude    # create/enter the "box" running claude
+coi shell --profile box-codex     # re-enter the SAME box running codex
 ```
 
-`--tool` picks the tool for that run only and overrides `[tool] name` from every config scope. Session history is **per-tool** (each tool stores its own transcripts under `~/.coi/sessions-<tool>`), so `--resume`/`--continue` resume the chosen tool's own history — history is not shared across tools. `coi run --prompt … --tool <name>` also accepts it, but headless prompt mode currently supports `claude` only.
+On reuse, coi seeds the re-entering tool's credentials/config the first time that tool is used in the box (without disturbing the other tool's config or history). Session history is per-tool (`~/.coi/sessions-<tool>`), so `--resume`/`--continue` resume that tool's own conversations.
 
 _Aider and Cursor are on the way._ See the [Supported Tools wiki page](https://github.com/mensfeld/code-on-incus/wiki/Supported-Tools) for per-tool auth and configuration.
 

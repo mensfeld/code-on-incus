@@ -60,22 +60,6 @@ def test_missing_prompt_file_rejected(coi_binary, workspace_dir):
     assert "failed to read --prompt-file" in (r.stdout + r.stderr)
 
 
-def test_prompt_tool_override_nonclaude_rejected(coi_binary, workspace_dir):
-    """`coi run --prompt … --tool <non-claude>` is rejected up front: headless
-    prompt mode currently supports only claude (#708)."""
-    r = _run(coi_binary, workspace_dir, "--prompt", "do it", "--tool", "opencode")
-    assert r.returncode == 2, f"want exit 2, got {r.returncode}: {r.stderr}"
-    out = r.stdout + r.stderr
-    assert "headless prompt mode currently supports only the claude tool" in out, out
-
-
-def test_prompt_tool_override_unknown_rejected(coi_binary, workspace_dir):
-    """An unknown --tool value fails fast with the supported list (#708)."""
-    r = _run(coi_binary, workspace_dir, "--prompt", "do it", "--tool", "bogus")
-    assert r.returncode == 2, f"want exit 2, got {r.returncode}: {r.stderr}"
-    assert "unknown tool: bogus" in (r.stdout + r.stderr)
-
-
 def test_untrusted_project_prompt_is_ignored(coi_binary, workspace_dir):
     """A [prompts] entry in an untrusted project .coi/config.toml must be ignored
     entirely — prompts are honored only from trusted scope (~/.coi / $COI_CONFIG),

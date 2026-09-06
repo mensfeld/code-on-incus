@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,7 +10,6 @@ import (
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/session"
 	"github.com/mensfeld/code-on-incus/internal/terminal"
-	"github.com/mensfeld/code-on-incus/internal/tool"
 	"github.com/spf13/cobra"
 )
 
@@ -33,15 +31,13 @@ Examples:
   coi attach claude-abc123-1    # Attach to specific session
   coi attach --slot=1           # Attach to slot 1 for current workspace
   coi attach --bash             # Attach to bash shell instead of tmux session
-  coi attach coi-123 --bash     # Attach to specific container with bash
-  coi attach --tool codex       # Start codex in the running container (overrides [tool] name)`,
+  coi attach coi-123 --bash     # Attach to specific container with bash`,
 	RunE: app.attachCommand,
 }
 
 func init() {
 	attachCmd.Flags().BoolVar(&attachWithBash, "bash", false, "Attach to bash shell instead of tmux session")
 	attachCmd.Flags().IntVar(&attachSlot, "slot", 0, "Slot number to attach to (requires workspace context)")
-	attachCmd.Flags().StringVar(&toolOverride, "tool", "", "Start this AI tool in the running container instead of attaching to tmux (claude, codex, opencode, pi, omp)")
 }
 
 func (a *App) attachCommand(cmd *cobra.Command, args []string) error {
@@ -49,13 +45,6 @@ func (a *App) attachCommand(cmd *cobra.Command, args []string) error {
 	// resolves to, so the operational commands apply the same [defaults]
 	// profile fallback the launch used (error-tolerantly, per #607).
 	a.applyDefaultProfileForOps(cmd)
-
-	// --tool and --bash are mutually exclusive: one starts an AI tool, the other
-	// drops to a shell.
-	if toolOverride != "" && attachWithBash {
-		return &ExitCodeError{Code: 2, Message: "--tool and --bash cannot be combined"}
-	}
-
 	var targetContainer string
 
 	// If --slot is provided, calculate container name from workspace and slot
@@ -128,106 +117,11 @@ func (a *App) attachCommand(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Attach to container (a specific tool, bash, or the tmux session)
-	if toolOverride != "" {
-		t, err := a.resolveConfiguredTool()
-		if err != nil {
-			return &ExitCodeError{Code: 2, Message: err.Error()}
-		}
-		return a.attachToContainerWithTool(targetContainer, t)
-	}
+	// Attach to container (tmux or bash)
 	if attachWithBash {
 		return attachToContainerWithBash(targetContainer)
 	}
 	return attachToContainer(targetContainer)
-}
-
-// attachToContainerWithTool starts an AI tool in an already-running container
-// (the analog of --bash starting a shell), overriding the tool the session was
-// created with (#708). It first seeds that tool's CLI config/credentials +
-// context + model env — so, e.g., starting codex on a claude-created container
-// still authenticates — then execs the tool's launch command interactively as a
-// fresh session. This is separate from the session's original tmux window.
-func (a *App) attachToContainerWithTool(containerName string, t tool.Tool) error {
-	mgr := container.NewManager(containerName)
-	workspacePath := mgr.GetWorkspacePath()
-
-	// homeDir drives config/context seeding; the exec run-user is resolved via
-	// tmuxExecUser below (the #588 tmux-socket-owner resolution).
-	_, homeDir, err := toolSpecUserHome(mgr)
-	if err != nil {
-		return err
-	}
-
-	// Seed the tool's config/creds/context/model env into the live container.
-	hostHome, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("failed to resolve host home directory: %w", err)
-	}
-	var cliConfigPath string
-	if dirName := t.ConfigDirName(); dirName != "" {
-		cliConfigPath = filepath.Join(hostHome, dirName)
-	}
-	seedResult := &session.SetupResult{
-		Manager:                mgr,
-		ContainerName:          containerName,
-		ContainerWorkspacePath: workspacePath,
-		HomeDir:                homeDir,
-	}
-	seedOpts := session.SetupOptions{
-		Tool:                t,
-		CLIConfigPath:       cliConfigPath,
-		AutoContext:         a.cfg.Tool.AutoContext,
-		ContextJSON:         a.cfg.Tool.ContextJSON,
-		ContextFilePath:     a.cfg.Tool.ContextFile,
-		ContextJSONFilePath: a.cfg.Tool.ContextJSONFile,
-		ProfileContextFile:  a.cfg.ProfileContextFile,
-		NetworkConfig:       &a.cfg.Network,
-		LimitsConfig:        &a.cfg.Limits,
-		Persistent:          a.persistent,
-		ForwardedEnvVars:    resolveForwardedEnvVarNames(a.cfg.Defaults.ForwardEnv),
-		Logger:              stderrLogFn,
-	}
-	if err := session.SeedToolConfigForRun(context.Background(), seedResult, seedOpts); err != nil {
-		return err
-	}
-
-	// Build the tool's launch command for a fresh ad-hoc session.
-	sessionID, err := session.GenerateSessionID()
-	if err != nil {
-		return fmt.Errorf("failed to generate session id: %w", err)
-	}
-	argv := t.BuildCommand(sessionID, false, "")
-	if os.Getenv("COI_USE_DUMMY") == "1" && len(argv) > 0 {
-		argv[0] = "dummy"
-	}
-
-	env := map[string]string{"TERM": terminal.SanitizeTerm(os.Getenv("TERM"))}
-	mergeToolEnv(env, t, workspacePath)
-
-	// Run as the container's ACTUAL code user (config-derived CodeUID can
-	// misstate it, #588 — same resolution as tmux attach / --bash).
-	user, err := tmuxExecUser(mgr)
-	if err != nil {
-		return err
-	}
-	opts := container.ExecCommandOptions{
-		User:        user,
-		Cwd:         workspacePath,
-		Interactive: true,
-		Env:         env,
-	}
-
-	fmt.Fprintf(os.Stderr, "Starting %s in %s...\n", t.Name(), containerName)
-	if err := mgr.ExecArgs(argv, opts); err != nil {
-		errStr := err.Error()
-		// Signal exits on container shutdown / force-kill / Ctrl+C are expected.
-		if errStr == "exit status 143" || errStr == "exit status 137" || errStr == "exit status 130" {
-			return nil
-		}
-		return fmt.Errorf("failed to start %s in container: %w", t.Name(), err)
-	}
-	return nil
 }
 
 func attachToContainer(containerName string) error {

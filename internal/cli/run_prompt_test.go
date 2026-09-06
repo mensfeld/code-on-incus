@@ -17,7 +17,6 @@ import (
 func newRunPromptCmd(t *testing.T, args []string) *cobra.Command {
 	t.Helper()
 	runPrompt, runPromptFile, runPromptName = "", "", ""
-	toolOverride = ""
 	cmd := &cobra.Command{Use: "run"}
 	cmd.Flags().StringVar(&runPrompt, "prompt", "", "")
 	cmd.Flags().StringVar(&runPromptFile, "prompt-file", "", "")
@@ -88,31 +87,6 @@ func TestResolvePromptMode_InlineSuccess(t *testing.T) {
 	}
 	if s.promptTool == nil || s.promptTool.Name() != "claude" {
 		t.Errorf("resolved tool should be stored on runState, got %v", s.promptTool)
-	}
-}
-
-func TestResolvePromptMode_ToolOverrideRejectsNonClaude(t *testing.T) {
-	t.Cleanup(func() { toolOverride = "" })
-	a := &App{cfg: &config.Config{}}
-	cmd := newRunPromptCmd(t, []string{"--prompt", "do it"})
-	toolOverride = "opencode" // set after newRunPromptCmd (which resets it)
-	err := a.resolvePromptMode(cmd, &runState{}, nil)
-	if code := exitCode(t, err); code != 2 {
-		t.Errorf("headless --tool opencode should exit 2, got %d", code)
-	}
-}
-
-func TestResolvePromptMode_ToolOverrideClaudeAccepted(t *testing.T) {
-	t.Cleanup(func() { toolOverride = "" })
-	a := &App{cfg: &config.Config{Tool: config.ToolConfig{Name: "opencode"}}}
-	cmd := newRunPromptCmd(t, []string{"--prompt", "do it"})
-	toolOverride = "claude" // override a non-claude default back to claude for headless
-	s := &runState{}
-	if err := a.resolvePromptMode(cmd, s, nil); err != nil {
-		t.Fatalf("--tool claude should be accepted for headless, got %v", err)
-	}
-	if !s.promptMode || s.promptTool == nil || s.promptTool.Name() != "claude" {
-		t.Errorf("bad state: promptMode=%v tool=%v", s.promptMode, s.promptTool)
 	}
 }
 

@@ -40,14 +40,13 @@ def test_shell_help(coi_binary):
     assert "--slot" in output, f"Should document --slot flag. Got:\n{output}"
     assert "--resume" in output, f"Should document --resume flag. Got:\n{output}"
     assert "--debug" in output, f"Should document --debug flag. Got:\n{output}"
-    # --tool is a per-invocation choice (a flag), not config-shaped (#708).
-    assert "--tool" in output, f"Should document --tool flag. Got:\n{output}"
 
     # Config-shaped settings are config/profile-driven (0.10): the
-    # --persistent/--image/--tmux flags were all removed.
+    # --persistent/--image/--tmux/--tool flags were all removed.
     assert "--persistent" not in output, f"--persistent flag was removed. Got:\n{output}"
     assert "--image" not in output, f"--image flag was removed. Got:\n{output}"
     assert "--tmux" not in output, f"--tmux flag was removed. Got:\n{output}"
+    assert "--tool" not in output, f"--tool flag was removed. Got:\n{output}"
 
     # Should contain Flags section
     assert "Flags:" in output, f"Should contain Flags section. Got:\n{output}"
