@@ -187,7 +187,6 @@ var removedFlagConfig = map[string]string{
 	"--image":       `[container] image = "..."`,
 	"--persistent":  `[container] persistent = true`,
 	"--tmux":        `[shell] use_tmux = false`,
-	"--tool":        `[tool] name = "opencode"`,
 	"--compression": `[container.build] compression = "none"`,
 	"--timeout":     `[container] shutdown_timeout = 30`,
 }
@@ -200,7 +199,7 @@ var removedFlagConfig = map[string]string{
 // characters. Commands that legitimately keep one of these names (e.g.
 // `coi image publish --compression`) never reach this path because their
 // flag exists and parses.
-var removedFlagRe = regexp.MustCompile(`(--image|--persistent|--tmux|--tool|--compression|--timeout)($|[\s=])`)
+var removedFlagRe = regexp.MustCompile(`(--image|--persistent|--tmux|--compression|--timeout)($|[\s=])`)
 
 // removedFlagHint upgrades the bare "unknown flag" error for a removed,
 // config-shaped flag into an actionable migration message pointing at the
