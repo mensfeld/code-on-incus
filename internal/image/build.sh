@@ -62,6 +62,33 @@ EOF
 }
 
 #######################################
+# Prefer IPv4 and bound apt's network waits
+#######################################
+# Build containers frequently have IPv6 configured but no working IPv6 route.
+# apt (and installers) resolve AAAA records first, try the dead IPv6 path, and —
+# because apt has no default network timeout — hang on connect essentially
+# forever, stalling the whole build until the CI job's hard timeout kills it
+# (observed: builds wedged at "Installing base dependencies..." for ~59m). The
+# codebase already preferred IPv4 for the agent installers via /etc/gai.conf
+# (prefer_ipv4), but that ran AFTER apt. Force IPv4 for apt and bound its
+# retries/timeouts here, BEFORE the first apt-get, and set the gai.conf
+# preference (Bun/Node installers resolve AAAA first;
+# https://github.com/anthropics/claude-code/issues/13498) for everything else.
+# Called once from main(); idempotent.
+configure_network_ipv4() {
+    log "Preferring IPv4 for network operations..."
+    cat > /etc/apt/apt.conf.d/99coi-force-ipv4 <<'APTCONF'
+Acquire::ForceIPv4 "true";
+Acquire::http::Timeout "30";
+Acquire::https::Timeout "30";
+Acquire::Retries "3";
+APTCONF
+    if ! grep -q '::ffff:0:0/96' /etc/gai.conf 2>/dev/null; then
+        echo 'precedence ::ffff:0:0/96 100' >> /etc/gai.conf
+    fi
+}
+
+#######################################
 # Install base dependencies
 #######################################
 install_base_dependencies() {
@@ -359,21 +386,6 @@ WRAPPER_EOF
     chmod 755 "/usr/local/bin/close"
 
     log "Power management wrappers configured"
-}
-
-#######################################
-# Prefer IPv4 for outbound connections.
-# Works around broken IPv6 in containers and some networks: agent installers
-# (Bun/Node-based) resolve AAAA records first; when the IPv6 path is
-# non-functional the download either times out or returns 403.
-# See: https://github.com/anthropics/claude-code/issues/13498
-# Idempotent; called once from main() so EVERY agent installer benefits.
-#######################################
-prefer_ipv4() {
-    if ! grep -q '::ffff:0:0/96' /etc/gai.conf 2>/dev/null; then
-        echo 'precedence ::ffff:0:0/96 100' >> /etc/gai.conf
-        log "IPv4 preference set in /etc/gai.conf"
-    fi
 }
 
 #######################################
@@ -825,6 +837,7 @@ install_selected_agents() {
 main() {
     log "Starting coi image build..."
 
+    configure_network_ipv4
     configure_dns_if_needed
     install_base_dependencies
     disable_host_only_services
@@ -835,7 +848,6 @@ main() {
     configure_power_wrappers
     configure_tmp_cleanup
     configure_tmux
-    prefer_ipv4
     install_selected_agents
     install_dummy
     install_docker

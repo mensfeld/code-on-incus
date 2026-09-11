@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixed
+
+- **Image build no longer hangs on broken container IPv6** — `coi build` could wedge at "Installing base dependencies…" until the CI job's 60-minute cap: build containers often have IPv6 configured but no working route, and `apt` (which resolves AAAA first and has no default network timeout) stalled indefinitely on the dead IPv6 path. The IPv4 preference the build already used for the agent installers now runs up front — `Acquire::ForceIPv4` plus bounded apt timeouts/retries — before the first `apt-get`, so base-dependency installation uses IPv4 and fails fast instead of hanging.
+
 ### New Features
 
 - **Forensics survive an auto-kill: `[monitoring] forensics_on_kill`** — when the threat responder auto-kills a container on a critical threat, it now first preserves a forensic copy of the still-running container (`incus copy` → `<container>-forensics-<ts>`, capped at 3 per container, oldest pruned) that survives the kill, instead of deleting the evidence with the threat — "snapshot state for investigation before deactivating" (Trail of Bits). The original still auto-deletes under its own name as usual; a failed copy never blocks or delays the kill. On the recommended btrfs/zfs pool the copy is a near-instant COW reflink. Opt-in (`forensics_on_kill = true`); off by default, since preserving a container on every kill would otherwise accumulate stopped containers.
