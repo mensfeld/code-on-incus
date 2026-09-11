@@ -106,7 +106,15 @@ jobs:
     name: Integration Tests (${{ matrix.test_group.name }})
     runs-on: ubuntu-24.04
     needs: build
-    timeout-minutes: 60
+    # 90 (not 60): the build-heavy lanes (core-build especially) run ~15 tests
+    # that each build a full COI image. On a cold image cache — which happens
+    # whenever internal/image/**, profiles/default/**, or the build script
+    # change — those rebuild from scratch (a slim build alone can take ~10min on
+    # a slow runner), and the suite legitimately exceeds 60min. The IPv4 apt fix
+    # removed the indefinite hang; this gives the genuinely-long cold runs room
+    # to finish instead of being cancelled at the cap. Fast/warm lanes are
+    # unaffected (they finish well under either limit).
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:

@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- **Image build no longer hangs on broken container IPv6** — `coi build` could wedge at "Installing base dependencies…" until the CI job's 60-minute cap: build containers often have IPv6 configured but no working route, and `apt` (which resolves AAAA first and has no default network timeout) stalled indefinitely on the dead IPv6 path. The IPv4 preference the build already used for the agent installers now runs up front — `Acquire::ForceIPv4` plus bounded apt timeouts/retries — before the first `apt-get`, so base-dependency installation uses IPv4 and fails fast instead of hanging.
+- **Image build no longer hangs on broken container IPv6** — `coi build` could wedge at "Installing base dependencies…" until the CI job's 60-minute cap: build containers often have IPv6 configured but no working route, and `apt` (which resolves AAAA first and has no default network timeout) stalled indefinitely on the dead IPv6 path. The IPv4 preference the build already used for the agent installers now runs up front — `Acquire::ForceIPv4` plus bounded apt timeouts/retries — before the first `apt-get`, so base-dependency installation uses IPv4 and fails fast instead of hanging. The image-build CI lanes' timeout was also raised (60→90 min) so a legitimately-long cold-cache rebuild finishes instead of being cancelled at the cap.
 
 ### New Features
 
