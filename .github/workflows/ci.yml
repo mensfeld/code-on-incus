@@ -150,8 +150,11 @@ jobs:
             path: tests/list tests/attach tests/tmux tests/kill tests/persist
             description: "Core commands: list/attach/tmux/kill/persist"
           - name: core-build
-            path: tests/build tests/run
-            description: "Build and run command tests"
+            path: tests/build
+            description: "Build command tests (each builds a full image — kept on its own lane)"
+          - name: core-run
+            path: tests/run
+            description: "Run command tests"
           - name: misc-cli
             path: tests/cli
             description: "CLI flag/format/output tests"
@@ -566,7 +569,7 @@ jobs:
           key: ${{ runner.os }}-coi-image-${{ hashFiles('internal/image/**', 'testdata/dummy/**', 'profiles/default/**') }}
 
       - name: Free disk space for image-intensive tests
-        if: matrix.test_group.name == 'core-build'
+        if: matrix.test_group.name == 'core-build' || matrix.test_group.name == 'core-run'
         run: |
           # core-build publishes many full images; free up space to avoid "no space left on device"
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/hostedtoolcache/CodeQL
