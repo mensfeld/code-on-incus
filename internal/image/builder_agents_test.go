@@ -19,6 +19,8 @@ func TestAgentEnv(t *testing.T) {
 // into the exec options used to run build.sh — i.e. runBuildScriptResolved does not
 // silently drop the Env. Testable without launching a container.
 func TestBuildScriptExecOpts(t *testing.T) {
+	t.Setenv("COI_APT_MIRROR", "") // isolate from the ambient env (CI sets it)
+
 	// Selection present -> COI_AGENTS delivered to the script.
 	b := NewBuilder(BuildOptions{Agents: []string{"claude", "pi"}})
 	opts := b.buildScriptExecOpts()
@@ -29,9 +31,30 @@ func TestBuildScriptExecOpts(t *testing.T) {
 		t.Error("build script exec should stream (Capture=false), not capture")
 	}
 
-	// No selection -> no COI_AGENTS, so build.sh keeps its default agent set.
+	// No selection and no mirror -> nil Env, so build.sh keeps its defaults.
 	b = NewBuilder(BuildOptions{})
 	if opts := b.buildScriptExecOpts(); opts.Env != nil {
-		t.Errorf("empty agents should leave Env nil (COI_AGENTS unset), got %v", opts.Env)
+		t.Errorf("empty agents + no mirror should leave Env nil, got %v", opts.Env)
+	}
+}
+
+// COI_APT_MIRROR must be forwarded into the build container's env when set
+// (CI points it at a fast mirror), and absent when unset (local builds keep
+// the stock mirrors), independent of the agent selection.
+func TestBuildScriptEnv_AptMirror(t *testing.T) {
+	t.Setenv("COI_APT_MIRROR", "http://azure.archive.ubuntu.com/ubuntu")
+	env := buildScriptEnv(nil)
+	if env["COI_APT_MIRROR"] != "http://azure.archive.ubuntu.com/ubuntu" {
+		t.Errorf("COI_APT_MIRROR not forwarded, got %v", env)
+	}
+	// Forwarded alongside an agent selection, not instead of it.
+	env = buildScriptEnv([]string{"claude"})
+	if env["COI_AGENTS"] != "claude" || env["COI_APT_MIRROR"] == "" {
+		t.Errorf("expected both COI_AGENTS and COI_APT_MIRROR, got %v", env)
+	}
+
+	t.Setenv("COI_APT_MIRROR", "")
+	if env := buildScriptEnv(nil); env != nil {
+		t.Errorf("unset mirror + no agents should yield nil env, got %v", env)
 	}
 }

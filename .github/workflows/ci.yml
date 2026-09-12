@@ -12,6 +12,16 @@ on:
 permissions:
   contents: read
 
+# GitHub's Azure-hosted runners reach the in-region Ubuntu mirror
+# (azure.archive.ubuntu.com) far faster than the default archive.ubuntu.com,
+# which is intermittently rate-limited from Azure and made the image build's
+# base-dependency apt take 35+ min (blowing the job timeout). coi build
+# forwards COI_APT_MIRROR into the build container (see internal/image/builder.go
+# buildScriptEnv → build.sh configure_apt_mirror), so the build uses the fast
+# mirror in CI. Local builds leave it unset and keep the stock mirrors.
+env:
+  COI_APT_MIRROR: http://azure.archive.ubuntu.com/ubuntu
+
 jobs:
   # Build job gates all tests - nothing runs if build fails
   build:

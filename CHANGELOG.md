@@ -4,7 +4,7 @@
 
 ### Fixed
 
-- **Image build no longer hangs on broken container IPv6** — `coi build` could wedge at "Installing base dependencies…" until the CI job's 60-minute cap: build containers often have IPv6 configured but no working route, and `apt` (which resolves AAAA first and has no default network timeout) stalled indefinitely on the dead IPv6 path. The IPv4 preference the build already used for the agent installers now runs up front — `Acquire::ForceIPv4` plus bounded apt timeouts/retries — before the first `apt-get`, so base-dependency installation uses IPv4 and fails fast instead of hanging. The image-build CI lanes' timeout was also raised (60→90 min) so a legitimately-long cold-cache rebuild finishes instead of being cancelled at the cap.
+- **Image build no longer hangs on broken container IPv6** — `coi build` could wedge at "Installing base dependencies…" until the CI job's 60-minute cap: build containers often have IPv6 configured but no working route, and `apt` (which resolves AAAA first and has no default network timeout) stalled indefinitely on the dead IPv6 path. The IPv4 preference the build already used for the agent installers now runs up front — `Acquire::ForceIPv4` plus bounded apt timeouts/retries — before the first `apt-get`, so base-dependency installation uses IPv4 and fails fast instead of hanging. The build also honors a `COI_APT_MIRROR` override (CI points it at the runner's fast in-region mirror, `azure.archive.ubuntu.com`, instead of the intermittently-slow default `archive.ubuntu.com` that made base-dependency apt take 35+ min); local builds leave it unset and keep the stock mirrors. The image-build CI lanes' timeout was also raised (60→90 min) as headroom for cold rebuilds.
 
 ### New Features
 

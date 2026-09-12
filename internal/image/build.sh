@@ -89,6 +89,32 @@ APTCONF
 }
 
 #######################################
+# Point apt at a faster mirror when one is provided
+#######################################
+# The build container is a fresh ubuntu image using the default
+# archive.ubuntu.com/security.ubuntu.com mirrors, which are intermittently
+# slow/rate-limited from some networks (observed in CI: base-dependency apt
+# taking 35+ minutes vs ~2 on a good day, blowing the job timeout). When
+# COI_APT_MIRROR is set (e.g. CI exports the runner's fast in-region mirror
+# like http://azure.archive.ubuntu.com/ubuntu), rewrite the archive+security
+# URIs to it before the first apt-get. Unset (the default for local builds) is
+# a no-op, so ordinary users keep the stock mirrors. Handles both the 24.04
+# deb822 sources and the legacy sources.list; idempotent (the optional
+# azure./mirror host in the pattern makes a re-run a no-op).
+configure_apt_mirror() {
+    [ -n "${COI_APT_MIRROR:-}" ] || return 0
+    log "Using apt mirror ${COI_APT_MIRROR} (COI_APT_MIRROR)"
+    local f
+    for f in /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list; do
+        [ -f "$f" ] || continue
+        sed -i -E \
+            -e "s#https?://[a-z0-9.-]*archive\.ubuntu\.com/ubuntu#${COI_APT_MIRROR}#g" \
+            -e "s#https?://security\.ubuntu\.com/ubuntu#${COI_APT_MIRROR}#g" \
+            "$f"
+    done
+}
+
+#######################################
 # Install base dependencies
 #######################################
 install_base_dependencies() {
@@ -838,6 +864,7 @@ main() {
     log "Starting coi image build..."
 
     configure_network_ipv4
+    configure_apt_mirror
     configure_dns_if_needed
     install_base_dependencies
     disable_host_only_services
