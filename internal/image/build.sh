@@ -62,6 +62,59 @@ EOF
 }
 
 #######################################
+# Prefer IPv4 and bound apt's network waits
+#######################################
+# Build containers frequently have IPv6 configured but no working IPv6 route.
+# apt (and installers) resolve AAAA records first, try the dead IPv6 path, and —
+# because apt has no default network timeout — hang on connect essentially
+# forever, stalling the whole build until the CI job's hard timeout kills it
+# (observed: builds wedged at "Installing base dependencies..." for ~59m). The
+# codebase already preferred IPv4 for the agent installers via /etc/gai.conf
+# (prefer_ipv4), but that ran AFTER apt. Force IPv4 for apt and bound its
+# retries/timeouts here, BEFORE the first apt-get, and set the gai.conf
+# preference (Bun/Node installers resolve AAAA first;
+# https://github.com/anthropics/claude-code/issues/13498) for everything else.
+# Called once from main(); idempotent.
+configure_network_ipv4() {
+    log "Preferring IPv4 for network operations..."
+    cat > /etc/apt/apt.conf.d/99coi-force-ipv4 <<'APTCONF'
+Acquire::ForceIPv4 "true";
+Acquire::http::Timeout "30";
+Acquire::https::Timeout "30";
+Acquire::Retries "3";
+APTCONF
+    if ! grep -q '::ffff:0:0/96' /etc/gai.conf 2>/dev/null; then
+        echo 'precedence ::ffff:0:0/96 100' >> /etc/gai.conf
+    fi
+}
+
+#######################################
+# Point apt at a faster mirror when one is provided
+#######################################
+# The build container is a fresh ubuntu image using the default
+# archive.ubuntu.com/security.ubuntu.com mirrors, which are intermittently
+# slow/rate-limited from some networks (observed in CI: base-dependency apt
+# taking 35+ minutes vs ~2 on a good day, blowing the job timeout). When
+# COI_APT_MIRROR is set (e.g. CI exports the runner's fast in-region mirror
+# like http://azure.archive.ubuntu.com/ubuntu), rewrite the archive+security
+# URIs to it before the first apt-get. Unset (the default for local builds) is
+# a no-op, so ordinary users keep the stock mirrors. Handles both the 24.04
+# deb822 sources and the legacy sources.list; idempotent (the optional
+# azure./mirror host in the pattern makes a re-run a no-op).
+configure_apt_mirror() {
+    [ -n "${COI_APT_MIRROR:-}" ] || return 0
+    log "Using apt mirror ${COI_APT_MIRROR} (COI_APT_MIRROR)"
+    local f
+    for f in /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list; do
+        [ -f "$f" ] || continue
+        sed -i -E \
+            -e "s#https?://[a-z0-9.-]*archive\.ubuntu\.com/ubuntu#${COI_APT_MIRROR}#g" \
+            -e "s#https?://security\.ubuntu\.com/ubuntu#${COI_APT_MIRROR}#g" \
+            "$f"
+    done
+}
+
+#######################################
 # Install base dependencies
 #######################################
 install_base_dependencies() {
@@ -359,21 +412,6 @@ WRAPPER_EOF
     chmod 755 "/usr/local/bin/close"
 
     log "Power management wrappers configured"
-}
-
-#######################################
-# Prefer IPv4 for outbound connections.
-# Works around broken IPv6 in containers and some networks: agent installers
-# (Bun/Node-based) resolve AAAA records first; when the IPv6 path is
-# non-functional the download either times out or returns 403.
-# See: https://github.com/anthropics/claude-code/issues/13498
-# Idempotent; called once from main() so EVERY agent installer benefits.
-#######################################
-prefer_ipv4() {
-    if ! grep -q '::ffff:0:0/96' /etc/gai.conf 2>/dev/null; then
-        echo 'precedence ::ffff:0:0/96 100' >> /etc/gai.conf
-        log "IPv4 preference set in /etc/gai.conf"
-    fi
 }
 
 #######################################
@@ -825,6 +863,8 @@ install_selected_agents() {
 main() {
     log "Starting coi image build..."
 
+    configure_network_ipv4
+    configure_apt_mirror
     configure_dns_if_needed
     install_base_dependencies
     disable_host_only_services
@@ -835,7 +875,6 @@ main() {
     configure_power_wrappers
     configure_tmp_cleanup
     configure_tmux
-    prefer_ipv4
     install_selected_agents
     install_dummy
     install_docker
