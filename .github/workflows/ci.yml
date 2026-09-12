@@ -12,6 +12,16 @@ on:
 permissions:
   contents: read
 
+# GitHub's Azure-hosted runners reach the in-region Ubuntu mirror
+# (azure.archive.ubuntu.com) far faster than the default archive.ubuntu.com,
+# which is intermittently rate-limited from Azure and made the image build's
+# base-dependency apt take 35+ min (blowing the job timeout). coi build
+# forwards COI_APT_MIRROR into the build container (see internal/image/builder.go
+# buildScriptEnv → build.sh configure_apt_mirror), so the build uses the fast
+# mirror in CI. Local builds leave it unset and keep the stock mirrors.
+env:
+  COI_APT_MIRROR: http://azure.archive.ubuntu.com/ubuntu
+
 jobs:
   # Build job gates all tests - nothing runs if build fails
   build:
@@ -106,7 +116,15 @@ jobs:
     name: Integration Tests (${{ matrix.test_group.name }})
     runs-on: ubuntu-24.04
     needs: build
-    timeout-minutes: 60
+    # 90 (not 60): the build-heavy lanes (core-build especially) run ~15 tests
+    # that each build a full COI image. On a cold image cache — which happens
+    # whenever internal/image/**, profiles/default/**, or the build script
+    # change — those rebuild from scratch (a slim build alone can take ~10min on
+    # a slow runner), and the suite legitimately exceeds 60min. The IPv4 apt fix
+    # removed the indefinite hang; this gives the genuinely-long cold runs room
+    # to finish instead of being cancelled at the cap. Fast/warm lanes are
+    # unaffected (they finish well under either limit).
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -132,8 +150,11 @@ jobs:
             path: tests/list tests/attach tests/tmux tests/kill tests/persist
             description: "Core commands: list/attach/tmux/kill/persist"
           - name: core-build
-            path: tests/build tests/run
-            description: "Build and run command tests"
+            path: tests/build
+            description: "Build command tests (each builds a full image — kept on its own lane)"
+          - name: core-run
+            path: tests/run
+            description: "Run command tests"
           - name: misc-cli
             path: tests/cli
             description: "CLI flag/format/output tests"
@@ -548,7 +569,7 @@ jobs:
           key: ${{ runner.os }}-coi-image-${{ hashFiles('internal/image/**', 'testdata/dummy/**', 'profiles/default/**') }}
 
       - name: Free disk space for image-intensive tests
-        if: matrix.test_group.name == 'core-build'
+        if: matrix.test_group.name == 'core-build' || matrix.test_group.name == 'core-run'
         run: |
           # core-build publishes many full images; free up space to avoid "no space left on device"
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/hostedtoolcache/CodeQL

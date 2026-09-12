@@ -695,9 +695,25 @@ func agentEnv(agents []string) map[string]string {
 	return map[string]string{"COI_AGENTS": strings.Join(agents, ",")}
 }
 
+// buildScriptEnv is agentEnv plus any host-provided build knobs forwarded into
+// the build container. COI_APT_MIRROR lets the caller (CI) point the build's
+// apt at a fast in-region mirror instead of the intermittently-slow default
+// archive.ubuntu.com; unset means the build keeps the stock mirrors. Kept
+// separate from agentEnv so the forwarding is unit-testable.
+func buildScriptEnv(agents []string) map[string]string {
+	env := agentEnv(agents)
+	if mirror := os.Getenv("COI_APT_MIRROR"); mirror != "" {
+		if env == nil {
+			env = map[string]string{}
+		}
+		env["COI_APT_MIRROR"] = mirror
+	}
+	return env
+}
+
 // buildScriptExecOpts builds the exec options used to run build.sh in the build
 // container. It threads the agent selection through COI_AGENTS (#454); kept as a
 // method so the wiring is unit-testable without launching a container.
 func (b *Builder) buildScriptExecOpts() container.ExecCommandOptions {
-	return container.ExecCommandOptions{Capture: false, Env: agentEnv(b.opts.Agents)}
+	return container.ExecCommandOptions{Capture: false, Env: buildScriptEnv(b.opts.Agents)}
 }
