@@ -20,15 +20,30 @@ type HardeningPolicy struct {
 	// over Docker: nesting is part of the surface being reduced, and dockerd
 	// itself needs bpf.
 	ReduceKernelSurface bool
+	// ReduceKernelSurfaceStrict is the opt-in strict tier: everything
+	// ReduceKernelSurface does, plus perf_event_open on the deny list.
+	// perf_event_open has a long kernel-LPE history and nothing in a normal
+	// coding workflow needs it, but denying it removes kernel-level profiling
+	// (perf, JVM async-profiler's perf mode) — a real capability loss, unlike
+	// the base list's transparently-substituted syscalls — so it is a separate
+	// opt-in rather than part of the default hardened list. Implies (and does
+	// not require separately setting) ReduceKernelSurface.
+	ReduceKernelSurfaceStrict bool
+}
+
+// reducesKernelSurface reports whether either hardening tier is active. The
+// strict tier implies the base tier, so callers never have to set both.
+func (p HardeningPolicy) reducesKernelSurface() bool {
+	return p.ReduceKernelSurface || p.ReduceKernelSurfaceStrict
 }
 
 // DefaultHardeningPolicy returns the pre-flag behavior: Docker support on,
 // no syscall denies.
 func DefaultHardeningPolicy() HardeningPolicy { return HardeningPolicy{Docker: true} }
 
-// DockerEnabled resolves the docker/hardening conflict: ReduceKernelSurface
-// wins over Docker (nesting is part of the surface being reduced).
-func (p HardeningPolicy) DockerEnabled() bool { return p.Docker && !p.ReduceKernelSurface }
+// DockerEnabled resolves the docker/hardening conflict: either kernel-surface
+// tier wins over Docker (nesting is part of the surface being reduced).
+func (p HardeningPolicy) DockerEnabled() bool { return p.Docker && !p.reducesKernelSurface() }
 
 // KernelSurfaceDenySyscalls is the security.syscalls.deny value applied by
 // ReduceKernelSurface: io_uring, bpf, userfaultfd, and the kernel keyring —
@@ -38,6 +53,27 @@ func (p HardeningPolicy) DockerEnabled() bool { return p.Docker && !p.ReduceKern
 // its thread pool, so Node/npm keep working. Incus >= 6.1 (COI's hard floor)
 // always supports the key.
 const KernelSurfaceDenySyscalls = "io_uring_setup io_uring_enter io_uring_register bpf userfaultfd keyctl add_key request_key"
+
+// KernelSurfaceStrictExtraSyscalls are the additional denies of the opt-in
+// strict tier (ReduceKernelSurfaceStrict) on top of KernelSurfaceDenySyscalls.
+// perf_event_open is a long-standing kernel-LPE vector unused by normal coding
+// workflows; unlike the base list it removes real capability (kernel profiling
+// via perf / async-profiler degrades gracefully — EPERM, no crash — but stops
+// working), which is why it lives behind a separate opt-in.
+const KernelSurfaceStrictExtraSyscalls = "perf_event_open"
+
+// kernelSurfaceDenyList is the security.syscalls.deny value for a policy: empty
+// when no tier is active, the base list under ReduceKernelSurface, or the base
+// list plus the strict extras under ReduceKernelSurfaceStrict.
+func kernelSurfaceDenyList(p HardeningPolicy) string {
+	if !p.reducesKernelSurface() {
+		return ""
+	}
+	if p.ReduceKernelSurfaceStrict {
+		return KernelSurfaceDenySyscalls + " " + KernelSurfaceStrictExtraSyscalls
+	}
+	return KernelSurfaceDenySyscalls
+}
 
 // kernelSurfaceKeys are the instance config keys ApplyKernelSurfacePolicy owns.
 // Every launch/reconcile writes ALL of them (a wanted key to its value, an
@@ -67,10 +103,7 @@ func hardeningConfigArgs(p HardeningPolicy) []string {
 	if p.DockerEnabled() {
 		lowPort = "0"
 	}
-	deny := ""
-	if p.ReduceKernelSurface {
-		deny = KernelSurfaceDenySyscalls
-	}
+	deny := kernelSurfaceDenyList(p)
 	return []string{
 		"security.nesting=" + docker,
 		"security.syscalls.intercept.mknod=" + docker,
@@ -196,7 +229,7 @@ func kernelSurfaceViolations(expanded map[string]string, p HardeningPolicy) []st
 			violations = append(violations, "linux.sysctl.net.ipv4.ip_unprivileged_port_start="+s)
 		}
 	}
-	if p.ReduceKernelSurface {
+	if p.reducesKernelSurface() {
 		// Instance-local deny (which we write) overrides any profile deny, so
 		// this cannot realistically fire — kept as a cheap invariant so a
 		// future write-path regression surfaces here instead of shipping a
@@ -206,7 +239,7 @@ func kernelSurfaceViolations(expanded map[string]string, p HardeningPolicy) []st
 			have[tok] = true
 		}
 		var missing []string
-		for _, tok := range strings.Fields(KernelSurfaceDenySyscalls) {
+		for _, tok := range strings.Fields(kernelSurfaceDenyList(p)) {
 			if !have[tok] {
 				missing = append(missing, tok)
 			}

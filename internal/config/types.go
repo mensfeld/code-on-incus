@@ -355,12 +355,36 @@ type SecurityConfig struct {
 	// in the container — a broader blast radius than [container] docker = false
 	// (which only turns off nesting and IS honored from untrusted scope).
 	ReduceKernelSurface *bool `toml:"reduce_kernel_surface"`
+	// ReduceKernelSurfaceStrict is the opt-in STRICT tier on top of
+	// reduce_kernel_surface: it additionally denies perf_event_open (a
+	// long-standing kernel-LPE vector). It is separate from the base list
+	// because, unlike io_uring/bpf/userfaultfd/keyring — which have transparent
+	// in-container fallbacks (e.g. libuv drops to its thread pool) — denying
+	// perf_event_open removes real capability: kernel-level profiling (perf,
+	// JVM async-profiler's perf mode) stops working, though it degrades
+	// gracefully (EPERM, no crash). Enabling it implies reduce_kernel_surface.
+	// Same default (false) and same trusted-scope-only handling as the base
+	// flag: stripped from untrusted repo configs in both directions.
+	ReduceKernelSurfaceStrict *bool `toml:"reduce_kernel_surface_strict"`
 }
 
 // IsReduceKernelSurfaceEnabled reports whether kernel attack-surface hardening
-// is enabled. Default false (nil receiver or field).
+// is enabled. The strict tier implies the base tier, so this is true whenever
+// either flag is set. Default false (nil receiver or fields).
 func (s *SecurityConfig) IsReduceKernelSurfaceEnabled() bool {
-	return s != nil && s.ReduceKernelSurface != nil && *s.ReduceKernelSurface
+	if s == nil {
+		return false
+	}
+	if s.ReduceKernelSurface != nil && *s.ReduceKernelSurface {
+		return true
+	}
+	return s.IsReduceKernelSurfaceStrictEnabled()
+}
+
+// IsReduceKernelSurfaceStrictEnabled reports whether the opt-in strict tier
+// (additionally deny perf_event_open) is enabled. Default false.
+func (s *SecurityConfig) IsReduceKernelSurfaceStrictEnabled() bool {
+	return s != nil && s.ReduceKernelSurfaceStrict != nil && *s.ReduceKernelSurfaceStrict
 }
 
 // GetEffectiveProtectedPaths returns the combined list of protected paths

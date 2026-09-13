@@ -16,6 +16,8 @@ Covered:
    support AND sets security.syscalls.deny to the full deny list.
 3. An untrusted project config's docker = true cannot re-enable nesting that
    trusted config disabled.
+4. [security] reduce_kernel_surface_strict = true (trusted scope) implies the
+   base tier AND adds perf_event_open to security.syscalls.deny.
 """
 
 import os
@@ -107,6 +109,30 @@ def test_reduce_kernel_surface_hardening(coi_binary, cleanup_containers, tmp_pat
         deny = incus_config_get(name, "security.syscalls.deny").split()
         for syscall in DENY_SYSCALLS:
             assert syscall in deny, f"{syscall} missing from deny list: {deny}"
+    finally:
+        subprocess.run(["incus", "--project", "default", "delete", name, "--force"], timeout=60)
+
+
+def test_reduce_kernel_surface_strict_adds_perf_event_open(coi_binary, cleanup_containers, tmp_path):
+    """Trusted [security] reduce_kernel_surface_strict = true implies the base
+    tier (Docker off + full base deny list) and additionally denies
+    perf_event_open — the one syscall the strict tier adds."""
+    cfg = tmp_path / "trusted.toml"
+    cfg.write_text("[security]\nreduce_kernel_surface_strict = true\n")
+    env = {**os.environ, "COI_CONFIG": str(cfg)}
+    name = "coi-ks-strict"
+    try:
+        launch(coi_binary, name, env=env)
+        for key in DOCKER_KEYS:
+            assert incus_config_get(name, key) in ("", "false"), (
+                f"{key} should be unset under reduce_kernel_surface_strict"
+            )
+        deny = incus_config_get(name, "security.syscalls.deny").split()
+        for syscall in DENY_SYSCALLS:
+            assert syscall in deny, f"base {syscall} missing under strict tier: {deny}"
+        assert "perf_event_open" in deny, (
+            f"strict tier must add perf_event_open to the deny list: {deny}"
+        )
     finally:
         subprocess.run(["incus", "--project", "default", "delete", name, "--force"], timeout=60)
 

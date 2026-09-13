@@ -52,8 +52,9 @@ func (a *App) hardeningPolicy() container.HardeningPolicy {
 		return container.DefaultHardeningPolicy()
 	}
 	return container.HardeningPolicy{
-		Docker:              a.cfg.Container.IsDockerEnabled(),
-		ReduceKernelSurface: a.cfg.Security.IsReduceKernelSurfaceEnabled(),
+		Docker:                    a.cfg.Container.IsDockerEnabled(),
+		ReduceKernelSurface:       a.cfg.Security.IsReduceKernelSurfaceEnabled(),
+		ReduceKernelSurfaceStrict: a.cfg.Security.IsReduceKernelSurfaceStrictEnabled(),
 	}
 }
 

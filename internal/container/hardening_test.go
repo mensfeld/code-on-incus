@@ -230,3 +230,63 @@ func TestKernelSurfaceDenySyscalls(t *testing.T) {
 		t.Errorf("deny list has %d entries, want %d", len(got), len(want))
 	}
 }
+
+// The strict tier is exactly the base list plus perf_event_open, and it implies
+// the base tier (setting only ReduceKernelSurfaceStrict still reduces surface).
+func TestKernelSurfaceStrictTier(t *testing.T) {
+	if KernelSurfaceStrictExtraSyscalls != "perf_event_open" {
+		t.Errorf("strict extras = %q, want %q", KernelSurfaceStrictExtraSyscalls, "perf_event_open")
+	}
+
+	// Strict implies base even when only the strict field is set.
+	strict := HardeningPolicy{ReduceKernelSurfaceStrict: true}
+	if !strict.reducesKernelSurface() {
+		t.Error("strict tier must imply the base tier")
+	}
+	if strict.DockerEnabled() {
+		// docker=false already, but assert the precedence explicitly
+		t.Error("strict tier must win over Docker")
+	}
+	if got := kernelSurfaceDenyList(strict); got != KernelSurfaceDenySyscalls+" perf_event_open" {
+		t.Errorf("strict deny list = %q, want base + perf_event_open", got)
+	}
+
+	// Base tier alone must NOT deny perf_event_open (that is the whole point of
+	// keeping it a separate opt-in).
+	base := HardeningPolicy{ReduceKernelSurface: true}
+	if strings.Contains(kernelSurfaceDenyList(base), "perf_event_open") {
+		t.Error("base tier must not deny perf_event_open")
+	}
+
+	// No tier -> empty deny value.
+	if got := kernelSurfaceDenyList(HardeningPolicy{Docker: true}); got != "" {
+		t.Errorf("no-tier deny list = %q, want empty", got)
+	}
+
+	// The strict deny value is what actually lands in the config args.
+	args := hardeningConfigArgs(strict)
+	var denyArg string
+	for _, kv := range args {
+		if k, v, _ := strings.Cut(kv, "="); k == "security.syscalls.deny" {
+			denyArg = v
+		}
+	}
+	if denyArg != KernelSurfaceDenySyscalls+" perf_event_open" {
+		t.Errorf("config arg security.syscalls.deny = %q, want strict list", denyArg)
+	}
+}
+
+// A container whose effective (profile-expanded) deny list is missing the strict
+// extra is a violation under the strict policy but fine under the base policy.
+func TestKernelSurfaceStrictViolation(t *testing.T) {
+	// Effective config carrying only the base list.
+	baseOnly := map[string]string{"security.syscalls.deny": KernelSurfaceDenySyscalls}
+
+	if v := kernelSurfaceViolations(baseOnly, HardeningPolicy{ReduceKernelSurface: true}); v != nil {
+		t.Errorf("base policy satisfied by base list, got violations %v", v)
+	}
+	v := kernelSurfaceViolations(baseOnly, HardeningPolicy{ReduceKernelSurfaceStrict: true})
+	if len(v) == 0 {
+		t.Error("strict policy must flag a base-only deny list as missing perf_event_open")
+	}
+}

@@ -720,8 +720,9 @@ func (a *App) runPromptPhase(s *runState) session.Phase {
 				// off) would make every headless run's context claim Docker is
 				// unavailable while the container actually has it (the launch
 				// phase applies the real policy). Mirrors phases_shell.go.
-				DockerSupport:       a.cfg.Container.IsDockerEnabled(),
-				ReduceKernelSurface: a.cfg.Security.IsReduceKernelSurfaceEnabled(),
+				DockerSupport:             a.cfg.Container.IsDockerEnabled(),
+				ReduceKernelSurface:       a.cfg.Security.IsReduceKernelSurfaceEnabled(),
+				ReduceKernelSurfaceStrict: a.cfg.Security.IsReduceKernelSurfaceStrictEnabled(),
 			}
 			if err := session.SeedToolConfigForRun(ctx, seedResult, seedOpts); err != nil {
 				return nil, err

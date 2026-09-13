@@ -95,6 +95,13 @@ host_immutable = true
 # still shares the host kernel — this narrows the boundary, it does not remove
 # it. Enabled by the built-in "hardened" profile. Trusted scope only.
 # reduce_kernel_surface = false
+# reduce_kernel_surface_strict: opt-in STRICT tier. Everything reduce_kernel_surface
+# does, plus deny perf_event_open (a long-standing kernel-LPE vector). Implies
+# reduce_kernel_surface. Kept separate because — unlike the base list, which has
+# transparent in-container fallbacks — denying perf_event_open removes real
+# capability: kernel-level profiling (perf, JVM async-profiler's perf mode) stops
+# working, though it degrades gracefully (EPERM, no crash). Trusted scope only.
+# reduce_kernel_surface_strict = false
 
 [limits.cpu]
 count = ""
