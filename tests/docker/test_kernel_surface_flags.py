@@ -113,7 +113,9 @@ def test_reduce_kernel_surface_hardening(coi_binary, cleanup_containers, tmp_pat
         subprocess.run(["incus", "--project", "default", "delete", name, "--force"], timeout=60)
 
 
-def test_reduce_kernel_surface_strict_adds_perf_event_open(coi_binary, cleanup_containers, tmp_path):
+def test_reduce_kernel_surface_strict_adds_perf_event_open(
+    coi_binary, cleanup_containers, tmp_path
+):
     """Trusted [security] reduce_kernel_surface_strict = true implies the base
     tier (Docker off + full base deny list) and additionally denies
     perf_event_open — the one syscall the strict tier adds."""
