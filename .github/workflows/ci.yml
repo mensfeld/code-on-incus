@@ -34,7 +34,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.25'
+          go-version: '1.26'
           cache: true
 
       - name: Install system dependencies
@@ -76,7 +76,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.25'
+          go-version: '1.26'
           cache: true
 
       - name: Install system dependencies
@@ -209,7 +209,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.25'
+          go-version: '1.26'
           cache: true
 
       - name: Install system dependencies
@@ -634,7 +634,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.25'
+          go-version: '1.26'
           cache: true
 
       - name: Install host packages (QEMU + virtiofsd + build deps)
@@ -687,7 +687,7 @@ jobs:
           # Disable swap limit in the embedded default so tests can run.
           sed -i 's/^swap = "true"/swap = ""/' internal/config/embedded/default_config.toml
 
-      - name: Build COI binary (on the runner; go.mod needs Go 1.25)
+      - name: Build COI binary (on the runner; go.mod needs Go 1.26)
         run: |
           # The guest is the same distro/arch (Ubuntu 24.04 amd64), so the binary
           # runs there as-is. setcap happens in the guest on a native-fs copy —
