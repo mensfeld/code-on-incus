@@ -57,6 +57,26 @@ reduce_kernel_surface_strict = true
 	}
 }
 
+// IsReduceKernelSurfaceBaseEnabled distinguishes the base flag the user
+// actually wrote from the strict tier's implication — so messaging can name the
+// right flag. Strict-only must NOT report the base flag as set.
+func TestKernelSurface_BaseVsStrictDistinction(t *testing.T) {
+	yes := true
+
+	strictOnly := &SecurityConfig{ReduceKernelSurfaceStrict: &yes}
+	if strictOnly.IsReduceKernelSurfaceBaseEnabled() {
+		t.Error("strict-only config must not report the base flag as explicitly set")
+	}
+	if !strictOnly.IsReduceKernelSurfaceEnabled() {
+		t.Error("strict-only must still count as hardening-enabled (implies base)")
+	}
+
+	baseOnly := &SecurityConfig{ReduceKernelSurface: &yes}
+	if !baseOnly.IsReduceKernelSurfaceBaseEnabled() {
+		t.Error("base flag set must report base-enabled")
+	}
+}
+
 // Strict tier defaults to off, and does not turn on just because the base flag is set.
 func TestKernelSurface_StrictDefaultsOff(t *testing.T) {
 	cfg := GetDefaultConfig()

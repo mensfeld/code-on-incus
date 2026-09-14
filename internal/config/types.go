@@ -387,6 +387,14 @@ func (s *SecurityConfig) IsReduceKernelSurfaceStrictEnabled() bool {
 	return s != nil && s.ReduceKernelSurfaceStrict != nil && *s.ReduceKernelSurfaceStrict
 }
 
+// IsReduceKernelSurfaceBaseEnabled reports whether the BASE flag itself is set,
+// independent of the strict tier's implication. Use this only to distinguish
+// which flag the user actually wrote (e.g. for messaging); for "is hardening
+// active" use IsReduceKernelSurfaceEnabled.
+func (s *SecurityConfig) IsReduceKernelSurfaceBaseEnabled() bool {
+	return s != nil && s.ReduceKernelSurface != nil && *s.ReduceKernelSurface
+}
+
 // GetEffectiveProtectedPaths returns the combined list of protected paths
 // (protected_paths + additional_protected_paths) minus any writable_paths
 // opt-outs. Matching is slash-normalized so config entries are platform-stable.
