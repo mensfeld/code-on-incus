@@ -653,6 +653,7 @@ func mergeSecurityInto(dst *SecurityConfig, src *SecurityConfig) {
 		dst.SecretPaths = MergeStringSliceUnique(dst.SecretPaths, src.SecretPaths)
 	}
 	mergePtr(&dst.ReduceKernelSurface, src.ReduceKernelSurface)
+	mergePtr(&dst.ReduceKernelSurfaceStrict, src.ReduceKernelSurfaceStrict)
 }
 
 func mergeTimezoneInto(dst *TimezoneConfig, src *TimezoneConfig) {

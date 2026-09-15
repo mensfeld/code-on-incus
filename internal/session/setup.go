@@ -68,6 +68,7 @@ type SetupOptions struct {
 	ReadyTimeout                int                    // Seconds to wait for the container to become ready (<=0 = default 30)
 	DockerSupport               bool                   // [container] docker (raw flag; precedence vs ReduceKernelSurface is resolved by container.HardeningPolicy.DockerEnabled): nesting + syscall interception + low-port sysctl
 	ReduceKernelSurface         bool                   // [security] reduce_kernel_surface: deny high-risk kernel-escape syscalls; wins over DockerSupport
+	ReduceKernelSurfaceStrict   bool                   // [security] reduce_kernel_surface_strict: opt-in strict tier, additionally deny perf_event_open (implies ReduceKernelSurface)
 	Logger                      func(string)
 	ContainerName               string // Use existing container (for testing) - skips container creation
 }

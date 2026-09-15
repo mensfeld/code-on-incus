@@ -37,6 +37,78 @@ reduce_kernel_surface = true
 	}
 }
 
+// The strict tier parses, and it IMPLIES the base tier: setting only
+// reduce_kernel_surface_strict makes IsReduceKernelSurfaceEnabled true so the
+// base deny list + docker-off still apply, plus the strict extra.
+func TestKernelSurface_StrictImpliesBase(t *testing.T) {
+	const tomlSrc = `
+[security]
+reduce_kernel_surface_strict = true
+`
+	var cfg Config
+	if _, err := toml.Decode(tomlSrc, &cfg); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !cfg.Security.IsReduceKernelSurfaceStrictEnabled() {
+		t.Error("reduce_kernel_surface_strict=true not parsed")
+	}
+	if !cfg.Security.IsReduceKernelSurfaceEnabled() {
+		t.Error("strict tier must imply the base tier (IsReduceKernelSurfaceEnabled)")
+	}
+}
+
+// IsReduceKernelSurfaceBaseEnabled distinguishes the base flag the user
+// actually wrote from the strict tier's implication — so messaging can name the
+// right flag. Strict-only must NOT report the base flag as set.
+func TestKernelSurface_BaseVsStrictDistinction(t *testing.T) {
+	yes := true
+
+	strictOnly := &SecurityConfig{ReduceKernelSurfaceStrict: &yes}
+	if strictOnly.IsReduceKernelSurfaceBaseEnabled() {
+		t.Error("strict-only config must not report the base flag as explicitly set")
+	}
+	if !strictOnly.IsReduceKernelSurfaceEnabled() {
+		t.Error("strict-only must still count as hardening-enabled (implies base)")
+	}
+
+	baseOnly := &SecurityConfig{ReduceKernelSurface: &yes}
+	if !baseOnly.IsReduceKernelSurfaceBaseEnabled() {
+		t.Error("base flag set must report base-enabled")
+	}
+}
+
+// Strict tier defaults to off, and does not turn on just because the base flag is set.
+func TestKernelSurface_StrictDefaultsOff(t *testing.T) {
+	cfg := GetDefaultConfig()
+	if cfg.Security.IsReduceKernelSurfaceStrictEnabled() {
+		t.Error("reduce_kernel_surface_strict should default to disabled")
+	}
+	yes := true
+	cfg.Security.ReduceKernelSurface = &yes
+	if cfg.Security.IsReduceKernelSurfaceStrictEnabled() {
+		t.Error("base flag must not imply the strict tier")
+	}
+}
+
+// The strict flag is trusted-scope-only in both directions, exactly like the base flag.
+func TestKernelSurface_StrictUntrustedStripped(t *testing.T) {
+	yes, no := true, false
+
+	cfg := &Config{}
+	cfg.Security.ReduceKernelSurfaceStrict = &no
+	sanitizeUntrustedConfig(cfg, "/ws/.coi/config.toml")
+	if cfg.Security.ReduceKernelSurfaceStrict != nil {
+		t.Error("untrusted reduce_kernel_surface_strict=false must be stripped")
+	}
+
+	cfg = &Config{}
+	cfg.Security.ReduceKernelSurfaceStrict = &yes
+	sanitizeUntrustedConfig(cfg, "/ws/.coi/config.toml")
+	if cfg.Security.ReduceKernelSurfaceStrict != nil {
+		t.Error("untrusted reduce_kernel_surface_strict=true must be stripped (trusted scope only)")
+	}
+}
+
 // reduce_kernel_surface wins over an explicit docker=true. The raw flags are
 // kept as set (that's the config layer's job); the precedence is resolved by
 // container.HardeningPolicy.DockerEnabled, mirrored inline here since the config

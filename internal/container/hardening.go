@@ -20,24 +20,108 @@ type HardeningPolicy struct {
 	// over Docker: nesting is part of the surface being reduced, and dockerd
 	// itself needs bpf.
 	ReduceKernelSurface bool
+	// ReduceKernelSurfaceStrict is the opt-in strict tier: everything
+	// ReduceKernelSurface does, plus perf_event_open on the deny list.
+	// perf_event_open has a long kernel-LPE history and nothing in a normal
+	// coding workflow needs it, but denying it removes kernel-level profiling
+	// (perf, JVM async-profiler's perf mode) — a real capability loss, unlike
+	// the base list's transparently-substituted syscalls — so it is a separate
+	// opt-in rather than part of the default hardened list. Implies (and does
+	// not require separately setting) ReduceKernelSurface.
+	ReduceKernelSurfaceStrict bool
+}
+
+// reducesKernelSurface reports whether either hardening tier is active. The
+// strict tier implies the base tier, so callers never have to set both.
+func (p HardeningPolicy) reducesKernelSurface() bool {
+	return p.ReduceKernelSurface || p.ReduceKernelSurfaceStrict
 }
 
 // DefaultHardeningPolicy returns the pre-flag behavior: Docker support on,
 // no syscall denies.
 func DefaultHardeningPolicy() HardeningPolicy { return HardeningPolicy{Docker: true} }
 
-// DockerEnabled resolves the docker/hardening conflict: ReduceKernelSurface
-// wins over Docker (nesting is part of the surface being reduced).
-func (p HardeningPolicy) DockerEnabled() bool { return p.Docker && !p.ReduceKernelSurface }
+// DockerEnabled resolves the docker/hardening conflict: either kernel-surface
+// tier wins over Docker (nesting is part of the surface being reduced).
+func (p HardeningPolicy) DockerEnabled() bool { return p.Docker && !p.reducesKernelSurface() }
 
-// KernelSurfaceDenySyscalls is the security.syscalls.deny value applied by
-// ReduceKernelSurface: io_uring, bpf, userfaultfd, and the kernel keyring —
+// KernelSurfaceDenySyscalls is the space-separated list of syscall NAMES denied
+// by ReduceKernelSurface: io_uring, bpf, userfaultfd, and the kernel keyring —
 // the syscall families behind most recent container-escape/LPE chains, none
-// required by a typical agent workflow. Denied syscalls fail with EPERM;
-// libuv (Node >= 20.3) probes io_uring at startup and silently falls back to
-// its thread pool, so Node/npm keep working. Incus >= 6.1 (COI's hard floor)
-// always supports the key.
+// required by a typical agent workflow. Denied syscalls fail with EPERM (see
+// kernelSurfaceDenyAction); libuv (Node >= 20.3) probes io_uring at startup and
+// silently falls back to its thread pool, so Node/npm keep working. Incus >= 6.1
+// (COI's hard floor) always supports the key. This is the canonical NAME list;
+// the actual config value is built by kernelSurfaceDenyValue.
 const KernelSurfaceDenySyscalls = "io_uring_setup io_uring_enter io_uring_register bpf userfaultfd keyctl add_key request_key"
+
+// KernelSurfaceStrictExtraSyscalls are the additional denies of the opt-in
+// strict tier (ReduceKernelSurfaceStrict) on top of KernelSurfaceDenySyscalls.
+// perf_event_open is a long-standing kernel-LPE vector unused by normal coding
+// workflows; unlike the base list it removes real capability (kernel profiling
+// via perf / async-profiler degrades gracefully — EPERM, no crash — but stops
+// working), which is why it lives behind a separate opt-in.
+const KernelSurfaceStrictExtraSyscalls = "perf_event_open"
+
+// kernelSurfaceDenyAction is the per-syscall action appended to every entry in
+// security.syscalls.deny. It MUST be present: a bare syscall name inherits
+// LXC's default denylist action, which on current Incus is SIGSYS-KILL — so a
+// process that makes the call (e.g. systemd's own boot helpers calling
+// add_key/bpf, or libuv probing io_uring) is killed and the container falls
+// over instead of the syscall simply returning an error. "errno 1" makes it
+// return EPERM — the graceful failure this deny list was always documented to
+// produce.
+const kernelSurfaceDenyAction = "errno 1"
+
+// kernelSurfaceDenySyscallNames returns the ordered syscall NAMES the policy
+// denies — the base list, plus perf_event_open under the strict tier — or nil
+// when no tier is active.
+func kernelSurfaceDenySyscallNames(p HardeningPolicy) []string {
+	if !p.reducesKernelSurface() {
+		return nil
+	}
+	names := strings.Fields(KernelSurfaceDenySyscalls)
+	if p.ReduceKernelSurfaceStrict {
+		names = append(names, strings.Fields(KernelSurfaceStrictExtraSyscalls)...)
+	}
+	return names
+}
+
+// kernelSurfaceDenyValue is the exact security.syscalls.deny value COI writes:
+// each syscall on its OWN line with an explicit "errno 1" action. Two hard-won
+// format requirements are encoded here:
+//   - Incus wants a \n-separated list; a space-separated value is parsed as one
+//     malformed "<syscall> <action>" rule and the container fails to boot.
+//   - Every entry carries kernelSurfaceDenyAction so denies return EPERM rather
+//     than SIGSYS-killing the caller.
+//
+// Empty when no tier is active.
+func kernelSurfaceDenyValue(p HardeningPolicy) string {
+	names := kernelSurfaceDenySyscallNames(p)
+	if len(names) == 0 {
+		return ""
+	}
+	lines := make([]string, len(names))
+	for i, n := range names {
+		lines[i] = n + " " + kernelSurfaceDenyAction
+	}
+	return strings.Join(lines, "\n")
+}
+
+// kernelSurfaceDenySyscallSet extracts the set of syscall NAMES from a stored
+// security.syscalls.deny value, ignoring per-entry actions ("add_key errno 1")
+// and blank lines. Entries are newline-separated (COI's own format); the name
+// is the first field of each entry. Comparing by name set keeps convergence
+// stable regardless of how Incus echoes actions/whitespace back.
+func kernelSurfaceDenySyscallSet(value string) map[string]bool {
+	set := make(map[string]bool)
+	for _, entry := range strings.Split(value, "\n") {
+		if f := strings.Fields(entry); len(f) > 0 {
+			set[f[0]] = true
+		}
+	}
+	return set
+}
 
 // kernelSurfaceKeys are the instance config keys ApplyKernelSurfacePolicy owns.
 // Every launch/reconcile writes ALL of them (a wanted key to its value, an
@@ -67,10 +151,7 @@ func hardeningConfigArgs(p HardeningPolicy) []string {
 	if p.DockerEnabled() {
 		lowPort = "0"
 	}
-	deny := ""
-	if p.ReduceKernelSurface {
-		deny = KernelSurfaceDenySyscalls
-	}
+	deny := kernelSurfaceDenyValue(p)
 	return []string{
 		"security.nesting=" + docker,
 		"security.syscalls.intercept.mknod=" + docker,
@@ -196,19 +277,17 @@ func kernelSurfaceViolations(expanded map[string]string, p HardeningPolicy) []st
 			violations = append(violations, "linux.sysctl.net.ipv4.ip_unprivileged_port_start="+s)
 		}
 	}
-	if p.ReduceKernelSurface {
+	if p.reducesKernelSurface() {
 		// Instance-local deny (which we write) overrides any profile deny, so
 		// this cannot realistically fire — kept as a cheap invariant so a
 		// future write-path regression surfaces here instead of shipping a
-		// hardened container without its deny list.
-		have := make(map[string]bool)
-		for _, tok := range strings.Fields(expanded["security.syscalls.deny"]) {
-			have[tok] = true
-		}
+		// hardened container without its deny list. Compared by NAME so an
+		// "errno 1" action on each entry doesn't read as a missing syscall.
+		have := kernelSurfaceDenySyscallSet(expanded["security.syscalls.deny"])
 		var missing []string
-		for _, tok := range strings.Fields(KernelSurfaceDenySyscalls) {
-			if !have[tok] {
-				missing = append(missing, tok)
+		for _, name := range kernelSurfaceDenySyscallNames(p) {
+			if !have[name] {
+				missing = append(missing, name)
 			}
 		}
 		if len(missing) > 0 {
@@ -237,7 +316,34 @@ func incusTruthy(s string) bool {
 func KernelSurfaceMatches(current map[string]string, p HardeningPolicy) bool {
 	for _, kv := range hardeningConfigArgs(p) {
 		key, want, _ := strings.Cut(kv, "=")
+		if key == "security.syscalls.deny" {
+			// Compare by syscall-name set, not exact string: the value carries
+			// per-entry "errno 1" actions and \n separators, and Incus may echo
+			// them back with different surrounding whitespace. A set compare
+			// converges reliably without a spurious rewrite each launch.
+			if !kernelSurfaceDenyMatches(current[key], p) {
+				return false
+			}
+			continue
+		}
 		if strings.TrimSpace(current[key]) != want {
+			return false
+		}
+	}
+	return true
+}
+
+// kernelSurfaceDenyMatches reports whether a stored security.syscalls.deny value
+// denies exactly the syscalls the policy requires (by name, order/action/
+// separator-insensitive).
+func kernelSurfaceDenyMatches(current string, p HardeningPolicy) bool {
+	want := kernelSurfaceDenySyscallNames(p)
+	have := kernelSurfaceDenySyscallSet(current)
+	if len(have) != len(want) {
+		return false
+	}
+	for _, n := range want {
+		if !have[n] {
 			return false
 		}
 	}

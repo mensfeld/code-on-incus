@@ -325,6 +325,13 @@ func sanitizeUntrustedSecurity(s *SecurityConfig, path string) {
 		warnUntrustedDowngrade(path, "security.reduce_kernel_surface")
 	}
 	s.ReduceKernelSurface = nil
+	if s.ReduceKernelSurfaceStrict != nil && !*s.ReduceKernelSurfaceStrict {
+		// Trusted-only in both directions for the same reason as the base flag:
+		// its deny list (which adds perf_event_open) alters container behavior
+		// broadly, so a cloned repo must not be able to impose it or lift it.
+		warnUntrustedDowngrade(path, "security.reduce_kernel_surface_strict")
+	}
+	s.ReduceKernelSurfaceStrict = nil
 }
 
 // sanitizeUntrustedGit drops git settings that weaken protection or would let an

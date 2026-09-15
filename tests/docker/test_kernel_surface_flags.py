@@ -16,10 +16,16 @@ Covered:
    support AND sets security.syscalls.deny to the full deny list.
 3. An untrusted project config's docker = true cannot re-enable nesting that
    trusted config disabled.
+4. [security] reduce_kernel_surface_strict = true (trusted scope) implies the
+   base tier AND adds perf_event_open to security.syscalls.deny.
+5. A container with reduce_kernel_surface actually BOOTS (reaches RUNNING) —
+   catches malformed / init-killing deny policies a config assertion misses.
 """
 
 import os
 import subprocess
+
+import pytest
 
 DENY_SYSCALLS = [
     "io_uring_setup",
@@ -38,6 +44,16 @@ DOCKER_KEYS = [
     "security.syscalls.intercept.setxattr",
     "linux.sysctl.net.ipv4.ip_unprivileged_port_start",
 ]
+
+
+def incus_state(container_name):
+    result = subprocess.run(
+        ["incus", "--project", "default", "list", container_name, "-c", "s", "-f", "csv"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    return result.stdout.strip()
 
 
 def incus_config_get(container_name, key):
@@ -107,6 +123,70 @@ def test_reduce_kernel_surface_hardening(coi_binary, cleanup_containers, tmp_pat
         deny = incus_config_get(name, "security.syscalls.deny").split()
         for syscall in DENY_SYSCALLS:
             assert syscall in deny, f"{syscall} missing from deny list: {deny}"
+    finally:
+        subprocess.run(["incus", "--project", "default", "delete", name, "--force"], timeout=60)
+
+
+def test_reduce_kernel_surface_strict_adds_perf_event_open(
+    coi_binary, cleanup_containers, tmp_path
+):
+    """Trusted [security] reduce_kernel_surface_strict = true implies the base
+    tier (Docker off + full base deny list) and additionally denies
+    perf_event_open — the one syscall the strict tier adds."""
+    cfg = tmp_path / "trusted.toml"
+    cfg.write_text("[security]\nreduce_kernel_surface_strict = true\n")
+    env = {**os.environ, "COI_CONFIG": str(cfg)}
+    name = "coi-ks-strict"
+    try:
+        launch(coi_binary, name, env=env)
+        for key in DOCKER_KEYS:
+            assert incus_config_get(name, key) in ("", "false"), (
+                f"{key} should be unset under reduce_kernel_surface_strict"
+            )
+        deny = incus_config_get(name, "security.syscalls.deny").split()
+        for syscall in DENY_SYSCALLS:
+            assert syscall in deny, f"base {syscall} missing under strict tier: {deny}"
+        assert "perf_event_open" in deny, (
+            f"strict tier must add perf_event_open to the deny list: {deny}"
+        )
+    finally:
+        subprocess.run(["incus", "--project", "default", "delete", name, "--force"], timeout=60)
+
+
+def test_reduce_kernel_surface_container_boots(coi_binary, cleanup_containers, tmp_path):
+    """The hardened deny list must not prevent the container from BOOTING.
+
+    Regression guard for two format bugs that a config-value assertion cannot
+    catch (the container has to actually start):
+      * the deny value must be \\n-separated (a space-separated value is one
+        malformed LXC rule and the container never inits), and
+      * each entry must carry an explicit 'errno' action — a bare syscall name
+        inherits LXC's default action, which on current Incus is SIGSYS-KILL, so
+        init (or systemd's boot helpers calling add_key/bpf) is killed.
+    Both ship a green config-only test while breaking every real launch.
+    """
+    # Baseline: can this environment boot coi-default at all? (CI's nested lane
+    # sometimes cannot complete a container START regardless of hardening.)
+    base = "coi-ks-boot-base"
+    try:
+        launch(coi_binary, base)
+        if incus_state(base) != "RUNNING":
+            pytest.skip("environment cannot boot coi-default bare; skipping boot assertion")
+    finally:
+        subprocess.run(["incus", "--project", "default", "delete", base, "--force"], timeout=60)
+
+    # Hardened: with the deny list applied it must STILL reach RUNNING.
+    cfg = tmp_path / "trusted.toml"
+    cfg.write_text("[security]\nreduce_kernel_surface = true\n")
+    env = {**os.environ, "COI_CONFIG": str(cfg)}
+    name = "coi-ks-boot-hardened"
+    try:
+        launch(coi_binary, name, env=env)
+        state = incus_state(name)
+        assert state == "RUNNING", (
+            f"hardened container did not boot (state={state!r}); the deny list is "
+            "likely killing init (missing 'errno' action) or malformed (separator)"
+        )
     finally:
         subprocess.run(["incus", "--project", "default", "delete", name, "--force"], timeout=60)
 

@@ -720,6 +720,10 @@ func (a *App) runPromptPhase(s *runState) session.Phase {
 				// off) would make every headless run's context claim Docker is
 				// unavailable while the container actually has it (the launch
 				// phase applies the real policy). Mirrors phases_shell.go.
+				// The strict tier is intentionally not threaded here: this seed
+				// path only drives the Docker-availability line, which depends
+				// solely on DockerEnabled() — and ReduceKernelSurface already
+				// reflects the strict tier (it implies the base flag).
 				DockerSupport:       a.cfg.Container.IsDockerEnabled(),
 				ReduceKernelSurface: a.cfg.Security.IsReduceKernelSurfaceEnabled(),
 			}

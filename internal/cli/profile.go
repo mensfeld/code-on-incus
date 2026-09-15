@@ -781,6 +781,9 @@ func printProfileSecurity(p *config.ProfileConfig) {
 		if p.Security.ReduceKernelSurface != nil {
 			fmt.Printf("reduce_kernel_surface = %v\n", *p.Security.ReduceKernelSurface)
 		}
+		if p.Security.ReduceKernelSurfaceStrict != nil {
+			fmt.Printf("reduce_kernel_surface_strict = %v\n", *p.Security.ReduceKernelSurfaceStrict)
+		}
 	}
 }
 

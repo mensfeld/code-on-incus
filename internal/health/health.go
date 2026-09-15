@@ -102,8 +102,9 @@ func RunAllChecks(cfg *config.Config, verbose bool) *HealthResult {
 	// must not silently boot with the full docker/nesting surface — the exact
 	// class of widening the policy exists to prevent.
 	probePolicy := container.HardeningPolicy{
-		Docker:              cfg.Container.IsDockerEnabled(),
-		ReduceKernelSurface: cfg.Security.IsReduceKernelSurfaceEnabled(),
+		Docker:                    cfg.Container.IsDockerEnabled(),
+		ReduceKernelSurface:       cfg.Security.IsReduceKernelSurfaceEnabled(),
+		ReduceKernelSurfaceStrict: cfg.Security.IsReduceKernelSurfaceStrictEnabled(),
 	}
 	checks["container_connectivity"] = CheckContainerConnectivity(cfg.Container.Image, probePolicy)
 	checks["network_restriction"] = CheckNetworkRestriction(cfg.Container.Image, probePolicy)

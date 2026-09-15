@@ -34,6 +34,10 @@
     "reduce_kernel_surface": {
       "type": "boolean",
       "description": "Kernel attack-surface hardening: disables Docker/nesting support (wins over [container] docker) and denies the syscall families behind most recent kernel escape chains (io_uring, bpf, userfaultfd, keyring) via security.syscalls.deny. The container still shares the host kernel — this narrows the boundary, it does not make it escape-proof. Default: false. Trusted scope only. Enabled by the built-in 'hardened' profile."
+    },
+    "reduce_kernel_surface_strict": {
+      "type": "boolean",
+      "description": "Opt-in STRICT tier on top of reduce_kernel_surface: additionally denies perf_event_open (a long-standing kernel-LPE vector). Kept separate because, unlike the base list, denying perf_event_open removes real capability — kernel-level profiling (perf, JVM async-profiler's perf mode) stops working, though it degrades gracefully (EPERM, no crash). Enabling it implies reduce_kernel_surface. Default: false. Trusted scope only."
     }
   }
 }

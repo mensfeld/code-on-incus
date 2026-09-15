@@ -166,6 +166,10 @@
 # reduce_kernel_surface = false     # deny io_uring/bpf/userfaultfd/keyring syscalls and disable
 #                                   #   Docker support — opt-in kernel hardening (trusted scope only;
 #                                   #   on in the built-in "hardened" profile)
+# reduce_kernel_surface_strict = false  # STRICT tier: also deny perf_event_open (kernel-LPE vector).
+#                                   #   Implies reduce_kernel_surface. Kept separate because it removes
+#                                   #   kernel profiling (perf, JVM async-profiler) — degrades gracefully,
+#                                   #   but stops working. Trusted scope only.
 
 [limits.cpu]
 # count = ""                     # "2", "0-3", "0,1,3" ("" = unlimited)
