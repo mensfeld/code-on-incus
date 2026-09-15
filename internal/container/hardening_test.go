@@ -75,8 +75,17 @@ func TestHardeningConfigArgs_ReduceKernelSurface(t *testing.T) {
 	if m["security.nesting"] != "" {
 		t.Error("reduce_kernel_surface must leave security.nesting empty even with Docker=true")
 	}
-	if m["security.syscalls.deny"] != KernelSurfaceDenySyscalls {
-		t.Errorf("reduce_kernel_surface must set the deny list, got %q", m["security.syscalls.deny"])
+	want := kernelSurfaceDenyValue(HardeningPolicy{Docker: true, ReduceKernelSurface: true})
+	if m["security.syscalls.deny"] != want {
+		t.Errorf("reduce_kernel_surface must set the deny list, got %q want %q", m["security.syscalls.deny"], want)
+	}
+	// Every entry must carry an explicit errno action (never a bare name, which
+	// SIGSYS-kills), and entries must be newline-separated (space-separated is a
+	// malformed LXC rule).
+	for _, entry := range strings.Split(m["security.syscalls.deny"], "\n") {
+		if !strings.HasSuffix(entry, " "+kernelSurfaceDenyAction) {
+			t.Errorf("deny entry %q lacks the %q action", entry, kernelSurfaceDenyAction)
+		}
 	}
 }
 
@@ -106,16 +115,28 @@ func TestKernelSurfaceMatches(t *testing.T) {
 		"security.syscalls.intercept.mknod":                "",
 		"security.syscalls.intercept.setxattr":             "",
 		"linux.sysctl.net.ipv4.ip_unprivileged_port_start": "",
-		"security.syscalls.deny":                           KernelSurfaceDenySyscalls,
+		"security.syscalls.deny":                           kernelSurfaceDenyValue(p),
 	}
 	if !KernelSurfaceMatches(match, p) {
 		t.Error("expected match for the exact hardened config")
 	}
-	// Whitespace around a value must not defeat the match.
-	match["security.syscalls.deny"] = " " + KernelSurfaceDenySyscalls + " "
+	// Whitespace around the value must not defeat the match.
+	match["security.syscalls.deny"] = " " + kernelSurfaceDenyValue(p) + " "
 	if !KernelSurfaceMatches(match, p) {
 		t.Error("expected match despite surrounding whitespace")
 	}
+	// The same syscalls in a different order (and without actions) still match —
+	// comparison is by name set.
+	match["security.syscalls.deny"] = "add_key\nrequest_key\nkeyctl\nuserfaultfd\nbpf\nio_uring_register\nio_uring_enter\nio_uring_setup"
+	if !KernelSurfaceMatches(match, p) {
+		t.Error("expected match for the same syscall set in a different order")
+	}
+	// A deny list missing one syscall is drift.
+	match["security.syscalls.deny"] = "io_uring_setup errno 1\nbpf errno 1"
+	if KernelSurfaceMatches(match, p) {
+		t.Error("expected mismatch when the deny list is incomplete")
+	}
+	match["security.syscalls.deny"] = kernelSurfaceDenyValue(p)
 	// A stray nesting=true is drift.
 	drift := map[string]string{"security.nesting": "true"}
 	if KernelSurfaceMatches(drift, p) {
@@ -140,9 +161,10 @@ func TestKernelSurfaceMatches(t *testing.T) {
 func TestKernelSurfaceViolations(t *testing.T) {
 	hardened := HardeningPolicy{Docker: false, ReduceKernelSurface: true}
 	dockerOff := HardeningPolicy{Docker: false}
+	fullDeny := kernelSurfaceDenyValue(hardened) // the complete base list, as stored
 
 	// Clean hardened container: no violations.
-	clean := map[string]string{"security.syscalls.deny": KernelSurfaceDenySyscalls}
+	clean := map[string]string{"security.syscalls.deny": fullDeny}
 	if v := kernelSurfaceViolations(clean, hardened); len(v) != 0 {
 		t.Errorf("clean hardened config should have no violations, got %v", v)
 	}
@@ -151,7 +173,7 @@ func TestKernelSurfaceViolations(t *testing.T) {
 	for _, spelling := range []string{"true", "1", "yes", "on", "True", " true "} {
 		cfg := map[string]string{
 			"security.nesting":       spelling,
-			"security.syscalls.deny": KernelSurfaceDenySyscalls,
+			"security.syscalls.deny": fullDeny,
 		}
 		if v := kernelSurfaceViolations(cfg, hardened); len(v) != 1 {
 			t.Errorf("nesting=%q should be one violation, got %v", spelling, v)
@@ -161,7 +183,7 @@ func TestKernelSurfaceViolations(t *testing.T) {
 	for _, spelling := range []string{"", "false", "0", "off"} {
 		cfg := map[string]string{
 			"security.nesting":       spelling,
-			"security.syscalls.deny": KernelSurfaceDenySyscalls,
+			"security.syscalls.deny": fullDeny,
 		}
 		if v := kernelSurfaceViolations(cfg, hardened); len(v) != 0 {
 			t.Errorf("nesting=%q should not violate, got %v", spelling, v)
@@ -173,7 +195,7 @@ func TestKernelSurfaceViolations(t *testing.T) {
 	for val, want := range map[string]int{"0": 1, "80": 1, "1024": 0, "4096": 0, "junk": 1} {
 		cfg := map[string]string{
 			"linux.sysctl.net.ipv4.ip_unprivileged_port_start": val,
-			"security.syscalls.deny":                           KernelSurfaceDenySyscalls,
+			"security.syscalls.deny":                           fullDeny,
 		}
 		if v := kernelSurfaceViolations(cfg, hardened); len(v) != want {
 			t.Errorf("low-port=%q: want %d violations, got %v", val, want, v)
@@ -182,7 +204,7 @@ func TestKernelSurfaceViolations(t *testing.T) {
 
 	// A missing deny token under reduce_kernel_surface is a violation
 	// (write-path regression backstop).
-	partial := map[string]string{"security.syscalls.deny": "io_uring_setup bpf"}
+	partial := map[string]string{"security.syscalls.deny": "io_uring_setup errno 1\nbpf errno 1"}
 	if v := kernelSurfaceViolations(partial, hardened); len(v) != 1 {
 		t.Errorf("partial deny list should be one violation, got %v", v)
 	}
@@ -247,40 +269,48 @@ func TestKernelSurfaceStrictTier(t *testing.T) {
 		// docker=false already, but assert the precedence explicitly
 		t.Error("strict tier must win over Docker")
 	}
-	if got := kernelSurfaceDenyList(strict); got != KernelSurfaceDenySyscalls+" perf_event_open" {
-		t.Errorf("strict deny list = %q, want base + perf_event_open", got)
+	// Strict tier denies exactly the base names + perf_event_open, and every
+	// entry is newline-separated with an explicit errno action.
+	strictNames := kernelSurfaceDenySyscallNames(strict)
+	wantNames := append(strings.Fields(KernelSurfaceDenySyscalls), "perf_event_open")
+	if strings.Join(strictNames, ",") != strings.Join(wantNames, ",") {
+		t.Errorf("strict names = %v, want %v", strictNames, wantNames)
+	}
+	strictVal := kernelSurfaceDenyValue(strict)
+	if !strings.Contains(strictVal, "perf_event_open "+kernelSurfaceDenyAction) {
+		t.Errorf("strict deny value must include perf_event_open with the errno action, got %q", strictVal)
+	}
+	for _, entry := range strings.Split(strictVal, "\n") {
+		if !strings.HasSuffix(entry, " "+kernelSurfaceDenyAction) {
+			t.Errorf("deny entry %q lacks the errno action", entry)
+		}
 	}
 
 	// Base tier alone must NOT deny perf_event_open (that is the whole point of
 	// keeping it a separate opt-in).
 	base := HardeningPolicy{ReduceKernelSurface: true}
-	if strings.Contains(kernelSurfaceDenyList(base), "perf_event_open") {
+	if kernelSurfaceDenySyscallSet(kernelSurfaceDenyValue(base))["perf_event_open"] {
 		t.Error("base tier must not deny perf_event_open")
 	}
 
 	// No tier -> empty deny value.
-	if got := kernelSurfaceDenyList(HardeningPolicy{Docker: true}); got != "" {
-		t.Errorf("no-tier deny list = %q, want empty", got)
+	if got := kernelSurfaceDenyValue(HardeningPolicy{Docker: true}); got != "" {
+		t.Errorf("no-tier deny value = %q, want empty", got)
 	}
 
 	// The strict deny value is what actually lands in the config args.
-	args := hardeningConfigArgs(strict)
-	var denyArg string
-	for _, kv := range args {
-		if k, v, _ := strings.Cut(kv, "="); k == "security.syscalls.deny" {
-			denyArg = v
-		}
-	}
-	if denyArg != KernelSurfaceDenySyscalls+" perf_event_open" {
-		t.Errorf("config arg security.syscalls.deny = %q, want strict list", denyArg)
+	if denyArg := argsMap(t, strict)["security.syscalls.deny"]; denyArg != strictVal {
+		t.Errorf("config arg security.syscalls.deny = %q, want %q", denyArg, strictVal)
 	}
 }
 
 // A container whose effective (profile-expanded) deny list is missing the strict
 // extra is a violation under the strict policy but fine under the base policy.
 func TestKernelSurfaceStrictViolation(t *testing.T) {
-	// Effective config carrying only the base list.
-	baseOnly := map[string]string{"security.syscalls.deny": KernelSurfaceDenySyscalls}
+	// Effective config carrying only the base list (as actually stored).
+	baseOnly := map[string]string{
+		"security.syscalls.deny": kernelSurfaceDenyValue(HardeningPolicy{ReduceKernelSurface: true}),
+	}
 
 	if v := kernelSurfaceViolations(baseOnly, HardeningPolicy{ReduceKernelSurface: true}); v != nil {
 		t.Errorf("base policy satisfied by base list, got violations %v", v)
