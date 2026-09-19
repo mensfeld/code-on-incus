@@ -109,6 +109,18 @@ def test_commit_identity_is_unoverridable(coi_binary, workspace_dir, cleanup_con
     assert rc == 0, f"commit failed: {out}"
     assert _author(coi_binary, name) == BOT, "`--no-verify --author=` must still be re-stamped"
 
+    # 5. Spoofed NAME with the LOCKED email must ALSO be re-stamped (the guard
+    # compares name, not just email — otherwise `Evil <bot-email>` would stick).
+    rc, out = _exec(
+        coi_binary,
+        name,
+        f"git -C {REPO} commit --allow-empty --author='Evil <{BOT_EMAIL}>' -q -m t5",
+    )
+    assert rc == 0, f"commit failed: {out}"
+    assert _author(coi_binary, name) == BOT, (
+        "a spoofed author name with the locked email must be re-stamped to the locked name"
+    )
+
 
 def test_git_identity_env_present_in_all_shell_types(coi_binary, workspace_dir, cleanup_containers):
     """The GIT_* env must reach every shell an agent might use — a bare `sh -c`

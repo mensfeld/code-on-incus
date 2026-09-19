@@ -133,9 +133,14 @@ delegate() {
 for m in rebase-merge rebase-apply MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD BISECT_LOG sequencer; do
 	[ -e "$gitdir/$m" ] && delegate "$@"
 done
-ae="$(git log -1 --format='%ae' 2>/dev/null)" || delegate "$@"
+an="$(git log -1 --format='%an' 2>/dev/null)" || delegate "$@"
+ae="$(git log -1 --format='%ae' 2>/dev/null)"
+cn="$(git log -1 --format='%cn' 2>/dev/null)"
 ce="$(git log -1 --format='%ce' 2>/dev/null)"
-if [ "$ae" != "$LOCK_EMAIL" ] || [ "$ce" != "$LOCK_EMAIL" ]; then
+# Compare NAME and EMAIL of both author and committer: an override that keeps the
+# locked email but changes the name (e.g. --author="Evil <locked-email>") must
+# still be re-stamped.
+if [ "$an" != "$LOCK_NAME" ] || [ "$ae" != "$LOCK_EMAIL" ] || [ "$cn" != "$LOCK_NAME" ] || [ "$ce" != "$LOCK_EMAIL" ]; then
 	COI_RESTAMP_ACTIVE=1 \
 	GIT_AUTHOR_NAME="$LOCK_NAME" GIT_AUTHOR_EMAIL="$LOCK_EMAIL" \
 	GIT_COMMITTER_NAME="$LOCK_NAME" GIT_COMMITTER_EMAIL="$LOCK_EMAIL" \

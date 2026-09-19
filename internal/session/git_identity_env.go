@@ -3,7 +3,6 @@ package session
 import (
 	"context"
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/mensfeld/code-on-incus/internal/container"
@@ -28,6 +27,11 @@ const gitIdentityEnvMarkerKey = "user.coi.git_env_keys"
 // Values derive from the resolved GitIdentity (single source). Reconciles via
 // gitIdentityEnvMarkerKey exactly like applyToolContainerEnv: unset the keys when
 // lock is off / identity incomplete, so a reused container converges. Non-fatal.
+//
+// NB: like all environment.* config, this only reaches execs started AFTER it is
+// set. On a persistent-container reuse whose agent shell is already running, that
+// shell's env is a stale snapshot and its git children won't see the new GIT_* —
+// there the post-commit re-stamp hook (Layer 2) is the actual enforcer.
 func ApplyGitIdentityContainerEnv(ctx context.Context, containerName string, id GitIdentity, lock bool, logger func(string)) {
 	prevMarker, _ := container.ConfigGet(ctx, containerName, gitIdentityEnvMarkerKey)
 	plan := planGitIdentityEnv(prevMarker, id, lock)
@@ -53,41 +57,21 @@ func ApplyGitIdentityContainerEnv(ctx context.Context, containerName string, id 
 	}
 }
 
-// planGitIdentityEnv is the pure decision core (unit-tested without Incus): the
-// four GIT_* keys when the identity is locked and complete, none otherwise, plus
-// the stale keys to unset (from the previous marker) and the new marker value.
-// Reuses toolEnvPlan / validContainerEnvValue / splitCSV from setup_toolenv.go.
+// planGitIdentityEnv is the pure decision core (unit-tested without Incus): it
+// builds the desired GIT_* env — the four keys when the identity is locked and
+// complete, none otherwise — and delegates the set/unset/skip/marker
+// reconciliation to the shared planContainerEnv.
 func planGitIdentityEnv(prevMarker string, id GitIdentity, lock bool) toolEnvPlan {
-	plan := toolEnvPlan{set: map[string]string{}}
-
+	var desired map[string]string
 	if lock && id.Complete() {
 		name := strings.TrimSpace(id.Name)
 		email := strings.TrimSpace(id.Email)
-		desired := map[string]string{
+		desired = map[string]string{
 			"GIT_AUTHOR_NAME":     name,
 			"GIT_AUTHOR_EMAIL":    email,
 			"GIT_COMMITTER_NAME":  name,
 			"GIT_COMMITTER_EMAIL": email,
 		}
-		for k, v := range desired {
-			if validContainerEnvValue(v) {
-				plan.set[k] = v
-				plan.setKeys = append(plan.setKeys, k)
-			} else {
-				plan.skipped = append(plan.skipped, k)
-			}
-		}
 	}
-	sort.Strings(plan.setKeys)
-	sort.Strings(plan.skipped)
-
-	for _, k := range splitCSV(prevMarker) {
-		if _, keep := plan.set[k]; !keep {
-			plan.unset = append(plan.unset, k)
-		}
-	}
-	sort.Strings(plan.unset)
-
-	plan.marker = strings.Join(plan.setKeys, ",")
-	return plan
+	return planContainerEnv(prevMarker, desired)
 }

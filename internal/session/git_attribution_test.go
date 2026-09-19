@@ -183,7 +183,9 @@ func TestSetupGitHooks_IdentityLock(t *testing.T) {
 		"COI_RESTAMP_ACTIVE",
 		"--reset-author",
 		"--no-verify",
-		"--allow-empty", // empty commits must be re-stampable too (amend refuses otherwise)
+		"--allow-empty",   // empty commits must be re-stampable too (amend refuses otherwise)
+		`--format='%an'`,  // NAME is compared, not only email (spoofed-name guard)
+		`!= "$LOCK_NAME"`, // ...and the name check is in the re-stamp condition
 		"git rev-parse --git-dir",
 		"CHERRY_PICK_HEAD",
 	} {
