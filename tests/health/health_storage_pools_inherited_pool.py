@@ -15,39 +15,11 @@ from pathlib import Path
 
 import pytest
 
-
-def _is_permission_error(stderr):
-    """Heuristic: was `incus storage create` rejected because the caller
-    does not have Incus admin access? Anything else (name collision,
-    backend error, transient failure) should fail the test loud, not skip."""
-    lowered = stderr.lower()
-    return (
-        "permission denied" in lowered
-        or "not authorized" in lowered
-        or "forbidden" in lowered
-        or "access denied" in lowered
-    )
-
-
-def _create_temp_pool(name):
-    """Create a temp pool. Returns (ok, stderr). The caller is expected to
-    treat ok=False as a hard failure unless stderr matches a permission
-    error, in which case the whole test should pytest.skip."""
-    result = subprocess.run(
-        ["incus", "storage", "create", name, "dir"],
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    return result.returncode == 0, result.stderr
-
-
-def _delete_temp_pool(name):
-    subprocess.run(
-        ["incus", "storage", "delete", name],
-        capture_output=True,
-        timeout=30,
-    )
+from support.helpers import (
+    create_storage_pool,
+    delete_storage_pool,
+    is_incus_permission_error,
+)
 
 
 def test_health_storage_pools_inherited_pool(coi_binary, workspace_dir):
@@ -55,9 +27,9 @@ def test_health_storage_pools_inherited_pool(coi_binary, workspace_dir):
     # Unique pool name per test run avoids collisions with leftover pools.
     pool_name = f"coi-test-inheritedpool-{os.urandom(4).hex()}"
 
-    ok, err = _create_temp_pool(pool_name)
+    ok, err = create_storage_pool(pool_name)
     if not ok:
-        if _is_permission_error(err):
+        if is_incus_permission_error(err):
             pytest.skip(f"No permission to create storage pool {pool_name}: {err}")
         pytest.fail(f"Failed to create temp pool {pool_name}: {err}")
 
@@ -92,4 +64,4 @@ def test_health_storage_pools_inherited_pool(coi_binary, workspace_dir):
             f"though 'leaf' never mentioned it directly. Got: {list(details.keys())}"
         )
     finally:
-        _delete_temp_pool(pool_name)
+        delete_storage_pool(pool_name)

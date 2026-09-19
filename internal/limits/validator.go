@@ -25,6 +25,11 @@ var (
 	// NOT "10MB/s". The /s suffix is documentation-only; the config value omits it.
 	// SI units use lowercase k (kB); IEC units use uppercase K (KiB).
 	diskIORegex = regexp.MustCompile(`^(\d+[KMGT]iB|\d+[kMGT]B|\d+iops)$`)
+
+	// diskSizeRegex matches a disk-size quota: IEC ("20GiB") or SI ("20GB") units.
+	// Unlike memory, a percentage is not accepted — Incus root device `size=`
+	// takes an absolute quantity. A unit is required to avoid ambiguous bytes.
+	diskSizeRegex = regexp.MustCompile(`^(\d+[KMGT]iB|\d+[kMGT]B)$`)
 )
 
 // ValidateCPUCount validates CPU count format
@@ -108,6 +113,19 @@ func ValidateDiskIO(io string) error {
 	}
 	if !diskIORegex.MatchString(io) {
 		return fmt.Errorf("invalid disk I/O rate: %s (examples: '10MB', '10MiB', '1000iops')", io)
+	}
+	return nil
+}
+
+// ValidateDiskSize validates a disk-size quota format (whole-container rootfs
+// or, reused, any absolute byte quantity). Valid: "20GiB", "500MB", "" (empty =
+// unlimited). A percentage is not accepted.
+func ValidateDiskSize(size string) error {
+	if size == "" {
+		return nil // Empty = unlimited
+	}
+	if !diskSizeRegex.MatchString(size) {
+		return fmt.Errorf("invalid disk size: %s (examples: '20GiB', '10GB', '512MiB')", size)
 	}
 	return nil
 }
@@ -201,6 +219,9 @@ func ValidateAll(cpu CPULimits, memory MemoryLimits, disk DiskLimits, runtime Ru
 	if err := ValidateDiskIO(disk.Max); err != nil {
 		errors["disk.max"] = err
 	}
+	if err := ValidateDiskSize(disk.Size); err != nil {
+		errors["disk.size"] = err
+	}
 	if err := ValidatePriority(disk.Priority); err != nil {
 		errors["disk.priority"] = err
 	}
@@ -238,6 +259,7 @@ type DiskLimits struct {
 	Read     string
 	Write    string
 	Max      string
+	Size     string // whole-container rootfs quota (root device size=); requires a quota-capable pool
 	Priority int
 }
 

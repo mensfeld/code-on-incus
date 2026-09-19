@@ -52,8 +52,11 @@ func TestCheckIncus_VersionCheck(t *testing.T) {
 	}
 
 	if container.MeetsMinimumVersion(v) {
+		// At or above the hard minimum the check is StatusOK — including the
+		// [6.1, recommended) band, which only adds an advisory note so `coi
+		// health` exit 0 is preserved on supported hosts.
 		if result.Status != StatusOK {
-			t.Errorf("Version %s meets minimum but status is %s: %s", versionStr, result.Status, result.Message)
+			t.Errorf("Version %s meets the minimum but status is %s: %s", versionStr, result.Status, result.Message)
 		}
 		if !strings.Contains(result.Message, versionStr) {
 			t.Errorf("Message should contain version %q, got %q", versionStr, result.Message)
@@ -71,7 +74,8 @@ func TestCheckIncus_VersionCheck(t *testing.T) {
 }
 
 // evaluateIncusVersion should return StatusWarning with zabbly upgrade instructions for old versions
-// (6.0.x, 5.x), StatusOK for versions meeting minimum (6.1+, 7.x), and degrade gracefully
+// (6.0.x, 5.x), StatusWarning with "recommended" advice for versions between the hard minimum and
+// the recommended floor, StatusOK for recommended-or-newer versions, and degrade gracefully
 // (StatusOK) when the version output is unparseable or empty.
 func TestEvaluateIncusVersion_OldVersion(t *testing.T) {
 	tests := []struct {
@@ -99,10 +103,10 @@ func TestEvaluateIncusVersion_OldVersion(t *testing.T) {
 			"zabbly",
 		},
 		{
-			"6.1 passes",
+			"6.1 meets the minimum; recommended-floor note stays StatusOK (must not flip exit code)",
 			"Client version: 6.1\nServer version: 6.1",
 			StatusOK,
-			"6.1",
+			"recommended",
 		},
 		{
 			"6.20 passes",
@@ -285,7 +289,7 @@ func TestCheckContainerConnectivity_NoImage(t *testing.T) {
 	}
 
 	// Use a non-existent image name
-	result := CheckContainerConnectivity("non-existent-image-12345")
+	result := CheckContainerConnectivity("non-existent-image-12345", container.DefaultHardeningPolicy())
 
 	if result.Name != "container_connectivity" {
 		t.Errorf("Expected check name 'container_connectivity', got '%s'", result.Name)
@@ -322,7 +326,7 @@ func TestCheckContainerConnectivity_WithImage(t *testing.T) {
 	}
 
 	// Run the actual connectivity check
-	result := CheckContainerConnectivity("coi-default")
+	result := CheckContainerConnectivity("coi-default", container.DefaultHardeningPolicy())
 
 	if result.Name != "container_connectivity" {
 		t.Errorf("Expected check name 'container_connectivity', got '%s'", result.Name)
@@ -374,7 +378,7 @@ func TestCheckContainerConnectivity_EmptyImageName(t *testing.T) {
 	}
 
 	// Run with empty image name
-	result := CheckContainerConnectivity("")
+	result := CheckContainerConnectivity("", container.DefaultHardeningPolicy())
 
 	if result.Name != "container_connectivity" {
 		t.Errorf("Expected check name 'container_connectivity', got '%s'", result.Name)
@@ -419,7 +423,7 @@ func TestCheckContainerConnectivity_Cleanup(t *testing.T) {
 
 	// Run multiple checks to ensure cleanup works
 	for i := 0; i < 3; i++ {
-		_ = CheckContainerConnectivity("coi-default")
+		_ = CheckContainerConnectivity("coi-default", container.DefaultHardeningPolicy())
 	}
 
 	// Count containers after
@@ -530,7 +534,7 @@ func TestCheckNetworkRestriction_NoFirewall(t *testing.T) {
 		t.Skip("nft is available, cannot test no-firewall scenario")
 	}
 
-	result := CheckNetworkRestriction("coi-default")
+	result := CheckNetworkRestriction("coi-default", container.DefaultHardeningPolicy())
 
 	if result.Name != "network_restriction" {
 		t.Errorf("Expected check name 'network_restriction', got '%s'", result.Name)
@@ -566,7 +570,7 @@ func TestCheckNetworkRestriction_NoImage(t *testing.T) {
 	}
 
 	// Use a non-existent image name
-	result := CheckNetworkRestriction("non-existent-image-12345")
+	result := CheckNetworkRestriction("non-existent-image-12345", container.DefaultHardeningPolicy())
 
 	if result.Name != "network_restriction" {
 		t.Errorf("Expected check name 'network_restriction', got '%s'", result.Name)
@@ -609,7 +613,7 @@ func TestCheckNetworkRestriction_WithImage(t *testing.T) {
 	}
 
 	// Run the network restriction check
-	result := CheckNetworkRestriction("coi-default")
+	result := CheckNetworkRestriction("coi-default", container.DefaultHardeningPolicy())
 
 	if result.Name != "network_restriction" {
 		t.Errorf("Expected check name 'network_restriction', got '%s'", result.Name)
@@ -672,7 +676,7 @@ func TestCheckNetworkRestriction_Cleanup(t *testing.T) {
 	containersBefore, _ := container.ListContainers("^coi-restriction-check-")
 
 	// Run the check
-	_ = CheckNetworkRestriction("coi-default")
+	_ = CheckNetworkRestriction("coi-default", container.DefaultHardeningPolicy())
 
 	// Count containers after
 	containersAfter, err := container.ListContainers("^coi-restriction-check-")
@@ -800,10 +804,14 @@ func TestCheckIncusStoragePools_SaneValues(t *testing.T) {
 			continue
 		}
 
-		for _, key := range []string{"used_gib", "total_gib", "free_gib", "used_pct"} {
+		for _, key := range []string{"driver", "used_gib", "total_gib", "free_gib", "used_pct"} {
 			if _, ok := entry[key]; !ok {
 				t.Errorf("Expected %q key in details[%q]", key, poolName)
 			}
+		}
+
+		if driver, _ := entry["driver"].(string); driver == "" {
+			t.Errorf("Expected non-empty driver in details[%q]", poolName)
 		}
 
 		totalGiB, ok := entry["total_gib"].(float64)
@@ -830,8 +838,8 @@ func TestCheckIncusStoragePools_SaneValues(t *testing.T) {
 			t.Errorf("pool %q used_pct should be 0-100, got %f (was >100%% before the MiB/GiB fix)", poolName, usedPct)
 		}
 
-		t.Logf("CheckIncusStoragePools[%s]: total=%.2f GiB free=%.2f GiB used=%.0f%%",
-			poolName, totalGiB, freeGiB, usedPct)
+		t.Logf("CheckIncusStoragePools[%s]: driver=%v total=%.2f GiB free=%.2f GiB used=%.0f%%",
+			poolName, entry["driver"], totalGiB, freeGiB, usedPct)
 	}
 }
 

@@ -18,6 +18,21 @@
     "seed_host_identity": {
       "type": "boolean",
       "description": "Read the host's global git user.name/user.email and install it in the container when no explicit name/email is set (default: true). Set false to keep only the fail-closed guard. Trusted-scope only."
+    },
+    "readonly": {
+      "type": "boolean",
+      "description": "Lock the configured commit identity so the container agent cannot overwrite it: instead of writing ~/.gitconfig (which is writable), COI mounts the identity read-only at ~/.gitconfig. This locks the WHOLE global gitconfig, so ANY `git config --global …` in the container fails read-only (use per-repo --local config for other settings). Only takes effect with a resolvable identity (name/email, or a seeded host identity); if it cannot be applied the session fails closed rather than falling back to writable. Trusted-scope only. Default false."
+    },
+    "strip_attribution": {
+      "type": "boolean",
+      "description": "Install a global commit-msg hook (core.hooksPath → /etc/coi/git-hooks, root-owned) that strips auto-injected AI attribution — `Co-Authored-By: <tool bot>` trailers and `Generated with …` footers — from every commit message, so commits carry only the configured author identity. Strip-don't-reject: never blocks a commit. For Claude Code it additionally enforces includeCoAuthoredBy=false via managed settings. Known limitations: a repo whose LOCAL git config sets core.hooksPath (e.g. husky) overrides the global hook, and `git commit --no-verify` skips commit-msg hooks. Default: true. Trusted-scope only."
+    },
+    "strip_attribution_patterns": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Replace the default strip patterns (grep -E extended regexes, matched per commit-message line) when non-empty. Trusted-scope only."
     }
   }
 }

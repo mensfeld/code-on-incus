@@ -4,8 +4,8 @@ Tests for selectable agents in the base image build (issue #454).
 profiles/default/build.sh used to call install_claude_cli / install_opencode /
 install_pi unconditionally. It now dispatches through install_selected_agents,
 which installs the agents named in $COI_AGENTS (comma/space separated) and falls
-back to ALL supported agents when COI_AGENTS is unset — preserving the historical
-default.
+back to the DEFAULT agent set when COI_AGENTS is unset (claude/opencode/pi —
+opt-in agents like codex are excluded per #698 and must be requested explicitly).
 
 These tests source the REAL install_selected_agents from build.sh (like
 test_opencode_arch_selection.py sources opencode_asset_arch), stub the per-agent
@@ -30,6 +30,7 @@ set -e
 install_claude_cli() { echo "AGENT:claude"; }
 install_opencode()   { echo "AGENT:opencode"; }
 install_pi()         { echo "AGENT:pi"; }
+install_codex()      { echo "AGENT:codex"; }
 log()                { echo "LOG:$*"; }
 source <(sed -n '/^install_selected_agents()/,/^}/p' "$BUILD_SH")
 install_selected_agents
@@ -49,16 +50,23 @@ def _run(coi_agents=None):
     ], r.stdout
 
 
-def test_unset_installs_all_agents():
-    """COI_AGENTS unset installs every supported agent (historical default)."""
+def test_unset_installs_default_agents():
+    """COI_AGENTS unset installs the default agent set (historical default;
+    codex is opt-in per #698 and deliberately excluded)."""
     agents, _ = _run(coi_agents=None)
     assert agents == ["claude", "opencode", "pi"], agents
 
 
-def test_empty_installs_all_agents():
-    """An empty COI_AGENTS also falls back to all agents."""
+def test_empty_installs_default_agents():
+    """An empty COI_AGENTS also falls back to the default agent set."""
     agents, _ = _run(coi_agents="")
     assert agents == ["claude", "opencode", "pi"], agents
+
+
+def test_codex_opt_in():
+    """codex installs only when explicitly requested (#698)."""
+    agents, _ = _run(coi_agents="claude,codex")
+    assert agents == ["claude", "codex"], agents
 
 
 def test_single_agent_selection():

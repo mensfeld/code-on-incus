@@ -31,8 +31,54 @@ func TestSanitizeTerm(t *testing.T) {
 			want: "xterm-256color",
 		},
 		{
-			name: "kitty",
+			// The value kitty ACTUALLY exports by default (#772). The prior
+			// test used a bare "kitty" that kitty never sets, so the real
+			// xterm-kitty fell through to passthrough and broke `coi shell`.
+			name: "kitty (real TERM)",
+			term: "xterm-kitty",
+			want: "xterm-256color",
+		},
+		{
+			name: "kitty bare",
 			term: "kitty",
+			want: "xterm-256color",
+		},
+		{
+			name: "foot",
+			term: "foot",
+			want: "xterm-256color",
+		},
+		{
+			name: "foot-extra",
+			term: "foot-extra",
+			want: "xterm-256color",
+		},
+		{
+			name: "rio",
+			term: "rio",
+			want: "xterm-256color",
+		},
+		{
+			name: "contour",
+			term: "contour",
+			want: "xterm-256color",
+		},
+		{
+			name: "st-256color",
+			term: "st-256color",
+			want: "xterm-256color",
+		},
+		{
+			// xterm-16color/xterm-88color live in ncurses-term, not the minimal
+			// ncurses-base, so they're mapped to the always-present superset
+			// rather than trusted to exist (#772 review).
+			name: "xterm-16color maps to 256color",
+			term: "xterm-16color",
+			want: "xterm-256color",
+		},
+		{
+			name: "xterm-88color maps to 256color",
+			term: "xterm-88color",
 			want: "xterm-256color",
 		},
 		{

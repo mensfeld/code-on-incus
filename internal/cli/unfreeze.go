@@ -48,7 +48,7 @@ func unfreezeContainer(name string) error {
 		return fmt.Errorf("container %s not found: %w", name, err)
 	}
 
-	if status != "Frozen" {
+	if !container.StatusIsFrozen(status) {
 		return fmt.Errorf("container %s is not frozen (status: %s)", name, status)
 	}
 
@@ -89,7 +89,7 @@ func unfreezeAllFrozen() error {
 			continue
 		}
 
-		if status == "FROZEN" {
+		if container.StatusIsFrozen(status) {
 			if err := unfreezeContainer(name); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: Failed to unfreeze %s: %v\n", name, err)
 			} else {
@@ -118,7 +118,7 @@ func getContainerStatus(name string) (string, error) {
 		return "", fmt.Errorf("container not found")
 	}
 	// Normalize status
-	if status == "FROZEN" {
+	if container.StatusIsFrozen(status) {
 		return "Frozen", nil
 	}
 	return status, nil

@@ -100,7 +100,7 @@ func TestContainerName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			name := ContainerName(tt.workspacePath, tt.slot)
+			name := ContainerName(tt.workspacePath, "", tt.slot)
 
 			// Check prefix
 			if len(name) < len(tt.wantPrefix) || name[:len(tt.wantPrefix)] != tt.wantPrefix {
@@ -120,8 +120,8 @@ func TestContainerName(t *testing.T) {
 	// Test deterministic naming
 	path := "/test/path"
 	slot := 1
-	name1 := ContainerName(path, slot)
-	name2 := ContainerName(path, slot)
+	name1 := ContainerName(path, "", slot)
+	name2 := ContainerName(path, "", slot)
 
 	if name1 != name2 {
 		t.Errorf("ContainerName() not deterministic: %s != %s", name1, name2)
@@ -130,8 +130,8 @@ func TestContainerName(t *testing.T) {
 
 func TestContainerNameDifferentSlots(t *testing.T) {
 	path := "/test/workspace"
-	name1 := ContainerName(path, 1)
-	name2 := ContainerName(path, 2)
+	name1 := ContainerName(path, "", 1)
+	name2 := ContainerName(path, "", 2)
 
 	if name1 == name2 {
 		t.Error("ContainerName() produced same name for different slots")

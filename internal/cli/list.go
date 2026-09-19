@@ -50,6 +50,7 @@ Examples:
 func init() {
 	listCmd.Flags().BoolVarP(&listAll, "all", "a", false, "Show saved sessions in addition to active containers")
 	listCmd.Flags().StringVar(&listFormat, "format", "text", "Output format: text or json")
+	listCmd.Flags().Bool("json", false, "Alias for --format json")
 	listCmd.Flags().StringVar(&listStatus, "status", "", "Show only containers with this status: "+strings.Join(validStatusFilters, ", "))
 	listCmd.Flags().BoolVar(&listRunning, "running", false, "Show only running containers (alias for --status running)")
 	listCmd.Flags().BoolVar(&listStopped, "stopped", false, "Show only stopped containers (alias for --status stopped)")
@@ -57,8 +58,9 @@ func init() {
 
 func listCommand(cmd *cobra.Command, args []string) error {
 	// Validate format value
-	if listFormat != "text" && listFormat != "json" {
-		return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid format '%s': must be 'text' or 'json'", listFormat)}
+	applyJSONFormatAlias(cmd, &listFormat)
+	if err := validateTextOrJSON(listFormat); err != nil {
+		return err
 	}
 
 	// Resolve the status filter before touching Incus so flag misuse fails

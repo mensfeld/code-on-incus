@@ -8,22 +8,13 @@ read-only file/dir over it, so the contained agent can neither READ its contents
 Issue #494.
 """
 
-import subprocess
 from pathlib import Path
+
+from support.helpers import run_coi_in_workspace as _run
 
 SECRET_ENV = "API_TOKEN=topsecret-do-not-leak"
 SECRET_PEM = "-----BEGIN PRIVATE KEY-----leakme"
 SECRET_DB = "db-password-leakme"
-
-
-def _run(coi_binary, workspace_dir, argv, timeout=120):
-    return subprocess.run(
-        [coi_binary, "run", "--", *argv],
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        cwd=workspace_dir,
-    )
 
 
 def _seed(workspace_dir):

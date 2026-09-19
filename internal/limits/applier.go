@@ -111,11 +111,20 @@ func applyMemoryLimits(ctx context.Context, containerName string, memory MemoryL
 // the instance config), Incus refuses to modify it via `config device set`.
 // We work around this by ensuring an instance-level root device exists first.
 func applyDiskLimits(ctx context.Context, containerName string, disk DiskLimits) error {
-	if disk.Read == "" && disk.Write == "" && disk.Max == "" && disk.Priority == 0 {
+	if disk.Read == "" && disk.Write == "" && disk.Max == "" && disk.Size == "" && disk.Priority == 0 {
 		return nil
 	}
 
-	// Ensure root device is at the instance level before setting disk I/O limits.
+	// A rootfs size quota can only be enforced on a quota-capable pool, so reject
+	// it up front on an unsupported (e.g. dir) pool rather than leaving the user
+	// with an unbounded rootfs they believe is capped (#728).
+	if disk.Size != "" {
+		if err := ensureSizeQuotaSupported(ctx, containerName); err != nil {
+			return err
+		}
+	}
+
+	// Ensure root device is at the instance level before setting disk limits.
 	if err := ensureInstanceRootDevice(ctx, containerName); err != nil {
 		return fmt.Errorf("failed to ensure instance-level root device: %w", err)
 	}
@@ -138,6 +147,12 @@ func applyDiskLimits(ctx context.Context, containerName string, disk DiskLimits)
 		}
 	}
 
+	if disk.Size != "" {
+		if out, err := container.DeviceSet(ctx, containerName, "root", "size="+disk.Size); err != nil {
+			return fmt.Errorf("incus config device set size=%s failed: %w (output: %s)", disk.Size, err, out)
+		}
+	}
+
 	if disk.Priority != 0 {
 		priority := fmt.Sprintf("%d", disk.Priority)
 		if out, err := container.DeviceSet(ctx, containerName, "root", "limits.disk.priority="+priority); err != nil {
@@ -146,6 +161,45 @@ func applyDiskLimits(ctx context.Context, containerName string, disk DiskLimits)
 	}
 
 	return nil
+}
+
+// quotaCapablePoolDrivers are the Incus storage drivers that enforce a root
+// disk `size=` quota. On any other driver (notably `dir`) Incus accepts the
+// key but never enforces it, so coi rejects the config instead.
+var quotaCapablePoolDrivers = map[string]bool{
+	"btrfs": true,
+	"zfs":   true,
+	"lvm":   true,
+	"ceph":  true,
+}
+
+// poolDriverEnforcesQuota reports whether an Incus storage-pool driver can
+// enforce a root disk `size=` quota. Pure, so it is unit-testable. (#728)
+func poolDriverEnforcesQuota(driver string) bool {
+	return quotaCapablePoolDrivers[driver]
+}
+
+// ensureSizeQuotaSupported returns an error when the container's root disk lives
+// on a storage pool whose driver cannot enforce a size quota (e.g. dir). This is
+// a hard failure by design: a silently-ignored quota is worse than none (#728).
+func ensureSizeQuotaSupported(ctx context.Context, containerName string) error {
+	pool, err := getRootDevicePool(ctx, containerName)
+	if err != nil {
+		return fmt.Errorf("cannot verify storage pool for disk size quota: %w", err)
+	}
+	pools, err := container.ListStoragePools()
+	if err != nil {
+		return fmt.Errorf("cannot list storage pools for disk size quota: %w", err)
+	}
+	for _, p := range pools {
+		if p.Name == pool {
+			if poolDriverEnforcesQuota(p.Driver) {
+				return nil
+			}
+			return fmt.Errorf("[limits.disk] size requires a quota-capable storage pool, but pool %q uses the %q driver which cannot enforce a rootfs quota; use a btrfs/zfs/lvm pool (see 'incus storage create') or remove [limits.disk] size", pool, p.Driver)
+		}
+	}
+	return fmt.Errorf("[limits.disk] size is set but storage pool %q was not found; cannot verify it can enforce a rootfs quota", pool)
 }
 
 // ensureInstanceRootDevice ensures the root disk device is defined at the instance

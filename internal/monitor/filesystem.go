@@ -50,8 +50,8 @@ func (fm *FilesystemMonitor) Collect(ctx context.Context, containerName string) 
 	// Calculate delta and rate
 	if !fm.previousTime.IsZero() {
 		elapsed := time.Since(fm.previousTime)
-		deltaReadBytes := currentReadBytes - fm.previousSnapshot.totalReadBytes
-		deltaWriteBytes := currentWriteBytes - fm.previousSnapshot.totalWriteBytes
+		deltaReadBytes := counterDelta(currentReadBytes, fm.previousSnapshot.totalReadBytes)
+		deltaWriteBytes := counterDelta(currentWriteBytes, fm.previousSnapshot.totalWriteBytes)
 
 		if elapsed.Seconds() > 0 {
 			readRateMBPerSec := float64(deltaReadBytes) / 1024 / 1024 / elapsed.Seconds()
@@ -92,6 +92,22 @@ func (fm *FilesystemMonitor) Collect(ctx context.Context, containerName string) 
 		TmpTotalMB:        tmpTotal,
 		TmpUsedPercent:    tmpPercent,
 	}, nil
+}
+
+// counterDelta returns current - previous for a monotonic cumulative counter,
+// clamped to 0 when the counter appears to have gone backwards. A cgroup io
+// counter reads lower than the prior sample when CollectResourceStats hits its
+// io-error branch (IOReadMB/IOWriteMB fall back to 0 while the rest of the
+// sample is valid) or when the container's cgroup is momentarily
+// unavailable/reset. Without this clamp the unsigned subtraction underflows to
+// ~2^64, yielding a spurious multi-terabyte "read"/"write" in a single interval
+// that trips DetectLargeReads and freezes a perfectly healthy container. Mirrors
+// the negative-delta clamp used for the `coi top` rate counters.
+func counterDelta(current, previous uint64) uint64 {
+	if current < previous {
+		return 0
+	}
+	return current - previous
 }
 
 // DetectLargeReads checks if filesystem read activity exceeds thresholds

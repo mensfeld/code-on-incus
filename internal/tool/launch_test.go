@@ -1,0 +1,217 @@
+package tool
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestCatSubst(t *testing.T) {
+	got := catSubst("/home/code/.coi/runs/abc.prompt")
+	want := `"$(cat /home/code/.coi/runs/abc.prompt)"`
+	if got != want {
+		t.Errorf("catSubst = %q, want %q", got, want)
+	}
+}
+
+func TestClaudeBuildCommandLaunch_PromptAndSystem(t *testing.T) {
+	c := NewClaude().(ToolWithPrompt)
+	cmd, err := c.BuildCommandLaunch(LaunchSpec{
+		SessionID:        "sid-1",
+		PromptFile:       "/run/p",
+		SystemPromptFile: "/run/s",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(cmd, " ")
+	// Fresh session (no resume) keeps --session-id.
+	if !strings.Contains(joined, "--session-id sid-1") {
+		t.Errorf("missing --session-id: %q", joined)
+	}
+	if !strings.Contains(joined, `--append-system-prompt "$(cat /run/s)"`) {
+		t.Errorf("missing system prompt: %q", joined)
+	}
+	// The user prompt must be the trailing positional arg.
+	if last := cmd[len(cmd)-1]; last != `"$(cat /run/p)"` {
+		t.Errorf("prompt must be the trailing positional, got last=%q in %q", last, joined)
+	}
+}
+
+// Print mode (#701) adds -p so Claude runs to completion and exits, and drops
+// --verbose so the fire-and-forget output stays clean. The prompt stays the
+// trailing positional.
+func TestClaudeBuildCommandLaunch_PrintMode(t *testing.T) {
+	c := NewClaude().(ToolWithPrompt)
+	cmd, err := c.BuildCommandLaunch(LaunchSpec{
+		SessionID:  "sid-1",
+		PromptFile: "/run/p",
+		Print:      true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(cmd, " ")
+	if !containsArg(cmd, "-p") {
+		t.Errorf("print mode must add -p: %q", joined)
+	}
+	if containsArg(cmd, "--verbose") {
+		t.Errorf("print mode must drop --verbose: %q", joined)
+	}
+	if !strings.Contains(joined, "--permission-mode bypassPermissions") {
+		t.Errorf("print mode must keep bypass permissions: %q", joined)
+	}
+	if last := cmd[len(cmd)-1]; last != `"$(cat /run/p)"` {
+		t.Errorf("prompt must be the trailing positional, got %q", cmd)
+	}
+}
+
+// Without print mode, the launch keeps --verbose and adds no -p (interactive
+// seeding), so the two paths stay distinct.
+func TestClaudeBuildCommandLaunch_NoPrintKeepsVerbose(t *testing.T) {
+	c := NewClaude().(ToolWithPrompt)
+	cmd, err := c.BuildCommandLaunch(LaunchSpec{SessionID: "sid-1", PromptFile: "/run/p"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsArg(cmd, "--verbose") {
+		t.Errorf("non-print launch should keep --verbose: %q", cmd)
+	}
+	if containsArg(cmd, "-p") {
+		t.Errorf("non-print launch must not add -p: %q", cmd)
+	}
+}
+
+func containsArg(cmd []string, arg string) bool {
+	for _, a := range cmd {
+		if a == arg {
+			return true
+		}
+	}
+	return false
+}
+
+func TestClaudeBuildCommandLaunch_NoPrompt(t *testing.T) {
+	c := NewClaude().(ToolWithPrompt)
+	cmd, err := c.BuildCommandLaunch(LaunchSpec{SessionID: "sid-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.Join(cmd, " "), "cat") {
+		t.Errorf("no prompt/system files -> no cat subst, got %q", cmd)
+	}
+}
+
+func TestClaudeBuildCommandLaunch_Resume(t *testing.T) {
+	c := NewClaude().(ToolWithPrompt)
+	cmd, err := c.BuildCommandLaunch(LaunchSpec{
+		Resume:          true,
+		ResumeSessionID: "prev-9",
+		PromptFile:      "/run/p",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(cmd, " ")
+	if !strings.Contains(joined, "--resume prev-9") {
+		t.Errorf("resume should carry the prior id: %q", joined)
+	}
+	if strings.Contains(joined, "--session-id") {
+		t.Errorf("resume must not also set --session-id: %q", joined)
+	}
+}
+
+// Resume-latest (no id) in a LAUNCH must be `--continue` (headless "resume most recent"), not bare
+// `--resume`, which would open Claude's interactive picker and hang. Interactive `coi shell` keeps
+// the picker via BuildCommand; only the launch path rewrites it (#754).
+func TestClaudeBuildCommandLaunch_ResumeLatestUsesContinue(t *testing.T) {
+	c := NewClaude().(ToolWithPrompt)
+	cmd, err := c.BuildCommandLaunch(LaunchSpec{Resume: true, PromptFile: "/run/p"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(cmd, " ")
+	if !strings.Contains(joined, "--continue") {
+		t.Errorf("resume-latest launch should use --continue: %q", joined)
+	}
+	for _, arg := range cmd {
+		if arg == "--resume" {
+			t.Errorf("resume-latest launch must not emit bare --resume (picker): %q", joined)
+		}
+	}
+}
+
+func TestCodexBuildCommandLaunch_Prompt(t *testing.T) {
+	c := NewCodex().(ToolWithPrompt)
+	cmd, err := c.BuildCommandLaunch(LaunchSpec{SessionID: "sid-1", PromptFile: "/run/p"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if last := cmd[len(cmd)-1]; last != `"$(cat /run/p)"` {
+		t.Errorf("prompt must be the trailing positional, got %q", cmd)
+	}
+}
+
+// TestCodexBuildCommandLaunch_ResumeWithPrompt pins the resume+initial-prompt
+// rendering (#755). codex's resume subcommand grammar is
+// `codex resume [OPTIONS] [SESSION_ID] [PROMPT]` (verified against codex-cli
+// 0.152.0, the version coi's installer pulls), so on a resume the initial prompt
+// rides as the trailing [PROMPT] positional after the session id — codex accepts
+// and acts on it, it is not dropped.
+func TestCodexBuildCommandLaunch_ResumeWithPrompt(t *testing.T) {
+	c := NewCodex().(ToolWithPrompt)
+	cmd, err := c.BuildCommandLaunch(LaunchSpec{
+		SessionID: "new", Resume: true, ResumeSessionID: "sess-abc", PromptFile: "/run/p",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(cmd, " ")
+	// `codex resume <id> … "$(cat …)"`: resume subcommand, the id, prompt trailing.
+	if !strings.HasPrefix(joined, "codex resume sess-abc") {
+		t.Errorf("resume must render `codex resume <id>`: %q", joined)
+	}
+	if last := cmd[len(cmd)-1]; last != `"$(cat /run/p)"` {
+		t.Errorf("prompt must be the trailing [PROMPT] positional, got %q", cmd)
+	}
+	// Fresh-session flag must not appear on a resume.
+	if strings.Contains(joined, "--session-id") {
+		t.Errorf("a resume must not pass a fresh --session-id: %q", joined)
+	}
+}
+
+// TestCodexBuildCommandLaunch_ResumeLatestWithPrompt pins the resume-latest case:
+// no id, so `codex resume --last … "$(cat …)"` — the prompt still rides as the
+// trailing [PROMPT] positional (#755).
+func TestCodexBuildCommandLaunch_ResumeLatestWithPrompt(t *testing.T) {
+	c := NewCodex().(ToolWithPrompt)
+	cmd, err := c.BuildCommandLaunch(LaunchSpec{
+		SessionID: "new", Resume: true, PromptFile: "/run/p",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(cmd, " ")
+	if !strings.HasPrefix(joined, "codex resume --last") {
+		t.Errorf("resume-latest must render `codex resume --last`: %q", joined)
+	}
+	if last := cmd[len(cmd)-1]; last != `"$(cat /run/p)"` {
+		t.Errorf("prompt must be the trailing [PROMPT] positional, got %q", cmd)
+	}
+}
+
+func TestCodexBuildCommandLaunch_SystemPromptRejected(t *testing.T) {
+	c := NewCodex().(ToolWithPrompt)
+	_, err := c.BuildCommandLaunch(LaunchSpec{SystemPromptFile: "/run/s"})
+	if err == nil {
+		t.Error("codex must reject a system prompt (no such flag)")
+	}
+}
+
+// opencode intentionally does NOT implement ToolWithPrompt (its interactive
+// prompt injection has no clean flag); `coi tool spec` fails loudly for such
+// tools when a prompt is requested, so the orchestrator delivers it out-of-band.
+func TestOpencodeDoesNotImplementToolWithPrompt(t *testing.T) {
+	if _, ok := NewOpencode().(ToolWithPrompt); ok {
+		t.Error("opencode should not implement ToolWithPrompt (orchestrator delivers prompt out-of-band)")
+	}
+}

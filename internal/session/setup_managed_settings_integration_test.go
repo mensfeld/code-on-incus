@@ -19,7 +19,7 @@ func TestSetupClaudeManagedSettings_Integration(t *testing.T) {
 	mgr := launchContextTestContainer(t, "coi-test-managed-settings")
 	logger := func(msg string) { t.Logf("[managed-settings] %s", msg) }
 
-	SetupClaudeManagedSettings(mgr, logger)
+	SetupClaudeManagedSettings(mgr, true, true, logger)
 
 	const path = "/etc/claude-code/managed-settings.json"
 

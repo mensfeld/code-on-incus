@@ -3,10 +3,12 @@ package tool
 import (
 	"bytes"
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"text/template"
 
@@ -248,6 +250,75 @@ func (c *ClaudeTool) SetModel(model string) {
 	c.model = model
 }
 
+// GetContainerEnv implements ToolWithContainerEnv. It exposes the model and
+// effort knobs as environment variables so they can be applied at the
+// container level (see session setup), which makes them reach EVERY tool
+// launch — including an external `coi container exec` — not just coi's own
+// launcher and the in-container settings.json (#744). The same variables are
+// also written into settings.json by GetSandboxSettings (which additionally
+// carries the effort-lock/permission keys that are not env vars); setting them
+// here as well is harmless (identical values) and gives a single, launcher- and
+// settings.json-independent source of truth. Empty knobs contribute nothing, so
+// Claude keeps its own defaults.
+func (c *ClaudeTool) GetContainerEnv(_ string) map[string]string {
+	env := map[string]string{}
+	if c.model != "" {
+		env["ANTHROPIC_MODEL"] = c.model
+	}
+	if c.effortLevel != "" {
+		env["CLAUDE_CODE_EFFORT_LEVEL"] = c.effortLevel
+	}
+	return env
+}
+
+// BuildCommandLaunch implements ToolWithPrompt for Claude. It layers the
+// launch dynamics onto the normal command: an optional system prompt via
+// --append-system-prompt, and the initial user prompt as the trailing
+// positional argument Claude Code runs on start. Both are passed as
+// `"$(cat <file>)"` so arbitrary content stays in the file, never on the line.
+func (c *ClaudeTool) BuildCommandLaunch(spec LaunchSpec) ([]string, error) {
+	cmd := c.BuildCommand(spec.SessionID, spec.Resume, spec.ResumeSessionID)
+	// Resume-latest with no id: BuildCommand emits bare `claude --resume`, which opens Claude's
+	// interactive session PICKER and hangs in a headless launch. A launch wants "resume the most
+	// recent conversation" non-interactively, which for Claude is `--continue`. Rewrite it here so
+	// only the launch path is affected - interactive `coi shell --resume` (via BuildCommand) keeps
+	// the picker, which is the right behavior for an attached human (#754).
+	if spec.Resume && spec.ResumeSessionID == "" {
+		for i, arg := range cmd {
+			if arg == "--resume" {
+				cmd[i] = "--continue"
+				break
+			}
+		}
+	}
+	// Headless print mode: run the prompt to completion and exit with a status
+	// code instead of opening an interactive session (#701). Drop --verbose so
+	// the fire-and-forget output stays clean for cron logs; -p keeps Claude's
+	// default text output.
+	if spec.Print {
+		cmd = removeArg(cmd, "--verbose")
+		cmd = append(cmd, "-p")
+	}
+	if spec.SystemPromptFile != "" {
+		cmd = append(cmd, "--append-system-prompt", catSubst(spec.SystemPromptFile))
+	}
+	if spec.PromptFile != "" {
+		cmd = append(cmd, catSubst(spec.PromptFile))
+	}
+	return cmd, nil
+}
+
+// removeArg returns cmd with the first occurrence of arg removed. Used to drop
+// flags that conflict with a launch variant (e.g. --verbose in print mode).
+func removeArg(cmd []string, arg string) []string {
+	for i, a := range cmd {
+		if a == arg {
+			return append(cmd[:i:i], cmd[i+1:]...)
+		}
+	}
+	return cmd
+}
+
 // ToolWithModel is an optional interface for tools that support selecting a
 // model (e.g., Claude via ANTHROPIC_MODEL).
 type ToolWithModel interface {
@@ -338,6 +409,9 @@ type ContextInfo struct {
 	HomeDir            string      // Home directory inside container (e.g., "/home/code")
 	Persistent         bool        // Whether the container persists between sessions
 	NetworkMode        string      // "restricted", "open", "allowlist", or ""
+	AllowedPorts       []int       // Egress destination-port allowlist (empty = all ports)
+	DNSServers         []string    // Pinned DNS resolvers, :53 restricted to these (empty = unrestricted)
+	AllowedDomains     []string    // Allowlist-mode reachable destinations (hostnames/IPs/CIDRs)
 	SSHAgentForwarded  bool        // Whether host SSH agent is forwarded
 	RunAsRoot          bool        // Whether the tool runs as root
 	OSName             string      // OS name (e.g., "Ubuntu 22.04")
@@ -354,6 +428,45 @@ type ContextInfo struct {
 	ToolName           string      // e.g., "claude", "aider"
 	ContainerName      string      // Incus container name
 	ProfileContext     string      // User-provided profile context content (from profile CONTEXT.md)
+	// DockerUnavailable is set when [container] docker is off or
+	// [security] reduce_kernel_surface is on, so the container has no
+	// Docker/nesting support. The zero value (false) means Docker IS
+	// available, preserving the historical default for callers that don't set
+	// it. When true, the context tells the agent Docker is unavailable instead
+	// of advertising Docker-in-Docker it cannot use.
+	DockerUnavailable bool
+}
+
+// withDefaults fills the fields setup leaves zero-valued (OS name, architecture)
+// with the same fallbacks the human-readable renderer uses, so the .md and .json
+// context files can never disagree on them.
+func (info ContextInfo) withDefaults() ContextInfo {
+	if info.OSName == "" {
+		info.OSName = "Ubuntu (container)"
+	}
+	if info.Architecture == "" {
+		info.Architecture = runtime.GOARCH
+	}
+	return info
+}
+
+// portsEnforced / dnsEnforced / domainsEnforced report whether the corresponding
+// egress control is actually installed by the firewall in the current mode, as
+// opposed to merely being present in config. allowed_ports/dns_servers are inert
+// in open mode (blanket accept), dns_servers is inert in allowlist mode (all DNS
+// blocked), and allowed_domains only bites in allowlist mode. Both the .md and
+// the .json gate on these so they never announce a cap the firewall never
+// installed (which would read as "egress is filtered" when it is wide open).
+func (info ContextInfo) portsEnforced() bool {
+	return info.NetworkMode == "restricted" || info.NetworkMode == "allowlist"
+}
+
+func (info ContextInfo) dnsEnforced() bool {
+	return info.NetworkMode == "restricted"
+}
+
+func (info ContextInfo) domainsEnforced() bool {
+	return info.NetworkMode == "allowlist"
 }
 
 // contextTemplateData holds the resolved values passed to the context file template.
@@ -392,12 +505,14 @@ type contextTemplateData struct {
 	HasGitAuth          bool
 	SSHAgentForwarded   bool
 	GHCLIAuthenticated  bool
+	DockerAvailable     bool
 }
 
 // RenderContextFileContent renders the embedded sandbox context template with
 // dynamic environment info. This is tool-agnostic — the resulting file is
 // placed at ~/SANDBOX_CONTEXT.md by setup and can be consumed by any AI tool.
 func RenderContextFileContent(info ContextInfo) string {
+	info = info.withDefaults()
 	data := contextTemplateData{
 		WorkspacePath:   info.WorkspacePath,
 		HomeDir:         info.HomeDir,
@@ -409,15 +524,12 @@ func RenderContextFileContent(info ContextInfo) string {
 		SSHDesc:         "Not available",
 		GitHubCLIDesc:   "Not authenticated",
 		DockerDesc:      "Available (Docker-in-Docker)",
+		DockerAvailable: !info.DockerUnavailable,
 		UserDesc:        "Non-root user (code)",
 		SudoDesc:        "Available via passwordless sudo",
 	}
-
-	if data.OSDesc == "" {
-		data.OSDesc = "Ubuntu (container)"
-	}
-	if data.ArchDesc == "" {
-		data.ArchDesc = runtime.GOARCH
+	if info.DockerUnavailable {
+		data.DockerDesc = "Not available (kernel-surface hardening disabled Docker/nesting for this session)"
 	}
 
 	if info.Persistent {
@@ -435,6 +547,41 @@ func RenderContextFileContent(info ContextInfo) string {
 		data.NetworkLimitation = "Only pre-approved domains are reachable; all other outbound connections and private networks are blocked"
 	case "":
 		data.NetworkDesc = "Default (no explicit network policy)"
+	}
+
+	// Surface the fine-grained egress controls so the agent knows exactly what it
+	// can and cannot reach and does not waste turns dialing blocked ports/resolvers.
+	// Appended to NetworkLimitation, which the template renders only when non-empty.
+	//
+	// These are gated on the mode that actually ENFORCES them, not merely on the
+	// config being present: allowed_ports/dns_servers are inert in open mode (which
+	// installs a blanket accept), and dns_servers is inert in allowlist mode (which
+	// blocks all DNS and is rejected at setup). Announcing a cap the firewall never
+	// installed would tell the agent egress is filtered when it is wide open.
+	var egress []string
+	if info.portsEnforced() && len(info.AllowedPorts) > 0 {
+		ports := make([]string, len(info.AllowedPorts))
+		for i, p := range info.AllowedPorts {
+			ports[i] = strconv.Itoa(p)
+		}
+		egress = append(egress, "outbound is restricted to destination port(s) "+strings.Join(ports, ", ")+
+			" — all other ports are blocked (including on the local network), so services on non-listed ports are unreachable")
+	}
+	if info.dnsEnforced() && len(info.DNSServers) > 0 {
+		egress = append(egress, "DNS is pinned to "+strings.Join(info.DNSServers, ", ")+
+			" on port 53 — queries to any other resolver are blocked")
+	}
+	if info.domainsEnforced() && len(info.AllowedDomains) > 0 {
+		egress = append(egress, "the only reachable outbound destinations are: "+strings.Join(info.AllowedDomains, ", "))
+	}
+	if len(egress) > 0 {
+		joined := strings.Join(egress, "; ")
+		if data.NetworkLimitation != "" {
+			data.NetworkLimitation += ". Additionally, " + joined
+		} else {
+			data.NetworkLimitation = "Egress is filtered: " + joined
+		}
+		data.NetworkDesc += " — egress-filtered (see Limitations below)"
 	}
 
 	if info.SSHAgentForwarded {
@@ -554,4 +701,165 @@ func RenderContextFileContent(info ContextInfo) string {
 	}
 
 	return buf.String()
+}
+
+// sandboxContextSchemaVersion is the version of the SANDBOX_CONTEXT.json schema.
+// Bump it on any backwards-incompatible change so programmatic consumers can
+// gate on it.
+const sandboxContextSchemaVersion = 1
+
+// SandboxContextJSON is the machine-readable form of the sandbox context,
+// written to ~/SANDBOX_CONTEXT.json next to the human-readable .md (#705). It is
+// a STABLE PUBLIC CONTRACT — deliberately decoupled from the internal
+// ContextInfo struct so that renaming/reshaping internals never silently
+// changes what external nodes parse. Change it only with a SchemaVersion bump.
+type SandboxContextJSON struct {
+	SchemaVersion int `json:"schema_version"`
+
+	ContainerName string `json:"container_name"`
+	ToolName      string `json:"tool_name"`
+	WorkspacePath string `json:"workspace_path"`
+	HomeDir       string `json:"home_dir"`
+	OS            string `json:"os"`
+	Architecture  string `json:"architecture"`
+	Timezone      string `json:"timezone,omitempty"`
+	Persistent    bool   `json:"persistent"`
+	RunAsRoot     bool   `json:"run_as_root"`
+
+	Network SandboxNetworkJSON `json:"network"`
+
+	SSHAgentForwarded  bool              `json:"ssh_agent_forwarded"`
+	GHCLIAuthenticated bool              `json:"gh_cli_authenticated"`
+	DockerAvailable    bool              `json:"docker_available"`
+	ForwardedEnvVars   []string          `json:"forwarded_env_vars"`
+	ProtectedPaths     []string          `json:"protected_paths"`
+	ExtraMounts        []string          `json:"extra_mounts"` // container paths
+	PublishedPorts     []SandboxPortJSON `json:"published_ports"`
+
+	Limits SandboxLimitsJSON `json:"limits"`
+	// ProfileContext (the profile CONTEXT.md prose) is intentionally NOT included:
+	// it is a free-text markdown blob for the human .md / tool auto-context, not
+	// structured data a programmatic consumer needs.
+}
+
+// SandboxNetworkJSON carries the EFFECTIVE egress posture, matching what the .md
+// tells the agent. A field is populated only in the mode that actually enforces
+// it — allowed_ports in restricted/allowlist, dns_servers in restricted,
+// allowed_domains in allowlist — so an empty array means "not enforced" (e.g. in
+// open mode all ports are reachable regardless of a configured allowed_ports).
+// This avoids a consumer misreading an inert config value as an installed cap.
+type SandboxNetworkJSON struct {
+	Mode           string   `json:"mode"` // restricted | open | allowlist | ""
+	AllowedPorts   []int    `json:"allowed_ports"`
+	DNSServers     []string `json:"dns_servers"`
+	AllowedDomains []string `json:"allowed_domains"`
+}
+
+// SandboxPortJSON is one container port published on the host.
+type SandboxPortJSON struct {
+	Name          string `json:"name,omitempty"`
+	HostPort      int    `json:"host_port"`
+	ContainerPort int    `json:"container_port"`
+	Listen        string `json:"listen,omitempty"`
+	Pool          bool   `json:"pool"`
+	EnvVar        string `json:"env_var,omitempty"`
+}
+
+// SandboxLimitsJSON carries the resource limits ("" = unlimited).
+type SandboxLimitsJSON struct {
+	CPU         string `json:"cpu,omitempty"`
+	Memory      string `json:"memory,omitempty"`
+	MaxDuration string `json:"max_duration,omitempty"`
+}
+
+// RenderContextFileJSON serializes a ContextInfo to the SANDBOX_CONTEXT.json
+// contract. Tool-agnostic, like RenderContextFileContent; the result is written
+// to ~/SANDBOX_CONTEXT.json by setup. List fields are emitted as [] (never null)
+// so consumers never special-case a missing array. No timestamp is included, so
+// the output is deterministic and does not churn on persistent-container reuse.
+func RenderContextFileJSON(info ContextInfo) (string, error) {
+	info = info.withDefaults()
+
+	mounts := make([]string, 0, len(info.ExtraMounts))
+	for _, m := range info.ExtraMounts {
+		mounts = append(mounts, m.ContainerPath)
+	}
+
+	ports := make([]SandboxPortJSON, 0, len(info.PublishedPorts))
+	for _, p := range info.PublishedPorts {
+		// PortInfo and SandboxPortJSON share identical fields (tags aside), so a
+		// direct conversion copies them; if the two ever diverge this stops
+		// compiling, forcing an explicit mapping rather than a silent mismatch.
+		ports = append(ports, SandboxPortJSON(p))
+	}
+
+	out := SandboxContextJSON{
+		SchemaVersion: sandboxContextSchemaVersion,
+		ContainerName: info.ContainerName,
+		ToolName:      info.ToolName,
+		WorkspacePath: info.WorkspacePath,
+		HomeDir:       info.HomeDir,
+		OS:            info.OSName,
+		Architecture:  info.Architecture,
+		Timezone:      info.Timezone,
+		Persistent:    info.Persistent,
+		RunAsRoot:     info.RunAsRoot,
+		Network: SandboxNetworkJSON{
+			Mode:           info.NetworkMode,
+			AllowedPorts:   effectiveInts(info.portsEnforced(), info.AllowedPorts),
+			DNSServers:     effectiveStrings(info.dnsEnforced(), info.DNSServers),
+			AllowedDomains: effectiveStrings(info.domainsEnforced(), info.AllowedDomains),
+		},
+		SSHAgentForwarded:  info.SSHAgentForwarded,
+		GHCLIAuthenticated: info.GHCLIAuthenticated,
+		DockerAvailable:    !info.DockerUnavailable,
+		ForwardedEnvVars:   nonNilStrings(info.ForwardedEnvVars),
+		ProtectedPaths:     nonNilStrings(info.ProtectedPaths),
+		ExtraMounts:        mounts,
+		PublishedPorts:     ports,
+		Limits: SandboxLimitsJSON{
+			CPU:         info.CPULimit,
+			Memory:      info.MemoryLimit,
+			MaxDuration: info.MaxDuration,
+		},
+	}
+
+	b, err := json.MarshalIndent(out, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal sandbox context JSON: %w", err)
+	}
+	return string(b) + "\n", nil
+}
+
+// nonNilStrings / nonNilInts return an empty (non-nil) slice for a nil input so
+// the field marshals as [] rather than null.
+func nonNilStrings(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
+}
+
+func nonNilInts(s []int) []int {
+	if s == nil {
+		return []int{}
+	}
+	return s
+}
+
+// effectiveStrings / effectiveInts return the configured slice only when the
+// control is actually enforced in the current mode; otherwise an empty [] — so
+// the JSON never reports an inert config value as an installed egress cap.
+func effectiveStrings(enforced bool, s []string) []string {
+	if !enforced {
+		return []string{}
+	}
+	return nonNilStrings(s)
+}
+
+func effectiveInts(enforced bool, s []int) []int {
+	if !enforced {
+		return []int{}
+	}
+	return nonNilInts(s)
 }

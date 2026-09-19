@@ -61,6 +61,7 @@ Examples:
 
 func init() {
 	tmuxListCmd.Flags().StringVar(&tmuxFormat, "format", "text", "Output format: text or json")
+	tmuxListCmd.Flags().Bool("json", false, "Alias for --format json")
 
 	tmuxCmd.AddCommand(tmuxSendCmd)
 	tmuxCmd.AddCommand(tmuxCaptureCmd)
@@ -145,8 +146,9 @@ func tmuxCaptureCommand(cmd *cobra.Command, args []string) error {
 }
 
 func tmuxListCommand(cmd *cobra.Command, args []string) error {
-	if tmuxFormat != "text" && tmuxFormat != "json" {
-		return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid format '%s': must be 'text' or 'json'", tmuxFormat)}
+	applyJSONFormatAlias(cmd, &tmuxFormat)
+	if err := validateTextOrJSON(tmuxFormat); err != nil {
+		return err
 	}
 
 	// List all running containers with configured prefix

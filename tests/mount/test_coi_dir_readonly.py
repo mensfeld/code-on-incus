@@ -8,18 +8,9 @@ weakens network isolation — a cross-session sandbox escape. COI mounts .coi/
 read-only (protected_paths) so the agent cannot tamper with it.
 """
 
-import subprocess
 from pathlib import Path
 
-
-def _run(coi_binary, workspace_dir, argv, timeout=120):
-    return subprocess.run(
-        [coi_binary, "run", "--", *argv],
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        cwd=workspace_dir,
-    )
+from support.helpers import run_coi_in_workspace as _run
 
 
 def test_coi_dir_is_readonly_inside_container(coi_binary, cleanup_containers, workspace_dir):

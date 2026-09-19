@@ -61,12 +61,25 @@ func getInitPIDViaIncus(ctx context.Context, containerName string) (int, error) 
 // wellKnownCgroupPaths returns the candidate cgroup v2 paths for a container
 // in the order they should be probed. Shared with GetCgroupPath so both
 // functions check exactly the same list without duplicating it.
+//
+// The .payload paths come FIRST: on an Incus/LXC layout that splits the
+// instance into a monitor cgroup (the host-side forkstart process) and a
+// payload cgroup (the container's own process tree), only the payload holds
+// the container's processes. Probing .monitor first there would make
+// GetCgroupPath read the monitor's tiny memory/IO (under-reporting the whole
+// container) and make GetContainerInitPID return the monitor's PID instead of
+// the container init. The .monitor paths stay in the list as a fallback for
+// layouts where the monitor cgroup is itself the combined instance root, but
+// after payload and the legacy single-hierarchy roots. Non-existent candidates
+// are Stat-probed and skipped, so listing extra forms is always safe.
 func wellKnownCgroupPaths(containerName string) []string {
 	return []string{
-		fmt.Sprintf("/sys/fs/cgroup/incus.monitor/%s", containerName),
-		fmt.Sprintf("/sys/fs/cgroup/lxc.monitor/%s", containerName),
+		fmt.Sprintf("/sys/fs/cgroup/incus.payload/%s", containerName),
+		fmt.Sprintf("/sys/fs/cgroup/lxc.payload/%s", containerName),
 		fmt.Sprintf("/sys/fs/cgroup/lxc/%s", containerName),
 		fmt.Sprintf("/sys/fs/cgroup/incus/%s", containerName),
+		fmt.Sprintf("/sys/fs/cgroup/incus.monitor/%s", containerName),
+		fmt.Sprintf("/sys/fs/cgroup/lxc.monitor/%s", containerName),
 	}
 }
 
@@ -154,12 +167,38 @@ func findCgroupPathViaIncus(ctx context.Context, containerName string) (string, 
 	return "", fmt.Errorf("could not parse cgroup path from %s", cgroupFile)
 }
 
+// stripSystemdScopeSuffix removes a single trailing systemd scope/service
+// segment (e.g. "/init.scope") from a cgroup path, so reads hit the container's
+// top-level cgroup, whose cgroup v2 counters (memory.current, cpu.stat,
+// io.stat) aggregate the whole process tree. GetCgroupPath's incus-info
+// fallback returns the init process's own sub-scope, which accounts for only
+// systemd PID 1 — reading resource stats there under-reports the container by
+// orders of magnitude (#top-mem).
+//
+// It strips exactly ONE leaf, which is all GetCgroupPath ever produces: either
+// the container root itself, or "<root>/init.scope". It is NOT a general
+// container-root resolver — a deeper path like "<root>/system.slice/foo.service"
+// yields "<root>/system.slice", not the root. Callers rely on the ≤1-level
+// contract. A path whose leaf is neither .scope nor .service is returned
+// unchanged. collectProcessesViaHostProc uses the same strip so both views
+// agree on the container root.
+func stripSystemdScopeSuffix(cgroupPath string) string {
+	base := filepath.Base(cgroupPath)
+	if strings.HasSuffix(base, ".scope") || strings.HasSuffix(base, ".service") {
+		return filepath.Dir(cgroupPath)
+	}
+	return cgroupPath
+}
+
 // CollectResourceStats reads resource usage from cgroup
 func CollectResourceStats(ctx context.Context, containerName string) (ResourceStats, error) {
-	cgroupPath, err := GetCgroupPath(ctx, containerName)
+	rawPath, err := GetCgroupPath(ctx, containerName)
 	if err != nil {
 		return ResourceStats{}, fmt.Errorf("failed to get cgroup path: %w", err)
 	}
+	// Read from the container's top-level cgroup, not init.scope, so the v2
+	// counters aggregate every process in the container (#top-mem).
+	cgroupPath := stripSystemdScopeSuffix(rawPath)
 
 	stats := ResourceStats{}
 
@@ -182,22 +221,17 @@ func CollectResourceStats(ctx context.Context, containerName string) (ResourceSt
 		stats.MemoryLimitMB = memStats.max / 1024.0 / 1024.0
 	}
 
-	// Read I/O stats
+	// Read I/O stats from the container root, whose io.stat aggregates the
+	// whole tree. (This previously read init.scope, which tracks no I/O, and
+	// climbed one level to compensate — no longer needed now that cgroupPath is
+	// already the container root. Climbing further would reach the grouping
+	// cgroup shared by every container and over-count.)
 	ioStats, err := readIOStats(filepath.Join(cgroupPath, "io.stat"))
 	if err != nil {
 		// I/O stats might not be available, don't fail
 		stats.IOReadMB = 0
 		stats.IOWriteMB = 0
 	} else {
-		// If stats are zero, try parent cgroup (in case init.scope doesn't track I/O)
-		if ioStats.read == 0 && ioStats.write == 0 {
-			parentPath := filepath.Dir(cgroupPath)
-			parentStats, parentErr := readIOStats(filepath.Join(parentPath, "io.stat"))
-			if parentErr == nil && (parentStats.read > 0 || parentStats.write > 0) {
-				ioStats = parentStats
-			}
-		}
-
 		stats.IOReadMB = ioStats.read / 1024.0 / 1024.0
 		stats.IOWriteMB = ioStats.write / 1024.0 / 1024.0
 	}

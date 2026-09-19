@@ -11,6 +11,15 @@ const (
 	MinIncusVersionMajor = 6
 	// MinIncusVersionMinor is the minimum required Incus minor version
 	MinIncusVersionMinor = 1
+
+	// RecommendedIncusVersionMajor/Minor is the version below which `coi
+	// health` warns (but nothing refuses to run): Incus releases carry
+	// container-manager and isolation fixes that stable distributions
+	// backport late or never, so running far behind the current release
+	// means known-fixed issues stay live. Bump this occasionally alongside
+	// dependency updates.
+	RecommendedIncusVersionMajor = 6
+	RecommendedIncusVersionMinor = 7
 )
 
 // IncusVersion represents a parsed Incus version
@@ -78,6 +87,18 @@ func MeetsMinimumVersion(v *IncusVersion) bool {
 	}
 	if v.Major == MinIncusVersionMajor {
 		return v.Minor >= MinIncusVersionMinor
+	}
+	return false
+}
+
+// MeetsRecommendedVersion checks if the given version meets the recommended
+// version (see RecommendedIncusVersionMajor/Minor).
+func MeetsRecommendedVersion(v *IncusVersion) bool {
+	if v.Major > RecommendedIncusVersionMajor {
+		return true
+	}
+	if v.Major == RecommendedIncusVersionMajor {
+		return v.Minor >= RecommendedIncusVersionMinor
 	}
 	return false
 }

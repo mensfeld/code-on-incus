@@ -109,7 +109,7 @@ func ExpandSecretPaths(workspacePath string, secretPaths []string) (masks []secr
 // second MountDisk would fail). The hash is collision-free and stable per path.
 func maskDeviceName(relPath string) string {
 	sum := sha256.Sum256([]byte(relPath))
-	return "mask-" + hex.EncodeToString(sum[:])[:16]
+	return maskDevicePrefix + hex.EncodeToString(sum[:])[:16]
 }
 
 // ensureMaskSources creates the empty file and empty directory used as read-only

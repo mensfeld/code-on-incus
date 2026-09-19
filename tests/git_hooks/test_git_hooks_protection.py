@@ -7,21 +7,12 @@ malicious code injection that could execute on the host during git operations.
 import subprocess
 from pathlib import Path
 
-from support.helpers import write_trusted_coi_config
-
-
-def _make_workspace_writable(workspace_dir):
-    """Make workspace world-writable so container user (UID 1000) can write.
-
-    In CI, the test runner UID (1001) differs from the container user UID (1000).
-    With shift=true on the Incus disk device, host UIDs map directly — so the
-    container user can only write to files with 'other' write permission.
-    """
-    subprocess.run(
-        ["chmod", "-R", "a+rwX", workspace_dir],
-        check=True,
-        capture_output=True,
-    )
+from support.helpers import (
+    make_workspace_writable as _make_workspace_writable,
+)
+from support.helpers import (
+    write_trusted_coi_config,
+)
 
 
 def test_git_hooks_readonly_by_default(coi_binary, workspace_dir, cleanup_containers):
