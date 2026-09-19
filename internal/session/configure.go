@@ -106,7 +106,9 @@ func ConfigureContainer(ctx context.Context, opts ConfigureOptions) (*ConfigureR
 	// 2.1. AI-attribution strip hook (#788): global commit-msg hook removing
 	// co-author/tool-footer lines from every commit message.
 	if opts.GitStripAttribution {
-		SetupGitAttributionHook(mgr, homeDir, opts.GitStripAttributionPatterns, true, opts.Logger)
+		// coi-pond lightweight path: strip only (no [git] readonly branch here,
+		// so identity is not locked/enforced — a pre-existing gap, out of scope).
+		SetupGitHooks(mgr, homeDir, opts.GitIdentity, true, opts.GitStripAttributionPatterns, false, true, opts.Logger)
 	}
 
 	// 3. Claude managed settings: auto-mode suppression (skipped under

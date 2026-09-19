@@ -51,9 +51,12 @@ var DefaultAttributionPatterns = []string{
 // silently stop running in-container. Deliberately excludes high-frequency
 // plumbing hooks (reference-transaction, post-index-change) — a fork+exec on
 // every ref update is not worth delegating hooks repos rarely use.
+// post-commit is intentionally absent: it is handled explicitly by SetupGitHooks
+// (a root-owned re-stamp script when the identity is locked, a plain delegation
+// symlink otherwise), so it must not be blanket-symlinked here.
 var delegatedHookNames = []string{
 	"applypatch-msg", "pre-applypatch", "post-applypatch",
-	"pre-commit", "pre-merge-commit", "prepare-commit-msg", "post-commit",
+	"pre-commit", "pre-merge-commit", "prepare-commit-msg",
 	"pre-rebase", "post-checkout", "post-merge", "pre-push",
 	"post-rewrite", "pre-auto-gc",
 }
@@ -98,6 +101,64 @@ fi
 exit 0
 `
 
+// gitPostCommitRestampHead is the top of the identity re-stamp post-commit hook:
+// the recursion/single-delegate guard and the git-dir lookup. The LOCK_NAME /
+// LOCK_EMAIL assignments (baked from the resolved identity) and
+// gitPostCommitRestampBody are appended by renderPostCommitRestampScript.
+const gitPostCommitRestampHead = `#!/bin/sh
+# Managed by coi ([git] readonly identity lock): if a commit was authored or
+# committed as anyone other than the locked identity (via -c user.*, --author=,
+# or GIT_AUTHOR_* the agent exported), re-stamp HEAD to the locked identity,
+# then run the repository's own post-commit. Never blocks (git ignores the
+# post-commit exit status).
+#
+# The --amend below re-fires post-commit; COI_RESTAMP_ACTIVE makes that nested
+# run a no-op (no amend, no delegate) so the repo hook runs EXACTLY ONCE, from
+# this outer run, on the corrected commit.
+[ -n "$COI_RESTAMP_ACTIVE" ] && exit 0
+gitdir="$(git rev-parse --git-dir 2>/dev/null)" || exit 0
+`
+
+// gitPostCommitRestampBody is the tail: the single-delegate helper, the
+// mid-sequence skip, and the amend. %ae/%ce are literal git format specifiers
+// (this is a plain string, never a printf format). git rev-parse --git-dir is
+// used (NOT --git-path hooks, which resolves back to this dir and recurses).
+const gitPostCommitRestampBody = `
+delegate() {
+	hook="$gitdir/hooks/post-commit"
+	[ -x "$hook" ] && "$hook" "$@"
+	exit 0
+}
+# Never amend mid-sequence — git drives these itself and an amend corrupts state.
+for m in rebase-merge rebase-apply MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD BISECT_LOG sequencer; do
+	[ -e "$gitdir/$m" ] && delegate "$@"
+done
+an="$(git log -1 --format='%an' 2>/dev/null)" || delegate "$@"
+ae="$(git log -1 --format='%ae' 2>/dev/null)"
+cn="$(git log -1 --format='%cn' 2>/dev/null)"
+ce="$(git log -1 --format='%ce' 2>/dev/null)"
+# Compare NAME and EMAIL of both author and committer: an override that keeps the
+# locked email but changes the name (e.g. --author="Evil <locked-email>") must
+# still be re-stamped.
+if [ "$an" != "$LOCK_NAME" ] || [ "$ae" != "$LOCK_EMAIL" ] || [ "$cn" != "$LOCK_NAME" ] || [ "$ce" != "$LOCK_EMAIL" ]; then
+	COI_RESTAMP_ACTIVE=1 \
+	GIT_AUTHOR_NAME="$LOCK_NAME" GIT_AUTHOR_EMAIL="$LOCK_EMAIL" \
+	GIT_COMMITTER_NAME="$LOCK_NAME" GIT_COMMITTER_EMAIL="$LOCK_EMAIL" \
+	git commit --amend --reset-author --no-edit --no-verify --allow-empty >/dev/null 2>&1
+fi
+delegate "$@"
+`
+
+// renderPostCommitRestampScript bakes the resolved identity into the re-stamp
+// hook (single source of truth — no hardcoded copy). shellEscape single-quotes
+// the values, so the assignments are injection-safe.
+func renderPostCommitRestampScript(id GitIdentity) string {
+	return gitPostCommitRestampHead +
+		"LOCK_NAME=" + shellEscape(strings.TrimSpace(id.Name)) + "\n" +
+		"LOCK_EMAIL=" + shellEscape(strings.TrimSpace(id.Email)) + "\n" +
+		gitPostCommitRestampBody
+}
+
 // renderAttributionPatternsFile joins the pattern list into the grep -f file
 // content. Blank/whitespace-only entries are dropped: an empty pattern line
 // matches EVERY line, which with grep -v would delete the whole message.
@@ -122,21 +183,32 @@ func effectiveAttributionPatterns(configured []string) []string {
 	return DefaultAttributionPatterns
 }
 
-// SetupGitAttributionHook installs the strip hook inside the container: the
-// root-owned hook directory (commit-msg + delegation wrappers + pattern file)
-// and, for a writable global gitconfig, core.hooksPath pointing at it. With
-// [git] readonly the caller instead bakes core.hooksPath into the mounted
-// gitconfig (renderReadonlyGitConfig) and passes setHooksPath=false here.
-// Root ownership keeps the sandboxed agent from editing its own policy.
-// Non-fatal: logs a warning on failure (cosmetic feature, never blocks a
-// session), mirroring SetupGitIdentity.
-func SetupGitAttributionHook(mgr container.ContainerManager, homeDir string, patterns []string, setHooksPath bool, logger func(string)) {
+// SetupGitHooks installs COI's root-owned global git hooks inside the container
+// and (for a writable global gitconfig) points core.hooksPath at them. Two
+// independent policies share the one hook directory, because core.hooksPath can
+// point at only one place:
+//   - stripAttribution: the commit-msg strip hook (#788) + its pattern file.
+//   - lockIdentity: a post-commit re-stamp hook baked with `id` that rewrites any
+//     commit whose author/committer isn't the locked identity — the enforcement
+//     that makes -c user.*, --author=, and agent GIT_* overrides lose.
+//
+// The delegation wrappers (so a repo's own hooks keep running under the replaced
+// hooks dir) are always installed. With [git] readonly the caller bakes
+// core.hooksPath into the mounted gitconfig (renderReadonlyGitConfig) and passes
+// setHooksPath=false. Root ownership (uid/gid 0) keeps the sandboxed non-root
+// agent from editing its own policy. Non-fatal: logs a warning on failure and
+// never blocks a session.
+func SetupGitHooks(mgr container.ContainerManager, homeDir string, id GitIdentity, stripAttribution bool, patterns []string, lockIdentity, setHooksPath bool, logger func(string)) {
 	files := []struct {
 		path, content, mode string
 	}{
-		{GitHooksDir + "/commit-msg", gitCommitMsgHookScript, "0755"},
 		{GitHooksDir + "/delegate", gitDelegateHookScript, "0755"},
-		{gitAttributionPatternsPath, renderAttributionPatternsFile(effectiveAttributionPatterns(patterns)), "0644"},
+	}
+	if stripAttribution {
+		files = append(files,
+			struct{ path, content, mode string }{GitHooksDir + "/commit-msg", gitCommitMsgHookScript, "0755"},
+			struct{ path, content, mode string }{gitAttributionPatternsPath, renderAttributionPatternsFile(effectiveAttributionPatterns(patterns)), "0644"},
+		)
 	}
 	if _, err := mgr.ExecCommand("mkdir -p "+GitHooksDir, container.ExecCommandOptions{Capture: true}); err != nil {
 		logger(fmt.Sprintf("Warning: failed to create %s: %v", GitHooksDir, err))
@@ -158,6 +230,24 @@ func SetupGitAttributionHook(mgr container.ContainerManager, homeDir string, pat
 		logger(fmt.Sprintf("Warning: failed to link delegation hooks: %v", err))
 		return
 	}
+	// post-commit: a real re-stamp file when locking, else a delegation symlink.
+	// Remove any prior form first so CreateFileWithOwner can't follow an existing
+	// symlink and clobber the delegate script, and so a lock->unlock switch on a
+	// reused container converges.
+	postCommit := GitHooksDir + "/post-commit"
+	if _, err := mgr.ExecCommand("rm -f "+postCommit, container.ExecCommandOptions{Capture: true}); err != nil {
+		logger(fmt.Sprintf("Warning: failed to reset %s: %v", postCommit, err))
+		return
+	}
+	if lockIdentity {
+		if err := mgr.CreateFileWithOwner(postCommit, renderPostCommitRestampScript(id), 0, 0, "0755"); err != nil {
+			logger(fmt.Sprintf("Warning: failed to write %s: %v", postCommit, err))
+			return
+		}
+	} else if _, err := mgr.ExecCommand("ln -sf delegate "+postCommit, container.ExecCommandOptions{Capture: true}); err != nil {
+		logger(fmt.Sprintf("Warning: failed to link post-commit delegation hook: %v", err))
+		return
+	}
 	if setHooksPath {
 		cmd := fmt.Sprintf(`HOME=%s git config --global core.hooksPath %s`,
 			shellEscape(homeDir), shellEscape(GitHooksDir))
@@ -166,7 +256,14 @@ func SetupGitAttributionHook(mgr container.ContainerManager, homeDir string, pat
 			return
 		}
 	}
-	logger("Installed AI-attribution strip hook (git commit messages keep only the configured author)")
+	switch {
+	case stripAttribution && lockIdentity:
+		logger("Installed git hooks: AI-attribution strip + commit-identity re-stamp (identity locked)")
+	case lockIdentity:
+		logger("Installed git commit-identity re-stamp hook (identity locked; overrides cannot change the author)")
+	default:
+		logger("Installed AI-attribution strip hook (git commit messages keep only the configured author)")
+	}
 }
 
 // RemoveGitAttributionHookConfig best-effort unsets core.hooksPath so a

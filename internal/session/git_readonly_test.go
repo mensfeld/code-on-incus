@@ -8,6 +8,14 @@ import (
 	"testing"
 )
 
+// testBotName / testBotEmail are the single source for the fake locked identity
+// used across session tests. Kept in one place so the value can't drift between
+// fixtures (a duplicated copy previously went stale on the account number).
+const (
+	testBotName  = "coipond-coder[bot]"
+	testBotEmail = "317930231+coipond-coder[bot]@users.noreply.github.com"
+)
+
 func TestGitConfigQuote(t *testing.T) {
 	cases := map[string]string{
 		"coipond-coder[bot]": `"coipond-coder[bot]"`, // brackets are ordinary in a value
@@ -25,12 +33,12 @@ func TestGitConfigQuote(t *testing.T) {
 
 func TestRenderReadonlyGitConfig(t *testing.T) {
 	got := renderReadonlyGitConfig(GitIdentity{
-		Name:  "coipond-coder[bot]",
-		Email: "4624853+coipond-coder[bot]@users.noreply.github.com",
+		Name:  testBotName,
+		Email: testBotEmail,
 	}, "")
 	for _, want := range []string{
-		`name = "coipond-coder[bot]"`,
-		`email = "4624853+coipond-coder[bot]@users.noreply.github.com"`,
+		`name = "` + testBotName + `"`,
+		`email = "` + testBotEmail + `"`,
 		"useConfigOnly = true",
 		"[user]",
 	} {

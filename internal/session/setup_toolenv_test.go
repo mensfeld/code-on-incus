@@ -6,7 +6,7 @@ import (
 )
 
 func TestPlanToolContainerEnv_SetsDesired(t *testing.T) {
-	plan := planToolContainerEnv("", map[string]string{
+	plan := planContainerEnv("", map[string]string{
 		"ANTHROPIC_MODEL":          "opus",
 		"CLAUDE_CODE_EFFORT_LEVEL": "high",
 	})
@@ -28,7 +28,7 @@ func TestPlanToolContainerEnv_SetsDesired(t *testing.T) {
 // profile set but the new one no longer wants — the core reuse-staleness fix.
 func TestPlanToolContainerEnv_ReconcilesStaleKeys(t *testing.T) {
 	prev := "ANTHROPIC_MODEL,CLAUDE_CODE_EFFORT_LEVEL"
-	plan := planToolContainerEnv(prev, map[string]string{"ANTHROPIC_MODEL": "sonnet"})
+	plan := planContainerEnv(prev, map[string]string{"ANTHROPIC_MODEL": "sonnet"})
 
 	if !reflect.DeepEqual(plan.setKeys, []string{"ANTHROPIC_MODEL"}) {
 		t.Errorf("setKeys = %v, want [ANTHROPIC_MODEL]", plan.setKeys)
@@ -46,7 +46,7 @@ func TestPlanToolContainerEnv_ReconcilesStaleKeys(t *testing.T) {
 
 // Nothing desired but keys set before -> unset them all and clear the marker.
 func TestPlanToolContainerEnv_ClearsWhenEmpty(t *testing.T) {
-	plan := planToolContainerEnv("ANTHROPIC_MODEL", map[string]string{})
+	plan := planContainerEnv("ANTHROPIC_MODEL", map[string]string{})
 	if len(plan.setKeys) != 0 {
 		t.Errorf("setKeys = %v, want none", plan.setKeys)
 	}
@@ -61,7 +61,7 @@ func TestPlanToolContainerEnv_ClearsWhenEmpty(t *testing.T) {
 // An unsafe value (newline) is skipped, not set — and because it isn't applied,
 // a previously-set key of the same name is reconciled away.
 func TestPlanToolContainerEnv_SkipsUnsafeValue(t *testing.T) {
-	plan := planToolContainerEnv("ANTHROPIC_MODEL", map[string]string{
+	plan := planContainerEnv("ANTHROPIC_MODEL", map[string]string{
 		"ANTHROPIC_MODEL": "opus\nenvironment.EVIL=1",
 	})
 	if len(plan.setKeys) != 0 {

@@ -464,16 +464,19 @@ func (a *App) configureContainerRunPhase(s *runState) session.Phase {
 			homeDir := "/home/" + container.CodeUser
 			gitID := resolveGitIdentity(&a.cfg.Git)
 			stripAttribution := a.cfg.Git.IsStripAttributionEnabled()
+			readonlyLock := a.cfg.Git.IsReadonlyEnabled() && gitID.Complete()
+			identityLock := readonlyLock
+			// core.hooksPath must be installed when EITHER the strip hook or the
+			// identity re-stamp hook is active (they share the one hook dir).
 			hooksPath := ""
-			if stripAttribution {
+			if stripAttribution || identityLock {
 				hooksPath = session.GitHooksDir
 			}
-			readonlyLock := a.cfg.Git.IsReadonlyEnabled() && gitID.Complete()
 			if readonlyLock {
 				// Fail closed: the user asked to lock the identity read-only.
-				// core.hooksPath for the attribution strip hook rides inside the
-				// mounted gitconfig (a live `git config --global` would fail
-				// against the read-only mount).
+				// core.hooksPath for the hooks rides inside the mounted gitconfig
+				// (a live `git config --global` would fail against the read-only
+				// mount).
 				if err := session.SetupGitIdentityReadonly(s.mgr, homeDir, gitID, hooksPath); err != nil {
 					return nil, fmt.Errorf("git.readonly: could not lock the commit identity read-only: %w", err)
 				}
@@ -481,14 +484,17 @@ func (a *App) configureContainerRunPhase(s *runState) session.Phase {
 				session.SetupGitIdentityGuard(s.mgr, homeDir, logFn)
 				session.SetupGitIdentity(s.mgr, homeDir, gitID, logFn)
 			}
-			// AI-attribution strip hook (#788), mirroring the shell path: the
-			// hook dir is needed on both identity paths; core.hooksPath is
+			// Git hooks (#788 strip + identity re-stamp), mirroring the shell path:
+			// the hook dir is needed on both identity paths; core.hooksPath is
 			// written live only when the gitconfig is writable.
-			if stripAttribution {
-				session.SetupGitAttributionHook(s.mgr, homeDir, a.cfg.Git.StripAttributionPatterns, !readonlyLock, logFn)
+			if stripAttribution || identityLock {
+				session.SetupGitHooks(s.mgr, homeDir, gitID, stripAttribution, a.cfg.Git.StripAttributionPatterns, identityLock, !readonlyLock, logFn)
 			} else if !readonlyLock {
 				session.RemoveGitAttributionHookConfig(s.mgr, homeDir)
 			}
+			// Layer 1: pin GIT_AUTHOR_*/GIT_COMMITTER_* container-level env so a
+			// `-c user.*` override loses; no-op / unset when identity isn't locked.
+			session.ApplyGitIdentityContainerEnv(ctx, s.containerName, gitID, identityLock, logFn)
 			// Claude source-level layer for the same policy
 			// (includeCoAuthoredBy=false via managed settings) — it also covers
 			// the hook's two blind spots (local core.hooksPath repos, commits
