@@ -463,7 +463,10 @@ def test_unknown_key_in_nested_section_rejected(validator, profile):
         # Arrays expected — wrong types supplied
         {"forward_env": "SOME_VAR"},
         {"forward_env": True},
-        {"mounts": {}},
+        # mounts must be an array ([[mounts]]) or a { default = [...] } table
+        # ([[mounts.default]]); a scalar is neither. (An empty {} table is a
+        # valid "no mounts" nested form, so it is intentionally NOT rejected.)
+        {"mounts": "not-a-mount-block"},
         {"network": {"allowed_domains": "github.com"}},
         {"security": {"protected_paths": ".git/hooks"}},
         {"security": {"additional_protected_paths": True}},

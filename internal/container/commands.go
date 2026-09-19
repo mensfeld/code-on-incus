@@ -147,6 +147,20 @@ func ImportImage(lxdTar, squashfs, alias string) error {
 }
 
 // IncusOutputContext executes an Incus command with context support and returns the output (trimmed)
+// toExitError wraps a failed incus command's error as *ExitError when it is an
+// *exec.ExitError (capturing the exit code and the given stderr), and returns
+// the original error unchanged otherwise. Pass "" for stderr when none was
+// captured separately (e.g. combined stdout+stderr, or streamed output).
+func toExitError(err error, stderr string) error {
+	if err == nil {
+		return nil
+	}
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		return &ExitError{ExitCode: exitErr.ExitCode(), Err: err, Stderr: stderr}
+	}
+	return err
+}
+
 func IncusOutputContext(ctx context.Context, args ...string) (string, error) {
 	cmdArgs := buildIncusCommand(args...)
 	cmd := execIncusCommandContext(ctx, cmdArgs)
@@ -159,14 +173,7 @@ func IncusOutputContext(ctx context.Context, args ...string) (string, error) {
 	output := strings.TrimSpace(stdout.String())
 
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return output, &ExitError{
-				ExitCode: exitErr.ExitCode(),
-				Err:      err,
-				Stderr:   strings.TrimSpace(stderr.String()),
-			}
-		}
-		return output, err
+		return output, toExitError(err, strings.TrimSpace(stderr.String()))
 	}
 
 	return output, nil
@@ -190,14 +197,7 @@ func IncusOutputRawContext(ctx context.Context, args ...string) (string, error) 
 	output := stdout.String()
 
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return output, &ExitError{
-				ExitCode: exitErr.ExitCode(),
-				Err:      err,
-				Stderr:   strings.TrimSpace(stderr.String()),
-			}
-		}
-		return output, err
+		return output, toExitError(err, strings.TrimSpace(stderr.String()))
 	}
 
 	return output, nil
@@ -221,13 +221,7 @@ func IncusOutputWithStderrContext(ctx context.Context, args ...string) (string, 
 	output := strings.TrimSpace(combined.String())
 
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return output, &ExitError{
-				ExitCode: exitErr.ExitCode(),
-				Err:      err,
-			}
-		}
-		return output, err
+		return output, toExitError(err, "")
 	}
 
 	return output, nil
@@ -252,14 +246,7 @@ func IncusOutputWithArgsContext(ctx context.Context, args ...string) (string, er
 	output := strings.TrimSpace(stdout.String())
 
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return output, &ExitError{
-				ExitCode: exitErr.ExitCode(),
-				Err:      err,
-				Stderr:   strings.TrimSpace(stderr.String()),
-			}
-		}
-		return output, err
+		return output, toExitError(err, strings.TrimSpace(stderr.String()))
 	}
 
 	return output, nil
@@ -316,10 +303,7 @@ func IncusExecStreamedContext(ctx context.Context, args ...string) error {
 
 	err := runIncus(cmd)
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return &ExitError{ExitCode: exitErr.ExitCode(), Err: err}
-		}
-		return err
+		return toExitError(err, "")
 	}
 	return nil
 }
@@ -437,6 +421,23 @@ func withDisableShiftHint(err error) error {
 	return fmt.Errorf("%w -- this host's kernel can't set up idmapped (\"shift\") mounts and coi's "+
 		"automatic raw.idmap fallback did not recover; set `[incus] disable_shift = true` in "+
 		"~/.coi/config.toml (or your active profile) to use raw.idmap for the workspace mount instead", err)
+}
+
+// startRetryError decides what error a start-retry branch returns. A successful
+// retry (nil) returns nil. When the retry also fails, a #678 idmapped-mount
+// failure — identified from the ORIGINAL start error — gets the disable_shift
+// hint; any other failure is returned unchanged. Shared by the ephemeral
+// recreate-after-deletion and the unset-isolation branches so their hint
+// routing can't drift (#716). Kept pure so the decision is unit-tested without
+// the live-Incus retry paths.
+func startRetryError(firstErr, retryErr error) error {
+	if retryErr == nil {
+		return nil
+	}
+	if isIdmapMountUnsupported(firstErr) {
+		return withDisableShiftHint(retryErr)
+	}
+	return retryErr
 }
 
 // ContainerUsesRawIdmap reports whether the container already has raw.idmap set,
@@ -590,12 +591,21 @@ func LaunchContainerPersistent(imageAlias, containerName, pool string) error {
 
 // LaunchContainerWithPreStart is LaunchContainer/LaunchContainerPersistent with
 // an optional preStart hook that runs AFTER `incus init` (+ config flags) but
-// BEFORE the container is started. This is where start-time-only instance
+// BEFORE the container is started. It applies the DEFAULT hardening policy;
+// callers that honor [container] docker / [security] reduce_kernel_surface use
+// LaunchContainerWithPreStartPolicy instead. A nil preStart is a no-op.
+func LaunchContainerWithPreStart(imageAlias, containerName, pool string, ephemeral bool, preStart func() error) error {
+	return LaunchContainerWithPreStartPolicy(imageAlias, containerName, pool, ephemeral, preStart, DefaultHardeningPolicy())
+}
+
+// LaunchContainerWithPreStartPolicy is LaunchContainerWithPreStart with an
+// explicit kernel-surface policy applied once at init (before first boot, as
+// the seccomp profile requires). This is where start-time-only instance
 // settings such as raw.idmap must be applied (issue #530): the run pipeline
 // needs the workspace UID mapping set before first boot, and `incus launch`
 // would start too early. A nil preStart is a no-op.
-func LaunchContainerWithPreStart(imageAlias, containerName, pool string, ephemeral bool, preStart func() error) error {
-	if err := initAndConfigureContainer(imageAlias, containerName, pool, ephemeral, preStart); err != nil {
+func LaunchContainerWithPreStartPolicy(imageAlias, containerName, pool string, ephemeral bool, preStart func() error, policy HardeningPolicy) error {
+	if err := initAndConfigureContainer(imageAlias, containerName, pool, ephemeral, preStart, policy); err != nil {
 		return err
 	}
 	// Non-fatal: unset and retry at start time if the environment lacks subuid space.
@@ -618,10 +628,25 @@ func LaunchContainerWithPreStart(imageAlias, containerName, pool string, ephemer
 		// Check for deletion: stopped ephemeral containers are deleted by Incus.
 		out, err := IncusOutput("list", "^"+containerName+"$", "--format=csv", "--columns=n")
 		if err == nil && strings.TrimSpace(out) == "" {
-			// Recreate without isolation and start fresh (preStart re-runs so the
-			// idmap is re-applied on the recreated container).
-			fmt.Fprintf(os.Stderr, "Warning: UID namespace isolation not supported in this environment\n")
-			return initConfigureAndStart(imageAlias, containerName, pool, true, preStart)
+			// Incus deleted the ephemeral container after the start failure.
+			// Recreate + start fresh (preStart re-runs so raw.idmap is re-applied);
+			// initConfigureAndStart does not set security.idmap.isolated, so the
+			// retry drops isolation. State that neutrally rather than asserting
+			// isolation was unsupported — the recreate *succeeding* is what would
+			// prove that, and an idmapped-mount failure (#678) is a different
+			// class entirely (#716).
+			fmt.Fprintf(os.Stderr, "Warning: container start failed; recreating without UID namespace isolation and retrying\n")
+			recreateErr := initConfigureAndStart(imageAlias, containerName, pool, true, preStart, policy)
+			// The recreate's start (a plain `incus start`) can soft-fail —
+			// forkstart exits non-zero though the container came up — on the same
+			// nested/CI hosts the initial start does; treat a running container as
+			// success before reporting failure, matching the other retry branches.
+			if recreateErr != nil {
+				if running, _ := ContainerRunning(containerName); running {
+					return nil
+				}
+			}
+			return startRetryError(firstErr, recreateErr)
 		}
 	}
 
@@ -646,18 +671,17 @@ func LaunchContainerWithPreStart(imageAlias, containerName, pool string, ephemer
 		if running, _ := ContainerRunning(containerName); running {
 			return nil
 		}
-		if isIdmapMountUnsupported(firstErr) {
-			return withDisableShiftHint(retryErr)
-		}
-		return retryErr
+		return startRetryError(firstErr, retryErr)
 	}
 	return nil
 }
 
-// initAndConfigureContainer creates a container, applies the required config
-// flags, and runs the optional preStart hook (used for start-time-only settings
-// like raw.idmap) before the caller starts the container.
-func initAndConfigureContainer(imageAlias, containerName, pool string, ephemeral bool, preStart func() error) error {
+// initAndConfigureContainer creates a container, applies the kernel-surface
+// policy and other required config flags, and runs the optional preStart hook
+// (used for start-time-only settings like raw.idmap) before the caller starts
+// the container. The policy is applied once here, before first boot, so no
+// caller needs to patch it on afterward.
+func initAndConfigureContainer(imageAlias, containerName, pool string, ephemeral bool, preStart func() error, policy HardeningPolicy) error {
 	args := []string{"init", imageAlias, containerName}
 	if ephemeral {
 		args = append(args, "--ephemeral")
@@ -668,7 +692,15 @@ func initAndConfigureContainer(imageAlias, containerName, pool string, ephemeral
 	if err := IncusExec(args...); err != nil {
 		return err
 	}
-	if err := EnableDockerSupport(containerName); err != nil {
+	if err := ApplyKernelSurfacePolicy(containerName, policy); err != nil {
+		return err
+	}
+	// Fail closed BEFORE first boot when an attached Incus profile pins a key
+	// the policy needs unset (e.g. security.nesting=true from a Docker-in-Incus
+	// default profile): the instance-local unset above cannot override it, and
+	// booting anyway would silently defeat the requested hardening. Free for
+	// the default (docker-on) policy — no reads are performed.
+	if err := VerifyKernelSurfacePolicy(containerName, policy); err != nil {
 		return err
 	}
 	if err := DisableGuestAPI(containerName); err != nil {
@@ -685,54 +717,11 @@ func initAndConfigureContainer(imageAlias, containerName, pool string, ephemeral
 
 // initConfigureAndStart creates, configures, and starts a container without
 // security.idmap.isolated — used as the isolation-unsupported fallback path.
-func initConfigureAndStart(imageAlias, containerName, pool string, ephemeral bool, preStart func() error) error {
-	if err := initAndConfigureContainer(imageAlias, containerName, pool, ephemeral, preStart); err != nil {
+func initConfigureAndStart(imageAlias, containerName, pool string, ephemeral bool, preStart func() error, policy HardeningPolicy) error {
+	if err := initAndConfigureContainer(imageAlias, containerName, pool, ephemeral, preStart, policy); err != nil {
 		return err
 	}
 	return IncusExec("start", containerName)
-}
-
-// EnableDockerSupport configures the container to support Docker/nested containers.
-//
-// This function sets security flags and sysctl overrides required for Docker:
-//   - security.nesting=true: Enables nested containerization
-//   - security.syscalls.intercept.mknod=true: Safe device node creation
-//   - security.syscalls.intercept.setxattr=true: Safe filesystem attribute handling
-//   - linux.sysctl.net.ipv4.ip_unprivileged_port_start=0: Allows binding to low ports
-//     and prevents runc from failing with "permission denied" on sysctl writes (#187)
-//
-// These flags must be set before the container's first boot so the kernel loads
-// the correct seccomp profile. Setting them on a running container is a race
-// condition that can cause Docker Compose to fail with sysctl permission errors.
-//
-// Note: If an error occurs during configuration, the container may be left in a
-// partially configured state with some but not all flags set. Future troubleshooting
-// should verify all four settings are properly configured if Docker isn't working.
-func EnableDockerSupport(containerName string) error {
-	// Enable container nesting for Docker support
-	if err := IncusExec("config", "set", containerName, "security.nesting=true"); err != nil {
-		return err
-	}
-
-	// Enable syscall interception for mknod (device node creation)
-	if err := IncusExec("config", "set", containerName, "security.syscalls.intercept.mknod=true"); err != nil {
-		return err
-	}
-
-	// Enable syscall interception for setxattr (filesystem attributes)
-	if err := IncusExec("config", "set", containerName, "security.syscalls.intercept.setxattr=true"); err != nil {
-		return err
-	}
-
-	// Allow unprivileged port binding and prevent runc sysctl permission errors.
-	// Newer runc versions (1.3.x) try to write net.ipv4.ip_unprivileged_port_start
-	// via a detached procfs mount, which AppArmor blocks in nested containers.
-	// Pre-setting this sysctl at the Incus level avoids the permission denied error.
-	if err := IncusExec("config", "set", containerName, "linux.sysctl.net.ipv4.ip_unprivileged_port_start=0"); err != nil {
-		return err
-	}
-
-	return nil
 }
 
 // DisableGuestAPI prevents the Incus guest API (/dev/incus) from being
@@ -940,7 +929,7 @@ func ContainerRunning(containerName string) (bool, error) {
 	}
 
 	for _, c := range containers {
-		if c.Name == containerName && c.Status == "Running" {
+		if c.Name == containerName && StatusIsRunning(c.Status) {
 			return true, nil
 		}
 	}
@@ -1082,6 +1071,18 @@ func shellQuote(s string) string {
 // ConfigSet sets a configuration key on a container.
 func ConfigSet(ctx context.Context, containerName, key, value string) error {
 	return IncusExecContext(ctx, "config", "set", containerName, key+"="+value)
+}
+
+// ConfigGet returns the value of a configuration key on a container (trimmed).
+// An unset key yields an empty string with no error, matching `incus config get`.
+func ConfigGet(ctx context.Context, containerName, key string) (string, error) {
+	out, err := IncusOutputContext(ctx, "config", "get", containerName, key)
+	return strings.TrimSpace(out), err
+}
+
+// ConfigUnset removes a configuration key from a container.
+func ConfigUnset(ctx context.Context, containerName, key string) error {
+	return IncusExecContext(ctx, "config", "unset", containerName, key)
 }
 
 // ConfigShow returns the container's YAML configuration.

@@ -26,6 +26,7 @@ type Config struct {
 	DNSQueryThreshold  int
 	LogDNSQueries      bool
 	LimaHost           string
+	ForensicsOnKill    bool // preserve a forensic copy before the responder's auto-kill deletes the container
 	OnThreat           func(ThreatEvent)
 	OnAction           func(action, message string) // Called when container is paused/killed
 	OnError            func(error)                  // Called on non-fatal errors (avoids stdout corruption)

@@ -2,6 +2,7 @@ package container
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -48,18 +49,31 @@ func NewManager(containerName string) *Manager {
 }
 
 // Launch creates a new container from an image on the given storage pool.
-// An empty pool falls back to Incus's default pool.
+// An empty pool falls back to Incus's default pool. Applies the default
+// hardening policy (Docker on); use LaunchWithPolicy to honor config.
 func (m *Manager) Launch(image string, ephemeral bool, pool string) error {
-	if ephemeral {
-		return LaunchContainer(image, m.ContainerName, pool)
-	}
-	return LaunchContainerPersistent(image, m.ContainerName, pool)
+	return m.LaunchWithPolicy(image, ephemeral, pool, DefaultHardeningPolicy())
+}
+
+// LaunchWithPolicy is Launch with an explicit kernel-surface policy applied
+// before first boot, so callers with config in scope (e.g. `coi container
+// launch`) can honor [container] docker / [security] reduce_kernel_surface.
+func (m *Manager) LaunchWithPolicy(image string, ephemeral bool, pool string, policy HardeningPolicy) error {
+	return LaunchContainerWithPreStartPolicy(image, m.ContainerName, pool, ephemeral, nil, policy)
 }
 
 // LaunchWithPreStart launches the container, running preStart after init/config
 // but before start (for start-time-only settings like raw.idmap; see #530).
+// Applies the default hardening policy; use LaunchWithPreStartPolicy to honor config.
 func (m *Manager) LaunchWithPreStart(image string, ephemeral bool, pool string, preStart func() error) error {
 	return LaunchContainerWithPreStart(image, m.ContainerName, pool, ephemeral, preStart)
+}
+
+// LaunchWithPreStartPolicy is LaunchWithPreStart with an explicit kernel-surface
+// policy applied once before first boot (used by the run pipeline so a hardened
+// config is honored without a second reconcile pass).
+func (m *Manager) LaunchWithPreStartPolicy(image string, ephemeral bool, pool string, preStart func() error, policy HardeningPolicy) error {
+	return LaunchContainerWithPreStartPolicy(image, m.ContainerName, pool, ephemeral, preStart, policy)
 }
 
 // Stop stops the container
@@ -168,23 +182,96 @@ func (m *Manager) ListDevices() ([]string, error) {
 	return names, nil
 }
 
-// SetTmpfsSize configures the tmpfs size for /tmp in the container
-// size should be a string like "2GiB", "1024MiB", etc.
+// buildTmpMountUnit returns a systemd tmp.mount unit that mounts /tmp as a
+// tmpfs of the given size in bytes. Kept pure so it is unit-testable.
+func buildTmpMountUnit(sizeBytes int64) string {
+	return fmt.Sprintf(`[Unit]
+Description=coi sized /tmp (tmpfs)
+DefaultDependencies=no
+Conflicts=umount.target
+Before=local-fs.target umount.target
+
+[Mount]
+What=tmpfs
+Where=/tmp
+Type=tmpfs
+Options=mode=1777,strictatime,nosuid,nodev,size=%d
+
+[Install]
+WantedBy=local-fs.target
+`, sizeBytes)
+}
+
+// SetTmpfsSize mounts /tmp as a tmpfs of the given size (e.g. "2GiB",
+// "1024MiB", "512MB", or a raw byte count), inside a RUNNING container.
+//
+// It uses a systemd tmp.mount unit — a normal in-namespace mount the
+// container's own init performs — because Incus silently ignores both a `disk
+// source=tmpfs` device and a raw.lxc `lxc.mount.entry` for unprivileged
+// containers, leaving /tmp at the default size (#733). `enable --now` mounts it
+// immediately and (for persistent containers) again at every subsequent boot.
 func (m *Manager) SetTmpfsSize(size string) error {
-	args := []string{
-		"config", "device", "override", m.ContainerName, "tmp", "disk",
-		"source=tmpfs",
-		"path=/tmp",
-		fmt.Sprintf("size=%s", size),
+	sizeBytes, err := parseSizeBytes(size)
+	if err != nil {
+		return fmt.Errorf("invalid tmpfs size %q: %w", size, err)
 	}
-	if err := IncusExec(args...); err != nil {
-		// If override fails, try adding (container might not have tmp device)
-		args[2] = "add"
-		if err := IncusExec(args...); err != nil {
-			return err
-		}
+	if sizeBytes <= 0 {
+		return fmt.Errorf("invalid tmpfs size %q: must be greater than 0", size)
+	}
+	// base64 so the unit's newlines/spaces need no shell quoting.
+	b64 := base64.StdEncoding.EncodeToString([]byte(buildTmpMountUnit(sizeBytes)))
+	script := "set -e; echo '" + b64 + "' | base64 -d > /etc/systemd/system/tmp.mount; " +
+		"systemctl daemon-reload; systemctl enable --now tmp.mount"
+	if _, err := m.ExecCommand(script, ExecCommandOptions{Capture: true}); err != nil {
+		return fmt.Errorf("failed to configure sized /tmp tmpfs: %w", err)
 	}
 	return nil
+}
+
+// parseSizeBytes parses a size string into bytes. It accepts IEC suffixes
+// (KiB/MiB/GiB/TiB, 1024-based), SI suffixes (KB/MB/GB/TB, 1000-based), bare
+// binary suffixes (K/M/G/T, 1024-based), an optional trailing B, and a plain
+// integer (bytes). Case-insensitive; whitespace around the value is ignored.
+func parseSizeBytes(s string) (int64, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, fmt.Errorf("empty size")
+	}
+	lower := strings.ToLower(s)
+	// Longest suffixes first so "MiB" wins over "B"/"M".
+	units := []struct {
+		suffix string
+		mul    float64
+	}{
+		{"kib", 1 << 10},
+		{"mib", 1 << 20},
+		{"gib", 1 << 30},
+		{"tib", 1 << 40},
+		{"kb", 1e3},
+		{"mb", 1e6},
+		{"gb", 1e9},
+		{"tb", 1e12},
+		{"k", 1 << 10},
+		{"m", 1 << 20},
+		{"g", 1 << 30},
+		{"t", 1 << 40},
+		{"b", 1},
+	}
+	for _, u := range units {
+		if strings.HasSuffix(lower, u.suffix) {
+			num := strings.TrimSpace(lower[:len(lower)-len(u.suffix)])
+			f, err := strconv.ParseFloat(num, 64)
+			if err != nil {
+				return 0, fmt.Errorf("bad numeric value in %q", s)
+			}
+			return int64(f * u.mul), nil
+		}
+	}
+	n, err := strconv.ParseInt(lower, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("unrecognized size %q", s)
+	}
+	return n, nil
 }
 
 // GetWorkspacePath returns the container path where the "workspace" device is mounted.
@@ -223,15 +310,11 @@ func (m *Manager) Exec(args ...string) error {
 	return IncusExec(cmdArgs...)
 }
 
-// ExecArgs executes command arguments in the container with options
-func (m *Manager) ExecArgs(commandArgs []string, opts ExecCommandOptions) error {
-	args := []string{"exec", m.ContainerName}
-
-	// Add force-interactive flag for interactive sessions (required for tmux attach)
-	if opts.Interactive {
-		args = append(args, "--force-interactive")
-	}
-
+// appendExecOpts appends the env, working-directory, and user/group flags shared
+// by the exec builders, in that order. It deliberately does NOT add
+// --force-interactive (caller-specific, must precede these) or the trailing
+// "--"/command, so callers keep control of those.
+func appendExecOpts(args []string, opts ExecCommandOptions) []string {
 	// Add environment variables
 	for k, v := range opts.Env {
 		args = append(args, "--env", fmt.Sprintf("%s=%s", k, v))
@@ -251,6 +334,20 @@ func (m *Manager) ExecArgs(commandArgs []string, opts ExecCommandOptions) error 
 		}
 		args = append(args, "--group", fmt.Sprintf("%d", *group))
 	}
+
+	return args
+}
+
+// ExecArgs executes command arguments in the container with options
+func (m *Manager) ExecArgs(commandArgs []string, opts ExecCommandOptions) error {
+	args := []string{"exec", m.ContainerName}
+
+	// Add force-interactive flag for interactive sessions (required for tmux attach)
+	if opts.Interactive {
+		args = append(args, "--force-interactive")
+	}
+
+	args = appendExecOpts(args, opts)
 
 	// Add command arguments
 	args = append(args, "--")
@@ -266,27 +363,7 @@ func (m *Manager) ExecArgs(commandArgs []string, opts ExecCommandOptions) error 
 
 // ExecArgsCapture executes a command with raw arguments and captures output (no bash -c wrapping, preserves whitespace)
 func (m *Manager) ExecArgsCapture(commandArgs []string, opts ExecCommandOptions) (string, error) {
-	args := []string{"exec", m.ContainerName}
-
-	// Add environment variables
-	for k, v := range opts.Env {
-		args = append(args, "--env", fmt.Sprintf("%s=%s", k, v))
-	}
-
-	// Add working directory
-	if opts.Cwd != "" {
-		args = append(args, "--cwd", opts.Cwd)
-	}
-
-	// Add user/group
-	if opts.User != nil {
-		args = append(args, "--user", fmt.Sprintf("%d", *opts.User))
-		group := opts.User // default to same as user
-		if opts.Group != nil {
-			group = opts.Group
-		}
-		args = append(args, "--group", fmt.Sprintf("%d", *group))
-	}
+	args := appendExecOpts([]string{"exec", m.ContainerName}, opts)
 
 	// Add command arguments
 	args = append(args, "--")
@@ -315,25 +392,7 @@ func (m *Manager) ExecCommand(command string, opts ExecCommandOptions) (string, 
 		args = append(args, "--force-interactive")
 	}
 
-	// Add environment variables
-	for k, v := range opts.Env {
-		args = append(args, "--env", fmt.Sprintf("%s=%s", k, v))
-	}
-
-	// Add working directory
-	if opts.Cwd != "" {
-		args = append(args, "--cwd", opts.Cwd)
-	}
-
-	// Add user/group
-	if opts.User != nil {
-		args = append(args, "--user", fmt.Sprintf("%d", *opts.User))
-		group := opts.User // default to same as user
-		if opts.Group != nil {
-			group = opts.Group
-		}
-		args = append(args, "--group", fmt.Sprintf("%d", *group))
-	}
+	args = appendExecOpts(args, opts)
 
 	// Add command
 	args = append(args, "--", "bash", "-c", command)
@@ -426,27 +485,9 @@ func (m *Manager) PullDirectory(containerPath, localPath string) error {
 		return err
 	}
 
-	// Rename (move) the pulled directory to the final location
-	// If rename fails with cross-device error, fall back to copy via a temp dir
-	if err := os.Rename(pulledDir, localPath); err != nil {
-		if isCrossDeviceError(err) {
-			// Create a temporary directory on the same filesystem as localPath
-			tempDestDir, err := os.MkdirTemp(filepath.Dir(localPath), "coi-pull-*")
-			if err != nil {
-				return err
-			}
-			defer os.RemoveAll(tempDestDir)
-
-			// Copy into a temp target, then atomically rename to the final location
-			tempTarget := filepath.Join(tempDestDir, filepath.Base(localPath))
-			if err := copyDirRecursive(pulledDir, tempTarget); err != nil {
-				return err
-			}
-			return os.Rename(tempTarget, localPath)
-		}
-		return err
-	}
-	return nil
+	// Move the pulled directory to the final location, falling back to a copy
+	// when it's on a different filesystem (cross-device rename).
+	return renameOrCopy(pulledDir, localPath, copyDirRecursive)
 }
 
 // ErrRemoteIsDirectory is returned by PullFile when the remote source is a
@@ -524,23 +565,34 @@ func (m *Manager) PullFile(containerPath, localPath string) error {
 		return err
 	}
 
-	if err := os.Rename(staged, localPath); err != nil {
-		if isCrossDeviceError(err) {
-			// Copy to a temp file on the destination filesystem, then rename
-			// so the destination is still replaced atomically.
-			tempDestDir, err := os.MkdirTemp(filepath.Dir(localPath), "coi-pull-*")
-			if err != nil {
-				return err
-			}
-			defer os.RemoveAll(tempDestDir)
+	// Replace the destination atomically, falling back to a copy when staged and
+	// localPath are on different filesystems (cross-device rename).
+	return renameOrCopy(staged, localPath, copyFile)
+}
 
-			tempTarget := filepath.Join(tempDestDir, filepath.Base(localPath))
-			if err := copyFile(staged, tempTarget); err != nil {
-				return err
-			}
-			return os.Rename(tempTarget, localPath)
+// renameOrCopy moves src to dst with os.Rename, falling back — only on a
+// cross-device (EXDEV) rename — to copying (via copyFn) into a temp dir on dst's
+// filesystem and then atomically renaming into place, so dst is still replaced
+// atomically. copyFn is copyFile for a single file or copyDirRecursive for a
+// tree.
+func renameOrCopy(src, dst string, copyFn func(src, dst string) error) error {
+	if err := os.Rename(src, dst); err != nil {
+		if !isCrossDeviceError(err) {
+			return err
 		}
-		return err
+		// Create a temporary directory on the same filesystem as dst.
+		tempDestDir, err := os.MkdirTemp(filepath.Dir(dst), "coi-pull-*")
+		if err != nil {
+			return err
+		}
+		defer os.RemoveAll(tempDestDir)
+
+		// Copy into a temp target, then atomically rename to the final location.
+		tempTarget := filepath.Join(tempDestDir, filepath.Base(dst))
+		if err := copyFn(src, tempTarget); err != nil {
+			return err
+		}
+		return os.Rename(tempTarget, dst)
 	}
 	return nil
 }

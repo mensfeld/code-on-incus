@@ -129,21 +129,69 @@ func ResolveReuseUIDMapping(containerName string, sources []string, disableShift
 	hadRawIdmap := container.ContainerUsesRawIdmap(containerName)
 	configuredShift, idmapApplied := ConfigureUIDMapping(containerName, sources, disableShift, logger)
 	useShift := reuseShiftDecision(configuredShift, hadRawIdmap || idmapApplied)
-	// Convert creation-time devices only on the TRANSITION to raw.idmap: a
-	// container that already carried it had its devices converted when that
-	// happened (creation, the #678 fallback, or an earlier reuse), so the
-	// per-device incus scan is skipped on the steady state every later
-	// session hits.
-	if idmapApplied && !hadRawIdmap {
-		converted, failed := container.ConvertShiftedDiskDevices(containerName)
-		if converted > 0 {
-			logger(fmt.Sprintf("Converted %d creation-time shift=true disk device(s) to shift=false to match raw.idmap (#683)", converted))
-		}
-		if failed > 0 {
-			logger(fmt.Sprintf("Warning: %d shift=true disk device(s) could not be converted to shift=false; the container may fail to start with raw.idmap set — retry, or recreate the container", failed))
-		}
-	}
+	convertCreationTimeShiftDevices(containerName, idmapApplied, hadRawIdmap, logger)
 	return useShift
+}
+
+// convertCreationTimeShiftDevices strips a container's creation-time shift=true
+// disk devices (setting shift=false) when the mapping decision has just
+// transitioned to raw.idmap (idmapApplied && !hadRawIdmap), so the newly-set
+// raw.idmap actually takes effect (#683). It is a no-op on the steady state: a
+// container that already carried raw.idmap had its devices converted when that
+// first happened (creation, the #678 fallback, or an earlier reuse), so the
+// per-device incus scan is skipped every later session. Shared by the reuse
+// (ResolveReuseUIDMapping) and start (ResolveStartUIDMapping) paths.
+func convertCreationTimeShiftDevices(containerName string, idmapApplied, hadRawIdmap bool, logger func(string)) {
+	if !idmapApplied || hadRawIdmap {
+		return
+	}
+	converted, failed := container.ConvertShiftedDiskDevices(containerName)
+	if converted > 0 {
+		logger(fmt.Sprintf("Converted %d creation-time shift=true disk device(s) to shift=false to match raw.idmap (#683)", converted))
+	}
+	if failed > 0 {
+		logger(fmt.Sprintf("Warning: %d shift=true disk device(s) could not be converted to shift=false; the container may fail to start with raw.idmap set — retry, or recreate the container", failed))
+	}
+}
+
+// ResolveStartUIDMapping is the `coi container start` counterpart of
+// ResolveReuseUIDMapping. That command has no session context (workspace path,
+// mount config), so it derives the statfs-sweep sources from the container's
+// OWN disk devices and proactively applies the #683 shift→raw.idmap decision
+// before start. On OrbStack ≥2.2.2 the shift mount succeeds-but-unwritable, so
+// the reactive #678 fallback in StartWithIdmapFallback never fires; this heals
+// a pre-#689 container up front (#691).
+//
+// It is deliberately a no-op when the container carries no shift=true disk
+// device: `coi container start` runs against an arbitrary container, and — like
+// the reactive fallbackShiftToRawIdmap, which only acts when shift devices
+// exist — it must not mutate a container that has nothing to heal.
+func ResolveStartUIDMapping(containerName string, disableShift bool, logger func(string)) {
+	if logger == nil {
+		logger = func(string) {}
+	}
+	// `coi container start` can target an arbitrary container in any state, so
+	// scope the heal tightly (#691 review):
+	//   - Skip a RUNNING container: raw.idmap/shift can't be changed to effect
+	//     without a restart, and mutating a live instance only emits misleading
+	//     "unwritable"/"could not convert" warnings. Skip on error too (don't
+	//     act on uncertain state).
+	if running, err := container.ContainerRunning(containerName); err != nil || running {
+		return
+	}
+	sources, hasShiftDevice := container.DiskDeviceSources(containerName)
+	if !hasShiftDevice {
+		return
+	}
+	//   - Skip a container that isn't coi-managed: coi always mounts a disk
+	//     device named "workspace", so an empty workspace source means this is
+	//     someone else's container we must not rewrite.
+	if container.NewManager(containerName).GetWorkspaceSource() == "" {
+		return
+	}
+	hadRawIdmap := container.ContainerUsesRawIdmap(containerName)
+	_, idmapApplied := ConfigureUIDMapping(containerName, sources, disableShift, logger)
+	convertCreationTimeShiftDevices(containerName, idmapApplied, hadRawIdmap, logger)
 }
 
 // decideUIDMapping is the pure decision behind ConfigureUIDMapping (no I/O), so
@@ -399,20 +447,80 @@ func SetupGitIdentity(mgr container.ContainerExecution, homeDir string, identity
 	logger("Configured container git identity from host global git config")
 }
 
+// tmpfsSizer is the subset of container operations ApplyTmpfsSizing needs.
+type tmpfsSizer interface {
+	SetTmpfsSize(size string) error
+}
+
+// ApplyTmpfsSizing sizes /tmp for a freshly launched, RUNNING container when
+// [limits.disk] tmpfs_size is set. It is the single source of truth for both
+// the shell (session.Setup) and run (coi run) launch paths, so an explicit
+// tmpfs_size from a profile applies uniformly regardless of how the container
+// was started (#728/#769). No default is applied: coi does NOT convert /tmp to
+// a RAM-backed tmpfs on its own — that would silently move /tmp off disk and
+// onto RAM for every container. To bound /tmp without RAM cost, cap the whole
+// rootfs with [limits.disk] size instead. Non-fatal: logs warnings.
+func ApplyTmpfsSizing(mgr tmpfsSizer, limitsCfg *config.LimitsConfig, logger func(string)) {
+	if limitsCfg == nil || limitsCfg.Disk.TmpfsSize == "" {
+		return
+	}
+	size := limitsCfg.Disk.TmpfsSize
+	if err := mgr.SetTmpfsSize(size); err != nil {
+		logger(fmt.Sprintf("Warning: Failed to set /tmp size: %v", err))
+	} else {
+		logger(fmt.Sprintf("Set /tmp size to %s", size))
+	}
+}
+
+// shouldSuppressClaudeAutoMode reports whether coi should write the Claude
+// managed-settings policy that disables auto mode. It is Claude-specific and,
+// per #764, deliberately skipped under interactive permission mode: managed
+// settings are Claude Code's highest-precedence tier and cannot be overridden
+// by any user/project setting, so writing the policy also strips auto mode from
+// the in-session Shift+Tab cycle. Under interactive the user is present and
+// owns that per-session choice; the sandbox boundary is enforced by the
+// container, not by Claude's permission gate. Default (bypass) is unchanged.
+func shouldSuppressClaudeAutoMode(toolName, permissionMode string) bool {
+	return toolName == "claude" && permissionMode != "interactive"
+}
+
+// renderClaudeManagedSettings composes the managed-settings policy from the
+// enabled parts: disableAutoMode (auto-mode prompt suppression, #764) and
+// includeCoAuthoredBy=false (AI-attribution stripping at the source for
+// Claude, [git] strip_attribution — this also covers the two cases the
+// commit-msg hook cannot: repos with a local core.hooksPath and
+// `git commit --no-verify`). Returns "" when neither applies.
+func renderClaudeManagedSettings(suppressAutoMode, stripAttribution bool) string {
+	parts := []string{}
+	if suppressAutoMode {
+		parts = append(parts, `"disableAutoMode": "disable"`)
+	}
+	if stripAttribution {
+		parts = append(parts, `"includeCoAuthoredBy": false`)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "{" + strings.Join(parts, ", ") + "}\n"
+}
+
 // SetupClaudeManagedSettings writes /etc/claude-code/managed-settings.json
-// inside the container to disable the "Enable auto mode?" prompt that newer
-// Claude Code versions show at startup. The managed-settings path is the only
-// way to set disableAutoMode — it cannot be set via user settings.
-// Non-fatal: logs a warning on failure.
+// inside the container — Claude Code's highest-precedence settings tier, which
+// no user/project setting can override. Used for disableAutoMode (the only
+// place it can be set) and includeCoAuthoredBy. A no-op when no policy part is
+// enabled. Non-fatal: logs a warning on failure.
 // Accepts ContainerManager (not a sub-interface) because it uses both
 // ExecCommand (ContainerExecution) and CreateFileWithOwner (ContainerFiles).
-func SetupClaudeManagedSettings(mgr container.ContainerManager, logger func(string)) {
+func SetupClaudeManagedSettings(mgr container.ContainerManager, suppressAutoMode, stripAttribution bool, logger func(string)) {
+	content := renderClaudeManagedSettings(suppressAutoMode, stripAttribution)
+	if content == "" {
+		return
+	}
 	mkdirCmd := "mkdir -p /etc/claude-code"
 	if _, err := mgr.ExecCommand(mkdirCmd, container.ExecCommandOptions{Capture: true}); err != nil {
 		logger(fmt.Sprintf("Warning: Failed to create Claude managed settings directory: %v", err))
 		return
 	}
-	content := `{"disableAutoMode": "disable"}` + "\n"
 	// Root-owned and world-readable, applied atomically by the push: a plain
 	// CreateFile inherits the host temp file's 0600 mode and UID, which the
 	// container code user cannot read when the host UID differs (macOS 501,
@@ -422,24 +530,4 @@ func SetupClaudeManagedSettings(mgr container.ContainerManager, logger func(stri
 	if err := mgr.CreateFileWithOwner("/etc/claude-code/managed-settings.json", content, 0, 0, "0644"); err != nil {
 		logger(fmt.Sprintf("Warning: Failed to write Claude managed settings: %v", err))
 	}
-}
-
-// hasLimits checks if any limits are configured
-func hasLimits(cfg *config.LimitsConfig) bool {
-	if cfg == nil {
-		return false
-	}
-
-	// Check if any limit is set (non-empty strings or non-zero integers)
-	return cfg.CPU.Count != "" ||
-		cfg.CPU.Allowance != "" ||
-		cfg.CPU.Priority != 0 ||
-		cfg.Memory.Limit != "" ||
-		cfg.Memory.Enforce != "" ||
-		cfg.Memory.Swap != "" ||
-		cfg.Disk.Read != "" ||
-		cfg.Disk.Write != "" ||
-		cfg.Disk.Max != "" ||
-		cfg.Disk.Priority != 0 ||
-		cfg.Runtime.MaxProcesses != 0
 }

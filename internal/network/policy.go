@@ -20,25 +20,43 @@ import (
 //     firewall has not already been given.
 type AllowPolicy struct {
 	staticCIDRs []string
+	staticTups  []staticTuple
 	exact       map[string]bool
 	names       []string
+	namePorts   map[string][]portRange
+}
+
+// staticTuple is a literal address entry paired with the ports it may be reached
+// on. Ports is nil when the allowed_domains entry named no port — meaning "inherit
+// the global allowed_ports (else all ports)", resolved at set-build time.
+type staticTuple struct {
+	CIDR  string
+	Ports []portRange
 }
 
 // NewAllowPolicy compiles allowed_domains entries into an AllowPolicy.
 //
-// Accepted entry forms:
+// Accepted entry forms (each optionally suffixed with :ports — a comma list of
+// single ports and/or lo-hi ranges, e.g. ":443", ":80,443", ":8000-8100"):
 //
 //	1.2.3.4              raw IPv4 address
 //	10.0.0.0/8           IPv4 CIDR
 //	api.example.com      exact hostname
+//	github.com:443       hostname reachable only on 443
+//	192.168.1.50:8080    address reachable only on 8080
 //
-// Wildcards are rejected — see the error text below for why, and for what to
-// write instead.
+// A per-entry port set scopes that destination (Phase 3); an entry with no port
+// inherits the global allowed_ports, else all ports. Wildcards are rejected — see
+// the error text below for why, and for what to write instead.
 func NewAllowPolicy(entries []string) (*AllowPolicy, error) {
-	p := &AllowPolicy{exact: make(map[string]bool)}
+	p := &AllowPolicy{exact: make(map[string]bool), namePorts: make(map[string][]portRange)}
 
 	for _, raw := range entries {
-		entry := strings.ToLower(strings.TrimSpace(raw))
+		dest, ports, _, err := splitDestPorts(strings.TrimSpace(raw))
+		if err != nil {
+			return nil, fmt.Errorf("invalid entry in allowed_domains: %w", err)
+		}
+		entry := strings.ToLower(dest)
 		entry = strings.TrimSuffix(entry, ".")
 		if entry == "" {
 			continue
@@ -57,13 +75,16 @@ func NewAllowPolicy(entries []string) (*AllowPolicy, error) {
 				return nil, fmt.Errorf("%q is an IPv6 CIDR; allowed_domains is IPv4-only", raw)
 			}
 			p.staticCIDRs = append(p.staticCIDRs, ipNet.String())
+			p.staticTups = append(p.staticTups, staticTuple{CIDR: ipNet.String(), Ports: ports})
 
 		case net.ParseIP(entry) != nil:
 			ip := net.ParseIP(entry)
 			if ip.To4() == nil {
 				return nil, fmt.Errorf("%q is an IPv6 address; allowed_domains is IPv4-only", raw)
 			}
-			p.staticCIDRs = append(p.staticCIDRs, ip.To4().String()+"/32")
+			cidr := ip.To4().String() + "/32"
+			p.staticCIDRs = append(p.staticCIDRs, cidr)
+			p.staticTups = append(p.staticTups, staticTuple{CIDR: cidr, Ports: ports})
 
 		case strings.Contains(entry, "*"):
 			// Wildcards cannot be honoured, so they are rejected rather than
@@ -93,6 +114,7 @@ func NewAllowPolicy(entries []string) (*AllowPolicy, error) {
 		default:
 			p.exact[entry] = true
 			p.names = append(p.names, entry)
+			p.namePorts[entry] = ports
 		}
 	}
 
@@ -100,9 +122,18 @@ func NewAllowPolicy(entries []string) (*AllowPolicy, error) {
 }
 
 // StaticCIDRs returns the literal address entries, in CIDR form, for the static
-// nft set. Raw IPs come back as /32.
+// (address-only) nft set. Raw IPs come back as /32. Ports are not carried here —
+// this set backs ICMP reachability and the security monitor, which are per-address.
 func (p *AllowPolicy) StaticCIDRs() []string { return p.staticCIDRs }
+
+// StaticTuples returns the literal address entries paired with their per-entry
+// ports (nil = inherit global), for the port-scoped concatenated nft set.
+func (p *AllowPolicy) StaticTuples() []staticTuple { return p.staticTups }
 
 // Names returns the hostname entries. These are resolved on the host; the answers
 // go into both the container's dynamic nft set and its /etc/hosts.
 func (p *AllowPolicy) Names() []string { return p.names }
+
+// PortsForName returns the per-entry ports configured for a hostname (nil =
+// inherit global), keyed by the same normalised name Names() returns.
+func (p *AllowPolicy) PortsForName(name string) []portRange { return p.namePorts[name] }

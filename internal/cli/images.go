@@ -158,10 +158,11 @@ var imageInfoCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		alias := args[0]
 		format, _ := cmd.Flags().GetString("format")
+		applyJSONFormatAlias(cmd, &format)
 
 		// Validate format
-		if format != "text" && format != "json" {
-			return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid format '%s': must be 'text' or 'json'", format)}
+		if err := validateTextOrJSON(format); err != nil {
+			return err
 		}
 
 		var output string
@@ -187,6 +188,7 @@ func init() {
 	imageListCmd.Flags().BoolVarP(&showAll, "all", "a", false, "Show all local images, not just COI images")
 	imageListCmd.Flags().String("prefix", "", "Filter images by alias prefix")
 	imageListCmd.Flags().String("format", "text", "Output format: text or json")
+	imageListCmd.Flags().Bool("json", false, "Alias for --format json")
 
 	// Add flags to publish command
 	imagePublishCmd.Flags().String("description", "", "Image description")
@@ -198,6 +200,7 @@ func init() {
 
 	// Add flags to info command
 	imageInfoCmd.Flags().String("format", "text", "Output format: text or json")
+	imageInfoCmd.Flags().Bool("json", false, "Alias for --format json")
 
 	// Add subcommands to image command
 	imageCmd.AddCommand(imageListCmd)
@@ -215,11 +218,12 @@ func imageListCommand(cmd *cobra.Command, args []string) error {
 	}
 
 	format, _ := cmd.Flags().GetString("format")
+	applyJSONFormatAlias(cmd, &format)
 	prefix, _ := cmd.Flags().GetString("prefix")
 
 	// Validate format value
-	if format != "text" && format != "json" {
-		return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid format '%s': must be 'text' or 'json'", format)}
+	if err := validateTextOrJSON(format); err != nil {
+		return err
 	}
 
 	// If format is JSON, output structured data

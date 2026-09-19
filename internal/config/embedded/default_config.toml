@@ -12,6 +12,11 @@ storage_pool = ""
 # keys the session identity — container, slots, ports, saved sessions —
 # instead of the workspace path, so the same persistent session continues
 # from any workspace location. Trusted scope only.
+# docker defaults to true so Docker-in-container works out of the box. Set
+# false to drop nesting + syscall interception when Docker isn't needed —
+# less shared-kernel attack surface. See also [security] reduce_kernel_surface
+# and the "Threat model" wiki page.
+# docker = true
 
 [defaults]
 
@@ -62,21 +67,41 @@ path = "~/.coi/logs/network.log"
 [tool]
 name = "claude"
 auto_context = true
+context_json = true
 
 [git]
 writable_hooks = false
+# strip_attribution defaults to true: a global commit-msg hook strips auto-injected
+# AI attribution (Co-Authored-By trailers / "Generated with" footers) from every
+# commit. Set false to keep tool attribution. Trusted-scope only.
+# strip_attribution = true
 
 [ssh]
 forward_agent = false
 
 [security]
-protected_paths = [".git/hooks", ".git/config", ".git/config.worktree", ".git/info/attributes", ".husky", ".vscode", ".coi", ".claude/settings.json", ".claude/settings.local.json"]
+protected_paths = [".git/hooks", ".git/config", ".git/config.worktree", ".git/info/attributes", ".husky", ".vscode", ".coi", ".claude/settings.json", ".claude/settings.local.json", ".codex/config.toml"]
 host_immutable = true
 # writable_agent_config: when false (default), in-workspace agent tool config
-# (.claude/settings.json, .claude/settings.local.json) is mounted read-only so a
-# contained agent cannot plant/modify hooks that a later session would auto-execute.
+# (.claude/settings.json, .claude/settings.local.json, .codex/config.toml) is
+# mounted read-only so a contained agent cannot plant/modify hooks or commands
+# that a later session would auto-execute.
 # Set to true in trusted-scope config (~/.coi/config.toml) to let the tool write them.
 # writable_agent_config = false
+# reduce_kernel_surface: opt-in kernel attack-surface hardening. Disables
+# Docker/nesting support (wins over [container] docker) and denies the syscall
+# families behind most recent kernel escape chains (io_uring, bpf, userfaultfd,
+# keyring). Node/libuv falls back off io_uring automatically. The container
+# still shares the host kernel — this narrows the boundary, it does not remove
+# it. Enabled by the built-in "hardened" profile. Trusted scope only.
+# reduce_kernel_surface = false
+# reduce_kernel_surface_strict: opt-in STRICT tier. Everything reduce_kernel_surface
+# does, plus deny perf_event_open (a long-standing kernel-LPE vector). Implies
+# reduce_kernel_surface. Kept separate because — unlike the base list, which has
+# transparent in-container fallbacks — denying perf_event_open removes real
+# capability: kernel-level profiling (perf, JVM async-profiler's perf mode) stops
+# working, though it degrades gracefully (EPERM, no crash). Trusted scope only.
+# reduce_kernel_surface_strict = false
 
 [limits.cpu]
 count = ""
@@ -93,7 +118,8 @@ read = ""
 write = ""
 max = ""
 priority = 0
-tmpfs_size = ""
+size = ""          # whole-container rootfs quota, e.g. "20GiB"; needs a btrfs/zfs/lvm pool (rejected on a dir pool)
+tmpfs_size = ""    # opt-in RAM-backed /tmp of this size (e.g. "4GiB"); "" = /tmp stays disk-backed
 
 [limits.runtime]
 max_duration = ""

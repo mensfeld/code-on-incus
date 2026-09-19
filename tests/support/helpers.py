@@ -1412,3 +1412,32 @@ def delete_storage_pool(name):
         capture_output=True,
         timeout=30,
     )
+
+
+def run_coi_in_workspace(coi_binary, workspace_dir, argv, env=None, timeout=120):
+    """Run `coi run -- <argv>` from workspace_dir, capturing output.
+
+    Shared by the protection test family (tests/mount, tests/git_hooks), which
+    previously each carried an identical private copy (hoisted per the same
+    convention as the storage-pool helpers, see the #684 CHANGELOG entry).
+    """
+    return subprocess.run(
+        [coi_binary, "run", "--", *argv],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        cwd=workspace_dir,
+        env=env,
+    )
+
+
+def make_workspace_writable(workspace_dir):
+    """Make the workspace world-writable so the container user (UID 1000) can write.
+
+    In CI, the test runner UID (1001) differs from the container user UID (1000).
+    With shift=true on the Incus disk device, host UIDs map directly — so the
+    container user can only write to files with 'other' write permission. Used by
+    protection tests so that ONLY a read-only mount (not file permissions) can
+    stop a write, preventing false passes.
+    """
+    subprocess.run(["chmod", "-R", "a+rwX", workspace_dir], check=True, capture_output=True)

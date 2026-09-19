@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/mensfeld/code-on-incus/internal/config"
@@ -11,9 +12,11 @@ import (
 	"github.com/mensfeld/code-on-incus/internal/limits"
 	"github.com/mensfeld/code-on-incus/internal/logger"
 	"github.com/mensfeld/code-on-incus/internal/monitor"
+	"github.com/mensfeld/code-on-incus/internal/network"
 	"github.com/mensfeld/code-on-incus/internal/nftmonitor"
 	"github.com/mensfeld/code-on-incus/internal/session"
 	"github.com/mensfeld/code-on-incus/internal/timing"
+	"github.com/mensfeld/code-on-incus/internal/tool"
 )
 
 // runState is the mutable state accumulated across run pipeline phases.
@@ -26,6 +29,15 @@ type runState struct {
 	// from the workspace mount. The file is required to be executable, so it
 	// runs directly and its shebang decides the interpreter.
 	runScript bool
+
+	// Prompt mode (coi run --prompt / --prompt-file / --prompt-name): run the
+	// AI agent headlessly with a predefined prompt and exit with its status
+	// code (#701). promptText is the resolved prompt; promptSessionID is a fresh
+	// session id used to stage the prompt file and as the tool's --session-id.
+	promptMode      bool
+	promptText      string
+	promptSessionID string
+	promptTool      tool.Tool // resolved once in resolvePromptMode, reused by runPromptPhase
 
 	// After validate-env
 	containerName  string
@@ -43,6 +55,7 @@ type runState struct {
 	gitWorktree        *session.GitWorktreeLayout // external git dirs for a worktree checkout (#533), nil otherwise
 	mountConfig        *session.MountConfig       // trust-gated
 	socketConfig       *session.SocketConfig      // trust-gated
+	credentialConfig   *session.CredentialConfig  // trust-gated [[credentials]] to seed (#726 follow-up)
 	portConfig         *session.PortConfig        // trust-gated [[ports]] to publish (#558)
 	slot               int                        // resolved slot number (for port allocation)
 	resolvedPorts      []session.PublishedPort    // preflighted port plan (see session.ResolvePorts)
@@ -146,10 +159,14 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 			if err != nil {
 				return nil, fmt.Errorf("invalid socket configuration: %w", err)
 			}
-			// One combined trust gate over mounts + sockets, so the per-source
-			// fingerprint matches what `coi trust` recorded.
+			cc, err := ParseCredentialConfig(a.cfg)
+			if err != nil {
+				return nil, fmt.Errorf("invalid credential configuration: %w", err)
+			}
+			// One combined trust gate over mounts + sockets + credentials + ports,
+			// so the per-source fingerprint matches what `coi trust` recorded.
 			pc := ParsePortConfig(a.cfg)
-			s.mountConfig, s.socketConfig, s.portConfig = a.gateRunForwarding(mc, sc, pc, s.absWorkspace, s.wasRestarted)
+			s.mountConfig, s.socketConfig, s.credentialConfig, s.portConfig = a.gateRunForwarding(mc, sc, cc, pc, s.absWorkspace, s.wasRestarted)
 
 			// A reused persistent container still carries the previous
 			// session's port devices; strip them while it is STOPPED so they
@@ -162,7 +179,7 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 			// port forwards must not be yanked here.)
 			if s.wasRestarted {
 				if running, _ := mgr.Running(); !running {
-					logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
+					logFn := stderrLogFn
 					session.RemoveStalePortDevices(mgr, logFn)
 				}
 			}
@@ -194,9 +211,14 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 			// hook re-runs on the fresh container, re-applying mapping and devices.
 			// s.useShift is set by whichever hook runs (preStart or preRestart)
 			// before anything reads it.
-			logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
+			logFn := stderrLogFn
+			hardening := a.hardeningPolicy()
+			warnDockerHardeningConflict(a.cfg)
 			preStart := func() error {
 				defer timing.Start(timing.CatStep, "pre-start-hook")()
+				// The kernel-surface policy is applied once at init by
+				// LaunchWithPreStartPolicy (below), before this hook runs — no
+				// second apply needed here.
 				// Detect a git worktree checkout (.git is a file → external git dirs)
 				// BEFORE the UID-mapping decision: the common dir is mounted as its
 				// own shift-carrying disk device, so its filesystem votes on that
@@ -209,11 +231,24 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 				}
 				s.gitWorktree = layout
 				s.useShift, _ = session.ConfigureUIDMapping(s.containerName, session.MountSources(s.absWorkspace, s.mountConfig, session.WorktreeSources(layout)...), a.cfg.Incus.DisableShift, logFn)
-				// Restricted/allowlist disable IPv6 in the container (post-start,
-				// via the network manager). Pre-seed an IPv4-only networkd config
-				// so the link reaches "configured" and systemd-networkd-wait-online
-				// does not hang (#548). Non-fatal.
+				// Harden the bridge NIC against egress-isolation bypass: anti-spoof
+				// the source IP/MAC (so saddr-keyed nft rules can't be dodged) and
+				// isolate the bridge port (no L2 reach to sibling containers). The
+				// shell path applies this; coi run must too, or a restricted/allowlist
+				// run can bypass its own egress allowlist (#726 follow-up). Must be set
+				// before first boot; non-fatal on unmanaged/static NICs.
+				if err := container.EnableNICSecurity(s.containerName); err != nil {
+					logFn(fmt.Sprintf("Warning: NIC security hardening not applied: %v", err))
+				}
+				// Restricted/allowlist: kill IPv6 from the kernel's first instant so
+				// there is no IPv6 egress window before the host-side ip6 drop lands
+				// (shell parity), and pre-seed an IPv4-only networkd config so the link
+				// reaches "configured" and systemd-networkd-wait-online does not hang
+				// (#548). Non-fatal. Open mode opts into unrestricted egress.
 				if m := a.cfg.Network.Mode; m != "" && m != config.NetworkModeOpen {
+					if err := container.DisableIPv6AtBoot(s.containerName); err != nil {
+						logFn(fmt.Sprintf("Warning: pre-boot IPv6 disable not applied: %v", err))
+					}
 					if err := container.ConfigureNetworkdIPv4Only(s.containerName); err != nil {
 						logFn(fmt.Sprintf("Warning: networkd IPv4-only config not applied: %v", err))
 					}
@@ -234,6 +269,22 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 			// workspace mount, re-resolve the worktree layout, strip those devices,
 			// and re-run the SAME security setup fresh launch uses (applySecurityMounts).
 			preRestart := func() error {
+				// Reconcile the kernel-surface policy while the container is
+				// stopped — the only window where security.nesting and the
+				// syscall deny list can change — so a persistent container
+				// converges to the current config (mirrors the shell reuse path).
+				// Fail-closed: abort the restart rather than boot a container
+				// whose hardening config could not be brought to the desired
+				// state. Skips the write when the config already matches.
+				changed, reconcileErr := container.ReconcileKernelSurfacePolicy(s.containerName, hardening)
+				if reconcileErr != nil {
+					return fmt.Errorf("could not reconcile docker/kernel-hardening settings: %w", reconcileErr)
+				}
+				if changed {
+					// Never silent: this rewrite also resets any manual `incus
+					// config set` hardening back to policy (mirrors setup.go).
+					logFn("Reconciled docker/kernel-hardening settings to the current config (any manual security.nesting/syscalls overrides were reset)")
+				}
 				s.containerWorkspace = mgr.GetWorkspacePath()
 				layout, wtErr := session.ResolveGitWorktree(s.absWorkspace)
 				if wtErr != nil {
@@ -274,7 +325,7 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 			// one) fails first. Leaked +i flags make the workspace undeletable
 			// (pytest tmpdir cleanup EPERM).
 			teardown := func() {
-				logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
+				logFn := stderrLogFn
 				session.RemoveImmutable(s.containerName, logFn)
 				if !a.persistent {
 					fmt.Fprintf(os.Stderr, "Cleaning up container %s...\n", s.containerName)
@@ -288,7 +339,7 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 			}
 
 			stopLaunch := timing.Start(timing.CatStep, "launch-or-reuse")
-			launchErr := launchOrReuseContainer(mgr, s.img, a.cfg.Container.StoragePool, s.containerName, containerExists, a.persistent, preStart, preRestart)
+			launchErr := launchOrReuseContainer(mgr, s.img, a.cfg.Container.StoragePool, s.containerName, containerExists, a.persistent, preStart, preRestart, hardening)
 			stopLaunch()
 			if launchErr != nil {
 				// No teardown on a failed launch: launchOrReuseContainer already
@@ -297,7 +348,7 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 				// teardown's unconditional delete must not fire on a container
 				// that may not be ours. Only the immutable flags the pre-start
 				// hook may have applied need releasing here.
-				logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
+				logFn := stderrLogFn
 				session.RemoveImmutable(s.containerName, logFn)
 				return nil, launchErr
 			}
@@ -305,6 +356,20 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 			// From here the container is definitively ours (we created or
 			// restarted it) — register the teardown, including alongside an
 			// error: the pipeline registers teardowns returned with a failed Run.
+
+			// Block egress immediately after first boot, before the container's
+			// init can phone home, until the real isolation rules land in
+			// apply-network (which removes this temporary rule). Shell parity
+			// (#726 follow-up). Only for non-open modes: open opts into
+			// unrestricted egress, and its network path never removes a boot
+			// block (applyNetworkIsolation short-circuits), so installing one
+			// there would strand the container with no network. Fail closed.
+			if m := a.cfg.Network.Mode; m != "" && m != config.NetworkModeOpen {
+				if err := network.ApplyBootBlockRule(s.containerName); err != nil {
+					return teardown, fmt.Errorf("boot network block failed in %s mode; refusing to run with an unprotected boot window: %w", m, err)
+				}
+			}
+
 			if err := applyContainerAlias(s.effectiveAlias, s.containerName, s.absWorkspace); err != nil {
 				return teardown, err
 			}
@@ -326,7 +391,7 @@ func (a *App) configureContainerRunPhase(s *runState) session.Phase {
 		RunFn: func(ctx context.Context) (session.Teardown, error) {
 			if !s.wasRestarted {
 				limitsConfig := &a.cfg.Limits
-				if hasAnyLimits(limitsConfig) {
+				if limitsConfig.HasAny() {
 					fmt.Fprintf(os.Stderr, "Applying resource limits...\n")
 					applyOpts := limits.ApplyOptions{
 						ContainerName: s.containerName,
@@ -344,6 +409,7 @@ func (a *App) configureContainerRunPhase(s *runState) session.Phase {
 							Read:     limitsConfig.Disk.Read,
 							Write:    limitsConfig.Disk.Write,
 							Max:      limitsConfig.Disk.Max,
+							Size:     limitsConfig.Disk.Size,
 							Priority: limitsConfig.Disk.Priority,
 						},
 						Runtime: limits.RuntimeLimits{
@@ -357,7 +423,7 @@ func (a *App) configureContainerRunPhase(s *runState) session.Phase {
 				}
 			}
 
-			logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
+			logFn := stderrLogFn
 
 			// ctx is the pipeline's signal-cancelled context (run.go's
 			// NotifyContext), so Ctrl+C aborts the wait instead of polling
@@ -366,13 +432,79 @@ func (a *App) configureContainerRunPhase(s *runState) session.Phase {
 				return nil, session.AnnotateReadyTimeout(err, &a.cfg.Limits)
 			}
 
-			if !s.wasRestarted {
+			// Configure the Docker bridge CIDR whenever Docker is enabled — on
+			// reuse too, not only fresh launches: a persistent container flipped
+			// from docker=false to docker=true has no daemon.json yet, so gating
+			// on !wasRestarted would leave dockerd on its default 172.17/16
+			// bridge. The write is idempotent.
+			if a.hardeningPolicy().DockerEnabled() {
 				if err := session.ConfigureDockerDaemon(s.mgr, logFn); err != nil {
 					fmt.Fprintf(os.Stderr, "Warning: failed to configure Docker daemon: %v\n", err)
 				}
+			}
+			if !s.wasRestarted {
+				// Apply an explicit [limits.disk] tmpfs_size the same way the
+				// shell path does, so a profile's /tmp sizing applies to
+				// `coi run` too — the container is running now (#728/#769).
+				session.ApplyTmpfsSizing(s.mgr, &a.cfg.Limits, logFn)
 				if err := remapContainerUserIfNeeded(s.mgr, s.wasRestarted); err != nil {
 					return nil, err
 				}
+			}
+
+			// Git commit identity + [[credentials]], applied the same way the
+			// shell path does so `coi run -- git commit`/credential-consuming
+			// scripts behave identically (#726 follow-up). Applied on reuse too,
+			// not just fresh launches: the shell path re-applies both on reuse
+			// (setup.go runs them outside its fresh-only block), and the helpers
+			// are idempotent (SetupGitIdentityReadonly re-mounts, SetupGitIdentity
+			// re-writes, SetupCredentials re-pushes) — so a reused persistent
+			// container picks up identity/credential config changes made since it
+			// was created, instead of silently keeping stale values.
+			homeDir := "/home/" + container.CodeUser
+			gitID := resolveGitIdentity(&a.cfg.Git)
+			stripAttribution := a.cfg.Git.IsStripAttributionEnabled()
+			readonlyLock := a.cfg.Git.IsReadonlyEnabled() && gitID.Complete()
+			identityLock := readonlyLock
+			// core.hooksPath must be installed when EITHER the strip hook or the
+			// identity re-stamp hook is active (they share the one hook dir).
+			hooksPath := ""
+			if stripAttribution || identityLock {
+				hooksPath = session.GitHooksDir
+			}
+			if readonlyLock {
+				// Fail closed: the user asked to lock the identity read-only.
+				// core.hooksPath for the hooks rides inside the mounted gitconfig
+				// (a live `git config --global` would fail against the read-only
+				// mount).
+				if err := session.SetupGitIdentityReadonly(s.mgr, homeDir, gitID, hooksPath); err != nil {
+					return nil, fmt.Errorf("git.readonly: could not lock the commit identity read-only: %w", err)
+				}
+			} else {
+				session.SetupGitIdentityGuard(s.mgr, homeDir, logFn)
+				session.SetupGitIdentity(s.mgr, homeDir, gitID, logFn)
+			}
+			// Git hooks (#788 strip + identity re-stamp), mirroring the shell path:
+			// the hook dir is needed on both identity paths; core.hooksPath is
+			// written live only when the gitconfig is writable.
+			if stripAttribution || identityLock {
+				session.SetupGitHooks(s.mgr, homeDir, gitID, stripAttribution, a.cfg.Git.StripAttributionPatterns, identityLock, !readonlyLock, logFn)
+			} else if !readonlyLock {
+				session.RemoveGitAttributionHookConfig(s.mgr, homeDir)
+			}
+			// Layer 1: pin GIT_AUTHOR_*/GIT_COMMITTER_* container-level env so a
+			// `-c user.*` override loses; no-op / unset when identity isn't locked.
+			session.ApplyGitIdentityContainerEnv(ctx, s.containerName, gitID, identityLock, logFn)
+			// Claude source-level layer for the same policy
+			// (includeCoAuthoredBy=false via managed settings) — it also covers
+			// the hook's two blind spots (local core.hooksPath repos, commits
+			// with --no-verify). Auto-mode suppression stays off here: the run
+			// pipeline never needed it (#764 concerns interactive sessions).
+			if a.cfg.Tool.Name == "claude" {
+				session.SetupClaudeManagedSettings(s.mgr, false, stripAttribution, logFn)
+			}
+			if err := session.SetupCredentials(s.mgr, homeDir, s.credentialConfig, logFn); err != nil {
+				return nil, fmt.Errorf("failed to set up credentials: %w", err)
 			}
 
 			// Disk devices (workspace, additional mounts, security + secret masks)
@@ -408,7 +540,7 @@ func (a *App) applyNetworkRunPhase(s *runState) session.Phase {
 			// Publish [ports] on the host (localhost:<port> -> container)
 			// and expose the mapping to the command env (COI_PORTS /
 			// COI_PORT_<NAME>).
-			logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
+			logFn := stderrLogFn
 			_, portsEnv := session.PublishResolvedPorts(s.mgr, s.resolvedPorts, logFn)
 			for k, v := range portsEnv {
 				if s.socketEnv == nil {
@@ -464,18 +596,7 @@ func (a *App) runCommandPhase(args []string, s *runState) session.Phase {
 	return session.PhaseFunc{
 		PhaseName: "run-command",
 		RunFn: func(ctx context.Context) (session.Teardown, error) {
-			var timeoutMon *limits.TimeoutMonitor
-			if a.cfg.Limits.Runtime.MaxDuration != "" {
-				maxDur, _ := limits.ParseDuration(a.cfg.Limits.Runtime.MaxDuration)
-				autoStop := config.BoolVal(a.cfg.Limits.Runtime.AutoStop)
-				if a.cfg.Limits.Runtime.AutoStop == nil {
-					autoStop = true
-				}
-				stopGraceful := config.BoolVal(a.cfg.Limits.Runtime.StopGraceful)
-				runLog := logger.NewDiscard()
-				timeoutMon = limits.NewTimeoutMonitor(ctx, s.containerName, maxDur, autoStop, stopGraceful, a.cfg.Incus.Project, runLog)
-				timeoutMon.Start()
-			}
+			timeoutMon := a.startRunTimeoutMonitor(ctx, s.containerName)
 			defer func() {
 				if timeoutMon != nil {
 					timeoutMon.Stop()
@@ -497,7 +618,7 @@ func (a *App) runCommandPhase(args []string, s *runState) session.Phase {
 				"exec", s.containerName, "--user", fmt.Sprintf("%d", container.CodeUID),
 				"--group", fmt.Sprintf("%d", container.CodeUID), "--cwd", s.containerWorkspace,
 			}
-			incusArgs, err := a.appendEnvArgs(incusArgs, s.tz, s.socketEnv)
+			incusArgs, err := a.appendEnvArgs(incusArgs, "/home/"+container.CodeUser, s.tz, s.socketEnv)
 			if err != nil {
 				return nil, err
 			}
@@ -515,6 +636,163 @@ func (a *App) runCommandPhase(args []string, s *runState) session.Phase {
 			}
 
 			fmt.Fprintf(os.Stderr, "\nCommand completed successfully\n")
+			return nil, nil
+		},
+	}
+}
+
+// startRunTimeoutMonitor starts the [limits.runtime] max_duration monitor for a
+// run container, or returns nil when no max_duration is configured. Shared by
+// the command and prompt run phases. Call Stop() on the result when done.
+func (a *App) startRunTimeoutMonitor(ctx context.Context, containerName string) *limits.TimeoutMonitor {
+	if a.cfg.Limits.Runtime.MaxDuration == "" {
+		return nil
+	}
+	maxDur, _ := limits.ParseDuration(a.cfg.Limits.Runtime.MaxDuration)
+	autoStop := config.BoolVal(a.cfg.Limits.Runtime.AutoStop)
+	if a.cfg.Limits.Runtime.AutoStop == nil {
+		autoStop = true
+	}
+	stopGraceful := config.BoolVal(a.cfg.Limits.Runtime.StopGraceful)
+	mon := limits.NewTimeoutMonitor(ctx, containerName, maxDur, autoStop, stopGraceful, a.cfg.Incus.Project, logger.NewDiscard())
+	mon.Start()
+	return mon
+}
+
+// runPromptPhase runs the AI agent headlessly with a predefined prompt and
+// propagates its exit code (#701). It seeds the agent's auth/context/model env
+// (which the lean run pipeline otherwise skips), stages the prompt into a
+// container file so arbitrary text never touches the command line, builds the
+// tool's headless (print-mode) launch command, and execs it through `bash -lc`
+// so the "$(cat <file>)" prompt substitution expands.
+func (a *App) runPromptPhase(s *runState) session.Phase {
+	return session.PhaseFunc{
+		PhaseName: "run-prompt",
+		RunFn: func(ctx context.Context) (session.Teardown, error) {
+			timeoutMon := a.startRunTimeoutMonitor(ctx, s.containerName)
+			defer func() {
+				if timeoutMon != nil {
+					timeoutMon.Stop()
+				}
+			}()
+
+			// The tool was resolved and validated (claude-only, non-interactive)
+			// in resolvePromptMode; reuse it rather than rebuilding.
+			t := s.promptTool
+			if t == nil {
+				return nil, fmt.Errorf("internal error: prompt tool was not resolved before run-prompt phase")
+			}
+
+			// Resolve the uid the agent runs as and the home its runs dir lives
+			// under (code user, or root when the image has none).
+			uid, homeDir, err := toolSpecUserHome(s.mgr)
+			if err != nil {
+				return nil, err
+			}
+
+			// Seed tool auth + context + model/effort env, exactly as an
+			// interactive `coi shell` session does — the lean run pipeline skips
+			// this, but a headless agent needs it to authenticate and load context.
+			hostHome, err := os.UserHomeDir()
+			if err != nil {
+				return nil, fmt.Errorf("failed to resolve host home directory: %w", err)
+			}
+			var cliConfigPath string
+			if dirName := t.ConfigDirName(); dirName != "" {
+				cliConfigPath = filepath.Join(hostHome, dirName)
+			}
+			seedResult := &session.SetupResult{
+				Manager:                s.mgr,
+				ContainerName:          s.containerName,
+				ContainerWorkspacePath: s.containerWorkspace,
+				HomeDir:                homeDir,
+				Timezone:               s.tz,
+			}
+			seedOpts := session.SetupOptions{
+				Tool:                t,
+				CLIConfigPath:       cliConfigPath,
+				AutoContext:         a.cfg.Tool.AutoContext,
+				ContextJSON:         a.cfg.Tool.ContextJSON,
+				ContextFilePath:     a.cfg.Tool.ContextFile,
+				ContextJSONFilePath: a.cfg.Tool.ContextJSONFile,
+				ProfileContextFile:  a.cfg.ProfileContextFile,
+				NetworkConfig:       &a.cfg.Network,
+				LimitsConfig:        &a.cfg.Limits,
+				Persistent:          a.persistent,
+				ForwardedEnvVars:    resolveForwardedEnvVarNames(a.cfg.Defaults.ForwardEnv),
+				Logger:              stderrLogFn,
+				// The kernel-surface flags feed injectSandboxContext's Docker
+				// availability line; omitting them here (zero value = docker
+				// off) would make every headless run's context claim Docker is
+				// unavailable while the container actually has it (the launch
+				// phase applies the real policy). Mirrors phases_shell.go.
+				// The strict tier is intentionally not threaded here: this seed
+				// path only drives the Docker-availability line, which depends
+				// solely on DockerEnabled() — and ReduceKernelSurface already
+				// reflects the strict tier (it implies the base flag).
+				DockerSupport:       a.cfg.Container.IsDockerEnabled(),
+				ReduceKernelSurface: a.cfg.Security.IsReduceKernelSurfaceEnabled(),
+			}
+			if err := session.SeedToolConfigForRun(ctx, seedResult, seedOpts); err != nil {
+				return nil, err
+			}
+
+			// Stage the prompt as an in-container file owned by the run user
+			// (shared runs-dir helper with `coi tool spec`).
+			runsDir, err := ensureContainerRunsDir(s.mgr, homeDir, uid)
+			if err != nil {
+				return nil, err
+			}
+			promptPath := filepath.Join(runsDir, s.promptSessionID+".prompt")
+			if err := s.mgr.CreateFileWithOwner(promptPath, s.promptText, uid, uid, "0600"); err != nil {
+				return nil, fmt.Errorf("failed to stage prompt file in container: %w", err)
+			}
+
+			// Build the headless (print-mode) launch command. A fresh session per
+			// fire (Resume:false) is the right cron default — deterministic, no
+			// accumulating conversation state.
+			argv, outOfBand, err := buildToolLaunchArgv(t, tool.LaunchSpec{
+				SessionID:  s.promptSessionID,
+				PromptFile: promptPath,
+				Print:      true,
+			})
+			if err != nil {
+				return nil, err
+			}
+			if outOfBand != "" {
+				// Tool can't embed the prompt in argv and coi run has no
+				// orchestrator to deliver it out-of-band.
+				return nil, &ExitCodeError{Code: 2, Message: fmt.Sprintf(
+					"tool %q cannot run a prompt headlessly via coi run", t.Name())}
+			}
+
+			// incus exec as the run user; route through a non-login shell so the
+			// argv's "$(cat <prompt-file>)" substitution expands without sourcing
+			// profile scripts (whose stdout would pollute the agent's output).
+			// HOME is pinned to the resolved home so it matches where the tool
+			// config was seeded (matters for a no-code-user/root image). Model and
+			// effort reach the agent via SeedToolConfigForRun (container-level env
+			// + settings.json), so no per-exec tool env is needed here.
+			incusArgs := []string{
+				"exec", s.containerName, "--user", fmt.Sprintf("%d", uid),
+				"--group", fmt.Sprintf("%d", uid), "--cwd", s.containerWorkspace,
+			}
+			incusArgs, err = a.appendEnvArgs(incusArgs, homeDir, s.tz, s.socketEnv)
+			if err != nil {
+				return nil, err
+			}
+			incusArgs = append(incusArgs, "--", "bash", "-c", strings.Join(argv, " "))
+
+			fmt.Fprintf(os.Stderr, "Running headless prompt with %s (session %s)...\n", t.Name(), s.promptSessionID)
+			if err := container.IncusExecStreamedContext(ctx, incusArgs...); err != nil {
+				if exitErr, ok := err.(*container.ExitError); ok {
+					fmt.Fprintf(os.Stderr, "\nAgent exited with code %d\n", exitErr.ExitCode)
+					return nil, &ExitCodeError{Code: exitErr.ExitCode}
+				}
+				return nil, fmt.Errorf("headless prompt run failed: %w", err)
+			}
+
+			fmt.Fprintf(os.Stderr, "\nPrompt run completed successfully\n")
 			return nil, nil
 		},
 	}

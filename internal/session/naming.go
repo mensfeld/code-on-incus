@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
-	"strings"
 
 	"github.com/mensfeld/code-on-incus/internal/container"
 )
@@ -153,7 +152,7 @@ func FindReusablePersistentSlot(workspacePath, sessionName string, maxSlots int)
 	re := regexp.MustCompile(fmt.Sprintf(`^%s(\d+)$`, regexp.QuoteMeta(prefix)))
 	best := 0
 	for _, c := range containers {
-		if !strings.EqualFold(c.Status, "stopped") {
+		if !container.StatusIsStopped(c.Status) {
 			continue
 		}
 		if m := re.FindStringSubmatch(c.Name); len(m) > 1 {

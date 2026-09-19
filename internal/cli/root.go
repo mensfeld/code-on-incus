@@ -43,6 +43,41 @@ func (a *App) sessionName() string {
 	return a.cfg.Container.SessionName
 }
 
+// hardeningPolicy builds the container-level kernel-surface policy from
+// [container] docker and [security] reduce_kernel_surface. It passes the raw
+// flags; the precedence ("reduce_kernel_surface wins") is resolved in exactly
+// one place, HardeningPolicy.DockerEnabled.
+func (a *App) hardeningPolicy() container.HardeningPolicy {
+	if a.cfg == nil {
+		return container.DefaultHardeningPolicy()
+	}
+	return container.HardeningPolicy{
+		Docker:                    a.cfg.Container.IsDockerEnabled(),
+		ReduceKernelSurface:       a.cfg.Security.IsReduceKernelSurfaceEnabled(),
+		ReduceKernelSurfaceStrict: a.cfg.Security.IsReduceKernelSurfaceStrictEnabled(),
+	}
+}
+
+// warnDockerHardeningConflict surfaces an explicit `[container] docker = true`
+// being overridden by kernel-surface hardening (security wins; nesting is part
+// of the surface being reduced). The message names whichever flag the user
+// actually set — reduce_kernel_surface_strict implies the base tier, so when
+// only the strict flag is on, pointing at reduce_kernel_surface would name a
+// setting absent from their config.
+func warnDockerHardeningConflict(cfg *config.Config) {
+	if cfg == nil || !cfg.Security.IsReduceKernelSurfaceEnabled() {
+		return
+	}
+	if cfg.Container.Docker != nil && *cfg.Container.Docker {
+		flag := "reduce_kernel_surface"
+		if !cfg.Security.IsReduceKernelSurfaceBaseEnabled() {
+			flag = "reduce_kernel_surface_strict"
+		}
+		fmt.Fprintf(os.Stderr,
+			"Warning: [security] %s = true disables Docker support; ignoring [container] docker = true\n", flag)
+	}
+}
+
 // applyDefaultProfileForOps applies the [defaults] profile fallback for
 // OPERATIONAL commands (attach, monitor, snapshot) so a profile-carried
 // session_name — the documented placement — resolves the same container
@@ -272,6 +307,7 @@ func init() {
 	rootCmd.AddCommand(hostsCmd) // coi hosts <add|list|remove> (#605)
 	rootCmd.AddCommand(persistCmd)
 	rootCmd.AddCommand(tmuxCmd)
+	rootCmd.AddCommand(toolCmd) // coi tool <spec> (#751)
 	rootCmd.AddCommand(versionCmd)
 	rootCmd.AddCommand(healthCmd)
 	rootCmd.AddCommand(snapshotCmd)
@@ -286,6 +322,7 @@ func init() {
 	rootCmd.AddCommand(shutdownCmd)
 	rootCmd.AddCommand(monitorCmd)
 	rootCmd.AddCommand(overviewCmd)
+	rootCmd.AddCommand(topCmd)
 }
 
 var versionCmd = &cobra.Command{
@@ -293,6 +330,7 @@ var versionCmd = &cobra.Command{
 	Short: "Print version information",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		format, _ := cmd.Flags().GetString("format")
+		applyJSONFormatAlias(cmd, &format)
 		if format != "text" && format != "json" {
 			return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid format %q: must be 'text' or 'json'", format)}
 		}
@@ -308,4 +346,5 @@ var versionCmd = &cobra.Command{
 
 func init() {
 	versionCmd.Flags().String("format", "text", "Output format: text or json")
+	versionCmd.Flags().Bool("json", false, "Alias for --format json")
 }

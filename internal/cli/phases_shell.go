@@ -317,6 +317,12 @@ func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.P
 			if err := CheckAndReportStaleBase(a.cfg, img); err != nil {
 				return nil, err
 			}
+			// Validate the configured storage pool up front (matching coi run),
+			// so a typo fails clearly instead of the container silently landing
+			// on the default pool (#726).
+			if err := container.ValidateStoragePool(a.cfg.Container.StoragePool); err != nil {
+				return nil, err
+			}
 
 			// Build config-derived options.
 			networkConfig := a.cfg.Network
@@ -361,39 +367,50 @@ func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.P
 			}
 
 			s.setupOpts = session.SetupOptions{
-				WorkspacePath:         s.absWorkspace,
-				SessionName:           a.sessionName(),
-				Image:                 img,
-				Persistent:            a.persistent,
-				ResumeFromID:          resumeID,
-				Slot:                  slotNum,
-				MountConfig:           mountConfig,
-				SocketConfig:          socketConfig,
-				CredentialConfig:      credConfig,
-				PortConfig:            portConfig,
-				SessionsDir:           sessionsDir,
-				CLIConfigPath:         cliConfigPath,
-				Tool:                  ti,
-				NetworkConfig:         &networkConfig,
-				DisableShift:          a.cfg.Incus.DisableShift,
-				LimitsConfig:          limitsConfig,
-				IncusProject:          a.cfg.Incus.Project,
-				ProtectedPaths:        protectedPaths,
-				Security:              &a.cfg.Security,
-				SecretPaths:           a.cfg.Security.SecretPaths,
-				HostImmutable:         a.cfg.Security.IsHostImmutableEnabled(),
-				PreserveWorkspacePath: a.cfg.Paths.PreserveWorkspacePath,
-				ForwardSSHAgent:       config.BoolVal(a.cfg.SSH.ForwardAgent),
-				ForwardedEnvVars:      resolvedForwardedEnvVars,
-				GitIdentity:           resolveGitIdentity(&a.cfg.Git),
-				ContextFilePath:       a.cfg.Tool.ContextFile,
-				ProfileContextFile:    a.cfg.ProfileContextFile,
-				AutoContext:           a.cfg.Tool.AutoContext,
-				ContainerName:         containerName,
-				Timezone:              resolvedTimezone,
-				Alias:                 a.cfg.Container.Alias,
-				ReadyTimeout:          a.cfg.Container.ReadyTimeoutSeconds(),
+				WorkspacePath:               s.absWorkspace,
+				SessionName:                 a.sessionName(),
+				Image:                       img,
+				StoragePool:                 a.cfg.Container.StoragePool,
+				Persistent:                  a.persistent,
+				ResumeFromID:                resumeID,
+				Slot:                        slotNum,
+				MountConfig:                 mountConfig,
+				SocketConfig:                socketConfig,
+				CredentialConfig:            credConfig,
+				PortConfig:                  portConfig,
+				SessionsDir:                 sessionsDir,
+				CLIConfigPath:               cliConfigPath,
+				Tool:                        ti,
+				PermissionMode:              a.cfg.Tool.PermissionMode,
+				NetworkConfig:               &networkConfig,
+				DisableShift:                a.cfg.Incus.DisableShift,
+				LimitsConfig:                limitsConfig,
+				IncusProject:                a.cfg.Incus.Project,
+				ProtectedPaths:              protectedPaths,
+				Security:                    &a.cfg.Security,
+				SecretPaths:                 a.cfg.Security.SecretPaths,
+				HostImmutable:               a.cfg.Security.IsHostImmutableEnabled(),
+				PreserveWorkspacePath:       a.cfg.Paths.PreserveWorkspacePath,
+				ForwardSSHAgent:             config.BoolVal(a.cfg.SSH.ForwardAgent),
+				ForwardedEnvVars:            resolvedForwardedEnvVars,
+				GitIdentity:                 resolveGitIdentity(&a.cfg.Git),
+				GitReadonly:                 a.cfg.Git.IsReadonlyEnabled(),
+				GitStripAttribution:         a.cfg.Git.IsStripAttributionEnabled(),
+				GitStripAttributionPatterns: a.cfg.Git.StripAttributionPatterns,
+				ContextFilePath:             a.cfg.Tool.ContextFile,
+				ProfileContextFile:          a.cfg.ProfileContextFile,
+				AutoContext:                 a.cfg.Tool.AutoContext,
+				ContextJSON:                 a.cfg.Tool.ContextJSON,
+				ContextJSONFilePath:         a.cfg.Tool.ContextJSONFile,
+				ContainerName:               containerName,
+				Timezone:                    resolvedTimezone,
+				Alias:                       a.cfg.Container.Alias,
+				ReadyTimeout:                a.cfg.Container.ReadyTimeoutSeconds(),
+				DockerSupport:               a.cfg.Container.IsDockerEnabled(),
+				ReduceKernelSurface:         a.cfg.Security.IsReduceKernelSurfaceEnabled(),
+				ReduceKernelSurfaceStrict:   a.cfg.Security.IsReduceKernelSurfaceStrictEnabled(),
 			}
+			warnDockerHardeningConflict(a.cfg)
 			return nil, nil
 		},
 	}

@@ -287,6 +287,41 @@ func TestClaudeModelAndEffortCoexist(t *testing.T) {
 	}
 }
 
+// Claude must expose model/effort via GetContainerEnv too, so session setup can
+// persist them as container-level environment.* that any exec inherits (#744).
+func TestClaudeGetContainerEnv(t *testing.T) {
+	twce, ok := NewClaude().(ToolWithContainerEnv)
+	if !ok {
+		t.Fatal("Claude tool should implement ToolWithContainerEnv")
+	}
+
+	// Nothing configured -> no env (tool keeps its own defaults).
+	if env := twce.GetContainerEnv("/workspace"); len(env) != 0 {
+		t.Errorf("unconfigured Claude should return no container env, got %v", env)
+	}
+
+	twce.(ToolWithModel).SetModel("opus")
+	twce.(ToolWithEffortLevel).SetEffortLevel("high")
+	env := twce.GetContainerEnv("/workspace")
+	if env["ANTHROPIC_MODEL"] != "opus" {
+		t.Errorf("ANTHROPIC_MODEL = %q, want opus", env["ANTHROPIC_MODEL"])
+	}
+	if env["CLAUDE_CODE_EFFORT_LEVEL"] != "high" {
+		t.Errorf("CLAUDE_CODE_EFFORT_LEVEL = %q, want high", env["CLAUDE_CODE_EFFORT_LEVEL"])
+	}
+
+	// Only model set -> only ANTHROPIC_MODEL, no effort key.
+	only := NewClaude()
+	only.(ToolWithModel).SetModel("sonnet")
+	oenv := only.(ToolWithContainerEnv).GetContainerEnv("/workspace")
+	if oenv["ANTHROPIC_MODEL"] != "sonnet" {
+		t.Errorf("ANTHROPIC_MODEL = %q, want sonnet", oenv["ANTHROPIC_MODEL"])
+	}
+	if _, ok := oenv["CLAUDE_CODE_EFFORT_LEVEL"]; ok {
+		t.Error("CLAUDE_CODE_EFFORT_LEVEL must be absent when effort not configured")
+	}
+}
+
 func TestClaudeToolConfigDirFiles(t *testing.T) {
 	tool := NewClaude()
 	tcf, ok := tool.(ToolWithConfigDirFiles)
@@ -569,8 +604,8 @@ func TestRenderContextFileContent(t *testing.T) {
 		{"ssh forwarded", "Forwarded from host"},
 		{"non-root user", "Non-root user"},
 		{"COI header", "COI Sandbox Environment"},
-		{"full root access", "Full root access"},
-		{"docker available", "Docker is available"},
+		{"full root access", "full root"},
+		{"docker available", "Docker (Docker-in-Docker)"},
 		{"OS info", "Ubuntu"},
 		{"architecture", "amd64"},
 		{"docker row", "Docker-in-Docker"},
@@ -583,7 +618,7 @@ func TestRenderContextFileContent(t *testing.T) {
 		{"container name", "coi-test-1"},
 		{"autonomous operation section", "Autonomous Operation"},
 		{"never ask confirmation", "Never ask for confirmation"},
-		{"act autonomously guidance", "Act autonomously"},
+		{"act autonomously guidance", "expected to act, not ask"},
 		{"git configuration section", "Git Configuration"},
 		{"git ssh recommendation", "Use SSH for git operations"},
 		{"git identity warning", `NEVER fabricate`},
@@ -593,6 +628,47 @@ func TestRenderContextFileContent(t *testing.T) {
 		if !strings.Contains(content, check.substr) {
 			t.Errorf("RenderContextFileContent() missing %s (expected substring %q)", check.name, check.substr)
 		}
+	}
+}
+
+// When Docker is disabled (docker=false or reduce_kernel_surface=true), the
+// context must NOT advertise Docker-in-Docker the agent can't use — otherwise
+// it burns turns debugging a dockerd that cannot start (finding: sandbox
+// context Docker desc).
+func TestRenderContextFileContent_DockerUnavailable(t *testing.T) {
+	info := ContextInfo{
+		WorkspacePath:     "/workspace",
+		HomeDir:           "/home/code",
+		NetworkMode:       "restricted",
+		DockerUnavailable: true,
+	}
+	content := RenderContextFileContent(info)
+
+	if strings.Contains(content, "Docker-in-Docker") {
+		t.Error("hardened context must not advertise Docker-in-Docker")
+	}
+	if !strings.Contains(content, "Not available") {
+		t.Errorf("Docker row should say Not available, got:\n%s", content)
+	}
+	// The pre-installed-tools line and the docker troubleshooting bullet must
+	// be gated out too.
+	if strings.Contains(content, "Docker not responding") {
+		t.Error("hardened context must omit the docker troubleshooting bullet")
+	}
+
+	// JSON contract must report it too.
+	jsonStr, err := RenderContextFileJSON(info)
+	if err != nil {
+		t.Fatalf("RenderContextFileJSON: %v", err)
+	}
+	if !strings.Contains(jsonStr, "\"docker_available\": false") {
+		t.Errorf("JSON should report docker_available:false, got:\n%s", jsonStr)
+	}
+
+	// Default (zero value) still advertises Docker — back-compat.
+	def := RenderContextFileContent(ContextInfo{WorkspacePath: "/w", HomeDir: "/h", NetworkMode: "open"})
+	if !strings.Contains(def, "Docker-in-Docker") {
+		t.Error("default context should still advertise Docker-in-Docker")
 	}
 }
 
@@ -880,10 +956,10 @@ func TestRenderContextFileContent_GitAuthHints_TokenOnly(t *testing.T) {
 	if !strings.Contains(content, "Git Configuration") {
 		t.Error("Expected 'Git Configuration' section when token is available")
 	}
-	if !strings.Contains(content, "Token-based git authentication is available") {
+	if !strings.Contains(content, "Token-based git auth is available") {
 		t.Error("Expected token-based auth description")
 	}
-	if !strings.Contains(content, "token may have limited scope") {
+	if !strings.Contains(content, "may have limited scope") {
 		t.Error("Expected scope warning for forwarded token")
 	}
 	if !strings.Contains(content, "gh api user") {

@@ -1,0 +1,20 @@
+{
+  "description": "A predefined prompt: either inline text (a string) or a { file = \"...\" } table pointing at a Markdown/text file whose contents are the prompt.",
+  "oneOf": [
+    {
+      "type": "string",
+      "description": "Inline prompt text."
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file"],
+      "properties": {
+        "file": {
+          "type": "string",
+          "description": "Path to a file whose contents are the prompt, resolved relative to the config/profile directory. Trusted-scope only."
+        }
+      }
+    }
+  ]
+}

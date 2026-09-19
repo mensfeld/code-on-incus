@@ -12,6 +12,16 @@ on:
 permissions:
   contents: read
 
+# GitHub's Azure-hosted runners reach the in-region Ubuntu mirror
+# (azure.archive.ubuntu.com) far faster than the default archive.ubuntu.com,
+# which is intermittently rate-limited from Azure and made the image build's
+# base-dependency apt take 35+ min (blowing the job timeout). coi build
+# forwards COI_APT_MIRROR into the build container (see internal/image/builder.go
+# buildScriptEnv → build.sh configure_apt_mirror), so the build uses the fast
+# mirror in CI. Local builds leave it unset and keep the stock mirrors.
+env:
+  COI_APT_MIRROR: http://azure.archive.ubuntu.com/ubuntu
+
 jobs:
   # Build job gates all tests - nothing runs if build fails
   build:
@@ -24,7 +34,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.25'
+          go-version: '1.26'
           cache: true
 
       - name: Install system dependencies
@@ -66,7 +76,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.25'
+          go-version: '1.26'
           cache: true
 
       - name: Install system dependencies
@@ -106,7 +116,15 @@ jobs:
     name: Integration Tests (${{ matrix.test_group.name }})
     runs-on: ubuntu-24.04
     needs: build
-    timeout-minutes: 60
+    # 90 (not 60): the build-heavy lanes (core-build especially) run ~15 tests
+    # that each build a full COI image. On a cold image cache — which happens
+    # whenever internal/image/**, profiles/default/**, or the build script
+    # change — those rebuild from scratch (a slim build alone can take ~10min on
+    # a slow runner), and the suite legitimately exceeds 60min. The IPv4 apt fix
+    # removed the indefinite hang; this gives the genuinely-long cold runs room
+    # to finish instead of being cancelled at the cap. Fast/warm lanes are
+    # unaffected (they finish well under either limit).
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -132,8 +150,11 @@ jobs:
             path: tests/list tests/attach tests/tmux tests/kill tests/persist
             description: "Core commands: list/attach/tmux/kill/persist"
           - name: core-build
-            path: tests/build tests/run
-            description: "Build and run command tests"
+            path: tests/build
+            description: "Build command tests (each builds a full image — kept on its own lane)"
+          - name: core-run
+            path: tests/run
+            description: "Run command tests"
           - name: misc-cli
             path: tests/cli
             description: "CLI flag/format/output tests"
@@ -141,8 +162,8 @@ jobs:
             path: tests/meta tests/snapshot tests/image
             description: "Snapshot, image, and meta command tests"
           - name: misc-commands
-            path: tests/audit tests/clean tests/completion tests/docker tests/errors tests/help tests/info tests/mount tests/monitor tests/shutdown tests/update tests/version tests/main_help_flag.py tests/main_help_shorthand.py
-            description: "Misc commands: audit/clean/completion/docker/errors/help/info/mount/monitor/shutdown/update/version + root help files"
+            path: tests/audit tests/clean tests/completion tests/docker tests/errors tests/help tests/info tests/mount tests/monitor tests/top tests/shutdown tests/update tests/version tests/main_help_flag.py tests/main_help_shorthand.py
+            description: "Misc commands: audit/clean/completion/docker/errors/help/info/mount/monitor/top/shutdown/update/version + root help files"
           - name: misc-config
             path: tests/config tests/health tests/limits tests/schema
             description: "Config, health, limits, and schema tests"
@@ -188,7 +209,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.25'
+          go-version: '1.26'
           cache: true
 
       - name: Install system dependencies
@@ -548,7 +569,7 @@ jobs:
           key: ${{ runner.os }}-coi-image-${{ hashFiles('internal/image/**', 'testdata/dummy/**', 'profiles/default/**') }}
 
       - name: Free disk space for image-intensive tests
-        if: matrix.test_group.name == 'core-build'
+        if: matrix.test_group.name == 'core-build' || matrix.test_group.name == 'core-run'
         run: |
           # core-build publishes many full images; free up space to avoid "no space left on device"
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/hostedtoolcache/CodeQL
@@ -613,7 +634,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.25'
+          go-version: '1.26'
           cache: true
 
       - name: Install host packages (QEMU + virtiofsd + build deps)
@@ -666,7 +687,7 @@ jobs:
           # Disable swap limit in the embedded default so tests can run.
           sed -i 's/^swap = "true"/swap = ""/' internal/config/embedded/default_config.toml
 
-      - name: Build COI binary (on the runner; go.mod needs Go 1.25)
+      - name: Build COI binary (on the runner; go.mod needs Go 1.26)
         run: |
           # The guest is the same distro/arch (Ubuntu 24.04 amd64), so the binary
           # runs there as-is. setcap happens in the guest on a native-fs copy —
@@ -806,7 +827,7 @@ jobs:
       # Pinned by digest (like every action in this file) so the test's
       # environmental assumptions — real pacman, zfs absent, btrfs absent by
       # default — can't drift out from under it on an upstream image rebuild.
-      image: archlinux:latest@sha256:345a872f6c95e082d4b8c050af637eebb57402c6e2177b411c3acf7df84eb33b
+      image: archlinux:latest@sha256:b0deabeb3d283da2c7f7dbf0eea051b7b2cd0554e0b737cc457fd21683bdcdd1
     steps:
       - name: Install git (needed by actions/checkout)
         run: pacman -Sy --noconfirm --needed git

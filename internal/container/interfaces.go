@@ -3,7 +3,9 @@ package container
 // ContainerLifecycle covers creating, starting, stopping and deleting containers.
 type ContainerLifecycle interface {
 	Launch(image string, ephemeral bool, pool string) error
+	LaunchWithPolicy(image string, ephemeral bool, pool string, policy HardeningPolicy) error
 	LaunchWithPreStart(image string, ephemeral bool, pool string, preStart func() error) error
+	LaunchWithPreStartPolicy(image string, ephemeral bool, pool string, preStart func() error, policy HardeningPolicy) error
 	Stop(force bool) error
 	Delete(force bool) error
 	Start() error

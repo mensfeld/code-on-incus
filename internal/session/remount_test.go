@@ -35,7 +35,9 @@ func (f *fakeRemounter) MountDisk(name, source, path string, shift, readonly boo
 	}
 	return f.mountErr
 }
+
 func (f *fakeRemounter) AddProxyDevice(name, connect, listen string, uid, gid int) error { return nil }
+
 func (f *fakeRemounter) AddHostPortDevice(name, listenAddr string, hostPort, containerPort int) error {
 	return nil
 }

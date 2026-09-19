@@ -18,12 +18,15 @@
 # persistent = false             # reuse the container across sessions (keeps installed tools/state)
 # storage_pool = ""              # Incus storage pool ("" = Incus default)
 # stale_base_check = "warn"      # warn | error | off — flag when the base image is outdated
+# docker = true                  # Docker-in-container support (nesting + syscall interception);
+#                                #   set false to shrink the shared-kernel attack surface
 
 # [container.build]              # how `coi build` builds the base image
 # base = "ubuntu:24.04"          # base image to build from
 # compression = "none"          # image compression: none | gzip | xz ("" = Incus default)
-# agents = ["claude"]            # AI agents to install (subset of claude/opencode/pi);
-#                                #   omit to install all supported agents (the default)
+# agents = ["claude"]            # AI agents to install (any of claude/opencode/pi/codex);
+#                                #   omit to install the default set (claude, opencode, pi —
+#                                #   codex is opt-in and must be listed explicitly, #698)
 
 [defaults]
 # Profile to apply when --profile is not passed, so your setup applies without
@@ -56,6 +59,10 @@
 # refresh_interval_minutes = 30  # re-resolve allowlist domains (allowlist mode)
 # allowlist mode only — domains/IPs the container may reach:
 # allowed_domains = ["registry.npmjs.org", "api.anthropic.com"]
+# Each entry may carry a per-destination port scope as ":ports" (single ports,
+# comma lists, and lo-hi ranges); an entry with no port inherits allowed_ports
+# (else all ports). So a name/IP is reachable ONLY on the ports you name:
+# allowed_domains = ["github.com:443", "192.168.1.50:8080", "10.0.0.0/8:22", "svc:8000-8100"]
 
 # Pin the DNS resolvers the container may reach on port 53 (restricted mode).
 # COI accepts :53 only to these IPs and rejects all other off-box DNS, so a
@@ -78,25 +85,55 @@
 # Static name→address entries written into the container's /etc/hosts, made
 # reachable to match the mode (restricted punches a targeted allow for a private
 # IP; allowlist adds it to the firewall set and refuses private/metadata IPs).
-# If allowed_ports is set, that reachability is scoped to those ports too, so a
-# host entry can't reopen the full port range on a LAN box.
+# Add an optional per-entry `ports` to reach that host on specific ports only —
+# empty inherits allowed_ports (else all ports). This is what lets restricted mode
+# open ONE LAN service (e.g. redmine:443) while the rest of egress stays open.
 # Trusted-scope only — ignored from a project ./.coi/config.toml. Add on the fly
-# to a running container with `coi hosts add <container> <ip> <hostname...>`.
+# to a running container with `coi hosts add <container> <ip> <hostname...> --ports 443`.
 # [[network.hosts]]
 # ip        = "10.0.0.5"
 # hostnames = ["db.internal", "cache.internal"]
+# ports     = [443]        # optional: reach this host on 443 only
+#
+# Example — "internet open, LAN only redmine:443, Pi-hole resolves":
+# [network]
+# mode        = "restricted"
+# dns_servers = ["192.168.1.2"]     # your Pi-hole
+# [[network.hosts]]
+# ip        = "192.168.1.50"
+# hostnames = ["redmine.susanoo.pl"]
+# ports     = [443]
 
 [network.logging]
 # enabled = true
 # path = "~/.coi/logs/network.log"
 
 [tool]
-# name = "claude"                # claude | opencode
+# name = "claude"                # claude | opencode | pi | codex
 # auto_context = true            # inject SANDBOX_CONTEXT.md into the tool
+# context_json = true            # also write ~/SANDBOX_CONTEXT.json (set false to disable)
+# context_json_file = "~/coi-context.json"  # inject a custom JSON instead of the generated one
 
 # [tool.claude]
 # model = "opus"                 # Claude model (ANTHROPIC_MODEL): alias like "opus" or a full ID
 # effort_level = "high"          # low | medium | high | xhigh | max | auto (unset = you control it)
+
+# [tool.codex]                   # codex is opt-in at image build: [container.build] agents = ["claude", "codex"]
+# model = "gpt-5-codex"          # Codex model (passed as -m); unset = codex's own default
+# reasoning_effort = "high"      # minimal | low | medium | high (model_reasoning_effort); unset = codex default
+
+# [prompts]                      # named prompts for headless "fire and forget" runs (#701):
+                                 #   coi run --prompt-name <name>
+                                 # runs the agent to completion and exits with its status code —
+                                 # pair with host cron for automation. A value is either inline text
+                                 # or a { file = "..." } table (path resolved relative to this config
+                                 # file). [prompts] is honored ONLY from trusted scope (~/.coi/config.toml
+                                 # / $COI_CONFIG); a [prompts] table in an untrusted project
+                                 # .coi/config.toml (or project-scoped profile) is ignored entirely.
+                                 # Prompt mode needs [tool] permission_mode = "bypass" (headless has
+                                 # no TTY to approve tool use).
+# nightly-maintenance = "Update dependencies, run the tests, and open a PR if green."
+# triage = { file = "prompts/triage.md" }
 
 [git]
 # writable_hooks = false         # allow the container to write .git/hooks (security-sensitive)
@@ -104,18 +141,35 @@
 # email = "jane@corp.example"    # ...both name+email required to take effect
 # seed_host_identity = true      # default: copy host `git config --global` user.name/email into the
                                  # container. Set false to keep only the fail-closed guard.
-                                 # (name/email/seed_host_identity are trusted-scope only — ignored in
-                                 #  a project .coi/config.toml)
+# readonly = true                # LOCK the identity: mount ~/.gitconfig read-only so the agent
+                                 # can't `git config --global` over it (locks the WHOLE global
+                                 # config — any `git config --global` fails; needs an identity).
+                                 # (name/email/seed_host_identity/readonly are trusted-scope only —
+                                 #  ignored in a project .coi/config.toml)
+# strip_attribution = true       # default: a global commit-msg hook strips auto-injected AI
+                                 # attribution (Co-Authored-By trailers / "Generated with" footers)
+                                 # from every commit, so commits carry only the configured author.
+                                 # Limitations: a repo-local core.hooksPath (husky) bypasses it,
+                                 # and `git commit --no-verify` skips commit-msg hooks.
+# strip_attribution_patterns = ["^Co-[Aa]uthored-[Bb]y:"]  # replace the default strip patterns
+                                 # (grep -E, per message line; trusted-scope only, like the flag)
 
 [ssh]
 # forward_agent = false          # forward the host SSH agent into the container
 
 [security]
 # Paths mounted read-only so the container can't tamper with host-executed files.
-# protected_paths = [".git/hooks", ".git/config", ".git/config.worktree", ".git/info/attributes", ".husky", ".vscode", ".coi"]
+# protected_paths = [".git/hooks", ".git/config", ".git/config.worktree", ".git/info/attributes", ".husky", ".vscode", ".coi", ".claude/settings.json", ".claude/settings.local.json", ".codex/config.toml"]
 # additional_protected_paths = []   # add to (not replace) the defaults above
 # host_immutable = true             # also set chattr +i on protected paths
 # disable_protection = false        # turn protection off entirely (NOT recommended)
+# reduce_kernel_surface = false     # deny io_uring/bpf/userfaultfd/keyring syscalls and disable
+#                                   #   Docker support — opt-in kernel hardening (trusted scope only;
+#                                   #   on in the built-in "hardened" profile)
+# reduce_kernel_surface_strict = false  # STRICT tier: also deny perf_event_open (kernel-LPE vector).
+#                                   #   Implies reduce_kernel_surface. Kept separate because it removes
+#                                   #   kernel profiling (perf, JVM async-profiler) — degrades gracefully,
+#                                   #   but stops working. Trusted scope only.
 
 [limits.cpu]
 # count = ""                     # "2", "0-3", "0,1,3" ("" = unlimited)
@@ -132,7 +186,8 @@
 # write = ""
 # max = ""                       # combined read+write (overrides read/write)
 # priority = 0
-# tmpfs_size = ""                # "" = /tmp on container disk; "4GiB" = RAM-backed tmpfs
+# size = ""                      # whole-container rootfs quota, e.g. "20GiB"; needs a btrfs/zfs/lvm pool (rejected on a dir pool)
+# tmpfs_size = ""                # opt-in RAM-backed /tmp of this size, e.g. "4GiB"; "" = /tmp stays disk-backed (use size to bound total disk)
 
 [limits.runtime]
 # max_duration = ""              # "2h", "30m", "1h30m" ("" = unlimited)
@@ -144,6 +199,7 @@
 # enabled = false                # background threat monitoring
 # auto_pause_on_high = true
 # auto_kill_on_critical = true
+# forensics_on_kill = true       # keep a forensic copy (*-forensics-*) before an auto-kill deletes the container
 # poll_interval_sec = 2
 # file_read_threshold_mb = 50.0
 # file_read_rate_mb_per_sec = 10.0

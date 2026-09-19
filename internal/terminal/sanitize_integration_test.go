@@ -17,11 +17,16 @@ func TestSanitizeTerm_Integration(t *testing.T) {
 		t.Skip("tmux not found, skipping integration test")
 	}
 
+	// Use the TERM values these emulators ACTUALLY export (kitty exports
+	// xterm-kitty, not "kitty" — the mismatch behind #772), so this exercises
+	// the real inputs rather than made-up ones.
 	exoticTerminals := []string{
 		"xterm-ghostty",
+		"xterm-kitty",
 		"wezterm",
 		"alacritty",
-		"kitty",
+		"foot",
+		"rio",
 	}
 
 	for _, exoticTerm := range exoticTerminals {

@@ -87,36 +87,7 @@ func (a *App) shellCommand(cmd *cobra.Command, args []string) error {
 	pipeline := &session.Pipeline{}
 	defer pipeline.Teardown()
 
-	// Signal handler: explicitly trigger cleanup when SIGINT/SIGTERM arrives
-	// while runCLI is blocking on an interactive incus exec.
-	//
-	// We cannot use ctx.Done() as the "signal received" branch because
-	// signal.NotifyContext cancels ctx AND delivers to sigChan at the same
-	// time — a select over both is non-deterministic. If ctx.Done() is chosen,
-	// the goroutine exits without calling Teardown, leaving cleanup to the
-	// deferred call, which won't run until the blocking incus exec returns.
-	//
-	// Instead we use a dedicated `done` channel closed when shellCommand
-	// returns. On signal, cleanup is always called. On normal return, the
-	// goroutine exits via the done branch without a second cleanup attempt
-	// (pipeline.Teardown is idempotent). signal.Stop ensures no further
-	// signals are queued after shellCommand returns.
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(sigChan)
-	done := make(chan struct{})
-	defer close(done)
-	go func() {
-		select {
-		case <-sigChan:
-			fmt.Fprintf(os.Stderr, "\nReceived interrupt signal, cleaning up...\n")
-			pipeline.Teardown()
-		case <-done:
-		}
-	}()
-
-	return pipeline.Run(
-		ctx,
+	return runPipelineWithSignals(ctx, pipeline,
 		a.resolveWorkspacePhase(cmd, s),
 		a.validateEnvPhase(cmd, s),
 		a.configureSessionPhase(cmd, s),
@@ -138,19 +109,39 @@ func getConfiguredTool(cfg *config.Config) (tool.Tool, error) {
 		return nil, fmt.Errorf("failed to get tool '%s': %w", toolName, err)
 	}
 
-	// Set effort level if the tool supports it (Claude-specific)
+	// Model/effort knobs live in per-tool config sections ([tool.claude],
+	// [tool.codex]) so one tool's settings never leak into another. Tools
+	// without a section here simply get no model/effort applied.
+	var model, effortLevel string
+	switch t.Name() {
+	case "claude":
+		model, effortLevel = cfg.Tool.Claude.Model, cfg.Tool.Claude.EffortLevel
+	case "codex":
+		model, effortLevel = cfg.Tool.Codex.Model, cfg.Tool.Codex.ReasoningEffort
+		// Codex values travel as launch flags through a shell command string
+		// (unlike Claude's env delivery), and the [tool] section is mergeable
+		// from project-scope config — reject unsafe values loudly here; the
+		// setters below would silently drop them otherwise.
+		if err := tool.ValidateCodexFlagValue("model", model); err != nil {
+			return nil, err
+		}
+		if err := tool.ValidateCodexFlagValue("reasoning_effort", effortLevel); err != nil {
+			return nil, err
+		}
+	}
+
+	// Set effort level if the tool supports it. If not configured, the tool
+	// uses its own default (Claude: user controls interactively).
 	if twel, ok := t.(tool.ToolWithEffortLevel); ok {
-		effortLevel := cfg.Tool.Claude.EffortLevel
-		// If not configured, the tool's GetSandboxSettings will use its default
 		if effortLevel != "" {
 			twel.SetEffortLevel(effortLevel)
 		}
 	}
 
-	// Set model if the tool supports it (Claude-specific). Delivered as
-	// ANTHROPIC_MODEL; when unset the tool uses its own default.
+	// Set model if the tool supports it. Delivery is tool-specific (Claude:
+	// ANTHROPIC_MODEL env; codex: -m flag); when unset the tool uses its own default.
 	if twm, ok := t.(tool.ToolWithModel); ok {
-		if model := cfg.Tool.Claude.Model; model != "" {
+		if model != "" {
 			twm.SetModel(model)
 		}
 	}
@@ -277,28 +268,10 @@ func (a *App) buildContainerEnv(result *session.SetupResult) (map[string]string,
 		containerEnv["TZ"] = result.Timezone
 	}
 
-	// Apply static environment from config (defaults.environment + profile environment)
-	for k, v := range a.cfg.Defaults.Environment {
-		containerEnv[k] = v
-	}
-
-	// Resolve forward_env from config, deduplicate, then look up host values
-	for _, name := range a.cfg.Defaults.ForwardEnv {
-		if val, ok := os.LookupEnv(name); ok {
-			containerEnv[name] = val
-		} else {
-			fmt.Fprintf(os.Stderr, "Warning: forward_env variable %q is not set on host, skipping\n", name)
-		}
-	}
-
-	// Command-sourced env vars (highest precedence — freshly minted per session).
-	// Applied last so a minted value wins over static environment/forward_env.
-	envCommandValues, err := a.resolveEnvCommands()
-	if err != nil {
+	// Apply the config-sourced env layers (defaults.environment -> forward_env ->
+	// env_commands, last-wins), shared with coi run's appendEnvArgs.
+	if err := a.applyConfigEnv(containerEnv); err != nil {
 		return nil, nil, err
-	}
-	for k, v := range envCommandValues {
-		containerEnv[k] = v
 	}
 
 	// Sanitize TERM if user explicitly provided it via config
@@ -688,6 +661,7 @@ func startMonitoringDaemon(ctx context.Context, containerName, workspacePath str
 		ProcessSpawnRateThreshold: config.IntVal(cfg.Monitoring.ProcessSpawnRateThreshold),
 		AutoPauseOnHigh:           config.BoolVal(cfg.Monitoring.AutoPauseOnHigh),
 		AutoKillOnCritical:        config.BoolVal(cfg.Monitoring.AutoKillOnCritical),
+		ForensicsOnKill:           cfg.Monitoring.IsForensicsOnKillEnabled(),
 		OnThreat: func(threat monitor.ThreatEvent) {
 			log.Printf("[monitor] threat detected: %s severity=%s", threat.Title, threat.Level)
 		},
@@ -762,6 +736,7 @@ func startNFTMonitoringDaemon(ctx context.Context, containerName string, cfg *co
 		DNSQueryThreshold:  cfg.Monitoring.NFT.DNSQueryThreshold,
 		LogDNSQueries:      config.BoolVal(cfg.Monitoring.NFT.LogDNSQueries),
 		LimaHost:           cfg.Monitoring.NFT.LimaHost,
+		ForensicsOnKill:    cfg.Monitoring.IsForensicsOnKillEnabled(),
 		OnThreat: func(threat nftmonitor.ThreatEvent) {
 			log.Printf("[nft] threat detected: %s severity=%s", threat.Title, threat.Level)
 		},

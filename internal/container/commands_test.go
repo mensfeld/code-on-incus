@@ -106,3 +106,37 @@ func TestWithDisableShiftHint(t *testing.T) {
 		t.Errorf("hint must mention the disable_shift workaround, got: %s", wrapped.Error())
 	}
 }
+
+// TestStartRetryError covers the #716 fix: a start-retry branch adds the
+// disable_shift hint for the #678 idmapped-mount class (keyed on the ORIGINAL
+// start error) and only then, matching the other retry paths — and returns
+// anything else unchanged.
+func TestStartRetryError(t *testing.T) {
+	idmapErr := errors.New("idmapping abilities are required but aren't supported on system")
+	otherErr := errors.New("Permission denied - Failed to mount .incus-systemd-credentials")
+	retryErr := errors.New("retry start failed")
+
+	// Successful retry -> nil regardless of the original error.
+	if got := startRetryError(idmapErr, nil); got != nil {
+		t.Errorf("successful retry should return nil, got %v", got)
+	}
+
+	// #678 original error + failed retry -> hinted, wrapping the retry error.
+	got := startRetryError(idmapErr, retryErr)
+	if !errors.Is(got, retryErr) {
+		t.Error("must wrap the retry error (errors.Is)")
+	}
+	if !strings.Contains(got.Error(), "disable_shift = true") {
+		t.Errorf("idmap-class failure must get the disable_shift hint, got: %s", got.Error())
+	}
+
+	// Non-idmap original error + failed retry -> returned unchanged (no hint,
+	// no misattribution).
+	got = startRetryError(otherErr, retryErr)
+	if got != retryErr {
+		t.Errorf("non-idmap failure must be returned unchanged, got: %v", got)
+	}
+	if strings.Contains(got.Error(), "disable_shift") {
+		t.Errorf("non-idmap failure must NOT get the disable_shift hint, got: %s", got.Error())
+	}
+}

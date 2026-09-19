@@ -28,7 +28,7 @@ type BuildOptions struct {
 	BuildScript string   // For custom images
 	Compression string   // Compression algorithm (e.g., "none", "gzip", "xz")
 	StoragePool string   // Storage pool for the build container ("" = Incus default)
-	Agents      []string // AI agents to install (empty = all supported); passed as COI_AGENTS (#454)
+	Agents      []string // AI agents to install (empty = default set; opt-in agents like codex excluded, #698); passed as COI_AGENTS (#454)
 	Logger      func(string)
 }
 
@@ -646,9 +646,19 @@ func (b *Builder) updateAlias(versionAlias, mainAlias string) error {
 	return nil
 }
 
+// imageFingerprintListArgs builds the `incus image list` argv that
+// getImageFingerprint runs. Kept as a separate function so the project wiring is
+// unit-testable without a running Incus: the lookup MUST target the configured
+// project (container.IncusProject), not a hardcoded "default" — otherwise `coi
+// build` fails right after a successful publish on any non-default `[incus]
+// project` (#777). TestImageFingerprintListArgs_UsesConfiguredProject guards it.
+func imageFingerprintListArgs(alias string) []string {
+	return []string{"image", "list", alias, "--project", container.IncusProject, "--format=json"}
+}
+
 // getImageFingerprint gets the fingerprint of an image by alias
 func getImageFingerprint(alias string) (string, error) {
-	output, err := container.IncusOutput("image", "list", alias, "--project", "default", "--format=json")
+	output, err := container.IncusOutput(imageFingerprintListArgs(alias)...)
 	if err != nil {
 		return "", err
 	}
@@ -676,8 +686,8 @@ func getImageFingerprint(alias string) (string, error) {
 }
 
 // agentEnv returns the environment passed to build.sh to select which AI agents to
-// install (#454). An empty selection returns nil, so the script keeps its default of
-// installing every supported agent (COI_AGENTS unset).
+// install (#454). An empty selection returns nil, so the script keeps its default
+// agent set (COI_AGENTS unset; opt-in agents like codex are excluded, #698).
 func agentEnv(agents []string) map[string]string {
 	if len(agents) == 0 {
 		return nil
@@ -685,9 +695,25 @@ func agentEnv(agents []string) map[string]string {
 	return map[string]string{"COI_AGENTS": strings.Join(agents, ",")}
 }
 
+// buildScriptEnv is agentEnv plus any host-provided build knobs forwarded into
+// the build container. COI_APT_MIRROR lets the caller (CI) point the build's
+// apt at a fast in-region mirror instead of the intermittently-slow default
+// archive.ubuntu.com; unset means the build keeps the stock mirrors. Kept
+// separate from agentEnv so the forwarding is unit-testable.
+func buildScriptEnv(agents []string) map[string]string {
+	env := agentEnv(agents)
+	if mirror := os.Getenv("COI_APT_MIRROR"); mirror != "" {
+		if env == nil {
+			env = map[string]string{}
+		}
+		env["COI_APT_MIRROR"] = mirror
+	}
+	return env
+}
+
 // buildScriptExecOpts builds the exec options used to run build.sh in the build
 // container. It threads the agent selection through COI_AGENTS (#454); kept as a
 // method so the wiring is unit-testable without launching a container.
 func (b *Builder) buildScriptExecOpts() container.ExecCommandOptions {
-	return container.ExecCommandOptions{Capture: false, Env: agentEnv(b.opts.Agents)}
+	return container.ExecCommandOptions{Capture: false, Env: buildScriptEnv(b.opts.Agents)}
 }

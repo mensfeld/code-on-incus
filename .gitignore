@@ -72,3 +72,4 @@ test-config.toml
 # Analysis / planning scratch generated at repo root by tooling (kept local,
 # never committed) — e.g. *_IMPROVEMENTS.md coverage write-ups.
 /*_IMPROVEMENTS.md
+*.img

@@ -43,6 +43,10 @@
       "type": "string",
       "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$",
       "description": "Name that keys the session identity (container, slots, ports, saved sessions) instead of the workspace path, so the same persistent session continues from any workspace location. Honored from trusted scope only."
+    },
+    "docker": {
+      "type": "boolean",
+      "description": "Enable Docker/nested-container support (security.nesting, mknod/setxattr syscall interception, unprivileged low-port sysctl). Default: true. Set false to shrink the shared-kernel attack surface when Docker-in-container is not needed. Re-enabling (true) is honored from trusted scope only; false is a tightening and honored from any scope."
     }
   }
 }

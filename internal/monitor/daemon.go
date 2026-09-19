@@ -40,6 +40,7 @@ func StartDaemon(ctx context.Context, cfg DaemonConfig) (*Daemon, error) {
 		WithProcessSpawnRateThreshold(cfg.ProcessSpawnRateThreshold)
 	responder := NewResponder(cfg.ContainerName, cfg.AutoPauseOnHigh, cfg.AutoKillOnCritical,
 		auditLog, cfg.OnThreat)
+	responder.SetForensicsOnKill(cfg.ForensicsOnKill)
 
 	// Set action callback for pause/kill notifications
 	if cfg.OnAction != nil {

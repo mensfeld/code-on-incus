@@ -8,6 +8,7 @@ import (
 
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/network"
+	"github.com/mensfeld/code-on-incus/internal/session"
 	"github.com/spf13/cobra"
 )
 
@@ -34,8 +35,14 @@ var containerLaunchCmd = &cobra.Command{
 			return err
 		}
 
+		// Honor [container] docker / [security] reduce_kernel_surface from the
+		// loaded config (app.cfg is populated by PersistentPreRunE), so `coi
+		// container launch` doesn't silently give a hardened setup the full
+		// Docker/nesting surface.
+		policy := app.hardeningPolicy()
+		warnDockerHardeningConflict(app.cfg)
 		mgr := container.NewManager(name)
-		if err := mgr.Launch(image, ephemeral, pool); err != nil {
+		if err := mgr.LaunchWithPolicy(image, ephemeral, pool, policy); err != nil {
 			return fmt.Errorf("failed to launch container: %v", err)
 		}
 
@@ -51,6 +58,20 @@ var containerStartCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
+
+		// #691: proactively apply the #683 shift→raw.idmap decision before
+		// starting, deriving the statfs-sweep sources from the container's own
+		// disk devices (this command has no session context). On OrbStack ≥2.2.2
+		// a shift=true mount succeeds-but-unwritable, so the reactive fallback
+		// below never fires; this heals a pre-#689 container up front. No-op
+		// unless the container still carries a shift=true disk device.
+		disableShift := false
+		if app.cfg != nil {
+			disableShift = app.cfg.Incus.DisableShift
+		}
+		session.ResolveStartUIDMapping(name, disableShift, func(msg string) {
+			fmt.Fprintln(os.Stderr, msg)
+		})
 
 		// Recover from the #678 idmapped-mount start failure here too, rather
 		// than handing back a raw Incus error the user can't act on (#685). The
@@ -102,13 +123,12 @@ var containerDeleteCmd = &cobra.Command{
 			containerIP, _ = network.GetContainerIPFast(name)
 		}
 
-		// Clean up nft rules BEFORE deleting container
-		if containerIP != "" {
-			fm := network.NewNftManager(containerIP, "")
-			if err := fm.RemoveRules(); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: Failed to cleanup nft rules: %v\n", err)
-			}
-		}
+		// Clean up ALL host-side firewall artefacts BEFORE deleting the
+		// container: the IP-keyed rule bundle + sets, the monitoring LOG rules,
+		// and the NAME-keyed coi6-<name> IPv6 block. Using the shared helper
+		// (same one kill/shutdown use) closes #696 item 5 — the old inline
+		// RemoveRules() left the LOG rules and the IPv6 block behind.
+		cleanupContainerFirewall(name, containerIP)
 
 		if err := mgr.Delete(force); err != nil {
 			return fmt.Errorf("failed to delete container: %v", err)
@@ -370,6 +390,7 @@ Examples:
   coi container list --format=json`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		format, _ := cmd.Flags().GetString("format")
+		applyJSONFormatAlias(cmd, &format)
 
 		// Validate format
 		if format != "json" && format != "text" {
@@ -403,10 +424,11 @@ var containerInfoCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 		format, _ := cmd.Flags().GetString("format")
+		applyJSONFormatAlias(cmd, &format)
 
 		// Validate format
-		if format != "text" && format != "json" {
-			return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid format '%s': must be 'text' or 'json'", format)}
+		if err := validateTextOrJSON(format); err != nil {
+			return err
 		}
 
 		var output string
@@ -453,9 +475,11 @@ func init() {
 
 	// Add flags to info command
 	containerInfoCmd.Flags().String("format", "text", "Output format: text or json")
+	containerInfoCmd.Flags().Bool("json", false, "Alias for --format json")
 
 	// Add flags to list command
 	containerListCmd.Flags().String("format", "text", "Output format: text or json")
+	containerListCmd.Flags().Bool("json", false, "Alias for --format json")
 
 	// Add subcommands to container command
 	containerCmd.AddCommand(containerLaunchCmd)

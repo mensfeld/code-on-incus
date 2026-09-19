@@ -62,6 +62,59 @@ EOF
 }
 
 #######################################
+# Prefer IPv4 and bound apt's network waits
+#######################################
+# Build containers frequently have IPv6 configured but no working IPv6 route.
+# apt (and installers) resolve AAAA records first, try the dead IPv6 path, and —
+# because apt has no default network timeout — hang on connect essentially
+# forever, stalling the whole build until the CI job's hard timeout kills it
+# (observed: builds wedged at "Installing base dependencies..." for ~59m). The
+# codebase already preferred IPv4 for the agent installers via /etc/gai.conf
+# (prefer_ipv4), but that ran AFTER apt. Force IPv4 for apt and bound its
+# retries/timeouts here, BEFORE the first apt-get, and set the gai.conf
+# preference (Bun/Node installers resolve AAAA first;
+# https://github.com/anthropics/claude-code/issues/13498) for everything else.
+# Called once from main(); idempotent.
+configure_network_ipv4() {
+    log "Preferring IPv4 for network operations..."
+    cat > /etc/apt/apt.conf.d/99coi-force-ipv4 <<'APTCONF'
+Acquire::ForceIPv4 "true";
+Acquire::http::Timeout "30";
+Acquire::https::Timeout "30";
+Acquire::Retries "3";
+APTCONF
+    if ! grep -q '::ffff:0:0/96' /etc/gai.conf 2>/dev/null; then
+        echo 'precedence ::ffff:0:0/96 100' >> /etc/gai.conf
+    fi
+}
+
+#######################################
+# Point apt at a faster mirror when one is provided
+#######################################
+# The build container is a fresh ubuntu image using the default
+# archive.ubuntu.com/security.ubuntu.com mirrors, which are intermittently
+# slow/rate-limited from some networks (observed in CI: base-dependency apt
+# taking 35+ minutes vs ~2 on a good day, blowing the job timeout). When
+# COI_APT_MIRROR is set (e.g. CI exports the runner's fast in-region mirror
+# like http://azure.archive.ubuntu.com/ubuntu), rewrite the archive+security
+# URIs to it before the first apt-get. Unset (the default for local builds) is
+# a no-op, so ordinary users keep the stock mirrors. Handles both the 24.04
+# deb822 sources and the legacy sources.list; idempotent (the optional
+# azure./mirror host in the pattern makes a re-run a no-op).
+configure_apt_mirror() {
+    [ -n "${COI_APT_MIRROR:-}" ] || return 0
+    log "Using apt mirror ${COI_APT_MIRROR} (COI_APT_MIRROR)"
+    local f
+    for f in /etc/apt/sources.list.d/ubuntu.sources /etc/apt/sources.list; do
+        [ -f "$f" ] || continue
+        sed -i -E \
+            -e "s#https?://[a-z0-9.-]*archive\.ubuntu\.com/ubuntu#${COI_APT_MIRROR}#g" \
+            -e "s#https?://security\.ubuntu\.com/ubuntu#${COI_APT_MIRROR}#g" \
+            "$f"
+    done
+}
+
+#######################################
 # Install base dependencies
 #######################################
 install_base_dependencies() {
@@ -222,6 +275,7 @@ create_code_user() {
         useradd -m -u "$CODE_UID" -g "$CODE_USER" -s /bin/bash "$CODE_USER"
     fi
     mkdir -p "/home/$CODE_USER/.claude"
+    mkdir -p "/home/$CODE_USER/.codex"
     mkdir -p "/home/$CODE_USER/.ssh"
     chmod 700 "/home/$CODE_USER/.ssh"
     # Pre-populate known_hosts. Try ssh-keyscan first (fresh keys); fall back to
@@ -368,19 +422,15 @@ WRAPPER_EOF
 install_claude_cli() {
     log "Installing Claude CLI (native)..."
 
-    # Prefer IPv4 to work around broken IPv6 in containers and some networks.
-    # The native installer (Bun/Node) resolves AAAA records first; when the
-    # IPv6 path is non-functional the download either times out or returns 403.
-    # See: https://github.com/anthropics/claude-code/issues/13498
-    if ! grep -q '::ffff:0:0/96' /etc/gai.conf 2>/dev/null; then
-        echo 'precedence ::ffff:0:0/96 100' >> /etc/gai.conf
-        log "IPv4 preference set in /etc/gai.conf"
-    fi
-
-    # Run the native installer as the code user (with retries for transient network failures)
+    # Run the native installer as the code user (with retries for transient
+    # network failures). `set -o pipefail` inside the su login shell is what
+    # makes the retry work: without it the pipeline's status is bash's, which
+    # exits 0 on the empty stdin a failed curl leaves behind — so a transient
+    # network failure would "succeed", skip the retries, and hard-fail the
+    # build at the binary check below.
     local attempt
     for attempt in 1 2 3; do
-        if su - "$CODE_USER" -c 'curl -4 -fsSL https://claude.ai/install.sh | bash'; then
+        if su - "$CODE_USER" -c 'set -o pipefail; curl -4 -fsSL https://claude.ai/install.sh | bash'; then
             break
         fi
         if [ "$attempt" -eq 3 ]; then
@@ -478,10 +528,11 @@ install_opencode() {
 install_pi() {
     log "Installing pi..."
 
-    # Install as the code user via the official installer
+    # Install as the code user via the official installer. `set -o pipefail`
+    # makes a failed curl actually trigger the retries — see install_claude_cli.
     local attempt
     for attempt in 1 2 3; do
-        if su - "$CODE_USER" -c 'curl -fsSL https://pi.dev/install.sh | sh'; then
+        if su - "$CODE_USER" -c 'set -o pipefail; curl -fsSL https://pi.dev/install.sh | sh'; then
             break
         fi
         if [ "$attempt" -eq 3 ]; then
@@ -502,6 +553,102 @@ install_pi() {
     ln -sf "$PI_BIN" /usr/local/bin/pi
 
     log "pi $(su - "$CODE_USER" -c 'pi --version' 2>/dev/null || echo 'installed')"
+}
+
+#######################################
+# Install OpenAI Codex CLI using native installer
+# See: https://developers.openai.com/codex/cli
+#
+# Not in the default agent set — opt in via [container.build]
+# agents = ["claude", "codex"] before building (issue #698).
+#######################################
+install_codex() {
+    log "Installing Codex CLI (native)..."
+
+    # Run the native installer as the code user (with retries for transient
+    # network failures). `set -o pipefail` inside the su login shell is
+    # required for the retry to work at all: without it the pipeline's status
+    # is sh's, and sh exits 0 on the empty stdin a failed curl leaves behind —
+    # so a transient network failure would "succeed", skip the retries, and
+    # hard-fail the build at the binary check below.
+    local attempt
+    for attempt in 1 2 3; do
+        if su - "$CODE_USER" -c 'set -o pipefail; CODEX_NON_INTERACTIVE=1 curl -4 -fsSL https://chatgpt.com/codex/install.sh | sh'; then
+            break
+        fi
+        if [ "$attempt" -eq 3 ]; then
+            log "ERROR: Codex CLI installation failed after 3 attempts."
+            exit 1
+        fi
+        log "Codex CLI install failed (attempt $attempt/3), retrying in 10s..."
+        sleep 10
+    done
+
+    # Verify that the installer actually created the Codex CLI binary
+    local CODEX_PATH="/home/$CODE_USER/.local/bin/codex"
+    if [[ ! -x "$CODEX_PATH" ]]; then
+        log "ERROR: Codex CLI binary not found at $CODEX_PATH after installation."
+        log "Installation may have failed or installed to an unexpected location."
+        exit 1
+    fi
+
+    # Create a global symlink so it's accessible system-wide
+    ln -sf "$CODEX_PATH" /usr/local/bin/codex
+
+    log "Codex CLI $(codex --version 2>/dev/null || echo 'installed')"
+
+    # Smoke-check the resume grammar coi's codex integration depends on. coi
+    # renders `codex resume <id> "$(cat prompt)"` (CodexTool.BuildCommandLaunch),
+    # which requires the `resume` subcommand to accept a trailing [PROMPT]
+    # positional. codex is unpinned (latest at build time), so fail the build
+    # loudly if a release drops it — instead of silently shipping a broken
+    # resume+prompt path (coi#755). Run as the code user (login shell, so codex
+    # is on PATH with its HOME); --help is offline and needs no auth.
+    local resume_help
+    resume_help="$(su - "$CODE_USER" -c 'codex resume --help' 2>&1 || true)"
+    if ! printf '%s' "$resume_help" | grep -qi '\[prompt\]'; then
+        log "ERROR: 'codex resume' no longer advertises a [PROMPT] positional."
+        log "coi's resume+prompt rendering (internal/tool/codex.go, coi#755) would break;"
+        log "update CodexTool.BuildCommandLaunch to match the current codex grammar."
+        exit 1
+    fi
+}
+
+#######################################
+# Install Oh My Pi (omp) using the native installer
+# See: https://github.com/can1357/oh-my-pi
+#
+# Not in the default agent set — opt in via [container.build]
+# agents = ["claude", "omp"] before building (issue #699).
+#######################################
+install_omp() {
+    log "Installing omp..."
+
+    # Install as the code user via the official installer. `set -o pipefail`
+    # makes a failed curl actually trigger the retries — see install_pi.
+    local attempt
+    for attempt in 1 2 3; do
+        if su - "$CODE_USER" -c 'set -o pipefail; curl -fsSL https://omp.sh/install | sh'; then
+            break
+        fi
+        if [ "$attempt" -eq 3 ]; then
+            log "ERROR: omp installation failed after 3 attempts."
+            exit 1
+        fi
+        log "omp install failed (attempt $attempt/3), retrying in 10s..."
+        sleep 10
+    done
+
+    # Ensure omp is available system-wide for non-login/non-interactive shells
+    local OMP_BIN
+    OMP_BIN="$(su - "$CODE_USER" -c 'which omp' 2>/dev/null || true)"
+    if [[ -z "$OMP_BIN" ]]; then
+        log "ERROR: omp binary not found after installation."
+        exit 1
+    fi
+    ln -sf "$OMP_BIN" /usr/local/bin/omp
+
+    log "omp $(su - "$CODE_USER" -c 'omp --version' 2>/dev/null || echo 'installed')"
 }
 
 #######################################
@@ -693,9 +840,11 @@ cleanup() {
 # Main
 #######################################
 # install_selected_agents installs the AI agents named in $COI_AGENTS (comma- or
-# space-separated). When COI_AGENTS is unset/empty it installs ALL supported agents,
-# preserving the historical behavior (issue #454). Unknown names are warned and skipped
-# (coi validates the list host-side before build, so this is defense-in-depth).
+# space-separated). When COI_AGENTS is unset/empty it installs the default agents,
+# preserving the historical behavior (issue #454). codex is supported but opt-in
+# only (issue #698) — request it explicitly to include it. Unknown names are
+# warned and skipped (coi validates the list host-side before build, so this is
+# defense-in-depth).
 install_selected_agents() {
     local agents="${COI_AGENTS:-claude opencode pi}"
     for agent in ${agents//,/ }; do
@@ -703,6 +852,8 @@ install_selected_agents() {
             claude) install_claude_cli ;;
             opencode) install_opencode ;;
             pi) install_pi ;;
+            codex) install_codex ;;
+            omp) install_omp ;;
             "") ;;
             *) log "WARNING: unknown agent '$agent' in COI_AGENTS, skipping" ;;
         esac
@@ -712,6 +863,8 @@ install_selected_agents() {
 main() {
     log "Starting coi image build..."
 
+    configure_network_ipv4
+    configure_apt_mirror
     configure_dns_if_needed
     install_base_dependencies
     disable_host_only_services

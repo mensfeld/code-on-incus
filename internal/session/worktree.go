@@ -318,7 +318,7 @@ func protectCommonDirSink(mgr container.ContainerDevices, commonDir string, s co
 // pathToDeviceName is not (it strips '.' and maps '/'→'-').
 func commonDirDeviceName(rel string) string {
 	sum := sha256.Sum256([]byte("gitcommon/" + rel))
-	return "gitc-" + hex.EncodeToString(sum[:])[:16]
+	return gitcDevicePrefix + hex.EncodeToString(sum[:])[:16]
 }
 
 // StripGitProtectedPaths removes workspace-relative `.git` / `.git/*` entries from a

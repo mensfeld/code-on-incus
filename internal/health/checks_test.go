@@ -347,6 +347,116 @@ func TestCheckIncusStoragePools_ErrPathKeepsDriver(t *testing.T) {
 	}
 }
 
+// lvmcluster never gets a thin pool regardless of config; a plain lvm pool
+// only loses one when lvm.use_thinpool is explicitly falsy (empty/absent
+// defaults to true, same as every other driver).
+func TestIsNonThinLVM(t *testing.T) {
+	tests := []struct {
+		name   string
+		driver string
+		config map[string]string
+		want   bool
+	}{
+		{"lvm thinpool disabled", "lvm", map[string]string{"lvm.use_thinpool": "false"}, true},
+		{"lvm thinpool disabled, alternate spellings", "lvm", map[string]string{"lvm.use_thinpool": "No"}, true},
+		{"lvm thinpool default (key absent)", "lvm", map[string]string{}, false},
+		{"lvm thinpool explicitly enabled", "lvm", map[string]string{"lvm.use_thinpool": "true"}, false},
+		{"lvmcluster ignores an explicit true", "lvmcluster", map[string]string{"lvm.use_thinpool": "true"}, true},
+		{"lvmcluster with no config", "lvmcluster", nil, true},
+		{"zfs is unaffected", "zfs", map[string]string{"lvm.use_thinpool": "false"}, false},
+		{"dir is unaffected", "dir", nil, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isNonThinLVM(tt.driver, tt.config); got != tt.want {
+				t.Errorf("isNonThinLVM(%q, %v) = %v, want %v", tt.driver, tt.config, got, tt.want)
+			}
+		})
+	}
+}
+
+// A non-thin lvm/lvmcluster pool has the same per-launch cost as `dir`
+// (#686), and must warn the same way `dir` does, even when its own usage
+// is healthy.
+func TestCheckIncusStoragePools_NonThinLVMWarns(t *testing.T) {
+	origGather := gatherPoolUsage
+	origList := listPoolDrivers
+	origNonThin := listNonThinLVMPools
+	defer func() {
+		gatherPoolUsage = origGather
+		listPoolDrivers = origList
+		listNonThinLVMPools = origNonThin
+	}()
+
+	tests := []struct {
+		name       string
+		driver     string
+		nonThin    bool
+		wantStatus CheckStatus
+		wantWarn   bool
+	}{
+		{"lvm without a thin pool warns", "lvm", true, StatusWarning, true},
+		{"lvmcluster warns", "lvmcluster", true, StatusWarning, true},
+		{"lvm with its default thin pool is ok", "lvm", false, StatusOK, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gatherPoolUsage = func(pool string) poolUsage {
+				return poolUsage{usedGiB: 5, totalGiB: 100}
+			}
+			listPoolDrivers = func() map[string]string {
+				return map[string]string{"testpool": tt.driver}
+			}
+			listNonThinLVMPools = func() map[string]bool {
+				return map[string]bool{"testpool": tt.nonThin}
+			}
+
+			result := CheckIncusStoragePools([]string{"testpool"})
+			if result.Status != tt.wantStatus {
+				t.Errorf("status = %s, want %s (message: %s)", result.Status, tt.wantStatus, result.Message)
+			}
+
+			gotWarn := strings.Contains(result.Message, "full logical-volume copy")
+			if gotWarn != tt.wantWarn {
+				t.Errorf("non-thin LVM warning present = %v, want %v, message: %q", gotWarn, tt.wantWarn, result.Message)
+			}
+		})
+	}
+}
+
+// The usage-error path must still surface the non-thin LVM warning, matching
+// the same schema-consistency guarantee the dir case already has.
+func TestCheckIncusStoragePools_NonThinLVMErrPathWarns(t *testing.T) {
+	origGather := gatherPoolUsage
+	origList := listPoolDrivers
+	origNonThin := listNonThinLVMPools
+	defer func() {
+		gatherPoolUsage = origGather
+		listPoolDrivers = origList
+		listNonThinLVMPools = origNonThin
+	}()
+
+	gatherPoolUsage = func(pool string) poolUsage {
+		return poolUsage{err: errors.New("could not parse usage")}
+	}
+	listPoolDrivers = func() map[string]string {
+		return map[string]string{"testpool": "lvmcluster"}
+	}
+	listNonThinLVMPools = func() map[string]bool {
+		return map[string]bool{"testpool": true}
+	}
+
+	result := CheckIncusStoragePools([]string{"testpool"})
+	if result.Status != StatusFailed {
+		t.Errorf("status = %s, want %s", result.Status, StatusFailed)
+	}
+	if !strings.Contains(result.Message, "full logical-volume copy") {
+		t.Errorf("non-thin LVM warning should still fire when usage is unavailable, message: %q", result.Message)
+	}
+}
+
 // A pool with no driver from either source (not enumerated, info failed) is
 // genuinely unresolvable — that one is reported as missing.
 func TestCheckIncusStoragePools_UnknownPoolIsMissing(t *testing.T) {

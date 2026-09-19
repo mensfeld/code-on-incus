@@ -7,6 +7,41 @@ import (
 	"github.com/mensfeld/code-on-incus/internal/config"
 )
 
+// TestCheckHostPortsEnforceable pins that a per-host ports scope is refused
+// (fail-closed) exactly when the mode/class combination cannot enforce it, and
+// allowed when it can — so a user never gets a silently-ignored port cap.
+func TestCheckHostPortsEnforceable(t *testing.T) {
+	withPorts := func(ip string) config.HostEntry {
+		return config.HostEntry{IP: ip, Hostnames: []string{"h.local"}, Ports: []int{443}}
+	}
+	cases := []struct {
+		name    string
+		mode    config.NetworkMode
+		entry   config.HostEntry
+		wantErr bool
+	}{
+		{
+			"no ports is always fine", config.NetworkModeRestricted,
+			config.HostEntry{IP: "8.8.8.8", Hostnames: []string{"h"}},
+			false,
+		},
+		{"restricted + private enforces", config.NetworkModeRestricted, withPorts("192.168.1.50"), false},
+		{"allowlist + public enforces", config.NetworkModeAllowlist, withPorts("1.1.1.1"), false},
+		{"restricted + public cannot", config.NetworkModeRestricted, withPorts("1.1.1.1"), true},
+		{"allowlist + private cannot", config.NetworkModeAllowlist, withPorts("192.168.1.50"), true},
+		{"open mode cannot", config.NetworkModeOpen, withPorts("192.168.1.50"), true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := checkHostPortsEnforceable(c.mode, c.entry)
+			if (err != nil) != c.wantErr {
+				t.Fatalf("checkHostPortsEnforceable(%s, %s) err = %v, wantErr %v",
+					c.mode, c.entry.IP, err, c.wantErr)
+			}
+		})
+	}
+}
+
 // A [[network.hosts]] private-IP entry punches a targeted accept at the head of
 // the coi forward chain. Without a port cap that is the historic all-protocol
 // hole; with allowed_ports set the accept MUST be scoped to those dports, or a
