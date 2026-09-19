@@ -111,7 +111,8 @@ func TestGitHookScripts(t *testing.T) {
 
 func TestSetupGitAttributionHook(t *testing.T) {
 	rec := &managedSettingsRecorder{}
-	SetupGitAttributionHook(rec, "/home/code", nil, true, func(string) {})
+	// strip on, identity NOT locked: post-commit stays a delegation symlink.
+	SetupGitHooks(rec, "/home/code", GitIdentity{}, true, nil, false, true, func(string) {})
 
 	// Three root-owned files: the two scripts (0755) and the pattern file (0644).
 	wantModes := map[string]string{
@@ -148,6 +149,72 @@ func TestSetupGitAttributionHook(t *testing.T) {
 	if strings.Contains(joined, "ln -sf delegate "+GitHooksDir+"/commit-msg") {
 		t.Error("commit-msg must be the strip script, not a delegation symlink")
 	}
+	// Identity not locked: post-commit is a delegation symlink (reset first).
+	if !strings.Contains(joined, "ln -sf delegate "+GitHooksDir+"/post-commit") {
+		t.Error("post-commit must be a delegation symlink when identity is not locked")
+	}
+}
+
+// With identity locking on (and strip off), post-commit is a REAL root-owned
+// re-stamp script — not a symlink — and the strip artifacts are absent.
+func TestSetupGitHooks_IdentityLock(t *testing.T) {
+	rec := &managedSettingsRecorder{}
+	id := GitIdentity{Name: testBotName, Email: testBotEmail}
+	SetupGitHooks(rec, "/home/code", id, false, nil, true, true, func(string) {})
+
+	var post *createWithOwnerCall
+	for i := range rec.creates {
+		switch rec.creates[i].path {
+		case GitHooksDir + "/post-commit":
+			post = &rec.creates[i]
+		case GitHooksDir + "/commit-msg", gitAttributionPatternsPath:
+			t.Errorf("strip is off — %s must not be written", rec.creates[i].path)
+		}
+	}
+	if post == nil {
+		t.Fatal("post-commit re-stamp file was not written under identity lock")
+	}
+	if post.uid != 0 || post.gid != 0 || post.mode != "0755" {
+		t.Errorf("post-commit owner/mode = %d:%d/%s, want 0:0/0755", post.uid, post.gid, post.mode)
+	}
+	// The baked identity + all the correctness guards must be present.
+	for _, want := range []string{
+		id.Email, id.Name,
+		"COI_RESTAMP_ACTIVE",
+		"--reset-author",
+		"--no-verify",
+		"--allow-empty",   // empty commits must be re-stampable too (amend refuses otherwise)
+		`--format='%an'`,  // NAME is compared, not only email (spoofed-name guard)
+		`!= "$LOCK_NAME"`, // ...and the name check is in the re-stamp condition
+		"git rev-parse --git-dir",
+		"CHERRY_PICK_HEAD",
+	} {
+		if !strings.Contains(post.content, want) {
+			t.Errorf("post-commit script missing %q", want)
+		}
+	}
+	if strings.Contains(post.content, "--git-path") {
+		t.Error("post-commit must use --git-dir, not --git-path (recursion)")
+	}
+	joined := strings.Join(rec.commands, "\n")
+	if !strings.Contains(joined, "rm -f "+GitHooksDir+"/post-commit") {
+		t.Error("must reset post-commit before writing the re-stamp file")
+	}
+	if strings.Contains(joined, "ln -sf delegate "+GitHooksDir+"/post-commit") {
+		t.Error("post-commit must be the re-stamp file, not a delegation symlink, when locking")
+	}
+}
+
+// renderPostCommitRestampScript must single-quote-escape the baked identity so a
+// name containing a quote can't break out of the assignment.
+func TestRenderPostCommitRestampScript_Escaping(t *testing.T) {
+	s := renderPostCommitRestampScript(GitIdentity{Name: "O'Brien", Email: "o@x"})
+	if !strings.Contains(s, `LOCK_NAME='O'"'"'Brien'`) {
+		t.Errorf("identity not safely single-quote-escaped:\n%s", s)
+	}
+	if !strings.Contains(s, "LOCK_EMAIL='o@x'") {
+		t.Errorf("email not baked:\n%s", s)
+	}
 }
 
 // With [git] readonly the mounted gitconfig carries core.hooksPath, so the
@@ -155,7 +222,7 @@ func TestSetupGitAttributionHook(t *testing.T) {
 // mount and log a spurious warning).
 func TestSetupGitAttributionHookSkipsConfigWhenReadonly(t *testing.T) {
 	rec := &managedSettingsRecorder{}
-	SetupGitAttributionHook(rec, "/home/code", nil, false, func(string) {})
+	SetupGitHooks(rec, "/home/code", GitIdentity{}, true, nil, false, false, func(string) {})
 	for _, cmd := range rec.commands {
 		if strings.Contains(cmd, "core.hooksPath") {
 			t.Errorf("setHooksPath=false must not write git config, got %q", cmd)

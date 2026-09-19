@@ -35,7 +35,7 @@ func applyToolContainerEnv(ctx context.Context, containerName, workspacePath str
 		return
 	}
 	prevMarker, _ := container.ConfigGet(ctx, containerName, toolEnvMarkerKey)
-	plan := planToolContainerEnv(prevMarker, twce.GetContainerEnv(workspacePath))
+	plan := planContainerEnv(prevMarker, twce.GetContainerEnv(workspacePath))
 
 	for _, k := range plan.skipped {
 		logger(fmt.Sprintf("Warning: skipping tool env %s (unsafe value)", k))
@@ -67,12 +67,12 @@ type toolEnvPlan struct {
 	marker  string            // comma-joined applied keys for toolEnvMarkerKey
 }
 
-// planToolContainerEnv is the pure decision core of applyToolContainerEnv: given
-// the previous marker (keys coi set last time) and the tool's desired env, it
-// decides which environment.* keys to set, which stale ones to unset, which to
-// skip as unsafe, and the new marker value. Kept free of Incus calls so the
-// reconciliation is unit-tested.
-func planToolContainerEnv(prevMarker string, desired map[string]string) toolEnvPlan {
+// planContainerEnv is the pure decision core shared by applyToolContainerEnv and
+// ApplyGitIdentityContainerEnv: given the previous marker (keys coi set last time)
+// and a desired env map, it decides which environment.* keys to set, which stale
+// ones to unset, which to skip as unsafe, and the new marker value. Kept free of
+// Incus calls so the reconciliation is unit-tested.
+func planContainerEnv(prevMarker string, desired map[string]string) toolEnvPlan {
 	plan := toolEnvPlan{set: map[string]string{}}
 
 	for k, v := range desired {

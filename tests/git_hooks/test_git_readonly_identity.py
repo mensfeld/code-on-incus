@@ -16,7 +16,7 @@ import subprocess
 from support.helpers import extract_container_name, write_trusted_coi_config
 
 BOT_NAME = "coipond-coder[bot]"
-BOT_EMAIL = "4624853+coipond-coder[bot]@users.noreply.github.com"
+BOT_EMAIL = "317930231+coipond-coder[bot]@users.noreply.github.com"
 HOME = "/home/code"
 
 

@@ -253,15 +253,28 @@ type GitConfig struct {
 	// the fail-closed guard only (git refuses commits until the tool sets an
 	// identity), e.g. to avoid copying the host identity into the container.
 	SeedHostIdentity *bool `toml:"seed_host_identity"`
-	// Readonly, when true, LOCKS the configured identity: instead of writing the
-	// container's ~/.gitconfig (which the agent can overwrite), COI mounts the
-	// identity read-only at ~/.gitconfig. This locks the WHOLE global gitconfig, so
-	// ANY `git config --global …` in the container (name/email, aliases, editor,
-	// credential.helper, …) fails on a read-only filesystem — use per-repo
-	// `--local` config for anything else. Only takes effect with a resolvable
-	// identity (name/email or a seeded host identity); if it cannot be applied the
-	// session fails closed rather than falling back to writable. Trusted-scope only,
-	// like name/email. Default false (writable, as before).
+	// Readonly, when true, LOCKS the configured identity so an agent cannot commit
+	// as anyone else. Three layers, because a config file alone loses to `-c`,
+	// `--author`, and env:
+	//   1. mounts ~/.gitconfig read-only (the WHOLE global gitconfig — ANY
+	//      `git config --global …`, incl. aliases/editor/credential.helper, fails;
+	//      use per-repo `--local` for those);
+	//   2. pins GIT_AUTHOR_*/GIT_COMMITTER_* as container-level env, which beats
+	//      `git -c user.*` (the config `-c` override no longer wins);
+	//   3. installs a root-owned post-commit re-stamp hook that rewrites any commit
+	//      whose author/committer isn't the locked identity — catching
+	//      `git commit --author=…` and an agent that exports its own GIT_*.
+	// Only takes effect with a resolvable identity (name/email or a seeded host
+	// identity); fails closed if it cannot be applied. Trusted-scope only, like
+	// name/email. Default false (writable, as before).
+	//
+	// Residual gaps (documented, accepted): a repo whose LOCAL git config sets
+	// core.hooksPath (husky) evades the re-stamp hook; and an adversarial agent
+	// that exports GIT_CONFIG_GLOBAL bypasses the mounted gitconfig (dropping
+	// useConfigOnly + the baked core.hooksPath), so `--author` sticks — the env
+	// layer still forces the committer. No tool exposes an author-identity
+	// managed-setting analog to includeCoAuthoredBy, so these can't be closed at
+	// the tool source.
 	Readonly *bool `toml:"readonly"`
 	// StripAttribution installs a global commit-msg hook (core.hooksPath →
 	// /etc/coi/git-hooks, root-owned) that strips auto-injected AI attribution
