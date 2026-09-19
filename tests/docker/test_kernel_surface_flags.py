@@ -20,6 +20,10 @@ Covered:
    base tier AND adds perf_event_open to security.syscalls.deny.
 5. A container with reduce_kernel_surface actually BOOTS (reaches RUNNING) —
    catches malformed / init-killing deny policies a config assertion misses.
+6. The STRICT tier container also BOOTS.
+7. The deny value's FORMAT: \n-separated, one entry per line, each with an
+   explicit "errno 1" action (guards the space-separated / bare-name bugs at
+   config level, so it runs even where the container can't start).
 """
 
 import os
@@ -54,6 +58,19 @@ def incus_state(container_name):
         timeout=30,
     )
     return result.stdout.strip()
+
+
+def skip_unless_bootable(coi_binary):
+    """Launch coi-default bare; skip the calling test if this environment can't
+    boot it at all (CI's nested lane sometimes can't complete a container START
+    regardless of hardening). Cleans up the baseline container."""
+    base = "coi-ks-boot-base"
+    try:
+        launch(coi_binary, base)
+        if incus_state(base) != "RUNNING":
+            pytest.skip("environment cannot boot coi-default bare; skipping boot assertion")
+    finally:
+        subprocess.run(["incus", "--project", "default", "delete", base, "--force"], timeout=60)
 
 
 def incus_config_get(container_name, key):
@@ -165,15 +182,7 @@ def test_reduce_kernel_surface_container_boots(coi_binary, cleanup_containers, t
         init (or systemd's boot helpers calling add_key/bpf) is killed.
     Both ship a green config-only test while breaking every real launch.
     """
-    # Baseline: can this environment boot coi-default at all? (CI's nested lane
-    # sometimes cannot complete a container START regardless of hardening.)
-    base = "coi-ks-boot-base"
-    try:
-        launch(coi_binary, base)
-        if incus_state(base) != "RUNNING":
-            pytest.skip("environment cannot boot coi-default bare; skipping boot assertion")
-    finally:
-        subprocess.run(["incus", "--project", "default", "delete", base, "--force"], timeout=60)
+    skip_unless_bootable(coi_binary)
 
     # Hardened: with the deny list applied it must STILL reach RUNNING.
     cfg = tmp_path / "trusted.toml"
@@ -187,6 +196,58 @@ def test_reduce_kernel_surface_container_boots(coi_binary, cleanup_containers, t
             f"hardened container did not boot (state={state!r}); the deny list is "
             "likely killing init (missing 'errno' action) or malformed (separator)"
         )
+    finally:
+        subprocess.run(["incus", "--project", "default", "delete", name, "--force"], timeout=60)
+
+
+def test_reduce_kernel_surface_strict_container_boots(coi_binary, cleanup_containers, tmp_path):
+    """The STRICT tier (base list + perf_event_open) must also boot cleanly.
+    perf_event_open was in the set that killed init under the old bare-name
+    format; this guards that the strict container reaches RUNNING too."""
+    skip_unless_bootable(coi_binary)
+
+    cfg = tmp_path / "trusted.toml"
+    cfg.write_text("[security]\nreduce_kernel_surface_strict = true\n")
+    env = {**os.environ, "COI_CONFIG": str(cfg)}
+    name = "coi-ks-boot-strict"
+    try:
+        launch(coi_binary, name, env=env)
+        state = incus_state(name)
+        assert state == "RUNNING", (
+            f"strict-hardened container did not boot (state={state!r}); "
+            "perf_event_open denial may be killing init instead of returning EPERM"
+        )
+    finally:
+        subprocess.run(["incus", "--project", "default", "delete", name, "--force"], timeout=60)
+
+
+def test_reduce_kernel_surface_deny_format(coi_binary, cleanup_containers, tmp_path):
+    """The deny value must be \\n-separated with an explicit 'errno 1' action on
+    every entry — the two properties whose absence (space-separated, bare names)
+    made the container fail to boot / SIGSYS-kill init. This asserts the config
+    the launch WRITES, so it runs even where the container can't start."""
+    cfg = tmp_path / "trusted.toml"
+    cfg.write_text("[security]\nreduce_kernel_surface = true\n")
+    env = {**os.environ, "COI_CONFIG": str(cfg)}
+    name = "coi-ks-deny-format"
+    try:
+        launch(coi_binary, name, env=env)
+        raw = incus_config_get(name, "security.syscalls.deny")
+        entries = [ln for ln in raw.splitlines() if ln.strip()]
+        # Must be newline-separated: one entry per line, and more than one line
+        # (a space-separated value would collapse to a single line).
+        assert len(entries) == len(DENY_SYSCALLS), (
+            f"expected {len(DENY_SYSCALLS)} newline-separated entries, got {entries!r}"
+        )
+        # Every entry must carry the explicit errno action (never a bare name,
+        # which inherits LXC's SIGSYS-kill default on modern Incus).
+        for entry in entries:
+            assert entry.strip().endswith(" errno 1"), (
+                f"deny entry {entry!r} lacks the 'errno 1' action (bare names SIGSYS-kill)"
+            )
+        # And the syscalls themselves are the base list.
+        names = {entry.split()[0] for entry in entries}
+        assert names == set(DENY_SYSCALLS), f"deny syscalls {names} != {set(DENY_SYSCALLS)}"
     finally:
         subprocess.run(["incus", "--project", "default", "delete", name, "--force"], timeout=60)
 
