@@ -471,7 +471,7 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 	// identity and we cannot, the session aborts rather than silently handing back a
 	// writable one. With no resolvable identity there is nothing to lock, so fall
 	// through to the normal guard (which still refuses commits until one is set).
-	if err := configureGitIdentity(result, opts); err != nil {
+	if err := configureGitIdentity(ctx, result, opts); err != nil {
 		return nil, err
 	}
 
@@ -1355,10 +1355,17 @@ func remapContainerUser(result *SetupResult, opts SetupOptions) error {
 // readonly path core.hooksPath rides inside the mounted gitconfig (a live
 // `git config --global` would fail read-only), on the writable path the hook
 // setup writes it itself.
-func configureGitIdentity(result *SetupResult, opts SetupOptions) error {
+func configureGitIdentity(ctx context.Context, result *SetupResult, opts SetupOptions) error {
+	// identityLock is the "make the identity unoverridable" intent. It currently
+	// equals readonlyLock (git.readonly) — the two enforcement layers below key
+	// off this one binding, so a future [git] enforce_identity that turns them on
+	// WITHOUT the heavyweight whole-gitconfig read-only mount is a one-line change.
 	readonlyLock := opts.GitReadonly && opts.GitIdentity.Complete()
+	identityLock := readonlyLock
+	// core.hooksPath must be installed whenever EITHER the strip hook or the
+	// identity re-stamp hook is active (both share the one hook directory).
 	hooksPath := ""
-	if opts.GitStripAttribution {
+	if opts.GitStripAttribution || identityLock {
 		hooksPath = GitHooksDir
 	}
 	if readonlyLock {
@@ -1373,14 +1380,18 @@ func configureGitIdentity(result *SetupResult, opts SetupOptions) error {
 		SetupGitIdentityGuard(result.Manager, result.HomeDir, opts.Logger)
 		SetupGitIdentity(result.Manager, result.HomeDir, opts.GitIdentity, opts.Logger)
 	}
-	if opts.GitStripAttribution {
-		// The hook dir is needed on both paths; core.hooksPath is written live
-		// only on the writable path (the readonly mount already carries it).
-		SetupGitAttributionHook(result.Manager, result.HomeDir, opts.GitStripAttributionPatterns, !readonlyLock, opts.Logger)
+	if opts.GitStripAttribution || identityLock {
+		// The hook dir is needed on both identity paths; core.hooksPath is written
+		// live only on the writable path (the readonly mount already carries it).
+		SetupGitHooks(result.Manager, result.HomeDir, opts.GitIdentity, opts.GitStripAttribution, opts.GitStripAttributionPatterns, identityLock, !readonlyLock, opts.Logger)
 	} else if !readonlyLock {
-		// Converge a reused persistent container after strip_attribution was
-		// turned off: drop the stale core.hooksPath (best-effort).
+		// Converge a reused persistent container after both were turned off: drop
+		// the stale core.hooksPath (best-effort).
 		RemoveGitAttributionHookConfig(result.Manager, result.HomeDir)
 	}
+	// Layer 1: pin GIT_AUTHOR_*/GIT_COMMITTER_* as container-level env so `-c
+	// user.*` overrides lose without rewriting history. No-op (and unsets stale
+	// keys) when the identity isn't locked.
+	ApplyGitIdentityContainerEnv(ctx, result.ContainerName, opts.GitIdentity, identityLock, opts.Logger)
 	return nil
 }

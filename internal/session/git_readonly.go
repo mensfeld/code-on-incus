@@ -16,6 +16,13 @@ import (
 // the container's ~/.gitconfig — a rename over a mount point fails, so the write is
 // blocked at the filesystem layer.
 //
+// The read-only mount is only ONE of three layers (a config file loses to `-c`,
+// `--author`, and env): the caller also pins GIT_AUTHOR_*/GIT_COMMITTER_* as
+// container-level env (ApplyGitIdentityContainerEnv — beats `git -c user.*`) and
+// installs a root-owned post-commit re-stamp hook (SetupGitHooks — catches
+// `--author=` and agent-exported GIT_*). This file provides layer 1 and the
+// core.hooksPath bake for layer 3.
+//
 // NB: this locks the WHOLE global gitconfig, not only user.name/email — any
 // `git config --global …` in the container fails read-only. The agent uses
 // per-repo (`--local`) config or env for anything else.
