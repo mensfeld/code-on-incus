@@ -137,6 +137,7 @@ coi run --prompt-name nightly   # fire-and-forget: run the agent headlessly from
 coi top                   # per-container CPU/memory/IO, resolved to workspace + alias
 coi monitor               # real-time security dashboard
 coi list --all            # active containers + saved sessions
+coi overview              # live table of running sessions (refreshes every 2s)
 coi attach                # attach to a running session
 coi audit                 # stream the JSONL threat-event log (pipe into a SIEM or jq)
 coi shutdown / coi kill   # stop or force-kill containers

@@ -22,6 +22,13 @@ func NewTable(headers ...string) *Table {
 	}
 }
 
+// SetOutput redirects the table's output to w (the default is os.Stdout). Useful
+// for rendering into a buffer or an alternate writer — the overview command
+// renders into the writer it was handed, and tests capture into a buffer.
+func (t *Table) SetOutput(w io.Writer) {
+	t.out = w
+}
+
 // AddRow appends a row. Short rows are padded with empty strings.
 func (t *Table) AddRow(values ...string) {
 	for len(values) < len(t.headers) {

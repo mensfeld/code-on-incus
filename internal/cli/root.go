@@ -321,6 +321,7 @@ func init() {
 	rootCmd.AddCommand(attachCmd)
 	rootCmd.AddCommand(shutdownCmd)
 	rootCmd.AddCommand(monitorCmd)
+	rootCmd.AddCommand(overviewCmd)
 	rootCmd.AddCommand(topCmd)
 }
 
