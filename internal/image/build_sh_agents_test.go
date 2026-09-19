@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -78,13 +79,27 @@ func TestBuildScriptDispatchMatchesRegistry(t *testing.T) {
 		t.Fatal("tool.ListSupported() is empty")
 	}
 
-	// Unset COI_AGENTS must install exactly one installer per supported agent — i.e.
-	// the ${COI_AGENTS:-...} default lists every supported agent (preserves all-agents).
+	// Unset COI_AGENTS must dispatch to exactly the installers that an explicit
+	// COI_AGENTS=tool.DefaultBuildAgents() run dispatches to — i.e. the
+	// ${COI_AGENTS:-...} default lists exactly the Go-side default set (a subset
+	// of the registry: opt-in agents like codex are excluded, #698). Comparing
+	// the two dispatch runs checks MEMBERSHIP AND ORDER, not just count, so a
+	// same-length drift (e.g. build.sh default gaining codex but dropping pi
+	// while DefaultBuildAgents() is unchanged) fails red — that drift would make
+	// prepareBuildAgents' footgun warning reason about a default set the image
+	// doesn't actually install.
+	defaults := tool.DefaultBuildAgents()
 	installers, _ := dispatchAgents(t, path, nil)
-	if len(installers) != len(supported) {
-		t.Errorf("unset COI_AGENTS invoked %d installers %v, want one per supported agent %v; "+
-			"the ${COI_AGENTS:-...} default must list exactly the supported agents",
-			len(installers), installers, supported)
+	explicit := strings.Join(defaults, " ")
+	wantInstallers, _ := dispatchAgents(t, path, &explicit)
+	if len(wantInstallers) != len(defaults) {
+		t.Errorf("explicit default agents %v invoked %d installers %v, want one per agent",
+			defaults, len(wantInstallers), wantInstallers)
+	}
+	if !slices.Equal(installers, wantInstallers) {
+		t.Errorf("unset COI_AGENTS invoked installers %v, but tool.DefaultBuildAgents()=%v dispatches %v; "+
+			"the ${COI_AGENTS:-...} default must list exactly tool.DefaultBuildAgents()",
+			installers, defaults, wantInstallers)
 	}
 
 	// Every supported agent must dispatch to exactly one installer (a case arm exists).

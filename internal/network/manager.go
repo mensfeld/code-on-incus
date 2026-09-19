@@ -158,7 +158,7 @@ func (m *Manager) applyUserHosts(containerName string) error {
 	if len(m.config.Hosts) == 0 {
 		return nil
 	}
-	if err := ApplyUserHosts(containerName, m.config.Mode, config.BoolVal(m.config.AllowLocalNetworkAccess), m.config.Hosts); err != nil {
+	if err := ApplyUserHosts(containerName, m.config.Mode, config.BoolVal(m.config.AllowLocalNetworkAccess), m.config.Hosts, m.config.AllowedPorts); err != nil {
 		return fmt.Errorf("failed to apply [[network.hosts]]: %w", err)
 	}
 	m.logger.Printf("Applied %d configured host entr(y/ies) to /etc/hosts", len(m.config.Hosts))
@@ -279,6 +279,18 @@ func (m *Manager) setupAllowlist(ctx context.Context, containerName string) erro
 	// Validate configuration
 	if len(m.config.AllowedDomains) == 0 {
 		return fmt.Errorf("allowlist mode requires at least one allowed domain")
+	}
+
+	// dns_servers is meaningless — and actively harmful — in allowlist mode, which
+	// deliberately blocks ALL DNS and makes the container's /etc/hosts the single
+	// source of name resolution. Re-opening :53 to a pinned resolver would let the
+	// container learn addresses the firewall was never told about, the exact
+	// host/container divergence this mode exists to prevent. Fail loudly rather
+	// than silently ignore a security-shaped setting.
+	if len(m.config.DNSServers) > 0 {
+		return fmt.Errorf("network.dns_servers is not compatible with allowlist mode: " +
+			"allowlist mode blocks all DNS and resolves names via /etc/hosts. " +
+			"Use dns_servers with restricted mode, or list the resolver in allowed_domains")
 	}
 
 	policy, err := NewAllowPolicy(m.config.AllowedDomains)
@@ -406,12 +418,21 @@ func (m *Manager) installNames(containerName string) error {
 func (m *Manager) syncResolved(domainIPs map[string][]string) error {
 	allower := m.nftSetAllower()
 	refreshInterval := m.dynamicElementLifetimeInterval()
+	// The global allowed_ports a name inherits when it named no port of its own.
+	// Already validated at ApplyAllowlist (setup fails closed before we get here),
+	// so a plain conversion is safe.
+	globalPorts := intsToPortRanges(m.config.AllowedPorts)
 	for domain, ips := range domainIPs {
 		if len(ips) == 0 {
 			continue
 		}
 		ttl := m.resolver.DomainTTLs[domain]
-		if err := allower.AllowDynamicIPs(ips, ttl, refreshInterval); err != nil {
+		var entryPorts []portRange
+		if m.policy != nil {
+			entryPorts = m.policy.PortsForName(domain)
+		}
+		ports := resolvePorts(entryPorts, globalPorts)
+		if err := allower.AllowDynamicIPsPorts(ips, ports, ttl, refreshInterval); err != nil {
 			return fmt.Errorf("failed to allow %d addresses for %s: %w", len(ips), domain, err)
 		}
 		m.logger.Printf("  %s -> %v", domain, ips)
@@ -471,7 +492,9 @@ func (m *Manager) dynamicElementLifetimeInterval() time.Duration {
 // noopAllower stands in when the nft layer cannot install set elements (tests).
 type noopAllower struct{}
 
-func (noopAllower) AllowDynamicIPs([]string, uint32, time.Duration) error { return nil }
+func (noopAllower) AllowDynamicIPsPorts([]string, []portRange, uint32, time.Duration) error {
+	return nil
+}
 
 // computeRefreshInterval determines the refresh interval based on DNS TTL and config cap.
 // The configured refresh_interval_minutes acts as a maximum cap.
@@ -705,7 +728,7 @@ func otherContainersRunning(jsonOutput, excludeName string) bool {
 		return true // conservative: can't confirm no other containers, keep rules
 	}
 	for _, c := range containers {
-		if c.Name != excludeName && c.State.Status == "Running" {
+		if c.Name != excludeName && container.StatusIsRunning(c.State.Status) {
 			return true
 		}
 	}

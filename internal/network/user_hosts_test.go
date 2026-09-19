@@ -1,10 +1,88 @@
 package network
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/mensfeld/code-on-incus/internal/config"
 )
+
+// TestCheckHostPortsEnforceable pins that a per-host ports scope is refused
+// (fail-closed) exactly when the mode/class combination cannot enforce it, and
+// allowed when it can — so a user never gets a silently-ignored port cap.
+func TestCheckHostPortsEnforceable(t *testing.T) {
+	withPorts := func(ip string) config.HostEntry {
+		return config.HostEntry{IP: ip, Hostnames: []string{"h.local"}, Ports: []int{443}}
+	}
+	cases := []struct {
+		name    string
+		mode    config.NetworkMode
+		entry   config.HostEntry
+		wantErr bool
+	}{
+		{
+			"no ports is always fine", config.NetworkModeRestricted,
+			config.HostEntry{IP: "8.8.8.8", Hostnames: []string{"h"}},
+			false,
+		},
+		{"restricted + private enforces", config.NetworkModeRestricted, withPorts("192.168.1.50"), false},
+		{"allowlist + public enforces", config.NetworkModeAllowlist, withPorts("1.1.1.1"), false},
+		{"restricted + public cannot", config.NetworkModeRestricted, withPorts("1.1.1.1"), true},
+		{"allowlist + private cannot", config.NetworkModeAllowlist, withPorts("192.168.1.50"), true},
+		{"open mode cannot", config.NetworkModeOpen, withPorts("192.168.1.50"), true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := checkHostPortsEnforceable(c.mode, c.entry)
+			if (err != nil) != c.wantErr {
+				t.Fatalf("checkHostPortsEnforceable(%s, %s) err = %v, wantErr %v",
+					c.mode, c.entry.IP, err, c.wantErr)
+			}
+		})
+	}
+}
+
+// A [[network.hosts]] private-IP entry punches a targeted accept at the head of
+// the coi forward chain. Without a port cap that is the historic all-protocol
+// hole; with allowed_ports set the accept MUST be scoped to those dports, or a
+// host entry silently reopens the full port range (SSH/DB/admin) on a LAN box —
+// exactly the lateral-movement the egress cap exists to prevent.
+func TestContainerAcceptRuleArgs(t *testing.T) {
+	const c, d = "10.1.2.3", "192.168.1.50"
+	joined := func(a []string) string { return strings.Join(a, " ") }
+
+	t.Run("no cap keeps the all-protocol accept", func(t *testing.T) {
+		got := joined(containerAcceptRuleArgs(c, d, nil))
+		want := `insert rule ip coi forward ip saddr 10.1.2.3 ip daddr 192.168.1.50/32 accept comment "coi-10.1.2.3"`
+		if got != want {
+			t.Fatalf("unscoped rule mismatch:\n got: %s\nwant: %s", got, want)
+		}
+	})
+
+	t.Run("cap scopes the accept to allowed dports", func(t *testing.T) {
+		got := joined(containerAcceptRuleArgs(c, d, []int{80, 443}))
+		// The l4 match must sit between the daddr and the accept verb so the host is
+		// reachable ONLY on the capped ports.
+		want := `insert rule ip coi forward ip saddr 10.1.2.3 ip daddr 192.168.1.50/32 ` +
+			`meta l4proto { tcp, udp } th dport { 80, 443 } accept comment "coi-10.1.2.3"`
+		if got != want {
+			t.Fatalf("scoped rule mismatch:\n got: %s\nwant: %s", got, want)
+		}
+		if strings.Contains(got, "th dport { 80, 443 } accept") == false {
+			t.Errorf("port set must immediately precede accept, got: %s", got)
+		}
+	})
+
+	t.Run("a capped host is not reachable on an un-listed port", func(t *testing.T) {
+		got := joined(containerAcceptRuleArgs(c, d, []int{443}))
+		if strings.Contains(got, "22") {
+			t.Errorf("cap=[443] must not mention port 22 (SSH): %s", got)
+		}
+		if !strings.Contains(got, "dport { 443 }") {
+			t.Errorf("cap=[443] should render a single-port set: %s", got)
+		}
+	})
+}
 
 func TestClassifyHostIP(t *testing.T) {
 	cases := map[string]hostIPClass{

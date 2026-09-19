@@ -69,12 +69,26 @@ type securityDeviceStripper interface {
 	RemoveDevice(name string) error
 }
 
-// stripSecurityDevicePrefixes name the disk-device families whose host sources
+// Device-name prefixes for the security disk-device families whose host sources
 // are (re)established by the fresh-launch security setup: workspace-relative
 // protected paths (protect-), secret masks (mask-, sourced under ~/.coi/masks),
-// and the read-only git worktree common-dir overlays (gitc-). The read-WRITE base
-// mounts these overlay (workspace, git-worktree-common) are deliberately NOT here.
-var stripSecurityDevicePrefixes = []string{"protect-", "mask-", "gitc-"}
+// and the read-only git worktree common-dir overlays (gitc-). Each generator
+// (pathToDeviceName, maskDeviceName, commonDirDeviceName) builds its name from
+// the matching constant here, and stripSecurityDevicePrefixes below lists the
+// same constants — so the create side and the reuse-strip side share one source
+// of truth and cannot diverge (a new family added without stripping it would
+// leak across reuse, the #610 class; TestSecurityDeviceNamesAreStripped verifies
+// the coupling for every generator). The read-WRITE base mounts these overlay
+// (workspace, git-worktree-common) are deliberately NOT here.
+const (
+	protectDevicePrefix = "protect-"
+	maskDevicePrefix    = "mask-"
+	gitcDevicePrefix    = "gitc-"
+)
+
+// stripSecurityDevicePrefixes is the reuse-strip list; it MUST list exactly the
+// prefixes above (each family created is a family stripped on reuse).
+var stripSecurityDevicePrefixes = []string{protectDevicePrefix, maskDevicePrefix, gitcDevicePrefix}
 
 // StripSecurityDevices removes the creation-time security device families (see
 // stripSecurityDevicePrefixes) from a REUSED persistent container, so the caller
@@ -291,6 +305,10 @@ var fileTypeProtectedPaths = map[string]bool{
 	// auto-created — see fileTypeParentAutoCreate). Issue #504 / settings planting.
 	".claude/settings.json":       true,
 	".claude/settings.local.json": true,
+	// Codex project-scoped config can name commands the host would run (e.g.
+	// notify, MCP server launchers) when a host codex session trusts the repo.
+	// Protected read-only for the same planting reason as the Claude settings.
+	".codex/config.toml": true,
 }
 
 // fileTypeParentAutoCreate lists file-type protected entries whose parent
@@ -304,6 +322,7 @@ var fileTypeProtectedPaths = map[string]bool{
 var fileTypeParentAutoCreate = map[string]bool{
 	".claude/settings.json":       true,
 	".claude/settings.local.json": true,
+	".codex/config.toml":          true,
 }
 
 // directoryTypeProtectedPaths lists entries that are materialized as
@@ -497,8 +516,9 @@ func pathToDeviceName(path string) string {
 	name = strings.ReplaceAll(name, ".", "")
 	// Remove leading dash if present
 	name = strings.TrimPrefix(name, "-")
-	// Prefix with "protect-" for clarity
-	return "protect-" + name
+	// Prefix for clarity + so the reuse-strip path (stripSecurityDevicePrefixes)
+	// removes it.
+	return protectDevicePrefix + name
 }
 
 // GetProtectedPathsForLogging returns a human-readable list of protected paths

@@ -206,8 +206,9 @@ func TestInstallSh_EnsureIncusInitialized_SkipsWhenAlreadyInitialized(t *testing
 
 	script := installShPath(t)
 
-	// Stub incus: when called with "network list", return a fake network line.
-	// This simulates an already-initialized Incus without needing a real one.
+	// Stub incus: when called with "network list", return a fake MANAGED network
+	// line (column 3 = YES). This simulates an already-initialized Incus without
+	// needing a real one.
 	snippet := `
 		tmpdir=$(mktemp -d)
 		trap "rm -rf $tmpdir" EXIT
@@ -215,7 +216,7 @@ func TestInstallSh_EnsureIncusInitialized_SkipsWhenAlreadyInitialized(t *testing
 		cat > "$tmpdir/incus" <<'STUB'
 #!/bin/bash
 if [[ "$*" == *"network list"* ]]; then
-	echo "incusbr0,bridge,,"
+	echo "incusbr0,bridge,YES,10.87.0.1/24,,,3,RUNNING"
 	exit 0
 fi
 exit 0
@@ -302,6 +303,131 @@ STUB
 	// Verify sudo was called with the right command
 	if !strings.Contains(stdout, "INIT_WAS_CALLED") {
 		t.Errorf("expected sudo incus admin init --auto to be called; stdout: %s", stdout)
+	}
+}
+
+// #703: on a real host, `incus network list` is never empty even before
+// `incus admin init` has run, because it also lists unmanaged physical and
+// loopback interfaces. ensure_incus_initialized must still run
+// `sudo incus admin init --auto` in that case rather than treating a
+// non-empty-but-all-unmanaged list as "already initialized".
+func TestInstallSh_EnsureIncusInitialized_RunsInitWhenOnlyUnmanagedNetworksExist(t *testing.T) {
+	script := installShPath(t)
+
+	// Stub incus network list with the exact CSV shape reported in #703: a
+	// physical NIC and loopback, both unmanaged (column 3, MANAGED, is NO).
+	snippet := `
+		tmpdir=$(mktemp -d)
+		trap "rm -rf $tmpdir" EXIT
+
+		cat > "$tmpdir/incus" <<'STUB'
+#!/bin/bash
+if [[ "$*" == *"network list"* ]]; then
+	printf 'enp7s0,physical,NO,,,,0,\n'
+	printf 'lo,loopback,NO,,,,0,\n'
+	exit 0
+fi
+exit 0
+STUB
+		chmod +x "$tmpdir/incus"
+
+		export COI_TEST_MARKER="$tmpdir/init_called"
+		cat > "$tmpdir/sudo" <<'STUB'
+#!/bin/bash
+if [[ "$*" == *"incus admin init --auto"* ]]; then
+	touch "$COI_TEST_MARKER"
+	exit 0
+fi
+exec /usr/bin/sudo "$@"
+STUB
+		chmod +x "$tmpdir/sudo"
+		export PATH="$tmpdir:$PATH"
+
+		export NONINTERACTIVE=1
+		source <(sed '/^main "\$@"/d; /^trap error_handler ERR/d' "` + script + `")
+		ensure_incus_initialized
+		if [ -f "$COI_TEST_MARKER" ]; then
+			echo "INIT_WAS_CALLED"
+		fi
+		echo "COMPLETED"
+	`
+	stdout, _, exitCode := runBashSnippet(t, snippet, "NONINTERACTIVE=1")
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0, got %d; stdout: %s", exitCode, stdout)
+	}
+	if !strings.Contains(stdout, "COMPLETED") {
+		t.Errorf("function did not complete; stdout: %s", stdout)
+	}
+	if !strings.Contains(stdout, "has not been initialized") {
+		t.Errorf("expected 'has not been initialized' message when only unmanaged networks exist, got: %s", stdout)
+	}
+	if !strings.Contains(stdout, "INIT_WAS_CALLED") {
+		t.Errorf("expected sudo incus admin init --auto to be called when only unmanaged networks exist (#703); stdout: %s", stdout)
+	}
+}
+
+// A host can be initialized with an existing/custom network and no managed
+// bridge, so the network list holds only unmanaged interfaces. `incus admin
+// init --auto` always creates a storage pool too, so a non-empty storage list
+// must count as "already initialized" and skip re-running init - otherwise the
+// installer prints a false "not initialized" warning and fires a doomed
+// `sudo incus admin init --auto` (which refuses on a configured host).
+func TestInstallSh_EnsureIncusInitialized_SkipsWhenOnlyStoragePoolExists(t *testing.T) {
+	script := installShPath(t)
+
+	// incus network list returns only unmanaged interfaces (MANAGED=NO), but
+	// storage list returns a pool - the reliable signal of prior init.
+	snippet := `
+		tmpdir=$(mktemp -d)
+		trap "rm -rf $tmpdir" EXIT
+
+		cat > "$tmpdir/incus" <<'STUB'
+#!/bin/bash
+if [[ "$*" == *"network list"* ]]; then
+	printf 'enp7s0,physical,NO,,,,0,\n'
+	printf 'lo,loopback,NO,,,,0,\n'
+	exit 0
+fi
+if [[ "$*" == *"storage list"* ]]; then
+	echo "default,zfs,,,3,CREATED"
+	exit 0
+fi
+exit 0
+STUB
+		chmod +x "$tmpdir/incus"
+
+		export COI_TEST_MARKER="$tmpdir/init_called"
+		cat > "$tmpdir/sudo" <<'STUB'
+#!/bin/bash
+if [[ "$*" == *"incus admin init --auto"* ]]; then
+	touch "$COI_TEST_MARKER"
+	exit 0
+fi
+exec /usr/bin/sudo "$@"
+STUB
+		chmod +x "$tmpdir/sudo"
+		export PATH="$tmpdir:$PATH"
+
+		export NONINTERACTIVE=1
+		source <(sed '/^main "\$@"/d; /^trap error_handler ERR/d' "` + script + `")
+		ensure_incus_initialized
+		if [ -f "$COI_TEST_MARKER" ]; then
+			echo "INIT_WAS_CALLED"
+		fi
+		echo "COMPLETED"
+	`
+	stdout, _, exitCode := runBashSnippet(t, snippet, "NONINTERACTIVE=1")
+	if exitCode != 0 {
+		t.Fatalf("expected exit 0, got %d; stdout: %s", exitCode, stdout)
+	}
+	if !strings.Contains(stdout, "COMPLETED") {
+		t.Errorf("function did not complete; stdout: %s", stdout)
+	}
+	if strings.Contains(stdout, "has not been initialized") {
+		t.Errorf("should skip init when a storage pool exists, got: %s", stdout)
+	}
+	if strings.Contains(stdout, "INIT_WAS_CALLED") {
+		t.Errorf("must not run sudo incus admin init --auto when a storage pool already exists; stdout: %s", stdout)
 	}
 }
 
@@ -915,5 +1041,83 @@ func TestInstallSh_SetupFastStorage_InstallsZfsOnApt(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "ZFS storage pool created") {
 		t.Errorf("ZFS pool should be created on apt, got: %s", stdout)
+	}
+}
+
+// setup_nm_unmanaged_veths (#695) must install the veth exclusion when the NM
+// conf dir exists, be idempotent, respect a pre-existing user rule covering
+// veths, and no-op entirely when NetworkManager is absent. sudo/systemctl are
+// stubbed to plain execution/no-ops so the real system is never touched.
+func TestInstallSh_NMUnmanagedVeths(t *testing.T) {
+	script := installShPath(t)
+	confDir := t.TempDir()
+	snippet := func(dir string) string {
+		return `
+			sudo() { "$@"; }        # run without privileges
+			systemctl() { :; }      # never reload anything real
+			source <(sed '/^main "\$@"/d; /^trap error_handler ERR/d' "` + script + `")
+			COI_NM_CONF_DIR="` + dir + `" setup_nm_unmanaged_veths
+		`
+	}
+
+	// 1. Fresh dir: file gets written.
+	_, stderr, code := runBashSnippet(t, snippet(confDir))
+	if code != 0 {
+		t.Fatalf("setup failed: %s", stderr)
+	}
+	conf := filepath.Join(confDir, "99-coi-unmanaged.conf")
+	data, err := os.ReadFile(conf)
+	if err != nil {
+		t.Fatalf("conf file not written: %v", err)
+	}
+	// += appends to any user-set list (plain = would replace it under
+	// NM's last-file-wins conf.d semantics).
+	if !strings.Contains(string(data), "unmanaged-devices+=interface-name:veth*") {
+		t.Errorf("conf missing the veth exclusion: %s", data)
+	}
+
+	// 2. Idempotent: second run leaves the file alone and succeeds.
+	if _, stderr, code = runBashSnippet(t, snippet(confDir)); code != 0 {
+		t.Fatalf("second run failed: %s", stderr)
+	}
+
+	// 3. Pre-existing user rule covering veths: no coi file is added.
+	userDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(userDir, "50-user.conf"),
+		[]byte("[keyfile]\nunmanaged-devices=interface-name:veth*\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, stderr, code = runBashSnippet(t, snippet(userDir)); code != 0 {
+		t.Fatalf("user-rule run failed: %s", stderr)
+	}
+	if _, err := os.Stat(filepath.Join(userDir, "99-coi-unmanaged.conf")); err == nil {
+		t.Error("coi conf must not be written when a user rule already covers veths")
+	}
+
+	// 4. NM absent (dir missing): silent no-op.
+	if _, stderr, code = runBashSnippet(t, snippet(filepath.Join(confDir, "nope"))); code != 0 {
+		t.Fatalf("absent-dir run should no-op, got: %s", stderr)
+	}
+
+	// 5. A COMMENTED-OUT veth rule must not suppress the real one.
+	commentedDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(commentedDir, "50-user.conf"),
+		[]byte("[keyfile]\n#unmanaged-devices=interface-name:veth*\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, stderr, code = runBashSnippet(t, snippet(commentedDir)); code != 0 {
+		t.Fatalf("commented-rule run failed: %s", stderr)
+	}
+	if _, err := os.Stat(filepath.Join(commentedDir, "99-coi-unmanaged.conf")); err != nil {
+		t.Error("a commented-out user rule must not suppress installing the active exclusion")
+	}
+
+	// 6. COI_SKIP_NM_UNMANAGED=1 opts out entirely.
+	skipDir := t.TempDir()
+	if _, stderr, code = runBashSnippet(t, "COI_SKIP_NM_UNMANAGED=1\n"+snippet(skipDir)); code != 0 {
+		t.Fatalf("skip-env run failed: %s", stderr)
+	}
+	if _, err := os.Stat(filepath.Join(skipDir, "99-coi-unmanaged.conf")); err == nil {
+		t.Error("COI_SKIP_NM_UNMANAGED=1 must prevent the drop-in")
 	}
 }

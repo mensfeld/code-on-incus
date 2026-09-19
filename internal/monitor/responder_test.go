@@ -326,3 +326,42 @@ func TestResponderThreatLevelActions(t *testing.T) {
 		})
 	}
 }
+
+func TestForensicCopyName(t *testing.T) {
+	got := forensicCopyName("coi-abc-1", time.Unix(1700000000, 0))
+	if got != "coi-abc-1-forensics-1700000000" {
+		t.Errorf("forensicCopyName = %q", got)
+	}
+}
+
+// The prune selection must keep the newest copies, only consider the target
+// container's own forensic copies, and leave room under the cap for the copy
+// about to be created.
+func TestForensicCopiesToPrune(t *testing.T) {
+	names := []string{
+		"coi-abc-1-forensics-1700000001",
+		"coi-abc-1-forensics-1700000003",
+		"coi-abc-1-forensics-1700000002",
+		"coi-abc-2-forensics-1700000000", // different container — untouched
+		"coi-abc-1",                      // the live container — untouched
+		"unrelated",
+	}
+	got := forensicCopiesToPrune(names, "coi-abc-1")
+	// 3 existing + 1 incoming = 4 > cap 3 → prune the 2 oldest, keeping 1 + new... cap-1 = 2 kept, so prune 1.
+	if len(got) != 1 || got[0] != "coi-abc-1-forensics-1700000001" {
+		t.Errorf("expected oldest copy pruned, got %v", got)
+	}
+	// Under the cap: nothing pruned.
+	if got := forensicCopiesToPrune(names[:2], "coi-abc-1"); got != nil {
+		t.Errorf("2 existing + 1 new is within the cap, got %v", got)
+	}
+	// Way over the cap: all but (cap-1) newest pruned.
+	many := []string{
+		"c-forensics-1700000001", "c-forensics-1700000002", "c-forensics-1700000003",
+		"c-forensics-1700000004", "c-forensics-1700000005",
+	}
+	got = forensicCopiesToPrune(many, "c")
+	if len(got) != 3 || got[2] != "c-forensics-1700000003" {
+		t.Errorf("expected the 3 oldest pruned, got %v", got)
+	}
+}

@@ -287,6 +287,41 @@ func TestClaudeModelAndEffortCoexist(t *testing.T) {
 	}
 }
 
+// Claude must expose model/effort via GetContainerEnv too, so session setup can
+// persist them as container-level environment.* that any exec inherits (#744).
+func TestClaudeGetContainerEnv(t *testing.T) {
+	twce, ok := NewClaude().(ToolWithContainerEnv)
+	if !ok {
+		t.Fatal("Claude tool should implement ToolWithContainerEnv")
+	}
+
+	// Nothing configured -> no env (tool keeps its own defaults).
+	if env := twce.GetContainerEnv("/workspace"); len(env) != 0 {
+		t.Errorf("unconfigured Claude should return no container env, got %v", env)
+	}
+
+	twce.(ToolWithModel).SetModel("opus")
+	twce.(ToolWithEffortLevel).SetEffortLevel("high")
+	env := twce.GetContainerEnv("/workspace")
+	if env["ANTHROPIC_MODEL"] != "opus" {
+		t.Errorf("ANTHROPIC_MODEL = %q, want opus", env["ANTHROPIC_MODEL"])
+	}
+	if env["CLAUDE_CODE_EFFORT_LEVEL"] != "high" {
+		t.Errorf("CLAUDE_CODE_EFFORT_LEVEL = %q, want high", env["CLAUDE_CODE_EFFORT_LEVEL"])
+	}
+
+	// Only model set -> only ANTHROPIC_MODEL, no effort key.
+	only := NewClaude()
+	only.(ToolWithModel).SetModel("sonnet")
+	oenv := only.(ToolWithContainerEnv).GetContainerEnv("/workspace")
+	if oenv["ANTHROPIC_MODEL"] != "sonnet" {
+		t.Errorf("ANTHROPIC_MODEL = %q, want sonnet", oenv["ANTHROPIC_MODEL"])
+	}
+	if _, ok := oenv["CLAUDE_CODE_EFFORT_LEVEL"]; ok {
+		t.Error("CLAUDE_CODE_EFFORT_LEVEL must be absent when effort not configured")
+	}
+}
+
 func TestClaudeToolConfigDirFiles(t *testing.T) {
 	tool := NewClaude()
 	tcf, ok := tool.(ToolWithConfigDirFiles)
@@ -569,8 +604,8 @@ func TestRenderContextFileContent(t *testing.T) {
 		{"ssh forwarded", "Forwarded from host"},
 		{"non-root user", "Non-root user"},
 		{"COI header", "COI Sandbox Environment"},
-		{"full root access", "Full root access"},
-		{"docker available", "Docker is available"},
+		{"full root access", "full root"},
+		{"docker available", "Docker (Docker-in-Docker)"},
 		{"OS info", "Ubuntu"},
 		{"architecture", "amd64"},
 		{"docker row", "Docker-in-Docker"},
@@ -583,7 +618,7 @@ func TestRenderContextFileContent(t *testing.T) {
 		{"container name", "coi-test-1"},
 		{"autonomous operation section", "Autonomous Operation"},
 		{"never ask confirmation", "Never ask for confirmation"},
-		{"act autonomously guidance", "Act autonomously"},
+		{"act autonomously guidance", "expected to act, not ask"},
 		{"git configuration section", "Git Configuration"},
 		{"git ssh recommendation", "Use SSH for git operations"},
 		{"git identity warning", `NEVER fabricate`},
@@ -593,6 +628,47 @@ func TestRenderContextFileContent(t *testing.T) {
 		if !strings.Contains(content, check.substr) {
 			t.Errorf("RenderContextFileContent() missing %s (expected substring %q)", check.name, check.substr)
 		}
+	}
+}
+
+// When Docker is disabled (docker=false or reduce_kernel_surface=true), the
+// context must NOT advertise Docker-in-Docker the agent can't use — otherwise
+// it burns turns debugging a dockerd that cannot start (finding: sandbox
+// context Docker desc).
+func TestRenderContextFileContent_DockerUnavailable(t *testing.T) {
+	info := ContextInfo{
+		WorkspacePath:     "/workspace",
+		HomeDir:           "/home/code",
+		NetworkMode:       "restricted",
+		DockerUnavailable: true,
+	}
+	content := RenderContextFileContent(info)
+
+	if strings.Contains(content, "Docker-in-Docker") {
+		t.Error("hardened context must not advertise Docker-in-Docker")
+	}
+	if !strings.Contains(content, "Not available") {
+		t.Errorf("Docker row should say Not available, got:\n%s", content)
+	}
+	// The pre-installed-tools line and the docker troubleshooting bullet must
+	// be gated out too.
+	if strings.Contains(content, "Docker not responding") {
+		t.Error("hardened context must omit the docker troubleshooting bullet")
+	}
+
+	// JSON contract must report it too.
+	jsonStr, err := RenderContextFileJSON(info)
+	if err != nil {
+		t.Fatalf("RenderContextFileJSON: %v", err)
+	}
+	if !strings.Contains(jsonStr, "\"docker_available\": false") {
+		t.Errorf("JSON should report docker_available:false, got:\n%s", jsonStr)
+	}
+
+	// Default (zero value) still advertises Docker — back-compat.
+	def := RenderContextFileContent(ContextInfo{WorkspacePath: "/w", HomeDir: "/h", NetworkMode: "open"})
+	if !strings.Contains(def, "Docker-in-Docker") {
+		t.Error("default context should still advertise Docker-in-Docker")
 	}
 }
 
@@ -651,6 +727,100 @@ func TestRenderContextFileContent_AllNetworkModes(t *testing.T) {
 			}
 		}
 	}
+}
+
+// The generated sandbox context MUST surface the fine-grained egress controls
+// (allowed_ports, dns_servers, allowlist domains) so the agent knows what it can
+// and cannot reach. These are injected into the tool's system prompt via the
+// auto-context file, so a gap here means the agent dials blocked ports/resolvers
+// blindly.
+func TestRenderContextFileContent_EgressControls(t *testing.T) {
+	t.Run("allowed_ports surfaced", func(t *testing.T) {
+		content := RenderContextFileContent(ContextInfo{
+			WorkspacePath: "/workspace", HomeDir: "/home/code",
+			NetworkMode: "restricted", AllowedPorts: []int{80, 443},
+		})
+		for _, want := range []string{"restricted to destination port(s) 80, 443", "egress-filtered"} {
+			if !strings.Contains(content, want) {
+				t.Errorf("allowed_ports: expected context to contain %q\n---\n%s", want, content)
+			}
+		}
+	})
+
+	t.Run("dns_servers surfaced", func(t *testing.T) {
+		content := RenderContextFileContent(ContextInfo{
+			WorkspacePath: "/workspace", HomeDir: "/home/code",
+			NetworkMode: "restricted", DNSServers: []string{"192.168.1.2"},
+		})
+		if !strings.Contains(content, "DNS is pinned to 192.168.1.2") {
+			t.Errorf("dns_servers: expected pinned-resolver note, got:\n%s", content)
+		}
+	})
+
+	t.Run("allowlist domains enumerated", func(t *testing.T) {
+		content := RenderContextFileContent(ContextInfo{
+			WorkspacePath: "/workspace", HomeDir: "/home/code",
+			NetworkMode: "allowlist", AllowedDomains: []string{"api.anthropic.com", "registry.npmjs.org"},
+		})
+		for _, want := range []string{"api.anthropic.com", "registry.npmjs.org", "only reachable outbound destinations"} {
+			if !strings.Contains(content, want) {
+				t.Errorf("allowlist domains: expected context to contain %q", want)
+			}
+		}
+	})
+
+	t.Run("combined ports+dns", func(t *testing.T) {
+		content := RenderContextFileContent(ContextInfo{
+			WorkspacePath: "/workspace", HomeDir: "/home/code",
+			NetworkMode: "restricted", AllowedPorts: []int{443}, DNSServers: []string{"10.0.0.53"},
+		})
+		if !strings.Contains(content, "destination port(s) 443") || !strings.Contains(content, "DNS is pinned to 10.0.0.53") {
+			t.Errorf("combined: expected both port cap and DNS pin in context:\n%s", content)
+		}
+	})
+
+	t.Run("no controls => no egress-filtered note", func(t *testing.T) {
+		// Parity: without the new controls the context must not gain the egress note,
+		// so existing configs render unchanged.
+		content := RenderContextFileContent(ContextInfo{
+			WorkspacePath: "/workspace", HomeDir: "/home/code", NetworkMode: "open",
+		})
+		if strings.Contains(content, "egress-filtered") || strings.Contains(content, "DNS is pinned") {
+			t.Errorf("open mode with no controls should not mention egress filtering:\n%s", content)
+		}
+	})
+
+	t.Run("open mode does not claim a cap it never enforces", func(t *testing.T) {
+		// Open mode installs a blanket accept: allowed_ports/dns_servers are inert.
+		// The context must not tell the agent egress is filtered, or it would waste
+		// turns avoiding ports/resolvers that are actually reachable.
+		content := RenderContextFileContent(ContextInfo{
+			WorkspacePath: "/workspace", HomeDir: "/home/code",
+			NetworkMode: "open", AllowedPorts: []int{80, 443}, DNSServers: []string{"192.168.1.2"},
+		})
+		for _, unwanted := range []string{"restricted to destination port(s)", "DNS is pinned", "egress-filtered"} {
+			if strings.Contains(content, unwanted) {
+				t.Errorf("open mode must not surface %q (it is not enforced):\n%s", unwanted, content)
+			}
+		}
+	})
+
+	t.Run("allowlist mode does not claim DNS pinning", func(t *testing.T) {
+		// dns_servers is rejected at setup in allowlist mode (all DNS is blocked and
+		// /etc/hosts is authoritative), so the context must not advertise a pin.
+		// allowed_ports, however, IS enforced in allowlist mode and should show.
+		content := RenderContextFileContent(ContextInfo{
+			WorkspacePath: "/workspace", HomeDir: "/home/code",
+			NetworkMode: "allowlist", AllowedPorts: []int{443}, DNSServers: []string{"192.168.1.2"},
+			AllowedDomains: []string{"api.anthropic.com"},
+		})
+		if strings.Contains(content, "DNS is pinned") {
+			t.Errorf("allowlist mode blocks all DNS; must not claim a resolver pin:\n%s", content)
+		}
+		if !strings.Contains(content, "destination port(s) 443") {
+			t.Errorf("allowlist mode enforces allowed_ports; expected it surfaced:\n%s", content)
+		}
+	})
 }
 
 func TestRenderContextFileContent_NoProtectedPaths(t *testing.T) {
@@ -786,10 +956,10 @@ func TestRenderContextFileContent_GitAuthHints_TokenOnly(t *testing.T) {
 	if !strings.Contains(content, "Git Configuration") {
 		t.Error("Expected 'Git Configuration' section when token is available")
 	}
-	if !strings.Contains(content, "Token-based git authentication is available") {
+	if !strings.Contains(content, "Token-based git auth is available") {
 		t.Error("Expected token-based auth description")
 	}
-	if !strings.Contains(content, "token may have limited scope") {
+	if !strings.Contains(content, "may have limited scope") {
 		t.Error("Expected scope warning for forwarded token")
 	}
 	if !strings.Contains(content, "gh api user") {

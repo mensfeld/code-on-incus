@@ -27,9 +27,17 @@ import (
 // bash, ruby, or python script all work the same way.
 const runScriptName = "coi-run"
 
+// Prompt-mode flags for `coi run` (#701). Exactly one may be set, and none can
+// be combined with a positional command.
+var (
+	runPrompt     string // --prompt "<text>"
+	runPromptFile string // --prompt-file <host path>
+	runPromptName string // --prompt-name <name from [prompts]>
+)
+
 var runCmd = &cobra.Command{
 	Use:   "run [command] [args...]",
-	Short: "Run a command or the workspace run script in a sandboxed container",
+	Short: "Run a command, the workspace run script, or a headless agent prompt in a sandboxed container",
 	Long: `Execute a command in an isolated Incus container with the full sandbox
 (workspace mount, protected paths, secret masking, network isolation, limits,
 monitoring). Output streams live and the command's exit code is propagated.
@@ -39,6 +47,16 @@ root and runs it inside the container directly from the workspace mount. The
 shebang decides the interpreter, so any language works (#!/usr/bin/env bash,
 ruby, python, ...).
 
+Headless prompt mode (--prompt / --prompt-file / --prompt-name) runs the
+configured AI agent to completion with a predefined prompt and exits with its
+status code — "fire and forget" for cron automation. The prompt is staged into
+the container as a file (never on the command line), the agent's auth and
+context are seeded exactly as in an interactive session, and each fire is a
+fresh ephemeral session by default. --prompt-name looks the prompt up in the
+[prompts] config table (inline text or { file = "..." }, profile-inheritable).
+Prompt mode currently supports the claude tool with permission_mode = "bypass"
+(a headless run has no TTY to approve tool use).
+
 The container is ephemeral: it is cleaned up after the command completes (or
 stopped and kept, when [container] persistent = true is configured).
 
@@ -47,9 +65,18 @@ Examples:
   coi run --profile scripts          # same, with a credential-limiting profile
   coi run -- npm test                # run an arbitrary command
   coi run --workspace ~/project -- make build
+  coi run --prompt "update deps and open a PR"   # headless agent run
+  coi run --prompt-file ./task.md --profile hardened
+  coi run --prompt-name nightly-maintenance      # from the [prompts] table
 `,
 	Args: cobra.ArbitraryArgs,
 	RunE: app.runCommand,
+}
+
+func init() {
+	runCmd.Flags().StringVar(&runPrompt, "prompt", "", "Run the AI agent headlessly with this prompt text, then exit (fire and forget)")
+	runCmd.Flags().StringVar(&runPromptFile, "prompt-file", "", "Run the AI agent headlessly with the prompt read from this host file")
+	runCmd.Flags().StringVar(&runPromptName, "prompt-name", "", "Run the AI agent headlessly with a named prompt from the [prompts] config table")
 }
 
 // detectRunScript checks for the workspace run script. The script must carry
@@ -125,10 +152,19 @@ func (a *App) runCommand(cmd *cobra.Command, args []string) error {
 
 	s := &runState{absWorkspace: absWorkspace}
 
+	// Prompt mode (#701): resolve the predefined prompt and validate its flags
+	// before any container work, against the fully merged/profile-applied config
+	// so --prompt-name sees the right [prompts]. Prompt mode replaces both the
+	// positional command and the run-script fallback.
+	if err := a.resolvePromptMode(cmd, s, args); err != nil {
+		return err
+	}
+
 	// No command given: fall back to the workspace run-script convention.
 	// Detection happens host-side before any container work so a missing
-	// script fails fast with a clear message.
-	if len(args) == 0 {
+	// script fails fast with a clear message. Skipped in prompt mode, which
+	// runs the agent rather than a workspace script.
+	if len(args) == 0 && !s.promptMode {
 		found, err := detectRunScript(absWorkspace)
 		if err != nil {
 			return err
@@ -144,37 +180,97 @@ func (a *App) runCommand(cmd *cobra.Command, args []string) error {
 	pipeline := &session.Pipeline{}
 	defer pipeline.Teardown()
 
-	// Signal handler: trigger cleanup immediately on SIGINT while incus exec blocks.
-	// Uses a dedicated sigChan (not ctx.Done) to avoid non-determinism when both fire
-	// simultaneously. pipeline.Teardown is idempotent so the deferred call above is safe.
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(sigChan)
-	done := make(chan struct{})
-	defer close(done)
-	go func() {
-		select {
-		case <-sigChan:
-			fmt.Fprintf(os.Stderr, "\nReceived interrupt signal, cleaning up...\n")
-			pipeline.Teardown()
-		case <-done:
-		}
-	}()
+	finalPhase := a.runCommandPhase(args, s)
+	if s.promptMode {
+		finalPhase = a.runPromptPhase(s)
+	}
 
-	return pipeline.Run(
-		ctx,
+	return runPipelineWithSignals(ctx, pipeline,
 		a.validateEnvRunPhase(s),
 		a.launchContainerRunPhase(s),
 		a.configureContainerRunPhase(s),
 		a.applyNetworkRunPhase(s),
 		a.startMonitoringRunPhase(s),
-		a.runCommandPhase(args, s),
+		finalPhase,
 	)
 }
 
+// resolvePromptMode validates the --prompt/--prompt-file/--prompt-name flags,
+// and when one is set, resolves the prompt text and flips runState into prompt
+// mode. Exactly one prompt source may be set, and prompt mode is incompatible
+// with a positional command. An empty resolved prompt is rejected so a
+// scheduled run never launches the agent with no instructions. All validation
+// errors use exit code 2 to distinguish them from an agent failure.
+func (a *App) resolvePromptMode(cmd *cobra.Command, s *runState, args []string) error {
+	promptSet := cmd.Flags().Changed("prompt")
+	fileSet := cmd.Flags().Changed("prompt-file")
+	nameSet := cmd.Flags().Changed("prompt-name")
+	if countTrue(promptSet, fileSet, nameSet) == 0 {
+		return nil
+	}
+	if countTrue(promptSet, fileSet, nameSet) > 1 {
+		return &ExitCodeError{Code: 2, Message: "--prompt, --prompt-file, and --prompt-name are mutually exclusive"}
+	}
+	if len(args) > 0 {
+		return &ExitCodeError{Code: 2, Message: "a positional command cannot be combined with --prompt/--prompt-file/--prompt-name"}
+	}
+
+	var text string
+	switch {
+	case fileSet:
+		data, err := os.ReadFile(runPromptFile)
+		if err != nil {
+			return &ExitCodeError{Code: 2, Message: fmt.Sprintf("failed to read --prompt-file %s: %v", runPromptFile, err)}
+		}
+		text = string(data)
+	case nameSet:
+		resolved, err := a.cfg.ResolvePrompt(runPromptName)
+		if err != nil {
+			return &ExitCodeError{Code: 2, Message: err.Error()}
+		}
+		text = resolved
+	default:
+		text = runPrompt
+	}
+
+	if strings.TrimSpace(text) == "" {
+		return &ExitCodeError{Code: 2, Message: "the resolved prompt is empty"}
+	}
+
+	// Headless print mode can't answer permission prompts (no TTY), so an
+	// interactive permission_mode would silently block every tool use. Reject it
+	// up front rather than launch an agent that can do nothing (#701 review).
+	if a.cfg.Tool.PermissionMode == "interactive" {
+		return &ExitCodeError{Code: 2, Message: "headless prompt mode needs [tool] permission_mode = \"bypass\" — \"interactive\" can't approve tool use without a TTY"}
+	}
+
+	// Fail fast on an unsupported tool before any container work, so cron doesn't
+	// spin up (and tear down) a container just to be told the tool can't run
+	// headlessly. The resolved tool is reused by runPromptPhase.
+	t, err := getConfiguredTool(a.cfg)
+	if err != nil {
+		return &ExitCodeError{Code: 2, Message: err.Error()}
+	}
+	if t.Name() != "claude" {
+		return &ExitCodeError{Code: 2, Message: fmt.Sprintf(
+			"coi run headless prompt mode currently supports only the claude tool (configured: %q)", t.Name())}
+	}
+
+	sessionID, err := session.GenerateSessionID()
+	if err != nil {
+		return fmt.Errorf("failed to generate session id: %w", err)
+	}
+	s.promptMode = true
+	s.promptText = text
+	s.promptSessionID = sessionID
+	s.promptTool = t
+	return nil
+}
+
 // launchOrReuseContainer restarts an existing persistent container, or
-// recreates / creates a fresh one on the given storage pool.
-func launchOrReuseContainer(mgr container.ContainerManager, img, pool, containerName string, containerExists, persistent bool, preStart, preRestart func() error) error {
+// recreates / creates a fresh one on the given storage pool. policy is the
+// resolved kernel-surface policy, applied once at init on the fresh path.
+func launchOrReuseContainer(mgr container.ContainerManager, img, pool, containerName string, containerExists, persistent bool, preStart, preRestart func() error, policy container.HardeningPolicy) error {
 	if containerExists && persistent {
 		// Fail fast on an already-running container (another session may own
 		// it). Master's plain Start() errored here; StartWithIsolationFallback's
@@ -206,6 +302,14 @@ func launchOrReuseContainer(mgr container.ContainerManager, img, pool, container
 		return nil
 	}
 	if containerExists {
+		// Never force-delete a RUNNING container: for a path-keyed workspace a
+		// leftover here is this workspace's own ephemeral corpse, but with a
+		// session_name the identical name resolves from EVERY checkout — an
+		// ephemeral `coi run --slot N` must not be able to kill another
+		// checkout's live named session mid-flight.
+		if running, _ := mgr.Running(); running {
+			return fmt.Errorf("container %s is already running — another session may be using it; pick a different --slot or stop it first", containerName)
+		}
 		fmt.Fprintf(os.Stderr, "Removing existing container...\n")
 		if err := mgr.Delete(true); err != nil {
 			return fmt.Errorf("failed to delete existing container: %w", err)
@@ -216,7 +320,7 @@ func launchOrReuseContainer(mgr container.ContainerManager, img, pool, container
 	// raw.idmap for the workspace UID mapping (#530) and every disk device, so
 	// idmap-incompatible device filesystems fail the START where the isolation
 	// fallback covers them (#534).
-	if err := mgr.LaunchWithPreStart(img, ephemeral, pool, preStart); err != nil {
+	if err := mgr.LaunchWithPreStartPolicy(img, ephemeral, pool, preStart, policy); err != nil {
 		// Best-effort cleanup of the half-created container: a preStart/start
 		// failure leaves it behind stopped and half-configured (stopped
 		// ephemeral containers are only auto-deleted after having run, and a
@@ -308,7 +412,7 @@ func remapContainerUserIfNeeded(mgr container.ContainerManager, wasRestarted boo
 // tz is the resolved timezone name (may be empty).
 // socketEnv maps env var names to container-side socket paths for every
 // forwarded socket (SSH_AUTH_SOCK plus any configured [[sockets]] entries).
-func (a *App) appendEnvArgs(incusArgs []string, tz string, socketEnv map[string]string) ([]string, error) {
+func (a *App) appendEnvArgs(incusArgs []string, homeDir, tz string, socketEnv map[string]string) ([]string, error) {
 	// Assemble the environment in a map so precedence is deterministic: each
 	// source in turn overwrites the previous one (last-wins), and every key is
 	// emitted as a single --env flag below. This mirrors how `coi shell` builds
@@ -327,10 +431,11 @@ func (a *App) appendEnvArgs(incusArgs []string, tz string, socketEnv map[string]
 	// Baseline identity. incus exec does not set HOME/USER for a --user exec, so
 	// without this a `coi run` command runs with no HOME — anything resolving ~
 	// or reading a --global config breaks (`git config --global` ->
-	// "fatal: $HOME not set", #623). `coi run` execs as the code user, whose home
-	// is /home/<code_user>. A user can still override any of these via
-	// [defaults].environment (they are applied later, below).
-	env["HOME"] = "/home/" + container.CodeUser
+	// "fatal: $HOME not set", #623). homeDir is the run user's home resolved by
+	// the caller (usually /home/<code_user>; /root for a no-code-user image), so
+	// HOME matches where per-user state was seeded. A user can still override any
+	// of these via [defaults].environment (they are applied later, below).
+	env["HOME"] = homeDir
 	env["USER"] = container.CodeUser
 	env["LOGNAME"] = container.CodeUser
 
@@ -342,28 +447,10 @@ func (a *App) appendEnvArgs(incusArgs []string, tz string, socketEnv map[string]
 		env[name] = path
 	}
 
-	// Static environment from config (defaults.environment + profile environment)
-	for k, v := range a.cfg.Defaults.Environment {
-		env[k] = v
-	}
-
-	// Resolve forward_env from config, look up host values
-	for _, name := range a.cfg.Defaults.ForwardEnv {
-		if val, ok := os.LookupEnv(name); ok {
-			env[name] = val
-		} else {
-			fmt.Fprintf(os.Stderr, "Warning: forward_env variable %q is not set on host, skipping\n", name)
-		}
-	}
-
-	// Command-sourced env vars (highest precedence — freshly minted per session).
-	// A failing env_command is fatal: don't launch a half-credentialed session.
-	envCommandValues, err := a.resolveEnvCommands()
-	if err != nil {
+	// Apply the config-sourced env layers (defaults.environment -> forward_env ->
+	// env_commands, last-wins), shared with coi shell's buildContainerEnv.
+	if err := a.applyConfigEnv(env); err != nil {
 		return nil, err
-	}
-	for k, v := range envCommandValues {
-		env[k] = v
 	}
 
 	// Emit each var once, in a stable (sorted) order for deterministic args.
@@ -377,26 +464,6 @@ func (a *App) appendEnvArgs(incusArgs []string, tz string, socketEnv map[string]
 	}
 
 	return incusArgs, nil
-}
-
-// hasAnyLimits checks if any limits are configured (used in run.go)
-func hasAnyLimits(cfg *config.LimitsConfig) bool {
-	if cfg == nil {
-		return false
-	}
-
-	// Check if any limit is set (non-empty strings or non-zero integers)
-	return cfg.CPU.Count != "" ||
-		cfg.CPU.Allowance != "" ||
-		cfg.CPU.Priority != 0 ||
-		cfg.Memory.Limit != "" ||
-		cfg.Memory.Enforce != "" ||
-		cfg.Memory.Swap != "" ||
-		cfg.Disk.Read != "" ||
-		cfg.Disk.Write != "" ||
-		cfg.Disk.Max != "" ||
-		cfg.Disk.Priority != 0 ||
-		cfg.Runtime.MaxProcesses != 0
 }
 
 // filterWritableGitHooks removes .git/hooks from protected paths when writable hooks are enabled.
@@ -600,7 +667,7 @@ func (a *App) applySecurityMounts(mgr container.ContainerManager, absWorkspace, 
 		}
 	}
 	if len(effectivePaths) > 0 && a.cfg.Security.IsHostImmutableEnabled() {
-		logFn := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
+		logFn := stderrLogFn
 		immutablePaths := session.ApplyImmutable(absWorkspace, effectivePaths, containerName, logFn)
 		if len(immutablePaths) > 0 {
 			fmt.Fprintf(os.Stderr, "Host-side immutable protection applied: %s\n", strings.Join(immutablePaths, ", "))
@@ -643,8 +710,8 @@ func (a *App) applySecurityMounts(mgr container.ContainerManager, absWorkspace, 
 // every launch, so the gate always applies to them; a reused persistent
 // container keeps its creation-time mount devices, so for those we only warn
 // that trust changes won't take effect until the container is recreated.
-func (a *App) gateRunForwarding(mc *session.MountConfig, sc *session.SocketConfig, pc *session.PortConfig, workspace string, wasRestarted bool) (*session.MountConfig, *session.SocketConfig, *session.PortConfig) {
-	keptMC, droppedM, keptSC, droppedS, _, _, keptPC, droppedP := session.FilterTrusted(mc, sc, nil, pc, workspace)
+func (a *App) gateRunForwarding(mc *session.MountConfig, sc *session.SocketConfig, cc *session.CredentialConfig, pc *session.PortConfig, workspace string, wasRestarted bool) (*session.MountConfig, *session.SocketConfig, *session.CredentialConfig, *session.PortConfig) {
+	keptMC, droppedM, keptSC, droppedS, keptCC, droppedC, keptPC, droppedP := session.FilterTrusted(mc, sc, cc, pc, workspace)
 	if wasRestarted {
 		if len(droppedM) > 0 {
 			fmt.Fprintf(os.Stderr,
@@ -657,14 +724,17 @@ func (a *App) gateRunForwarding(mc *session.MountConfig, sc *session.SocketConfi
 	}
 	warnDroppedSockets(droppedS)
 	warnDroppedPorts(droppedP)
-	return keptMC, keptSC, keptPC
+	if len(droppedC) > 0 {
+		fmt.Fprintf(os.Stderr, "Warning: %d untrusted credential entr(ies) skipped from an untrusted project config\n", len(droppedC))
+	}
+	return keptMC, keptSC, keptCC, keptPC
 }
 
 // applyForwardSockets forwards the host SSH agent (when ssh.forward_agent is
 // true) plus every trust-gated [[sockets]] entry into the container. Returns a
 // map of env var name -> container-side socket path for those that declare one.
 func (a *App) applyForwardSockets(mgr container.ContainerManager, socketConfig *session.SocketConfig) map[string]string {
-	logger := func(msg string) { fmt.Fprintf(os.Stderr, "%s\n", msg) }
+	logger := stderrLogFn
 	return session.ForwardConfiguredSockets(mgr, socketConfig, config.BoolVal(a.cfg.SSH.ForwardAgent), logger)
 }
 
@@ -679,7 +749,7 @@ func (a *App) applyNetworkIsolation(ctx context.Context, containerName string) (
 		// coi shell path calls SetupForContainer for every mode, so it already
 		// covers open; coi run short-circuits here, so apply them explicitly.)
 		if len(networkConfig.Hosts) > 0 {
-			if err := network.ApplyUserHosts(containerName, networkConfig.Mode, config.BoolVal(networkConfig.AllowLocalNetworkAccess), networkConfig.Hosts); err != nil {
+			if err := network.ApplyUserHosts(containerName, networkConfig.Mode, config.BoolVal(networkConfig.AllowLocalNetworkAccess), networkConfig.Hosts, networkConfig.AllowedPorts); err != nil {
 				return nil, fmt.Errorf("failed to apply [[network.hosts]]: %w", err)
 			}
 		}

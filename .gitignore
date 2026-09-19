@@ -42,6 +42,9 @@ tmp/
 *.swo
 *~
 
+# AI agent tooling (local Claude Code config/state at repo root)
+/.claude/
+
 # OS
 .DS_Store
 Thumbs.db
@@ -69,3 +72,4 @@ test-config.toml
 # Analysis / planning scratch generated at repo root by tooling (kept local,
 # never committed) — e.g. *_IMPROVEMENTS.md coverage write-ups.
 /*_IMPROVEMENTS.md
+*.img

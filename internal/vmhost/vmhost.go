@@ -54,9 +54,17 @@ func Detect() Kind {
 func detect(mounts, user, osRelease string) Kind {
 	// OrbStack also mounts the host filesystem via virtiofs, so it must be
 	// excluded before the generic virtiofs check below, or it would
-	// false-positive as Lima/Colima. Unlike them, OrbStack's virtiofs mounts
-	// support idmapped shift mounts fine, detected via its guest kernel's
-	// release string (e.g. "7.0.11-orbstack-...").
+	// false-positive as Lima/Colima. It is detected via its guest kernel's
+	// release string (e.g. "7.0.11-orbstack-...") and, unlike Lima/Colima, does
+	// NOT handle UID mapping at the VM level — hence KindOrbStack.HandlesUIDMapping()
+	// is false and coi maps UIDs itself. Whether OrbStack's virtiofs mounts
+	// support Incus's idmapped ("shift") mounts is kernel-dependent and NOT
+	// assumed here: some OrbStack kernels can't, so a shift=true workspace mount
+	// fails at container start, and on 2.2.2 and later it attaches but produces
+	// junk ownership instead. Neither is decided by this string match. The
+	// question is answered from the source path's filesystem instead, in
+	// SourceBlocksIdmappedMounts (#683), with the reactive raw.idmap fallback at
+	// start (StartWithIsolationFallback / #678) left underneath as the backstop.
 	if strings.Contains(strings.ToLower(osRelease), "orbstack") {
 		return KindOrbStack
 	}

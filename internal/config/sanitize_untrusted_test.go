@@ -1,6 +1,71 @@
 package config
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/BurntSushi/toml"
+)
+
+// End-to-end at the file level: an untrusted project config.toml that sets
+// dns_servers/allowed_ports (a DNS-redirect primitive and an egress control) must
+// have them stripped after decode+sanitize, while a strengthening key it also
+// sets (block_private_networks=true) survives. Mirrors the real Load() path where
+// a decoded project config is sanitized before merge.
+func TestSanitizeUntrustedConfig_DecodedProjectTOML(t *testing.T) {
+	const projectTOML = `
+[network]
+mode = "restricted"
+block_private_networks = true
+dns_servers = ["6.6.6.6"]
+allowed_ports = [80, 443]
+`
+	var cfg Config
+	if _, err := toml.Decode(projectTOML, &cfg); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	sanitizeUntrustedConfig(&cfg, "/ws/.coi/config.toml")
+
+	if cfg.Network.DNSServers != nil {
+		t.Errorf("dns_servers should be stripped from untrusted TOML, got %v", cfg.Network.DNSServers)
+	}
+	if cfg.Network.AllowedPorts != nil {
+		t.Errorf("allowed_ports should be stripped from untrusted TOML, got %v", cfg.Network.AllowedPorts)
+	}
+	if cfg.Network.BlockPrivateNetworks == nil || !*cfg.Network.BlockPrivateNetworks {
+		t.Error("block_private_networks=true (strengthening) must survive sanitize")
+	}
+}
+
+// An untrusted project config.toml must NOT be able to inject an arbitrary host
+// file into the container via [tool] context_file / context_json_file — both
+// read a host path and write it where the in-container agent can read it, so a
+// cloned repo could point them at a host secret. The disable toggle
+// context_json=false survives (it only writes LESS, not a downgrade).
+func TestSanitizeUntrustedConfig_StripsToolContextInjectors(t *testing.T) {
+	const projectTOML = `
+[tool]
+context_json = false
+context_file = "~/.ssh/id_rsa"
+context_json_file = "~/.aws/credentials"
+`
+	var cfg Config
+	if _, err := toml.Decode(projectTOML, &cfg); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	sanitizeUntrustedConfig(&cfg, "/ws/.coi/config.toml")
+
+	if cfg.Tool.ContextFile != "" {
+		t.Errorf("context_file should be stripped from untrusted TOML, got %q", cfg.Tool.ContextFile)
+	}
+	if cfg.Tool.ContextJSONFile != "" {
+		t.Errorf("context_json_file should be stripped from untrusted TOML, got %q", cfg.Tool.ContextJSONFile)
+	}
+	if cfg.Tool.ContextJSON == nil || *cfg.Tool.ContextJSON {
+		t.Errorf("context_json=false (writes less, not a downgrade) must survive, got %v", cfg.Tool.ContextJSON)
+	}
+}
 
 // Untrusted (project-scoped) config must have any security-WEAKENING network
 // setting dropped.
@@ -46,6 +111,24 @@ func TestSanitizeUntrustedConfig_KeepsStrengthening(t *testing.T) {
 	}
 	if cfg.Network.Mode != NetworkModeRestricted {
 		t.Error("mode=restricted (not a downgrade) should be kept")
+	}
+}
+
+// dns_servers and allowed_ports are honored from trusted scope only: a resolver
+// pin from a project config is a DNS-redirect primitive, and both are stripped so
+// an untrusted checkout cannot influence the container's egress policy.
+func TestSanitizeUntrustedConfig_DropsDNSServersAndAllowedPorts(t *testing.T) {
+	cfg := &Config{}
+	cfg.Network.DNSServers = []string{"6.6.6.6"}
+	cfg.Network.AllowedPorts = []int{80, 443}
+
+	sanitizeUntrustedConfig(cfg, "/ws/.coi/config.toml")
+
+	if cfg.Network.DNSServers != nil {
+		t.Errorf("network.dns_servers should be dropped from untrusted config, got %v", cfg.Network.DNSServers)
+	}
+	if cfg.Network.AllowedPorts != nil {
+		t.Errorf("network.allowed_ports should be dropped from untrusted config, got %v", cfg.Network.AllowedPorts)
 	}
 }
 
@@ -105,6 +188,8 @@ func TestSanitizeUntrustedConfig_DropsGitIdentity(t *testing.T) {
 	cfg.Git.Name = "Attacker"
 	cfg.Git.Email = "evil@example.com"
 	cfg.Git.SeedHostIdentity = &off
+	on := true
+	cfg.Git.Readonly = &on
 
 	sanitizeUntrustedConfig(cfg, "/ws/.coi/config.toml")
 
@@ -116,6 +201,26 @@ func TestSanitizeUntrustedConfig_DropsGitIdentity(t *testing.T) {
 	}
 	if cfg.Git.SeedHostIdentity != nil {
 		t.Error("git.seed_host_identity should be dropped from untrusted config")
+	}
+	if cfg.Git.Readonly != nil {
+		t.Error("git.readonly should be dropped from untrusted config (identity behavior is trusted-scope)")
+	}
+}
+
+func TestGitConfig_IsReadonlyEnabled(t *testing.T) {
+	on, off := true, false
+	if (&GitConfig{}).IsReadonlyEnabled() {
+		t.Error("default (nil) must be false")
+	}
+	if (&GitConfig{Readonly: &off}).IsReadonlyEnabled() {
+		t.Error("explicit false must be false")
+	}
+	if !(&GitConfig{Readonly: &on}).IsReadonlyEnabled() {
+		t.Error("explicit true must be true")
+	}
+	var nilCfg *GitConfig
+	if nilCfg.IsReadonlyEnabled() {
+		t.Error("nil receiver must be false")
 	}
 }
 

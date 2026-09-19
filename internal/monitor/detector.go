@@ -2,6 +2,7 @@ package monitor
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -42,6 +43,22 @@ func (d *Detector) WithProcessSpawnRateThreshold(threshold int) *Detector {
 }
 
 // Analyze examines a snapshot and returns detected threats
+// newThreatEvent builds a ThreatEvent with the fields every detection shares —
+// a fresh UUID, the snapshot timestamp, and the "pending" (not-yet-actioned)
+// state — so each detection block only supplies what differs.
+func newThreatEvent(ts time.Time, level ThreatLevel, category, title, description string, ev Evidence) ThreatEvent {
+	return ThreatEvent{
+		ID:          uuid.New().String(),
+		Timestamp:   ts,
+		Level:       level,
+		Category:    category,
+		Title:       title,
+		Description: description,
+		Evidence:    ev,
+		Action:      "pending",
+	}
+}
+
 func (d *Detector) Analyze(snapshot MonitorSnapshot) []ThreatEvent {
 	var threats []ThreatEvent
 
@@ -49,17 +66,8 @@ func (d *Detector) Analyze(snapshot MonitorSnapshot) []ThreatEvent {
 	if snapshot.Processes.Available {
 		reverseShells := DetectReverseShells(snapshot.Processes.Processes)
 		for _, rs := range reverseShells {
-			threats = append(threats, ThreatEvent{
-				ID:        uuid.New().String(),
-				Timestamp: snapshot.Timestamp,
-				Level:     ThreatLevelCritical,
-				Category:  "process",
-				Title:     "Reverse shell detected",
-				Description: fmt.Sprintf("Process '%s' (PID %d) matches reverse shell pattern '%s'",
-					rs.Command, rs.PID, rs.Pattern),
-				Evidence: Evidence{Process: &rs},
-				Action:   "pending",
-			})
+			threats = append(threats, newThreatEvent(snapshot.Timestamp, ThreatLevelCritical, "process", "Reverse shell detected", fmt.Sprintf("Process '%s' (PID %d) matches reverse shell pattern '%s'",
+				rs.Command, rs.PID, rs.Pattern), Evidence{Process: &rs}))
 		}
 	}
 
@@ -67,17 +75,8 @@ func (d *Detector) Analyze(snapshot MonitorSnapshot) []ThreatEvent {
 	if snapshot.Processes.Available {
 		envScans := DetectEnvScanning(snapshot.Processes.Processes)
 		for _, es := range envScans {
-			threats = append(threats, ThreatEvent{
-				ID:        uuid.New().String(),
-				Timestamp: snapshot.Timestamp,
-				Level:     ThreatLevelWarning,
-				Category:  "environment",
-				Title:     "Environment variable scanning detected",
-				Description: fmt.Sprintf("Process '%s' (PID %d) is accessing environment variables",
-					es.Command, es.PID),
-				Evidence: Evidence{Process: &es},
-				Action:   "pending",
-			})
+			threats = append(threats, newThreatEvent(snapshot.Timestamp, ThreatLevelWarning, "environment", "Environment variable scanning detected", fmt.Sprintf("Process '%s' (PID %d) is accessing environment variables",
+				es.Command, es.PID), Evidence{Process: &es}))
 		}
 	}
 
@@ -97,86 +96,41 @@ func (d *Detector) Analyze(snapshot MonitorSnapshot) []ThreatEvent {
 			level = ThreatLevelCritical
 		}
 
-		threats = append(threats, ThreatEvent{
-			ID:        uuid.New().String(),
-			Timestamp: snapshot.Timestamp,
-			Level:     level,
-			Category:  "network",
-			Title:     "Unexpected network connection",
-			Description: fmt.Sprintf("Connection to %s: %s",
-				conn.RemoteAddr, conn.SuspectReason),
-			Evidence: Evidence{Network: &NetworkThreat{
-				Connection: conn,
-				Reason:     conn.SuspectReason,
-				RemoteHost: extractIP(conn.RemoteAddr),
-			}},
-			Action: "pending",
-		})
+		threats = append(threats, newThreatEvent(snapshot.Timestamp, level, "network", "Unexpected network connection", fmt.Sprintf("Connection to %s: %s",
+			conn.RemoteAddr, conn.SuspectReason), Evidence{Network: &NetworkThreat{
+			Connection: conn,
+			Reason:     conn.SuspectReason,
+			RemoteHost: extractIP(conn.RemoteAddr),
+		}}))
 	}
 
 	// 4. Detect large workspace reads (possible data exfiltration)
 	if snapshot.Filesystem.Available {
 		fsExfil := DetectLargeReads(snapshot.Filesystem, d.fileReadThresholdMB, d.fileReadRateMBPerSec)
 		if fsExfil != nil {
-			threats = append(threats, ThreatEvent{
-				ID:        uuid.New().String(),
-				Timestamp: snapshot.Timestamp,
-				Level:     ThreatLevelHigh,
-				Category:  "filesystem",
-				Title:     "Large workspace read detected",
-				Description: fmt.Sprintf("Read %.2f MB at %.2f MB/sec (threshold: %.2f MB)",
-					fsExfil.ReadBytesMB, fsExfil.ReadRate, fsExfil.Threshold),
-				Evidence: Evidence{Filesystem: fsExfil},
-				Action:   "pending",
-			})
+			threats = append(threats, newThreatEvent(snapshot.Timestamp, ThreatLevelHigh, "filesystem", "Large workspace read detected", fmt.Sprintf("Read %.2f MB at %.2f MB/sec (threshold: %.2f MB)",
+				fsExfil.ReadBytesMB, fsExfil.ReadRate, fsExfil.Threshold), Evidence{Filesystem: fsExfil}))
 		}
 
 		// 4b. Detect large workspace writes (possible data exfiltration via tar, dd, etc.)
 		fsWriteExfil := DetectLargeWrites(snapshot.Filesystem, d.fileWriteThresholdMB, d.fileWriteRateMBPerSec)
 		if fsWriteExfil != nil {
-			threats = append(threats, ThreatEvent{
-				ID:        uuid.New().String(),
-				Timestamp: snapshot.Timestamp,
-				Level:     ThreatLevelHigh,
-				Category:  "filesystem",
-				Title:     "Large workspace write detected",
-				Description: fmt.Sprintf("Write %.2f MB at %.2f MB/sec (threshold: %.2f MB)",
-					fsWriteExfil.WriteBytesMB, fsWriteExfil.WriteRate, fsWriteExfil.Threshold),
-				Evidence: Evidence{FileWrite: fsWriteExfil},
-				Action:   "pending",
-			})
+			threats = append(threats, newThreatEvent(snapshot.Timestamp, ThreatLevelHigh, "filesystem", "Large workspace write detected", fmt.Sprintf("Write %.2f MB at %.2f MB/sec (threshold: %.2f MB)",
+				fsWriteExfil.WriteBytesMB, fsWriteExfil.WriteRate, fsWriteExfil.Threshold), Evidence{FileWrite: fsWriteExfil}))
 		}
 	}
 
 	// 5. Detect process count spike (fork bomb / runaway spawner)
 	if snapshot.Processes.Available {
 		if spike := DetectProcessCountSpike(snapshot.Processes, d.processCountThreshold); spike != nil {
-			threats = append(threats, ThreatEvent{
-				ID:        uuid.New().String(),
-				Timestamp: snapshot.Timestamp,
-				Level:     ThreatLevelCritical,
-				Category:  "process",
-				Title:     "Process count spike detected",
-				Description: fmt.Sprintf("Container has %d processes (threshold: %d) — possible fork bomb or runaway spawner",
-					spike.Count, spike.Threshold),
-				Evidence: Evidence{ProcessCount: spike},
-				Action:   "pending",
-			})
+			threats = append(threats, newThreatEvent(snapshot.Timestamp, ThreatLevelCritical, "process", "Process count spike detected", fmt.Sprintf("Container has %d processes (threshold: %d) — possible fork bomb or runaway spawner",
+				spike.Count, spike.Threshold), Evidence{ProcessCount: spike}))
 		}
 
 		// 5b. Detect process spawn rate (delta-based fork-bomb detection)
 		if rate := DetectProcessSpawnRate(snapshot.Processes.TotalCount, d.previousProcessCount, d.processSpawnRateThreshold); rate != nil {
-			threats = append(threats, ThreatEvent{
-				ID:        uuid.New().String(),
-				Timestamp: snapshot.Timestamp,
-				Level:     ThreatLevelCritical,
-				Category:  "process",
-				Title:     "Process spawn rate spike detected",
-				Description: fmt.Sprintf("Container spawned %d new processes in one poll interval (threshold: %d)",
-					rate.Delta, rate.Threshold),
-				Evidence: Evidence{ProcessCount: rate},
-				Action:   "pending",
-			})
+			threats = append(threats, newThreatEvent(snapshot.Timestamp, ThreatLevelCritical, "process", "Process spawn rate spike detected", fmt.Sprintf("Container spawned %d new processes in one poll interval (threshold: %d)",
+				rate.Delta, rate.Threshold), Evidence{ProcessCount: rate}))
 		}
 		d.previousProcessCount = snapshot.Processes.TotalCount
 	} else {
@@ -189,23 +143,14 @@ func (d *Detector) Analyze(snapshot MonitorSnapshot) []ThreatEvent {
 	if snapshot.Filesystem.Available && snapshot.Filesystem.TmpTotalMB > 0 {
 		// Warn if /tmp is >80% full
 		if snapshot.Filesystem.TmpUsedPercent > 80 {
-			threats = append(threats, ThreatEvent{
-				ID:        uuid.New().String(),
-				Timestamp: snapshot.Timestamp,
-				Level:     ThreatLevelWarning,
-				Category:  "filesystem",
-				Title:     "Low disk space on /tmp",
-				Description: fmt.Sprintf("/tmp is %.1f%% full (%.0fMB used of %.0fMB total). Consider increasing tmpfs_size in config.",
-					snapshot.Filesystem.TmpUsedPercent,
-					snapshot.Filesystem.TmpUsedMB,
-					snapshot.Filesystem.TmpTotalMB),
-				Evidence: Evidence{DiskSpace: &DiskSpaceInfo{
-					TmpUsedMB:      snapshot.Filesystem.TmpUsedMB,
-					TmpTotalMB:     snapshot.Filesystem.TmpTotalMB,
-					TmpUsedPercent: snapshot.Filesystem.TmpUsedPercent,
-				}},
-				Action: "pending",
-			})
+			threats = append(threats, newThreatEvent(snapshot.Timestamp, ThreatLevelWarning, "filesystem", "Low disk space on /tmp", fmt.Sprintf("/tmp is %.1f%% full (%.0fMB used of %.0fMB total). Consider increasing tmpfs_size in config.",
+				snapshot.Filesystem.TmpUsedPercent,
+				snapshot.Filesystem.TmpUsedMB,
+				snapshot.Filesystem.TmpTotalMB), Evidence{DiskSpace: &DiskSpaceInfo{
+				TmpUsedMB:      snapshot.Filesystem.TmpUsedMB,
+				TmpTotalMB:     snapshot.Filesystem.TmpTotalMB,
+				TmpUsedPercent: snapshot.Filesystem.TmpUsedPercent,
+			}}))
 		}
 	}
 

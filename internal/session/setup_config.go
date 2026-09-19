@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/tool"
@@ -149,6 +150,41 @@ func injectCredentials(mgr container.ContainerManager, hostCLIConfigPath, homeDi
 
 	logger("Credentials and config injected successfully")
 	return nil
+}
+
+// containerCommandRunner is the narrow slice of the container manager that
+// toolConfigSeeded needs, so the probe can be unit-tested with a tiny fake.
+type containerCommandRunner interface {
+	ExecCommand(command string, opts container.ExecCommandOptions) (string, error)
+}
+
+// toolConfigSeeded reports whether this tool's config has already been seeded in
+// the container, by probing for any of the tool's ESSENTIAL config files. On
+// persistent reuse this decides whether a re-entering tool needs seeding: a
+// profile that shares [container] session_name but sets a different [tool] name
+// lands in the existing container, where the new tool hasn't been seeded yet
+// (#708 follow-up).
+//
+// It keys off the tool's own config files, not the dir's existence or content:
+// the base image pre-creates the config dirs (empty for claude/codex) and a
+// third-party agent installer can leave unrelated files in another tool's dir
+// (pi/omp), so neither `test -d` nor "dir non-empty" is a reliable signal — but
+// an essential config file only appears once the tool has actually been
+// configured. The check is a single `test -f a || test -f b || …`, succeeding
+// (err == nil) if any essential file exists. Paths are coi-controlled (home +
+// config dir + fixed filenames), so no shell-quoting is needed.
+func toolConfigSeeded(mgr containerCommandRunner, homeDir string, tcf tool.ToolWithConfigDirFiles) bool {
+	dir := filepath.Join(homeDir, tcf.ConfigDirName())
+	files := tcf.EssentialConfigFiles()
+	if len(files) == 0 {
+		return false // nothing identifies a seeded config; treat as unseeded
+	}
+	tests := make([]string, 0, len(files))
+	for _, f := range files {
+		tests = append(tests, "test -f "+filepath.Join(dir, f))
+	}
+	_, err := mgr.ExecCommand(strings.Join(tests, " || "), container.ExecCommandOptions{Capture: true})
+	return err == nil
 }
 
 // setupCLIConfig copies tool config directory and injects sandbox settings

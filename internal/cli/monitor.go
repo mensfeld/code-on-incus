@@ -54,14 +54,17 @@ Examples:
 }
 
 func (a *App) monitorCommand(cmd *cobra.Command, args []string) error {
+	// Resolve the same session identity the launch used (profile-carried
+	// session_name), error-tolerantly per #607.
+	a.applyDefaultProfileForOps(cmd)
 	// Reconcile --json flag with --format flag (backward compatibility)
 	if monitorJSON {
 		monitorFormat = "json"
 	}
 
 	// Validate format value
-	if monitorFormat != "text" && monitorFormat != "json" {
-		return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid format '%s': must be 'text' or 'json'", monitorFormat)}
+	if err := validateTextOrJSON(monitorFormat); err != nil {
+		return err
 	}
 
 	// Watch mode doesn't support JSON output
@@ -164,7 +167,7 @@ func (a *App) resolveMonitorContainer(args []string) (string, error) {
 		return "", fmt.Errorf("failed to resolve workspace path: %w", err)
 	}
 
-	sessions, err := session.ListWorkspaceSessions(absWorkspace)
+	sessions, err := session.ListWorkspaceSessions(absWorkspace, a.sessionName())
 	if err != nil {
 		return "", fmt.Errorf("failed to list workspace sessions: %w", err)
 	}

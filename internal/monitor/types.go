@@ -236,6 +236,7 @@ type DaemonConfig struct {
 	// Response configuration
 	AutoPauseOnHigh    bool
 	AutoKillOnCritical bool
+	ForensicsOnKill    bool // preserve a forensic copy of the container before an auto-kill deletes it
 
 	// Callbacks
 	OnThreat func(ThreatEvent)

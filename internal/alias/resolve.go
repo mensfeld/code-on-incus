@@ -149,7 +149,7 @@ func FindContainersByAlias(alias string) ([]string, error) {
 		status, _ := c["status"].(string)
 
 		// Only consider running containers
-		if status != "Running" {
+		if !container.StatusIsRunning(status) {
 			continue
 		}
 

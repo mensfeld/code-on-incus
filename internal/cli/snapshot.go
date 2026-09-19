@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mensfeld/code-on-incus/internal/alias"
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/session"
 	"github.com/spf13/cobra"
@@ -137,6 +136,7 @@ func init() {
 	// Add flags to list command
 	snapshotListCmd.Flags().StringVarP(&snapshotContainer, "container", "c", "", "Container name (default: auto-detect from workspace)")
 	snapshotListCmd.Flags().StringVar(&snapshotFormat, "format", "text", "Output format: text or json")
+	snapshotListCmd.Flags().Bool("json", false, "Alias for --format json")
 	snapshotListCmd.Flags().BoolVarP(&snapshotAll, "all", "a", false, "List snapshots for all COI containers")
 
 	// Add flags to restore command
@@ -152,6 +152,7 @@ func init() {
 	// Add flags to info command
 	snapshotInfoCmd.Flags().StringVarP(&snapshotContainer, "container", "c", "", "Container name (default: auto-detect from workspace)")
 	snapshotInfoCmd.Flags().StringVar(&snapshotFormat, "format", "text", "Output format: text or json")
+	snapshotInfoCmd.Flags().Bool("json", false, "Alias for --format json")
 
 	// Add subcommands to snapshot command
 	snapshotCmd.AddCommand(snapshotCreateCmd)
@@ -168,10 +169,8 @@ func init() {
 func resolveContainer() (string, error) {
 	// 1. Use --container flag if provided (with alias resolution)
 	if snapshotContainer != "" {
-		name := snapshotContainer
-		if resolved, err := alias.ResolveAliasForRunning(name); err == nil {
-			name = resolved
-		} else if !alias.IsContainerName(name) {
+		name, err := resolveNameOrAlias(snapshotContainer)
+		if err != nil {
 			return "", err
 		}
 		// Verify container exists
@@ -205,7 +204,7 @@ func resolveContainer() (string, error) {
 		return "", fmt.Errorf("failed to resolve workspace path: %w", err)
 	}
 
-	sessions, err := session.ListWorkspaceSessions(absWorkspace)
+	sessions, err := session.ListWorkspaceSessions(absWorkspace, app.sessionName())
 	if err != nil {
 		return "", fmt.Errorf("failed to list workspace sessions: %w", err)
 	}
@@ -249,6 +248,7 @@ func confirmAction(prompt string) bool {
 }
 
 func snapshotCreateCommand(cmd *cobra.Command, args []string) error {
+	app.applyDefaultProfileForOps(cmd) // profile-carried session_name (#607-tolerant)
 	containerName, err := resolveContainer()
 	if err != nil {
 		return fmt.Errorf("%w", err)
@@ -288,9 +288,11 @@ func snapshotCreateCommand(cmd *cobra.Command, args []string) error {
 }
 
 func snapshotListCommand(cmd *cobra.Command, args []string) error {
+	app.applyDefaultProfileForOps(cmd) // profile-carried session_name (#607-tolerant)
 	// Validate format
-	if snapshotFormat != "text" && snapshotFormat != "json" {
-		return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid format '%s': must be 'text' or 'json'", snapshotFormat)}
+	applyJSONFormatAlias(cmd, &snapshotFormat)
+	if err := validateTextOrJSON(snapshotFormat); err != nil {
+		return err
 	}
 
 	if snapshotAll {
@@ -422,6 +424,7 @@ func outputSnapshotText(containerName string, snapshots []container.SnapshotInfo
 }
 
 func snapshotRestoreCommand(cmd *cobra.Command, args []string) error {
+	app.applyDefaultProfileForOps(cmd) // profile-carried session_name (#607-tolerant)
 	containerName, err := resolveContainer()
 	if err != nil {
 		return fmt.Errorf("%w", err)
@@ -468,6 +471,7 @@ func snapshotRestoreCommand(cmd *cobra.Command, args []string) error {
 }
 
 func snapshotDeleteCommand(cmd *cobra.Command, args []string) error {
+	app.applyDefaultProfileForOps(cmd) // profile-carried session_name (#607-tolerant)
 	containerName, err := resolveContainer()
 	if err != nil {
 		return fmt.Errorf("%w", err)
@@ -538,9 +542,11 @@ func snapshotDeleteCommand(cmd *cobra.Command, args []string) error {
 }
 
 func snapshotInfoCommand(cmd *cobra.Command, args []string) error {
+	app.applyDefaultProfileForOps(cmd) // profile-carried session_name (#607-tolerant)
 	// Validate format
-	if snapshotFormat != "text" && snapshotFormat != "json" {
-		return &ExitCodeError{Code: 2, Message: fmt.Sprintf("invalid format '%s': must be 'text' or 'json'", snapshotFormat)}
+	applyJSONFormatAlias(cmd, &snapshotFormat)
+	if err := validateTextOrJSON(snapshotFormat); err != nil {
+		return err
 	}
 
 	containerName, err := resolveContainer()

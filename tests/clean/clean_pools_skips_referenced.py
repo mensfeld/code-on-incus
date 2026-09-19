@@ -2,35 +2,27 @@
 Test that `coi clean --pools` never flags pools referenced by a loaded profile.
 """
 
+import os
 import subprocess
 from pathlib import Path
 
 import pytest
 
-
-def _create_temp_pool(name):
-    result = subprocess.run(
-        ["incus", "storage", "create", name, "dir"],
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    return result.returncode == 0
-
-
-def _delete_temp_pool(name):
-    subprocess.run(
-        ["incus", "storage", "delete", name],
-        capture_output=True,
-        timeout=30,
-    )
+from support.helpers import (
+    create_storage_pool,
+    delete_storage_pool,
+    is_incus_permission_error,
+)
 
 
 def test_clean_pools_skips_referenced(coi_binary, workspace_dir):
     """A pool referenced by a profile is never flagged for cleanup."""
-    pool_name = "coi-test-skipref"
-    if not _create_temp_pool(pool_name):
-        pytest.skip("Cannot create temp storage pool")
+    pool_name = f"coi-test-skipref-{os.urandom(4).hex()}"
+    ok, err = create_storage_pool(pool_name)
+    if not ok:
+        if is_incus_permission_error(err):
+            pytest.skip(f"No permission to create storage pool {pool_name}: {err}")
+        pytest.fail(f"Failed to create temp pool {pool_name}: {err}")
 
     try:
         # Create a profile that references the temp pool.
@@ -63,4 +55,4 @@ def test_clean_pools_skips_referenced(coi_binary, workspace_dir):
             f"Referenced pool should not be flagged for deletion. Got:\n{combined}"
         )
     finally:
-        _delete_temp_pool(pool_name)
+        delete_storage_pool(pool_name)

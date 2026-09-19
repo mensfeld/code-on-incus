@@ -147,6 +147,20 @@ func ImportImage(lxdTar, squashfs, alias string) error {
 }
 
 // IncusOutputContext executes an Incus command with context support and returns the output (trimmed)
+// toExitError wraps a failed incus command's error as *ExitError when it is an
+// *exec.ExitError (capturing the exit code and the given stderr), and returns
+// the original error unchanged otherwise. Pass "" for stderr when none was
+// captured separately (e.g. combined stdout+stderr, or streamed output).
+func toExitError(err error, stderr string) error {
+	if err == nil {
+		return nil
+	}
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		return &ExitError{ExitCode: exitErr.ExitCode(), Err: err, Stderr: stderr}
+	}
+	return err
+}
+
 func IncusOutputContext(ctx context.Context, args ...string) (string, error) {
 	cmdArgs := buildIncusCommand(args...)
 	cmd := execIncusCommandContext(ctx, cmdArgs)
@@ -159,14 +173,7 @@ func IncusOutputContext(ctx context.Context, args ...string) (string, error) {
 	output := strings.TrimSpace(stdout.String())
 
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return output, &ExitError{
-				ExitCode: exitErr.ExitCode(),
-				Err:      err,
-				Stderr:   strings.TrimSpace(stderr.String()),
-			}
-		}
-		return output, err
+		return output, toExitError(err, strings.TrimSpace(stderr.String()))
 	}
 
 	return output, nil
@@ -190,14 +197,7 @@ func IncusOutputRawContext(ctx context.Context, args ...string) (string, error) 
 	output := stdout.String()
 
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return output, &ExitError{
-				ExitCode: exitErr.ExitCode(),
-				Err:      err,
-				Stderr:   strings.TrimSpace(stderr.String()),
-			}
-		}
-		return output, err
+		return output, toExitError(err, strings.TrimSpace(stderr.String()))
 	}
 
 	return output, nil
@@ -221,13 +221,7 @@ func IncusOutputWithStderrContext(ctx context.Context, args ...string) (string, 
 	output := strings.TrimSpace(combined.String())
 
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return output, &ExitError{
-				ExitCode: exitErr.ExitCode(),
-				Err:      err,
-			}
-		}
-		return output, err
+		return output, toExitError(err, "")
 	}
 
 	return output, nil
@@ -252,14 +246,7 @@ func IncusOutputWithArgsContext(ctx context.Context, args ...string) (string, er
 	output := strings.TrimSpace(stdout.String())
 
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return output, &ExitError{
-				ExitCode: exitErr.ExitCode(),
-				Err:      err,
-				Stderr:   strings.TrimSpace(stderr.String()),
-			}
-		}
-		return output, err
+		return output, toExitError(err, strings.TrimSpace(stderr.String()))
 	}
 
 	return output, nil
@@ -316,10 +303,7 @@ func IncusExecStreamedContext(ctx context.Context, args ...string) error {
 
 	err := runIncus(cmd)
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return &ExitError{ExitCode: exitErr.ExitCode(), Err: err}
-		}
-		return err
+		return toExitError(err, "")
 	}
 	return nil
 }
@@ -356,24 +340,131 @@ func IncusFilePushWithOwner(source, destination string, uid, gid int, mode strin
 	return IncusFilePushWithOwnerContext(context.Background(), source, destination, uid, gid, mode)
 }
 
-// StartWithIsolationFallback starts a non-ephemeral container that may have
-// security.idmap.isolated set, with automatic fallback if the host doesn't
-// support it. Intended for non-ephemeral containers (setup.go path, run's
-// persistent reuse) — stopped containers are not deleted, so unset+retry works.
+// startCapture runs `incus start`, capturing stderr into the returned error so
+// the start fallbacks can inspect WHY start failed — in particular the idmapped
+// ("shift") mount failure some guest kernels raise (#678). Plain IncusExec sends
+// stderr straight to the terminal and returns a bare exit error, which can't be
+// matched on. `incus start` prints nothing useful on success, so nothing is lost.
+func startCapture(containerName string) error {
+	return IncusExecQuietContext(context.Background(), "start", containerName)
+}
+
+// isIdmapMountUnsupported reports whether err is the failure Incus raises when a
+// shift=true (idmapped) disk device can't be materialized because the guest
+// kernel lacks idmapped-mount support. Observed on some OrbStack kernels (#678):
+// "Failed to setup device mount \"workspace\": idmapping abilities are required
+// but aren't supported on system".
+func isIdmapMountUnsupported(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "idmapping abilities are required")
+}
+
+// shiftEnabledDiskDevices returns the names of the container's disk devices that
+// have shift=true set — the ones that would fail on a host without idmapped-mount
+// support and need converting to a raw.idmap workspace mapping instead.
+func shiftEnabledDiskDevices(containerName string) []string {
+	out, err := IncusOutput("config", "device", "list", containerName)
+	if err != nil {
+		return nil
+	}
+	var shifted []string
+	for _, name := range strings.Fields(out) {
+		if typ, _ := IncusOutput("config", "device", "get", containerName, name, "type"); strings.TrimSpace(typ) != "disk" {
+			continue
+		}
+		if sh, _ := IncusOutput("config", "device", "get", containerName, name, "shift"); strings.TrimSpace(sh) == "true" {
+			shifted = append(shifted, name)
+		}
+	}
+	return shifted
+}
+
+// ConvertShiftedDiskDevices sets shift=false on every shift=true disk device
+// of the (stopped) container, reporting how many conversions succeeded and how
+// many failed — a failed one leaves raw.idmap combined with a shift=true
+// device, which fails the start with an error none of the fallbacks match, so
+// callers must not report failure as success. Callers pair it with raw.idmap:
+// reactively via fallbackShiftToRawIdmap after a #678 start failure, or
+// proactively on reuse when the mapping decision has changed to raw.idmap
+// since the container was created (#683 — OrbStack ≥2.2.2 never produces the
+// start failure the reactive path keys on, so creation-time shift=true devices
+// must be converted before start).
+func ConvertShiftedDiskDevices(containerName string) (converted, failed int) {
+	for _, d := range shiftEnabledDiskDevices(containerName) {
+		if err := IncusExecQuiet("config", "device", "set", containerName, d, "shift=false"); err != nil {
+			failed++
+			continue
+		}
+		converted++
+	}
+	return converted, failed
+}
+
+// fallbackShiftToRawIdmap converts every shift=true disk device on the (stopped)
+// container to shift=false and sets raw.idmap="both <hostUID> <codeUID>" — the
+// exact mapping decideUIDMapping applies for a manual `disable_shift`. This is
+// the reactive recovery for a host whose kernel can't do idmapped mounts (#678):
+// try shift, and only if start fails on it, drop to raw.idmap. Returns true if it
+// changed anything, so the caller knows a retry is worthwhile.
+func fallbackShiftToRawIdmap(containerName string) bool {
+	converted, failed := ConvertShiftedDiskDevices(containerName)
+	if converted+failed == 0 {
+		return false
+	}
+	_ = IncusExecQuiet("config", "set", containerName, "raw.idmap", fmt.Sprintf("both %d %d", os.Getuid(), CodeUID))
+	return true
+}
+
+// withDisableShiftHint wraps err with actionable guidance for the case where a
+// host can't do idmapped mounts and coi's automatic raw.idmap fallback did not
+// recover (#678). Callers apply it only when the failure is the idmapping error.
+func withDisableShiftHint(err error) error {
+	return fmt.Errorf("%w -- this host's kernel can't set up idmapped (\"shift\") mounts and coi's "+
+		"automatic raw.idmap fallback did not recover; set `[incus] disable_shift = true` in "+
+		"~/.coi/config.toml (or your active profile) to use raw.idmap for the workspace mount instead", err)
+}
+
+// startRetryError decides what error a start-retry branch returns. A successful
+// retry (nil) returns nil. When the retry also fails, a #678 idmapped-mount
+// failure — identified from the ORIGINAL start error — gets the disable_shift
+// hint; any other failure is returned unchanged. Shared by the ephemeral
+// recreate-after-deletion and the unset-isolation branches so their hint
+// routing can't drift (#716). Kept pure so the decision is unit-tested without
+// the live-Incus retry paths.
+func startRetryError(firstErr, retryErr error) error {
+	if retryErr == nil {
+		return nil
+	}
+	if isIdmapMountUnsupported(firstErr) {
+		return withDisableShiftHint(retryErr)
+	}
+	return retryErr
+}
+
+// ContainerUsesRawIdmap reports whether the container already has raw.idmap set,
+// i.e. its workspace UID mapping is on the non-shift path — either because the
+// config asked for it (disable_shift, a host/code UID mismatch) or because
+// fallbackShiftToRawIdmap healed it after a #678 start failure. The reuse path
+// checks this so a session doesn't re-arm shift=true on a container that has
+// already been established as unable to use it (#685).
+func ContainerUsesRawIdmap(containerName string) bool {
+	out, err := IncusOutput("config", "get", containerName, "raw.idmap")
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(out) != ""
+}
+
+// startWithIdmapRecovery is the start sequence shared by every non-ephemeral
+// start path: start, poll, retry, and on a #678 idmapped-mount failure convert
+// the shift mounts to raw.idmap and retry again. Returns nil once the container
+// is running; otherwise the ORIGINAL start error, which is the useful diagnostic
+// and what callers match on to decide whether a further fallback applies.
 //
 // On some hosts (nested containers, CI runners), forkstart exits non-zero even
-// though the LXC process started successfully. We poll ContainerRunning for up
-// to 5 s before deciding the container failed to start.
-//
-// The fallback is careful not to downgrade a container it didn't help:
-//   - a second attempt runs with isolation INTACT first, so transient failures
-//     (incusd blip, slow storage) recover without touching the security posture;
-//   - the prior isolated state is captured, and restored if the post-unset
-//     retry fails too — an unrelated permanent failure (corrupt rootfs, missing
-//     mount source) must not leave a persistent container silently un-isolated
-//     for every future session.
-func StartWithIsolationFallback(containerName string) error {
-	firstErr := IncusExec("start", containerName)
+// though the LXC process started successfully, so ContainerRunning is polled for
+// up to 5 s before deciding the container failed to start.
+func startWithIdmapRecovery(containerName string) error {
+	firstErr := startCapture(containerName)
 	if firstErr == nil {
 		return nil
 	}
@@ -385,13 +476,71 @@ func StartWithIsolationFallback(containerName string) error {
 			return nil
 		}
 	}
-	// Retry once with isolation intact: transient failures recover here.
-	if retryErr := IncusExec("start", containerName); retryErr == nil {
+	// Retry once unchanged: transient failures (incusd blip, slow storage)
+	// recover here, before anything touches the container's configuration.
+	if retryErr := startCapture(containerName); retryErr == nil {
 		return nil
 	}
 	if running, _ := ContainerRunning(containerName); running {
 		return nil
 	}
+
+	// #678: a shift=true (idmapped) workspace mount the guest kernel can't do —
+	// observed on some OrbStack kernels — fails the START. Convert the shift
+	// mounts to raw.idmap (the same mapping a manual disable_shift produces) on
+	// the stopped container and retry.
+	if isIdmapMountUnsupported(firstErr) && fallbackShiftToRawIdmap(containerName) {
+		fmt.Fprintf(os.Stderr, "Warning: this host can't do idmapped (shift) mounts; using raw.idmap for the workspace and retrying\n")
+		if retryErr := startCapture(containerName); retryErr == nil {
+			return nil
+		}
+		if running, _ := ContainerRunning(containerName); running {
+			return nil
+		}
+	}
+	return firstErr
+}
+
+// StartWithIdmapFallback starts a container with only the #678 shift→raw.idmap
+// recovery, for callers whose container never had security.idmap.isolated set:
+// the non-isolated fresh-launch branch and `coi container start`. Those callers
+// must not go through StartWithIsolationFallback, which would print a misleading
+// "UID namespace isolation not available" warning — and unset a key that was
+// never set — for any unrelated permanent failure.
+func StartWithIdmapFallback(containerName string) error {
+	firstErr := startWithIdmapRecovery(containerName)
+	if firstErr == nil {
+		return nil
+	}
+	// The raw.idmap conversion didn't recover: point at the escape hatch rather
+	// than leave the user with the raw Incus error (#678).
+	if isIdmapMountUnsupported(firstErr) {
+		return withDisableShiftHint(firstErr)
+	}
+	return firstErr
+}
+
+// StartWithIsolationFallback starts a non-ephemeral container that may have
+// security.idmap.isolated set, with automatic fallback if the host doesn't
+// support it. Intended for non-ephemeral containers (setup.go path, run's
+// persistent reuse) — stopped containers are not deleted, so unset+retry works.
+//
+// The idmapped-mount recovery in startWithIdmapRecovery runs first: that failure
+// is a different code path, and unsetting isolation would not fix it.
+//
+// The isolation fallback is careful not to downgrade a container it didn't help:
+//   - startWithIdmapRecovery's second attempt runs with isolation INTACT, so
+//     transient failures recover without touching the security posture;
+//   - the prior isolated state is captured, and restored if the post-unset
+//     retry fails too — an unrelated permanent failure (corrupt rootfs, missing
+//     mount source) must not leave a persistent container silently un-isolated
+//     for every future session.
+func StartWithIsolationFallback(containerName string) error {
+	firstErr := startWithIdmapRecovery(containerName)
+	if firstErr == nil {
+		return nil
+	}
+
 	// Persistent failure — isolation may genuinely be unsupported. Surface the
 	// original error so a non-isolation root cause isn't misattributed, capture
 	// the prior flag state, then unset and retry.
@@ -402,7 +551,7 @@ func StartWithIsolationFallback(containerName string) error {
 	}
 	fmt.Fprintf(os.Stderr, "Warning: UID namespace isolation not available in this environment, disabling and retrying\n")
 	_ = IncusExecQuiet("config", "unset", containerName, "security.idmap.isolated")
-	if retryErr := IncusExec("start", containerName); retryErr != nil {
+	if retryErr := startCapture(containerName); retryErr != nil {
 		if running, _ := ContainerRunning(containerName); running {
 			return nil
 		}
@@ -410,6 +559,12 @@ func StartWithIsolationFallback(containerName string) error {
 		// Restore the container's isolation so the failed run leaves no trace.
 		if wasIsolated {
 			_ = IncusExecQuiet("config", "set", containerName, "security.idmap.isolated=true")
+		}
+		// If the root cause was an unsupported idmapped mount that the raw.idmap
+		// fallback couldn't recover, point the user at the disable_shift escape
+		// hatch instead of the raw Incus error (#678).
+		if isIdmapMountUnsupported(firstErr) {
+			return withDisableShiftHint(retryErr)
 		}
 		return retryErr
 	}
@@ -436,12 +591,21 @@ func LaunchContainerPersistent(imageAlias, containerName, pool string) error {
 
 // LaunchContainerWithPreStart is LaunchContainer/LaunchContainerPersistent with
 // an optional preStart hook that runs AFTER `incus init` (+ config flags) but
-// BEFORE the container is started. This is where start-time-only instance
+// BEFORE the container is started. It applies the DEFAULT hardening policy;
+// callers that honor [container] docker / [security] reduce_kernel_surface use
+// LaunchContainerWithPreStartPolicy instead. A nil preStart is a no-op.
+func LaunchContainerWithPreStart(imageAlias, containerName, pool string, ephemeral bool, preStart func() error) error {
+	return LaunchContainerWithPreStartPolicy(imageAlias, containerName, pool, ephemeral, preStart, DefaultHardeningPolicy())
+}
+
+// LaunchContainerWithPreStartPolicy is LaunchContainerWithPreStart with an
+// explicit kernel-surface policy applied once at init (before first boot, as
+// the seccomp profile requires). This is where start-time-only instance
 // settings such as raw.idmap must be applied (issue #530): the run pipeline
 // needs the workspace UID mapping set before first boot, and `incus launch`
 // would start too early. A nil preStart is a no-op.
-func LaunchContainerWithPreStart(imageAlias, containerName, pool string, ephemeral bool, preStart func() error) error {
-	if err := initAndConfigureContainer(imageAlias, containerName, pool, ephemeral, preStart); err != nil {
+func LaunchContainerWithPreStartPolicy(imageAlias, containerName, pool string, ephemeral bool, preStart func() error, policy HardeningPolicy) error {
+	if err := initAndConfigureContainer(imageAlias, containerName, pool, ephemeral, preStart, policy); err != nil {
 		return err
 	}
 	// Non-fatal: unset and retry at start time if the environment lacks subuid space.
@@ -449,7 +613,8 @@ func LaunchContainerWithPreStart(imageAlias, containerName, pool string, ephemer
 	if !ephemeral {
 		return startWithIsolationFallback(containerName)
 	}
-	if err := IncusExec("start", containerName); err == nil {
+	firstErr := startCapture(containerName)
+	if firstErr == nil {
 		return nil
 	}
 	// Start failed. Poll briefly to distinguish a soft forkstart error (container
@@ -463,28 +628,60 @@ func LaunchContainerWithPreStart(imageAlias, containerName, pool string, ephemer
 		// Check for deletion: stopped ephemeral containers are deleted by Incus.
 		out, err := IncusOutput("list", "^"+containerName+"$", "--format=csv", "--columns=n")
 		if err == nil && strings.TrimSpace(out) == "" {
-			// Recreate without isolation and start fresh (preStart re-runs so the
-			// idmap is re-applied on the recreated container).
-			fmt.Fprintf(os.Stderr, "Warning: UID namespace isolation not supported in this environment\n")
-			return initConfigureAndStart(imageAlias, containerName, pool, true, preStart)
+			// Incus deleted the ephemeral container after the start failure.
+			// Recreate + start fresh (preStart re-runs so raw.idmap is re-applied);
+			// initConfigureAndStart does not set security.idmap.isolated, so the
+			// retry drops isolation. State that neutrally rather than asserting
+			// isolation was unsupported — the recreate *succeeding* is what would
+			// prove that, and an idmapped-mount failure (#678) is a different
+			// class entirely (#716).
+			fmt.Fprintf(os.Stderr, "Warning: container start failed; recreating without UID namespace isolation and retrying\n")
+			recreateErr := initConfigureAndStart(imageAlias, containerName, pool, true, preStart, policy)
+			// The recreate's start (a plain `incus start`) can soft-fail —
+			// forkstart exits non-zero though the container came up — on the same
+			// nested/CI hosts the initial start does; treat a running container as
+			// success before reporting failure, matching the other retry branches.
+			if recreateErr != nil {
+				if running, _ := ContainerRunning(containerName); running {
+					return nil
+				}
+			}
+			return startRetryError(firstErr, recreateErr)
 		}
 	}
-	// Container exists but didn't start; unset isolation and retry.
-	fmt.Fprintf(os.Stderr, "Warning: UID namespace isolation not supported in this environment, retrying\n")
-	_ = IncusExecQuiet("config", "unset", containerName, "security.idmap.isolated")
-	if retryErr := IncusExec("start", containerName); retryErr != nil {
+
+	// #678: an idmapped ("shift") workspace mount the guest kernel can't do fails
+	// the start and leaves the ephemeral container stopped (not deleted). Convert
+	// its shift mounts to raw.idmap and retry — the isolation unset below can't fix
+	// this, it's a different code path.
+	if isIdmapMountUnsupported(firstErr) && fallbackShiftToRawIdmap(containerName) {
+		fmt.Fprintf(os.Stderr, "Warning: this host can't do idmapped (shift) mounts; using raw.idmap for the workspace and retrying\n")
+		if retryErr := startCapture(containerName); retryErr == nil {
+			return nil
+		}
 		if running, _ := ContainerRunning(containerName); running {
 			return nil
 		}
-		return retryErr
+	}
+
+	// Container exists but didn't start; unset isolation and retry.
+	fmt.Fprintf(os.Stderr, "Warning: UID namespace isolation not supported in this environment, retrying\n")
+	_ = IncusExecQuiet("config", "unset", containerName, "security.idmap.isolated")
+	if retryErr := startCapture(containerName); retryErr != nil {
+		if running, _ := ContainerRunning(containerName); running {
+			return nil
+		}
+		return startRetryError(firstErr, retryErr)
 	}
 	return nil
 }
 
-// initAndConfigureContainer creates a container, applies the required config
-// flags, and runs the optional preStart hook (used for start-time-only settings
-// like raw.idmap) before the caller starts the container.
-func initAndConfigureContainer(imageAlias, containerName, pool string, ephemeral bool, preStart func() error) error {
+// initAndConfigureContainer creates a container, applies the kernel-surface
+// policy and other required config flags, and runs the optional preStart hook
+// (used for start-time-only settings like raw.idmap) before the caller starts
+// the container. The policy is applied once here, before first boot, so no
+// caller needs to patch it on afterward.
+func initAndConfigureContainer(imageAlias, containerName, pool string, ephemeral bool, preStart func() error, policy HardeningPolicy) error {
 	args := []string{"init", imageAlias, containerName}
 	if ephemeral {
 		args = append(args, "--ephemeral")
@@ -495,7 +692,15 @@ func initAndConfigureContainer(imageAlias, containerName, pool string, ephemeral
 	if err := IncusExec(args...); err != nil {
 		return err
 	}
-	if err := EnableDockerSupport(containerName); err != nil {
+	if err := ApplyKernelSurfacePolicy(containerName, policy); err != nil {
+		return err
+	}
+	// Fail closed BEFORE first boot when an attached Incus profile pins a key
+	// the policy needs unset (e.g. security.nesting=true from a Docker-in-Incus
+	// default profile): the instance-local unset above cannot override it, and
+	// booting anyway would silently defeat the requested hardening. Free for
+	// the default (docker-on) policy — no reads are performed.
+	if err := VerifyKernelSurfacePolicy(containerName, policy); err != nil {
 		return err
 	}
 	if err := DisableGuestAPI(containerName); err != nil {
@@ -512,54 +717,11 @@ func initAndConfigureContainer(imageAlias, containerName, pool string, ephemeral
 
 // initConfigureAndStart creates, configures, and starts a container without
 // security.idmap.isolated — used as the isolation-unsupported fallback path.
-func initConfigureAndStart(imageAlias, containerName, pool string, ephemeral bool, preStart func() error) error {
-	if err := initAndConfigureContainer(imageAlias, containerName, pool, ephemeral, preStart); err != nil {
+func initConfigureAndStart(imageAlias, containerName, pool string, ephemeral bool, preStart func() error, policy HardeningPolicy) error {
+	if err := initAndConfigureContainer(imageAlias, containerName, pool, ephemeral, preStart, policy); err != nil {
 		return err
 	}
 	return IncusExec("start", containerName)
-}
-
-// EnableDockerSupport configures the container to support Docker/nested containers.
-//
-// This function sets security flags and sysctl overrides required for Docker:
-//   - security.nesting=true: Enables nested containerization
-//   - security.syscalls.intercept.mknod=true: Safe device node creation
-//   - security.syscalls.intercept.setxattr=true: Safe filesystem attribute handling
-//   - linux.sysctl.net.ipv4.ip_unprivileged_port_start=0: Allows binding to low ports
-//     and prevents runc from failing with "permission denied" on sysctl writes (#187)
-//
-// These flags must be set before the container's first boot so the kernel loads
-// the correct seccomp profile. Setting them on a running container is a race
-// condition that can cause Docker Compose to fail with sysctl permission errors.
-//
-// Note: If an error occurs during configuration, the container may be left in a
-// partially configured state with some but not all flags set. Future troubleshooting
-// should verify all four settings are properly configured if Docker isn't working.
-func EnableDockerSupport(containerName string) error {
-	// Enable container nesting for Docker support
-	if err := IncusExec("config", "set", containerName, "security.nesting=true"); err != nil {
-		return err
-	}
-
-	// Enable syscall interception for mknod (device node creation)
-	if err := IncusExec("config", "set", containerName, "security.syscalls.intercept.mknod=true"); err != nil {
-		return err
-	}
-
-	// Enable syscall interception for setxattr (filesystem attributes)
-	if err := IncusExec("config", "set", containerName, "security.syscalls.intercept.setxattr=true"); err != nil {
-		return err
-	}
-
-	// Allow unprivileged port binding and prevent runc sysctl permission errors.
-	// Newer runc versions (1.3.x) try to write net.ipv4.ip_unprivileged_port_start
-	// via a detached procfs mount, which AppArmor blocks in nested containers.
-	// Pre-setting this sysctl at the Incus level avoids the permission denied error.
-	if err := IncusExec("config", "set", containerName, "linux.sysctl.net.ipv4.ip_unprivileged_port_start=0"); err != nil {
-		return err
-	}
-
-	return nil
 }
 
 // DisableGuestAPI prevents the Incus guest API (/dev/incus) from being
@@ -767,7 +929,7 @@ func ContainerRunning(containerName string) (bool, error) {
 	}
 
 	for _, c := range containers {
-		if c.Name == containerName && c.Status == "Running" {
+		if c.Name == containerName && StatusIsRunning(c.Status) {
 			return true, nil
 		}
 	}
@@ -909,6 +1071,18 @@ func shellQuote(s string) string {
 // ConfigSet sets a configuration key on a container.
 func ConfigSet(ctx context.Context, containerName, key, value string) error {
 	return IncusExecContext(ctx, "config", "set", containerName, key+"="+value)
+}
+
+// ConfigGet returns the value of a configuration key on a container (trimmed).
+// An unset key yields an empty string with no error, matching `incus config get`.
+func ConfigGet(ctx context.Context, containerName, key string) (string, error) {
+	out, err := IncusOutputContext(ctx, "config", "get", containerName, key)
+	return strings.TrimSpace(out), err
+}
+
+// ConfigUnset removes a configuration key from a container.
+func ConfigUnset(ctx context.Context, containerName, key string) error {
+	return IncusExecContext(ctx, "config", "unset", containerName, key)
 }
 
 // ConfigShow returns the container's YAML configuration.

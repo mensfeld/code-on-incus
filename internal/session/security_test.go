@@ -274,6 +274,7 @@ func TestDefaultProtectedPaths(t *testing.T) {
 	expected := []string{
 		".git/hooks", ".git/config", ".git/config.worktree", ".git/info/attributes",
 		".husky", ".vscode", ".coi", ".claude/settings.json", ".claude/settings.local.json",
+		".codex/config.toml",
 	}
 
 	if len(paths) != len(expected) {
@@ -635,6 +636,36 @@ func TestEnsureProtectedExists_ClaudeSettingsPlaceholderWhenDirExists(t *testing
 	info, err := os.Lstat(localPath)
 	if err != nil || !info.Mode().IsRegular() || info.Size() != 0 {
 		t.Errorf("expected empty regular placeholder, info=%v err=%v", info, err)
+	}
+}
+
+// .codex/config.toml gets the same planting protection as the Claude settings
+// files (#698): parent auto-created, empty read-only placeholder materialized —
+// a contained agent must not be able to plant project-scoped codex config that
+// a host codex session could auto-execute (notify commands, MCP launchers).
+func TestEnsureProtectedExists_CodexConfigCreatesParentAndPlaceholder(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "ensure-exists-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// .codex/ does NOT exist yet.
+	configPath := filepath.Join(tmpDir, ".codex", "config.toml")
+	if err := ensureProtectedExists(tmpDir, configPath, ".codex/config.toml"); err != nil {
+		t.Fatalf("ensureProtectedExists returned error: %v", err)
+	}
+
+	dirInfo, err := os.Lstat(filepath.Join(tmpDir, ".codex"))
+	if err != nil || !dirInfo.IsDir() {
+		t.Fatalf("expected .codex/ to be auto-created as a dir, info=%v err=%v", dirInfo, err)
+	}
+	info, err := os.Lstat(configPath)
+	if err != nil {
+		t.Fatalf("expected .codex/config.toml placeholder, got err: %v", err)
+	}
+	if !info.Mode().IsRegular() || info.Size() != 0 {
+		t.Errorf("expected empty regular placeholder, got mode=%v size=%d", info.Mode(), info.Size())
 	}
 }
 

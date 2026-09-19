@@ -52,6 +52,9 @@ func TestEmbeddedDefaultConfigValues(t *testing.T) {
 	if cfg.Tool.AutoContext == nil || !*cfg.Tool.AutoContext {
 		t.Error("Expected auto_context=true")
 	}
+	if cfg.Tool.ContextJSON == nil || !*cfg.Tool.ContextJSON {
+		t.Error("Expected context_json=true")
+	}
 	if cfg.Incus.Project != "default" {
 		t.Errorf("Expected incus project 'default', got %q", cfg.Incus.Project)
 	}
@@ -64,8 +67,8 @@ func TestEmbeddedDefaultConfigValues(t *testing.T) {
 	if cfg.SSH.ForwardAgent == nil || *cfg.SSH.ForwardAgent {
 		t.Error("Expected forward_agent=false")
 	}
-	if len(cfg.Security.ProtectedPaths) != 9 {
-		t.Errorf("Expected 9 protected paths, got %d", len(cfg.Security.ProtectedPaths))
+	if len(cfg.Security.ProtectedPaths) != 10 {
+		t.Errorf("Expected 10 protected paths, got %d", len(cfg.Security.ProtectedPaths))
 	}
 	if cfg.Timezone.Mode != "host" {
 		t.Errorf("Expected timezone mode 'host', got %q", cfg.Timezone.Mode)

@@ -127,15 +127,7 @@ func shutdownCommand(cmd *cobra.Command, args []string) error {
 		}
 
 		// Clean up nft rules BEFORE deleting container
-		if containerIP != "" {
-			if err := cleanupNftRulesForIP(containerIP); err != nil {
-				fmt.Fprintf(os.Stderr, "  Warning: Failed to cleanup nft rules: %v\n", err)
-			}
-			// Also clean up NFT monitoring rules for this IP
-			if err := cleanupNftMonitoringRulesForIP(containerIP); err != nil {
-				fmt.Fprintf(os.Stderr, "  Warning: Failed to cleanup NFT monitoring rules: %v\n", err)
-			}
-		}
+		cleanupContainerFirewall(name, containerIP)
 
 		// Delete container (may already be gone if ephemeral or cleaned by shell process)
 		if err := mgr.Delete(true); err != nil {

@@ -1241,15 +1241,19 @@ def get_screen_display(child, refresh=False, clear_buffer=False):
         return ""
 
 
-def calculate_container_name(workspace_dir, slot):
+def calculate_container_name(workspace_dir, slot, session_name=None):
     """
-    Calculate the expected container name for a given workspace and slot.
+    Calculate the expected container name for a given session identity and slot.
 
-    This replicates the container naming logic from internal/session/naming.go.
+    This replicates the identity-keyed naming logic from
+    internal/session/naming.go (Identity/IdentityHash/ContainerName): the hash
+    input is the workspace's absolute path, or "session-name:<name>" when a
+    [container] session_name is configured.
 
     Args:
         workspace_dir: Path to workspace directory
         slot: Slot number
+        session_name: Optional [container] session_name keying the identity
 
     Returns:
         Expected container name (e.g., "coi-test-85918044-1")
@@ -1259,17 +1263,16 @@ def calculate_container_name(workspace_dir, slot):
     # Get container prefix from environment (defaults to "coi-" but tests use "coi-test-")
     prefix = os.environ.get("COI_CONTAINER_PREFIX", "coi-")
 
-    # Hash the workspace path (SHA256)
-    # Use os.path.abspath (not Path.resolve) to match Go's filepath.Abs behavior
-    # (abspath doesn't follow symlinks, resolve does)
-    workspace_path = os.path.abspath(workspace_dir)
-    hash_bytes = hashlib.sha256(workspace_path.encode()).digest()
+    # For the path case, use os.path.abspath (not Path.resolve) to match Go's
+    # filepath.Abs behavior (abspath doesn't follow symlinks, resolve does).
+    identity = f"session-name:{session_name}" if session_name else os.path.abspath(workspace_dir)
+    hash_bytes = hashlib.sha256(identity.encode()).digest()
 
     # Take first 8 hex characters
-    workspace_id = hash_bytes.hex()[:8]
+    identity_id = hash_bytes.hex()[:8]
 
     # Format: {prefix}{hash}-{slot}
-    return f"{prefix}{workspace_id}-{slot}"
+    return f"{prefix}{identity_id}-{slot}"
 
 
 def extract_container_name(result):
@@ -1373,3 +1376,68 @@ def wait_for_container_stopped(coi_binary, container_name, timeout=120):
             return True, last
         time.sleep(1)
     return False, last
+
+
+def is_incus_permission_error(stderr):
+    """Heuristic: was an incus admin operation (e.g. `incus storage create`)
+    rejected because the caller does not have Incus admin access? Anything
+    else (name collision, backend error, transient failure) should fail the
+    test loud, not skip."""
+    lowered = stderr.lower()
+    return (
+        "permission denied" in lowered
+        or "not authorized" in lowered
+        or "forbidden" in lowered
+        or "access denied" in lowered
+    )
+
+
+def create_storage_pool(name, driver="dir"):
+    """Create a storage pool for a test. Returns (ok, stderr). Callers should
+    treat ok=False as a hard failure unless is_incus_permission_error(stderr),
+    in which case the test should pytest.skip."""
+    result = subprocess.run(
+        ["incus", "storage", "create", name, driver],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    return result.returncode == 0, result.stderr
+
+
+def delete_storage_pool(name):
+    """Best-effort deletion of a test storage pool."""
+    subprocess.run(
+        ["incus", "storage", "delete", name],
+        capture_output=True,
+        timeout=30,
+    )
+
+
+def run_coi_in_workspace(coi_binary, workspace_dir, argv, env=None, timeout=120):
+    """Run `coi run -- <argv>` from workspace_dir, capturing output.
+
+    Shared by the protection test family (tests/mount, tests/git_hooks), which
+    previously each carried an identical private copy (hoisted per the same
+    convention as the storage-pool helpers, see the #684 CHANGELOG entry).
+    """
+    return subprocess.run(
+        [coi_binary, "run", "--", *argv],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        cwd=workspace_dir,
+        env=env,
+    )
+
+
+def make_workspace_writable(workspace_dir):
+    """Make the workspace world-writable so the container user (UID 1000) can write.
+
+    In CI, the test runner UID (1001) differs from the container user UID (1000).
+    With shift=true on the Incus disk device, host UIDs map directly — so the
+    container user can only write to files with 'other' write permission. Used by
+    protection tests so that ONLY a read-only mount (not file permissions) can
+    stop a write, preventing false passes.
+    """
+    subprocess.run(["chmod", "-R", "a+rwX", workspace_dir], check=True, capture_output=True)

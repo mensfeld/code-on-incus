@@ -49,6 +49,14 @@ func nftIdent(containerIP string) string {
 func staticSetName(containerIP string) string  { return "coi_s_" + nftIdent(containerIP) }
 func dynamicSetName(containerIP string) string { return "coi_d_" + nftIdent(containerIP) }
 
+// The port-scoped (Phase 3) counterparts: concatenated ipv4_addr . inet_service
+// sets that carry each destination's permitted ports. The address-only sets above
+// stay populated in parallel — they back the per-host ICMP-echo rule (ICMP has no
+// port) and CurrentAllowlistCIDRs (the security monitor), both of which are
+// per-address. The tuple sets below back only the L4 accept rules.
+func staticPortSetName(containerIP string) string  { return "coi_sp_" + nftIdent(containerIP) }
+func dynamicPortSetName(containerIP string) string { return "coi_dp_" + nftIdent(containerIP) }
+
 // elementTimeout derives a dynamic element's lifetime from a DNS answer's TTL
 // and the interval at which the refresher will re-confirm it.
 //
@@ -109,6 +117,25 @@ func (f *NftManager) ensureAllowlistSets() error {
 		"{", "type", "ipv4_addr", ";", "flags", "timeout", ";", "}"); err != nil {
 		return fmt.Errorf("failed to create dynamic allowlist set: %w", err)
 	}
+	// Port-scoped concatenated sets (Phase 3). Same interval/timeout split and the
+	// same auto-merge rationale as above, now over (address . port) tuples so
+	// overlapping ranges or a CIDR-plus-contained-address collapse instead of
+	// failing the whole fail-closed transaction.
+	if _, err := runNFTCommand("add", "set", "ip", "coi", staticPortSetName(f.containerIP),
+		"{", "type", "ipv4_addr", ".", "inet_service", ";", "flags", "interval", ";", "auto-merge", ";", "}"); err != nil {
+		return fmt.Errorf("failed to create static port-scoped allowlist set: %w", err)
+	}
+	// The dynamic port set needs `flags interval` in addition to `timeout`: a name
+	// that inherited "all ports" installs the RANGE 1-65535, and nft refuses range
+	// elements in a non-interval set. auto-merge collapses the rare overlap when two
+	// names resolve to the same address with overlapping port ranges, so a
+	// fail-closed transaction never aborts on "conflicting intervals". (Concatenated
+	// interval+timeout sets need a modern kernel — the same ~5.6+ the port-scoped
+	// sets already require.)
+	if _, err := runNFTCommand("add", "set", "ip", "coi", dynamicPortSetName(f.containerIP),
+		"{", "type", "ipv4_addr", ".", "inet_service", ";", "flags", "interval", ",", "timeout", ";", "auto-merge", ";", "}"); err != nil {
+		return fmt.Errorf("failed to create dynamic port-scoped allowlist set: %w", err)
+	}
 	return nil
 }
 
@@ -137,15 +164,36 @@ func (f *NftManager) AddStaticIPs(cidrs []string) error {
 	return f.addSetElements(staticSetName(f.containerIP), sorted)
 }
 
-// AllowDynamicIPs adds DNS-learned addresses to the dynamic set, sized so each
-// element outlives the refresh that will renew it (see elementTimeout).
-// refreshInterval is the cadence the refresher will use — or <= 0 when refresh is
-// disabled, in which case the elements are installed permanently. It returns only
-// once the kernel has the addresses, so a caller that writes them into the
-// container's /etc/hosts afterwards knows the firewall already trusts what it is
-// about to hand over.
+// AddStaticTuples installs the port-scoped (address . port) elements for the
+// literal allowed_domains entries into the static concatenated set. globalPorts is
+// the resolved global allowed_ports (empty = all ports), applied to any entry that
+// named no port of its own. Like AddStaticIPs these never expire.
+func (f *NftManager) AddStaticTuples(tuples []staticTuple, globalPorts []portRange) error {
+	if f.containerIP == "" || len(tuples) == 0 {
+		return nil
+	}
+	var elements []string
+	for _, t := range tuples {
+		for _, r := range resolvePorts(t.Ports, globalPorts) {
+			elements = append(elements, portTupleElem(t.CIDR, r))
+		}
+	}
+	sort.Strings(elements) // deterministic nft output; auto-merge handles overlaps
+	return f.addSetElements(staticPortSetName(f.containerIP), elements)
+}
+
+// AllowDynamicIPsPorts adds DNS-learned addresses to BOTH the dynamic address set
+// (backing ICMP + the security monitor) and the dynamic port-scoped set (backing
+// the L4 accepts, one element per address × port-range), sized so each element
+// outlives the refresh that will renew it (see elementTimeout). ports is that
+// name's permitted set, already resolved through the global-allowed_ports fallback
+// (empty is treated as all ports). refreshInterval is the cadence the refresher
+// will use — or <= 0 when refresh is disabled, in which case the elements are
+// installed permanently. It returns only once the kernel has the addresses, so a
+// caller that writes them into the container's /etc/hosts afterwards knows the
+// firewall already trusts what it is about to hand over.
 //
-// The lock is deliberately held across the nft call. Setup installs the initial
+// The lock is deliberately held across the nft calls. Setup installs the initial
 // answers while the background refresher may already be re-resolving on its own
 // goroutine, so two calls that touch the same address can overlap. An earlier
 // version recorded the addresses in dynSeen, released the lock, and only then
@@ -155,13 +203,16 @@ func (f *NftManager) AddStaticIPs(cidrs []string) error {
 // contain yet: the original bug, reproduced with a smaller window. Serialising
 // here costs one exec's latency and buys the invariant the whole design rests on.
 //
-// dynSeen is what keeps this cheap: it records what has already been installed
-// and when it expires, so re-syncing a name whose elements still have most of
-// their life left costs no exec at all. A permanent element carries the zero
-// time: it is never pruned and never re-added.
-func (f *NftManager) AllowDynamicIPs(ips []string, ttl uint32, refreshInterval time.Duration) error {
+// dynSeen / dynSeenTuples are what keep this cheap: they record what has already
+// been installed and when it expires, so re-syncing a name whose elements still
+// have most of their life left costs no exec at all. A permanent element carries
+// the zero time: it is never pruned and never re-added.
+func (f *NftManager) AllowDynamicIPsPorts(ips []string, ports []portRange, ttl uint32, refreshInterval time.Duration) error {
 	if f.containerIP == "" || len(ips) == 0 {
 		return nil
+	}
+	if len(ports) == 0 {
+		ports = allPortsRange()
 	}
 
 	timeout := elementTimeout(ttl, refreshInterval) // 0 == permanent
@@ -172,30 +223,55 @@ func (f *NftManager) AllowDynamicIPs(ips []string, ttl uint32, refreshInterval t
 	if f.dynSeen == nil {
 		f.dynSeen = make(map[string]time.Time)
 	}
+	if f.dynSeenTuples == nil {
+		f.dynSeenTuples = make(map[string]time.Time)
+	}
 	now := time.Now()
 
-	// Drop addresses whose kernel elements have already expired. Permanent
-	// elements carry a zero expiry and are never pruned here. Without this the map
-	// only ever grows — one entry per address ever resolved — which for an agent
-	// working through many subdomains is an unbounded leak.
-	for ip, expiry := range f.dynSeen {
+	// Address set (backs ICMP + the security monitor): one element per address.
+	if err := f.syncDynamicSetLocked(dynamicSetName(f.containerIP), ips, timeout, f.dynSeen, now); err != nil {
+		return err
+	}
+	// Port-scoped set (backs the L4 accepts): one element per (address, port-range).
+	tupleKeys := make([]string, 0, len(ips)*len(ports))
+	for _, ip := range ips {
+		for _, r := range ports {
+			tupleKeys = append(tupleKeys, portTupleElem(ip, r))
+		}
+	}
+	return f.syncDynamicSetLocked(dynamicPortSetName(f.containerIP), tupleKeys, timeout, f.dynSeenTuples, now)
+}
+
+// syncDynamicSetLocked installs `keys` into a timeout set, skipping any element
+// still fresh per `seen`, and records the new expiries. It is the shared core of
+// the dynamic path — the caller holds dynMu and passes the set-specific seen map,
+// so the address set and the port-scoped set stay in lockstep under one lock.
+//
+// The base element string (an address, or an "addr . port" tuple) is also the
+// seen-map key; the timeout attribute is appended only in the nft command. See
+// AllowDynamicIPsPorts' predecessor for why the exec must not race a concurrent
+// caller — serialising under dynMu is what buys the firewall-before-hosts invariant.
+func (f *NftManager) syncDynamicSetLocked(setName string, keys []string, timeout time.Duration, seen map[string]time.Time, now time.Time) error {
+	// Drop elements whose kernel entries have already expired. Permanent elements
+	// carry a zero expiry and are never pruned; without this the map only grows.
+	for k, expiry := range seen {
 		if !expiry.IsZero() && now.After(expiry) {
-			delete(f.dynSeen, ip)
+			delete(seen, k)
 		}
 	}
 
 	var stale []string
-	for _, ip := range ips {
-		expiry, known := f.dynSeen[ip]
+	for _, k := range keys {
+		expiry, known := seen[k]
 		switch {
 		case !known:
-			stale = append(stale, ip)
+			stale = append(stale, k)
 		case expiry.IsZero():
 			// already installed permanently — nothing to renew
 		case now.After(expiry.Add(-timeout / 2)):
 			// past half its life — re-add to reset the kernel timeout so a live
-			// address never expires while still in use
-			stale = append(stale, ip)
+			// element never expires while still in use
+			stale = append(stale, k)
 		}
 	}
 	if len(stale) == 0 {
@@ -204,26 +280,25 @@ func (f *NftManager) AllowDynamicIPs(ips []string, ttl uint32, refreshInterval t
 
 	secs := int(timeout.Seconds())
 	elements := make([]string, 0, len(stale))
-	for _, ip := range stale {
+	for _, k := range stale {
 		if timeout <= 0 {
-			elements = append(elements, ip) // permanent: no timeout attribute
+			elements = append(elements, k) // permanent: no timeout attribute
 		} else {
-			elements = append(elements, fmt.Sprintf("%s timeout %ds", ip, secs))
+			elements = append(elements, fmt.Sprintf("%s timeout %ds", k, secs))
 		}
 	}
 
-	if err := f.addSetElements(dynamicSetName(f.containerIP), elements); err != nil {
+	if err := f.addSetElements(setName, elements); err != nil {
 		return err
 	}
 
 	// Record only after the kernel has them, so a failed exec cannot leave an
-	// address marked as installed when it is not. A permanent element is recorded
-	// as the zero time so it is neither pruned nor renewed.
-	for _, ip := range stale {
+	// element marked as installed when it is not.
+	for _, k := range stale {
 		if timeout <= 0 {
-			f.dynSeen[ip] = time.Time{}
+			seen[k] = time.Time{}
 		} else {
-			f.dynSeen[ip] = now.Add(timeout)
+			seen[k] = now.Add(timeout)
 		}
 	}
 	return nil
@@ -346,7 +421,10 @@ func removeAllowlistSetsForIP(containerIP string) error {
 		return nil
 	}
 	var firstErr error
-	for _, name := range []string{staticSetName(containerIP), dynamicSetName(containerIP)} {
+	for _, name := range []string{
+		staticSetName(containerIP), dynamicSetName(containerIP),
+		staticPortSetName(containerIP), dynamicPortSetName(containerIP),
+	} {
 		if _, err := runNFTCommand("delete", "set", "ip", "coi", name); err != nil {
 			if isNftNotFound(err) {
 				continue
@@ -380,10 +458,10 @@ func (f *NftManager) dynSeenSnapshot() map[string]time.Time {
 }
 
 // dynAllower is the slice of NftManager the resolver/refresher path needs to
-// install DNS-learned addresses. Keeping it narrow lets the Manager's sync path
-// be tested with a stub in place of real nft.
+// install DNS-learned addresses (and their per-name ports). Keeping it narrow lets
+// the Manager's sync path be tested with a stub in place of real nft.
 type dynAllower interface {
-	AllowDynamicIPs(ips []string, ttl uint32, refreshInterval time.Duration) error
+	AllowDynamicIPsPorts(ips []string, ports []portRange, ttl uint32, refreshInterval time.Duration) error
 }
 
 var _ dynAllower = (*NftManager)(nil)

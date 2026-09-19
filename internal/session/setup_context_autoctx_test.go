@@ -88,6 +88,24 @@ func (fakeAutoCtxTool) AutoContextFile() string { return ".claude/CLAUDE.md" }
 // Because "# COI Sandbox Environment" appears exactly once per rendered block, the
 // number of occurrences equals the number of copies. Driving injectAutoContextFile
 // across several sessions against one persistent home must leave exactly one copy.
+// A host CLAUDE.md/AGENTS.md edited on Windows carries CRLF, so the coi block's
+// markers end with \r. stripManagedAutoContext must still find and remove the
+// block — otherwise a fresh copy is appended every session (the #674 growth bug).
+// Pure-function test: the byte-exact fake-manager round-trip can't surface this.
+func TestStripManagedAutoContext_CRLFMarkers(t *testing.T) {
+	block := autoCtxBeginMarker + "\r\nsandbox body\r\n" + autoCtxEndMarker + "\r\n"
+	input := "user prefix\r\n" + block + "user suffix\r\n"
+
+	got := stripManagedAutoContext(input)
+
+	if strings.Contains(got, autoCtxBeginMarker) || strings.Contains(got, autoCtxEndMarker) {
+		t.Errorf("CRLF-delimited managed block should be stripped, got:\n%q", got)
+	}
+	if !strings.Contains(got, "user prefix") || !strings.Contains(got, "user suffix") {
+		t.Errorf("user content must be preserved, got:\n%q", got)
+	}
+}
+
 func TestInjectAutoContextFile_DoesNotAccumulateAcrossSessions(t *testing.T) {
 	mgr := newFakeAutoCtxManager()
 	acf := fakeAutoCtxTool{}
@@ -214,6 +232,53 @@ func TestInjectAutoContextFile_HealsLegacyPreservingHostContent(t *testing.T) {
 	}
 	if n := strings.Count(got, "# COI Sandbox Environment"); n != 1 {
 		t.Errorf("legacy coi copies must be healed to one block, found %d", n)
+	}
+}
+
+// TestInjectAutoContextFile_CodexAgentsMD verifies the codex wiring end-to-end
+// with the REAL CodexTool: the managed block lands in ~/.codex/AGENTS.md
+// (container-global — never the workspace AGENTS.md, which is on the host
+// bind-mount), host-seeded AGENTS.md content is preserved, and repeated
+// sessions keep exactly one copy of the block.
+func TestInjectAutoContextFile_CodexAgentsMD(t *testing.T) {
+	mgr := newFakeAutoCtxManager()
+	codex, err := tool.Get("codex")
+	if err != nil {
+		t.Fatalf("Get(codex): %v", err)
+	}
+	acf, ok := codex.(tool.ToolWithAutoContextFile)
+	if !ok {
+		t.Fatal("CodexTool must implement ToolWithAutoContextFile")
+	}
+	homeDir := "/home/code"
+	destPath := "/home/code/.codex/AGENTS.md"
+	logger := func(string) {}
+
+	const userMarker = "MY-GLOBAL-CODEX-RULES-KEEP-ME"
+	mgr.files[destPath] = "# My codex instructions\n\n" + userMarker + "\n"
+
+	content := tool.RenderContextFileContent(tool.ContextInfo{
+		WorkspacePath: "/workspace",
+		HomeDir:       homeDir,
+		NetworkMode:   "restricted",
+	})
+
+	for i := 0; i < 3; i++ {
+		if err := injectAutoContextFile(mgr, acf, content, homeDir, logger); err != nil {
+			t.Fatalf("session %d: injectAutoContextFile failed: %v", i+1, err)
+		}
+	}
+
+	got := mgr.files[destPath]
+	if n := strings.Count(got, userMarker); n != 1 {
+		t.Errorf("host AGENTS.md content must be preserved exactly once, found %d occurrences", n)
+	}
+	if n := strings.Count(got, "# COI Sandbox Environment"); n != 1 {
+		t.Errorf("expected exactly one COI sandbox block in ~/.codex/AGENTS.md, found %d", n)
+	}
+	// The workspace AGENTS.md must not be touched.
+	if _, ok := mgr.files["/workspace/AGENTS.md"]; ok {
+		t.Error("workspace AGENTS.md was written — the managed block must only go to ~/.codex/AGENTS.md")
 	}
 }
 

@@ -34,6 +34,8 @@ def test_hardened_profile_hardened_settings(coi_binary):
         "persistent = false",  # ephemeral
         "forward_agent = false",  # never forward host SSH agent
         "host_immutable = true",  # host-side immutability
+        "reduce_kernel_surface = true",  # kernel attack-surface hardening (also disables docker)
+        'max_duration = "4h"',  # bounded session (12h+ persistence enabled the ToB escapes)
         "secret_paths = [",  # secret masking bundled
         ".env",  # a sensible default secret
         "*.tfstate",  # broadened secret-mask defaults (terraform state)

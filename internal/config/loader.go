@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -71,6 +73,22 @@ func Load() (*Config, error) {
 	// Resolve profile inheritance after all profiles are loaded from all levels
 	if err := cfg.ResolveProfileInheritance(); err != nil {
 		return nil, fmt.Errorf("profile inheritance error: %w", err)
+	}
+
+	stripUntrustedInheritedSessionNames(cfg)
+
+	// Profiles are schema-validated, but the top-level config is not — and a
+	// malformed session_name (trailing space, path separators, invisible
+	// characters) would silently hash to a different identity than its
+	// lookalike, recreating the fresh-container failure the feature exists to
+	// prevent. Validate every name that survived trust gating.
+	if err := validateSessionName(cfg.Container.SessionName); err != nil {
+		return nil, err
+	}
+	for name, p := range cfg.Profiles {
+		if err := validateSessionName(p.Container.SessionName); err != nil {
+			return nil, fmt.Errorf("profile %q: %w", name, err)
+		}
 	}
 
 	// Ensure directories exist
@@ -150,6 +168,11 @@ func loadConfigFileScoped(cfg *Config, path string, trusted bool) error {
 		fileCfg.Container.Build.Script = resolveRelativePath(configDir, fileCfg.Container.Build.Script)
 	}
 
+	// Resolve [prompts] file= paths relative to the config file dir, like the
+	// build script above (#701). Untrusted prompts were already stripped
+	// wholesale by sanitizeUntrustedConfig, so only trusted entries reach here.
+	resolvePromptFiles(fileCfg.Prompts, configDir)
+
 	// Merge into main config
 	cfg.Merge(&fileCfg)
 
@@ -164,8 +187,12 @@ func sanitizeUntrustedConfig(fileCfg *Config, path string) {
 	sanitizeUntrustedNetwork(&fileCfg.Network, path)
 	sanitizeUntrustedEnvCommands(&fileCfg.Defaults, path)
 	sanitizeUntrustedDefaultProfile(&fileCfg.Defaults, path)
+	sanitizeUntrustedSessionName(&fileCfg.Container, path)
+	sanitizeUntrustedDocker(&fileCfg.Container, path)
 	sanitizeUntrustedSecurity(&fileCfg.Security, path)
 	sanitizeUntrustedGit(&fileCfg.Git, path)
+	sanitizeUntrustedTool(&fileCfg.Tool, path)
+	sanitizeUntrustedPrompts(fileCfg.Prompts, path)
 
 	// Persistence is honored from project scope (not a protection downgrade —
 	// the container stays fully sandboxed), but a cloned repo opting the user
@@ -185,6 +212,68 @@ func warnUntrustedDowngrade(path, field string) {
 		"WARNING: ignoring '%s' in project config %s; removing read-only "+
 			"protection is a security downgrade. Move it to ~/.coi/config.toml or "+
 			"set COI_CONFIG to apply it.\n", field, path)
+}
+
+// sanitizeUntrustedTool drops [tool] fields that read an arbitrary HOST file and
+// inject it into the container, since honoring them from an untrusted
+// (project-scoped) config would let a cloned/agent-planted repo exfiltrate host
+// secrets into the sandbox: e.g. context_file = "~/.ssh/id_rsa" lands the key in
+// ~/SANDBOX_CONTEXT.md, and context_json_file = "~/.aws/credentials" lands it in
+// ~/SANDBOX_CONTEXT.json — both readable by the in-container agent. Both are
+// therefore honored only from trusted scope (~/.coi/config.toml or $COI_CONFIG).
+// nil is a no-op.
+func sanitizeUntrustedTool(tc *ToolConfig, path string) {
+	if tc == nil {
+		return
+	}
+	if tc.ContextFile != "" {
+		warnUntrustedDowngrade(path, "tool.context_file")
+		tc.ContextFile = ""
+	}
+	if tc.ContextJSONFile != "" {
+		warnUntrustedDowngrade(path, "tool.context_json_file")
+		tc.ContextJSONFile = ""
+	}
+}
+
+// sanitizeUntrustedPrompts drops ALL [prompts] entries from an untrusted
+// (project-scoped) source. A named prompt is exactly what `coi run --prompt-name
+// X` feeds to the agent, so it must come only from trusted scope
+// (~/.coi/config.toml / $COI_CONFIG): a cloned/agent-planted repo defining a
+// prompt — whether it reads a host file (file = "~/.ssh/id_rsa") or is inline
+// text redefining a name the user trusts — must never be honored. Handled the
+// same way as [defaults] env_commands and the default-profile selector. nil is a
+// no-op.
+func sanitizeUntrustedPrompts(prompts map[string]PromptEntry, path string) {
+	if len(prompts) == 0 {
+		return
+	}
+	// One message per config (not per entry) — a project that ships several
+	// prompts shouldn't spam a line for each on every coi command.
+	names := make([]string, 0, len(prompts))
+	for name := range prompts {
+		names = append(names, name)
+		delete(prompts, name)
+	}
+	sort.Strings(names)
+	fmt.Fprintf(os.Stderr,
+		"WARNING: ignoring [prompts] (%s) in project config %s; named prompts are "+
+			"honored only from trusted config (~/.coi/config.toml or $COI_CONFIG).\n",
+		strings.Join(names, ", "), path)
+}
+
+// resolvePromptFiles resolves each prompt entry's file= path relative to the
+// config/profile directory (like [container.build] script). Inline-text entries
+// are untouched; absolute and ~-prefixed paths pass through resolveRelativePath.
+// Only trusted-scope prompts reach here — untrusted ones are stripped wholesale
+// by sanitizeUntrustedPrompts before this runs.
+func resolvePromptFiles(prompts map[string]PromptEntry, baseDir string) {
+	for name, entry := range prompts {
+		if entry.File != "" {
+			entry.File = resolveRelativePath(baseDir, entry.File)
+			prompts[name] = entry
+		}
+	}
 }
 
 // sanitizeUntrustedSecurity drops security-weakening fields from an untrusted
@@ -223,6 +312,26 @@ func sanitizeUntrustedSecurity(s *SecurityConfig, path string) {
 		warnUntrustedDowngrade(path, "security.host_immutable")
 	}
 	s.HostImmutable = nil
+	if s.ReduceKernelSurface != nil && !*s.ReduceKernelSurface {
+		// Only false is a downgrade to warn about. Unlike [container] docker =
+		// false — a narrow tightening (nesting off) that IS honored from
+		// untrusted scope — reduce_kernel_surface is trusted-only in BOTH
+		// directions because its effect is broad: on top of disabling Docker it
+		// installs a security.syscalls.deny list (io_uring, bpf, userfaultfd,
+		// keyring) that can break legitimate NON-Docker workloads in the
+		// container. That blast radius, not merely "it turns Docker off", is
+		// why a cloned repo must not be able to impose it (or lift it). The
+		// strengthening true is therefore dropped silently.
+		warnUntrustedDowngrade(path, "security.reduce_kernel_surface")
+	}
+	s.ReduceKernelSurface = nil
+	if s.ReduceKernelSurfaceStrict != nil && !*s.ReduceKernelSurfaceStrict {
+		// Trusted-only in both directions for the same reason as the base flag:
+		// its deny list (which adds perf_event_open) alters container behavior
+		// broadly, so a cloned repo must not be able to impose it or lift it.
+		warnUntrustedDowngrade(path, "security.reduce_kernel_surface_strict")
+	}
+	s.ReduceKernelSurfaceStrict = nil
 }
 
 // sanitizeUntrustedGit drops git settings that weaken protection or would let an
@@ -259,8 +368,20 @@ func sanitizeUntrustedGit(g *GitConfig, path string) {
 		g.Email = ""
 	}
 	// A project config must not influence git-identity behavior at all; drop the
-	// toggle silently (neither value is a protection downgrade on its own).
+	// toggles silently (neither is a protection downgrade on its own — readonly
+	// only ever tightens — but identity behavior is trusted-scope by design).
 	g.SeedHostIdentity = nil
+	g.Readonly = nil
+	// Attribution stripping is trusted-scope in both directions, like the
+	// identity fields it protects: a cloned repo must control neither whether
+	// commits made in it keep AI attribution (false would re-enable trailers
+	// the operator chose to strip) nor which patterns get removed from
+	// messages (arbitrary line-deletion from every commit).
+	if g.StripAttribution != nil && !*g.StripAttribution {
+		warnUntrustedDowngrade(path, "git.strip_attribution")
+	}
+	g.StripAttribution = nil
+	g.StripAttributionPatterns = nil
 }
 
 // sanitizeUntrustedEnvCommands strips env_commands (and their timeout) from an
@@ -269,7 +390,14 @@ func sanitizeUntrustedGit(g *GitConfig, path string) {
 // `coi trust` — it is never honored from a project config or project-scoped
 // profile; it must live in trusted-scope config (~/.coi/config.toml / $COI_CONFIG).
 func sanitizeUntrustedEnvCommands(d *DefaultsConfig, path string) {
-	if d == nil || len(d.EnvCommands) == 0 {
+	if d == nil {
+		return
+	}
+	// Strip the timeout unconditionally: even without env_commands here, a lone
+	// env_command_timeout from an untrusted source would override the timeout
+	// applied to trusted-scope env_commands.
+	d.EnvCommandTimeout = ""
+	if len(d.EnvCommands) == 0 {
 		return
 	}
 	fmt.Fprintf(os.Stderr,
@@ -277,7 +405,6 @@ func sanitizeUntrustedEnvCommands(d *DefaultsConfig, path string) {
 			"command is host code execution. Move it to ~/.coi/config.toml or set "+
 			"COI_CONFIG to apply it.\n", path)
 	d.EnvCommands = nil
-	d.EnvCommandTimeout = ""
 }
 
 // sanitizeUntrustedDefaultProfile strips `[defaults] profile` from an untrusted
@@ -294,6 +421,71 @@ func sanitizeUntrustedDefaultProfile(d *DefaultsConfig, path string) {
 			"profile selects the whole session environment. Move it to "+
 			"~/.coi/config.toml or set COI_CONFIG to apply it.\n", path)
 	d.Profile = ""
+}
+
+// stripUntrustedInheritedSessionNames re-strips session_name from untrusted
+// (project-scoped) profiles AFTER inheritance resolution: inheritance can copy
+// a TRUSTED parent's session_name into a project-scoped child, so
+// `inherits = "<trusted profile>"` would smuggle what direct declaration
+// cannot (the per-profile strip runs before inheritance is resolved).
+func stripUntrustedInheritedSessionNames(cfg *Config) {
+	for name, p := range cfg.Profiles {
+		// Synthesized profiles (default/hardened) have no Source and carry
+		// only already-validated trusted config; disk profiles carry the
+		// Trusted stamp from their scan root.
+		if p.Container.SessionName == "" || p.Source == "" || p.Trusted {
+			continue
+		}
+		sanitizeUntrustedSessionName(&p.Container, p.Source)
+		cfg.Profiles[name] = p
+	}
+}
+
+// sessionNameRe mirrors the profile schema's session_name pattern.
+var sessionNameRe = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$`)
+
+// validateSessionName rejects [container] session_name values that would
+// silently hash to a different identity than their lookalike (whitespace,
+// path separators, invisible characters). Empty = unset = valid.
+func validateSessionName(name string) error {
+	if name == "" || sessionNameRe.MatchString(name) {
+		return nil
+	}
+	return fmt.Errorf("invalid [container] session_name %q: must match %s (letters, digits, '.', '_', '-'; start alphanumeric; max 64 chars)", name, sessionNameRe.String())
+}
+
+// sanitizeUntrustedSessionName strips [container] session_name from an
+// untrusted (project-scoped) source. The session name selects which persistent
+// container and saved session state (conversation history, restored
+// credentials) a launch attaches to — a cloned/agent-planted repo must not be
+// able to attach its own workspace to another project's session, or plant a
+// name that a later trusted launch would unknowingly share state with.
+func sanitizeUntrustedSessionName(c *ContainerConfig, path string) {
+	if c == nil || c.SessionName == "" {
+		return
+	}
+	fmt.Fprintf(os.Stderr,
+		"WARNING: ignoring '[container] session_name' in project config %s; the "+
+			"session name selects which persistent session a launch attaches to. "+
+			"Move it to ~/.coi/config.toml or a profile under ~/.coi/profiles to apply it.\n", path)
+	c.SessionName = ""
+}
+
+// sanitizeUntrustedDocker strips an untrusted `[container] docker = true`: a
+// cloned/agent-planted repo must not re-enable nesting and the wider kernel
+// surface that a trusted profile disabled. `docker = false` is a NARROW
+// tightening — it only turns off nesting/syscall-interception, with no effect
+// on ordinary in-container workloads — so it is honored from any scope, the
+// same as an add-only network restriction. (Contrast security.reduce_kernel_-
+// surface, which is trusted-only in both directions because its syscall deny
+// list has a far broader blast radius; see sanitizeUntrustedSecurity.) nil is
+// a no-op.
+func sanitizeUntrustedDocker(c *ContainerConfig, path string) {
+	if c == nil || c.Docker == nil || !*c.Docker {
+		return
+	}
+	warnUntrustedDowngrade(path, "container.docker")
+	c.Docker = nil
 }
 
 // sanitizeUntrustedNetwork drops security-downgrading network settings from an
@@ -330,6 +522,20 @@ func sanitizeUntrustedNetwork(n *NetworkConfig, path string) {
 		// only from trusted scope.
 		refuse("network.hosts")
 		n.Hosts = nil
+	}
+	if len(n.DNSServers) > 0 {
+		// Pinning the resolver a container may reach is a DNS-redirect primitive:
+		// a project config could point DNS at an attacker's box. Trusted scope only.
+		refuse("network.dns_servers")
+		n.DNSServers = nil
+	}
+	if len(n.AllowedPorts) > 0 {
+		// A port allowlist only tightens egress, so it cannot downgrade security on
+		// its own — but it is honored from trusted scope only for a uniform rule,
+		// matching the other network policy keys (and so a project config cannot
+		// silently narrow egress in ways the user did not intend either).
+		refuse("network.allowed_ports")
+		n.AllowedPorts = nil
 	}
 }
 
@@ -493,8 +699,9 @@ func loadProfileDirectories(cfg *Config, configDir string, trusted bool) error {
 			profileCfg.Context = resolveRelativePath(profileDir, profileCfg.Context)
 		}
 
-		// Tag with source location
+		// Tag with source location and the scan root's trust
 		profileCfg.Source = profileConfigPath
+		profileCfg.Trusted = trusted
 
 		// A project-scoped profile (under the workspace ./.coi) is untrusted — a
 		// cloned repo can ship it. Apply the same hardening as an untrusted
@@ -502,8 +709,11 @@ func loadProfileDirectories(cfg *Config, configDir string, trusted bool) error {
 		// escaping host mounts are gated behind `coi trust`.
 		if !trusted {
 			sanitizeUntrustedNetwork(profileCfg.Network, profileConfigPath)
+			sanitizeUntrustedSessionName(&profileCfg.Container, profileConfigPath)
+			sanitizeUntrustedDocker(&profileCfg.Container, profileConfigPath)
 			sanitizeUntrustedSecurity(profileCfg.Security, profileConfigPath)
 			sanitizeUntrustedGit(profileCfg.Git, profileConfigPath)
+			sanitizeUntrustedPrompts(profileCfg.Prompts, profileConfigPath)
 			markUntrustedMounts(profileCfg.Mounts, profileConfigPath)
 			markUntrustedSockets(profileCfg.Sockets, profileConfigPath)
 			markUntrustedPorts(profileCfg.Ports, profileConfigPath)
@@ -515,7 +725,18 @@ func loadProfileDirectories(cfg *Config, configDir string, trusted bool) error {
 						"~/.coi/profiles to apply it.\n", profileConfigPath)
 				profileCfg.EnvCommands = nil
 			}
+			// Strip the timeout unconditionally, even with no env_commands here: a
+			// lone env_command_timeout would otherwise survive and override the
+			// timeout applied to trusted-scope env_commands when this profile is
+			// selected — a project-scoped file must not influence how long a
+			// trusted host command may run.
+			profileCfg.EnvCommandTimeout = ""
 		}
+
+		// Resolve [prompts] file= paths AFTER the untrusted strip above, so only
+		// surviving (trusted) entries are resolved — matching the top-level
+		// loadConfigFileScoped order (sanitize first, then resolve).
+		resolvePromptFiles(profileCfg.Prompts, profileDir)
 
 		if cfg.Profiles == nil {
 			cfg.Profiles = make(map[string]ProfileConfig)

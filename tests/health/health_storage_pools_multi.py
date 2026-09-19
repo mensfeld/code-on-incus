@@ -6,38 +6,30 @@ and verifies the health check details map contains both pools.
 """
 
 import json
+import os
 import subprocess
 from pathlib import Path
 
 import pytest
 
-
-def _create_temp_pool(name):
-    result = subprocess.run(
-        ["incus", "storage", "create", name, "dir"],
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    return result.returncode == 0, result.stderr
-
-
-def _delete_temp_pool(name):
-    subprocess.run(
-        ["incus", "storage", "delete", name],
-        capture_output=True,
-        timeout=30,
-    )
+from support.helpers import (
+    create_storage_pool,
+    delete_storage_pool,
+    is_incus_permission_error,
+)
 
 
 def test_health_storage_pools_multi(coi_binary, workspace_dir):
     """Health check details map should contain both default and a temp pool."""
-    pool_name = "coi-test-multipool"
+    # Random suffix so a pool leaked by a crashed run can't collide with (and
+    # permanently skip) later runs.
+    pool_name = f"coi-test-multipool-{os.urandom(4).hex()}"
 
-    # Skip if we cannot create a temp pool (e.g. no admin permission).
-    ok, err = _create_temp_pool(pool_name)
+    ok, err = create_storage_pool(pool_name)
     if not ok:
-        pytest.skip(f"Cannot create temp storage pool: {err}")
+        if is_incus_permission_error(err):
+            pytest.skip(f"No permission to create storage pool {pool_name}: {err}")
+        pytest.fail(f"Failed to create temp pool {pool_name}: {err}")
 
     try:
         # Reference the temp pool from a profile so it shows up in the check.
@@ -76,4 +68,4 @@ def test_health_storage_pools_multi(coi_binary, workspace_dir):
             f"Temp pool {pool_name} should appear in pool details. Got: {list(details.keys())}"
         )
     finally:
-        _delete_temp_pool(pool_name)
+        delete_storage_pool(pool_name)

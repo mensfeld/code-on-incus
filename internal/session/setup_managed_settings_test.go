@@ -56,7 +56,7 @@ func (r *managedSettingsRecorder) CreateFileWithOwner(path, content string, uid,
 func TestSetupClaudeManagedSettingsCreatesRootOwnedWorldReadableFile(t *testing.T) {
 	rec := &managedSettingsRecorder{}
 
-	SetupClaudeManagedSettings(rec, func(msg string) { t.Log(msg) })
+	SetupClaudeManagedSettings(rec, true, true, func(msg string) { t.Log(msg) })
 
 	if len(rec.creates) != 1 {
 		t.Fatalf("expected exactly one CreateFileWithOwner call, got %v", rec.creates)
@@ -76,11 +76,37 @@ func TestSetupClaudeManagedSettingsCreatesRootOwnedWorldReadableFile(t *testing.
 	}
 }
 
+// shouldSuppressClaudeAutoMode gates whether the managed-settings policy that
+// strips auto mode gets written. It must fire for Claude under the default
+// (bypass) mode and NOT under interactive, where the user owns the per-session
+// auto-mode choice (#764); non-Claude tools never get the policy.
+func TestShouldSuppressClaudeAutoMode(t *testing.T) {
+	cases := []struct {
+		name           string
+		toolName       string
+		permissionMode string
+		want           bool
+	}{
+		{"claude default/bypass suppresses", "claude", "", true},
+		{"claude explicit bypass suppresses", "claude", "bypass", true},
+		{"claude interactive does not suppress", "claude", "interactive", false},
+		{"non-claude bypass never suppresses", "codex", "bypass", false},
+		{"non-claude interactive never suppresses", "codex", "interactive", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := shouldSuppressClaudeAutoMode(tc.toolName, tc.permissionMode); got != tc.want {
+				t.Errorf("shouldSuppressClaudeAutoMode(%q, %q) = %v, want %v", tc.toolName, tc.permissionMode, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestSetupClaudeManagedSettingsWarnsWhenWriteFails(t *testing.T) {
 	rec := &managedSettingsRecorder{createErr: errors.New("push failed")}
 	var logs []string
 
-	SetupClaudeManagedSettings(rec, func(msg string) { logs = append(logs, msg) })
+	SetupClaudeManagedSettings(rec, true, false, func(msg string) { logs = append(logs, msg) })
 
 	if len(logs) == 0 {
 		t.Fatal("expected a warning log when writing managed settings fails")
@@ -96,7 +122,7 @@ func TestSetupClaudeManagedSettingsSkipsWriteWhenMkdirFails(t *testing.T) {
 	}}
 	var logs []string
 
-	SetupClaudeManagedSettings(rec, func(msg string) { logs = append(logs, msg) })
+	SetupClaudeManagedSettings(rec, true, false, func(msg string) { logs = append(logs, msg) })
 
 	if len(rec.creates) != 0 {
 		t.Fatalf("no file should be written after mkdir failure, got %v", rec.creates)

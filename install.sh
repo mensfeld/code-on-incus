@@ -458,17 +458,26 @@ ensure_incus_initialized() {
         return
     fi
 
-    # Check if Incus has been initialized by looking for any networks.
-    # `incus admin init` creates incusbr0; an empty list means never initialized.
-    # If the query itself fails (daemon down, no permissions), warn and bail out
-    # rather than incorrectly triggering init.
-    local networks
+    # Decide whether Incus has been initialized without being fooled by the
+    # unmanaged physical/loopback interfaces that appear on every real host: a
+    # bare "is the network list non-empty?" check is never empty and falsely
+    # skips init (#703). `incus admin init --auto` creates both a MANAGED network
+    # (incusbr0) and a storage pool, so treat either as proof of initialization -
+    # a host set up with an existing/custom network and no managed bridge still
+    # has a pool, which is the reliable signal.
+    # If the network query itself fails (daemon down, no permissions), warn and
+    # bail out rather than incorrectly triggering init.
+    local networks pools
     if ! networks="$(incus network list --format=csv 2>/dev/null)"; then
         echo -e "${YELLOW}⚠ Unable to determine whether Incus has been initialized${NC}"
         echo "  Could not query Incus networks. Ensure the Incus daemon is running and your user has access."
         return 1
     fi
-    if [ -n "$networks" ]; then
+    pools="$(incus storage list --format=csv 2>/dev/null)"
+    # MANAGED is CSV column 3 (YES/NO); awk avoids the cut|grep -q pipe whose
+    # early exit trips `set -o pipefail`.
+    if printf '%s\n' "$networks" | awk -F, '$3 == "YES" { found=1 } END { exit !found }' \
+        || [ -n "$pools" ]; then
         return
     fi
 
@@ -589,7 +598,7 @@ setup_zfs_storage() {
                 printf "${YELLOW}  %s${NC}\n" "$profile_output"
             fi
             echo -e "${YELLOW}  You can manually configure it later with:${NC}"
-            echo -e "  ${BLUE}incus profile device set default root pool=zfs-pool${NC}"
+            echo -e "  ${BLUE}incus profile device add default root disk pool=zfs-pool path=/${NC}"
         fi
     else
         echo -e "${YELLOW}⚠ ZFS storage pool creation failed${NC}"
@@ -649,7 +658,7 @@ setup_btrfs_storage() {
                 printf "${YELLOW}  %s${NC}\n" "$profile_output"
             fi
             echo -e "${YELLOW}  You can manually configure it later with:${NC}"
-            echo -e "  ${BLUE}incus profile device set default root pool=btrfs-pool${NC}"
+            echo -e "  ${BLUE}incus profile device add default root disk pool=btrfs-pool path=/${NC}"
         fi
     else
         echo -e "${YELLOW}⚠ btrfs storage pool creation failed${NC}"
@@ -675,12 +684,13 @@ fetch_detection_databases() {
         echo -e "${GREEN}✓ Detection databases fetched${NC}"
     else
         echo -e "${YELLOW}⚠ Detection database fetch failed (requires git and network access)${NC}"
-        echo "  Run manually later: ${BLUE}coi update patterns${NC}"
+        echo -e "  Run manually later: ${BLUE}coi update patterns${NC}"
     fi
 }
 
 # Post-install setup
 post_install() {
+    setup_nm_unmanaged_veths
     ensure_incus_service || true
     ensure_idmap || true
     ensure_incus_initialized || true
@@ -697,29 +707,29 @@ post_install() {
     echo "Next steps:"
     echo ""
     echo "  1. Build the COI image:"
-    echo "     ${BLUE}coi build${NC}"
+    echo -e "     ${BLUE}coi build${NC}"
     echo ""
     echo "  2. Start your first session:"
-    echo "     ${BLUE}coi shell${NC}"
+    echo -e "     ${BLUE}coi shell${NC}"
     echo ""
     echo "  3. View available commands:"
-    echo "     ${BLUE}coi --help${NC}"
+    echo -e "     ${BLUE}coi --help${NC}"
     echo ""
 
     if ! groups | grep -q incus-admin; then
         echo -e "${YELLOW}⚠ Remember to add yourself to incus-admin group:${NC}"
-        echo "   ${BLUE}sudo usermod -aG incus-admin \$USER${NC}"
+        echo -e "   ${BLUE}sudo usermod -aG incus-admin \$USER${NC}"
         echo "   Then log out and back in."
         echo ""
     fi
 
     if ! command -v nft &> /dev/null; then
         echo -e "${YELLOW}⚠ nftables is not installed — network isolation (restricted/allowlist modes) will not work.${NC}"
-        echo "   Install with: ${BLUE}sudo apt install nftables${NC}"
+        echo -e "   Install with: ${BLUE}sudo apt install nftables${NC}"
         echo ""
     elif ! [ -f /etc/sudoers.d/coi-nft ]; then
         echo -e "${YELLOW}⚠ Passwordless sudo for nft not configured — network isolation will not work.${NC}"
-        echo "   Run: ${BLUE}echo \"\$USER ALL=(ALL) NOPASSWD: \$(command -v nft)\" | sudo tee /etc/sudoers.d/coi-nft && sudo chmod 0440 /etc/sudoers.d/coi-nft${NC}"
+        echo -e "   Run: ${BLUE}echo \"\$USER ALL=(ALL) NOPASSWD: \$(command -v nft)\" | sudo tee /etc/sudoers.d/coi-nft && sudo chmod 0440 /etc/sudoers.d/coi-nft${NC}"
         echo ""
     fi
 
@@ -728,6 +738,51 @@ post_install() {
 }
 
 # Main installation
+# Prevent NetworkManager from enrolling container veths into firewalld zones.
+# NM assigns each new veth to firewalld's default zone; leaked registrations
+# survive container deletion, and firewalld generates FORWARD rules as the
+# CROSS PRODUCT of zone interfaces — dead veths grow the ruleset quadratically
+# (145 leaked veths ~= 101k rules, issue #695). Marking veth* unmanaged stops
+# the enrollment at the source; container traffic policy lives on the bridge.
+#
+# Entirely best-effort: every step tolerates failure (a firewall nicety must
+# never abort the install under set -e / the ERR trap), and it is skippable
+# with COI_SKIP_NM_UNMANAGED=1 for hosts that intentionally manage veths
+# through NetworkManager (e.g. nmcli-configured veth pairs).
+setup_nm_unmanaged_veths() {
+    [ "${COI_SKIP_NM_UNMANAGED:-0}" = "1" ] && return 0
+    # COI_NM_CONF_DIR is a test seam; production always uses the real path.
+    local conf_dir="${COI_NM_CONF_DIR:-/etc/NetworkManager/conf.d}"
+    local conf_file="$conf_dir/99-coi-unmanaged.conf"
+    [ -d "$conf_dir" ] || return 0
+    if [ -f "$conf_file" ]; then
+        return 0
+    fi
+    # Only an ACTIVE (uncommented) rule that mentions veths counts as existing
+    # coverage — a commented-out example must not suppress the real one.
+    if grep -rhs '^[[:space:]]*unmanaged-devices' "$conf_dir"/*.conf 2>/dev/null | grep -q 'veth'; then
+        echo -e "${GREEN}✓ NetworkManager already has an unmanaged-devices rule mentioning veths — leaving it alone${NC}"
+        return 0
+    fi
+    echo -e "${BLUE}→ Marking veth* unmanaged in NetworkManager (prevents firewalld zone bloat, #695; skip with COI_SKIP_NM_UNMANAGED=1)...${NC}"
+    # unmanaged-devices+= APPENDS to any list set elsewhere; plain '=' would
+    # REPLACE a user's own exclusions under NM's last-file-wins semantics.
+    if ! sudo tee "$conf_file" > /dev/null 2>&1 <<'NMEOF'
+# Installed by code-on-incus (coi): container veths must not be enrolled in
+# firewalld zones — leaked registrations grow the firewall ruleset
+# quadratically. See https://github.com/mensfeld/code-on-incus/issues/695
+# Remove this file (and reload NetworkManager) to undo.
+[keyfile]
+unmanaged-devices+=interface-name:veth*
+NMEOF
+    then
+        echo -e "${YELLOW}⚠ Could not write $conf_file; skipping (see issue #695 for the manual step)${NC}"
+        return 0
+    fi
+    sudo systemctl reload NetworkManager 2>/dev/null || true
+    echo -e "${GREEN}✓ NetworkManager veth exclusion installed${NC}"
+}
+
 main() {
     echo ""
     echo -e "${BLUE}════════════════════════════════════════${NC}"
