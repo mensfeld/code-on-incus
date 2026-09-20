@@ -51,6 +51,7 @@ type runState struct {
 	mgr                container.ContainerManager
 	wasRestarted       bool
 	useShift           bool                       // resolved by the launch phase's UID-mapping pre-start hook
+	rawIdmapActive     bool                       // true when the container uses raw.idmap (mutually exclusive with per-device shift, #604)
 	containerWorkspace string                     // in-container workspace path
 	gitWorktree        *session.GitWorktreeLayout // external git dirs for a worktree checkout (#533), nil otherwise
 	mountConfig        *session.MountConfig       // trust-gated
@@ -230,7 +231,7 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 					logFn(fmt.Sprintf("Warning: git worktree not mounted (%v); git commands may fail in the container", wtErr))
 				}
 				s.gitWorktree = layout
-				s.useShift, _ = session.ConfigureUIDMapping(s.containerName, session.MountSources(s.absWorkspace, s.mountConfig, session.WorktreeSources(layout)...), a.cfg.Incus.DisableShift, logFn)
+				s.useShift, s.rawIdmapActive = session.ConfigureUIDMapping(s.containerName, session.MountSources(s.absWorkspace, s.mountConfig, session.WorktreeSources(layout)...), a.cfg.Incus.DisableShift, logFn)
 				// Harden the bridge NIC against egress-isolation bypass: anti-spoof
 				// the source IP/MAC (so saddr-keyed nft rules can't be dodged) and
 				// isolate the bridge port (no L2 reach to sibling containers). The
@@ -258,7 +259,7 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 				}
 				s.containerWorkspace = a.resolveContainerWorkspacePath(s.absWorkspace, layout != nil)
 				defer timing.Start(timing.CatStep, "apply-workspace-mounts")()
-				return a.applyWorkspaceMounts(mgr, s.containerName, s.absWorkspace, &s.containerWorkspace, s.mountConfig, s.useShift, false, layout)
+				return a.applyWorkspaceMounts(mgr, s.containerName, s.absWorkspace, &s.containerWorkspace, s.mountConfig, s.useShift, s.rawIdmapActive, false, layout)
 			}
 
 			// preRestart reconciles a REUSED persistent container's security devices

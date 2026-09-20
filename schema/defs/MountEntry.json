@@ -17,6 +17,10 @@
     "readonly": {
       "type": "boolean",
       "description": "Mount the path read-only (default: false)"
+    },
+    "shift": {
+      "type": "boolean",
+      "description": "Override UID/GID shifting for this mount (maps to `incus config device add … shift=<v>`). Unset inherits the session-wide decision the workspace uses. true forces an idmapped mount so host files appear owned by the container 'code' user instead of nobody:nogroup; false opts the mount out. Ignored on containers using raw.idmap (mutually exclusive; raw.idmap already remaps the mount)."
     }
   }
 }

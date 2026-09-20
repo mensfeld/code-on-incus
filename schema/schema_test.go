@@ -285,6 +285,39 @@ func TestValidateProfileMap_RejectsBadStaleBaseCheck(t *testing.T) {
 	}
 }
 
+// A per-mount `shift` boolean (#604) must validate in both mount shapes and
+// must be rejected when it is not a boolean.
+func TestValidateProfileMap_MountShift(t *testing.T) {
+	valid := map[string]any{
+		"mounts": []any{
+			map[string]any{"host": "/h", "container": "/c", "shift": true},
+		},
+	}
+	if err := schema.ValidateProfileMap(valid); err != nil {
+		t.Fatalf("mount with shift=true should validate, got: %v", err)
+	}
+
+	nested := map[string]any{
+		"mounts": map[string]any{
+			"default": []any{
+				map[string]any{"host": "/h", "container": "/c", "shift": false},
+			},
+		},
+	}
+	if err := schema.ValidateProfileMap(nested); err != nil {
+		t.Fatalf("nested mount with shift=false should validate, got: %v", err)
+	}
+
+	bad := map[string]any{
+		"mounts": []any{
+			map[string]any{"host": "/h", "container": "/c", "shift": "yes"},
+		},
+	}
+	if err := schema.ValidateProfileMap(bad); err == nil {
+		t.Fatal("mount shift must be a boolean; string should be rejected")
+	}
+}
+
 // The strict schema must still reject genuinely unknown keys.
 func TestValidateProfileMap_RejectsUnknownKey(t *testing.T) {
 	profile := map[string]any{

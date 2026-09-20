@@ -639,6 +639,16 @@ type MountEntry struct {
 	Container string `toml:"container"` // Container path (must be absolute)
 	Readonly  bool   `toml:"readonly"`  // Mount read-only (default: false)
 
+	// Shift overrides the session-wide UID/GID shifting decision for THIS
+	// mount, mapping directly to `incus config device add … shift=<v>` (#604).
+	// nil (unset) inherits the session default the workspace uses — the common
+	// case. shift=true forces an idmapped mount so host files show up owned by
+	// the container's `code` user rather than nobody:nogroup; shift=false opts a
+	// mount out. It is ignored (with a warning) on a container that uses
+	// raw.idmap for UID mapping, since shift and raw.idmap are mutually
+	// exclusive and raw.idmap already remaps the mount to `code`.
+	Shift *bool `toml:"shift"`
+
 	// Untrusted is set programmatically (never from TOML) when this mount was
 	// loaded from an untrusted, project-scope config file. Such mounts that
 	// resolve outside the workspace are gated behind explicit trust (`coi trust`)
@@ -761,6 +771,13 @@ func mountEntriesFromMaps(maps []map[string]interface{}) ([]MountEntry, error) {
 				return nil, fmt.Errorf("mount `readonly` must be a boolean")
 			}
 			e.Readonly = b
+		}
+		if raw, ok := m["shift"]; ok {
+			b, ok := raw.(bool)
+			if !ok {
+				return nil, fmt.Errorf("mount `shift` must be a boolean")
+			}
+			e.Shift = &b
 		}
 		entries = append(entries, e)
 	}

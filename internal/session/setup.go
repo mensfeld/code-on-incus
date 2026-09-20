@@ -1031,8 +1031,10 @@ func createAndStartContainer(result *SetupResult, opts *SetupOptions, image, con
 	// auto-detection AND set raw.idmap on any host-UID/code-UID mismatch
 	// (issue #530).
 	// Shell path sets raw.idmap before its own start (below), so the
-	// idmapApplied signal is not needed here.
-	useShift, _ := ConfigureUIDMapping(result.ContainerName, MountSources(opts.WorkspacePath, opts.MountConfig, WorktreeSources(worktreeLayout)...), opts.DisableShift, opts.Logger)
+	// idmapApplied signal is not needed for the workspace mount itself — but it
+	// gates a per-mount shift=true override, which is mutually exclusive with
+	// raw.idmap (#604).
+	useShift, rawIdmapActive := ConfigureUIDMapping(result.ContainerName, MountSources(opts.WorkspacePath, opts.MountConfig, WorktreeSources(worktreeLayout)...), opts.DisableShift, opts.Logger)
 
 	// Determine container mount path - either /workspace (default) or same as host path
 	preserveWorkspace := opts.PreserveWorkspacePath || worktreeLayout != nil
@@ -1069,7 +1071,7 @@ func createAndStartContainer(result *SetupResult, opts *SetupOptions, image, con
 	}
 
 	// Mount all configured directories
-	if err := setupMounts(result.Manager, opts.MountConfig, useShift, opts.Logger); err != nil {
+	if err := setupMounts(result.Manager, opts.MountConfig, useShift, rawIdmapActive, opts.Logger); err != nil {
 		return err
 	}
 

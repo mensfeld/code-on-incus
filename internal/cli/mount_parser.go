@@ -131,6 +131,7 @@ func ParseMountConfig(cfg *config.Config) (*session.MountConfig, error) {
 			ContainerPath: filepath.Clean(cfgMount.Container),
 			DeviceName:    fmt.Sprintf("mount-%d", deviceNameCounter),
 			Readonly:      cfgMount.Readonly,
+			Shift:         cfgMount.Shift,
 			Untrusted:     cfgMount.Untrusted,
 			SourcePath:    cfgMount.SourcePath,
 		})
