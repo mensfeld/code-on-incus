@@ -16,6 +16,9 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// incusBinary is the incus executable name, resolved from $PATH by exec.Command.
+const incusBinary = "incus"
+
 var (
 	CodeUID      = 1000
 	CodeUser     = "code"
@@ -30,20 +33,20 @@ func Configure(project, codeUser string, codeUID int) {
 	CodeUID = codeUID
 }
 
-// execIncusCommand creates an exec.Cmd for running an incus command string
-// via "sh -c". The user must be in the incus-admin group in their current
-// session (log out / log back in after usermod -aG).
-func execIncusCommand(incusCmd string) *exec.Cmd {
-	return exec.Command("sh", "-c", incusCmd)
+// execIncusCommand creates an exec.Cmd that runs the incus binary directly with
+// the given argv (no intermediate shell). The user must be in the incus-admin
+// group in their current session (log out / log back in after usermod -aG).
+func execIncusCommand(argv []string) *exec.Cmd {
+	return exec.Command(incusBinary, argv...)
 }
 
-// execIncusCommandContext creates a context-aware exec.Cmd for running an
-// incus command string via "sh -c".
+// execIncusCommandContext creates a context-aware exec.Cmd that runs the incus
+// binary directly with the given argv (no intermediate shell).
 //
 // WaitDelay is set so that when the context is cancelled, cmd.Wait returns
 // promptly instead of blocking until all child-process pipes are closed.
-func execIncusCommandContext(ctx context.Context, incusCmd string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, "sh", "-c", incusCmd)
+func execIncusCommandContext(ctx context.Context, argv []string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, incusBinary, argv...)
 	cmd.WaitDelay = time.Second
 	return cmd
 }
@@ -64,19 +67,19 @@ func outputIncus(cmd *exec.Cmd) ([]byte, error) {
 }
 
 // incusLabel is the timing label for a command built by buildIncusCommand: the
-// full command line with the constant "incus --project <project> " prefix
+// argv joined with spaces and the constant "incus --project <project>" prefix
 // stripped, so the report shows "init <image> <name>" rather than the noise.
 func incusLabel(cmd *exec.Cmd) string {
 	if !timing.Enabled() || len(cmd.Args) == 0 {
 		return ""
 	}
-	// Commands are built as sh -c "<incus ...>"; anything else (a direct
-	// exec.Command) is labeled with its own argv.
-	line := strings.Join(cmd.Args, " ")
-	if cmd.Args[0] == "sh" && len(cmd.Args) == 3 {
-		line = cmd.Args[2]
+	// Drop the leading "incus --project <project>" that buildIncusCommand adds;
+	// anything else (a direct exec.Command) keeps its full argv.
+	args := cmd.Args
+	if len(args) >= 3 && args[0] == incusBinary && args[1] == "--project" && args[2] == IncusProject {
+		args = args[3:]
 	}
-	return strings.TrimPrefix(line, "incus --project "+shellQuote(IncusProject)+" ")
+	return strings.Join(args, " ")
 }
 
 // IncusExecContext executes an Incus command with context support
@@ -1043,29 +1046,11 @@ func ListContainers(pattern string) ([]string, error) {
 	return matching, nil
 }
 
-// buildIncusCommand builds the full incus command string with project flag.
-func buildIncusCommand(args ...string) string {
-	incusArgs := append([]string{"--project", IncusProject}, args...)
-
-	// Properly quote arguments for shell execution
-	quotedArgs := make([]string, len(incusArgs))
-	for i, arg := range incusArgs {
-		quotedArgs[i] = shellQuote(arg)
-	}
-
-	return "incus " + strings.Join(quotedArgs, " ")
-}
-
-// shellQuote quotes a string for safe use in a shell command
-func shellQuote(s string) string {
-	// If string contains no special characters, don't quote
-	if regexp.MustCompile(`^[a-zA-Z0-9@%+=:,./_-]+$`).MatchString(s) {
-		return s
-	}
-
-	// Otherwise, single-quote and escape any single quotes
-	escaped := strings.ReplaceAll(s, "'", "'\"'\"'")
-	return "'" + escaped + "'"
+// buildIncusCommand builds the incus argv (project flag first, then args). The
+// result is passed straight to exec.Command — no shell parses it, so arguments
+// need no quoting or escaping regardless of the characters they contain.
+func buildIncusCommand(args ...string) []string {
+	return append([]string{"--project", IncusProject}, args...)
 }
 
 // ConfigSet sets a configuration key on a container.

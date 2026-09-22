@@ -205,36 +205,16 @@ func (s *serializingWriter) Write(p []byte) (int, error) {
 }
 
 // newIncusPipedCommand returns an exec.Cmd ready to run an incus subcommand
-// with its stdout piped back to the caller. Mirrors the direct invocation
-// path in internal/container/commands.go (post sg removal in #360).
+// with its stdout piped back to the caller. The incus binary is invoked
+// directly with an argv (no intermediate shell), mirroring the direct
+// invocation path in internal/container/commands.go.
 func newIncusPipedCommand(ctx context.Context, args []string) (*exec.Cmd, io.ReadCloser, error) {
-	cmdArgs := []string{"incus", "--project", container.IncusProject}
-	cmdArgs = append(cmdArgs, args...)
+	incusArgs := append([]string{"--project", container.IncusProject}, args...)
 
-	cmd := exec.CommandContext(ctx, "sh", "-c", joinShellArgs(cmdArgs))
+	cmd := exec.CommandContext(ctx, "incus", incusArgs...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, nil, err
 	}
 	return cmd, stdout, nil
-}
-
-// joinShellArgs single-quotes args for safe POSIX-shell concatenation.
-func joinShellArgs(args []string) string {
-	out := make([]byte, 0, 64)
-	for i, a := range args {
-		if i > 0 {
-			out = append(out, ' ')
-		}
-		out = append(out, '\'')
-		for j := 0; j < len(a); j++ {
-			if a[j] == '\'' {
-				out = append(out, []byte(`'\''`)...)
-				continue
-			}
-			out = append(out, a[j])
-		}
-		out = append(out, '\'')
-	}
-	return string(out)
 }
