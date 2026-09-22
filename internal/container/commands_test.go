@@ -140,3 +140,41 @@ func TestStartRetryError(t *testing.T) {
 		t.Errorf("non-idmap failure must NOT get the disable_shift hint, got: %s", got.Error())
 	}
 }
+
+// buildIncusCommand must produce a plain argv (project flag first) with NO
+// shell quoting or escaping: the argv is handed straight to exec.Command, so
+// metacharacters must survive verbatim rather than being wrapped in quotes.
+func TestBuildIncusCommand_ArgvNoShellQuoting(t *testing.T) {
+	saved := IncusProject
+	t.Cleanup(func() { IncusProject = saved })
+	IncusProject = "proj space"
+
+	tricky := "name; rm -rf / $(whoami) 'quoted' \"dq\" | pipe"
+	got := buildIncusCommand("exec", "c", "--", "echo", tricky)
+	want := []string{"--project", "proj space", "exec", "c", "--", "echo", tricky}
+
+	if len(got) != len(want) {
+		t.Fatalf("argv length: got %d %q, want %d %q", len(got), got, len(want), want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("argv[%d]: got %q, want %q (arguments must pass through unquoted)", i, got[i], want[i])
+		}
+	}
+}
+
+// execIncusCommand must invoke the incus binary directly, never via an
+// intermediate "sh -c" — that is what removes the shell-injection surface.
+func TestExecIncusCommand_RunsIncusDirectlyNotViaShell(t *testing.T) {
+	cmd := execIncusCommand(buildIncusCommand("list"))
+	if cmd.Args[0] != incusBinary {
+		t.Errorf("argv[0]: got %q, want %q (must exec incus directly, not a shell)", cmd.Args[0], incusBinary)
+	}
+	if cmd.Args[0] == "sh" || cmd.Args[0] == "bash" {
+		t.Fatalf("command is routed through a shell (%q); the shell wrapper must be gone", cmd.Args[0])
+	}
+	want := []string{"incus", "--project", IncusProject, "list"}
+	if strings.Join(cmd.Args, " ") != strings.Join(want, " ") {
+		t.Errorf("argv: got %q, want %q", cmd.Args, want)
+	}
+}
