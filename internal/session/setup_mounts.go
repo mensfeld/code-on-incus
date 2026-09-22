@@ -32,6 +32,70 @@ func ResolveMountShift(sessionUseShift bool, override *bool, rawIdmapActive bool
 	return *override
 }
 
+// mountShiftDrift records a single mount whose attached shift flag no longer
+// matches what the current config asks for (#604).
+type mountShiftDrift struct {
+	host, container string
+	got, want       bool
+}
+
+// detectMountShiftDrift compares each configured mount that carries an EXPLICIT
+// shift override against the shift flag of its attached disk device (keyed by
+// host source path), returning the entries that drifted. Only explicit
+// overrides are checked: the inherit case (Shift == nil) tracks the session-wide
+// decision, which is out of scope here. `want` folds in the raw.idmap clamp so a
+// shift=true override under raw.idmap (which resolves to false) is not reported
+// as drift. A mount whose source is not attached (e.g. a readonly source that
+// was missing at creation) is skipped. Pure so it is unit-testable without incus.
+func detectMountShiftDrift(mounts []MountEntry, attachedShiftBySource map[string]bool, rawIdmapActive bool) []mountShiftDrift {
+	var drifted []mountShiftDrift
+	for _, m := range mounts {
+		if m.Shift == nil {
+			continue
+		}
+		got, ok := attachedShiftBySource[m.HostPath]
+		if !ok {
+			continue
+		}
+		want := *m.Shift && !rawIdmapActive
+		if got != want {
+			drifted = append(drifted, mountShiftDrift{m.HostPath, m.ContainerPath, got, want})
+		}
+	}
+	return drifted
+}
+
+// WarnMountShiftDrift warns, on a REUSED container, when an attached mount
+// device's shift no longer matches the shift the current config requests (#604).
+// Mount devices are created once and never re-added on reuse (like mount-trust,
+// see §4.6 in Setup), so a changed `shift` is otherwise a silent no-op — the
+// container must be recreated to apply it. No-op when no mount carries an
+// explicit override, when the device data can't be read, or when nothing drifted.
+func WarnMountShiftDrift(containerName string, mounts []MountEntry, logger func(string)) {
+	if logger == nil {
+		return
+	}
+	hasOverride := false
+	for _, m := range mounts {
+		if m.Shift != nil {
+			hasOverride = true
+			break
+		}
+	}
+	if !hasOverride {
+		return
+	}
+	attached, err := container.DiskDeviceShiftBySource(containerName)
+	if err != nil || attached == nil {
+		return
+	}
+	for _, d := range detectMountShiftDrift(mounts, attached, container.ContainerUsesRawIdmap(containerName)) {
+		logger(fmt.Sprintf(
+			"Warning: mount %s -> %s is attached with shift=%t but the current config requests shift=%t; mount devices persist from creation, so recreate the container (coi kill + relaunch) to apply the change",
+			d.host, d.container, d.got, d.want))
+	}
+}
+
 // setupMounts mounts all configured directories to the container
 func setupMounts(mgr container.ContainerDevices, mountConfig *MountConfig, useShift, rawIdmapActive bool, logger func(string)) error {
 	if mountConfig == nil || len(mountConfig.Mounts) == 0 {

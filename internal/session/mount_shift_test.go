@@ -83,3 +83,38 @@ func TestSetupMounts_ShiftClampedUnderRawIdmap(t *testing.T) {
 		t.Errorf("shift=true must be clamped to false under raw.idmap, got shift=true")
 	}
 }
+
+// detectMountShiftDrift reports only mounts with an explicit override whose
+// attached shift no longer matches the config's request (#604), folding in the
+// raw.idmap clamp and skipping unattached and inherit-only mounts.
+func TestDetectMountShiftDrift(t *testing.T) {
+	mounts := []MountEntry{
+		{HostPath: "/host/a", ContainerPath: "/a", Shift: boolPtr(true)},  // wants shift, attached false → drift
+		{HostPath: "/host/b", ContainerPath: "/b", Shift: boolPtr(false)}, // wants no-shift, attached false → OK
+		{HostPath: "/host/c", ContainerPath: "/c", Shift: boolPtr(true)},  // wants shift, attached true → OK
+		{HostPath: "/host/d", ContainerPath: "/d"},                        // inherit (nil) → never reported
+		{HostPath: "/host/e", ContainerPath: "/e", Shift: boolPtr(true)},  // not attached → skipped
+	}
+	attached := map[string]bool{
+		"/host/a": false,
+		"/host/b": false,
+		"/host/c": true,
+		"/host/d": false,
+	}
+
+	drift := detectMountShiftDrift(mounts, attached, false)
+	if len(drift) != 1 {
+		t.Fatalf("want exactly 1 drift, got %d: %+v", len(drift), drift)
+	}
+	if drift[0].host != "/host/a" || drift[0].got != false || drift[0].want != true {
+		t.Errorf("unexpected drift entry: %+v", drift[0])
+	}
+
+	// Under raw.idmap, a shift=true override resolves to false, so /host/a
+	// (attached false) is no longer drift, while /host/c (attached true) becomes
+	// drift because its effective desire is now false.
+	driftRaw := detectMountShiftDrift(mounts, attached, true)
+	if len(driftRaw) != 1 || driftRaw[0].host != "/host/c" || driftRaw[0].want != false {
+		t.Fatalf("under raw.idmap want only /host/c drifting to false, got %+v", driftRaw)
+	}
+}
