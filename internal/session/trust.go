@@ -227,7 +227,10 @@ func untrustedPorts(ports []PortEntry) []PortEntry {
 func sourceFingerprint(mounts []MountEntry, sockets []SocketEntry, creds []CredentialEntry, ports []PortEntry, pool int) string {
 	lines := make([]string, 0, len(mounts)+len(sockets)+len(creds))
 	for _, m := range mounts {
-		lines = append(lines, fmt.Sprintf("mount:%q|%q|%t", m.HostPath, m.ContainerPath, m.Readonly))
+		// Shift is a three-state override (nil=inherit / true / false) and
+		// changes the effective writability of an approved mount, so it must
+		// re-arm trust like readonly does (#604).
+		lines = append(lines, fmt.Sprintf("mount:%q|%q|%t|shift=%s", m.HostPath, m.ContainerPath, m.Readonly, shiftFingerprint(m.Shift)))
 	}
 	for _, s := range sockets {
 		lines = append(lines, fmt.Sprintf("socket:%q|%q|%q", s.HostPath, s.ContainerPath, s.EnvVar))
@@ -244,6 +247,19 @@ func sourceFingerprint(mounts []MountEntry, sockets []SocketEntry, creds []Crede
 	sort.Strings(lines)
 	sum := sha256.Sum256([]byte(strings.Join(lines, "\n")))
 	return hex.EncodeToString(sum[:])
+}
+
+// shiftFingerprint renders a mount's three-state *bool shift override as a
+// stable, collision-free token for the trust fingerprint: unset, true, and
+// false must all hash differently so any change re-arms the trust prompt.
+func shiftFingerprint(shift *bool) string {
+	if shift == nil {
+		return "unset"
+	}
+	if *shift {
+		return "true"
+	}
+	return "false"
 }
 
 // trustedSources computes, per source path, whether the source's gated

@@ -8,6 +8,11 @@ type MountEntry struct {
 	UseShift      bool   // Whether to use UID shifting
 	Readonly      bool   // Mount read-only
 
+	// Shift, when non-nil, overrides the session-wide shift decision for this
+	// mount (#604). See config.MountEntry.Shift for the semantics; nil inherits
+	// the session default. Resolved to the effective flag by ResolveMountShift.
+	Shift *bool
+
 	// Untrusted is true when this mount came from an untrusted (project-scope)
 	// config file. SourcePath is that file's absolute path. Used to gate mounts
 	// whose host path escapes the workspace behind explicit trust (`coi trust`).

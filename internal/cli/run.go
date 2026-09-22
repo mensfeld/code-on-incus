@@ -574,7 +574,7 @@ func (a *App) resolveContainerWorkspacePath(absWorkspace string, forcePreserve b
 // applyWorkspaceMounts mounts the workspace and all configured additional directories
 // into the container, then applies security (read-only) mounts. For restarted persistent
 // containers it retrieves the existing workspace path from the container config instead.
-func (a *App) applyWorkspaceMounts(mgr container.ContainerManager, containerName, absWorkspace string, containerWorkspacePath *string, mountConfig *session.MountConfig, useShift, wasRestarted bool, worktree *session.GitWorktreeLayout) error {
+func (a *App) applyWorkspaceMounts(mgr container.ContainerManager, containerName, absWorkspace string, containerWorkspacePath *string, mountConfig *session.MountConfig, useShift, rawIdmapActive, wasRestarted bool, worktree *session.GitWorktreeLayout) error {
 	if wasRestarted {
 		fmt.Fprintf(os.Stderr, "Reusing existing workspace mount...\n")
 		*containerWorkspacePath = mgr.GetWorkspacePath()
@@ -605,7 +605,7 @@ func (a *App) applyWorkspaceMounts(mgr container.ContainerManager, containerName
 	}
 	if mountConfig != nil {
 		for _, mount := range mountConfig.Mounts {
-			if err := addMount(mgr, mount, useShift); err != nil {
+			if err := addMount(mgr, mount, useShift, rawIdmapActive); err != nil {
 				return err
 			}
 		}
@@ -621,7 +621,7 @@ func (a *App) applyWorkspaceMounts(mgr container.ContainerManager, containerName
 }
 
 // addMount adds a single configured directory mount to the container.
-func addMount(mgr container.ContainerManager, mount session.MountEntry, useShift bool) error {
+func addMount(mgr container.ContainerManager, mount session.MountEntry, useShift, rawIdmapActive bool) error {
 	if mount.Readonly {
 		if _, err := os.Stat(mount.HostPath); err != nil {
 			if os.IsNotExist(err) {
@@ -637,7 +637,10 @@ func addMount(mgr container.ContainerManager, mount session.MountEntry, useShift
 		}
 		fmt.Fprintf(os.Stderr, "Adding mount: %s -> %s\n", mount.HostPath, mount.ContainerPath)
 	}
-	if err := mgr.MountDisk(mount.DeviceName, mount.HostPath, mount.ContainerPath, useShift, mount.Readonly); err != nil {
+	shift := session.ResolveMountShift(useShift, mount.Shift, rawIdmapActive, mount.DeviceName, func(msg string) {
+		fmt.Fprintln(os.Stderr, msg)
+	})
+	if err := mgr.MountDisk(mount.DeviceName, mount.HostPath, mount.ContainerPath, shift, mount.Readonly); err != nil {
 		return fmt.Errorf("failed to add mount '%s': %w", mount.DeviceName, err)
 	}
 	return nil

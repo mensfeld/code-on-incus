@@ -64,6 +64,31 @@ func TestSourceFingerprint_OrderIndependentAndSensitive(t *testing.T) {
 	}
 }
 
+// A mount's shift override changes its effective writability, so flipping it
+// must re-arm the trust prompt just like readonly (#604). All three states
+// (unset / true / false) must fingerprint distinctly.
+func TestSourceFingerprint_CoversShift(t *testing.T) {
+	withShift := func(s *bool) []MountEntry {
+		m := tm("/h1", "/c1", false, true, "s")
+		m.Shift = s
+		return []MountEntry{m}
+	}
+	tt, ff := true, false
+	unset := sourceFingerprint(withShift(nil), nil, nil, nil, 0)
+	on := sourceFingerprint(withShift(&tt), nil, nil, nil, 0)
+	off := sourceFingerprint(withShift(&ff), nil, nil, nil, 0)
+
+	if unset == on {
+		t.Error("fingerprint should change when shift goes from unset to true")
+	}
+	if unset == off {
+		t.Error("fingerprint should change when shift goes from unset to false")
+	}
+	if on == off {
+		t.Error("fingerprint should differ between shift=true and shift=false")
+	}
+}
+
 func TestSourceFingerprint_CoversSockets(t *testing.T) {
 	mounts := []MountEntry{tm("/h1", "/c1", false, true, "s")}
 	sockA := []SocketEntry{ts("/run/a.sock", "/c/a.sock", "A_SOCK", true, "s")}
