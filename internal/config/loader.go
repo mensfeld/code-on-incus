@@ -26,7 +26,19 @@ import (
 // Profiles from all scan locations are merged into a single namespace; if the
 // same profile name is defined in more than one location Load() returns an
 // error asking the user to resolve the conflict.
-func Load() (*Config, error) {
+func Load() (_ *Config, err error) {
+	// Every failure to load, parse, or validate config is a ConfigError, so the
+	// CLI can distinguish "your config is wrong" from a runtime failure with one
+	// errors.As. Wrapping once here covers all the return paths below without
+	// annotating each; already-wrapped errors are not re-wrapped.
+	defer func() {
+		if err != nil {
+			if _, ok := err.(*ConfigError); !ok {
+				err = &ConfigError{Err: err}
+			}
+		}
+	}()
+
 	// Check for deprecated .coi.toml in project root
 	if err := checkDeprecatedConfig(); err != nil {
 		return nil, err

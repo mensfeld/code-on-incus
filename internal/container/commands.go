@@ -124,10 +124,11 @@ func IncusExecQuietContext(ctx context.Context, args ...string) error {
 	cmd.Stderr = &stderr
 
 	if err := runIncus(cmd); err != nil {
-		if msg := strings.TrimSpace(stderr.String()); msg != "" {
-			return fmt.Errorf("%w: %s", err, msg)
+		msg := strings.TrimSpace(stderr.String())
+		if msg != "" {
+			err = fmt.Errorf("%w: %s", err, msg)
 		}
-		return err
+		return ClassifyIncusErr(err, msg)
 	}
 	return nil
 }
@@ -159,9 +160,9 @@ func toExitError(err error, stderr string) error {
 		return nil
 	}
 	if exitErr, ok := err.(*exec.ExitError); ok {
-		return &ExitError{ExitCode: exitErr.ExitCode(), Err: err, Stderr: stderr}
+		return ClassifyIncusErr(&ExitError{ExitCode: exitErr.ExitCode(), Err: err, Stderr: stderr}, stderr)
 	}
-	return err
+	return ClassifyIncusErr(err, stderr)
 }
 
 func IncusOutputContext(ctx context.Context, args ...string) (string, error) {
@@ -885,29 +886,6 @@ func StopContainerQuiet(ctx context.Context, containerName string, force bool) (
 		args = append(args, "--force")
 	}
 	return IncusOutputContext(ctx, args...)
-}
-
-// IsNotFoundErr reports whether an Incus error means the instance is not there.
-//
-// For anything whose goal is "this container should be gone", that is success,
-// not failure. Deletion races are routine: stopping a container ends the session
-// that owns it, and that session then deletes its own ephemeral container — so a
-// concurrent `coi kill` can find the instance already removed between checking
-// that it exists and deleting it. Treating that as an error made `coi kill`
-// report "No containers were killed" and exit non-zero about a container that
-// had, in fact, been killed.
-//
-// Matching on the message is unpleasant but is what the Incus CLI gives us; it
-// exits 1 for every failure and distinguishes them only in stderr. We match the
-// exact phrase Incus emits ("Instance not found") rather than a loose "not found"
-// AND "instance", so an unrelated failure that merely mentions an instance — a
-// busy storage volume, a missing network "for instance X" — is still reported
-// instead of being silently counted as a successful kill.
-func IsNotFoundErr(err error) bool {
-	if err == nil {
-		return false
-	}
-	return strings.Contains(strings.ToLower(err.Error()), "instance not found")
 }
 
 // DeleteContainer deletes a container forcefully
