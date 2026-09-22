@@ -355,6 +355,14 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 	opts.CredentialConfig = gatedCC
 	opts.PortConfig = gatedPC
 
+	// On reuse, [[mounts]] devices persist from creation and are never re-added
+	// (like mount-trust above), so a changed per-mount `shift` would otherwise
+	// be a silent no-op. Warn when an attached mount device's shift no longer
+	// matches the current config (#604).
+	if skipLaunch && opts.MountConfig != nil {
+		WarnMountShiftDrift(result.ContainerName, opts.MountConfig.Mounts, opts.Logger)
+	}
+
 	// 4.7. Preflight the port plan BEFORE any container is created (fresh
 	// path) and AFTER stale port devices were stripped (reuse path, step 4):
 	// pinned host ports that are already taken abort here with a clear

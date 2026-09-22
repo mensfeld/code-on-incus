@@ -305,6 +305,13 @@ func (a *App) launchContainerRunPhase(s *runState) session.Phase {
 				// converted when the decision is raw.idmap (#683 — the reactive
 				// #678 fallback never fires on OrbStack ≥2.2.2's silent breakage).
 				s.useShift = session.ResolveReuseUIDMapping(s.containerName, session.MountSources(s.absWorkspace, s.mountConfig, session.WorktreeSources(layout)...), a.cfg.Incus.DisableShift, logFn)
+				// On reuse, [[mounts]] devices persist from creation and are never
+				// re-added, so a changed per-mount `shift` is a silent no-op. Warn
+				// when an attached mount device's shift drifts from the current
+				// config (#604), mirroring the shell reuse path.
+				if s.mountConfig != nil {
+					session.WarnMountShiftDrift(s.containerName, s.mountConfig.Mounts, logFn)
+				}
 				// A named session (session_name) can be reused from a different
 				// workspace location than the container was created with — the
 				// persisted workspace device then points at the old source and

@@ -120,3 +120,59 @@ cache:
 		})
 	}
 }
+
+func TestParseDiskDeviceShiftBySource(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+		want map[string]bool
+	}{
+		{
+			name: "mixed shift, disk only, keyed by source",
+			yaml: `mount-0:
+  type: disk
+  source: /host/a
+  shift: "true"
+mount-1:
+  type: disk
+  source: /host/b
+  shift: "false"
+myproxy:
+  type: proxy
+  source: /tmp/host.sock
+  shift: "true"`,
+			want: map[string]bool{"/host/a": true, "/host/b": false},
+		},
+		{
+			name: "shift absent defaults false; unquoted bool understood",
+			yaml: `mount-0:
+  type: disk
+  source: /host/a
+mount-1:
+  type: disk
+  source: /host/b
+  shift: true`,
+			want: map[string]bool{"/host/a": false, "/host/b": true},
+		},
+		{
+			name: "disk with empty source skipped",
+			yaml: `root:
+  type: disk
+  pool: default`,
+			want: map[string]bool{},
+		},
+		{
+			name: "malformed yaml -> nil",
+			yaml: "this: : : not valid",
+			want: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseDiskDeviceShiftBySource(tt.yaml)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("parseDiskDeviceShiftBySource = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
