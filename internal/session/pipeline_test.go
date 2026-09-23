@@ -129,3 +129,36 @@ func TestPipeline_TeardownRunsForCompletedPhasesOnError(t *testing.T) {
 		t.Errorf("expected [a], got: %v", torn)
 	}
 }
+
+// Setup's driver strips Pipeline.Run's "<phase>: " annotation from user-facing
+// errors by unwrapping one level. This pins the contract that makes that safe:
+// a phase error unwraps to exactly the error the phase returned, while a
+// non-phase error (context cancellation) unwraps to nil and is thus returned
+// bare rather than silently dropped.
+func TestPipeline_ErrorUnwrapsToPhaseError(t *testing.T) {
+	sentinel := errors.New("image 'x' not found - run 'coi build' first")
+	p := &Pipeline{}
+	err := p.Run(context.Background(),
+		PhaseFunc{"resolve-image", func(_ context.Context) (Teardown, error) { return nil, sentinel }},
+	)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if got := errors.Unwrap(err); got != sentinel {
+		t.Errorf("single-level Unwrap must recover the phase error: got %v, want %v", got, sentinel)
+	}
+
+	// Cancelled context: Pipeline returns ctx.Err() un-annotated, so Unwrap is
+	// nil and the driver must return the error itself (not the nil unwrap).
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	cerr := (&Pipeline{}).Run(ctx,
+		PhaseFunc{"resolve-image", func(_ context.Context) (Teardown, error) { return nil, nil }},
+	)
+	if !errors.Is(cerr, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", cerr)
+	}
+	if errors.Unwrap(cerr) != nil {
+		t.Errorf("cancellation error must not unwrap to a phase error: %v", errors.Unwrap(cerr))
+	}
+}
