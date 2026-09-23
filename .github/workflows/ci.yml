@@ -114,6 +114,30 @@ jobs:
         # above, so compile them here (no Incus needed) to keep them from rotting.
         run: go vet -tags integration ./...
 
+  # Native-macOS coverage for the OS-sensitive host-detection code. coi's full
+  # binary is Linux-only (internal/monitor uses fanotify/inotify with no darwin
+  # stubs; releases ship linux only) and on macOS coi actually runs inside the
+  # Colima/Lima VM — so we do NOT build the whole binary here. But internal/vmhost
+  # (VM detection + the #817 shared-Mac-home config resolution) is darwin-clean
+  # and its logic is exactly what only a real Mac exercises, so run its unit tests
+  # natively to catch darwin-specific regressions (e.g. path/mount handling).
+  macos-unit-tests:
+    name: macOS Unit Tests (vmhost)
+    runs-on: macos-latest
+    needs: build
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: Run vmhost unit tests natively on macOS
+        run: go test -v ./internal/vmhost/...
+
   # Integration tests run in parallel with unit tests (after build passes)
   # Split into 15 test groups for parallel execution
   # Network isolation uses nftables (ip coi forward chain)
@@ -855,6 +879,7 @@ jobs:
     needs:
       - build
       - unit-tests
+      - macos-unit-tests
       - integration
       - lima-smoke
       - installer-storage-arch

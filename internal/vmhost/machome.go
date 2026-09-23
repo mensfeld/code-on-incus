@@ -17,30 +17,38 @@ import (
 // the guest over virtiofs/9p under /Users. A fresh guest home has no
 // ~/.claude, so the default path finds nothing to seed and the container boots
 // an unauthenticated tool. When we detect a Mac VM and the guest's own config
-// dir is empty, fall back to the same config dir under the shared Mac home so
-// `coi shell` picks up the Mac user's real credentials. On Linux (KindUnknown)
-// this is a no-op and returns the guest path unchanged.
-func HostToolConfigDir(guestHome, configDirName string) string {
+// dir holds no real config, fall back to the same config dir under the shared
+// Mac home so `coi shell` picks up the Mac user's real credentials. On Linux
+// (KindUnknown) this is a no-op and returns the guest path unchanged.
+//
+// configFiles are the tool's essential config filenames (e.g.
+// [".credentials.json", "settings.json", …]); their presence — not mere
+// directory non-emptiness — is what marks a dir as "real config worth
+// seeding", so a dir holding only stray files can't shadow the populated one.
+// When neither the guest nor any shared home holds one of these files there is
+// nothing to seed anywhere, so the guest path is returned unchanged.
+func HostToolConfigDir(guestHome, configDirName string, configFiles []string) string {
 	guestPath := filepath.Join(guestHome, configDirName)
 	if configDirName == "" || Detect() == KindUnknown {
 		return guestPath
 	}
-	return ResolveHostConfigDir(guestPath, macHostConfigCandidates(configDirName), dirHasEntries)
+	hasConfig := func(dir string) bool { return dirHasAnyFile(dir, configFiles) }
+	return ResolveHostConfigDir(guestPath, macHostConfigCandidates(configDirName), hasConfig)
 }
 
 // ResolveHostConfigDir chooses between the guest's own config dir and config
 // dirs found under a shared Mac home. The guest path wins whenever it already
 // holds real config (the user authenticated inside the VM); otherwise the
-// first non-empty shared-home candidate is used; if nothing is populated the
+// first shared-home candidate that holds real config is used; if none do the
 // guest path is returned unchanged so callers behave exactly as before (the
 // seeding step then simply skips the missing files). Pure and injectable so
 // the selection logic is unit-testable without a real filesystem.
-func ResolveHostConfigDir(guestPath string, candidates []string, nonEmpty func(string) bool) string {
-	if nonEmpty(guestPath) {
+func ResolveHostConfigDir(guestPath string, candidates []string, hasConfig func(string) bool) string {
+	if hasConfig(guestPath) {
 		return guestPath
 	}
 	for _, c := range candidates {
-		if c != guestPath && nonEmpty(c) {
+		if c != guestPath && hasConfig(c) {
 			return c
 		}
 	}
@@ -48,12 +56,20 @@ func ResolveHostConfigDir(guestPath string, candidates []string, nonEmpty func(s
 }
 
 // macHostConfigCandidates builds the list of <configDirName> paths to look for
-// under the Mac homes shared into this guest. A shared mount is usually the Mac
-// home itself (/Users/alice), so <mount>/<configDirName> is the candidate; but
-// a setup that shares the whole /Users parent is also handled by descending one
-// level (/Users/*/<configDirName>). Deduplicated, order-stable.
+// under the Mac homes shared into this guest, reading the live /proc/mounts.
 func macHostConfigCandidates(configDirName string) []string {
 	mountsBytes, _ := os.ReadFile("/proc/mounts")
+	return buildMacHostConfigCandidates(string(mountsBytes), configDirName, listSubdirs)
+}
+
+// buildMacHostConfigCandidates is the pure core of macHostConfigCandidates,
+// with directory listing injected for testability. A shared mount is normally
+// the Mac home itself (/Users/alice), so <mount>/<configDirName> is the sole
+// candidate — no descent, so we neither read the whole home over virtiofs nor
+// mistake a nested stray .claude for the real one. Only when the whole /Users
+// parent is shared do we descend one level (/Users/*/<configDirName>).
+// Deduplicated, order-stable.
+func buildMacHostConfigCandidates(mounts, configDirName string, listSubdirs func(string) []string) []string {
 	var out []string
 	seen := make(map[string]bool)
 	add := func(p string) {
@@ -62,19 +78,32 @@ func macHostConfigCandidates(configDirName string) []string {
 			out = append(out, p)
 		}
 	}
-	for _, m := range macHostMounts(string(mountsBytes)) {
-		add(filepath.Join(m, configDirName))
-		entries, err := os.ReadDir(m)
-		if err != nil {
+	for _, m := range macHostMounts(mounts) {
+		if m == "/Users" {
+			for _, name := range listSubdirs(m) {
+				add(filepath.Join(m, name, configDirName))
+			}
 			continue
 		}
-		for _, e := range entries {
-			if e.IsDir() {
-				add(filepath.Join(m, e.Name(), configDirName))
-			}
-		}
+		add(filepath.Join(m, configDirName))
 	}
 	return out
+}
+
+// listSubdirs returns the names of the immediate subdirectories of p, or nil
+// if p can't be read.
+func listSubdirs(p string) []string {
+	entries, err := os.ReadDir(p)
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, e := range entries {
+		if e.IsDir() {
+			names = append(names, e.Name())
+		}
+	}
+	return names
 }
 
 // macHostMounts returns the mountpoints under /Users that a Mac VM shares into
@@ -90,8 +119,11 @@ func macHostMounts(mounts string) []string {
 		if len(fields) < 3 {
 			continue
 		}
-		// /proc/mounts fields: source mountpoint fstype ...
-		mountpoint, fstype := fields[1], fields[2]
+		// /proc/mounts fields: source mountpoint fstype ...; the mountpoint is
+		// octal-escaped by the kernel (space -> \040, etc.), so decode it before
+		// use or a Mac home path containing those characters never resolves.
+		mountpoint := unescapeMountField(fields[1])
+		fstype := fields[2]
 		if fstype != "virtiofs" && fstype != "9p" {
 			continue
 		}
@@ -107,9 +139,27 @@ func macHostMounts(mounts string) []string {
 	return out
 }
 
-// dirHasEntries reports whether a directory exists and contains at least one
-// entry — the "has real config" signal for ResolveHostConfigDir.
-func dirHasEntries(p string) bool {
-	entries, err := os.ReadDir(p)
-	return err == nil && len(entries) > 0
+// mountFieldUnescaper decodes the octal escapes the kernel writes into
+// /proc/mounts fields: space, tab, newline, and backslash (see the kernel's
+// mangle_path). These are the only characters escaped there.
+var mountFieldUnescaper = strings.NewReplacer(
+	`\040`, " ",
+	`\011`, "\t",
+	`\012`, "\n",
+	`\134`, `\`,
+)
+
+func unescapeMountField(s string) string { return mountFieldUnescaper.Replace(s) }
+
+// dirHasAnyFile reports whether dir contains at least one of the named files —
+// the "has real tool config worth seeding" signal for ResolveHostConfigDir.
+// Keyed on actual config files rather than mere directory non-emptiness so a
+// dir holding only unrelated/stray files does not shadow one with real config.
+func dirHasAnyFile(dir string, files []string) bool {
+	for _, f := range files {
+		if _, err := os.Stat(filepath.Join(dir, f)); err == nil {
+			return true
+		}
+	}
+	return false
 }

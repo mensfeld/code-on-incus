@@ -27,10 +27,14 @@ import (
 func TestMacHomeConfigSeeding_Integration(t *testing.T) {
 	skipUnlessContextFileTestable(t)
 
-	// Guest home: exists but has an EMPTY .claude (fresh VM) — must NOT win.
+	// Guest home: has a .claude that holds only a stray, non-config file — this
+	// must NOT count as "real config" and must NOT shadow the shared Mac home.
 	guestHome := t.TempDir()
 	guestClaude := filepath.Join(guestHome, ".claude")
 	if err := os.MkdirAll(guestClaude, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(guestClaude, ".DS_Store"), []byte("junk"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -51,12 +55,18 @@ func TestMacHomeConfigSeeding_Integration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Selection: empty guest .claude must lose to the populated shared Mac home.
-	nonEmpty := func(p string) bool {
-		entries, err := os.ReadDir(p)
-		return err == nil && len(entries) > 0
+	// Selection: the guest .claude (stray file only) must lose to the shared Mac
+	// home, keyed on the presence of an actual credential/config file.
+	markers := []string{".credentials.json", "settings.json"}
+	hasConfig := func(p string) bool {
+		for _, f := range markers {
+			if _, err := os.Stat(filepath.Join(p, f)); err == nil {
+				return true
+			}
+		}
+		return false
 	}
-	resolved := vmhost.ResolveHostConfigDir(guestClaude, []string{macClaude}, nonEmpty)
+	resolved := vmhost.ResolveHostConfigDir(guestClaude, []string{macClaude}, hasConfig)
 	if resolved != macClaude {
 		t.Fatalf("ResolveHostConfigDir picked %q, want shared Mac home %q", resolved, macClaude)
 	}

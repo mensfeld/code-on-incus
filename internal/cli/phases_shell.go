@@ -338,8 +338,12 @@ func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.P
 			if configDirName := ti.ConfigDirName(); configDirName != "" {
 				// VM-aware: inside a Colima/Lima/OrbStack Mac VM this falls back to
 				// the config dir under the shared macOS home when the guest home has
-				// none, so tool credentials seed correctly (#macos-config-seeding).
-				cliConfigPath = vmhost.HostToolConfigDir(homeDir, configDirName)
+				// none, so tool credentials seed correctly (#817).
+				var configFiles []string
+				if tcf, ok := ti.(tool.ToolWithConfigDirFiles); ok {
+					configFiles = tcf.EssentialConfigFiles()
+				}
+				cliConfigPath = vmhost.HostToolConfigDir(homeDir, configDirName, configFiles)
 			}
 
 			resolvedForwardedEnvVars := resolveForwardedEnvVarNames(a.cfg.Defaults.ForwardEnv)
