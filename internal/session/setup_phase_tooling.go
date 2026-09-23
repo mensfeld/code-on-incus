@@ -59,7 +59,7 @@ func (st *setupState) phaseMountsAndContextPath(_ context.Context) (Teardown, er
 
 	// Set auto-context path for config-based tools (must happen before setupCLIConfig
 	// so the path is included in GetSandboxSettings output)
-	if st.opts.Tool != nil && config.BoolVal(st.opts.AutoContext) {
+	if st.opts.Tool != nil && config.BoolVal(st.opts.Context.Auto) {
 		if acp, ok := st.opts.Tool.(tool.ToolWithAutoContextPath); ok {
 			acp.SetAutoContextPath(filepath.Join(st.result.HomeDir, "SANDBOX_CONTEXT.md"))
 		}
@@ -138,7 +138,7 @@ func (st *setupState) phaseInjectContext(_ context.Context) (Teardown, error) {
 	// Runs for both new and resumed sessions so dynamic info stays current.
 	contextContent := injectSandboxContext(st.result, st.opts)
 
-	if st.opts.Tool != nil && config.BoolVal(st.opts.AutoContext) && contextContent != "" {
+	if st.opts.Tool != nil && config.BoolVal(st.opts.Context.Auto) && contextContent != "" {
 		if acf, ok := st.opts.Tool.(tool.ToolWithAutoContextFile); ok {
 			if err := injectAutoContextFile(st.result.Manager, acf, contextContent, st.result.HomeDir, st.opts.Logger); err != nil {
 				st.opts.Logger(fmt.Sprintf("Warning: Failed to inject auto-context file: %v", err))

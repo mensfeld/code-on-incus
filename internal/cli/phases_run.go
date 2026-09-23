@@ -717,29 +717,35 @@ func (a *App) runPromptPhase(s *runState) session.Phase {
 				Timezone:               s.tz,
 			}
 			seedOpts := session.SetupOptions{
-				Tool:                t,
-				CLIConfigPath:       cliConfigPath,
-				AutoContext:         a.cfg.Tool.AutoContext,
-				ContextJSON:         a.cfg.Tool.ContextJSON,
-				ContextFilePath:     a.cfg.Tool.ContextFile,
-				ContextJSONFilePath: a.cfg.Tool.ContextJSONFile,
-				ProfileContextFile:  a.cfg.ProfileContextFile,
-				NetworkConfig:       &a.cfg.Network,
-				LimitsConfig:        &a.cfg.Limits,
-				Persistent:          a.persistent,
-				ForwardedEnvVars:    resolveForwardedEnvVarNames(a.cfg.Defaults.ForwardEnv),
-				Logger:              stderrLogFn,
-				// The kernel-surface flags feed injectSandboxContext's Docker
-				// availability line; omitting them here (zero value = docker
-				// off) would make every headless run's context claim Docker is
-				// unavailable while the container actually has it (the launch
-				// phase applies the real policy). Mirrors phases_shell.go.
-				// The strict tier is intentionally not threaded here: this seed
-				// path only drives the Docker-availability line, which depends
-				// solely on DockerEnabled() — and ReduceKernelSurface already
-				// reflects the strict tier (it implies the base flag).
-				DockerSupport:       a.cfg.Container.IsDockerEnabled(),
-				ReduceKernelSurface: a.cfg.Security.IsReduceKernelSurfaceEnabled(),
+				Tool:          t,
+				CLIConfigPath: cliConfigPath,
+				LimitsConfig:  &a.cfg.Limits,
+				Persistent:    a.persistent,
+				Logger:        stderrLogFn,
+				Context: session.ContextOptions{
+					Auto:             a.cfg.Tool.AutoContext,
+					JSON:             a.cfg.Tool.ContextJSON,
+					FilePath:         a.cfg.Tool.ContextFile,
+					JSONFilePath:     a.cfg.Tool.ContextJSONFile,
+					ProfileFile:      a.cfg.ProfileContextFile,
+					ForwardedEnvVars: resolveForwardedEnvVarNames(a.cfg.Defaults.ForwardEnv),
+				},
+				Network: session.NetworkOptions{
+					Config: &a.cfg.Network,
+				},
+				Security: session.SecurityOptions{
+					// The kernel-surface flags feed injectSandboxContext's Docker
+					// availability line; omitting them here (zero value = docker
+					// off) would make every headless run's context claim Docker is
+					// unavailable while the container actually has it (the launch
+					// phase applies the real policy). Mirrors phases_shell.go.
+					// The strict tier is intentionally not threaded here: this seed
+					// path only drives the Docker-availability line, which depends
+					// solely on DockerEnabled() — and ReduceKernelSurface already
+					// reflects the strict tier (it implies the base flag).
+					Docker:              a.cfg.Container.IsDockerEnabled(),
+					ReduceKernelSurface: a.cfg.Security.IsReduceKernelSurfaceEnabled(),
+				},
 			}
 			if err := session.SeedToolConfigForRun(ctx, seedResult, seedOpts); err != nil {
 				return nil, err

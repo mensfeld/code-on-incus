@@ -115,7 +115,7 @@ func (st *setupState) phaseReconcileExisting(_ context.Context) (Teardown, error
 // sockets, ad-hoc credential entries, and port publications at the single
 // chokepoint every caller passes through. Runs on reuse paths too.
 func (st *setupState) phaseFilterTrusted(_ context.Context) (Teardown, error) {
-	gatedMC, droppedM, gatedSC, droppedS, gatedCC, droppedC, gatedPC, droppedP := FilterTrusted(st.opts.MountConfig, st.opts.SocketConfig, st.opts.CredentialConfig, st.opts.PortConfig, st.opts.WorkspacePath)
+	gatedMC, droppedM, gatedSC, droppedS, gatedCC, droppedC, gatedPC, droppedP := FilterTrusted(st.opts.MountConfig, st.opts.Network.Sockets, st.opts.CredentialConfig, st.opts.Network.Ports, st.opts.WorkspacePath)
 	if st.skipLaunch && len(droppedM) > 0 {
 		st.opts.Logger(fmt.Sprintf(
 			"Warning: %d untrusted mount(s) remain attached from when this container was created; recreate it (coi kill + relaunch) to apply mount-trust changes",
@@ -148,9 +148,9 @@ func (st *setupState) phaseFilterTrusted(_ context.Context) (Teardown, error) {
 		))
 	}
 	st.opts.MountConfig = gatedMC
-	st.opts.SocketConfig = gatedSC
+	st.opts.Network.Sockets = gatedSC
 	st.opts.CredentialConfig = gatedCC
-	st.opts.PortConfig = gatedPC
+	st.opts.Network.Ports = gatedPC
 
 	// On reuse, [[mounts]] devices persist from creation and are never re-added
 	// (like mount-trust above), so a changed per-mount `shift` would otherwise
@@ -165,7 +165,7 @@ func (st *setupState) phaseFilterTrusted(_ context.Context) (Teardown, error) {
 // 4.7 Preflight the port plan BEFORE any container is created (fresh path) and
 // AFTER stale port devices were stripped (reuse path).
 func (st *setupState) phasePreflightPorts(_ context.Context) (Teardown, error) {
-	resolvedPorts, err := ResolvePorts(st.opts.PortConfig, st.opts.WorkspacePath, st.opts.SessionName, st.opts.Slot)
+	resolvedPorts, err := ResolvePorts(st.opts.Network.Ports, st.opts.WorkspacePath, st.opts.SessionName, st.opts.Slot)
 	if err != nil {
 		return nil, fmt.Errorf("port preflight failed: %w", err)
 	}
