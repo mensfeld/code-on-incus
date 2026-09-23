@@ -109,6 +109,11 @@ jobs:
           tail -n +2 coverage-session.out >> coverage.out 2>/dev/null || true
           go tool cover -func=coverage.out | tail -1  # Show total coverage
 
+      - name: Compile-check integration tier
+        # The //go:build integration tests are not built by the default `go test`
+        # above, so compile them here (no Incus needed) to keep them from rotting.
+        run: go vet -tags integration ./...
+
   # Integration tests run in parallel with unit tests (after build passes)
   # Split into 15 test groups for parallel execution
   # Network isolation uses nftables (ip coi forward chain)
