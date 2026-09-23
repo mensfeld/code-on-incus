@@ -1,4 +1,4 @@
-.PHONY: build install clean test test-coverage test-unit integrations-setup integrations integrations-debug integrations-cli lint lint-python fmt tidy help check-deps
+.PHONY: build install clean test test-coverage test-unit test-integration test-integration-compile integrations-setup integrations integrations-debug integrations-cli lint lint-python fmt tidy help check-deps
 
 # Binary name
 BINARY_NAME=coi
@@ -106,8 +106,21 @@ clean:
 
 # Run all tests (unit tests only)
 test:
-	@echo "Running unit tests..."
+	@echo "Running unit tests (fast tier; Incus-requiring tests are behind //go:build integration)..."
 	$(GOTEST) -v -race -short ./...
+
+# Go integration tier: tests tagged //go:build integration. These drive a real
+# Incus daemon (and self-skip when it or the coi-default image is absent), so
+# they are excluded from the default `make test`. Run this on a host with Incus.
+test-integration:
+	@echo "Running Go integration tests (-tags integration; needs a local Incus)..."
+	$(GOTEST) -v -race -tags integration ./...
+
+# Compile-check the integration tier without running it (no Incus needed). Keeps
+# the tagged tests from rotting now that `make test` no longer builds them.
+test-integration-compile:
+	@echo "Compile-checking Go integration tier (-tags integration)..."
+	$(GOVET) -tags integration ./...
 
 # Setup integration test dependencies
 integrations-setup:

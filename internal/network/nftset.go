@@ -445,18 +445,6 @@ func isNftNotFound(err error) bool {
 	return strings.Contains(msg, "No such file") || strings.Contains(msg, "does not exist")
 }
 
-// dynSeenSnapshot returns the dynamic addresses this manager believes it has
-// installed, for diagnostics and tests.
-func (f *NftManager) dynSeenSnapshot() map[string]time.Time {
-	f.dynMu.Lock()
-	defer f.dynMu.Unlock()
-	out := make(map[string]time.Time, len(f.dynSeen))
-	for k, v := range f.dynSeen {
-		out[k] = v
-	}
-	return out
-}
-
 // dynAllower is the slice of NftManager the resolver/refresher path needs to
 // install DNS-learned addresses (and their per-name ports). Keeping it narrow lets
 // the Manager's sync path be tested with a stub in place of real nft.

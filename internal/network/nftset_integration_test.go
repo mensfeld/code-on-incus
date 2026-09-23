@@ -1,3 +1,5 @@
+//go:build integration
+
 package network
 
 import (
@@ -416,4 +418,17 @@ func TestDeleteCOIFilterRulesForIP_RemovesEverything(t *testing.T) {
 	if err := DeleteCOIFilterRulesForIP(testContainerIP); err != nil {
 		t.Errorf("second teardown should be a no-op, got: %v", err)
 	}
+}
+
+// dynSeenSnapshot returns the dynamic addresses this manager believes it has
+// installed. Test-only accessor (integration tier); lives here so it isn't dead
+// production code once the default build excludes the integration tests.
+func (f *NftManager) dynSeenSnapshot() map[string]time.Time {
+	f.dynMu.Lock()
+	defer f.dynMu.Unlock()
+	out := make(map[string]time.Time, len(f.dynSeen))
+	for k, v := range f.dynSeen {
+		out[k] = v
+	}
+	return out
 }
