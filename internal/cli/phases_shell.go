@@ -14,6 +14,7 @@ import (
 	"github.com/mensfeld/code-on-incus/internal/nftmonitor"
 	"github.com/mensfeld/code-on-incus/internal/session"
 	"github.com/mensfeld/code-on-incus/internal/tool"
+	"github.com/mensfeld/code-on-incus/internal/vmhost"
 	"github.com/spf13/cobra"
 )
 
@@ -335,7 +336,10 @@ func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.P
 
 			var cliConfigPath string
 			if configDirName := ti.ConfigDirName(); configDirName != "" {
-				cliConfigPath = filepath.Join(homeDir, configDirName)
+				// VM-aware: inside a Colima/Lima/OrbStack Mac VM this falls back to
+				// the config dir under the shared macOS home when the guest home has
+				// none, so tool credentials seed correctly (#macos-config-seeding).
+				cliConfigPath = vmhost.HostToolConfigDir(homeDir, configDirName)
 			}
 
 			resolvedForwardedEnvVars := resolveForwardedEnvVarNames(a.cfg.Defaults.ForwardEnv)
