@@ -9,7 +9,7 @@
 [![Latest Release](https://img.shields.io/github/v/release/mensfeld/code-on-incus)](https://github.com/mensfeld/code-on-incus/releases)
 [![Join the chat at https://slack.karafka.io](https://raw.githubusercontent.com/karafka/misc/master/slack.svg)](https://slack.karafka.io)
 
-**Give every AI coding agent its own machine - with active defense.**
+**Give the agent a machine. Just not yours.**
 
 `coi` runs your AI coding tool (Claude Code, Codex, opencode, pi, omp) inside its own isolated Linux system - a full-OS container with root access, systemd, Docker, and the freedom to install anything. The agent works like it would on a real server - but it can't touch your host, can't see your credentials, and if it does something dangerous, `coi` pauses or kills the container on its own.
 
