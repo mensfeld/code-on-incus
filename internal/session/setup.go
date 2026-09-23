@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mensfeld/code-on-incus/internal/bedrock"
 	"github.com/mensfeld/code-on-incus/internal/config"
 	"github.com/mensfeld/code-on-incus/internal/container"
 	"github.com/mensfeld/code-on-incus/internal/limits"
@@ -18,7 +17,6 @@ import (
 	"github.com/mensfeld/code-on-incus/internal/network"
 	"github.com/mensfeld/code-on-incus/internal/timing"
 	"github.com/mensfeld/code-on-incus/internal/tool"
-	"github.com/mensfeld/code-on-incus/internal/vmhost"
 )
 
 const (
@@ -92,13 +90,14 @@ type SetupResult struct {
 	HasImmutableProtection bool              // True if host-side immutable attribute was applied to protected paths
 }
 
-// Setup initializes a container for a Claude session
-// This configures the container with workspace mounting and user setup
+// Setup initializes a container for a Claude session.
 //
-//nolint:gocyclo // Sequential initialization with many configuration paths
+// It builds the container up in a fixed sequence of small phases (see
+// setup_phases.go), each mutating a shared setupState. The former ~600-line
+// body is now this driver plus one method per numbered step. Cleanup on failure
+// is unchanged: Setup is forward-only, and the caller's session.Cleanup handles
+// teardown, so the phases register no teardowns of their own.
 func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
-	result := &SetupResult{}
-
 	// Default logger
 	if opts.Logger == nil {
 		opts.Logger = func(msg string) {
@@ -106,570 +105,42 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		}
 	}
 
-	// 1. Generate or use existing container name
-	var containerName string
-	if opts.ContainerName != "" {
-		// Use existing container (for testing)
-		containerName = opts.ContainerName
-		opts.Logger(fmt.Sprintf("Using existing container: %s", containerName))
-	} else {
-		// Generate new container name
-		containerName = ContainerName(opts.WorkspacePath, opts.SessionName, opts.Slot)
-		opts.Logger(fmt.Sprintf("Container name: %s", containerName))
-	}
-	result.ContainerName = containerName
-	result.Manager = container.NewManager(containerName)
+	st := &setupState{opts: opts, result: &SetupResult{}}
 
-	hostHome, _ := os.UserHomeDir() // empty string on failure; logger.New handles it
-	result.Logger = logger.New(containerName, hostHome)
-	if w := result.Logger.InitWarning(); w != "" {
-		opts.Logger(fmt.Sprintf("Warning: %s", w))
-	}
-	// Route the network package's diagnostics (incl. the background IP-refresh
-	// goroutine) to the session log files instead of stderr, which in a coi
-	// shell is the user's tmux terminal (issue #372).
-	network.SetLogger(result.Logger)
-
-	// 1.5 Validate Bedrock setup if running in Colima/Lima
-	if vmhost.Detect().HandlesUIDMapping() && opts.CLIConfigPath != "" {
-		settingsPath := filepath.Join(opts.CLIConfigPath, "settings.json")
-		isConfigured, err := bedrock.IsBedrockConfigured(settingsPath)
-		if err != nil {
-			opts.Logger(fmt.Sprintf("Warning: Failed to check Bedrock configuration: %v", err))
-		} else if isConfigured {
-			opts.Logger("Detected AWS Bedrock configuration, validating setup...")
-
-			// Validate Bedrock setup
-			validationResult := bedrock.ValidateColimaBedrockSetup()
-
-			// Check if .aws is mounted
-			if opts.MountConfig != nil {
-				var mountPaths []string
-				for _, mount := range opts.MountConfig.Mounts {
-					mountPaths = append(mountPaths, mount.HostPath)
-				}
-				if mountIssue := bedrock.CheckMountConfiguration(mountPaths); mountIssue != nil {
-					validationResult.Issues = append(validationResult.Issues, *mountIssue)
-				}
-			}
-
-			// If there are errors, fail with helpful message
-			if validationResult.HasErrors() {
-				return nil, fmt.Errorf("%s", validationResult.FormatError())
-			}
-
-			// Log warnings but continue
-			if len(validationResult.Issues) > 0 {
-				for _, issue := range validationResult.Issues {
-					if issue.Severity == "warning" {
-						opts.Logger(fmt.Sprintf("⚠️  %s", issue.Message))
-					}
-				}
-			}
-		}
-	}
-
-	// Autofix: make sure the Incus bridge has iptables FORWARD ACCEPT rules
-	// before any container is started. Without them, containers cannot get IPs
-	// via DHCP when the FORWARD chain policy is DROP (e.g. when Docker is running).
-	if changed, bridgeName, err := network.EnsureBridgeInTrustedZone(); err != nil {
-		opts.Logger(fmt.Sprintf("Warning: could not ensure bridge forwarding rules: %v", err))
-	} else if changed {
-		opts.Logger(fmt.Sprintf("Added iptables FORWARD rules for %s (was missing — containers could not get IPs)", bridgeName))
-	}
-
-	// 2. Determine image
-	image := opts.Image
-	if image == "" {
-		image = CoiImage
-	}
-	result.Image = image
-
-	// Check if image exists
-	exists, err := container.ImageExists(image)
-	if err != nil {
-		return nil, fmt.Errorf("failed to check image: %w", err)
-	}
-	if !exists {
-		return nil, fmt.Errorf("image '%s' not found - run 'coi build' first", image)
-	}
-
-	// 3. Provisional execution context — finalized at step 6.4 once the
-	// container is up and we can probe it for the `code` user.
-	//
-	// Historically this was a literal string match against the coi-default
-	// alias. That breaks custom images built FROM coi-default (they have
-	// the `code` user inherited from the base layer but a different alias,
-	// so the match returned false and the session was forced to root). We
-	// now defer the final decision until after the container boots and
-	// probe it directly.
-	result.HomeDir = "/home/" + container.CodeUser
-
-	// 4. Check if container already exists
-	var skipLaunch bool
-
-	exists, err = result.Manager.Exists()
-	if err != nil {
-		return nil, fmt.Errorf("failed to check if container exists: %w", err)
-	}
-
-	// An explicitly named container (--container) is attached to, never
-	// created — so it must already exist. Without this guard a missing name
-	// silently skips both the reuse branch (exists is false) and the
-	// creation branch (skipLaunch is true), then fails with a misleading
-	// "container not ready" only after the full ready_timeout wait.
-	if opts.ContainerName != "" {
-		if !exists {
-			return nil, fmt.Errorf("container '%s' not found - omit --container to launch a new container for this workspace", opts.ContainerName)
-		}
-		skipLaunch = true
-		opts.Logger("Using existing container, skipping creation...")
-	}
-
-	if exists {
-		// Check if container is currently running
-		running, err := result.Manager.Running()
-		if err != nil {
-			return nil, fmt.Errorf("failed to check if container is running: %w", err)
-		}
-
-		if running {
-			// Container is running - this is an active session!
-			if opts.Persistent || opts.ContainerName != "" || opts.ResumeFromID != "" {
-				// Reuse running container if: persistent mode, --container flag, or explicit resume.
-				// The resume case covers post-reboot Incus stateful restore: a non-persistent
-				// container may be Running because Incus restored it; --resume should reuse it.
-				// A RUNNING container cannot be remounted safely, so refuse
-				// to attach when it still has a DIFFERENT workspace mounted —
-				// the normal hazard for a named session (session_name) whose
-				// previous checkout's session is still live. Attaching would
-				// silently hand this launch the other checkout's files.
-				// An EXPLICIT --container is exempt: naming the container is
-				// the user saying "attach to that container as it is",
-				// wherever it was created from (the documented testing flow).
-				if opts.ContainerName == "" {
-					if src := result.Manager.GetWorkspaceSource(); src == "" {
-						opts.Logger("Warning: could not determine the running container's workspace source; skipping the workspace-match check")
-					} else if !SameWorkspaceSource(src, opts.WorkspacePath) {
-						return nil, fmt.Errorf(
-							"container %s is running with a different workspace mounted (%s); "+
-								"stop that session first (coi shutdown %s) or launch from that workspace",
-							containerName, src, containerName)
-					}
-				}
-				opts.Logger("Container already running, reusing...")
-				// A RUNNING container's kernel-surface settings cannot be
-				// changed (nesting is rejected, the deny list is racy), so
-				// only surface a config mismatch instead of applying it. Skip
-				// for an explicit --container attach: that means "use it as it
-				// is", and its config may legitimately come from an Incus
-				// profile we neither manage nor should second-guess.
-				if opts.ContainerName == "" {
-					warnHardeningMismatch(result.ContainerName, hardeningPolicyFrom(&opts), opts.Logger)
-				}
-				// Strip the previous session's port devices NOW, before the
-				// port preflight below bind-probes: their live forkproxy
-				// listeners would otherwise make the session collide with its
-				// own ports (pinned entries hard-fail, pool numbers drift).
-				RemoveStalePortDevices(result.Manager, opts.Logger)
-				// Deliberately do NOT reconcile protect-* devices here. This
-				// branch reuses an already-RUNNING container, so (a) there is no
-				// Start(), hence no "Missing source path" start-validation to
-				// prevent — the #610 wedge only bites the stopped branch below —
-				// and (b) hot-removing a protect-* device from a live container
-				// would DROP a read-only protection mid-session: a source that
-				// went missing while still mounted keeps writes blocked, but
-				// RemoveDevice would reopen it to a possibly-malicious agent.
-				// Reconciliation happens on the next stopped->start cycle.
-				skipLaunch = true
-			} else {
-				// A running container exists for this slot but we're not resuming or in
-				// persistent mode — AllocateSlot() should have avoided this slot.
-				return nil, fmt.Errorf("slot %d is already in use by a running container %s - this should not happen (bug in slot allocation)", opts.Slot, containerName)
-			}
-		} else {
-			// Container exists but is stopped
-			if opts.Persistent || opts.ContainerName != "" {
-				// Restart the stopped container
-				// This includes: persistent containers OR containers specified via --container flag
-				if err := restartStoppedContainer(result, &opts, containerName); err != nil {
-					return nil, err
-				}
-				skipLaunch = true
-			} else {
-				// Delete the stopped leftover container
-				opts.Logger("Found stopped leftover container from previous session, deleting...")
-				if err := result.Manager.Delete(true); err != nil {
-					return nil, fmt.Errorf("failed to delete leftover container: %w", err)
-				}
-				// Brief pause to let Incus fully delete
-				time.Sleep(500 * time.Millisecond)
-			}
-		}
-	}
-
-	// 4.6. Defense-in-depth: gate untrusted out-of-workspace mounts, untrusted
-	// forwarded sockets, untrusted ad-hoc credential entries, AND untrusted
-	// port publications at the single chokepoint every caller passes through.
-	// This deliberately runs on the REUSE paths too: sockets, credentials
-	// (resume), and ports are re-applied from the current config every
-	// session, so gating only at creation would let an untrusted repo config
-	// smuggle them onto a reused container. Mount devices are the exception —
-	// they persist from creation and can't be re-gated here, so on reuse we
-	// warn instead. Idempotent with the CLI-level gate: on the normal CLI
-	// flow these are already filtered, so this drops nothing.
-	gatedMC, droppedM, gatedSC, droppedS, gatedCC, droppedC, gatedPC, droppedP := FilterTrusted(opts.MountConfig, opts.SocketConfig, opts.CredentialConfig, opts.PortConfig, opts.WorkspacePath)
-	if skipLaunch && len(droppedM) > 0 {
-		opts.Logger(fmt.Sprintf(
-			"Warning: %d untrusted mount(s) remain attached from when this container was created; recreate it (coi kill + relaunch) to apply mount-trust changes",
-			len(droppedM),
-		))
-	} else {
-		for _, m := range droppedM {
-			opts.Logger(fmt.Sprintf(
-				"Warning: ignoring untrusted mount from %s: %s -> %s (resolves outside the workspace; run 'coi trust' or set %s=1)",
-				m.SourcePath, m.HostPath, m.ContainerPath, TrustEnvVar,
-			))
-		}
-	}
-	for _, s := range droppedS {
-		opts.Logger(fmt.Sprintf(
-			"Warning: ignoring untrusted socket from %s: %s -> %s (run 'coi trust' or set %s=1)",
-			s.SourcePath, s.HostPath, s.ContainerPath, TrustEnvVar,
-		))
-	}
-	for _, c := range droppedC {
-		opts.Logger(fmt.Sprintf(
-			"Warning: ignoring untrusted credential entry from %s: %s -> %s (run 'coi trust' or set %s=1)",
-			c.SourcePath, c.HostPath, c.ContainerPath, TrustEnvVar,
-		))
-	}
-	for _, p := range droppedP {
-		opts.Logger(fmt.Sprintf(
-			"Warning: ignoring untrusted %s from %s (a repo declaring host listeners can squat localhost ports; run 'coi trust' or set %s=1)",
-			DescribeDroppedPort(p), p.SourcePath, TrustEnvVar,
-		))
-	}
-	opts.MountConfig = gatedMC
-	opts.SocketConfig = gatedSC
-	opts.CredentialConfig = gatedCC
-	opts.PortConfig = gatedPC
-
-	// On reuse, [[mounts]] devices persist from creation and are never re-added
-	// (like mount-trust above), so a changed per-mount `shift` would otherwise
-	// be a silent no-op. Warn when an attached mount device's shift no longer
-	// matches the current config (#604).
-	if skipLaunch && opts.MountConfig != nil {
-		WarnMountShiftDrift(result.ContainerName, opts.MountConfig.Mounts, opts.Logger)
-	}
-
-	// 4.7. Preflight the port plan BEFORE any container is created (fresh
-	// path) and AFTER stale port devices were stripped (reuse path, step 4):
-	// pinned host ports that are already taken abort here with a clear
-	// error, and auto/pool ports get their final numbers (busy ones skipped
-	// forward within the slot block). See ResolvePorts.
-	resolvedPorts, err := ResolvePorts(opts.PortConfig, opts.WorkspacePath, opts.SessionName, opts.Slot)
-	if err != nil {
-		return nil, fmt.Errorf("port preflight failed: %w", err)
-	}
-
-	// 5. Create and configure container (but don't start yet if we need to add devices)
-	// Always launch as non-ephemeral so we can save session data even if container is stopped
-	// (e.g., via 'sudo shutdown 0' from within). Cleanup will delete unless persistent mode is configured.
-	if !skipLaunch {
-		if err := createAndStartContainer(result, &opts, image, containerName); err != nil {
-			return nil, err
-		}
-	}
-
-	// Set/update alias metadata on container (for running-container lookup).
-	// This runs for both new and reused containers so alias changes are propagated.
-	if opts.Alias != "" {
-		if err := container.IncusExec("config", "set", result.ContainerName,
-			fmt.Sprintf("user.coi.alias=%s", opts.Alias)); err != nil {
-			opts.Logger(fmt.Sprintf("Warning: Failed to set alias metadata: %v", err))
-		}
-	}
-
-	// 6. Wait for ready
-	readyTimeout := opts.ReadyTimeout
-	if readyTimeout <= 0 {
-		readyTimeout = 30
-	}
-	if err := WaitForReady(ctx, result.Manager, readyTimeout, opts.Logger); err != nil {
-		return nil, AnnotateReadyTimeout(err, opts.LimitsConfig)
-	}
-
-	// 6.1. Configure Docker bridge CIDR to prevent IP conflicts with the host
-	// network or other containers. Written whenever Docker is enabled — on
-	// reuse too, not only fresh launches: a persistent container created with
-	// docker=false and later flipped to docker=true has no daemon.json yet, so
-	// gating this on !skipLaunch would leave dockerd on its default 172.17/16
-	// bridge (the VPN/subnet-conflict this file exists to prevent). The write
-	// is idempotent, so re-running it on every COI-managed reuse is safe.
-	// Skipped for an explicit --container attach ("use it as it is", same as
-	// the hardening reconcile above): overwriting a user-managed container's
-	// /etc/docker/daemon.json would clobber their own registry-mirror/
-	// storage-driver settings.
-	if opts.ContainerName == "" && hardeningPolicyFrom(&opts).DockerEnabled() {
-		if err := ConfigureDockerDaemon(result.Manager, opts.Logger); err != nil {
-			opts.Logger(fmt.Sprintf("Warning: Failed to configure Docker daemon: %v", err))
-		}
-	}
-
-	if !skipLaunch {
-		// Size /tmp to prevent space exhaustion in big builds. Applied POST-start:
-		// it installs a systemd tmp.mount unit, which the running container's init
-		// mounts immediately and again at every subsequent boot (#733). Shared with
-		// the run path via ApplyTmpfsSizing so /tmp sizing is uniform (#728).
-		ApplyTmpfsSizing(result.Manager, opts.LimitsConfig, opts.Logger)
-	}
-
-	// 6.4. Finalize execution context by probing the container for the
-	// `code` user. This replaces the old literal-alias match, which
-	// forced custom images built FROM coi-default (a valid and common
-	// pattern) to run as root. We now trust the image: if it has a
-	// `code` user, we use it; otherwise we fall back to root.
-	hasCodeUser, err := DetectCodeUser(result.Manager, container.CodeUser)
-	if err != nil {
-		opts.Logger(fmt.Sprintf("Warning: could not probe container for %s user: %v — falling back to root", container.CodeUser, err))
-		hasCodeUser = false
-	}
-	result.RunAsRoot = !hasCodeUser
-	if result.RunAsRoot {
-		result.HomeDir = "/root"
-	} else {
-		result.HomeDir = "/home/" + container.CodeUser
-	}
-
-	// 6.5. Remap container user UID/GID if configured UID differs from image default (1000)
-	// The COI image builds the 'code' user with UID/GID 1000. If code_uid is set to a
-	// different value, remap the user inside the container so /etc/passwd, home directory
-	// ownership, and file permissions all match the configured UID.
-	if !skipLaunch && hasCodeUser && container.CodeUID != 1000 {
-		if err := remapContainerUser(result, opts); err != nil {
-			return nil, err
-		}
-	}
-
-	// 6.6. Forward host sockets (proxy devices must be added to a running
-	// container). The SSH agent (opts.ForwardSSHAgent) is a built-in entry that
-	// reads the live $SSH_AUTH_SOCK; configured [[sockets]] follow (already
-	// trust-filtered above).
-	result.SocketEnv = ForwardConfiguredSockets(result.Manager, opts.SocketConfig, opts.ForwardSSHAgent, opts.Logger)
-	result.SSHAgentSocketPath = result.SocketEnv["SSH_AUTH_SOCK"]
-
-	// 6.6.05. Publish configured [ports] on the host (proxy devices, like
-	// sockets but pointing the other way): agent-started services become
-	// reachable as localhost:<port>, with the mapping exported to the
-	// session env (COI_PORTS / COI_PORT_<NAME>) and the sandbox context
-	// file (#558). The plan was trust-gated and resolved at step 4.6/4.7
-	// (after stale devices were stripped on reuse), so this is a plain add.
-	result.PublishedPorts, result.PortsEnv = PublishResolvedPorts(result.Manager, resolvedPorts, opts.Logger)
-
-	// 6.6.1. Prevent git from guessing commit identity from the container user.
-	// Setting user.useConfigOnly=true forces git to refuse commits until
-	// user.name and user.email are explicitly configured, which ensures AI
-	// tools discover and set the real developer identity.
-	//
-	// git.readonly: instead of writing ~/.gitconfig in-container (which the agent
-	// could overwrite), mount the identity read-only at result.HomeDir/.gitconfig —
-	// using the home resolved just above, so it is correct for both a code-user and
-	// a run-as-root container. This is fail-CLOSED: if the user asked to lock the
-	// identity and we cannot, the session aborts rather than silently handing back a
-	// writable one. With no resolvable identity there is nothing to lock, so fall
-	// through to the normal guard (which still refuses commits until one is set).
-	if err := configureGitIdentity(ctx, result, opts); err != nil {
+	pipe := &Pipeline{}
+	if err := pipe.Run(ctx,
+		phase("resolve-name", st.phaseResolveName),
+		phase("validate-bedrock", st.phaseValidateBedrock),
+		phase("ensure-bridge", st.phaseEnsureBridge),
+		phase("resolve-image", st.phaseResolveImage),
+		phase("reconcile-existing", st.phaseReconcileExisting),
+		phase("filter-trusted", st.phaseFilterTrusted),
+		phase("preflight-ports", st.phasePreflightPorts),
+		phase("create-container", st.phaseCreateContainer),
+		phase("wait-ready", st.phaseWaitReady),
+		phase("configure-docker-bridge", st.phaseConfigureDockerBridge),
+		phase("size-tmpfs", st.phaseSizeTmpfs),
+		phase("detect-user", st.phaseDetectUser),
+		phase("remap-uid", st.phaseRemapUID),
+		phase("forward-sockets", st.phaseForwardSockets),
+		phase("publish-ports", st.phasePublishPorts),
+		phase("configure-git", st.phaseConfigureGit),
+		phase("claude-settings", st.phaseClaudeSettings),
+		phase("configure-timezone", st.phaseConfigureTimezone),
+		phase("start-timeout-monitor", st.phaseStartTimeoutMonitor),
+		phase("setup-network", st.phaseSetupNetwork),
+		phase("resume-restore", st.phaseResumeRestore),
+		phase("mounts-context-path", st.phaseMountsAndContextPath),
+		phase("setup-cli-config", st.phaseSetupCLIConfig),
+		phase("apply-tool-env", st.phaseApplyToolEnv),
+		phase("setup-credentials", st.phaseSetupCredentials),
+		phase("inject-context", st.phaseInjectContext),
+	); err != nil {
 		return nil, err
 	}
 
-	// 6.6.2. Claude managed settings: auto-mode prompt suppression (skipped
-	// under interactive mode — see shouldSuppressClaudeAutoMode, #764) and
-	// includeCoAuthoredBy=false when attribution stripping is on (#788; applies
-	// in interactive mode too — attribution policy is not a permission choice).
-	// No-op for other tools or when neither part is enabled.
-	if opts.Tool != nil && opts.Tool.Name() == "claude" {
-		SetupClaudeManagedSettings(result.Manager,
-			shouldSuppressClaudeAutoMode(opts.Tool.Name(), opts.PermissionMode),
-			opts.GitStripAttribution, opts.Logger)
-	}
-
-	// 6.7. Configure timezone inside container
-	// Always set result.Timezone so the TZ env var is applied even if the
-	// filesystem configuration fails (some programs only check TZ).
-	result.Timezone = opts.Timezone
-	if opts.Timezone != "" {
-		opts.Logger(fmt.Sprintf("Setting container timezone to %s...", opts.Timezone))
-		tzCmd := fmt.Sprintf(
-			"ln -sf /usr/share/zoneinfo/%s /etc/localtime && echo %s > /etc/timezone",
-			opts.Timezone, opts.Timezone,
-		)
-		if _, err := result.Manager.ExecCommand(tzCmd, container.ExecCommandOptions{Capture: true}); err != nil {
-			opts.Logger(fmt.Sprintf("Warning: Failed to set timezone: %v", err))
-		}
-	} else {
-		// Explicitly reset to UTC — important for persistent containers that may
-		// have had a different timezone applied in a previous session.
-		resetCmd := "ln -sf /usr/share/zoneinfo/UTC /etc/localtime && echo UTC > /etc/timezone"
-		if _, err := result.Manager.ExecCommand(resetCmd, container.ExecCommandOptions{Capture: true}); err != nil {
-			opts.Logger(fmt.Sprintf("Warning: Failed to reset timezone to UTC: %v", err))
-		}
-	}
-
-	// 7. Start timeout monitor if max_duration is configured
-	if opts.LimitsConfig != nil && opts.LimitsConfig.Runtime.MaxDuration != "" {
-		duration, err := limits.ParseDuration(opts.LimitsConfig.Runtime.MaxDuration)
-		if err != nil {
-			return nil, fmt.Errorf("invalid max_duration: %w", err)
-		}
-		if duration > 0 {
-			result.TimeoutMonitor = limits.NewTimeoutMonitor(
-				ctx,
-				result.ContainerName,
-				duration,
-				config.BoolVal(opts.LimitsConfig.Runtime.AutoStop),
-				config.BoolVal(opts.LimitsConfig.Runtime.StopGraceful),
-				opts.IncusProject,
-				result.Logger,
-			)
-			result.TimeoutMonitor.Start()
-		}
-	}
-
-	// 8. Setup network isolation (after container is running and has IP)
-	if opts.NetworkConfig != nil {
-		result.NetworkManager = network.NewManager(opts.NetworkConfig, result.Logger)
-		if err := result.NetworkManager.SetupForContainer(ctx, result.ContainerName); err != nil {
-			return nil, fmt.Errorf("failed to setup network isolation: %w", err)
-		}
-	}
-
-	// 9. When resuming: restore session data if container was recreated, then inject credentials
-	// Skip if tool uses ENV-based auth (no config directory)
-	if opts.ResumeFromID != "" && opts.Tool != nil && opts.Tool.ConfigDirName() != "" {
-		// If we launched a new container (not reusing persistent one), restore config from saved session
-		if !skipLaunch && opts.SessionsDir != "" {
-			if err := restoreSessionData(result.Manager, opts.ResumeFromID, result.HomeDir, opts.SessionsDir, opts.Tool, opts.Logger); err != nil {
-				opts.Logger(fmt.Sprintf("Warning: Could not restore session data: %v", err))
-			}
-		}
-
-		// Always inject fresh credentials/sandbox settings when resuming
-		if tcf, ok := opts.Tool.(tool.ToolWithConfigDirFiles); ok {
-			if opts.CLIConfigPath != "" || tcf.AlwaysSetupConfig() {
-				if err := injectCredentials(result.Manager, opts.CLIConfigPath, result.HomeDir, tcf, opts.Logger); err != nil {
-					opts.Logger(fmt.Sprintf("Warning: Could not inject credentials: %v", err))
-				}
-			}
-		}
-	}
-
-	// 9.5 Refresh/copy configured [[credentials]] entries (catalog bundles and
-	// ad-hoc). Independent of which Tool is selected. Re-run on every resume
-	// (idempotent) so a rotated host credential stays in sync; on a fresh
-	// session it's applied once at step 11 alongside CLI tool config.
-	if opts.ResumeFromID != "" && opts.CredentialConfig != nil && len(opts.CredentialConfig.Entries) > 0 {
-		opts.Logger("Refreshing configured credentials...")
-		if err := setupCredentials(result.Manager, result.HomeDir, opts.CredentialConfig.Entries, opts.Logger); err != nil {
-			opts.Logger(fmt.Sprintf("Warning: Could not refresh credentials: %v", err))
-		}
-	}
-
-	// 10. Workspace and configured mounts are already mounted (added before container start in step 5)
-	if skipLaunch {
-		opts.Logger("Reusing existing workspace and mount configurations")
-	}
-
-	// 10.2 Auto-trust mise config files in the workspace so mise doesn't
-	// prompt or error when the workspace contains mise.toml / .tool-versions.
-	SetupMiseTrust(result.Manager, result.ContainerWorkspacePath, opts.Logger)
-
-	// 10.5 Set auto-context path for config-based tools (must happen before setupCLIConfig
-	// so the path is included in GetSandboxSettings output)
-	if opts.Tool != nil && config.BoolVal(opts.AutoContext) {
-		if acp, ok := opts.Tool.(tool.ToolWithAutoContextPath); ok {
-			acp.SetAutoContextPath(filepath.Join(result.HomeDir, "SANDBOX_CONTEXT.md"))
-		}
-	}
-
-	// 11. Setup CLI tool config (skip if resuming - config already restored)
-	if opts.Tool != nil {
-		if tcf, ok := opts.Tool.(tool.ToolWithConfigDirFiles); ok {
-			if opts.CLIConfigPath != "" && opts.ResumeFromID == "" {
-				_, statErr := os.Stat(opts.CLIConfigPath)
-				hostDirExists := statErr == nil
-
-				if hostDirExists || tcf.AlwaysSetupConfig() {
-					switch {
-					case !skipLaunch:
-						opts.Logger(fmt.Sprintf("Setting up %s config...", opts.Tool.Name()))
-						if err := setupCLIConfig(result.Manager, opts.CLIConfigPath, result.HomeDir, tcf, opts.Logger); err != nil {
-							opts.Logger(fmt.Sprintf("Warning: Failed to setup %s config: %v", opts.Tool.Name(), err))
-						}
-					case !toolConfigSeeded(result.Manager, result.HomeDir, tcf):
-						// Persistent reuse with a tool coi hasn't seeded in this
-						// container yet — e.g. a profile that shares [container]
-						// session_name but sets a different [tool] name, so you
-						// re-enter the same container (code, packages, state) with
-						// another tool (#708 follow-up). Keyed on the tool's own
-						// essential config files (not dir existence/content, which
-						// the base image and agent installers pre-populate). Seed
-						// its config once so it authenticates, without touching the
-						// original tool's config or conversation history.
-						opts.Logger(fmt.Sprintf("Setting up %s config in reused container (first use of this tool here)...", opts.Tool.Name()))
-						if err := setupCLIConfig(result.Manager, opts.CLIConfigPath, result.HomeDir, tcf, opts.Logger); err != nil {
-							opts.Logger(fmt.Sprintf("Warning: Failed to setup %s config: %v", opts.Tool.Name(), err))
-						}
-					default:
-						opts.Logger(fmt.Sprintf("Reusing existing %s config (persistent container)", opts.Tool.Name()))
-					}
-				} else if statErr != nil && !os.IsNotExist(statErr) {
-					return nil, fmt.Errorf("failed to check %s config directory: %w", opts.Tool.Name(), statErr)
-				}
-			} else if opts.ResumeFromID != "" {
-				opts.Logger(fmt.Sprintf("Resuming session - using restored %s config", opts.Tool.Name()))
-			}
-		} else if opts.Tool.ConfigDirName() == "" {
-			opts.Logger(fmt.Sprintf("Tool %s uses ENV-based auth, skipping config setup", opts.Tool.Name()))
-		}
-	}
-
-	// 11.1 Persist the tool's resolved env as container-level environment.* so
-	// EVERY exec — coi's own launch and an external `coi container exec` alike —
-	// inherits the profile's tool config (#744). Runs even when skipLaunch is
-	// true (reused/persistent containers), unlike the settings.json injection
-	// above, so a per-workflow model/effort change actually takes effect.
-	if opts.Tool != nil {
-		applyToolContainerEnv(ctx, result.ContainerName, result.ContainerWorkspacePath, opts.Tool, opts.Logger)
-	}
-
-	// 11.5 Setup configured [[credentials]] entries (skip if resuming - the
-	// refresh above already handled it; skip on container reuse - persists
-	// from creation, matching how step 11 handles the builtin tool config).
-	if !skipLaunch && opts.ResumeFromID == "" && opts.CredentialConfig != nil && len(opts.CredentialConfig.Entries) > 0 {
-		opts.Logger("Setting up configured credentials...")
-		if err := setupCredentials(result.Manager, result.HomeDir, opts.CredentialConfig.Entries, opts.Logger); err != nil {
-			opts.Logger(fmt.Sprintf("Warning: Failed to setup credentials: %v", err))
-		}
-	}
-
-	// 12. Inject sandbox context file (~/SANDBOX_CONTEXT.md)
-	// This runs for both new and resumed sessions so dynamic info stays current.
-	// The file is tool-agnostic — any AI tool can be configured to read it.
-	contextContent := injectSandboxContext(result, opts)
-
-	// 13. Inject auto-context file for tools that support it (e.g., Claude's ~/.claude/CLAUDE.md)
-	// This writes sandbox context into the tool's native auto-load file so it's available at session start.
-	if opts.Tool != nil && config.BoolVal(opts.AutoContext) && contextContent != "" {
-		if acf, ok := opts.Tool.(tool.ToolWithAutoContextFile); ok {
-			if err := injectAutoContextFile(result.Manager, acf, contextContent, result.HomeDir, opts.Logger); err != nil {
-				opts.Logger(fmt.Sprintf("Warning: Failed to inject auto-context file: %v", err))
-			}
-		}
-	}
-
 	opts.Logger("Container setup complete!")
-	return result, nil
+	return st.result, nil
 }
 
 // dockerDaemonJSON is the daemon.json written to new containers.
