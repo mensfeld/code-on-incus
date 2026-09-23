@@ -35,7 +35,7 @@ func SeedToolConfigForRun(ctx context.Context, result *SetupResult, opts SetupOp
 
 	// 10.5 Auto-context path (must precede setupCLIConfig so it lands in the
 	// tool's GetSandboxSettings output).
-	if config.BoolVal(opts.AutoContext) {
+	if config.BoolVal(opts.Context.Auto) {
 		if acp, ok := opts.Tool.(tool.ToolWithAutoContextPath); ok {
 			acp.SetAutoContextPath(filepath.Join(result.HomeDir, "SANDBOX_CONTEXT.md"))
 		}
@@ -71,7 +71,7 @@ func SeedToolConfigForRun(ctx context.Context, result *SetupResult, opts SetupOp
 	contextContent := injectSandboxContext(result, opts)
 
 	// 13. Auto-context file (tool's native auto-load file, e.g. ~/.claude/CLAUDE.md).
-	if config.BoolVal(opts.AutoContext) && contextContent != "" {
+	if config.BoolVal(opts.Context.Auto) && contextContent != "" {
 		if acf, ok := opts.Tool.(tool.ToolWithAutoContextFile); ok {
 			if err := injectAutoContextFile(result.Manager, acf, contextContent, result.HomeDir, opts.Logger); err != nil {
 				opts.Logger(fmt.Sprintf("Warning: Failed to inject auto-context file: %v", err))

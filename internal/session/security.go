@@ -142,14 +142,14 @@ func StripSecurityDevices(mgr securityDeviceStripper, logger func(string)) {
 // rather than launch with the secret exposed. Read-only protected-mount failures
 // are logged and non-fatal, matching prior behavior.
 func applySessionSecurity(mgr container.ContainerManager, opts SetupOptions, containerWorkspacePath string, useShift bool, worktreeLayout *GitWorktreeLayout, worktreeWritableHooks bool, containerName string) (effectivePaths []string, hasImmutable bool, err error) {
-	securityPaths := opts.ProtectedPaths
+	securityPaths := opts.Security.ProtectedPaths
 	if worktreeLayout != nil {
 		// Workspace .git is a file; its .git/* defaults can't be protected here
 		// (they'd warn "gitdir indirection"). SetupCommonDirProtection covers the
 		// real internals; keep the non-.git protections.
 		securityPaths = StripGitProtectedPaths(securityPaths)
 	}
-	effectivePaths, mErr := SetupSecurityMounts(mgr, opts.WorkspacePath, containerWorkspacePath, securityPaths, useShift, opts.Security)
+	effectivePaths, mErr := SetupSecurityMounts(mgr, opts.WorkspacePath, containerWorkspacePath, securityPaths, useShift, opts.Security.Config)
 	if mErr != nil {
 		opts.Logger(fmt.Sprintf("Warning: Failed to setup security mounts: %v", mErr))
 		// Non-fatal: continue even if a read-only protection mount fails.
@@ -163,7 +163,7 @@ func applySessionSecurity(mgr container.ContainerManager, opts SetupOptions, con
 	// the same #474 hook/config lockdown applied to the worktree's real internals,
 	// which the workspace-relative pass above cannot reach.
 	if worktreeLayout != nil {
-		cProtected, cErr := SetupCommonDirProtection(mgr, worktreeLayout.CommonDir, useShift, worktreeWritableHooks, opts.Security)
+		cProtected, cErr := SetupCommonDirProtection(mgr, worktreeLayout.CommonDir, useShift, worktreeWritableHooks, opts.Security.Config)
 		if cErr != nil {
 			opts.Logger(fmt.Sprintf("Warning: some git common-dir protections not applied: %v", cErr))
 		}
@@ -174,7 +174,7 @@ func applySessionSecurity(mgr container.ContainerManager, opts SetupOptions, con
 
 	// Host-side immutable attribute for defense-in-depth. Runs even on a partial
 	// mount error, so it is gated on the effective list, not mErr.
-	if len(effectivePaths) > 0 && opts.HostImmutable {
+	if len(effectivePaths) > 0 && opts.Security.HostImmutable {
 		if immutablePaths := ApplyImmutable(opts.WorkspacePath, effectivePaths, containerName, opts.Logger); len(immutablePaths) > 0 {
 			hasImmutable = true
 			opts.Logger(fmt.Sprintf("Host-side immutable protection applied: %s", strings.Join(immutablePaths, ", ")))
@@ -183,8 +183,8 @@ func applySessionSecurity(mgr container.ContainerManager, opts SetupOptions, con
 
 	// Mask secret paths (issue #494) — independent of protected_paths. FAIL CLOSED:
 	// if a configured secret cannot be masked we must not launch with it exposed.
-	if len(opts.SecretPaths) > 0 {
-		masked, skipped, sErr := SetupSecretMasks(mgr, opts.WorkspacePath, containerWorkspacePath, opts.SecretPaths, useShift)
+	if len(opts.Security.SecretPaths) > 0 {
+		masked, skipped, sErr := SetupSecretMasks(mgr, opts.WorkspacePath, containerWorkspacePath, opts.Security.SecretPaths, useShift)
 		for _, s := range skipped {
 			opts.Logger(fmt.Sprintf("Warning: secret_paths entry %q is NOT masked (missing, or a symlink resolving outside the workspace) — it is not hidden from the agent", s))
 		}

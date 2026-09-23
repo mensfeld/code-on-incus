@@ -34,48 +34,68 @@ type GitOptions struct {
 	StripAttributionPatterns []string    // [git] strip_attribution_patterns: override the default strip patterns (grep -E, per line)
 }
 
-// SetupOptions contains options for setting up a session
-type SetupOptions struct {
-	WorkspacePath             string
-	SessionName               string // [container] session_name: keys the session identity instead of the workspace path when set
-	Image                     string
-	StoragePool               string // [container] storage_pool: Incus storage pool for the container (empty = Incus default pool)
-	Persistent                bool   // Keep container between sessions (don't delete on cleanup)
-	ResumeFromID              string
-	Slot                      int
-	MountConfig               *MountConfig      // Multi-mount support
-	SocketConfig              *SocketConfig     // Forwarded host unix sockets
-	CredentialConfig          *CredentialConfig // Configured [[credentials]] entries (catalog + ad-hoc)
-	PortConfig                *PortConfig       // Configured [[ports]] entries to publish on the host (#558)
-	SessionsDir               string            // e.g., ~/.coi/sessions-claude
-	CLIConfigPath             string            // e.g., ~/.claude (host CLI config to copy credentials from)
-	Tool                      tool.Tool         // AI coding tool being used
-	PermissionMode            string            // Tool permission mode: "bypass" (default) or "interactive"; gates Claude auto-mode suppression (#764)
-	NetworkConfig             *config.NetworkConfig
-	DisableShift              bool                   // Disable UID shifting (for Colima/Lima environments)
-	LimitsConfig              *config.LimitsConfig   // Resource and time limits
-	IncusProject              string                 // Incus project name
-	ProtectedPaths            []string               // Paths to mount read-only for security (e.g., .git/hooks, .vscode)
-	Security                  *config.SecurityConfig // Security config, so worktree-config expansion honors disable_protection/writable_paths (nil = expand unconditionally)
-	SecretPaths               []string               // Workspace-relative globs to MASK (empty read-only mount hides contents) — issue #494
-	PreserveWorkspacePath     bool                   // Mount workspace at same path as host instead of /workspace
-	ForwardSSHAgent           bool                   // Forward host SSH agent to container
-	ForwardedEnvVars          []string               // Names of host env vars being forwarded (for context file)
-	Git                       GitOptions             // Git identity + commit-attribution policy applied inside the container
-	ContextFilePath           string                 // Path to custom context .md file on host (overrides tool default)
-	ProfileContextFile        string                 // Path to profile context .md file (appended to sandbox context)
-	Timezone                  string                 // Resolved IANA timezone name (e.g., "America/New_York"), empty for UTC
-	AutoContext               *bool                  // Auto-inject sandbox context into tool's native system (default: true)
-	ContextJSON               *bool                  // Write ~/SANDBOX_CONTEXT.json for programmatic consumers (default: true)
-	ContextJSONFilePath       string                 // Path to custom context .json file on host (overrides the generated JSON)
+// SecurityOptions groups the container's security posture: which host paths are
+// mounted read-only or masked, host-side immutability, and the docker /
+// kernel-surface hardening flags (read together by hardeningPolicyFrom).
+type SecurityOptions struct {
+	ProtectedPaths            []string               // Paths to mount read-only (e.g., .git/hooks, .vscode)
+	Config                    *config.SecurityConfig // Security config so worktree-config expansion honors disable_protection/writable_paths (nil = expand unconditionally)
+	SecretPaths               []string               // Workspace-relative globs to MASK (empty read-only mount hides contents)
 	HostImmutable             bool                   // Apply chattr +i on host-side protected paths (set by CLI from config)
-	Alias                     string                 // Human-friendly alias for this container (set user.coi.alias)
-	ReadyTimeout              int                    // Seconds to wait for the container to become ready (<=0 = default 30)
-	DockerSupport             bool                   // [container] docker (raw flag; precedence vs ReduceKernelSurface is resolved by container.HardeningPolicy.DockerEnabled): nesting + syscall interception + low-port sysctl
-	ReduceKernelSurface       bool                   // [security] reduce_kernel_surface: deny high-risk kernel-escape syscalls; wins over DockerSupport
-	ReduceKernelSurfaceStrict bool                   // [security] reduce_kernel_surface_strict: opt-in strict tier, additionally deny perf_event_open (implies ReduceKernelSurface)
-	Logger                    func(string)
-	ContainerName             string // Use existing container (for testing) - skips container creation
+	Docker                    bool                   // [container] docker: nesting + syscall interception + low-port sysctl (precedence vs ReduceKernelSurface resolved by container.HardeningPolicy.DockerEnabled)
+	ReduceKernelSurface       bool                   // [security] reduce_kernel_surface: deny high-risk kernel-escape syscalls; wins over Docker
+	ReduceKernelSurfaceStrict bool                   // [security] reduce_kernel_surface_strict: additionally deny perf_event_open (implies ReduceKernelSurface)
+}
+
+// NetworkOptions groups network isolation and host<->container forwarding.
+type NetworkOptions struct {
+	Config          *config.NetworkConfig // Network isolation mode + rules
+	Ports           *PortConfig           // Configured [[ports]] entries to publish on the host
+	Sockets         *SocketConfig         // Forwarded host unix sockets
+	ForwardSSHAgent bool                  // Forward host SSH agent to container
+}
+
+// ContextOptions groups the sandbox-context injection settings.
+type ContextOptions struct {
+	FilePath         string   // Custom context .md file on host (overrides tool default)
+	ProfileFile      string   // Profile context .md file (appended to sandbox context)
+	Auto             *bool    // Auto-inject sandbox context into tool's native system (default: true)
+	JSON             *bool    // Write ~/SANDBOX_CONTEXT.json for programmatic consumers (default: true)
+	JSONFilePath     string   // Custom context .json file on host (overrides the generated JSON)
+	ForwardedEnvVars []string // Names of host env vars being forwarded (for context file)
+}
+
+// SetupOptions contains options for setting up a session. Cohesive groups of
+// related settings live in sub-structs (Git, Security, Network, Context); the
+// remaining fields are session/container basics that don't cluster.
+type SetupOptions struct {
+	WorkspacePath         string
+	SessionName           string // [container] session_name: keys the session identity instead of the workspace path when set
+	Image                 string
+	StoragePool           string // [container] storage_pool: Incus storage pool for the container (empty = Incus default pool)
+	Persistent            bool   // Keep container between sessions (don't delete on cleanup)
+	ResumeFromID          string
+	Slot                  int
+	MountConfig           *MountConfig         // Multi-mount support
+	CredentialConfig      *CredentialConfig    // Configured [[credentials]] entries (catalog + ad-hoc)
+	SessionsDir           string               // e.g., ~/.coi/sessions-claude
+	CLIConfigPath         string               // e.g., ~/.claude (host CLI config to copy credentials from)
+	Tool                  tool.Tool            // AI coding tool being used
+	PermissionMode        string               // Tool permission mode: "bypass" (default) or "interactive"; gates Claude auto-mode suppression (#764)
+	DisableShift          bool                 // Disable UID shifting (for Colima/Lima environments)
+	LimitsConfig          *config.LimitsConfig // Resource and time limits
+	IncusProject          string               // Incus project name
+	PreserveWorkspacePath bool                 // Mount workspace at same path as host instead of /workspace
+	Timezone              string               // Resolved IANA timezone name (e.g., "America/New_York"), empty for UTC
+	Alias                 string               // Human-friendly alias for this container (set user.coi.alias)
+	ReadyTimeout          int                  // Seconds to wait for the container to become ready (<=0 = default 30)
+	ContainerName         string               // Use existing container (for testing) - skips container creation
+	Logger                func(string)
+
+	Git      GitOptions      // Git identity + commit-attribution policy applied inside the container
+	Security SecurityOptions // Read-only/masked paths, host immutability, docker/kernel-surface hardening
+	Network  NetworkOptions  // Network isolation + host<->container forwarding (ports, sockets, ssh-agent)
+	Context  ContextOptions  // Sandbox-context file injection
 }
 
 // SetupResult contains the result of setup
@@ -362,7 +382,7 @@ func ResolveCodeUID(mgr container.ContainerExecution, codeUser string) (int, err
 // (persistent or explicit --container). It re-runs the same workspace-mount and
 // security-device setup a fresh launch uses (issue #610) and applies the boot
 // network block; it mutates result (workspace path, immutable flag) and
-// opts.ProtectedPaths in place. Extracted verbatim from Setup.
+// opts.Security.ProtectedPaths in place. Extracted verbatim from Setup.
 func restartStoppedContainer(result *SetupResult, opts *SetupOptions, containerName string) error {
 	opts.Logger("Starting existing container...")
 	// Strip stale port devices while STOPPED: they would re-bind
@@ -387,7 +407,7 @@ func restartStoppedContainer(result *SetupResult, opts *SetupOptions, containerN
 		// silently would drop the common dir's vote (#683).
 		opts.Logger(fmt.Sprintf("Warning: git worktree not resolved (%v); its git dirs are skipped by the UID-mapping check and git commands may fail in the container", reuseWtErr))
 	}
-	reuseWritableHooks := !containsGitHooksPath(opts.ProtectedPaths)
+	reuseWritableHooks := !containsGitHooksPath(opts.Security.ProtectedPaths)
 	StripSecurityDevices(result.Manager, opts.Logger)
 	// Reconcile the kernel-surface policy while the container is stopped —
 	// the only window where security.nesting and security.syscalls.deny can
@@ -452,7 +472,7 @@ func restartStoppedContainer(result *SetupResult, opts *SetupOptions, containerN
 		}
 	}
 	reusePaths, reuseImmutable, reuseErr := applySessionSecurity(result.Manager, *opts, reuseCWP, reuseUseShift, reuseLayout, reuseWritableHooks, containerName)
-	opts.ProtectedPaths = reusePaths
+	opts.Security.ProtectedPaths = reusePaths
 	if reuseImmutable {
 		result.HasImmutableProtection = true
 	}
@@ -471,14 +491,14 @@ func restartStoppedContainer(result *SetupResult, opts *SetupOptions, containerN
 	// planted startup scripts (systemd units, cron jobs, shell hooks) that
 	// would otherwise phone home during the boot window before
 	// SetupForContainer installs proper isolation rules.
-	if opts.NetworkConfig != nil {
+	if opts.Network.Config != nil {
 		if err := network.ApplyBootBlockRule(result.ContainerName); err != nil {
 			// Fail closed in restricted/allowlist mode: rather than let
 			// the container run unblocked during the boot window, stop it
 			// and abort. Open mode opts into unrestricted egress.
-			if opts.NetworkConfig.Mode != config.NetworkModeOpen {
+			if opts.Network.Config.Mode != config.NetworkModeOpen {
 				_ = result.Manager.Stop(true)
-				return fmt.Errorf("boot network block failed in %s mode; stopped container to avoid an unprotected boot window: %w", opts.NetworkConfig.Mode, err)
+				return fmt.Errorf("boot network block failed in %s mode; stopped container to avoid an unprotected boot window: %w", opts.Network.Config.Mode, err)
 			}
 			opts.Logger(fmt.Sprintf("Warning: boot block not applied (open mode): %v", err))
 		} else {
@@ -491,7 +511,7 @@ func restartStoppedContainer(result *SetupResult, opts *SetupOptions, containerN
 // createAndStartContainer creates a fresh container (init), mounts the
 // workspace + configured/worktree/security devices, applies limits and the
 // pre-boot hardening, starts it, and applies the boot network block. It mutates
-// result and opts.ProtectedPaths in place. Extracted verbatim from Setup.
+// result and opts.Security.ProtectedPaths in place. Extracted verbatim from Setup.
 func createAndStartContainer(result *SetupResult, opts *SetupOptions, image, containerName string) error {
 	opts.Logger(fmt.Sprintf("Creating container from %s...", image))
 	// Create container without starting it (init). Honor the configured
@@ -518,7 +538,7 @@ func createAndStartContainer(result *SetupResult, opts *SetupOptions, image, con
 	if wtErr != nil {
 		opts.Logger(fmt.Sprintf("Warning: git worktree not mounted (%v); git commands may fail in the container", wtErr))
 	}
-	worktreeWritableHooks := !containsGitHooksPath(opts.ProtectedPaths)
+	worktreeWritableHooks := !containsGitHooksPath(opts.Security.ProtectedPaths)
 
 	// Configure UID/GID mapping for the workspace bind mount. Shared with
 	// the run pipeline via ConfigureUIDMapping so both honor Colima/Lima
@@ -577,9 +597,9 @@ func createAndStartContainer(result *SetupResult, opts *SetupOptions, image, con
 	effectivePaths, hasImmutable, secErr := applySessionSecurity(result.Manager, *opts, containerWorkspacePath, useShift, worktreeLayout, worktreeWritableHooks, containerName)
 	// Adopt the expanded list as the canonical protected set so downstream
 	// consumers (the SANDBOX_CONTEXT.md "Protected paths" listing built from
-	// opts.ProtectedPaths below) reflect what was actually mounted, including the
+	// opts.Security.ProtectedPaths below) reflect what was actually mounted, including the
 	// per-worktree configs.
-	opts.ProtectedPaths = effectivePaths
+	opts.Security.ProtectedPaths = effectivePaths
 	if hasImmutable {
 		result.HasImmutableProtection = true
 	}
@@ -659,7 +679,7 @@ func createAndStartContainer(result *SetupResult, opts *SetupOptions, image, con
 	// For restricted/allowlist modes, disable IPv6 from the kernel's first
 	// instant so there is no IPv6 egress window before the host-side ip6 drop
 	// is installed. Open mode opts into unrestricted egress, so skip it.
-	if opts.NetworkConfig != nil && opts.NetworkConfig.Mode != config.NetworkModeOpen {
+	if opts.Network.Config != nil && opts.Network.Config.Mode != config.NetworkModeOpen {
 		if err := container.DisableIPv6AtBoot(result.ContainerName); err != nil {
 			opts.Logger(fmt.Sprintf("Warning: pre-boot IPv6 disable not applied: %v", err))
 		}
@@ -690,14 +710,14 @@ func createAndStartContainer(result *SetupResult, opts *SetupOptions, image, con
 	}
 	// Block network immediately after first boot as well: defence-in-depth
 	// against a malicious base image that runs something on init.
-	if opts.NetworkConfig != nil {
+	if opts.Network.Config != nil {
 		if err := network.ApplyBootBlockRule(result.ContainerName); err != nil {
 			// Fail closed in restricted/allowlist mode: stop the just-started
 			// container and abort rather than leave an unprotected boot window.
 			// Open mode opts into unrestricted egress.
-			if opts.NetworkConfig.Mode != config.NetworkModeOpen {
+			if opts.Network.Config.Mode != config.NetworkModeOpen {
 				_ = result.Manager.Stop(true)
-				return fmt.Errorf("boot network block failed in %s mode; stopped container to avoid an unprotected boot window: %w", opts.NetworkConfig.Mode, err)
+				return fmt.Errorf("boot network block failed in %s mode; stopped container to avoid an unprotected boot window: %w", opts.Network.Config.Mode, err)
 			}
 			opts.Logger(fmt.Sprintf("Warning: boot block not applied (open mode): %v", err))
 		} else {
@@ -715,15 +735,15 @@ func injectSandboxContext(result *SetupResult, opts SetupOptions) string {
 	networkMode := ""
 	var allowedPorts []int
 	var dnsServers, allowedDomains []string
-	if opts.NetworkConfig != nil {
-		networkMode = string(opts.NetworkConfig.Mode)
-		allowedPorts = opts.NetworkConfig.AllowedPorts
-		dnsServers = opts.NetworkConfig.DNSServers
-		allowedDomains = opts.NetworkConfig.AllowedDomains
+	if opts.Network.Config != nil {
+		networkMode = string(opts.Network.Config.Mode)
+		allowedPorts = opts.Network.Config.AllowedPorts
+		dnsServers = opts.Network.Config.DNSServers
+		allowedDomains = opts.Network.Config.AllowedDomains
 	}
 	// Check if GH_TOKEN or GITHUB_TOKEN is among forwarded env vars
 	ghAuthenticated := false
-	for _, name := range opts.ForwardedEnvVars {
+	for _, name := range opts.Context.ForwardedEnvVars {
 		if name == "GH_TOKEN" || name == "GITHUB_TOKEN" {
 			ghAuthenticated = true
 			break
@@ -751,13 +771,13 @@ func injectSandboxContext(result *SetupResult, opts SetupOptions) string {
 
 	// Read profile context file content if configured
 	var profileContext string
-	if opts.ProfileContextFile != "" {
-		data, err := os.ReadFile(opts.ProfileContextFile)
+	if opts.Context.ProfileFile != "" {
+		data, err := os.ReadFile(opts.Context.ProfileFile)
 		if err != nil {
-			opts.Logger(fmt.Sprintf("Warning: Failed to read profile context file %s: %v", opts.ProfileContextFile, err))
+			opts.Logger(fmt.Sprintf("Warning: Failed to read profile context file %s: %v", opts.Context.ProfileFile, err))
 		} else {
 			profileContext = string(data)
-			opts.Logger(fmt.Sprintf("Loaded profile context from %s", opts.ProfileContextFile))
+			opts.Logger(fmt.Sprintf("Loaded profile context from %s", opts.Context.ProfileFile))
 		}
 	}
 
@@ -771,9 +791,9 @@ func injectSandboxContext(result *SetupResult, opts SetupOptions) string {
 		AllowedDomains:     allowedDomains,
 		SSHAgentForwarded:  result.SSHAgentSocketPath != "",
 		RunAsRoot:          result.RunAsRoot,
-		ProtectedPaths:     opts.ProtectedPaths,
+		ProtectedPaths:     opts.Security.ProtectedPaths,
 		GHCLIAuthenticated: ghAuthenticated,
-		ForwardedEnvVars:   opts.ForwardedEnvVars,
+		ForwardedEnvVars:   opts.Context.ForwardedEnvVars,
 		Timezone:           result.Timezone,
 		ExtraMounts:        extraMounts,
 		PublishedPorts:     publishedPortInfos(result.PublishedPorts),
@@ -785,16 +805,16 @@ func injectSandboxContext(result *SetupResult, opts SetupOptions) string {
 		ProfileContext:     profileContext,
 		DockerUnavailable:  !hardeningPolicyFrom(&opts).DockerEnabled(),
 	}
-	contextContent := resolveContextContent(ctxInfo, opts.ContextFilePath, opts.Logger)
-	if err := injectContextFile(result.Manager, ctxInfo, opts.ContextFilePath, result.HomeDir, opts.Logger); err != nil {
+	contextContent := resolveContextContent(ctxInfo, opts.Context.FilePath, opts.Logger)
+	if err := injectContextFile(result.Manager, ctxInfo, opts.Context.FilePath, result.HomeDir, opts.Logger); err != nil {
 		opts.Logger(fmt.Sprintf("Warning: Failed to inject context file: %v", err))
 	}
 	// Machine-readable companion for programmatic consumers (#705), enabled
 	// by default. Written from ctxInfo (the real facts) unless [tool]
 	// context_json_file provides a custom JSON to inject verbatim; disable
 	// entirely with context_json = false.
-	if config.BoolVal(opts.ContextJSON) {
-		if err := injectContextJSONFile(result.Manager, ctxInfo, opts.ContextJSONFilePath, result.HomeDir, opts.Logger); err != nil {
+	if config.BoolVal(opts.Context.JSON) {
+		if err := injectContextJSONFile(result.Manager, ctxInfo, opts.Context.JSONFilePath, result.HomeDir, opts.Logger); err != nil {
 			opts.Logger(fmt.Sprintf("Warning: Failed to inject context JSON file: %v", err))
 		}
 	}

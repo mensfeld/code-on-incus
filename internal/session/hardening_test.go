@@ -18,7 +18,7 @@ func TestHardeningPolicyFrom(t *testing.T) {
 		{false, true, false},
 	}
 	for _, tt := range tests {
-		opts := &SetupOptions{DockerSupport: tt.docker, ReduceKernelSurface: tt.reduce}
+		opts := &SetupOptions{Security: SecurityOptions{Docker: tt.docker, ReduceKernelSurface: tt.reduce}}
 		got := hardeningPolicyFrom(opts)
 		if got.Docker != tt.docker || got.ReduceKernelSurface != tt.reduce {
 			t.Errorf("docker=%v reduce=%v: got %+v, want raw flags copied", tt.docker, tt.reduce, got)

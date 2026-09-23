@@ -10,9 +10,9 @@ import (
 // container.HardeningPolicy.DockerEnabled, so callers never re-encode the rule.
 func hardeningPolicyFrom(opts *SetupOptions) container.HardeningPolicy {
 	return container.HardeningPolicy{
-		Docker:                    opts.DockerSupport,
-		ReduceKernelSurface:       opts.ReduceKernelSurface,
-		ReduceKernelSurfaceStrict: opts.ReduceKernelSurfaceStrict,
+		Docker:                    opts.Security.Docker,
+		ReduceKernelSurface:       opts.Security.ReduceKernelSurface,
+		ReduceKernelSurfaceStrict: opts.Security.ReduceKernelSurfaceStrict,
 	}
 }
 

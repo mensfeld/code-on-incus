@@ -13,7 +13,7 @@ import (
 // 6.6 Forward host sockets (SSH agent built-in entry plus configured
 // [[sockets]]) to the running container.
 func (st *setupState) phaseForwardSockets(_ context.Context) (Teardown, error) {
-	st.result.SocketEnv = ForwardConfiguredSockets(st.result.Manager, st.opts.SocketConfig, st.opts.ForwardSSHAgent, st.opts.Logger)
+	st.result.SocketEnv = ForwardConfiguredSockets(st.result.Manager, st.opts.Network.Sockets, st.opts.Network.ForwardSSHAgent, st.opts.Logger)
 	st.result.SSHAgentSocketPath = st.result.SocketEnv["SSH_AUTH_SOCK"]
 	return nil, nil
 }
@@ -94,8 +94,8 @@ func (st *setupState) phaseStartTimeoutMonitor(ctx context.Context) (Teardown, e
 
 // 8. Setup network isolation (after the container is running and has an IP).
 func (st *setupState) phaseSetupNetwork(ctx context.Context) (Teardown, error) {
-	if st.opts.NetworkConfig != nil {
-		st.result.NetworkManager = network.NewManager(st.opts.NetworkConfig, st.result.Logger)
+	if st.opts.Network.Config != nil {
+		st.result.NetworkManager = network.NewManager(st.opts.Network.Config, st.result.Logger)
 		if err := st.result.NetworkManager.SetupForContainer(ctx, st.result.ContainerName); err != nil {
 			return nil, fmt.Errorf("failed to setup network isolation: %w", err)
 		}
