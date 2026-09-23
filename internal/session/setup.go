@@ -136,10 +136,18 @@ func Setup(ctx context.Context, opts SetupOptions) (*SetupResult, error) {
 		phase("setup-credentials", st.phaseSetupCredentials),
 		phase("inject-context", st.phaseInjectContext),
 	); err != nil {
+		// Pipeline.Run annotates a failing phase's error as "<phase>: %w". Setup's
+		// phases already return user-facing, actionable messages (e.g. "image 'X'
+		// not found - run 'coi build' first"), so strip that one layer of phase
+		// annotation before returning. A non-phase error such as context
+		// cancellation is returned bare (Unwrap yields nil) and passes through.
+		if phaseErr := errors.Unwrap(err); phaseErr != nil {
+			return nil, phaseErr
+		}
 		return nil, err
 	}
 
-	opts.Logger("Container setup complete!")
+	st.opts.Logger("Container setup complete!")
 	return st.result, nil
 }
 

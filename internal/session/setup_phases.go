@@ -27,7 +27,6 @@ type setupState struct {
 	opts   SetupOptions
 	result *SetupResult
 
-	containerName string
 	image         string
 	skipLaunch    bool
 	hasCodeUser   bool
@@ -52,7 +51,6 @@ func (st *setupState) phaseResolveName(_ context.Context) (Teardown, error) {
 		containerName = ContainerName(st.opts.WorkspacePath, st.opts.SessionName, st.opts.Slot)
 		st.opts.Logger(fmt.Sprintf("Container name: %s", containerName))
 	}
-	st.containerName = containerName
 	st.result.ContainerName = containerName
 	st.result.Manager = container.NewManager(containerName)
 
@@ -203,7 +201,7 @@ func (st *setupState) phaseReconcileExisting(_ context.Context) (Teardown, error
 						return nil, fmt.Errorf(
 							"container %s is running with a different workspace mounted (%s); "+
 								"stop that session first (coi shutdown %s) or launch from that workspace",
-							st.containerName, src, st.containerName)
+							st.result.ContainerName, src, st.result.ContainerName)
 					}
 				}
 				st.opts.Logger("Container already running, reusing...")
@@ -234,14 +232,14 @@ func (st *setupState) phaseReconcileExisting(_ context.Context) (Teardown, error
 			} else {
 				// A running container exists for this slot but we're not resuming or in
 				// persistent mode — AllocateSlot() should have avoided this slot.
-				return nil, fmt.Errorf("slot %d is already in use by a running container %s - this should not happen (bug in slot allocation)", st.opts.Slot, st.containerName)
+				return nil, fmt.Errorf("slot %d is already in use by a running container %s - this should not happen (bug in slot allocation)", st.opts.Slot, st.result.ContainerName)
 			}
 		} else {
 			// Container exists but is stopped
 			if st.opts.Persistent || st.opts.ContainerName != "" {
 				// Restart the stopped container
 				// This includes: persistent containers OR containers specified via --container flag
-				if err := restartStoppedContainer(st.result, &st.opts, st.containerName); err != nil {
+				if err := restartStoppedContainer(st.result, &st.opts, st.result.ContainerName); err != nil {
 					return nil, err
 				}
 				st.skipLaunch = true
@@ -327,7 +325,7 @@ func (st *setupState) phaseCreateContainer(_ context.Context) (Teardown, error) 
 	// Always launch as non-ephemeral so we can save session data even if container is stopped
 	// (e.g., via 'sudo shutdown 0' from within). Cleanup will delete unless persistent mode is configured.
 	if !st.skipLaunch {
-		if err := createAndStartContainer(st.result, &st.opts, st.image, st.containerName); err != nil {
+		if err := createAndStartContainer(st.result, &st.opts, st.image, st.result.ContainerName); err != nil {
 			return nil, err
 		}
 	}
