@@ -39,7 +39,7 @@ func (st *setupState) phaseClaudeSettings(_ context.Context) (Teardown, error) {
 	if st.opts.Tool != nil && st.opts.Tool.Name() == "claude" {
 		SetupClaudeManagedSettings(st.result.Manager,
 			shouldSuppressClaudeAutoMode(st.opts.Tool.Name(), st.opts.PermissionMode),
-			st.opts.GitStripAttribution, st.opts.Logger)
+			st.opts.Git.StripAttribution, st.opts.Logger)
 	}
 	return nil, nil
 }
