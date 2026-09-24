@@ -21,34 +21,44 @@ import (
 // Mac home so `coi shell` picks up the Mac user's real credentials. On Linux
 // (KindUnknown) this is a no-op and returns the guest path unchanged.
 //
-// configFiles are the tool's essential config filenames (e.g.
-// [".credentials.json", "settings.json", …]); their presence — not mere
-// directory non-emptiness — is what marks a dir as "real config worth
-// seeding", so a dir holding only stray files can't shadow the populated one.
-// When neither the guest nor any shared home holds one of these files there is
-// nothing to seed anywhere, so the guest path is returned unchanged.
+// The guest and candidate sides are judged asymmetrically (see
+// ResolveHostConfigDir). configFiles are the tool's essential config filenames
+// (e.g. [".credentials.json", "settings.json", …]); the guest wins only if it
+// holds one of them, so a guest dir of stray files can't shadow a populated Mac
+// home. A shared Mac home, by contrast, is used when it merely exists and is
+// non-empty — even a Mac ~/.claude whose OAuth token lives in the Keychain
+// (so it has no .credentials.json) still carries settings and the sibling
+// ~/.claude.json onboarding state worth seeding.
 func HostToolConfigDir(guestHome, configDirName string, configFiles []string) string {
 	guestPath := filepath.Join(guestHome, configDirName)
 	if configDirName == "" || Detect() == KindUnknown {
 		return guestPath
 	}
-	hasConfig := func(dir string) bool { return dirHasAnyFile(dir, configFiles) }
-	return ResolveHostConfigDir(guestPath, macHostConfigCandidates(configDirName), hasConfig)
+	guestHasConfig := func(dir string) bool { return dirHasAnyFile(dir, configFiles) }
+	return ResolveHostConfigDir(guestPath, macHostConfigCandidates(configDirName), guestHasConfig, dirNonEmpty)
 }
 
 // ResolveHostConfigDir chooses between the guest's own config dir and config
-// dirs found under a shared Mac home. The guest path wins whenever it already
-// holds real config (the user authenticated inside the VM); otherwise the
-// first shared-home candidate that holds real config is used; if none do the
-// guest path is returned unchanged so callers behave exactly as before (the
-// seeding step then simply skips the missing files). Pure and injectable so
-// the selection logic is unit-testable without a real filesystem.
-func ResolveHostConfigDir(guestPath string, candidates []string, hasConfig func(string) bool) string {
-	if hasConfig(guestPath) {
+// dirs found under a shared Mac home, judging the two sides asymmetrically:
+//
+//   - The guest path wins only if guestHasConfig reports it already holds real
+//     tool config (the user authenticated inside the VM). This is strict — a
+//     dir of stray files must NOT win, or it would shadow the real Mac home.
+//   - Otherwise the first shared-home candidate that candidateUsable accepts is
+//     returned. This is deliberately lax ("exists and is non-empty"): a Mac
+//     ~/.claude whose credentials live in the Keychain has no .credentials.json
+//     yet still carries settings and the sibling onboarding state worth
+//     seeding, so requiring a specific config file here would wrongly skip it.
+//
+// If nothing qualifies the guest path is returned unchanged, so the seeding
+// step simply skips the missing files as before. Pure and injectable so the
+// selection logic is unit-testable without a real filesystem.
+func ResolveHostConfigDir(guestPath string, candidates []string, guestHasConfig, candidateUsable func(string) bool) string {
+	if guestHasConfig(guestPath) {
 		return guestPath
 	}
 	for _, c := range candidates {
-		if c != guestPath && hasConfig(c) {
+		if c != guestPath && candidateUsable(c) {
 			return c
 		}
 	}
@@ -152,9 +162,10 @@ var mountFieldUnescaper = strings.NewReplacer(
 func unescapeMountField(s string) string { return mountFieldUnescaper.Replace(s) }
 
 // dirHasAnyFile reports whether dir contains at least one of the named files —
-// the "has real tool config worth seeding" signal for ResolveHostConfigDir.
-// Keyed on actual config files rather than mere directory non-emptiness so a
-// dir holding only unrelated/stray files does not shadow one with real config.
+// the strict "guest already holds real tool config" signal for
+// ResolveHostConfigDir. Keyed on actual config files rather than mere directory
+// non-emptiness so a guest dir holding only unrelated/stray files does not
+// shadow a real shared Mac home.
 func dirHasAnyFile(dir string, files []string) bool {
 	for _, f := range files {
 		if _, err := os.Stat(filepath.Join(dir, f)); err == nil {
@@ -162,4 +173,14 @@ func dirHasAnyFile(dir string, files []string) bool {
 		}
 	}
 	return false
+}
+
+// dirNonEmpty reports whether a directory exists and contains at least one
+// entry — the lax "shared Mac home worth seeding from" signal for
+// ResolveHostConfigDir. Non-empty (not marker-file) on purpose: a Mac config
+// dir whose credentials live in the Keychain still carries settings and other
+// state we want to bring across.
+func dirNonEmpty(p string) bool {
+	entries, err := os.ReadDir(p)
+	return err == nil && len(entries) > 0
 }

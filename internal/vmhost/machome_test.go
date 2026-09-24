@@ -172,10 +172,10 @@ func TestDirHasAnyFile(t *testing.T) {
 }
 
 func TestResolveHostConfigDir(t *testing.T) {
-	// nonEmpty stub: a path is "populated" iff it's in the set.
-	nonEmptyIn := func(populated ...string) func(string) bool {
-		set := make(map[string]bool, len(populated))
-		for _, p := range populated {
+	// predicate stub: a path satisfies the predicate iff it's in the set.
+	predIn := func(members ...string) func(string) bool {
+		set := make(map[string]bool, len(members))
+		for _, p := range members {
 			set[p] = true
 		}
 		return func(p string) bool { return set[p] }
@@ -186,60 +186,89 @@ func TestResolveHostConfigDir(t *testing.T) {
 	const mac2 = "/Users/bob/.claude"
 
 	tests := []struct {
-		name       string
-		candidates []string
-		nonEmpty   func(string) bool
-		want       string
+		name            string
+		candidates      []string
+		guestHasConfig  func(string) bool // strict: guest holds a real config file
+		candidateUsable func(string) bool // lax: candidate exists and is non-empty
+		want            string
 	}{
 		{
-			name:       "guest already populated wins over mac home",
-			candidates: []string{mac},
-			nonEmpty:   nonEmptyIn(guest, mac),
-			want:       guest,
+			name:            "guest holds real config -> guest wins over mac home",
+			candidates:      []string{mac},
+			guestHasConfig:  predIn(guest),
+			candidateUsable: predIn(mac),
+			want:            guest,
 		},
 		{
-			name:       "empty guest falls back to populated mac home",
-			candidates: []string{mac},
-			nonEmpty:   nonEmptyIn(mac),
-			want:       mac,
+			// The #1 fix: guest ~/.claude has stray files only (not real config),
+			// and the Mac home has NO marker file (Keychain creds) but IS non-empty
+			// (settings/state) — it must still be chosen.
+			name:            "asymmetric: junk guest loses to non-empty keychain-only mac home",
+			candidates:      []string{mac},
+			guestHasConfig:  predIn(),    // guest has no real config file
+			candidateUsable: predIn(mac), // mac dir merely non-empty
+			want:            mac,
 		},
 		{
-			name:       "nothing populated returns guest default unchanged",
-			candidates: []string{mac},
-			nonEmpty:   nonEmptyIn(),
-			want:       guest,
+			name:            "empty mac home candidate is not chosen; guest default kept",
+			candidates:      []string{mac},
+			guestHasConfig:  predIn(),
+			candidateUsable: predIn(), // mac dir empty/missing
+			want:            guest,
 		},
 		{
-			name:       "first populated candidate chosen deterministically",
-			candidates: []string{mac, mac2},
-			nonEmpty:   nonEmptyIn(mac, mac2),
-			want:       mac,
+			name:            "first usable candidate chosen deterministically",
+			candidates:      []string{mac, mac2},
+			guestHasConfig:  predIn(),
+			candidateUsable: predIn(mac, mac2),
+			want:            mac,
 		},
 		{
-			name:       "skips empty candidate to reach a populated one",
-			candidates: []string{mac, mac2},
-			nonEmpty:   nonEmptyIn(mac2),
-			want:       mac2,
+			name:            "skips empty candidate to reach a usable one",
+			candidates:      []string{mac, mac2},
+			guestHasConfig:  predIn(),
+			candidateUsable: predIn(mac2),
+			want:            mac2,
 		},
 		{
-			name:       "candidate equal to guest path is ignored",
-			candidates: []string{guest},
-			nonEmpty:   nonEmptyIn(guest),
-			want:       guest,
+			name:            "candidate equal to guest path is ignored",
+			candidates:      []string{guest},
+			guestHasConfig:  predIn(),
+			candidateUsable: predIn(guest),
+			want:            guest,
 		},
 		{
-			name:       "no candidates returns guest",
-			candidates: nil,
-			nonEmpty:   nonEmptyIn(),
-			want:       guest,
+			name:            "no candidates returns guest",
+			candidates:      nil,
+			guestHasConfig:  predIn(),
+			candidateUsable: predIn(),
+			want:            guest,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ResolveHostConfigDir(guest, tt.candidates, tt.nonEmpty)
+			got := ResolveHostConfigDir(guest, tt.candidates, tt.guestHasConfig, tt.candidateUsable)
 			if got != tt.want {
 				t.Fatalf("ResolveHostConfigDir() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestDirNonEmpty(t *testing.T) {
+	empty := t.TempDir()
+	if dirNonEmpty(empty) {
+		t.Error("empty dir should report non-empty=false")
+	}
+	if dirNonEmpty(filepath.Join(empty, "missing")) {
+		t.Error("missing dir should report non-empty=false")
+	}
+	// A dir with ANY entry (even a stray/non-config one) counts — this is the
+	// lax candidate signal, unlike dirHasAnyFile.
+	if err := os.WriteFile(filepath.Join(empty, "history.jsonl"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if !dirNonEmpty(empty) {
+		t.Error("dir with an entry should report non-empty=true")
 	}
 }

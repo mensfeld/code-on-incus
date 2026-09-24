@@ -38,14 +38,17 @@ func TestMacHomeConfigSeeding_Integration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Shared Mac home: the user's real, populated config.
+	// Shared Mac home, KEYCHAIN-ONLY: the config dir has NO .credentials.json
+	// (the OAuth token lives in the macOS Keychain) and none of the other marker
+	// files — only non-config state, so it is merely non-empty. It is still the
+	// user's real home and must be chosen so the sibling onboarding state seeds.
+	// This is exactly the case the strict marker-only check regressed (#1).
 	macHome := t.TempDir()
 	macClaude := filepath.Join(macHome, ".claude")
 	if err := os.MkdirAll(macClaude, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	const creds = `{"claudeAiOauth":{"accessToken":"fake-mac-keychain-token"}}`
-	if err := os.WriteFile(filepath.Join(macClaude, ".credentials.json"), []byte(creds), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(macClaude, "history.jsonl"), []byte("{}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	// A sibling ~/.claude.json (onboarding state) lives next to the dir; seeding
@@ -55,10 +58,11 @@ func TestMacHomeConfigSeeding_Integration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Selection: the guest .claude (stray file only) must lose to the shared Mac
-	// home, keyed on the presence of an actual credential/config file.
-	markers := []string{".credentials.json", "settings.json"}
-	hasConfig := func(p string) bool {
+	// Asymmetric selection: the guest (stray file only) must lose because it
+	// holds no real config file; the keychain-only Mac home must win because it
+	// merely exists and is non-empty — even though it too has no marker file.
+	markers := []string{".credentials.json", "config.yml", "settings.json", "CLAUDE.md"}
+	guestHasConfig := func(p string) bool {
 		for _, f := range markers {
 			if _, err := os.Stat(filepath.Join(p, f)); err == nil {
 				return true
@@ -66,9 +70,13 @@ func TestMacHomeConfigSeeding_Integration(t *testing.T) {
 		}
 		return false
 	}
-	resolved := vmhost.ResolveHostConfigDir(guestClaude, []string{macClaude}, hasConfig)
+	candidateUsable := func(p string) bool {
+		entries, err := os.ReadDir(p)
+		return err == nil && len(entries) > 0
+	}
+	resolved := vmhost.ResolveHostConfigDir(guestClaude, []string{macClaude}, guestHasConfig, candidateUsable)
 	if resolved != macClaude {
-		t.Fatalf("ResolveHostConfigDir picked %q, want shared Mac home %q", resolved, macClaude)
+		t.Fatalf("ResolveHostConfigDir picked %q, want keychain-only Mac home %q", resolved, macClaude)
 	}
 
 	// Seed from the resolved path into a real container, exactly as the shell/run
@@ -90,24 +98,16 @@ func TestMacHomeConfigSeeding_Integration(t *testing.T) {
 		t.Fatalf("setupCLIConfig: %v", err)
 	}
 
-	// Credentials landed inside the container from the shared Mac home.
-	credPath := filepath.Join(homeDir, ".claude", ".credentials.json")
-	gotCreds, err := mgr.ExecCommand("cat "+credPath, container.ExecCommandOptions{Capture: true})
-	if err != nil {
-		t.Fatalf("reading seeded credentials: %v", err)
-	}
-	if gotCreds != creds {
-		t.Errorf("seeded credentials = %q, want %q", gotCreds, creds)
-	}
-
-	// The sibling state file (~/.claude.json) was seeded too — this is what
-	// suppresses the theme/onboarding prompt.
+	// The sibling state file (~/.claude.json) was seeded from the keychain-only
+	// Mac home — this is what suppresses the theme/onboarding prompt, and is
+	// precisely what the strict marker-only check would have skipped by falling
+	// back to the (config-less) guest path.
 	statePath := filepath.Join(homeDir, ".claude.json")
 	gotState, err := mgr.ExecCommand(fmt.Sprintf("cat %s 2>/dev/null || true", statePath), container.ExecCommandOptions{Capture: true})
 	if err != nil {
 		t.Fatalf("reading seeded state file: %v", err)
 	}
-	if gotState == "" {
-		t.Errorf("state file %s was not seeded from the shared Mac home", statePath)
+	if gotState != stateJSON {
+		t.Errorf("seeded state file = %q, want %q (onboarding state must come from the Mac home)", gotState, stateJSON)
 	}
 }
