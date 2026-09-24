@@ -715,10 +715,9 @@ func (a *App) runPromptPhase(s *runState) session.Phase {
 				if tcf, ok := t.(tool.ToolWithConfigDirFiles); ok {
 					configFiles = tcf.EssentialConfigFiles()
 				}
-				cliConfigPath = vmhost.HostToolConfigDir(hostHome, dirName, configFiles)
-				// macOS: if the tool's credential lives in the Keychain (no file to
-				// seed), tell the user how to materialize it on the Mac (#818).
-				printMacKeychainHint(t, cliConfigPath)
+				// Headless run path: no interactive Keychain hint here (an
+				// orchestrator consumes this output); the hint is shell-only (#818).
+				cliConfigPath, _ = vmhost.HostToolConfigDir(hostHome, dirName, configFiles)
 			}
 			seedResult := &session.SetupResult{
 				Manager:                s.mgr,

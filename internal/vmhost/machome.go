@@ -29,9 +29,12 @@ import (
 // non-empty — even a Mac ~/.claude whose OAuth token lives in the Keychain
 // (so it has no .credentials.json) still carries settings and the sibling
 // ~/.claude.json onboarding state worth seeding.
-func HostToolConfigDir(guestHome, configDirName string, configFiles []string) string {
+//
+// It also returns the detected VM Kind so callers can reuse it (e.g. the macOS
+// Keychain hint) without re-reading /proc/mounts.
+func HostToolConfigDir(guestHome, configDirName string, configFiles []string) (string, Kind) {
 	if configDirName == "" {
-		return filepath.Join(guestHome, configDirName)
+		return filepath.Join(guestHome, configDirName), KindUnknown
 	}
 	// Read /proc/mounts (and the kernel release) ONCE and reuse the blob for
 	// both VM detection and shared-home candidate discovery — previously the
@@ -39,7 +42,8 @@ func HostToolConfigDir(guestHome, configDirName string, configFiles []string) st
 	mounts, _ := os.ReadFile("/proc/mounts")
 	osRelease, _ := os.ReadFile("/proc/sys/kernel/osrelease")
 	kind := detect(string(mounts), os.Getenv("USER"), string(osRelease))
-	return resolveToolConfigDir(guestHome, configDirName, configFiles, kind, string(mounts), listSubdirs, dirHasAnyFile, dirNonEmpty)
+	path := resolveToolConfigDir(guestHome, configDirName, configFiles, kind, string(mounts), listSubdirs, dirHasAnyFile, dirNonEmpty)
+	return path, kind
 }
 
 // resolveToolConfigDir is the testable core of HostToolConfigDir: given the

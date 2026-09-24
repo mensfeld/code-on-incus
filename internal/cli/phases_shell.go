@@ -343,10 +343,13 @@ func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.P
 				if tcf, ok := ti.(tool.ToolWithConfigDirFiles); ok {
 					configFiles = tcf.EssentialConfigFiles()
 				}
-				cliConfigPath = vmhost.HostToolConfigDir(homeDir, configDirName, configFiles)
+				var vmKind vmhost.Kind
+				cliConfigPath, vmKind = vmhost.HostToolConfigDir(homeDir, configDirName, configFiles)
 				// macOS: if the tool's credential lives in the Keychain (no file to
-				// seed), tell the user how to materialize it on the Mac (#818).
-				printMacKeychainHint(ti, cliConfigPath)
+				// seed), tell the user how to materialize it on the Mac (#818). Stay
+				// quiet for API-key auth or a resumed session (already logged in).
+				printMacKeychainHint(ti, cliConfigPath, vmKind,
+					apiKeyAuthConfigured(a.cfg.Defaults.ForwardEnv), resumeFlagSet)
 			}
 
 			resolvedForwardedEnvVars := resolveForwardedEnvVarNames(a.cfg.Defaults.ForwardEnv)
