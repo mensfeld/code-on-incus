@@ -66,7 +66,7 @@ func printMacKeychainHint(t tool.Tool, cliConfigPath string, kind vmhost.Kind, a
 
 // anthropicAPIKeyEnv is the env var whose presence means Claude Code will
 // authenticate with an API key and needs no Keychain-stored OAuth token.
-const anthropicAPIKeyEnv = "ANTHROPIC_API_KEY"
+const anthropicAPIKeyEnv = "ANTHROPIC_API_KEY" //nolint:gosec // G101 false positive: this is an env var NAME, not a credential value
 
 // apiKeyAuthConfigured reports whether an API-key auth path is set up, so the
 // Keychain hint should stay quiet. True when ANTHROPIC_API_KEY is set in the
