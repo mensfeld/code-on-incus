@@ -344,6 +344,9 @@ func (a *App) configureSessionPhase(cmd *cobra.Command, s *shellState) session.P
 					configFiles = tcf.EssentialConfigFiles()
 				}
 				cliConfigPath = vmhost.HostToolConfigDir(homeDir, configDirName, configFiles)
+				// macOS: if the tool's credential lives in the Keychain (no file to
+				// seed), tell the user how to materialize it on the Mac (#818).
+				printMacKeychainHint(ti, cliConfigPath)
 			}
 
 			resolvedForwardedEnvVars := resolveForwardedEnvVarNames(a.cfg.Defaults.ForwardEnv)
