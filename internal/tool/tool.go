@@ -225,6 +225,13 @@ func (c *ClaudeTool) AlwaysSetupConfig() bool { return mustBundle("claude").Alwa
 // Claude Code automatically reads ~/.claude/CLAUDE.md as user-level instructions.
 func (c *ClaudeTool) AutoContextFile() string { return mustBundle("claude").AutoContextFile }
 
+// KeychainCredential implements ToolWithKeychainCredential. On macOS Claude Code
+// stores its OAuth token in the login Keychain, not in ~/.claude/.credentials.json.
+func (c *ClaudeTool) KeychainCredential() (service, filename string) {
+	b := mustBundle("claude")
+	return b.KeychainService, b.KeychainFile
+}
+
 // SetEffortLevel sets the effort level for Claude Code.
 // Valid values: "low", "medium", "high", "xhigh", "max", "auto".
 // When set, CLAUDE_CODE_EFFORT_LEVEL is injected and locks the level for the session.
@@ -240,6 +247,19 @@ type ToolWithEffortLevel interface {
 	// SetEffortLevel sets the effort level for the tool.
 	// Valid values depend on the tool (e.g., "low", "medium", "high" for Claude).
 	SetEffortLevel(level string)
+}
+
+// ToolWithKeychainCredential is an optional interface for tools whose
+// credential, on macOS, lives in the login Keychain rather than as a file coi
+// can seed (e.g. Claude Code's "Claude Code-credentials" item instead of
+// ~/.claude/.credentials.json). When coi runs inside a macOS VM it can't read
+// the Keychain, so it uses this to hint the user how to materialize the
+// credential on the Mac (#818).
+type ToolWithKeychainCredential interface {
+	Tool
+	// KeychainCredential returns the macOS Keychain service name and the config-
+	// dir filename it would populate. Empty strings disable the hint.
+	KeychainCredential() (service, filename string)
 }
 
 // SetModel sets the model for Claude Code.

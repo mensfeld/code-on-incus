@@ -715,7 +715,9 @@ func (a *App) runPromptPhase(s *runState) session.Phase {
 				if tcf, ok := t.(tool.ToolWithConfigDirFiles); ok {
 					configFiles = tcf.EssentialConfigFiles()
 				}
-				cliConfigPath = vmhost.HostToolConfigDir(hostHome, dirName, configFiles)
+				// Headless run path: no interactive Keychain hint here (an
+				// orchestrator consumes this output); the hint is shell-only (#818).
+				cliConfigPath, _ = vmhost.HostToolConfigDir(hostHome, dirName, configFiles)
 			}
 			seedResult := &session.SetupResult{
 				Manager:                s.mgr,

@@ -28,6 +28,14 @@ type Bundle struct {
 	AlwaysSetup         bool     `toml:"always_setup"`
 	AutoContextFile     string   `toml:"auto_context_file"`
 	Mode                string   `toml:"mode"`
+	// KeychainService/KeychainFile describe a credential that, on macOS, the
+	// tool keeps in the login Keychain rather than on disk (e.g. Claude Code's
+	// "Claude Code-credentials" item instead of ~/.claude/.credentials.json).
+	// coi runs in the Linux guest VM and can't read the Keychain, so it uses
+	// these to hint the user how to materialize it on the Mac (#818). Empty for
+	// tools without a Keychain-backed credential.
+	KeychainService string `toml:"keychain_service"`
+	KeychainFile    string `toml:"keychain_file"`
 }
 
 var catalog map[string]Bundle
