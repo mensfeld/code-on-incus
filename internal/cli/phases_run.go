@@ -17,6 +17,7 @@ import (
 	"github.com/mensfeld/code-on-incus/internal/session"
 	"github.com/mensfeld/code-on-incus/internal/timing"
 	"github.com/mensfeld/code-on-incus/internal/tool"
+	"github.com/mensfeld/code-on-incus/internal/vmhost"
 )
 
 // runState is the mutable state accumulated across run pipeline phases.
@@ -707,7 +708,14 @@ func (a *App) runPromptPhase(s *runState) session.Phase {
 			}
 			var cliConfigPath string
 			if dirName := t.ConfigDirName(); dirName != "" {
-				cliConfigPath = filepath.Join(hostHome, dirName)
+				// VM-aware: fall back to the shared macOS home under Colima/Lima/
+				// OrbStack when the guest home lacks the tool config dir, matching
+				// the interactive `coi shell` seeding path (#817).
+				var configFiles []string
+				if tcf, ok := t.(tool.ToolWithConfigDirFiles); ok {
+					configFiles = tcf.EssentialConfigFiles()
+				}
+				cliConfigPath = vmhost.HostToolConfigDir(hostHome, dirName, configFiles)
 			}
 			seedResult := &session.SetupResult{
 				Manager:                s.mgr,
