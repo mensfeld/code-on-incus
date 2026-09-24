@@ -30,12 +30,41 @@ import (
 // (so it has no .credentials.json) still carries settings and the sibling
 // ~/.claude.json onboarding state worth seeding.
 func HostToolConfigDir(guestHome, configDirName string, configFiles []string) string {
+	if configDirName == "" {
+		return filepath.Join(guestHome, configDirName)
+	}
+	// Read /proc/mounts (and the kernel release) ONCE and reuse the blob for
+	// both VM detection and shared-home candidate discovery — previously the
+	// detection and candidate steps each read /proc/mounts independently.
+	mounts, _ := os.ReadFile("/proc/mounts")
+	osRelease, _ := os.ReadFile("/proc/sys/kernel/osrelease")
+	kind := detect(string(mounts), os.Getenv("USER"), string(osRelease))
+	return resolveToolConfigDir(guestHome, configDirName, configFiles, kind, string(mounts), listSubdirs, dirHasAnyFile, dirNonEmpty)
+}
+
+// resolveToolConfigDir is the testable core of HostToolConfigDir: given the
+// already-detected VM kind and the already-read /proc/mounts blob, it builds the
+// shared-home candidates and picks the config dir. Every filesystem touch is
+// injected (listSubdirs, guestHasConfig, candidateUsable) so the wiring —
+// including that the tool's configFiles reach the guest check and that
+// KindUnknown short-circuits — is unit-testable without a real Mac VM.
+func resolveToolConfigDir(
+	guestHome, configDirName string,
+	configFiles []string,
+	kind Kind,
+	mounts string,
+	listSubdirs func(string) []string,
+	guestHasConfig func(string, []string) bool,
+	candidateUsable func(string) bool,
+) string {
 	guestPath := filepath.Join(guestHome, configDirName)
-	if configDirName == "" || Detect() == KindUnknown {
+	if kind == KindUnknown {
 		return guestPath
 	}
-	guestHasConfig := func(dir string) bool { return dirHasAnyFile(dir, configFiles) }
-	return ResolveHostConfigDir(guestPath, macHostConfigCandidates(configDirName), guestHasConfig, dirNonEmpty)
+	candidates := buildMacHostConfigCandidates(mounts, configDirName, listSubdirs)
+	return ResolveHostConfigDir(guestPath, candidates,
+		func(dir string) bool { return guestHasConfig(dir, configFiles) },
+		candidateUsable)
 }
 
 // ResolveHostConfigDir chooses between the guest's own config dir and config
@@ -65,16 +94,10 @@ func ResolveHostConfigDir(guestPath string, candidates []string, guestHasConfig,
 	return guestPath
 }
 
-// macHostConfigCandidates builds the list of <configDirName> paths to look for
-// under the Mac homes shared into this guest, reading the live /proc/mounts.
-func macHostConfigCandidates(configDirName string) []string {
-	mountsBytes, _ := os.ReadFile("/proc/mounts")
-	return buildMacHostConfigCandidates(string(mountsBytes), configDirName, listSubdirs)
-}
-
-// buildMacHostConfigCandidates is the pure core of macHostConfigCandidates,
-// with directory listing injected for testability. A shared mount is normally
-// the Mac home itself (/Users/alice), so <mount>/<configDirName> is the sole
+// buildMacHostConfigCandidates builds the list of <configDirName> paths to look
+// for under the Mac homes shared into this guest, from an already-read
+// /proc/mounts blob with directory listing injected for testability. A shared
+// mount is normally the Mac home itself (/Users/alice), so <mount>/<configDirName> is the sole
 // candidate — no descent, so we neither read the whole home over virtiofs nor
 // mistake a nested stray .claude for the real one. Only when the whole /Users
 // parent is shared do we descend one level (/Users/*/<configDirName>).

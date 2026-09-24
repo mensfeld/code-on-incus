@@ -255,6 +255,47 @@ func TestResolveHostConfigDir(t *testing.T) {
 	}
 }
 
+func TestResolveToolConfigDir(t *testing.T) {
+	const guestHome = "/home/lima"
+	const configDir = ".claude"
+	const guestPath = "/home/lima/.claude"
+	const macCandidate = "/Users/alice/.claude"
+	const mounts = "m0 /Users/alice virtiofs rw 0 0\n"
+	configFiles := []string{".credentials.json", "settings.json"}
+	noSubdirs := func(string) []string { return nil }
+
+	t.Run("KindUnknown (Linux) is a no-op and never touches the filesystem", func(t *testing.T) {
+		got := resolveToolConfigDir(guestHome, configDir, configFiles, KindUnknown, mounts, noSubdirs,
+			func(string, []string) bool { t.Fatal("guest check must not run when KindUnknown"); return false },
+			func(string) bool { t.Fatal("candidate check must not run when KindUnknown"); return false })
+		if got != guestPath {
+			t.Fatalf("got %q, want guest %q", got, guestPath)
+		}
+	})
+
+	t.Run("threads the tool's configFiles into the guest check", func(t *testing.T) {
+		var seenFiles []string
+		got := resolveToolConfigDir(guestHome, configDir, configFiles, KindLimaLike, mounts, noSubdirs,
+			func(dir string, files []string) bool { seenFiles = files; return dir == guestPath },
+			func(string) bool { return true })
+		if got != guestPath {
+			t.Fatalf("got %q, want guest %q (guest reports real config)", got, guestPath)
+		}
+		if !reflect.DeepEqual(seenFiles, configFiles) {
+			t.Fatalf("guest check received configFiles %#v, want threaded %#v", seenFiles, configFiles)
+		}
+	})
+
+	t.Run("builds the candidate from the mounts blob and falls back to it", func(t *testing.T) {
+		got := resolveToolConfigDir(guestHome, configDir, configFiles, KindLimaLike, mounts, noSubdirs,
+			func(string, []string) bool { return false },         // guest has no real config
+			func(dir string) bool { return dir == macCandidate }) // the /Users/alice candidate is usable
+		if got != macCandidate {
+			t.Fatalf("got %q, want mac candidate %q built from mounts", got, macCandidate)
+		}
+	})
+}
+
 func TestDirNonEmpty(t *testing.T) {
 	empty := t.TempDir()
 	if dirNonEmpty(empty) {
