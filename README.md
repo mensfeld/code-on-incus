@@ -173,6 +173,49 @@ Then schedule them with plain host cron - exit codes propagate, so failures show
 
 Each fire is a fresh ephemeral session by default, and prompt mode currently supports the `claude` tool with `permission_mode = "bypass"` (a headless run has no TTY to approve tool use). **Prompts are honored only from trusted-scope config** (`~/.coi/config.toml` / `$COI_CONFIG`); a `[prompts]` table in an untrusted project `.coi/config.toml` (or a project-scoped profile) is ignored entirely - so a cloned repo can never define or redefine a prompt you invoke by name. This matches how `env_commands` and the default-profile selector are treated.
 
+## Updating COI
+
+```bash
+# Update to the latest release
+coi update
+
+# Check for updates without installing
+coi update core --check
+
+# Skip confirmation prompt
+coi update --force
+```
+
+### How It Works
+
+1. Queries the GitHub releases API for the latest release
+2. Compares the current version against the latest semantic version
+3. Downloads the platform-appropriate binary (e.g., `coi-linux-amd64`)
+4. Verifies the SHA256 checksum against the published `checksums.txt`
+5. Atomically replaces the current binary (temp file + rename)
+
+**Checksum verification** — Downloaded binary is verified against the SHA256 checksum before replacing the current binary.
+
+**Symlink-aware** — If `coi` is a symlink, the symlink is resolved before replacing so existing symlinks continue working.
+
+**Sudo auto-escalation** — When the binary directory is not writable by the current user (e.g., `/usr/local/bin`), COI automatically re-executes with `sudo`.
+
+**Dev build safety** — Development builds (no version tag) print a warning and require `--force` to update.
+
+### After Updating
+
+After a `coi update`, run a health check to verify the environment is still correctly configured:
+
+```bash
+coi health
+```
+
+If the release notes mention image changes, rebuild the container image:
+
+```bash
+coi build --force
+```
+
 ## Documentation
 
 The README is the pitch; the wiki is the manual. Everything below lives there in full:
