@@ -72,9 +72,7 @@ def test_exec_stop_alias_poweroff(coi_binary, cleanup_containers, workspace_dir)
     )
 
     # stop should succeed (exit code 0) just like poweroff
-    assert result.returncode == 0, (
-        f"stop should succeed as poweroff alias. stderr: {result.stderr}"
-    )
+    assert result.returncode == 0, f"stop should succeed as poweroff alias. stderr: {result.stderr}"
 
     # === Phase 3: Wait for container to stop ===
 
